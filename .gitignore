@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# Xcode user state
+xcuserdata/
+*.xcuserstate
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Derived artifacts
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Tooling
+.claude/settings.local.json
