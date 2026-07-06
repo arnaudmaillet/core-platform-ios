@@ -1,5 +1,6 @@
 import Auth
 import AuthInterface
+import Connect
 import CoreContracts
 import CoreMedia
 import CoreModels
@@ -22,9 +23,18 @@ final class AppContainer {
 
     private init() {}
 
-    // M1 runs entirely against the in-process mock BFF (deterministic,
-    // offline). Environment/base-URL plumbing swaps this for a real
-    // URLSession transport without touching anything below this line.
+    /// Selected by launch argument: `.mock` (default) or `.localFleet`.
+    let environment = AppEnvironment.current
+
+    /// The transport for Connect RPCs: the in-process mock, or the real
+    /// URLSession client pointed at the Envoy gateway.
+    private lazy var rpcHTTPClient: any HTTPClientInterface = {
+        switch environment {
+        case .mock: mockBFF
+        case .localFleet: URLSessionHTTPClient()
+        }
+    }()
+
     private let mockDataset = MockSocialDataset()
     private lazy var mockCounterStore = MockCounterStore(dataset: mockDataset)
     private let mockBlobStore = MockBlobStore()
@@ -46,16 +56,18 @@ final class AppContainer {
     private let composedPostChannel = ComposedPostChannel()
 
     private lazy var unauthenticatedRPCClient = ConnectClientFactory.makeUnauthenticated(
-        host: "https://mock.bff.local",
-        httpClient: mockBFF
+        host: environment.host,
+        wire: environment.wire,
+        httpClient: rpcHTTPClient
     )
 
     /// RPC client for everything except AuthService; attaches the edge token
-    /// and refreshes it single-flight. First consumer arrives with M2 (feed).
+    /// and refreshes it single-flight.
     private(set) lazy var authenticatedRPCClient = ConnectClientFactory.makeAuthenticated(
-        host: "https://mock.bff.local",
+        host: environment.host,
         tokenProvider: sessionManager,
-        httpClient: mockBFF
+        wire: environment.wire,
+        httpClient: rpcHTTPClient
     )
 
     private(set) lazy var sessionManager = SessionManager(
