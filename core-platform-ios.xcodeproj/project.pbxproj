@@ -6,12 +6,31 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		5F00000000000000000000B1 /* CoreNavigation in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000C1 /* CoreNavigation */; };
+		5F00000000000000000000B2 /* CoreNetworking in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000C2 /* CoreNetworking */; };
+		5F00000000000000000000B3 /* DesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000C3 /* DesignSystem */; };
+		5F00000000000000000000B4 /* FeedInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000C4 /* FeedInterface */; };
+		5F00000000000000000000B5 /* CoreModels in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000C5 /* CoreModels */; };
+		5F00000000000000000000B6 /* CoreContracts in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000C6 /* CoreContracts */; };
+		5F00000000000000000000B7 /* CoreStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000C7 /* CoreStorage */; };
+		5F00000000000000000000B8 /* AuthInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000C8 /* AuthInterface */; };
+		5F00000000000000000000B9 /* Auth in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000C9 /* Auth */; };
+		5F00000000000000000000BA /* CoreNetworkingMocks in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000CA /* CoreNetworkingMocks */; };
+		5F00000000000000000000BB /* CoreMedia in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000CB /* CoreMedia */; };
+		5F00000000000000000000BC /* Feed in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000CC /* Feed */; };
+		5F00000000000000000000BD /* CoreRealtime in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000CD /* CoreRealtime */; };
+		5F00000000000000000000BE /* CoreRealtimeMocks in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000CE /* CoreRealtimeMocks */; };
+		5F00000000000000000000BF /* UploadInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000CF /* UploadInterface */; };
+		5F00000000000000000000D0 /* Upload in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000D1 /* Upload */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		51A1B7722FFBCAB6005918BC /* core-platform-ios.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "core-platform-ios.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		51A1B7842FFBCAB8005918BC /* Exceptions for "core-platform-ios" folder in "core-platform-ios" target */ = {
+		51A1B7842FFBCAB8005918BC /* Exceptions for "App" folder in "core-platform-ios" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
@@ -21,12 +40,12 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		51A1B7742FFBCAB6005918BC /* core-platform-ios */ = {
+		51A1B7742FFBCAB6005918BC /* App */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				51A1B7842FFBCAB8005918BC /* Exceptions for "core-platform-ios" folder in "core-platform-ios" target */,
+				51A1B7842FFBCAB8005918BC /* Exceptions for "App" folder in "core-platform-ios" target */,
 			);
-			path = "core-platform-ios";
+			path = App;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -36,6 +55,22 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5F00000000000000000000B1 /* CoreNavigation in Frameworks */,
+				5F00000000000000000000B2 /* CoreNetworking in Frameworks */,
+				5F00000000000000000000B3 /* DesignSystem in Frameworks */,
+				5F00000000000000000000B4 /* FeedInterface in Frameworks */,
+				5F00000000000000000000B5 /* CoreModels in Frameworks */,
+				5F00000000000000000000B6 /* CoreContracts in Frameworks */,
+				5F00000000000000000000B7 /* CoreStorage in Frameworks */,
+				5F00000000000000000000B8 /* AuthInterface in Frameworks */,
+				5F00000000000000000000B9 /* Auth in Frameworks */,
+				5F00000000000000000000BA /* CoreNetworkingMocks in Frameworks */,
+				5F00000000000000000000BB /* CoreMedia in Frameworks */,
+				5F00000000000000000000BC /* Feed in Frameworks */,
+				5F00000000000000000000BD /* CoreRealtime in Frameworks */,
+				5F00000000000000000000BE /* CoreRealtimeMocks in Frameworks */,
+				5F00000000000000000000BF /* UploadInterface in Frameworks */,
+				5F00000000000000000000D0 /* Upload in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -45,7 +80,7 @@
 		51A1B7692FFBCAB6005918BC = {
 			isa = PBXGroup;
 			children = (
-				51A1B7742FFBCAB6005918BC /* core-platform-ios */,
+				51A1B7742FFBCAB6005918BC /* App */,
 				51A1B7732FFBCAB6005918BC /* Products */,
 			);
 			sourceTree = "<group>";
@@ -74,10 +109,26 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				51A1B7742FFBCAB6005918BC /* core-platform-ios */,
+				51A1B7742FFBCAB6005918BC /* App */,
 			);
 			name = "core-platform-ios";
 			packageProductDependencies = (
+				5F00000000000000000000C1 /* CoreNavigation */,
+				5F00000000000000000000C2 /* CoreNetworking */,
+				5F00000000000000000000C3 /* DesignSystem */,
+				5F00000000000000000000C4 /* FeedInterface */,
+				5F00000000000000000000C5 /* CoreModels */,
+				5F00000000000000000000C6 /* CoreContracts */,
+				5F00000000000000000000C7 /* CoreStorage */,
+				5F00000000000000000000C8 /* AuthInterface */,
+				5F00000000000000000000C9 /* Auth */,
+				5F00000000000000000000CA /* CoreNetworkingMocks */,
+				5F00000000000000000000CB /* CoreMedia */,
+				5F00000000000000000000CC /* Feed */,
+				5F00000000000000000000CD /* CoreRealtime */,
+				5F00000000000000000000CE /* CoreRealtimeMocks */,
+				5F00000000000000000000CF /* UploadInterface */,
+				5F00000000000000000000D1 /* Upload */,
 			);
 			productName = "core-platform-ios";
 			productReference = 51A1B7722FFBCAB6005918BC /* core-platform-ios.app */;
@@ -107,6 +158,22 @@
 			);
 			mainGroup = 51A1B7692FFBCAB6005918BC;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				5F00000000000000000000A1 /* XCLocalSwiftPackageReference "Packages/Core/CoreNavigation" */,
+				5F00000000000000000000A2 /* XCLocalSwiftPackageReference "Packages/Core/CoreNetworking" */,
+				5F00000000000000000000A3 /* XCLocalSwiftPackageReference "Packages/Core/DesignSystem" */,
+				5F00000000000000000000A4 /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/FeedInterface" */,
+				5F00000000000000000000A5 /* XCLocalSwiftPackageReference "Packages/Kit/CoreModels" */,
+				5F00000000000000000000A6 /* XCLocalSwiftPackageReference "Packages/Kit/CoreContracts" */,
+				5F00000000000000000000A7 /* XCLocalSwiftPackageReference "Packages/Core/CoreStorage" */,
+				5F00000000000000000000A8 /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/AuthInterface" */,
+				5F00000000000000000000A9 /* XCLocalSwiftPackageReference "Packages/Features/Auth" */,
+				5F00000000000000000000AA /* XCLocalSwiftPackageReference "Packages/Core/CoreMedia" */,
+				5F00000000000000000000AB /* XCLocalSwiftPackageReference "Packages/Features/Feed" */,
+				5F00000000000000000000AC /* XCLocalSwiftPackageReference "Packages/Core/CoreRealtime" */,
+				5F00000000000000000000AD /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/UploadInterface" */,
+				5F00000000000000000000AE /* XCLocalSwiftPackageReference "Packages/Features/Upload" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 51A1B7732FFBCAB6005918BC /* Products */;
 			projectDirPath = "";
@@ -146,10 +213,9 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "core-platform-ios/Info.plist";
+				INFOPLIST_FILE = App/Info.plist;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
-				INFOPLIST_KEY_UIMainStoryboardFile = Main;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -164,7 +230,7 @@
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
@@ -177,10 +243,9 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "core-platform-ios/Info.plist";
+				INFOPLIST_FILE = App/Info.plist;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
-				INFOPLIST_KEY_UIMainStoryboardFile = Main;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -195,7 +260,7 @@
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
@@ -341,6 +406,132 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		5F00000000000000000000A1 /* XCLocalSwiftPackageReference "Packages/Core/CoreNavigation" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Core/CoreNavigation;
+		};
+		5F00000000000000000000A2 /* XCLocalSwiftPackageReference "Packages/Core/CoreNetworking" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Core/CoreNetworking;
+		};
+		5F00000000000000000000A3 /* XCLocalSwiftPackageReference "Packages/Core/DesignSystem" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Core/DesignSystem;
+		};
+		5F00000000000000000000A4 /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/FeedInterface" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/FeatureInterfaces/FeedInterface;
+		};
+		5F00000000000000000000A5 /* XCLocalSwiftPackageReference "Packages/Kit/CoreModels" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Kit/CoreModels;
+		};
+		5F00000000000000000000A6 /* XCLocalSwiftPackageReference "Packages/Kit/CoreContracts" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Kit/CoreContracts;
+		};
+		5F00000000000000000000A7 /* XCLocalSwiftPackageReference "Packages/Core/CoreStorage" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Core/CoreStorage;
+		};
+		5F00000000000000000000A8 /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/AuthInterface" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/FeatureInterfaces/AuthInterface;
+		};
+		5F00000000000000000000A9 /* XCLocalSwiftPackageReference "Packages/Features/Auth" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Features/Auth;
+		};
+		5F00000000000000000000AA /* XCLocalSwiftPackageReference "Packages/Core/CoreMedia" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Core/CoreMedia;
+		};
+		5F00000000000000000000AB /* XCLocalSwiftPackageReference "Packages/Features/Feed" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Features/Feed;
+		};
+		5F00000000000000000000AC /* XCLocalSwiftPackageReference "Packages/Core/CoreRealtime" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Core/CoreRealtime;
+		};
+		5F00000000000000000000AD /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/UploadInterface" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/FeatureInterfaces/UploadInterface;
+		};
+		5F00000000000000000000AE /* XCLocalSwiftPackageReference "Packages/Features/Upload" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Features/Upload;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		5F00000000000000000000C1 /* CoreNavigation */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CoreNavigation;
+		};
+		5F00000000000000000000C2 /* CoreNetworking */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CoreNetworking;
+		};
+		5F00000000000000000000C3 /* DesignSystem */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DesignSystem;
+		};
+		5F00000000000000000000C4 /* FeedInterface */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = FeedInterface;
+		};
+		5F00000000000000000000C5 /* CoreModels */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CoreModels;
+		};
+		5F00000000000000000000C6 /* CoreContracts */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CoreContracts;
+		};
+		5F00000000000000000000C7 /* CoreStorage */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CoreStorage;
+		};
+		5F00000000000000000000C8 /* AuthInterface */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AuthInterface;
+		};
+		5F00000000000000000000C9 /* Auth */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Auth;
+		};
+		5F00000000000000000000CA /* CoreNetworkingMocks */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CoreNetworkingMocks;
+		};
+		5F00000000000000000000CB /* CoreMedia */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CoreMedia;
+		};
+		5F00000000000000000000CC /* Feed */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Feed;
+		};
+		5F00000000000000000000CD /* CoreRealtime */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CoreRealtime;
+		};
+		5F00000000000000000000CE /* CoreRealtimeMocks */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CoreRealtimeMocks;
+		};
+		5F00000000000000000000CF /* UploadInterface */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = UploadInterface;
+		};
+		5F00000000000000000000D1 /* Upload */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Upload;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 51A1B76A2FFBCAB6005918BC /* Project object */;
 }

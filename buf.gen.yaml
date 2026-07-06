@@ -1,0 +1,21 @@
+# Code generation for buf.build/core-platform/contracts.
+# Run via Scripts/generate-contracts.sh — never invoke buf generate by hand,
+# the script owns the version pin (.contracts-pin).
+version: v2
+clean: true
+plugins:
+  - remote: buf.build/apple/swift
+    out: Packages/Kit/CoreContracts/Sources/CoreContracts/Generated
+    opt:
+      - Visibility=Public
+      # Swift targets require unique filenames; flatten proto paths into them
+      # (account/v1/enums.proto -> account_v1_enums.pb.swift).
+      - FileNaming=PathToUnderscores
+  # Connect clients for the BFF edge (Connect protocol, binary protobuf).
+  - remote: buf.build/connectrpc/swift
+    out: Packages/Kit/CoreContracts/Sources/CoreContracts/Generated
+    opt:
+      - Visibility=Public
+      - FileNaming=PathToUnderscores
+      - GenerateAsyncMethods=true
+      - GenerateCallbackMethods=false
