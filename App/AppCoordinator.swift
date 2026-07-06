@@ -44,13 +44,14 @@ final class AppCoordinator: Coordinator {
         // always stale against the fresh in-process mock BFF.
         if ProcessInfo.processInfo.arguments.contains("-mock-auto-login") {
             let sessionManager = container.sessionManager
+            let credentials = container.environment.demoCredentials
             let composeDemo = ProcessInfo.processInfo.arguments.contains("-mock-compose-demo")
             let composer = container.postComposer
             Task {
                 await sessionManager.logout()
                 try? await sessionManager.login(
-                    username: MockAuthService.defaultCredentials.username,
-                    password: MockAuthService.defaultCredentials.password
+                    username: credentials.username,
+                    password: credentials.password
                 )
                 // Exercises the real upload+create+publish flow so the compose
                 // wiring is verifiable without driving the photo picker UI.
@@ -101,7 +102,9 @@ final class AppCoordinator: Coordinator {
             let realtimeClient = container.realtimeClient
             Task { await realtimeClient.start() }
             #if DEBUG
-            container.startMockRealtimeDemo()
+            if container.environment == .mock {
+                container.startMockRealtimeDemo()
+            }
             #endif
             let sessionManager = container.sessionManager
             let feedViewController = container.feedFeature.makeFeedViewController()
