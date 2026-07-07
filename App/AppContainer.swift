@@ -140,7 +140,7 @@ final class AppContainer {
         engagementClient: Engagement_V1_EngagementServiceClient(client: authenticatedRPCClient),
         authSession: sessionManager,
         snapshotStore: CodableFileStore<[FeedEntry]>(name: "feed-first-page"),
-        viewerHandleFallback: environment.fleetViewerHandleFallback
+        viewerHandleFallback: environment.viewerHandleFallback
     )
 
     private(set) lazy var feedFeature: any FeedFeatureBuilding = FeedFeatureBuilder(

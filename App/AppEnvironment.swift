@@ -40,14 +40,20 @@ enum AppEnvironment: Equatable {
         }
     }
 
-    /// DEBUG-only fallback handle for resolving the viewer's own profile when
-    /// `ListProfilesByAccount` is unavailable. Works around a backend CQL bug
-    /// in the local fleet's ProfileService so dev can proceed; nil (unused) in
-    /// mock mode and irrelevant once the backend is fixed.
-    var fleetViewerHandleFallback: String? {
-        switch self {
-        case .mock: nil
-        case .localFleet: "alice"
+    /// Opt-in fallback for resolving the viewer's own profile via
+    /// `GetProfileByHandle` when `ListProfilesByAccount` is unavailable (a
+    /// local-fleet ProfileService CQL bug). Enabled explicitly with
+    /// `-fleet-viewer-handle <handle>`; nil by default so the backend bug
+    /// surfaces rather than being silently masked. Independent of the
+    /// environment case — the mock's account lookup works, so it never fires
+    /// there anyway.
+    var viewerHandleFallback: String? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-fleet-viewer-handle"),
+              index + 1 < arguments.count else {
+            return nil
         }
+        let handle = arguments[index + 1]
+        return handle.isEmpty ? nil : handle
     }
 }
