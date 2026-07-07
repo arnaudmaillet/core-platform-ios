@@ -16,10 +16,16 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     }
 
     public func makeCurrentUserProfileViewController(onLogout: @escaping () -> Void) -> UIViewController {
-        ProfileViewController(
+        let repository = repository
+        return ProfileViewController(
             viewModel: ProfileViewModel(repository: repository, source: .currentUser),
             imagePipeline: imagePipeline,
-            onLogout: onLogout
+            onLogout: onLogout,
+            makeEditViewController: { onSaved in
+                EditProfileViewController(
+                    viewModel: EditProfileViewModel(repository: repository, onSaved: onSaved)
+                )
+            }
         )
     }
 

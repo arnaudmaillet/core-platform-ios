@@ -7,6 +7,9 @@ final class ProfileViewController: UIViewController {
     /// Non-nil only for the signed-in viewer's own profile (the Profile tab);
     /// nil for a profile pushed via routing, which shows no account actions.
     private let onLogout: (() -> Void)?
+    /// Builds the edit form (for the viewer's own profile); the closure it
+    /// receives is invoked after a successful save. Nil for other users.
+    private let makeEditViewController: ((@escaping () -> Void) -> UIViewController)?
 
     private let scrollView = UIScrollView()
     private let headerView: ProfileHeaderView
@@ -14,9 +17,17 @@ final class ProfileViewController: UIViewController {
     private let spinner = UIActivityIndicatorView(style: .large)
     private let statusLabel = UILabel()
 
-    init(viewModel: ProfileViewModel, imagePipeline: ImagePipeline, onLogout: (() -> Void)?) {
+    private var followButtonState: ProfileViewModel.FollowButton = .hidden
+
+    init(
+        viewModel: ProfileViewModel,
+        imagePipeline: ImagePipeline,
+        onLogout: (() -> Void)?,
+        makeEditViewController: ((@escaping () -> Void) -> UIViewController)? = nil
+    ) {
         self.viewModel = viewModel
         self.onLogout = onLogout
+        self.makeEditViewController = makeEditViewController
         headerView = ProfileHeaderView(imagePipeline: imagePipeline)
         super.init(nibName: nil, bundle: nil)
     }
@@ -35,13 +46,47 @@ final class ProfileViewController: UIViewController {
             self?.render(phase)
         }
         viewModel.onFollowButtonChange = { [weak self] state in
+            self?.followButtonState = state
             self?.headerView.configureAction(state)
         }
         headerView.onActionTapped = { [weak self] in
-            self?.viewModel.toggleFollow()
+            self?.handleActionTapped()
         }
         render(.loading)
         viewModel.viewDidLoad()
+    }
+
+    #if DEBUG
+    private var didAutoPresentEdit = false
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // Dev convenience: `-edit-profile` opens the edit form on the viewer's
+        // own profile, so the form is testable without tapping the button.
+        if !didAutoPresentEdit, makeEditViewController != nil,
+           ProcessInfo.processInfo.arguments.contains("-edit-profile") {
+            didAutoPresentEdit = true
+            presentEditProfile()
+        }
+    }
+    #endif
+
+    /// The header's action button means different things per state: Edit opens
+    /// the edit form; Follow/Following toggle the relationship.
+    private func handleActionTapped() {
+        if followButtonState == .edit {
+            presentEditProfile()
+        } else {
+            viewModel.toggleFollow()
+        }
+    }
+
+    private func presentEditProfile() {
+        guard let makeEditViewController else { return }
+        let editViewController = makeEditViewController { [weak self] in
+            self?.dismiss(animated: true)
+            self?.viewModel.refresh()
+        }
+        present(UINavigationController(rootViewController: editViewController), animated: true)
     }
 
     // MARK: - Setup
