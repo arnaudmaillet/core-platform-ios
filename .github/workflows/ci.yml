@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [develop]
+  push:
+    branches: [develop]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: build-test
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain & simulators
+        run: |
+          xcodebuild -version
+          echo "--- installed iOS runtimes ---"
+          xcrun simctl list runtimes | grep -i ios || true
+
+      - name: Pick an available iPhone simulator
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available -j \
+            | jq -r '[.devices[][] | select(.name | test("iPhone")) | .udid] | first // ""')
+          if [ -z "$UDID" ]; then
+            echo "No available iPhone simulator on this runner" >&2
+            exit 1
+          fi
+          echo "Using simulator $UDID"
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
+      - name: Build app
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project core-platform-ios.xcodeproj \
+            -scheme core-platform-ios \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Test Profile package
+        working-directory: Packages/Features/Profile
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -scheme Profile \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}"
