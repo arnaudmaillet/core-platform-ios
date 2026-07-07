@@ -14,15 +14,15 @@ jobs:
   build-test:
     name: build-test
     runs-on: macos-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
       - name: Select Xcode 26
         run: |
           # macos-latest's default Xcode is nondeterministic; the project needs
-          # the iOS 26 SDK (Liquid Glass APIs, 26.5 deployment target). Pin the
-          # newest installed Xcode 26.x rather than trusting the default.
+          # the iOS 26 SDK (Liquid Glass APIs). Pin the newest installed Xcode
+          # 26.x rather than trusting the default.
           XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
           if [ -z "$XC" ]; then
             echo "No Xcode 26.x found on this runner" >&2
@@ -58,27 +58,72 @@ jobs:
             -skipMacroValidation \
             CODE_SIGNING_ALLOWED=NO
 
-      - name: Test Profile package
-        working-directory: Packages/Features/Profile
+      - name: Pick simulator
+        id: sim
         run: |
           set -o pipefail
-          xcodebuild -resolvePackageDependencies \
-            -scheme Profile \
-            -clonedSourcePackagesDirPath .spm
-          # Pick a concrete iPhone simulator from xcodebuild's own destination
-          # list (guaranteed valid for this scheme, unlike a simctl id).
-          DEST_ID=$(xcodebuild -scheme Profile -showdestinations \
-            -clonedSourcePackagesDirPath .spm 2>/dev/null \
-            | grep 'platform:iOS Simulator' \
-            | grep -iE 'name:iPhone' \
+          # A concrete iPhone simulator from xcodebuild's own destination list
+          # (guaranteed valid), reused for every package's tests since they all
+          # target the same platform.
+          DEST_ID=$(xcodebuild -project core-platform-ios.xcodeproj -scheme core-platform-ios \
+            -showdestinations -clonedSourcePackagesDirPath .spm 2>/dev/null \
+            | grep 'platform:iOS Simulator' | grep -iE 'name:iPhone' \
             | grep -oE 'id:[0-9A-Fa-f-]+' | head -1 | cut -d: -f2)
           if [ -z "$DEST_ID" ]; then
-            echo "No iPhone simulator destination found for the Profile scheme" >&2
+            echo "No iPhone simulator destination found" >&2
             exit 1
           fi
-          echo "Testing on simulator id=$DEST_ID"
-          xcodebuild test \
-            -scheme Profile \
-            -destination "id=$DEST_ID" \
-            -clonedSourcePackagesDirPath .spm \
-            -skipMacroValidation
+          echo "Using simulator id=$DEST_ID"
+          echo "id=$DEST_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Test all packages
+        run: |
+          set -uo pipefail
+          SPM="$GITHUB_WORKSPACE/.spm"           # shared checkouts, resolved once above
+          DEST="id=${{ steps.sim.outputs.id }}"
+          FAILED=()
+
+          # Runs a single package's tests. Multi-product packages (e.g.
+          # CoreNetworking + CoreNetworkingMocks) put the test action on the
+          # auto-generated "<name>-Package" scheme, not the product scheme;
+          # single-product packages only have "<name>". Prefer -Package when it
+          # exists.
+          test_package() {
+            local dir="$1" name="$2"
+            cd "$dir" || return 1
+            xcodebuild -resolvePackageDependencies -scheme "$name" -clonedSourcePackagesDirPath "$SPM" || return 1
+            local scheme="$name"
+            if xcodebuild -list -clonedSourcePackagesDirPath "$SPM" 2>/dev/null \
+                 | grep -qE "^[[:space:]]+${name}-Package$"; then
+              scheme="${name}-Package"
+            fi
+            echo "Using scheme: $scheme"
+            xcodebuild test -scheme "$scheme" -destination "$DEST" \
+              -clonedSourcePackagesDirPath "$SPM" -skipMacroValidation
+          }
+
+          # Every local package that has a test target (a Tests/ dir with sources).
+          PKG_DIRS=$(for manifest in $(find Packages -name Package.swift -not -path '*/.build/*'); do
+            dir=$(dirname "$manifest")
+            if ls "$dir"/Tests/*/*.swift >/dev/null 2>&1; then echo "$dir"; fi
+          done | sort)
+
+          echo "Packages under test:"; echo "$PKG_DIRS"
+
+          for dir in $PKG_DIRS; do
+            name=$(grep -m1 -E 'name:[[:space:]]*"' "$dir/Package.swift" | sed -E 's/.*name:[[:space:]]*"([^"]+)".*/\1/')
+            echo "::group::Test $name ($dir)"
+            if ( test_package "$dir" "$name" ); then
+              echo "PASS $name"
+            else
+              echo "FAIL $name"
+              FAILED+=("$name")
+            fi
+            echo "::endgroup::"
+          done
+
+          if [ ${#FAILED[@]} -ne 0 ]; then
+            echo "::error::Failed package tests: ${FAILED[*]}"
+            exit 1
+          fi
+          echo "All package tests passed."
