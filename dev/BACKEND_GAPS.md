@@ -15,6 +15,7 @@ full functionality.
 | 5 | Seed data has no avatars and only text-only posts | Nothing visual to render (images) | Low |
 | 6 | IdP authenticates on bare username, not email | Login (a gotcha, easily worked around) | Low |
 | 7 | `counter.v1` does not project profile follower/following counts | Profile counters (client falls back to social_graph) | Medium |
+| 8 | Envoy gateway didn't route `search.v1` (fixed in-repo) | People search (fixed; needs a gateway restart) | Low |
 
 ---
 
@@ -179,6 +180,29 @@ automatically once the projection lands — no client change needed.
 `PROFILE` entity from `social_graph` follow/unfollow Kafka events (the same
 pattern `LIKE` already uses on `POST`). Counting via graph pagination is an O(n)
 stopgap; the O(1) read-model is the right home for these counts.
+
+---
+
+## 8. Envoy gateway did not route `search.v1` (fixed in this repo)
+
+**Symptom.** People search failed in-app ("Couldn't search") even though the
+search service itself works: `grpcurl -plaintext localhost:50062
+search.v1.SearchService/Search` returns hits. The app goes through the Envoy
+gateway (`localhost:8080`, gRPC-Web); grpcurl hit the raw gRPC port directly.
+
+**Root cause.** `dev/envoy/envoy.yaml` had no route or cluster for
+`search.v1.SearchService`, so the gateway 404s the path. The gateway config is
+**in this repo**, so this was fixed here (added a `search` route + a
+`search-server:50062` cluster, mirroring the other 12 services).
+
+**To apply:** restart the gateway so it reloads the config —
+`docker restart core-platform-gateway`.
+
+**Latent note.** The gateway still routes only a subset of services. Besides
+`search` (now added), these remain **unrouted** and will hit the same wall when
+a client feature needs them: `geo_discovery.v1`, `moderation.v1`, `audit.v1`
+(likely internal-only), and `realtime.v1` (served over the WebSocket gateway on
+`:8443`, not Envoy — expected). Add routes as features require them.
 
 ---
 
