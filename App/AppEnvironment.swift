@@ -32,10 +32,22 @@ enum AppEnvironment: Equatable {
     }
 
     /// Seeded first-party credentials used by the `-mock-auto-login` dev flow.
+    /// The fleet IdP authenticates on the bare username (not the email).
     var demoCredentials: (username: String, password: String) {
         switch self {
         case .mock: ("demo", "password123")
-        case .localFleet: ("dev@coreplatform.local", "password123")
+        case .localFleet: ("alice", "password")
+        }
+    }
+
+    /// DEBUG-only fallback handle for resolving the viewer's own profile when
+    /// `ListProfilesByAccount` is unavailable. Works around a backend CQL bug
+    /// in the local fleet's ProfileService so dev can proceed; nil (unused) in
+    /// mock mode and irrelevant once the backend is fixed.
+    var fleetViewerHandleFallback: String? {
+        switch self {
+        case .mock: nil
+        case .localFleet: "alice"
         }
     }
 }
