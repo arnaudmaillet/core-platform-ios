@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [develop]
+  push:
+    branches: [develop]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: build-test
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain & simulators
+        run: |
+          xcodebuild -version
+          echo "--- installed iOS runtimes ---"
+          xcrun simctl list runtimes | grep -i ios || true
+
+      - name: Resolve Swift packages
+        run: |
+          set -o pipefail
+          xcodebuild -resolvePackageDependencies \
+            -project core-platform-ios.xcodeproj \
+            -scheme core-platform-ios \
+            -clonedSourcePackagesDirPath .spm
+
+      - name: Build app
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project core-platform-ios.xcodeproj \
+            -scheme core-platform-ios \
+            -destination "generic/platform=iOS Simulator" \
+            -configuration Debug \
+            -clonedSourcePackagesDirPath .spm \
+            -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Test Profile package
+        working-directory: Packages/Features/Profile
+        run: |
+          set -o pipefail
+          xcodebuild -resolvePackageDependencies \
+            -scheme Profile \
+            -clonedSourcePackagesDirPath .spm
+          # Pick a concrete iPhone simulator from xcodebuild's own destination
+          # list (guaranteed valid for this scheme, unlike a simctl id).
+          DEST_ID=$(xcodebuild -scheme Profile -showdestinations \
+            -clonedSourcePackagesDirPath .spm 2>/dev/null \
+            | grep 'platform:iOS Simulator' \
+            | grep -iE 'name:iPhone' \
+            | grep -oE 'id:[0-9A-Fa-f-]+' | head -1 | cut -d: -f2)
+          if [ -z "$DEST_ID" ]; then
+            echo "No iPhone simulator destination found for the Profile scheme" >&2
+            exit 1
+          fi
+          echo "Testing on simulator id=$DEST_ID"
+          xcodebuild test \
+            -scheme Profile \
+            -destination "id=$DEST_ID" \
+            -clonedSourcePackagesDirPath .spm \
+            -skipMacroValidation
