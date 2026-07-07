@@ -18,6 +18,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Select Xcode 26
+        run: |
+          # macos-latest's default Xcode is nondeterministic; the project needs
+          # the iOS 26 SDK (Liquid Glass APIs, 26.5 deployment target). Pin the
+          # newest installed Xcode 26.x rather than trusting the default.
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XC" ]; then
+            echo "No Xcode 26.x found on this runner" >&2
+            ls -d /Applications/Xcode_*.app 2>/dev/null >&2 || true
+            exit 1
+          fi
+          echo "Selecting $XC"
+          sudo xcode-select -s "$XC/Contents/Developer"
+
       - name: Toolchain & simulators
         run: |
           xcodebuild -version
