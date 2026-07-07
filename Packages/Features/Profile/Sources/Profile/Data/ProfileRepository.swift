@@ -1,4 +1,5 @@
 import AuthInterface
+import Connect
 import CoreContracts
 import CoreModels
 import Foundation
@@ -32,6 +33,24 @@ public enum CountEstimate: Equatable, Sendable {
     static func fromSample(count: Int, hasMore: Bool) -> CountEstimate {
         hasMore ? .atLeast(Int64(count)) : .exact(Int64(count))
     }
+
+    /// Nudges a known count by `delta` (never below zero) for optimistic
+    /// follow/unfollow updates. An `unavailable` count stays "—".
+    func adjusted(by delta: Int64) -> CountEstimate {
+        switch self {
+        case .exact(let value): .exact(max(0, value + delta))
+        case .atLeast(let value): .atLeast(max(0, value + delta))
+        case .unavailable: .unavailable
+        }
+    }
+}
+
+/// The viewer's relationship to a profile, driving the header's action button.
+public enum ProfileRelationship: Equatable, Sendable {
+    /// The profile belongs to the signed-in viewer → "Edit Profile".
+    case me
+    /// Someone else's profile → Follow / Following toggle.
+    case other(isFollowing: Bool)
 }
 
 /// A fully-resolved public profile plus its social-graph counters, ready for
@@ -77,6 +96,10 @@ public protocol ProfileProviding: Sendable {
     func currentUserProfile() async throws -> UserProfile
     /// Any profile by id — used when routing to another user's profile.
     func profile(id: ProfileID) async throws -> UserProfile
+    /// The viewer's relationship to `profileID` (own profile vs. follow state).
+    func relationship(for profileID: ProfileID) async throws -> ProfileRelationship
+    /// Follow (`true`) or unfollow (`false`) `profileID` as the viewer.
+    func setFollowing(_ following: Bool, for profileID: ProfileID) async throws
 }
 
 /// Reads the viewer's identity and social counters from profile.v1, counter.v1,
@@ -126,6 +149,55 @@ public actor ProfileRepository: ProfileProviding {
 
     public func profile(id: ProfileID) async throws -> UserProfile {
         try await loadProfile(id: id)
+    }
+
+    // MARK: - Relationship
+
+    public func relationship(for profileID: ProfileID) async throws -> ProfileRelationship {
+        let viewer = try await resolveViewerProfileID()
+        // The viewer's own profile (whether reached via the tab or by routing to
+        // your own id) offers Edit, never Follow.
+        guard viewer != profileID else { return .me }
+
+        var request = SocialGraph_V1_GetRelationStatusRequest()
+        request.actorID = viewer.rawValue
+        request.targetID = profileID.rawValue
+        let response = await socialGraphClient.getRelationStatus(request: request, headers: [:])
+        switch response.result {
+        case .success(let view):
+            // `.mutual` also means the viewer follows the target.
+            let isFollowing = view.status == .following || view.status == .mutual
+            return .other(isFollowing: isFollowing)
+        case .failure(let error):
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+        }
+    }
+
+    public func setFollowing(_ following: Bool, for profileID: ProfileID) async throws {
+        let viewer = try await resolveViewerProfileID()
+        guard viewer != profileID else { return } // no-op: can't follow yourself
+
+        if following {
+            var request = SocialGraph_V1_FollowRequest()
+            request.actorID = viewer.rawValue
+            request.targetID = profileID.rawValue
+            try Self.ensureAccepted(await socialGraphClient.follow(request: request, headers: [:]))
+        } else {
+            var request = SocialGraph_V1_UnfollowRequest()
+            request.actorID = viewer.rawValue
+            request.targetID = profileID.rawValue
+            try Self.ensureAccepted(await socialGraphClient.unfollow(request: request, headers: [:]))
+        }
+    }
+
+    /// Throws unless the command round-tripped and the server accepted it.
+    private static func ensureAccepted(_ response: ResponseMessage<SocialGraph_V1_CommandResponse>) throws {
+        if let error = response.error {
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+        }
+        guard response.message?.success == true else {
+            throw ProfileError.transport(message: "command rejected")
+        }
     }
 
     /// Fetches the profile view and its social counters concurrently.

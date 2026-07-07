@@ -84,4 +84,98 @@ struct ProfileRepositoryTests {
             _ = try await repository.currentUserProfile()
         }
     }
+
+    // MARK: - Relationship / follow
+
+    /// A repository whose social_graph is stubbed with a fixed relation status
+    /// and a capture box that records follow/unfollow commands.
+    private func makeRepositoryWithGraph(
+        status: SocialGraph_V1_RelationStatus = .none,
+        followSucceeds: Bool = true
+    ) -> (ProfileRepository, GraphCapture) {
+        let capture = GraphCapture()
+        let bff = MockBFF()
+        MockSocialServices(dataset: MockSocialDataset()).register(on: bff)
+        MockCounterService(store: MockCounterStore(dataset: MockSocialDataset())).register(on: bff)
+
+        bff.register(path: "/social_graph.v1.SocialGraphService/GetRelationStatus") { (request: SocialGraph_V1_GetRelationStatusRequest) in
+            var view = SocialGraph_V1_RelationStatusView()
+            view.actorID = request.actorID
+            view.targetID = request.targetID
+            view.status = status
+            return .success(view)
+        }
+        bff.register(path: "/social_graph.v1.SocialGraphService/Follow") { (request: SocialGraph_V1_FollowRequest) in
+            capture.record(following: true, actor: request.actorID, target: request.targetID)
+            var response = SocialGraph_V1_CommandResponse()
+            response.success = followSucceeds
+            return .success(response)
+        }
+        bff.register(path: "/social_graph.v1.SocialGraphService/Unfollow") { (request: SocialGraph_V1_UnfollowRequest) in
+            capture.record(following: false, actor: request.actorID, target: request.targetID)
+            var response = SocialGraph_V1_CommandResponse()
+            response.success = true
+            return .success(response)
+        }
+
+        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        let repository = ProfileRepository(
+            profileClient: Profile_V1_ProfileServiceClient(client: client),
+            counterClient: Counter_V1_CounterServiceClient(client: client),
+            socialGraphClient: SocialGraph_V1_SocialGraphServiceClient(client: client),
+            authSession: AuthenticatedSessionStub()
+        )
+        return (repository, capture)
+    }
+
+    @Test func ownProfileRelationshipIsMe() async throws {
+        let (repository, _) = makeRepositoryWithGraph()
+
+        let relationship = try await repository.relationship(for: ProfileID(MockSocialDataset.viewerProfileID))
+
+        #expect(relationship == .me)
+    }
+
+    @Test func readsFollowStatusForOthers() async throws {
+        let (following, _) = makeRepositoryWithGraph(status: .following)
+        #expect(try await following.relationship(for: ProfileID("prof-3")) == .other(isFollowing: true))
+
+        // `.mutual` also counts as "the viewer follows them".
+        let (mutual, _) = makeRepositoryWithGraph(status: .mutual)
+        #expect(try await mutual.relationship(for: ProfileID("prof-3")) == .other(isFollowing: true))
+
+        // `.followedBy` means they follow the viewer, not the other way around.
+        let (followedBy, _) = makeRepositoryWithGraph(status: .followedBy)
+        #expect(try await followedBy.relationship(for: ProfileID("prof-3")) == .other(isFollowing: false))
+    }
+
+    @Test func followSendsViewerAsActorAndTargetProfile() async throws {
+        let (repository, capture) = makeRepositoryWithGraph()
+
+        try await repository.setFollowing(true, for: ProfileID("prof-3"))
+
+        let call = capture.last
+        #expect(call?.following == true)
+        #expect(call?.actor == MockSocialDataset.viewerProfileID)
+        #expect(call?.target == "prof-3")
+    }
+
+    @Test func throwsWhenFollowRejected() async {
+        let (repository, _) = makeRepositoryWithGraph(followSucceeds: false)
+
+        await #expect(throws: ProfileError.self) {
+            try await repository.setFollowing(true, for: ProfileID("prof-3"))
+        }
+    }
+}
+
+/// Records the follow/unfollow commands the repository issues over the wire.
+private final class GraphCapture: @unchecked Sendable {
+    struct Call: Sendable { let following: Bool; let actor: String; let target: String }
+    private let lock = NSLock()
+    private var calls: [Call] = []
+    func record(following: Bool, actor: String, target: String) {
+        lock.withLock { calls.append(Call(following: following, actor: actor, target: target)) }
+    }
+    var last: Call? { lock.withLock { calls.last } }
 }
