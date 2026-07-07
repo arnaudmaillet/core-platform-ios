@@ -31,9 +31,18 @@ final class AppCoordinator: Coordinator {
         window.makeKeyAndVisible()
 
         stateObservation = Task { [weak self] in
-            guard let sessionManager = self?.container.sessionManager else { return }
-            for await state in await sessionManager.stateUpdates() {
+            guard let container = self?.container else { return }
+            let realtimeClient = container.realtimeClient
+            for await state in await container.sessionManager.stateUpdates() {
                 self?.render(state)
+                // Realtime lifecycle is driven here, in auth-state order, rather
+                // than via detached Tasks in render() — otherwise a rapid
+                // logout→login (e.g. auto-login) races start/stop and can leave
+                // the client stopped.
+                switch state {
+                case .authenticated: await realtimeClient.start()
+                case .unauthenticated: await realtimeClient.stop()
+                }
             }
         }
 
@@ -95,12 +104,8 @@ final class AppCoordinator: Coordinator {
     private func render(_ state: AuthState) {
         switch state {
         case .unauthenticated:
-            let realtimeClient = container.realtimeClient
-            Task { await realtimeClient.stop() }
             setRoot(container.authFeature.makeLoginViewController())
         case .authenticated:
-            let realtimeClient = container.realtimeClient
-            Task { await realtimeClient.start() }
             #if DEBUG
             if container.environment == .mock {
                 container.startMockRealtimeDemo()

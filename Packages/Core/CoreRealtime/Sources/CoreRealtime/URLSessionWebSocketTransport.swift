@@ -1,23 +1,33 @@
 import Foundation
 
 /// Production transport: `URLSessionWebSocketTask` against the realtime
-/// gateway, edge token in the upgrade request per the realtime.v1 handshake
+/// gateway, edge token presented on the upgrade per the realtime.v1 handshake
 /// contract (verified once; frames are never re-authenticated).
+///
+/// The gateway takes the token as a query parameter (`?access_token=…`), not
+/// an Authorization header — browsers can't set headers on a WebSocket
+/// handshake, so gateways standardize on the query param.
 public final class URLSessionWebSocketTransport: RealtimeTransport, @unchecked Sendable {
     private let url: URL
+    private let tokenQueryItem: String
     private let session: URLSession
     private let lock = NSLock()
     private var task: URLSessionWebSocketTask?
 
-    public init(url: URL, session: URLSession = .shared) {
+    public init(url: URL, tokenQueryItem: String = "access_token", session: URLSession = .shared) {
         self.url = url
+        self.tokenQueryItem = tokenQueryItem
         self.session = session
     }
 
     public func connect(edgeToken: String) async throws -> AsyncStream<RealtimeTransportEvent> {
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(edgeToken)", forHTTPHeaderField: "Authorization")
-        let task = session.webSocketTask(with: request)
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        var queryItems = components?.queryItems ?? []
+        queryItems.append(URLQueryItem(name: tokenQueryItem, value: edgeToken))
+        components?.queryItems = queryItems
+        let connectURL = components?.url ?? url
+
+        let task = session.webSocketTask(with: connectURL)
         lock.withLock { self.task = task }
 
         let (stream, continuation) = AsyncStream.makeStream(of: RealtimeTransportEvent.self)

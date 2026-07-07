@@ -29,22 +29,39 @@ public protocol MediaUploadTransport: Sendable {
     func upload(_ data: Data, using ticket: MediaUploadTicket) async throws -> String
 }
 
-/// Production transport: a background-configured `URLSession` uploading from a
-/// temp file so the transfer can proceed while the app is suspended. The ETag
-/// is read from the storage response.
-///
-/// Cross-relaunch resumption (rehydrating tasks after the app is killed
-/// mid-upload) is wired at the app layer via
-/// `application(handleEventsForBackgroundURLSession:)`; this type covers the
-/// in-session path.
+/// Rewrites a URL host for reachability while preserving the original host in
+/// the `Host` header — needed for presigned object-store URLs signed against a
+/// host the client can't resolve (e.g. a Docker-internal `minio:9000` from a
+/// local fleet). The presigned SigV4 signature covers the Host header, so the
+/// original value must still be sent. Also used for reading back delivery URLs
+/// hosted on the same internal host.
+public struct HostRewrite: Sendable {
+    public let from: String
+    public let to: String
+
+    public init(from: String, to: String) {
+        self.from = from
+        self.to = to
+    }
+
+    /// Returns (rewrittenURL, originalHostHeader) if `from` appears in the URL.
+    func apply(to url: URL) -> (url: URL, hostHeader: String?)? {
+        guard let range = url.absoluteString.range(of: from) else { return nil }
+        let hostHeader = url.host.map { $0 + (url.port.map { ":\($0)" } ?? "") }
+        let rewritten = url.absoluteString.replacingCharacters(in: range, with: to)
+        return (URL(string: rewritten) ?? url, hostHeader)
+    }
+}
+
+/// Production transport: a `URLSession` uploading the payload to the ticket's
+/// (typically presigned) URL. The ETag is read from the storage response.
 public final class URLSessionMediaUploadTransport: NSObject, MediaUploadTransport, @unchecked Sendable {
     private let session: URLSession
+    private let hostRewrite: HostRewrite?
 
-    public init(identifier: String = "cn.wynn.core-platform-ios.upload") {
-        let config = URLSessionConfiguration.background(withIdentifier: identifier)
-        config.isDiscretionary = false
-        config.sessionSendsLaunchEvents = true
-        self.session = URLSession(configuration: config)
+    public init(hostRewrite: HostRewrite? = nil, session: URLSession = .shared) {
+        self.session = session
+        self.hostRewrite = hostRewrite
         super.init()
     }
 
@@ -53,8 +70,18 @@ public final class URLSessionMediaUploadTransport: NSObject, MediaUploadTranspor
             throw MediaUploadError.payloadTooLarge(limit: ticket.maxSizeBytes)
         }
 
-        var request = URLRequest(url: ticket.uploadURL)
+        var uploadURL = ticket.uploadURL
+        var hostHeader: String?
+        if let rewrite = hostRewrite?.apply(to: uploadURL) {
+            uploadURL = rewrite.url
+            hostHeader = rewrite.hostHeader
+        }
+
+        var request = URLRequest(url: uploadURL)
         request.httpMethod = ticket.httpMethod
+        if let hostHeader {
+            request.setValue(hostHeader, forHTTPHeaderField: "Host")
+        }
         for (field, value) in ticket.requiredHeaders {
             request.setValue(value, forHTTPHeaderField: field)
         }

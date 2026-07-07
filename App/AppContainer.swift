@@ -82,9 +82,18 @@ final class AppContainer {
 
     // MARK: - Media
 
-    /// Placeholder fetcher renders deterministic images for mock:// URLs;
-    /// swaps for URLSessionImageFetcher alongside the real BFF transport.
-    private(set) lazy var imagePipeline = ImagePipeline(fetcher: PlaceholderImageFetcher())
+    /// Mock mode renders deterministic placeholder images for `mock://` URLs;
+    /// fleet mode fetches real images over HTTP, rewriting the fleet's
+    /// Docker-internal minio host to the published one.
+    private(set) lazy var imagePipeline: ImagePipeline = {
+        let fetcher: any ImageFetching = switch environment {
+        case .mock:
+            PlaceholderImageFetcher()
+        case .localFleet:
+            URLSessionImageFetcher(hostRewrite: HostRewrite(from: "minio:9000", to: "localhost:9000"))
+        }
+        return ImagePipeline(fetcher: fetcher)
+    }()
 
     // MARK: - Realtime
 
@@ -97,8 +106,13 @@ final class AppContainer {
             return cachedRealtimeClient
         }
         let sessionManager = sessionManager
+        let transport: any RealtimeTransport = if let realtimeURL = environment.realtimeURL {
+            URLSessionWebSocketTransport(url: realtimeURL)
+        } else {
+            mockRealtimeServer
+        }
         let client = RealtimeClient(
-            transport: mockRealtimeServer, // swaps for URLSessionWebSocketTransport with the real gateway
+            transport: transport,
             tokenProvider: { try await sessionManager.validAccessToken() },
             configuration: RealtimeClient.Configuration()
         )
@@ -160,12 +174,24 @@ final class AppContainer {
             if let cachedPostComposer {
                 return cachedPostComposer
             }
+            let uploadTransport: any MediaUploadTransport = switch environment {
+            case .mock:
+                MockMediaUploadTransport(store: mockBlobStore)
+            case .localFleet:
+                // The media service presigns object-store URLs against the
+                // Docker-internal host (minio:9000), unreachable from the
+                // client; rewrite to the published host, preserving the signed
+                // Host header. Remove once the fleet presigns a reachable host.
+                URLSessionMediaUploadTransport(
+                    hostRewrite: HostRewrite(from: "minio:9000", to: "localhost:9000")
+                )
+            }
             let composer = PostComposer(
                 mediaClient: Media_V1_MediaServiceClient(client: authenticatedRPCClient),
                 postClient: Post_V1_PostServiceClient(client: authenticatedRPCClient),
                 profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
                 authSession: sessionManager,
-                uploadTransport: MockMediaUploadTransport(store: mockBlobStore), // swaps for URLSessionMediaUploadTransport with the real BFF
+                uploadTransport: uploadTransport,
                 imagePipeline: imagePipeline,
                 composedChannel: composedPostChannel
             )

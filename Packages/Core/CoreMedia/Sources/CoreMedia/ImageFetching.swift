@@ -8,15 +8,29 @@ public protocol ImageFetching: Sendable {
 }
 
 /// Production fetcher: plain URLSession GET against the CDN.
+///
+/// `hostRewrite` handles delivery URLs hosted on a client-unreachable host
+/// (e.g. a local fleet's Docker-internal `minio:9000`): the host is rewritten
+/// to a reachable one, and the original host is sent as the `Host` header in
+/// case the object store validates it.
 public struct URLSessionImageFetcher: ImageFetching {
     private let session: URLSession
+    private let hostRewrite: HostRewrite?
 
-    public init(session: URLSession = .shared) {
+    public init(hostRewrite: HostRewrite? = nil, session: URLSession = .shared) {
         self.session = session
+        self.hostRewrite = hostRewrite
     }
 
     public func fetchImageData(for url: URL) async throws -> Data {
-        let (data, response) = try await session.data(from: url)
+        var request = URLRequest(url: url)
+        if let rewrite = hostRewrite?.apply(to: url) {
+            request.url = rewrite.url
+            if let hostHeader = rewrite.hostHeader {
+                request.setValue(hostHeader, forHTTPHeaderField: "Host")
+            }
+        }
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw URLError(.badServerResponse)
         }

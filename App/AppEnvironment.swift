@@ -31,11 +31,22 @@ enum AppEnvironment: Equatable {
         }
     }
 
+    /// The realtime WebSocket endpoint, or nil to use the in-process mock
+    /// server. The gateway is plaintext ws:// (despite the :8443 port) and
+    /// takes the edge token as an `access_token` query parameter.
+    var realtimeURL: URL? {
+        switch self {
+        case .mock: nil
+        case .localFleet: URL(string: "ws://localhost:8443/ws")
+        }
+    }
+
     /// Seeded first-party credentials used by the `-mock-auto-login` dev flow.
+    /// The fleet IdP authenticates on the bare username (not the email).
     var demoCredentials: (username: String, password: String) {
         switch self {
         case .mock: ("demo", "password123")
-        case .localFleet: ("dev@coreplatform.local", "password123")
+        case .localFleet: ("alice", "password")
         }
     }
 }

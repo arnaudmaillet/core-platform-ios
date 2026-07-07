@@ -42,6 +42,8 @@ public actor PostComposer: PostComposing {
     private let imagePipeline: ImagePipeline
     private let composedChannel: ComposedPostChannel
     private let encoder: MediaEncoder
+    private let resolveMaxAttempts: Int
+    private let resolvePollSeconds: Double
     private let now: @Sendable () -> Date
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "compose")
 
@@ -56,6 +58,8 @@ public actor PostComposer: PostComposing {
         imagePipeline: ImagePipeline,
         composedChannel: ComposedPostChannel,
         encoder: MediaEncoder = MediaEncoder(),
+        resolveMaxAttempts: Int = 6,
+        resolvePollSeconds: Double = 1,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.mediaClient = mediaClient
@@ -66,6 +70,8 @@ public actor PostComposer: PostComposing {
         self.imagePipeline = imagePipeline
         self.composedChannel = composedChannel
         self.encoder = encoder
+        self.resolveMaxAttempts = resolveMaxAttempts
+        self.resolvePollSeconds = resolvePollSeconds
         self.now = now
     }
 
@@ -154,16 +160,10 @@ public actor PostComposer: PostComposing {
             _ = try unwrap(commitResponse.message, errorMessage: commitResponse.error?.message, as: ComposeError.media)
         }
 
-        // 4. Resolve delivery to a CDN URL.
-        var resolveRequest = Media_V1_ResolveDeliveryRequest()
-        resolveRequest.assetID = assetID
-        resolveRequest.preferred = .mediaRenditionKindLarge
-        let resolveResponse = await mediaClient.resolveDelivery(request: resolveRequest, headers: [:])
-        let resolveBody = try unwrap(resolveResponse.message, errorMessage: resolveResponse.error?.message, as: ComposeError.media)
-        guard let renditionURL = resolveBody.media.renditions.first(where: { !$0.url.isEmpty })?.url,
-              let cdnURL = URL(string: renditionURL) else {
-            throw ComposeError.media("no delivery URL for asset \(assetID)")
-        }
+        // 4. Resolve delivery to a CDN URL. Media processing is asynchronous
+        //    (the asset lands PENDING and a worker transcodes it), so poll
+        //    until a rendition URL is available.
+        let cdnURL = try await resolveDeliveryURL(assetID: assetID)
 
         return MediaAttachment(
             url: cdnURL,
@@ -172,6 +172,27 @@ public actor PostComposer: PostComposing {
             pixelWidth: encoded.pixelWidth,
             pixelHeight: encoded.pixelHeight
         )
+    }
+
+    /// Polls ResolveDelivery until the asset has a rendition URL, tolerating
+    /// the async media pipeline. Throws a clear error if it never becomes
+    /// deliverable within the budget.
+    private func resolveDeliveryURL(assetID: String) async throws -> URL {
+        for attempt in 0..<resolveMaxAttempts {
+            if attempt > 0 {
+                try? await Task.sleep(for: .seconds(resolvePollSeconds))
+            }
+            var request = Media_V1_ResolveDeliveryRequest()
+            request.assetID = assetID
+            request.preferred = .mediaRenditionKindLarge
+            let response = await mediaClient.resolveDelivery(request: request, headers: [:])
+            if let body = response.message,
+               let urlString = body.media.renditions.first(where: { !$0.url.isEmpty })?.url,
+               let url = URL(string: urlString) {
+                return url
+            }
+        }
+        throw ComposeError.media("media still processing (asset \(assetID) not ready)")
     }
 
     private func createDraft(profileID: ProfileID, caption: String, attachments: [Post_V1_MediaAttachmentInput], hasMedia: Bool) async throws -> PostID {
