@@ -141,6 +141,11 @@ public final class FeedViewModel {
         router?.route(to: .profile(id))
     }
 
+    /// A post row tapped — open its detail via routing.
+    public func didTapPost(_ id: PostID) {
+        router?.route(to: .post(id))
+    }
+
     /// Pagination trigger: called by the view for every cell about to display.
     public func willDisplayItem(at index: Int) {
         guard nextPageToken != nil, pagingLoad == nil, index >= items.count - 5 else { return }

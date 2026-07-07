@@ -1,3 +1,4 @@
+import CoreModels
 import UIKit
 
 /// Entry point contract for the Feed feature. Other modules (the app shell,
@@ -7,4 +8,7 @@ import UIKit
 @MainActor
 public protocol FeedFeatureBuilding {
     func makeFeedViewController() -> UIViewController
+    /// The detail screen for a single post — the destination the router pushes
+    /// for a `.post` route (e.g. from the feed or a notification).
+    func makePostDetailViewController(for postID: PostID) -> UIViewController
 }

@@ -202,7 +202,8 @@ final class AppContainer {
     /// opaque `Router`; the shell binds its `navigator` when it starts.
     private(set) lazy var routeResolver = RouteResolver(
         profileFeature: profileFeature,
-        uploadFeature: uploadFeature
+        uploadFeature: uploadFeature,
+        feedFeature: { [unowned self] in self.feedFeature }
     )
 
     var router: any Router { routeResolver }

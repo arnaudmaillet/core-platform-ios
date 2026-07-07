@@ -32,6 +32,11 @@ private final class FakeFeedProvider: FeedProviding, @unchecked Sendable {
             try (pages[token] ?? .failure(.transport(message: "unstubbed"))).get()
         }
     }
+
+    var post: Result<FeedEntry, FeedError> = .failure(.transport(message: "unstubbed"))
+    func loadPost(_ id: PostID) async throws -> FeedEntry {
+        try lock.withLock { try post.get() }
+    }
 }
 
 private func makeEntries(_ range: Range<Int>) -> [FeedEntry] {
@@ -69,6 +74,13 @@ struct FeedViewModelTests {
         let viewModel = FeedViewModel(repository: FakeFeedProvider(), router: router)
         viewModel.didTapAuthor(ProfileID("prof-99"))
         #expect(router.routes == [.profile(ProfileID("prof-99"))])
+    }
+
+    @Test func tappingPostRoutesToDetail() {
+        let router = SpyRouter()
+        let viewModel = FeedViewModel(repository: FakeFeedProvider(), router: router)
+        viewModel.didTapPost(PostID("post-7"))
+        #expect(router.routes == [.post(PostID("post-7"))])
     }
 
     @Test func rendersCachedSnapshotBeforeNetworkTruth() async {

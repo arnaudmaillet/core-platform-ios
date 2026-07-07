@@ -91,6 +91,12 @@ private final class SinglePageProvider: FeedProviding, @unchecked Sendable {
     func loadPage(afterToken token: String) async throws -> FeedPage {
         FeedPage(entries: [], nextPageToken: nil, isCold: false)
     }
+    func loadPost(_ id: PostID) async throws -> FeedEntry {
+        guard let entry = entries.first(where: { $0.post.id == id }) else {
+            throw FeedError.transport(message: "not found")
+        }
+        return entry
+    }
 }
 
 private func makeEntry(_ id: String, likeCount: Int64) -> FeedEntry {

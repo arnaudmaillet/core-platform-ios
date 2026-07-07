@@ -56,6 +56,19 @@ struct FeedRepositoryTests {
         #expect(first.post.id == PostID("post-0000"))
     }
 
+    @Test func loadPostHydratesSinglePostWithAuthorAndLikes() async throws {
+        // Learn a real post id from the first page, then load it directly.
+        let (repository, _) = makeRepository()
+        let page = try await repository.loadFirstPage()
+        let target = try #require(page.entries.first)
+
+        let entry = try await repository.loadPost(target.post.id)
+
+        #expect(entry.post.id == target.post.id)
+        #expect(entry.author.id == target.author.id)
+        #expect(!entry.author.displayName.isEmpty)
+    }
+
     @Test func paginationWalksTheCursorWithoutDuplicatesUntilExhaustion() async throws {
         let (repository, _) = makeRepository(dataset: MockSocialDataset(postCount: 45))
 

@@ -173,6 +173,12 @@ extension FeedViewController: UICollectionViewDelegateFlowLayout {
     ) {
         viewModel.willDisplayItem(at: indexPath.item)
     }
+
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        // Tapping the row (outside the author/like targets) opens post detail.
+        guard let id = dataSource.itemIdentifier(for: indexPath) else { return }
+        viewModel.didTapPost(id)
+    }
 }
 
 extension FeedViewController: UICollectionViewDataSourcePrefetching {

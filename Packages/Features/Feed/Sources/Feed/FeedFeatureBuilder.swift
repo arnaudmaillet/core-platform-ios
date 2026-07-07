@@ -43,4 +43,16 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             imagePipeline: imagePipeline
         )
     }
+
+    public func makePostDetailViewController(for postID: PostID) -> UIViewController {
+        PostDetailViewController(
+            viewModel: PostDetailViewModel(
+                postID: postID,
+                repository: repository,
+                engagementProvider: engagementProvider,
+                router: router
+            ),
+            imagePipeline: imagePipeline
+        )
+    }
 }
