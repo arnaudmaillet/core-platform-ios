@@ -24,18 +24,6 @@ jobs:
           echo "--- installed iOS runtimes ---"
           xcrun simctl list runtimes | grep -i ios || true
 
-      - name: Pick an available iPhone simulator
-        id: sim
-        run: |
-          UDID=$(xcrun simctl list devices available -j \
-            | jq -r '[.devices[][] | select(.name | test("iPhone")) | .udid] | first // ""')
-          if [ -z "$UDID" ]; then
-            echo "No available iPhone simulator on this runner" >&2
-            exit 1
-          fi
-          echo "Using simulator $UDID"
-          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
-
       - name: Resolve Swift packages
         run: |
           set -o pipefail
@@ -63,8 +51,20 @@ jobs:
           xcodebuild -resolvePackageDependencies \
             -scheme Profile \
             -clonedSourcePackagesDirPath .spm
+          # Pick a concrete iPhone simulator from xcodebuild's own destination
+          # list (guaranteed valid for this scheme, unlike a simctl id).
+          DEST_ID=$(xcodebuild -scheme Profile -showdestinations \
+            -clonedSourcePackagesDirPath .spm 2>/dev/null \
+            | grep 'platform:iOS Simulator' \
+            | grep -iE 'name:iPhone' \
+            | grep -oE 'id:[0-9A-Fa-f-]+' | head -1 | cut -d: -f2)
+          if [ -z "$DEST_ID" ]; then
+            echo "No iPhone simulator destination found for the Profile scheme" >&2
+            exit 1
+          fi
+          echo "Testing on simulator id=$DEST_ID"
           xcodebuild test \
             -scheme Profile \
-            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -destination "id=$DEST_ID" \
             -clonedSourcePackagesDirPath .spm \
             -skipMacroValidation
