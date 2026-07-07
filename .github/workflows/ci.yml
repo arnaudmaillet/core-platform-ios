@@ -60,7 +60,11 @@ jobs:
         working-directory: Packages/Features/Profile
         run: |
           set -o pipefail
+          xcodebuild -resolvePackageDependencies \
+            -scheme Profile \
+            -clonedSourcePackagesDirPath .spm
           xcodebuild test \
             -scheme Profile \
             -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -clonedSourcePackagesDirPath .spm \
             -skipMacroValidation
