@@ -97,8 +97,13 @@ final class AppContainer {
             return cachedRealtimeClient
         }
         let sessionManager = sessionManager
+        let transport: any RealtimeTransport = if let realtimeURL = environment.realtimeURL {
+            URLSessionWebSocketTransport(url: realtimeURL)
+        } else {
+            mockRealtimeServer
+        }
         let client = RealtimeClient(
-            transport: mockRealtimeServer, // swaps for URLSessionWebSocketTransport with the real gateway
+            transport: transport,
             tokenProvider: { try await sessionManager.validAccessToken() },
             configuration: RealtimeClient.Configuration()
         )

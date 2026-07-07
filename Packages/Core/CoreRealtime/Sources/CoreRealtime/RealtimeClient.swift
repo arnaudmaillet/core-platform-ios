@@ -137,6 +137,7 @@ public actor RealtimeClient {
                         isConnected = true
                         let resumed = hasConnectedBefore
                         hasConnectedBefore = true
+                        logger.info("realtime connected (resumed: \(resumed))")
                         await announceChannels()
                         broadcastConnection(.connected(resumed: resumed))
                     case .message(let data):
@@ -188,6 +189,7 @@ public actor RealtimeClient {
             logger.error("undecodable server frame (\(data.count) bytes)")
             return
         }
+        logger.debug("realtime frame received (\(data.count) bytes)")
 
         switch body {
         case .event(let event):
