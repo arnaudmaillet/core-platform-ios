@@ -1,3 +1,4 @@
+import ChatInterface
 import CoreNavigation
 import FeedInterface
 import UIKit
@@ -21,6 +22,10 @@ final class FeedTabCoordinator: TabCoordinator {
             systemItem: .compose,
             primaryAction: UIAction { [weak self] _ in self?.presentCompose() }
         )
+        feedViewController.navigationItem.rightBarButtonItem = UIBarButtonItem(
+            image: UIImage(systemName: "paperplane"),
+            primaryAction: UIAction { [weak self] _ in self?.showMessages() }
+        )
         navigationController.viewControllers = [feedViewController]
         // The feed VC sets its own title ("Timeline"), which UIKit proxies onto
         // the tab bar item; match it here so the tab reads consistently.
@@ -29,10 +34,23 @@ final class FeedTabCoordinator: TabCoordinator {
             image: UIImage(systemName: "house"),
             selectedImage: UIImage(systemName: "house.fill")
         )
+
+        #if DEBUG
+        // Dev convenience: `-open-messages` pushes the conversation list on
+        // launch, for testing chat without tapping.
+        if ProcessInfo.processInfo.arguments.contains("-open-messages") {
+            showMessages()
+        }
+        #endif
     }
 
     private func presentCompose() {
         let composeViewController = container.uploadFeature.makeComposeViewController()
         navigationController.present(composeViewController, animated: true)
+    }
+
+    private func showMessages() {
+        let conversationList = container.chatFeature.makeConversationListViewController()
+        navigationController.pushViewController(conversationList, animated: true)
     }
 }

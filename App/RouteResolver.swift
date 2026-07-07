@@ -1,3 +1,4 @@
+import ChatInterface
 import CoreNavigation
 import FeedInterface
 import OSLog
@@ -22,16 +23,20 @@ final class RouteResolver: Router {
     /// router), so injecting it directly would be a construction cycle. The
     /// closure is only called when a `.post` route actually fires.
     private let feedFeature: () -> any FeedFeatureBuilding
+    /// Also resolved lazily — chat depends on this resolver as its router.
+    private let chatFeature: () -> any ChatFeatureBuilding
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "navigation")
 
     init(
         profileFeature: any ProfileFeatureBuilding,
         uploadFeature: any UploadFeatureBuilding,
-        feedFeature: @escaping () -> any FeedFeatureBuilding
+        feedFeature: @escaping () -> any FeedFeatureBuilding,
+        chatFeature: @escaping () -> any ChatFeatureBuilding
     ) {
         self.profileFeature = profileFeature
         self.uploadFeature = uploadFeature
         self.feedFeature = feedFeature
+        self.chatFeature = chatFeature
     }
 
     func route(to route: AppRoute) {
@@ -57,10 +62,9 @@ final class RouteResolver: Router {
             let detail = feedFeature().makePostDetailViewController(for: postID)
             navigator.activeNavigationController?.pushViewController(detail, animated: true)
 
-        case .conversation:
-            // No feature backs chat yet; keep the single code path and light up
-            // here once it lands.
-            logger.debug("Route not yet backed by a feature: \(String(describing: route))")
+        case .conversation(let conversationID):
+            let thread = chatFeature().makeConversationViewController(for: conversationID)
+            navigator.activeNavigationController?.pushViewController(thread, animated: true)
         }
     }
 }

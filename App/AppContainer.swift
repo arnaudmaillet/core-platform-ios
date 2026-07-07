@@ -1,5 +1,7 @@
 import Auth
 import AuthInterface
+import Chat
+import ChatInterface
 import Connect
 import CoreContracts
 import CoreNavigation
@@ -59,6 +61,7 @@ final class AppContainer {
         MockSearchService(dataset: mockDataset).register(on: bff)
         MockNotificationService(dataset: mockDataset).register(on: bff)
         MockCommentService(dataset: mockDataset).register(on: bff)
+        MockChatService(dataset: mockDataset).register(on: bff)
         return bff
     }()
 
@@ -220,6 +223,19 @@ final class AppContainer {
         router: routeResolver
     )
 
+    // MARK: - Chat
+
+    private lazy var chatRepository = ChatRepository(
+        chatClient: Chat_V1_ChatServiceClient(client: authenticatedRPCClient),
+        profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
+        authSession: sessionManager
+    )
+
+    private(set) lazy var chatFeature: any ChatFeatureBuilding = ChatFeatureBuilder(
+        repository: chatRepository,
+        router: routeResolver
+    )
+
     // MARK: - Routing
 
     /// The one place `AppRoute`s become navigation. Features receive it as an
@@ -227,7 +243,8 @@ final class AppContainer {
     private(set) lazy var routeResolver = RouteResolver(
         profileFeature: profileFeature,
         uploadFeature: uploadFeature,
-        feedFeature: { [unowned self] in self.feedFeature }
+        feedFeature: { [unowned self] in self.feedFeature },
+        chatFeature: { [unowned self] in self.chatFeature }
     )
 
     var router: any Router { routeResolver }

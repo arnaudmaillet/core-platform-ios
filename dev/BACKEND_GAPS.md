@@ -17,10 +17,17 @@ full functionality.
 | 7 | `counter.v1` does not project profile follower/following counts | Profile counters (client falls back to social_graph) | Medium |
 | 8 | Envoy gateway didn't route `search.v1` (fixed in-repo) | People search (fixed; needs a gateway restart) | Low |
 | 9 | No seeded notifications | Activity tab shows empty against the fleet | Low |
+| 10 | No seeded conversations | Messages list shows empty against the fleet | Low |
 
 ---
 
 ## 1. Realtime gateway resets WebSocket connections
+
+**Status: still broken — re-verified 2026-07-08** (gateway had been restarted ~5h
+prior). Two independent clients reproduce it: `websocat` → `EINVAL` (os error 22);
+Node's built-in `WebSocket` → `OPEN` at 60ms then `CLOSE code 1006` (no close
+frame) at 61ms. Handshake succeeds, teardown is immediate. Realtime work (live
+feed counters, notification/comment/chat streams) stays blocked on this.
 
 **Symptom.** The realtime gateway (`ws://localhost:8443/ws?access_token=<edge-token>`)
 completes a valid WebSocket handshake (`101 Switching Protocols`, correct
@@ -227,6 +234,27 @@ no gateway change was needed.
 **Suggested fix.** Seed a handful of notifications for the demo user (or have
 another seeded profile react to/comment on alice's posts so the projector
 emits them).
+
+---
+
+## 10. No seeded conversations
+
+**Symptom.** `chat.v1.ListSubscriptions` returns `{}` for the seeded user —
+there are no seeded conversations, so the Messages list is empty against the
+fleet.
+
+```bash
+grpcurl -plaintext -d '{"subscriberId":"019f39be-6b86-7022-808b-bae992a25908","limit":20}' \
+  localhost:50051 chat.v1.ChatService/ListSubscriptions   # -> {}
+```
+
+**Client impact.** The Messages list + thread are correct but empty against
+the fleet. Verified against `MockChatService` (two DMs with a short history),
+which also keeps offline mode useful. `chat.v1` **is** routed through Envoy.
+Live delivery (`streamConversation`) is not wired — blocked by §1.
+
+**Suggested fix.** Seed a couple of conversations with messages for the demo
+user.
 
 ---
 
