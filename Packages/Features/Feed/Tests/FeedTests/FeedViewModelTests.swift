@@ -1,7 +1,14 @@
 import CoreModels
+import CoreNavigation
 import Foundation
 import Testing
 @testable import Feed
+
+@MainActor
+private final class SpyRouter: Router {
+    private(set) var routes: [AppRoute] = []
+    func route(to route: AppRoute) { routes.append(route) }
+}
 
 private final class FakeFeedProvider: FeedProviding, @unchecked Sendable {
     private let lock = NSLock()
@@ -55,6 +62,13 @@ struct FeedViewModelTests {
                 }
             }
         }
+    }
+
+    @Test func tappingAuthorRoutesToProfile() {
+        let router = SpyRouter()
+        let viewModel = FeedViewModel(repository: FakeFeedProvider(), router: router)
+        viewModel.didTapAuthor(ProfileID("prof-99"))
+        #expect(router.routes == [.profile(ProfileID("prof-99"))])
     }
 
     @Test func rendersCachedSnapshotBeforeNetworkTruth() async {

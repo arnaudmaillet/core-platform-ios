@@ -40,3 +40,16 @@ final class MainTabCoordinator: Coordinator {
         #endif
     }
 }
+
+// MARK: - AppNavigating
+
+extension MainTabCoordinator: AppNavigating {
+    var activeNavigationController: UINavigationController? {
+        tabBarController.selectedViewController as? UINavigationController
+    }
+
+    func selectTab(_ tab: AppTab) {
+        guard tabBarController.viewControllers?.indices.contains(tab.rawValue) == true else { return }
+        tabBarController.selectedIndex = tab.rawValue
+    }
+}

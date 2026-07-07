@@ -16,7 +16,18 @@ private actor StubProfileProvider: ProfileProviding {
         self.outcome = outcome
     }
 
+    private(set) var lastRequestedID: ProfileID?
+
     func currentUserProfile() async throws -> UserProfile {
+        try await resolve()
+    }
+
+    func profile(id: ProfileID) async throws -> UserProfile {
+        lastRequestedID = id
+        return try await resolve()
+    }
+
+    private func resolve() async throws -> UserProfile {
         callCount += 1
         switch outcome {
         case .success(let profile): return profile
@@ -66,6 +77,22 @@ struct ProfileViewModelTests {
         #expect(model.handle == "@ada")
         #expect(model.followerText == "1.2K")
         #expect(model.isVerified)
+    }
+
+    @Test func routedSourceLoadsThatProfileByID() async {
+        let provider = StubProfileProvider(.success(sampleProfile()))
+        let viewModel = ProfileViewModel(repository: provider, source: .profile(ProfileID("prof-42")))
+        let phases = recorder(viewModel)
+
+        viewModel.viewDidLoad()
+        await Task.yield()
+        try? await Task.sleep(for: .milliseconds(50))
+
+        #expect(await provider.lastRequestedID == ProfileID("prof-42"))
+        guard case .content = phases().last else {
+            Issue.record("expected content phase")
+            return
+        }
     }
 
     @Test func surfacesFailureWhenNothingLoaded() async {

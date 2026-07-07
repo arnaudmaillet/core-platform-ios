@@ -1,5 +1,6 @@
 import CoreMedia
 import CoreModels
+import CoreNavigation
 import FeedInterface
 import UIKit
 
@@ -11,6 +12,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     private let engagementProvider: (any EngagementProviding)?
     private let realtime: (any FeedRealtimeSubscribing)?
     private let composedPosts: ComposedPostChannel?
+    private let router: (any Router)?
     private let imagePipeline: ImagePipeline
 
     public init(
@@ -18,12 +20,14 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         engagementProvider: (any EngagementProviding)? = nil,
         realtime: (any FeedRealtimeSubscribing)? = nil,
         composedPosts: ComposedPostChannel? = nil,
+        router: (any Router)? = nil,
         imagePipeline: ImagePipeline
     ) {
         self.repository = repository
         self.engagementProvider = engagementProvider
         self.realtime = realtime
         self.composedPosts = composedPosts
+        self.router = router
         self.imagePipeline = imagePipeline
     }
 
@@ -33,7 +37,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 repository: repository,
                 engagementProvider: engagementProvider,
                 realtime: realtime,
-                composedPosts: composedPosts
+                composedPosts: composedPosts,
+                router: router
             ),
             imagePipeline: imagePipeline
         )

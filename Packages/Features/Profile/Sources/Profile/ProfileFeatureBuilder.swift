@@ -1,4 +1,5 @@
 import CoreMedia
+import CoreModels
 import ProfileInterface
 import UIKit
 
@@ -16,9 +17,17 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
 
     public func makeCurrentUserProfileViewController(onLogout: @escaping () -> Void) -> UIViewController {
         ProfileViewController(
-            viewModel: ProfileViewModel(repository: repository),
+            viewModel: ProfileViewModel(repository: repository, source: .currentUser),
             imagePipeline: imagePipeline,
             onLogout: onLogout
+        )
+    }
+
+    public func makeProfileViewController(for profileID: ProfileID) -> UIViewController {
+        ProfileViewController(
+            viewModel: ProfileViewModel(repository: repository, source: .profile(profileID)),
+            imagePipeline: imagePipeline,
+            onLogout: nil
         )
     }
 }

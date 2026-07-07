@@ -80,6 +80,7 @@ final class FeedViewController: UIViewController {
             if let self, let model = self.modelsByID[id] {
                 cell.configure(with: model, engagement: self.viewModel.engagementState(for: id), pipeline: pipeline)
                 cell.onLikeTapped = { [weak self] id in self?.viewModel.toggleLike(for: id) }
+                cell.onAuthorTapped = { [weak self] authorID in self?.viewModel.didTapAuthor(authorID) }
             }
             return cell
         }

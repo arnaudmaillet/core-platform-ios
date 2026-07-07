@@ -1,3 +1,4 @@
+import CoreModels
 import Foundation
 
 @MainActor
@@ -8,16 +9,24 @@ public final class ProfileViewModel {
         case failed(message: String)
     }
 
+    /// Whose profile this view model loads.
+    public nonisolated enum Source: Equatable, Sendable {
+        case currentUser
+        case profile(ProfileID)
+    }
+
     public var onPhaseChange: ((Phase) -> Void)?
 
     private let repository: any ProfileProviding
+    private let source: Source
     private var phase: Phase = .loading {
         didSet { onPhaseChange?(phase) }
     }
     private var load: Task<Void, Never>?
 
-    public init(repository: any ProfileProviding) {
+    public init(repository: any ProfileProviding, source: Source = .currentUser) {
         self.repository = repository
+        self.source = source
     }
 
     // MARK: - Inputs
@@ -39,7 +48,7 @@ public final class ProfileViewModel {
         load = Task { [weak self] in
             guard let self else { return }
             do {
-                let profile = try await repository.currentUserProfile()
+                let profile = try await self.fetch()
                 self.phase = .content(ProfileDisplayModel(profile: profile))
             } catch is CancellationError {
                 // Superseded by a newer load; leave the phase alone.
@@ -51,6 +60,13 @@ public final class ProfileViewModel {
                 }
             }
             self.load = nil
+        }
+    }
+
+    private func fetch() async throws -> UserProfile {
+        switch source {
+        case .currentUser: try await repository.currentUserProfile()
+        case .profile(let id): try await repository.profile(id: id)
         }
     }
 }

@@ -56,6 +56,7 @@ struct RenderedText: @unchecked Sendable {
 /// it was computed at. Scroll-time layout does zero text measurement.
 public struct FeedItemDisplayModel: Identifiable, Sendable {
     public let id: PostID
+    let authorID: ProfileID
     let authorName: String
     let metaText: String // "@handle · 3m"
     let avatarURL: URL?
@@ -118,6 +119,7 @@ public struct FeedDisplayModelBuilder: Sendable {
 
         return FeedItemDisplayModel(
             id: entry.post.id,
+            authorID: entry.author.id,
             authorName: entry.author.displayName,
             metaText: "@\(entry.author.handle) · \(Self.relativeTime(from: entry.post.publishedAt, to: now))",
             avatarURL: entry.author.avatarURL,

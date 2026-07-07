@@ -4,7 +4,9 @@ import UIKit
 
 final class ProfileViewController: UIViewController {
     private let viewModel: ProfileViewModel
-    private let onLogout: () -> Void
+    /// Non-nil only for the signed-in viewer's own profile (the Profile tab);
+    /// nil for a profile pushed via routing, which shows no account actions.
+    private let onLogout: (() -> Void)?
 
     private let scrollView = UIScrollView()
     private let headerView: ProfileHeaderView
@@ -12,7 +14,7 @@ final class ProfileViewController: UIViewController {
     private let spinner = UIActivityIndicatorView(style: .large)
     private let statusLabel = UILabel()
 
-    init(viewModel: ProfileViewModel, imagePipeline: ImagePipeline, onLogout: @escaping () -> Void) {
+    init(viewModel: ProfileViewModel, imagePipeline: ImagePipeline, onLogout: (() -> Void)?) {
         self.viewModel = viewModel
         self.onLogout = onLogout
         headerView = ProfileHeaderView(imagePipeline: imagePipeline)
@@ -39,10 +41,12 @@ final class ProfileViewController: UIViewController {
     // MARK: - Setup
 
     private func configureNavigationBar() {
+        // Account actions only exist for the viewer's own profile.
+        guard let onLogout else { return }
         // Log Out lives in an overflow menu — destructive, so it's one tap
         // removed from the surface, matching where it sat on the placeholder.
-        let logout = UIAction(title: "Log Out", image: UIImage(systemName: "rectangle.portrait.and.arrow.right"), attributes: .destructive) { [weak self] _ in
-            self?.onLogout()
+        let logout = UIAction(title: "Log Out", image: UIImage(systemName: "rectangle.portrait.and.arrow.right"), attributes: .destructive) { _ in
+            onLogout()
         }
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             image: UIImage(systemName: "ellipsis.circle"),
@@ -100,6 +104,11 @@ final class ProfileViewController: UIViewController {
             refreshControl.endRefreshing()
             statusLabel.isHidden = true
             scrollView.isHidden = false
+            // A routed profile titles itself with the person's name; the
+            // viewer's own tab keeps the static "Profile" title.
+            if onLogout == nil {
+                title = model.displayName
+            }
             headerView.configure(with: model)
 
         case .failed(let message):
