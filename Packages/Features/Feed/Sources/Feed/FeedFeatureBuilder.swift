@@ -10,6 +10,7 @@ import UIKit
 public struct FeedFeatureBuilder: FeedFeatureBuilding {
     private let repository: any FeedProviding
     private let engagementProvider: (any EngagementProviding)?
+    private let commentsProvider: (any CommentsProviding)?
     private let realtime: (any FeedRealtimeSubscribing)?
     private let composedPosts: ComposedPostChannel?
     private let router: (any Router)?
@@ -18,6 +19,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     public init(
         repository: any FeedProviding,
         engagementProvider: (any EngagementProviding)? = nil,
+        commentsProvider: (any CommentsProviding)? = nil,
         realtime: (any FeedRealtimeSubscribing)? = nil,
         composedPosts: ComposedPostChannel? = nil,
         router: (any Router)? = nil,
@@ -25,6 +27,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     ) {
         self.repository = repository
         self.engagementProvider = engagementProvider
+        self.commentsProvider = commentsProvider
         self.realtime = realtime
         self.composedPosts = composedPosts
         self.router = router
@@ -50,6 +53,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 postID: postID,
                 repository: repository,
                 engagementProvider: engagementProvider,
+                commentsProvider: commentsProvider,
                 router: router
             ),
             imagePipeline: imagePipeline

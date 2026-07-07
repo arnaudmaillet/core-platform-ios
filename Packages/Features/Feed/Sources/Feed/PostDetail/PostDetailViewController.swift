@@ -27,6 +27,13 @@ final class PostDetailViewController: UIViewController {
     private let likeButton = UIButton(configuration: .plain())
     private let likeCountLabel = UILabel()
 
+    private let commentsHeaderLabel = UILabel()
+    private let commentsStack = UIStackView()
+    private let composeBar = UIView()
+    private let composeField = UITextField()
+    private let sendButton = UIButton(configuration: .plain())
+    private let composeSpinner = UIActivityIndicatorView(style: .medium)
+
     private var mediaAspectConstraint: NSLayoutConstraint?
     private var imageTasks: [Task<Void, Never>] = []
 
@@ -51,6 +58,8 @@ final class PostDetailViewController: UIViewController {
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
         viewModel.onEngagementChange = { [weak self] state in self?.renderEngagement(state) }
+        viewModel.onCommentsChange = { [weak self] state in self?.renderComments(state) }
+        viewModel.onComposingChange = { [weak self] composing in self?.renderComposing(composing) }
         render(.loading)
         viewModel.viewDidLoad()
     }
@@ -59,9 +68,17 @@ final class PostDetailViewController: UIViewController {
 
     private func configureViews() {
         scrollView.alwaysBounceVertical = true
-        scrollView.pin(to: view)
+        scrollView.keyboardDismissMode = .interactive
         refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
         scrollView.refreshControl = refreshControl
+        configureComposeBar()
+        // Scroll view fills above the compose bar, which tracks the keyboard.
+        scrollView.constrain(in: view) { parent in
+            scrollView.topAnchor.constraint(equalTo: parent.topAnchor)
+            scrollView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+            scrollView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
+            scrollView.bottomAnchor.constraint(equalTo: composeBar.topAnchor)
+        }
 
         // Author row: avatar + name/handle, tappable → profile.
         avatarView.backgroundColor = .tertiarySystemFill
@@ -118,6 +135,15 @@ final class PostDetailViewController: UIViewController {
         likeRow.alignment = .center
         likeRow.spacing = Spacing.xs
 
+        commentsHeaderLabel.text = "Comments"
+        commentsHeaderLabel.font = .preferredFont(forTextStyle: .headline)
+        commentsHeaderLabel.adjustsFontForContentSizeCategory = true
+        commentsHeaderLabel.textColor = .label
+        commentsHeaderLabel.isHidden = true
+
+        commentsStack.axis = .vertical
+        commentsStack.spacing = Spacing.lg
+
         contentStack.axis = .vertical
         contentStack.alignment = .fill
         contentStack.spacing = Spacing.md
@@ -126,6 +152,9 @@ final class PostDetailViewController: UIViewController {
         contentStack.addArrangedSubview(mediaView)
         contentStack.addArrangedSubview(timestampLabel)
         contentStack.addArrangedSubview(likeRow)
+        contentStack.addArrangedSubview(commentsHeaderLabel)
+        contentStack.addArrangedSubview(commentsStack)
+        contentStack.setCustomSpacing(Spacing.lg, after: likeRow)
 
         let content = scrollView.contentLayoutGuide
         let frame = scrollView.frameLayoutGuide
@@ -160,6 +189,59 @@ final class PostDetailViewController: UIViewController {
 
     @objc private func authorTapped() {
         viewModel.didTapAuthor()
+    }
+
+    private func configureComposeBar() {
+        composeBar.backgroundColor = .systemBackground
+
+        composeField.placeholder = "Add a comment…"
+        composeField.borderStyle = .roundedRect
+        composeField.returnKeyType = .send
+        composeField.delegate = self
+        composeField.font = .preferredFont(forTextStyle: .body)
+        composeField.adjustsFontForContentSizeCategory = true
+
+        var sendConfig = UIButton.Configuration.plain()
+        sendConfig.image = UIImage(systemName: "arrow.up.circle.fill")
+        sendConfig.contentInsets = .zero
+        sendButton.configuration = sendConfig
+        sendButton.addAction(UIAction { [weak self] _ in self?.sendComment() }, for: .primaryActionTriggered)
+        sendButton.setContentHuggingPriority(.required, for: .horizontal)
+
+        composeSpinner.hidesWhenStopped = true
+
+        let row = UIStackView(arrangedSubviews: [composeField, sendButton, composeSpinner])
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = Spacing.sm
+        row.pin(to: composeBar, insets: NSDirectionalEdgeInsets(
+            top: Spacing.sm, leading: Spacing.lg, bottom: Spacing.sm, trailing: Spacing.lg
+        ))
+
+        let separator = UIView()
+        separator.backgroundColor = .separator
+
+        view.addSubview(composeBar)
+        composeBar.translatesAutoresizingMaskIntoConstraints = false
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        composeBar.addSubview(separator)
+        NSLayoutConstraint.activate([
+            composeBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            composeBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            // Tracks the keyboard; sits at the safe-area bottom when dismissed.
+            composeBar.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
+            separator.topAnchor.constraint(equalTo: composeBar.topAnchor),
+            separator.leadingAnchor.constraint(equalTo: composeBar.leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: composeBar.trailingAnchor),
+            separator.heightAnchor.constraint(equalToConstant: 0.5)
+        ])
+    }
+
+    private func sendComment() {
+        let text = composeField.text ?? ""
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        composeField.text = ""
+        viewModel.submitComment(text)
     }
 
     // MARK: - Render
@@ -216,6 +298,30 @@ final class PostDetailViewController: UIViewController {
         likeButton.configuration = config
     }
 
+    private func renderComments(_ state: PostDetailViewModel.CommentsState) {
+        commentsHeaderLabel.isHidden = false
+        guard case .loaded(let models) = state else { return }
+        commentsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        if models.isEmpty {
+            let empty = UILabel()
+            empty.text = "No comments yet. Be the first."
+            empty.font = .preferredFont(forTextStyle: .subheadline)
+            empty.adjustsFontForContentSizeCategory = true
+            empty.textColor = .secondaryLabel
+            commentsStack.addArrangedSubview(empty)
+        } else {
+            for model in models {
+                commentsStack.addArrangedSubview(CommentRowView(model: model))
+            }
+        }
+    }
+
+    private func renderComposing(_ composing: Bool) {
+        composeField.isEnabled = !composing
+        sendButton.isHidden = composing
+        if composing { composeSpinner.startAnimating() } else { composeSpinner.stopAnimating() }
+    }
+
     // MARK: - Images
 
     private func loadAvatar(_ url: URL?) {
@@ -235,5 +341,12 @@ final class PostDetailViewController: UIViewController {
             guard let image = try? await pipeline.image(for: url) else { return }
             self?.mediaView.image = image
         })
+    }
+}
+
+extension PostDetailViewController: UITextFieldDelegate {
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        sendComment()
+        return false
     }
 }

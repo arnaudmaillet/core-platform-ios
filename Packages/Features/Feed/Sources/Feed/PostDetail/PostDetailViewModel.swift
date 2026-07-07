@@ -15,14 +15,27 @@ public final class PostDetailViewModel {
         public var isLiked: Bool
     }
 
+    /// The comments section state.
+    public nonisolated enum CommentsState: Equatable, Sendable {
+        case loading
+        case loaded([CommentDisplayModel])
+    }
+
     public var onPhaseChange: ((Phase) -> Void)?
     public var onEngagementChange: ((EngagementState) -> Void)?
+    public var onCommentsChange: ((CommentsState) -> Void)?
+    /// True while a comment is being posted (disables the send control).
+    public var onComposingChange: ((Bool) -> Void)?
 
     private let postID: PostID
     private let repository: any FeedProviding
     private let engagementProvider: (any EngagementProviding)?
+    private let commentsProvider: (any CommentsProviding)?
     private let router: (any Router)?
     private let now: @Sendable () -> Date
+
+    private var comments: [CommentEntry] = []
+    private var isComposing = false
 
     private var phase: Phase = .loading {
         didSet { onPhaseChange?(phase) }
@@ -36,12 +49,14 @@ public final class PostDetailViewModel {
         postID: PostID,
         repository: any FeedProviding,
         engagementProvider: (any EngagementProviding)? = nil,
+        commentsProvider: (any CommentsProviding)? = nil,
         router: (any Router)? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.postID = postID
         self.repository = repository
         self.engagementProvider = engagementProvider
+        self.commentsProvider = commentsProvider
         self.router = router
         self.now = now
     }
@@ -89,6 +104,22 @@ public final class PostDetailViewModel {
         router?.route(to: .profile(authorID))
     }
 
+    /// Posts a comment. Disables the composer while in flight; on success the
+    /// new comment is prepended. Empty/whitespace input is ignored.
+    public func submitComment(_ text: String) {
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let commentsProvider, !body.isEmpty, !isComposing else { return }
+        setComposing(true)
+        Task { [weak self] in
+            guard let self else { return }
+            if let entry = try? await commentsProvider.addComment(body, to: self.postID) {
+                self.comments.insert(entry, at: 0)
+                self.emitComments()
+            }
+            self.setComposing(false)
+        }
+    }
+
     // MARK: - Loading
 
     private func reload() {
@@ -101,6 +132,7 @@ public final class PostDetailViewModel {
                 self.engagement = EngagementState(likeCount: entry.likeCount, isLiked: false)
                 self.phase = .content(PostDetailDisplayModel(entry: entry, now: self.now()))
                 self.onEngagementChange?(self.engagement)
+                self.loadComments()
             } catch is CancellationError {
                 // Superseded; leave the phase alone.
             } catch {
@@ -110,5 +142,28 @@ public final class PostDetailViewModel {
             }
             self.load = nil
         }
+    }
+
+    /// Comments are best-effort: a failure just shows an empty section rather
+    /// than failing the whole post.
+    private func loadComments() {
+        guard let commentsProvider else { return }
+        onCommentsChange?(.loading)
+        Task { [weak self] in
+            guard let self else { return }
+            let loaded = (try? await commentsProvider.loadComments(for: self.postID)) ?? []
+            self.comments = loaded
+            self.emitComments()
+        }
+    }
+
+    private func emitComments() {
+        let now = now()
+        onCommentsChange?(.loaded(comments.map { CommentDisplayModel(entry: $0, now: now) }))
+    }
+
+    private func setComposing(_ composing: Bool) {
+        isComposing = composing
+        onComposingChange?(composing)
     }
 }
