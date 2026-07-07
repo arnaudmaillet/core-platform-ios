@@ -23,6 +23,8 @@
 		5F00000000000000000000BE /* CoreRealtimeMocks in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000CE /* CoreRealtimeMocks */; };
 		5F00000000000000000000BF /* UploadInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000CF /* UploadInterface */; };
 		5F00000000000000000000D0 /* Upload in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000D1 /* Upload */; };
+		5F00000000000000000000E1 /* ProfileInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000E3 /* ProfileInterface */; };
+		5F00000000000000000000E2 /* Profile in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000E4 /* Profile */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -71,6 +73,8 @@
 				5F00000000000000000000BE /* CoreRealtimeMocks in Frameworks */,
 				5F00000000000000000000BF /* UploadInterface in Frameworks */,
 				5F00000000000000000000D0 /* Upload in Frameworks */,
+				5F00000000000000000000E1 /* ProfileInterface in Frameworks */,
+				5F00000000000000000000E2 /* Profile in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -173,6 +177,8 @@
 				5F00000000000000000000AC /* XCLocalSwiftPackageReference "Packages/Core/CoreRealtime" */,
 				5F00000000000000000000AD /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/UploadInterface" */,
 				5F00000000000000000000AE /* XCLocalSwiftPackageReference "Packages/Features/Upload" */,
+				5F00000000000000000000AF /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/ProfileInterface" */,
+				5F00000000000000000000B0 /* XCLocalSwiftPackageReference "Packages/Features/Profile" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 51A1B7732FFBCAB6005918BC /* Products */;
@@ -464,6 +470,14 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/Features/Upload;
 		};
+		5F00000000000000000000AF /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/ProfileInterface" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/FeatureInterfaces/ProfileInterface;
+		};
+		5F00000000000000000000B0 /* XCLocalSwiftPackageReference "Packages/Features/Profile" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Features/Profile;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -530,6 +544,14 @@
 		5F00000000000000000000D1 /* Upload */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = Upload;
+		};
+		5F00000000000000000000E3 /* ProfileInterface */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ProfileInterface;
+		};
+		5F00000000000000000000E4 /* Profile */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Profile;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

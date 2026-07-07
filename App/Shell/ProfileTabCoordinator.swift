@@ -1,32 +1,27 @@
-import CoreModels
 import CoreNavigation
+import ProfileInterface
 import UIKit
 
-/// Owns the Profile tab. Placeholder until the profile feature is built; for
-/// now it shows the signed-in account and hosts Log Out (which moved here from
-/// the feed).
+/// Owns the Profile tab: the signed-in viewer's own profile, which also hosts
+/// the Log Out affordance (moved here from the feed).
 @MainActor
 final class ProfileTabCoordinator: TabCoordinator {
     var childCoordinators: [Coordinator] = []
     let navigationController = UINavigationController()
 
-    private let accountID: AccountID
+    private let container: AppContainer
     private let onLogout: () -> Void
 
-    init(accountID: AccountID, onLogout: @escaping () -> Void) {
-        self.accountID = accountID
+    init(container: AppContainer, onLogout: @escaping () -> Void) {
+        self.container = container
         self.onLogout = onLogout
     }
 
     func start() {
-        let placeholder = PlaceholderViewController(
-            title: "Profile",
-            systemImage: "person.crop.circle",
-            message: "Signed in as \(accountID.rawValue)",
-            actionTitle: "Log Out",
-            action: onLogout
-        )
-        navigationController.viewControllers = [placeholder]
+        let profileViewController = container.profileFeature.makeCurrentUserProfileViewController(onLogout: onLogout)
+        navigationController.viewControllers = [profileViewController]
+        // The profile VC sets its own title ("Profile"), which UIKit proxies
+        // onto the tab bar item; match it here so the tab reads consistently.
         navigationController.tabBarItem = UITabBarItem(
             title: "Profile",
             image: UIImage(systemName: "person.crop.circle"),

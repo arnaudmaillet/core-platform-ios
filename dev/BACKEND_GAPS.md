@@ -14,6 +14,7 @@ full functionality.
 | 4 | Services expose only gRPC/h2c (no Connect/gRPC-Web over HTTP/1.1) | Any native URLSession client (needs a gateway) | Medium (by design?) |
 | 5 | Seed data has no avatars and only text-only posts | Nothing visual to render (images) | Low |
 | 6 | IdP authenticates on bare username, not email | Login (a gotcha, easily worked around) | Low |
+| 7 | `counter.v1` does not project profile follower/following counts | Profile counters (client falls back to social_graph) | Medium |
 
 ---
 
@@ -138,6 +139,46 @@ the image path is exercisable end to end.
 `alice@coreplatform.local` is **rejected** (`Unauthenticated: identity provider
 rejected the credentials`). Worth documenting, or aligning the IdP to accept the
 email form.
+
+---
+
+## 7. `counter.v1` does not project profile follower/following counts
+
+**Symptom.** `counter.v1.BatchGetCounters` for a `COUNTER_ENTITY_TYPE_PROFILE`
+entity with metrics `FOLLOWER`/`FOLLOWING` returns a snapshot with **no
+`values`** — even for a profile that has real edges in `social_graph.v1`. The
+counter read-model is never populated for these metrics (the counter-worker does
+not appear to consume `social_graph` follow/unfollow events).
+
+**Isolation (counter empty, but the graph is not):**
+```bash
+PID=019f39be-6b86-7022-808b-bae992a25908   # alice
+
+# counter.v1 → empty snapshot, no values
+grpcurl -plaintext -d '{"entities":[{"entityType":"COUNTER_ENTITY_TYPE_PROFILE","id":"'$PID'"}],
+  "metrics":["COUNTER_METRIC_FOLLOWER","COUNTER_METRIC_FOLLOWING"]}' \
+  localhost:50064 counter.v1.CounterService/BatchGetCounters
+# -> { "snapshots": [ { "entity": {...} } ] }   ← no "values"
+
+# social_graph.v1 → the edges plainly exist (2 followers, 2 following)
+grpcurl -plaintext -d '{"followeeId":"'$PID'","limit":50}' \
+  localhost:50053 social_graph.v1.SocialGraphService/ListFollowers   # 2 edges
+grpcurl -plaintext -d '{"followerId":"'$PID'","limit":50}' \
+  localhost:50053 social_graph.v1.SocialGraphService/ListFollowing   # 2 edges
+```
+
+**Client impact.** The profile screen's headline metric. Reading counts from
+`counter.v1` alone renders "—" for **every** profile, even ones with followers.
+**Worked around:** `ProfileRepository` treats an empty counter as a cache miss
+and falls back to counting a bounded page of `social_graph.v1` edges (exact when
+the page is complete, `atLeast(n)` when truncated). Verified end-to-end against
+the fleet: alice renders **2 / 2**. The fast `counter.v1` path takes over
+automatically once the projection lands — no client change needed.
+
+**Suggested fix.** Have the counter-worker project `FOLLOWER`/`FOLLOWING` on the
+`PROFILE` entity from `social_graph` follow/unfollow Kafka events (the same
+pattern `LIKE` already uses on `POST`). Counting via graph pagination is an O(n)
+stopgap; the O(1) read-model is the right home for these counts.
 
 ---
 
