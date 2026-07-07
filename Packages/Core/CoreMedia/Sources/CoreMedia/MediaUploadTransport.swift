@@ -33,8 +33,9 @@ public protocol MediaUploadTransport: Sendable {
 /// the `Host` header — needed for presigned object-store URLs signed against a
 /// host the client can't resolve (e.g. a Docker-internal `minio:9000` from a
 /// local fleet). The presigned SigV4 signature covers the Host header, so the
-/// original value must still be sent.
-public struct UploadHostRewrite: Sendable {
+/// original value must still be sent. Also used for reading back delivery URLs
+/// hosted on the same internal host.
+public struct HostRewrite: Sendable {
     public let from: String
     public let to: String
 
@@ -42,15 +43,23 @@ public struct UploadHostRewrite: Sendable {
         self.from = from
         self.to = to
     }
+
+    /// Returns (rewrittenURL, originalHostHeader) if `from` appears in the URL.
+    func apply(to url: URL) -> (url: URL, hostHeader: String?)? {
+        guard let range = url.absoluteString.range(of: from) else { return nil }
+        let hostHeader = url.host.map { $0 + (url.port.map { ":\($0)" } ?? "") }
+        let rewritten = url.absoluteString.replacingCharacters(in: range, with: to)
+        return (URL(string: rewritten) ?? url, hostHeader)
+    }
 }
 
 /// Production transport: a `URLSession` uploading the payload to the ticket's
 /// (typically presigned) URL. The ETag is read from the storage response.
 public final class URLSessionMediaUploadTransport: NSObject, MediaUploadTransport, @unchecked Sendable {
     private let session: URLSession
-    private let hostRewrite: UploadHostRewrite?
+    private let hostRewrite: HostRewrite?
 
-    public init(hostRewrite: UploadHostRewrite? = nil, session: URLSession = .shared) {
+    public init(hostRewrite: HostRewrite? = nil, session: URLSession = .shared) {
         self.session = session
         self.hostRewrite = hostRewrite
         super.init()
@@ -63,11 +72,9 @@ public final class URLSessionMediaUploadTransport: NSObject, MediaUploadTranspor
 
         var uploadURL = ticket.uploadURL
         var hostHeader: String?
-        if let hostRewrite,
-           let absolute = uploadURL.absoluteString.range(of: hostRewrite.from) {
-            hostHeader = ticket.uploadURL.host.map { $0 + (ticket.uploadURL.port.map { ":\($0)" } ?? "") }
-            let rewritten = uploadURL.absoluteString.replacingCharacters(in: absolute, with: hostRewrite.to)
-            uploadURL = URL(string: rewritten) ?? uploadURL
+        if let rewrite = hostRewrite?.apply(to: uploadURL) {
+            uploadURL = rewrite.url
+            hostHeader = rewrite.hostHeader
         }
 
         var request = URLRequest(url: uploadURL)

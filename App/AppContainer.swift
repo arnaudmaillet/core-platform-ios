@@ -82,9 +82,18 @@ final class AppContainer {
 
     // MARK: - Media
 
-    /// Placeholder fetcher renders deterministic images for mock:// URLs;
-    /// swaps for URLSessionImageFetcher alongside the real BFF transport.
-    private(set) lazy var imagePipeline = ImagePipeline(fetcher: PlaceholderImageFetcher())
+    /// Mock mode renders deterministic placeholder images for `mock://` URLs;
+    /// fleet mode fetches real images over HTTP, rewriting the fleet's
+    /// Docker-internal minio host to the published one.
+    private(set) lazy var imagePipeline: ImagePipeline = {
+        let fetcher: any ImageFetching = switch environment {
+        case .mock:
+            PlaceholderImageFetcher()
+        case .localFleet:
+            URLSessionImageFetcher(hostRewrite: HostRewrite(from: "minio:9000", to: "localhost:9000"))
+        }
+        return ImagePipeline(fetcher: fetcher)
+    }()
 
     // MARK: - Realtime
 
@@ -174,7 +183,7 @@ final class AppContainer {
                 // client; rewrite to the published host, preserving the signed
                 // Host header. Remove once the fleet presigns a reachable host.
                 URLSessionMediaUploadTransport(
-                    hostRewrite: UploadHostRewrite(from: "minio:9000", to: "localhost:9000")
+                    hostRewrite: HostRewrite(from: "minio:9000", to: "localhost:9000")
                 )
             }
             let composer = PostComposer(
