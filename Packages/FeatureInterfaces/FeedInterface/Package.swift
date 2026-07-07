@@ -7,7 +7,13 @@ let package = Package(
     products: [
         .library(name: "FeedInterface", targets: ["FeedInterface"])
     ],
+    dependencies: [
+        .package(path: "../../Kit/CoreModels")
+    ],
     targets: [
-        .target(name: "FeedInterface")
+        .target(
+            name: "FeedInterface",
+            dependencies: ["CoreModels"]
+        )
     ]
 )

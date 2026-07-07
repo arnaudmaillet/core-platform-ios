@@ -1,4 +1,5 @@
 import CoreNavigation
+import FeedInterface
 import OSLog
 import ProfileInterface
 import UIKit
@@ -17,11 +18,20 @@ final class RouteResolver: Router {
 
     private let profileFeature: any ProfileFeatureBuilding
     private let uploadFeature: any UploadFeatureBuilding
+    /// Resolved lazily: the feed feature depends on this resolver (as its
+    /// router), so injecting it directly would be a construction cycle. The
+    /// closure is only called when a `.post` route actually fires.
+    private let feedFeature: () -> any FeedFeatureBuilding
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "navigation")
 
-    init(profileFeature: any ProfileFeatureBuilding, uploadFeature: any UploadFeatureBuilding) {
+    init(
+        profileFeature: any ProfileFeatureBuilding,
+        uploadFeature: any UploadFeatureBuilding,
+        feedFeature: @escaping () -> any FeedFeatureBuilding
+    ) {
         self.profileFeature = profileFeature
         self.uploadFeature = uploadFeature
+        self.feedFeature = feedFeature
     }
 
     func route(to route: AppRoute) {
@@ -43,9 +53,13 @@ final class RouteResolver: Router {
             let compose = uploadFeature.makeComposeViewController()
             navigator.activeNavigationController?.present(compose, animated: true)
 
-        case .post, .conversation:
-            // No feature backs these yet; keep the single code path and light
-            // up here once post detail / chat land.
+        case .post(let postID):
+            let detail = feedFeature().makePostDetailViewController(for: postID)
+            navigator.activeNavigationController?.pushViewController(detail, animated: true)
+
+        case .conversation:
+            // No feature backs chat yet; keep the single code path and light up
+            // here once it lands.
             logger.debug("Route not yet backed by a feature: \(String(describing: route))")
         }
     }

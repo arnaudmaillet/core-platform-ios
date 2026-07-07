@@ -19,6 +19,9 @@ public protocol FeedProviding: Sendable {
     func cachedFirstPage() async -> [FeedEntry]?
     func loadFirstPage() async throws -> FeedPage
     func loadPage(afterToken token: String) async throws -> FeedPage
+    /// A single post hydrated with its author and like count — the post-detail
+    /// read path.
+    func loadPost(_ id: PostID) async throws -> FeedEntry
 }
 
 /// The engagement write/read path the feed UI consumes.
@@ -94,6 +97,45 @@ public actor FeedRepository: FeedProviding {
 
     public func loadPage(afterToken token: String) async throws -> FeedPage {
         try await loadPage(token: token)
+    }
+
+    public func loadPost(_ id: PostID) async throws -> FeedEntry {
+        var request = Post_V1_GetPostRequest()
+        request.postID = id.rawValue
+        let response = await postClient.getPost(request: request, headers: [:])
+        guard let view = response.message else {
+            throw FeedError.transport(message: response.error?.message ?? "post \(id) unavailable")
+        }
+        let post = Self.makePost(from: view)
+
+        async let author = fetchAuthor(id: post.authorID)
+        async let count = likeCount(for: post.id)
+        guard let resolvedAuthor = await author else {
+            throw FeedError.transport(message: "author \(post.authorID) unavailable")
+        }
+        return FeedEntry(post: post, author: resolvedAuthor, likeCount: await count)
+    }
+
+    /// Fetches (and caches) a single author, reusing the page-hydration cache.
+    private func fetchAuthor(id: ProfileID) async -> AuthorSummary? {
+        if let cached = authorCache[id] { return cached }
+        var request = Profile_V1_GetProfileByIdRequest()
+        request.profileID = id.rawValue
+        let response = await profileClient.getProfileByID(request: request, headers: [:])
+        guard let view = response.message else { return nil }
+        let author = AuthorSummary(
+            id: ProfileID(view.profileID),
+            handle: view.handle,
+            displayName: view.displayName,
+            avatarURL: URL(string: view.avatarURL)
+        )
+        authorCache[author.id] = author
+        return author
+    }
+
+    /// The like count for one post, degrading to 0 when the counter read fails.
+    private func likeCount(for id: PostID) async -> Int64 {
+        ((try? await likeCounts(for: [id])) ?? [:])[id] ?? 0
     }
 
     // MARK: - Timeline + hydration
