@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "FeedInterface",
+    name: "SearchInterface",
     platforms: [.iOS("26.0")],
     products: [
-        .library(name: "FeedInterface", targets: ["FeedInterface"])
+        .library(name: "SearchInterface", targets: ["SearchInterface"])
     ],
     targets: [
-        .target(name: "FeedInterface")
+        .target(name: "SearchInterface")
     ]
 )

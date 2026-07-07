@@ -25,6 +25,8 @@
 		5F00000000000000000000D0 /* Upload in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000D1 /* Upload */; };
 		5F00000000000000000000E1 /* ProfileInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000E3 /* ProfileInterface */; };
 		5F00000000000000000000E2 /* Profile in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000E4 /* Profile */; };
+		5F00000000000000000000F3 /* SearchInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000F5 /* SearchInterface */; };
+		5F00000000000000000000F4 /* Search in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000F6 /* Search */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -75,6 +77,8 @@
 				5F00000000000000000000D0 /* Upload in Frameworks */,
 				5F00000000000000000000E1 /* ProfileInterface in Frameworks */,
 				5F00000000000000000000E2 /* Profile in Frameworks */,
+				5F00000000000000000000F3 /* SearchInterface in Frameworks */,
+				5F00000000000000000000F4 /* Search in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -179,6 +183,8 @@
 				5F00000000000000000000AE /* XCLocalSwiftPackageReference "Packages/Features/Upload" */,
 				5F00000000000000000000AF /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/ProfileInterface" */,
 				5F00000000000000000000B0 /* XCLocalSwiftPackageReference "Packages/Features/Profile" */,
+				5F00000000000000000000F1 /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/SearchInterface" */,
+				5F00000000000000000000F2 /* XCLocalSwiftPackageReference "Packages/Features/Search" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 51A1B7732FFBCAB6005918BC /* Products */;
@@ -323,7 +329,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -380,7 +386,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -478,6 +484,14 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/Features/Profile;
 		};
+		5F00000000000000000000F1 /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/SearchInterface" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/FeatureInterfaces/SearchInterface;
+		};
+		5F00000000000000000000F2 /* XCLocalSwiftPackageReference "Packages/Features/Search" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Features/Search;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -552,6 +566,14 @@
 		5F00000000000000000000E4 /* Profile */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = Profile;
+		};
+		5F00000000000000000000F5 /* SearchInterface */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SearchInterface;
+		};
+		5F00000000000000000000F6 /* Search */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Search;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

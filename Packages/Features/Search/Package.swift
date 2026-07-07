@@ -2,36 +2,35 @@
 import PackageDescription
 
 let package = Package(
-    name: "Upload",
+    name: "Search",
     platforms: [.iOS("26.0")],
     products: [
-        .library(name: "Upload", targets: ["Upload"])
+        .library(name: "Search", targets: ["Search"])
     ],
     dependencies: [
-        .package(path: "../../FeatureInterfaces/UploadInterface"),
-        .package(path: "../../FeatureInterfaces/AuthInterface"),
+        .package(path: "../../FeatureInterfaces/SearchInterface"),
         .package(path: "../../Kit/CoreContracts"),
         .package(path: "../../Kit/CoreModels"),
-        .package(path: "../../Core/CoreMedia"),
+        .package(path: "../../Core/CoreNavigation"),
         .package(path: "../../Core/CoreNetworking"),
         .package(path: "../../Core/DesignSystem")
     ],
     targets: [
         .target(
-            name: "Upload",
+            name: "Search",
             dependencies: [
-                "UploadInterface",
-                "AuthInterface",
+                "SearchInterface",
                 "CoreContracts",
                 "CoreModels",
-                "CoreMedia",
+                "CoreNavigation",
                 "DesignSystem"
             ]
         ),
         .testTarget(
-            name: "UploadTests",
+            name: "SearchTests",
             dependencies: [
-                "Upload",
+                "Search",
+                "CoreNavigation",
                 "CoreNetworking",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking")
             ]

@@ -20,7 +20,7 @@ final class MainTabCoordinator: Coordinator {
     func start() {
         let tabs: [any TabCoordinator] = [
             FeedTabCoordinator(container: container),
-            SearchTabCoordinator(),
+            SearchTabCoordinator(container: container),
             NotificationsTabCoordinator(),
             ProfileTabCoordinator(container: container, onLogout: onLogout)
         ]

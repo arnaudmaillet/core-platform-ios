@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "CoreRealtime",
-    platforms: [.iOS("26.5")],
+    platforms: [.iOS("26.0")],
     products: [
         .library(name: "CoreRealtime", targets: ["CoreRealtime"]),
         // In-process fake of the realtime gateway for deterministic tests and

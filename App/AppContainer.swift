@@ -15,6 +15,8 @@ import FeedInterface
 import Foundation
 import Profile
 import ProfileInterface
+import Search
+import SearchInterface
 import Upload
 import UploadInterface
 
@@ -52,6 +54,7 @@ final class AppContainer {
         MockCounterService(store: mockCounterStore).register(on: bff)
         MockMediaService(store: mockBlobStore).register(on: bff)
         MockPostAuthoringService(store: mockPostStore).register(on: bff)
+        MockSearchService(dataset: mockDataset).register(on: bff)
         return bff
     }()
 
@@ -180,6 +183,17 @@ final class AppContainer {
     private(set) lazy var profileFeature: any ProfileFeatureBuilding = ProfileFeatureBuilder(
         repository: profileRepository,
         imagePipeline: imagePipeline
+    )
+
+    // MARK: - Search
+
+    private lazy var searchRepository = SearchRepository(
+        searchClient: Search_V1_SearchServiceClient(client: authenticatedRPCClient)
+    )
+
+    private(set) lazy var searchFeature: any SearchFeatureBuilding = SearchFeatureBuilder(
+        repository: searchRepository,
+        router: routeResolver
     )
 
     // MARK: - Routing
