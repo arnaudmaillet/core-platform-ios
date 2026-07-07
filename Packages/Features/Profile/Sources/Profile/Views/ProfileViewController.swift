@@ -34,6 +34,12 @@ final class ProfileViewController: UIViewController {
         viewModel.onPhaseChange = { [weak self] phase in
             self?.render(phase)
         }
+        viewModel.onFollowButtonChange = { [weak self] state in
+            self?.headerView.configureAction(state)
+        }
+        headerView.onActionTapped = { [weak self] in
+            self?.viewModel.toggleFollow()
+        }
         render(.loading)
         viewModel.viewDidLoad()
     }

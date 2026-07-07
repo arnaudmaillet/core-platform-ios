@@ -18,6 +18,10 @@ final class ProfileHeaderView: UIView {
     private let bioLabel = UILabel()
     private let followersStat = ProfileStatView(caption: "Followers")
     private let followingStat = ProfileStatView(caption: "Following")
+    private let actionButton = UIButton(configuration: .filled())
+
+    /// Invoked when the Follow / Following / Edit Profile button is tapped.
+    var onActionTapped: (() -> Void)?
 
     private let imagePipeline: ImagePipeline
     private var avatarTask: Task<Void, Never>?
@@ -51,6 +55,39 @@ final class ProfileHeaderView: UIView {
         followingStat.setValue(model.followingText)
 
         loadAvatar(model.avatarURL)
+    }
+
+    /// Styles the action button per the viewer's relationship. `.follow` is the
+    /// one prominent (filled) call to action; Following/Edit are secondary.
+    func configureAction(_ state: ProfileViewModel.FollowButton) {
+        switch state {
+        case .hidden:
+            actionButton.isHidden = true
+        case .follow:
+            actionButton.isHidden = false
+            applyActionStyle(title: "Follow", prominent: true)
+        case .following:
+            actionButton.isHidden = false
+            applyActionStyle(title: "Following", prominent: false)
+        case .edit:
+            actionButton.isHidden = false
+            applyActionStyle(title: "Edit Profile", prominent: false)
+        }
+    }
+
+    private func applyActionStyle(title: String, prominent: Bool) {
+        var config: UIButton.Configuration = prominent ? .filled() : .gray()
+        config.title = title
+        config.cornerStyle = .capsule
+        config.buttonSize = .medium
+        config.contentInsets = NSDirectionalEdgeInsets(
+            top: Spacing.sm, leading: Spacing.xl, bottom: Spacing.sm, trailing: Spacing.xl
+        )
+        if prominent {
+            config.baseBackgroundColor = .systemBlue
+            config.baseForegroundColor = .white
+        }
+        actionButton.configuration = config
     }
 
     private func loadAvatar(_ url: URL?) {
@@ -117,13 +154,21 @@ final class ProfileHeaderView: UIView {
         statsRow.spacing = Spacing.xl
         statsRow.distribution = .fill
 
-        let column = UIStackView(arrangedSubviews: [avatarView, nameRow, handleLabel, bioLabel, statsRow])
+        actionButton.isHidden = true
+        actionButton.setContentHuggingPriority(.required, for: .horizontal)
+        actionButton.addAction(
+            UIAction { [weak self] _ in self?.onActionTapped?() },
+            for: .primaryActionTriggered
+        )
+
+        let column = UIStackView(arrangedSubviews: [avatarView, nameRow, handleLabel, bioLabel, statsRow, actionButton])
         column.axis = .vertical
         column.alignment = .leading
         column.spacing = Spacing.sm
         column.setCustomSpacing(Spacing.md, after: avatarView)
         column.setCustomSpacing(Spacing.md, after: handleLabel)
         column.setCustomSpacing(Spacing.lg, after: bioLabel)
+        column.setCustomSpacing(Spacing.lg, after: statsRow)
 
         column.pin(to: self, insets: NSDirectionalEdgeInsets(
             top: Spacing.lg, leading: Spacing.lg, bottom: Spacing.lg, trailing: Spacing.lg
