@@ -83,6 +83,25 @@ jobs:
           DEST="id=${{ steps.sim.outputs.id }}"
           FAILED=()
 
+          # Runs a single package's tests. Multi-product packages (e.g.
+          # CoreNetworking + CoreNetworkingMocks) put the test action on the
+          # auto-generated "<name>-Package" scheme, not the product scheme;
+          # single-product packages only have "<name>". Prefer -Package when it
+          # exists.
+          test_package() {
+            local dir="$1" name="$2"
+            cd "$dir" || return 1
+            xcodebuild -resolvePackageDependencies -scheme "$name" -clonedSourcePackagesDirPath "$SPM" || return 1
+            local scheme="$name"
+            if xcodebuild -list -clonedSourcePackagesDirPath "$SPM" 2>/dev/null \
+                 | grep -qE "^[[:space:]]+${name}-Package$"; then
+              scheme="${name}-Package"
+            fi
+            echo "Using scheme: $scheme"
+            xcodebuild test -scheme "$scheme" -destination "$DEST" \
+              -clonedSourcePackagesDirPath "$SPM" -skipMacroValidation
+          }
+
           # Every local package that has a test target (a Tests/ dir with sources).
           PKG_DIRS=$(for manifest in $(find Packages -name Package.swift -not -path '*/.build/*'); do
             dir=$(dirname "$manifest")
@@ -92,16 +111,13 @@ jobs:
           echo "Packages under test:"; echo "$PKG_DIRS"
 
           for dir in $PKG_DIRS; do
-            scheme=$(grep -m1 -E 'name:[[:space:]]*"' "$dir/Package.swift" | sed -E 's/.*name:[[:space:]]*"([^"]+)".*/\1/')
-            echo "::group::Test $scheme ($dir)"
-            if ( cd "$dir" \
-                  && xcodebuild -resolvePackageDependencies -scheme "$scheme" -clonedSourcePackagesDirPath "$SPM" \
-                  && xcodebuild test -scheme "$scheme" -destination "$DEST" \
-                       -clonedSourcePackagesDirPath "$SPM" -skipMacroValidation ); then
-              echo "PASS $scheme"
+            name=$(grep -m1 -E 'name:[[:space:]]*"' "$dir/Package.swift" | sed -E 's/.*name:[[:space:]]*"([^"]+)".*/\1/')
+            echo "::group::Test $name ($dir)"
+            if ( test_package "$dir" "$name" ); then
+              echo "PASS $name"
             else
-              echo "FAIL $scheme"
-              FAILED+=("$scheme")
+              echo "FAIL $name"
+              FAILED+=("$name")
             fi
             echo "::endgroup::"
           done
