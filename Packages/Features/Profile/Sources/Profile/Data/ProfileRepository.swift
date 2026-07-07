@@ -100,6 +100,10 @@ public protocol ProfileProviding: Sendable {
     func relationship(for profileID: ProfileID) async throws -> ProfileRelationship
     /// Follow (`true`) or unfollow (`false`) `profileID` as the viewer.
     func setFollowing(_ following: Bool, for profileID: ProfileID) async throws
+    /// Edits the viewer's own mutable profile metadata, returning the refreshed
+    /// profile. Fields not exposed here (handle, avatar, locale, links) are
+    /// preserved.
+    func updateCurrentUserProfile(displayName: String, bio: String, website: String) async throws -> UserProfile
 }
 
 /// Reads the viewer's identity and social counters from profile.v1, counter.v1,
@@ -198,6 +202,33 @@ public actor ProfileRepository: ProfileProviding {
         guard response.message?.success == true else {
             throw ProfileError.transport(message: "command rejected")
         }
+    }
+
+    // MARK: - Edit
+
+    public func updateCurrentUserProfile(displayName: String, bio: String, website: String) async throws -> UserProfile {
+        let id = try await resolveViewerProfileID()
+        // The contract has no field mask; start from the current view so fields
+        // the form doesn't edit (locale, custom links) are preserved, not cleared.
+        let current = try await fetchProfileView(id: id)
+
+        var request = Profile_V1_UpdateProfileRequest()
+        request.profileID = id.rawValue
+        request.displayName = displayName
+        request.bio = bio
+        request.websiteURL = website
+        request.locale = current.locale
+        request.customLinks = current.customLinks
+
+        let response = await profileClient.updateProfile(request: request, headers: [:])
+        if let error = response.error {
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+        }
+        guard response.message?.success == true else {
+            throw ProfileError.transport(message: "profile update rejected")
+        }
+
+        return try await loadProfile(id: id)
     }
 
     /// Fetches the profile view and its social counters concurrently.

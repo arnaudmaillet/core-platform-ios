@@ -167,6 +167,48 @@ struct ProfileRepositoryTests {
             try await repository.setFollowing(true, for: ProfileID("prof-3"))
         }
     }
+
+    // MARK: - Edit
+
+    @Test func updateSendsEditedFieldsForTheViewerProfile() async throws {
+        let capture = UpdateCapture()
+        let bff = MockBFF()
+        MockSocialServices(dataset: MockSocialDataset()).register(on: bff)
+        MockCounterService(store: MockCounterStore(dataset: MockSocialDataset())).register(on: bff)
+        bff.register(path: "/profile.v1.ProfileService/UpdateProfile") { (request: Profile_V1_UpdateProfileRequest) in
+            capture.record(id: request.profileID, displayName: request.displayName, bio: request.bio, website: request.websiteURL)
+            var response = Profile_V1_CommandResponse()
+            response.success = true
+            return .success(response)
+        }
+        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        let repository = ProfileRepository(
+            profileClient: Profile_V1_ProfileServiceClient(client: client),
+            counterClient: Counter_V1_CounterServiceClient(client: client),
+            socialGraphClient: SocialGraph_V1_SocialGraphServiceClient(client: client),
+            authSession: AuthenticatedSessionStub()
+        )
+
+        _ = try await repository.updateCurrentUserProfile(displayName: "New Name", bio: "New bio", website: "https://new.dev")
+
+        #expect(capture.lastID == MockSocialDataset.viewerProfileID)
+        #expect(capture.lastDisplayName == "New Name")
+        #expect(capture.lastBio == "New bio")
+        #expect(capture.lastWebsite == "https://new.dev")
+    }
+}
+
+private final class UpdateCapture: @unchecked Sendable {
+    private let lock = NSLock()
+    private(set) var lastID: String?
+    private(set) var lastDisplayName: String?
+    private(set) var lastBio: String?
+    private(set) var lastWebsite: String?
+    func record(id: String, displayName: String, bio: String, website: String) {
+        lock.withLock {
+            lastID = id; lastDisplayName = displayName; lastBio = bio; lastWebsite = website
+        }
+    }
 }
 
 /// Records the follow/unfollow commands the repository issues over the wire.
