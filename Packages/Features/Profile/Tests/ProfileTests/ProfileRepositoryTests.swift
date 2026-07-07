@@ -55,6 +55,16 @@ struct ProfileRepositoryTests {
         #expect(profile.displayName == "Demo Viewer")
     }
 
+    @Test func fetchesAnyProfileByID() async throws {
+        // Routing to another user resolves their view directly (no account hop).
+        let repository = makeRepository()
+
+        let profile = try await repository.profile(id: ProfileID(MockSocialDataset.viewerProfileID))
+
+        #expect(profile.id == ProfileID(MockSocialDataset.viewerProfileID))
+        #expect(profile.handle == "you")
+    }
+
     @Test func degradesToUnavailableWhenNeitherSourceHasCounts() async throws {
         // MockBFF serves only LIKE on counter.v1 and has no social_graph route,
         // so both the primary read and the fallback come up empty; the

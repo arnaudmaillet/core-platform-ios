@@ -75,6 +75,8 @@ public struct UserProfile: Equatable, Sendable {
 public protocol ProfileProviding: Sendable {
     /// The signed-in viewer's own profile, resolved from the auth session.
     func currentUserProfile() async throws -> UserProfile
+    /// Any profile by id — used when routing to another user's profile.
+    func profile(id: ProfileID) async throws -> UserProfile
 }
 
 /// Reads the viewer's identity and social counters from profile.v1, counter.v1,
@@ -119,6 +121,15 @@ public actor ProfileRepository: ProfileProviding {
 
     public func currentUserProfile() async throws -> UserProfile {
         let id = try await resolveViewerProfileID()
+        return try await loadProfile(id: id)
+    }
+
+    public func profile(id: ProfileID) async throws -> UserProfile {
+        try await loadProfile(id: id)
+    }
+
+    /// Fetches the profile view and its social counters concurrently.
+    private func loadProfile(id: ProfileID) async throws -> UserProfile {
         async let viewResult = fetchProfileView(id: id)
         async let counts = fetchSocialCounts(for: id)
         let view = try await viewResult

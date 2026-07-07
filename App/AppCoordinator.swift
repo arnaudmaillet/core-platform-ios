@@ -1,5 +1,6 @@
 import Auth
 import AuthInterface
+import CoreModels
 import CoreNavigation
 import CoreRealtime
 import DesignSystem
@@ -116,8 +117,21 @@ final class AppCoordinator: Coordinator {
                 onLogout: { Task { await sessionManager.logout() } }
             )
             tabCoordinator.start()
+            // Routes now resolve against this shell; the resolver holds it
+            // weakly, so logout (which drops the coordinator) stops routing.
+            container.routeResolver.navigator = tabCoordinator
             mainTabCoordinator = tabCoordinator
             setRoot(tabCoordinator.tabBarController)
+
+            #if DEBUG
+            // Dev convenience: `-open-profile <id>` fires a profile route once
+            // the shell is up — the same code path universal links and taps use
+            // — so cross-tab routing is testable without driving the UI.
+            let arguments = ProcessInfo.processInfo.arguments
+            if let index = arguments.firstIndex(of: "-open-profile"), index + 1 < arguments.count {
+                container.router.route(to: .profile(ProfileID(arguments[index + 1])))
+            }
+            #endif
         }
     }
 

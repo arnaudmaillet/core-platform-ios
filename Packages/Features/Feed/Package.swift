@@ -13,6 +13,7 @@ let package = Package(
         .package(path: "../../Kit/CoreContracts"),
         .package(path: "../../Kit/CoreModels"),
         .package(path: "../../Core/CoreMedia"),
+        .package(path: "../../Core/CoreNavigation"),
         .package(path: "../../Core/CoreNetworking"),
         .package(path: "../../Core/CoreRealtime"),
         .package(path: "../../Core/CoreStorage"),
@@ -27,6 +28,7 @@ let package = Package(
                 "CoreContracts",
                 "CoreModels",
                 "CoreMedia",
+                "CoreNavigation",
                 "CoreRealtime",
                 "CoreStorage",
                 "DesignSystem"
@@ -36,6 +38,7 @@ let package = Package(
             name: "FeedTests",
             dependencies: [
                 "Feed",
+                "CoreNavigation",
                 "CoreNetworking",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking"),
                 .product(name: "CoreRealtimeMocks", package: "CoreRealtime")

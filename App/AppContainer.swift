@@ -2,6 +2,7 @@ import Auth
 import AuthInterface
 import Connect
 import CoreContracts
+import CoreNavigation
 import CoreMedia
 import CoreModels
 import CoreNetworking
@@ -163,6 +164,7 @@ final class AppContainer {
         engagementProvider: feedRepository,
         realtime: realtimeClient,
         composedPosts: composedPostChannel,
+        router: routeResolver,
         imagePipeline: imagePipeline
     )
 
@@ -179,6 +181,17 @@ final class AppContainer {
         repository: profileRepository,
         imagePipeline: imagePipeline
     )
+
+    // MARK: - Routing
+
+    /// The one place `AppRoute`s become navigation. Features receive it as an
+    /// opaque `Router`; the shell binds its `navigator` when it starts.
+    private(set) lazy var routeResolver = RouteResolver(
+        profileFeature: profileFeature,
+        uploadFeature: uploadFeature
+    )
+
+    var router: any Router { routeResolver }
 
     // MARK: - Compose / upload
 

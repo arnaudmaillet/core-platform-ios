@@ -7,7 +7,13 @@ let package = Package(
     products: [
         .library(name: "ProfileInterface", targets: ["ProfileInterface"])
     ],
+    dependencies: [
+        .package(path: "../../Kit/CoreModels")
+    ],
     targets: [
-        .target(name: "ProfileInterface")
+        .target(
+            name: "ProfileInterface",
+            dependencies: ["CoreModels"]
+        )
     ]
 )

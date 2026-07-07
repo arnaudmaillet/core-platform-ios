@@ -1,5 +1,6 @@
 import CoreContracts
 import CoreModels
+import CoreNavigation
 import CoreRealtime
 import Foundation
 
@@ -48,6 +49,7 @@ public final class FeedViewModel {
     private let engagementProvider: (any EngagementProviding)?
     private let realtime: (any FeedRealtimeSubscribing)?
     private let composedPosts: ComposedPostChannel?
+    private let router: (any Router)?
     private let now: @Sendable () -> Date
 
     private var phase: Phase = .loading
@@ -66,12 +68,14 @@ public final class FeedViewModel {
         engagementProvider: (any EngagementProviding)? = nil,
         realtime: (any FeedRealtimeSubscribing)? = nil,
         composedPosts: ComposedPostChannel? = nil,
+        router: (any Router)? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.repository = repository
         self.engagementProvider = engagementProvider
         self.realtime = realtime
         self.composedPosts = composedPosts
+        self.router = router
         self.now = now
     }
 
@@ -129,6 +133,12 @@ public final class FeedViewModel {
         guard pagingLoad == nil else { return }
         initialLoad?.cancel()
         initialLoad = Task { await loadFirstPageFromNetwork(renderCacheFirst: false) }
+    }
+
+    /// Author tapped in a cell — hand off to cross-feature routing. The feed
+    /// never imports Profile; it only emits a route.
+    public func didTapAuthor(_ id: ProfileID) {
+        router?.route(to: .profile(id))
     }
 
     /// Pagination trigger: called by the view for every cell about to display.

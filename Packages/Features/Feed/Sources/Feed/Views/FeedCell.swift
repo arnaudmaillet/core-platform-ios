@@ -19,9 +19,12 @@ final class FeedCell: UICollectionViewCell {
 
     /// Set by the view controller; called on tap with the represented post.
     var onLikeTapped: ((PostID) -> Void)?
+    /// Called when the author's avatar or name is tapped.
+    var onAuthorTapped: ((ProfileID) -> Void)?
 
     private var model: FeedItemDisplayModel?
     private var representedID: PostID?
+    private var authorID: ProfileID?
     private var imageTasks: [Task<Void, Never>] = []
 
     override init(frame: CGRect) {
@@ -37,6 +40,14 @@ final class FeedCell: UICollectionViewCell {
         nameLabel.textColor = .label
         metaLabel.font = FeedCellMetrics.metaFont
         metaLabel.textColor = .secondaryLabel
+
+        // The avatar and name route to the author's profile.
+        for view in [avatarView, nameLabel] {
+            view.isUserInteractionEnabled = true
+            view.addGestureRecognizer(UITapGestureRecognizer(
+                target: self, action: #selector(authorTapped)
+            ))
+        }
 
         captionLabel.numberOfLines = 0
 
@@ -72,6 +83,11 @@ final class FeedCell: UICollectionViewCell {
         likeButton.configuration = config
     }
 
+    @objc private func authorTapped() {
+        guard let authorID else { return }
+        onAuthorTapped?(authorID)
+    }
+
     private static func countText(_ count: Int64) -> String {
         count >= 1000 ? String(format: "%.1fk", Double(count) / 1000) : String(count)
     }
@@ -82,6 +98,7 @@ final class FeedCell: UICollectionViewCell {
     func configure(with model: FeedItemDisplayModel, engagement: FeedViewModel.EngagementState, pipeline: ImagePipeline) {
         self.model = model
         representedID = model.id
+        authorID = model.authorID
         updateEngagement(engagement)
 
         nameLabel.text = model.authorName
@@ -109,6 +126,7 @@ final class FeedCell: UICollectionViewCell {
     override func prepareForReuse() {
         super.prepareForReuse()
         representedID = nil
+        authorID = nil
         for task in imageTasks {
             task.cancel()
         }
