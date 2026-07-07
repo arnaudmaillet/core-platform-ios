@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "CoreNetworking",
-    platforms: [.iOS("26.5")],
+    platforms: [.iOS("26.0")],
     products: [
         .library(name: "CoreNetworking", targets: ["CoreNetworking"]),
         // In-process fake BFF speaking the Connect protocol with binary proto,

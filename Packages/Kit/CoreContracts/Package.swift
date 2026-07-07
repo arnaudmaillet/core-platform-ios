@@ -9,7 +9,7 @@ import PackageDescription
 // and map to domain or display models at the repository boundary.
 let package = Package(
     name: "CoreContracts",
-    platforms: [.iOS("26.5")],
+    platforms: [.iOS("26.0")],
     products: [
         .library(name: "CoreContracts", targets: ["CoreContracts"])
     ],
