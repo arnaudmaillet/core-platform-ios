@@ -165,12 +165,24 @@ final class AppContainer {
             if let cachedPostComposer {
                 return cachedPostComposer
             }
+            let uploadTransport: any MediaUploadTransport = switch environment {
+            case .mock:
+                MockMediaUploadTransport(store: mockBlobStore)
+            case .localFleet:
+                // The media service presigns object-store URLs against the
+                // Docker-internal host (minio:9000), unreachable from the
+                // client; rewrite to the published host, preserving the signed
+                // Host header. Remove once the fleet presigns a reachable host.
+                URLSessionMediaUploadTransport(
+                    hostRewrite: UploadHostRewrite(from: "minio:9000", to: "localhost:9000")
+                )
+            }
             let composer = PostComposer(
                 mediaClient: Media_V1_MediaServiceClient(client: authenticatedRPCClient),
                 postClient: Post_V1_PostServiceClient(client: authenticatedRPCClient),
                 profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
                 authSession: sessionManager,
-                uploadTransport: MockMediaUploadTransport(store: mockBlobStore), // swaps for URLSessionMediaUploadTransport with the real BFF
+                uploadTransport: uploadTransport,
                 imagePipeline: imagePipeline,
                 composedChannel: composedPostChannel
             )
