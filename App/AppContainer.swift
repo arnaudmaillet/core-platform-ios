@@ -58,6 +58,7 @@ final class AppContainer {
         MockPostAuthoringService(store: mockPostStore).register(on: bff)
         MockSearchService(dataset: mockDataset).register(on: bff)
         MockNotificationService(dataset: mockDataset).register(on: bff)
+        MockCommentService(dataset: mockDataset).register(on: bff)
         return bff
     }()
 
@@ -165,9 +166,16 @@ final class AppContainer {
         snapshotStore: CodableFileStore<[FeedEntry]>(name: "feed-first-page")
     )
 
+    private lazy var commentsRepository = CommentsRepository(
+        commentClient: Comment_V1_CommentServiceClient(client: authenticatedRPCClient),
+        profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
+        authSession: sessionManager
+    )
+
     private(set) lazy var feedFeature: any FeedFeatureBuilding = FeedFeatureBuilder(
         repository: feedRepository,
         engagementProvider: feedRepository,
+        commentsProvider: commentsRepository,
         realtime: realtimeClient,
         composedPosts: composedPostChannel,
         router: routeResolver,
