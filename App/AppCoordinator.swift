@@ -104,7 +104,7 @@ final class AppCoordinator: Coordinator {
         case .unauthenticated:
             mainTabCoordinator = nil
             setRoot(container.authFeature.makeLoginViewController())
-        case .authenticated(let accountID):
+        case .authenticated:
             #if DEBUG
             if container.environment == .mock {
                 container.startMockRealtimeDemo()
@@ -113,7 +113,6 @@ final class AppCoordinator: Coordinator {
             let sessionManager = container.sessionManager
             let tabCoordinator = MainTabCoordinator(
                 container: container,
-                accountID: accountID,
                 onLogout: { Task { await sessionManager.logout() } }
             )
             tabCoordinator.start()

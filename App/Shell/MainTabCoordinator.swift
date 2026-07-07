@@ -1,4 +1,3 @@
-import CoreModels
 import CoreNavigation
 import UIKit
 
@@ -11,12 +10,10 @@ final class MainTabCoordinator: Coordinator {
     let tabBarController = UITabBarController()
 
     private let container: AppContainer
-    private let accountID: AccountID
     private let onLogout: () -> Void
 
-    init(container: AppContainer, accountID: AccountID, onLogout: @escaping () -> Void) {
+    init(container: AppContainer, onLogout: @escaping () -> Void) {
         self.container = container
-        self.accountID = accountID
         self.onLogout = onLogout
     }
 
@@ -25,7 +22,7 @@ final class MainTabCoordinator: Coordinator {
             FeedTabCoordinator(container: container),
             SearchTabCoordinator(),
             NotificationsTabCoordinator(),
-            ProfileTabCoordinator(accountID: accountID, onLogout: onLogout)
+            ProfileTabCoordinator(container: container, onLogout: onLogout)
         ]
         for tab in tabs {
             tab.start()

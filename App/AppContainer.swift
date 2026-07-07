@@ -12,6 +12,8 @@ import CoreStorage
 import Feed
 import FeedInterface
 import Foundation
+import Profile
+import ProfileInterface
 import Upload
 import UploadInterface
 
@@ -161,6 +163,20 @@ final class AppContainer {
         engagementProvider: feedRepository,
         realtime: realtimeClient,
         composedPosts: composedPostChannel,
+        imagePipeline: imagePipeline
+    )
+
+    // MARK: - Profile
+
+    private lazy var profileRepository = ProfileRepository(
+        profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
+        counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient),
+        socialGraphClient: SocialGraph_V1_SocialGraphServiceClient(client: authenticatedRPCClient),
+        authSession: sessionManager
+    )
+
+    private(set) lazy var profileFeature: any ProfileFeatureBuilding = ProfileFeatureBuilder(
+        repository: profileRepository,
         imagePipeline: imagePipeline
     )
 
