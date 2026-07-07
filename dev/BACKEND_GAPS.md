@@ -16,6 +16,7 @@ full functionality.
 | 6 | IdP authenticates on bare username, not email | Login (a gotcha, easily worked around) | Low |
 | 7 | `counter.v1` does not project profile follower/following counts | Profile counters (client falls back to social_graph) | Medium |
 | 8 | Envoy gateway didn't route `search.v1` (fixed in-repo) | People search (fixed; needs a gateway restart) | Low |
+| 9 | No seeded notifications | Activity tab shows empty against the fleet | Low |
 
 ---
 
@@ -203,6 +204,29 @@ gateway (`localhost:8080`, gRPC-Web); grpcurl hit the raw gRPC port directly.
 a client feature needs them: `geo_discovery.v1`, `moderation.v1`, `audit.v1`
 (likely internal-only), and `realtime.v1` (served over the WebSocket gateway on
 `:8443`, not Envoy — expected). Add routes as features require them.
+
+---
+
+## 9. No seeded notifications
+
+**Symptom.** `notification.v1.ListNotifications` returns `{}` for the seeded
+user (alice) — the notification store is empty because no seeded activity
+(reactions/comments/mentions on her posts) has been produced.
+
+```bash
+grpcurl -plaintext -d '{"profileId":"019f39be-6b86-7022-808b-bae992a25908","limit":10}' \
+  localhost:50055 notification.v1.NotificationService/ListNotifications   # -> {}
+```
+
+**Client impact.** The Activity tab is correct but empty against the fleet.
+The client is verified against `MockNotificationService` (a few reaction/
+comment/mention rows over the shared dataset), which also keeps offline mode
+useful. `notification.v1` **is** routed through Envoy (unlike search was), so
+no gateway change was needed.
+
+**Suggested fix.** Seed a handful of notifications for the demo user (or have
+another seeded profile react to/comment on alice's posts so the projector
+emits them).
 
 ---
 

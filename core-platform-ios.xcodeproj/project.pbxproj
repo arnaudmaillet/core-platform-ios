@@ -27,6 +27,8 @@
 		5F00000000000000000000E2 /* Profile in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000E4 /* Profile */; };
 		5F00000000000000000000F3 /* SearchInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000F5 /* SearchInterface */; };
 		5F00000000000000000000F4 /* Search in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000F6 /* Search */; };
+		5F00000000000000000000F9 /* NotificationsInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000FB /* NotificationsInterface */; };
+		5F00000000000000000000FA /* Notifications in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000FC /* Notifications */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -79,6 +81,8 @@
 				5F00000000000000000000E2 /* Profile in Frameworks */,
 				5F00000000000000000000F3 /* SearchInterface in Frameworks */,
 				5F00000000000000000000F4 /* Search in Frameworks */,
+				5F00000000000000000000F9 /* NotificationsInterface in Frameworks */,
+				5F00000000000000000000FA /* Notifications in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -185,6 +189,8 @@
 				5F00000000000000000000B0 /* XCLocalSwiftPackageReference "Packages/Features/Profile" */,
 				5F00000000000000000000F1 /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/SearchInterface" */,
 				5F00000000000000000000F2 /* XCLocalSwiftPackageReference "Packages/Features/Search" */,
+				5F00000000000000000000F7 /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/NotificationsInterface" */,
+				5F00000000000000000000F8 /* XCLocalSwiftPackageReference "Packages/Features/Notifications" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 51A1B7732FFBCAB6005918BC /* Products */;
@@ -492,6 +498,14 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/Features/Search;
 		};
+		5F00000000000000000000F7 /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/NotificationsInterface" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/FeatureInterfaces/NotificationsInterface;
+		};
+		5F00000000000000000000F8 /* XCLocalSwiftPackageReference "Packages/Features/Notifications" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Features/Notifications;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -574,6 +588,14 @@
 		5F00000000000000000000F6 /* Search */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = Search;
+		};
+		5F00000000000000000000FB /* NotificationsInterface */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NotificationsInterface;
+		};
+		5F00000000000000000000FC /* Notifications */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Notifications;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

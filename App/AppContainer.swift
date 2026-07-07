@@ -13,6 +13,8 @@ import CoreStorage
 import Feed
 import FeedInterface
 import Foundation
+import Notifications
+import NotificationsInterface
 import Profile
 import ProfileInterface
 import Search
@@ -55,6 +57,7 @@ final class AppContainer {
         MockMediaService(store: mockBlobStore).register(on: bff)
         MockPostAuthoringService(store: mockPostStore).register(on: bff)
         MockSearchService(dataset: mockDataset).register(on: bff)
+        MockNotificationService(dataset: mockDataset).register(on: bff)
         return bff
     }()
 
@@ -193,6 +196,19 @@ final class AppContainer {
 
     private(set) lazy var searchFeature: any SearchFeatureBuilding = SearchFeatureBuilder(
         repository: searchRepository,
+        router: routeResolver
+    )
+
+    // MARK: - Notifications
+
+    private lazy var notificationsRepository = NotificationsRepository(
+        notificationClient: Notification_V1_NotificationServiceClient(client: authenticatedRPCClient),
+        profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
+        authSession: sessionManager
+    )
+
+    private(set) lazy var notificationsFeature: any NotificationsFeatureBuilding = NotificationsFeatureBuilder(
+        repository: notificationsRepository,
         router: routeResolver
     )
 
