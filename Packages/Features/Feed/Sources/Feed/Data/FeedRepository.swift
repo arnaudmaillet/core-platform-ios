@@ -48,7 +48,6 @@ public actor FeedRepository: FeedProviding {
     private let authSession: any AuthSessionProviding
     private let snapshotStore: CodableFileStore<[FeedEntry]>?
     private let pageSize: Int32
-    private let viewerHandleFallback: String?
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "feed")
 
     private var viewerProfileID: ProfileID?
@@ -62,10 +61,7 @@ public actor FeedRepository: FeedProviding {
         engagementClient: any Engagement_V1_EngagementServiceClientInterface,
         authSession: any AuthSessionProviding,
         snapshotStore: CodableFileStore<[FeedEntry]>? = nil,
-        pageSize: Int32 = 20,
-        // DEBUG/dev fallback: resolve the viewer via GetProfileByHandle when
-        // ListProfilesByAccount is unavailable (a local-fleet backend bug).
-        viewerHandleFallback: String? = nil
+        pageSize: Int32 = 20
     ) {
         self.timelineClient = timelineClient
         self.postClient = postClient
@@ -75,7 +71,6 @@ public actor FeedRepository: FeedProviding {
         self.authSession = authSession
         self.snapshotStore = snapshotStore
         self.pageSize = pageSize
-        self.viewerHandleFallback = viewerHandleFallback
     }
 
     // MARK: - FeedProviding
@@ -210,35 +205,14 @@ public actor FeedRepository: FeedProviding {
         switch response.result {
         case .success(let body):
             guard let profile = body.profiles.first else {
-                if let fallback = try await resolveViewerViaHandleFallback() {
-                    return fallback
-                }
                 throw FeedError.noProfileForAccount
             }
             let id = ProfileID(profile.profileID)
             viewerProfileID = id
             return id
         case .failure(let error):
-            if let fallback = try await resolveViewerViaHandleFallback() {
-                return fallback
-            }
             throw FeedError.transport(message: error.message ?? "code \(error.code)")
         }
-    }
-
-    /// Dev fallback around a local-fleet ProfileService bug: resolve the
-    /// viewer by a configured handle when the account lookup is unavailable.
-    private func resolveViewerViaHandleFallback() async throws -> ProfileID? {
-        guard let handle = viewerHandleFallback else { return nil }
-        logger.warning("ListProfilesByAccount unavailable; resolving viewer via handle fallback '\(handle)'")
-
-        var request = Profile_V1_GetProfileByHandleRequest()
-        request.handle = handle
-        let response = await profileClient.getProfileByHandle(request: request, headers: [:])
-        guard let view = response.message else { return nil }
-        let id = ProfileID(view.profileID)
-        viewerProfileID = id
-        return id
     }
 
     private static func makePost(from view: Post_V1_PostView) -> Post {

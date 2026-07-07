@@ -139,8 +139,7 @@ final class AppContainer {
         counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient),
         engagementClient: Engagement_V1_EngagementServiceClient(client: authenticatedRPCClient),
         authSession: sessionManager,
-        snapshotStore: CodableFileStore<[FeedEntry]>(name: "feed-first-page"),
-        viewerHandleFallback: environment.viewerHandleFallback
+        snapshotStore: CodableFileStore<[FeedEntry]>(name: "feed-first-page")
     )
 
     private(set) lazy var feedFeature: any FeedFeatureBuilding = FeedFeatureBuilder(
