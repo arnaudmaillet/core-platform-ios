@@ -21,7 +21,7 @@ final class MainTabCoordinator: Coordinator {
         let tabs: [any TabCoordinator] = [
             FeedTabCoordinator(container: container),
             SearchTabCoordinator(container: container),
-            NotificationsTabCoordinator(),
+            NotificationsTabCoordinator(container: container),
             ProfileTabCoordinator(container: container, onLogout: onLogout)
         ]
         for tab in tabs {
