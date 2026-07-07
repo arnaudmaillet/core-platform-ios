@@ -1,13 +1,10 @@
 import Auth
 import AuthInterface
 import CoreNavigation
-import CoreNetworkingMocks
 import CoreRealtime
 import DesignSystem
-import FeedInterface
 import UIKit
 import Upload
-import UploadInterface
 
 /// Root coordinator. Owns the window and the top-level state machine:
 /// launching → auth → main. It is the single observer that turns
@@ -20,6 +17,7 @@ final class AppCoordinator: Coordinator {
     private let window: UIWindow
     private let container: AppContainer
     private var stateObservation: Task<Void, Never>?
+    private var mainTabCoordinator: MainTabCoordinator?
 
     init(window: UIWindow, container: AppContainer) {
         self.window = window
@@ -104,31 +102,23 @@ final class AppCoordinator: Coordinator {
     private func render(_ state: AuthState) {
         switch state {
         case .unauthenticated:
+            mainTabCoordinator = nil
             setRoot(container.authFeature.makeLoginViewController())
-        case .authenticated:
+        case .authenticated(let accountID):
             #if DEBUG
             if container.environment == .mock {
                 container.startMockRealtimeDemo()
             }
             #endif
             let sessionManager = container.sessionManager
-            let feedViewController = container.feedFeature.makeFeedViewController()
-            let navigationController = UINavigationController(rootViewController: feedViewController)
-            // Compose entry point (a tab bar's "+" until we build one).
-            feedViewController.navigationItem.leftBarButtonItem = UIBarButtonItem(
-                systemItem: .compose,
-                primaryAction: UIAction { [weak self, weak navigationController] _ in
-                    guard let self, let navigationController else { return }
-                    let composeVC = self.container.uploadFeature.makeComposeViewController()
-                    navigationController.present(composeVC, animated: true)
-                }
+            let tabCoordinator = MainTabCoordinator(
+                container: container,
+                accountID: accountID,
+                onLogout: { Task { await sessionManager.logout() } }
             )
-            // Temporary home for logout until the profile tab exists.
-            feedViewController.navigationItem.rightBarButtonItem = UIBarButtonItem(
-                title: "Log Out",
-                primaryAction: UIAction { _ in Task { await sessionManager.logout() } }
-            )
-            setRoot(navigationController)
+            tabCoordinator.start()
+            mainTabCoordinator = tabCoordinator
+            setRoot(tabCoordinator.tabBarController)
         }
     }
 
