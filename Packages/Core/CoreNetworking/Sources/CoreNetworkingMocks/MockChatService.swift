@@ -44,6 +44,17 @@ public final class MockChatService: @unchecked Sendable {
         bff.register(path: "/chat.v1.ChatService/MarkRead") { (_: Chat_V1_MarkReadRequest) in
             .success(Chat_V1_CommandResponse())
         }
+        bff.register(path: "/chat.v1.ChatService/CreateConversation") { [self] (_: Chat_V1_CreateConversationRequest) in
+            var response = Chat_V1_CreateConversationResponse()
+            response.conversationID = store.newConversationID()
+            return .success(response)
+        }
+        bff.register(path: "/chat.v1.ChatService/JoinAsMember") { (_: Chat_V1_JoinAsMemberRequest) in
+            .success(Chat_V1_CommandResponse())
+        }
+        bff.register(path: "/chat.v1.ChatService/Subscribe") { (_: Chat_V1_SubscribeRequest) in
+            .success(Chat_V1_CommandResponse())
+        }
     }
 
     private func member(_ profileID: String) -> Chat_V1_MemberView {
@@ -75,6 +86,14 @@ public final class MockChatService: @unchecked Sendable {
     private final class Store: @unchecked Sendable {
         private let lock = NSLock()
         private var sent: [String: [Chat_V1_MessageView]] = [:]
+        private var createdCount = 0
+
+        func newConversationID() -> String {
+            lock.withLock {
+                createdCount += 1
+                return "conv-created-\(createdCount)"
+            }
+        }
 
         func messages(for conversationID: String, seed: [Chat_V1_MessageView]) -> [Chat_V1_MessageView] {
             lock.withLock { seed + (sent[conversationID] ?? []) }

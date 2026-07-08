@@ -17,24 +17,23 @@ import UploadInterface
 final class RouteResolver: Router {
     weak var navigator: AppNavigating?
 
-    private let profileFeature: any ProfileFeatureBuilding
     private let uploadFeature: any UploadFeatureBuilding
-    /// Resolved lazily: the feed feature depends on this resolver (as its
-    /// router), so injecting it directly would be a construction cycle. The
-    /// closure is only called when a `.post` route actually fires.
+    /// Feature builders are resolved lazily: each one depends on this resolver
+    /// (as its router), so injecting them directly would be a construction
+    /// cycle. The closures are only called when a route actually fires.
+    private let profileFeature: () -> any ProfileFeatureBuilding
     private let feedFeature: () -> any FeedFeatureBuilding
-    /// Also resolved lazily — chat depends on this resolver as its router.
     private let chatFeature: () -> any ChatFeatureBuilding
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "navigation")
 
     init(
-        profileFeature: any ProfileFeatureBuilding,
         uploadFeature: any UploadFeatureBuilding,
+        profileFeature: @escaping () -> any ProfileFeatureBuilding,
         feedFeature: @escaping () -> any FeedFeatureBuilding,
         chatFeature: @escaping () -> any ChatFeatureBuilding
     ) {
-        self.profileFeature = profileFeature
         self.uploadFeature = uploadFeature
+        self.profileFeature = profileFeature
         self.feedFeature = feedFeature
         self.chatFeature = chatFeature
     }
@@ -51,7 +50,7 @@ final class RouteResolver: Router {
             navigator.activeNavigationController?.popToRootViewController(animated: true)
 
         case .profile(let profileID):
-            let profile = profileFeature.makeProfileViewController(for: profileID)
+            let profile = profileFeature().makeProfileViewController(for: profileID)
             navigator.activeNavigationController?.pushViewController(profile, animated: true)
 
         case .upload:
@@ -65,6 +64,16 @@ final class RouteResolver: Router {
         case .conversation(let conversationID):
             let thread = chatFeature().makeConversationViewController(for: conversationID)
             navigator.activeNavigationController?.pushViewController(thread, animated: true)
+
+        case .messageUser(let profileID):
+            // Creating/finding the DM is async; capture the destination stack now.
+            let chatFeature = chatFeature
+            let nav = navigator.activeNavigationController
+            Task {
+                if let thread = await chatFeature().makeDirectMessageViewController(with: profileID) {
+                    nav?.pushViewController(thread, animated: true)
+                }
+            }
         }
     }
 }

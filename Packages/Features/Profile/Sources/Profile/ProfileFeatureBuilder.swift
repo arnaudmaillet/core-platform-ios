@@ -1,5 +1,6 @@
 import CoreMedia
 import CoreModels
+import CoreNavigation
 import ProfileInterface
 import UIKit
 
@@ -9,10 +10,12 @@ import UIKit
 public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     private let repository: any ProfileProviding
     private let imagePipeline: ImagePipeline
+    private let router: (any Router)?
 
-    public init(repository: any ProfileProviding, imagePipeline: ImagePipeline) {
+    public init(repository: any ProfileProviding, imagePipeline: ImagePipeline, router: (any Router)? = nil) {
         self.repository = repository
         self.imagePipeline = imagePipeline
+        self.router = router
     }
 
     public func makeCurrentUserProfileViewController(onLogout: @escaping () -> Void) -> UIViewController {
@@ -31,7 +34,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
 
     public func makeProfileViewController(for profileID: ProfileID) -> UIViewController {
         ProfileViewController(
-            viewModel: ProfileViewModel(repository: repository, source: .profile(profileID)),
+            viewModel: ProfileViewModel(repository: repository, source: .profile(profileID), router: router),
             imagePipeline: imagePipeline,
             onLogout: nil
         )

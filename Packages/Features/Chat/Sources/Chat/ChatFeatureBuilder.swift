@@ -26,4 +26,9 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             viewModel: ConversationViewModel(conversationID: conversationID, repository: repository)
         )
     }
+
+    public func makeDirectMessageViewController(with profileID: ProfileID) async -> UIViewController? {
+        guard let conversationID = try? await repository.directConversation(with: profileID) else { return nil }
+        return makeConversationViewController(for: conversationID)
+    }
 }

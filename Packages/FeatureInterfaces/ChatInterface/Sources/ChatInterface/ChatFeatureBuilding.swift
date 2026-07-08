@@ -10,4 +10,8 @@ public protocol ChatFeatureBuilding {
     /// A single conversation thread — the destination the router pushes for a
     /// `.conversation` route.
     func makeConversationViewController(for conversationID: ConversationID) -> UIViewController
+
+    /// Opens (find-or-create) a DM thread with `profileID`. Async because it may
+    /// create the conversation; `nil` if that fails.
+    func makeDirectMessageViewController(with profileID: ProfileID) async -> UIViewController?
 }

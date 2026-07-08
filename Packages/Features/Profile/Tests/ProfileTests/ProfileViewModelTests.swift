@@ -1,7 +1,14 @@
 import CoreModels
+import CoreNavigation
 import Foundation
 import Testing
 @testable import Profile
+
+@MainActor
+private final class SpyRouter: Router {
+    private(set) var routes: [AppRoute] = []
+    func route(to route: AppRoute) { routes.append(route) }
+}
 
 private actor StubProfileProvider: ProfileProviding {
     enum Outcome {
@@ -217,6 +224,33 @@ struct ProfileViewModelTests {
         // Rolled back to the pre-tap state.
         #expect(follow().last == .follow)
         #expect(lastFollowerText(phases) == "10")
+    }
+
+    @Test func messageTappedRoutesToDirectMessageForOthers() async {
+        let router = SpyRouter()
+        let viewModel = ProfileViewModel(
+            repository: StubProfileProvider(.success(sampleProfile()), relationship: .other(isFollowing: false)),
+            source: .profile(ProfileID("prof-1")),
+            router: router
+        )
+        viewModel.viewDidLoad()
+        await settle()
+
+        viewModel.messageTapped()
+        #expect(router.routes == [.messageUser(ProfileID("prof-1"))])
+    }
+
+    @Test func messageTappedIsANoOpOnOwnProfile() async {
+        let router = SpyRouter()
+        let viewModel = ProfileViewModel(
+            repository: StubProfileProvider(.success(sampleProfile()), relationship: .me),
+            router: router
+        )
+        viewModel.viewDidLoad()
+        await settle()
+
+        viewModel.messageTapped()
+        #expect(router.routes.isEmpty)
     }
 
     @Test func editButtonTapIsANoOp() async {

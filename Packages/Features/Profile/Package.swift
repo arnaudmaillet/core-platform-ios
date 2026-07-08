@@ -13,6 +13,7 @@ let package = Package(
         .package(path: "../../Kit/CoreContracts"),
         .package(path: "../../Kit/CoreModels"),
         .package(path: "../../Core/CoreMedia"),
+        .package(path: "../../Core/CoreNavigation"),
         .package(path: "../../Core/CoreNetworking"),
         .package(path: "../../Core/DesignSystem")
     ],
@@ -25,6 +26,7 @@ let package = Package(
                 "CoreContracts",
                 "CoreModels",
                 "CoreMedia",
+                "CoreNavigation",
                 "DesignSystem"
             ]
         ),
@@ -32,6 +34,7 @@ let package = Package(
             name: "ProfileTests",
             dependencies: [
                 "Profile",
+                "CoreNavigation",
                 "CoreNetworking",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking")
             ]

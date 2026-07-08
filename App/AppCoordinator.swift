@@ -137,6 +137,9 @@ final class AppCoordinator: Coordinator {
             if let index = arguments.firstIndex(of: "-open-conversation"), index + 1 < arguments.count {
                 container.router.route(to: .conversation(ConversationID(arguments[index + 1])))
             }
+            if let index = arguments.firstIndex(of: "-message-user"), index + 1 < arguments.count {
+                container.router.route(to: .messageUser(ProfileID(arguments[index + 1])))
+            }
             #endif
         }
     }
