@@ -1,6 +1,6 @@
 import Connect
 import CoreContracts
-import CoreMedia
+import MediaCore
 import Foundation
 
 /// Shared store for in-flight and committed mock assets, plus the uploaded

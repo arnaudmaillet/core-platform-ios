@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 import UIKit
-@testable import CoreMedia
+@testable import MediaCore
 
 /// Counts fetches so coalescing/caching are observable.
 private final class CountingFetcher: ImageFetching, @unchecked Sendable {

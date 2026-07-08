@@ -65,13 +65,17 @@ public struct MockSocialDataset: Sendable {
         for index in 0..<postCount {
             let author = authors[index % authors.count]
             let caption = captionBank[index % captionBank.count]
-            let hasMedia = index % 3 != 2 // two of every three posts carry media
+            // One of every three posts is video, one image, one text-only —
+            // a mix that exercises all three snap-feed cell paths.
+            let hasMedia = index % 3 != 2
+            let isVideo = index % 3 == 0
+            let mediaHost = isVideo ? "video" : "media"
             let shape = mediaShapes[index % mediaShapes.count]
             records.append(PostRecord(
                 postID: String(format: "post-%04d", index),
                 authorProfileID: author.profileID,
                 caption: caption,
-                media: hasMedia ? ("mock://media/\(index)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1) : nil,
+                media: hasMedia ? ("mock://\(mediaHost)/\(index)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1) : nil,
                 publishedAtMS: newestMS - Int64(index) * 180_000 // 3 minutes apart, newest first
             ))
         }

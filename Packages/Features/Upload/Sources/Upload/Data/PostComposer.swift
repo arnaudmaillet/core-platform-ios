@@ -1,6 +1,6 @@
 import AuthInterface
 import CoreContracts
-import CoreMedia
+import MediaCore
 import CoreModels
 import Foundation
 import OSLog

@@ -1,4 +1,4 @@
-import CoreMedia
+import MediaCore
 import CoreModels
 import DesignSystem
 import UIKit
