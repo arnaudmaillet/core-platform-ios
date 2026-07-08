@@ -49,6 +49,15 @@ final class FeedTabCoordinator: TabCoordinator {
         if ProcessInfo.processInfo.arguments.contains("-open-messages") {
             showMessages()
         }
+        // `-present-compose` presents the compose sheet on launch, for
+        // driving/screenshotting compose without tapping the overlay button.
+        // Deferred: at start() the nav controller isn't in the window yet, so a
+        // modal present would no-op.
+        if ProcessInfo.processInfo.arguments.contains("-present-compose") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                self?.presentCompose()
+            }
+        }
         #endif
     }
 
