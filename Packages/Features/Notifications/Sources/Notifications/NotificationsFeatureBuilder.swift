@@ -19,4 +19,8 @@ public struct NotificationsFeatureBuilder: NotificationsFeatureBuilding {
             viewModel: NotificationsViewModel(repository: repository, router: router)
         )
     }
+
+    public func unreadCount() async -> Int {
+        (try? await repository.unreadCount()) ?? 0
+    }
 }

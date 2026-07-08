@@ -58,6 +58,8 @@ public struct NotificationItem: Equatable, Sendable, Identifiable {
 public protocol NotificationsProviding: Sendable {
     func loadNotifications(limit: Int32) async throws -> [NotificationItem]
     func markAllRead() async throws
+    /// The viewer's unread notification count, for the tab badge.
+    func unreadCount() async throws -> Int
 }
 
 /// Reads the viewer's activity from notification.v1, hydrating sender display
@@ -106,6 +108,17 @@ public actor NotificationsRepository: NotificationsProviding {
         let response = await notificationClient.markAllRead(request: request, headers: [:])
         if let error = response.error {
             throw NotificationsError.transport(message: error.message ?? "code \(error.code)")
+        }
+    }
+
+    public func unreadCount() async throws -> Int {
+        let viewer = try await resolveViewerProfileID()
+        var request = Notification_V1_GetUnreadCountRequest()
+        request.profileID = viewer.rawValue
+        let response = await notificationClient.getUnreadCount(request: request, headers: [:])
+        switch response.result {
+        case .success(let body): return Int(body.unreadCount)
+        case .failure(let error): throw NotificationsError.transport(message: error.message ?? "code \(error.code)")
         }
     }
 

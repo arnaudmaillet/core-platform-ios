@@ -60,4 +60,12 @@ struct NotificationsRepositoryTests {
         let repository = makeRepository()
         try await repository.markAllRead()
     }
+
+    @Test func unreadCountReflectsMarkAllRead() async throws {
+        let repository = makeRepository()
+
+        #expect(try await repository.unreadCount() == 2)
+        try await repository.markAllRead()
+        #expect(try await repository.unreadCount() == 0)
+    }
 }

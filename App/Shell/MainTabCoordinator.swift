@@ -5,23 +5,27 @@ import UIKit
 /// `TabCoordinator` per tab. Each tab owns its own navigation stack; this
 /// coordinator only assembles them and holds them alive.
 @MainActor
-final class MainTabCoordinator: Coordinator {
+final class MainTabCoordinator: NSObject, Coordinator {
     var childCoordinators: [Coordinator] = []
     let tabBarController = UITabBarController()
 
     private let container: AppContainer
     private let onLogout: () -> Void
+    private var notificationsTab: NotificationsTabCoordinator?
 
     init(container: AppContainer, onLogout: @escaping () -> Void) {
         self.container = container
         self.onLogout = onLogout
+        super.init()
     }
 
     func start() {
+        let notificationsTab = NotificationsTabCoordinator(container: container)
+        self.notificationsTab = notificationsTab
         let tabs: [any TabCoordinator] = [
             FeedTabCoordinator(container: container),
             SearchTabCoordinator(container: container),
-            NotificationsTabCoordinator(container: container),
+            notificationsTab,
             ProfileTabCoordinator(container: container, onLogout: onLogout)
         ]
         for tab in tabs {
@@ -29,6 +33,7 @@ final class MainTabCoordinator: Coordinator {
             addChild(tab)
         }
         tabBarController.viewControllers = tabs.map(\.navigationController)
+        tabBarController.delegate = self
 
         #if DEBUG
         // Dev convenience: `-select-tab N` opens directly on a tab for testing.
@@ -38,6 +43,16 @@ final class MainTabCoordinator: Coordinator {
             tabBarController.selectedIndex = tabIndex
         }
         #endif
+    }
+}
+
+// MARK: - Badge refresh
+
+extension MainTabCoordinator: UITabBarControllerDelegate {
+    func tabBarController(_ tabBarController: UITabBarController, didSelect viewController: UIViewController) {
+        // Re-read the unread count on every tab switch, so the Activity badge
+        // reflects state after the user reads/marks notifications.
+        notificationsTab?.refreshBadge()
     }
 }
 

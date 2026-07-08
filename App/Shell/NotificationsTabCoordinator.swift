@@ -25,5 +25,16 @@ final class NotificationsTabCoordinator: TabCoordinator {
             image: UIImage(systemName: "bell"),
             selectedImage: UIImage(systemName: "bell.fill")
         )
+        refreshBadge()
+    }
+
+    /// Updates the tab's unread badge from the server count. Best-effort and
+    /// idempotent — safe to call on start and on every tab switch.
+    func refreshBadge() {
+        Task { [weak self] in
+            guard let self else { return }
+            let count = await container.notificationsFeature.unreadCount()
+            navigationController.tabBarItem.badgeValue = count > 0 ? String(count) : nil
+        }
     }
 }

@@ -19,6 +19,7 @@ private actor StubProvider: NotificationsProviding {
         return items
     }
     func markAllRead() async throws { markAllReadCalls += 1 }
+    func unreadCount() async throws -> Int { 0 }
 }
 
 @MainActor
