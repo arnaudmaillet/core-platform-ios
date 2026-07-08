@@ -119,6 +119,24 @@ as the existing note in `FeedRepository`.)
 
 ---
 
+## 4a. Authoring — reference assets by id (`post.v1` write path)
+
+Required by the iOS compose/upload path (`IOS_VIDEO_CAPTURE_UPLOAD.md`). Video
+transcode is async and slow, so the client **cannot** resolve a delivery URL
+before publishing (the image path does — it polls `ResolveDelivery`, then
+`CreatePost` with the `cdn_url`). A video post must be publishable the moment
+the bytes are committed, and become playable once the asset reaches `READY`.
+
+- **Add `asset_id` (string) to `post.v1.MediaAttachmentInput`.** For video,
+  `CreatePost` references the asset by id (delivery URL unknown at publish time)
+  rather than by `cdn_url`. Keep `cdn_url` for the image path (backward
+  compatible; both fields optional, `asset_id` wins when set).
+- The **read side** (`GetPost` / feed hydration, §4) resolves the asset's
+  delivery for a referenced `asset_id` once `READY`, and returns the poster +
+  a "processing" signal while it is still `PROCESSING` (so the feed can show the
+  poster instead of a broken/empty player).
+- No change to `PublishPost`.
+
 ## 5. Acceptance criteria (definition of done)
 
 1. `GetFollowingFeed → GetPost` for a video post returns `mime_type: video/*`
