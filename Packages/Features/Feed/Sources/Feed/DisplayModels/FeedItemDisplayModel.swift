@@ -65,6 +65,9 @@ public struct FeedItemDisplayModel: Identifiable, Sendable {
     let captionHeight: CGFloat
     let mediaURL: URL?
     let mediaKind: MediaKind
+    /// Poster/thumbnail; for a video it's shown under the player until the first
+    /// frame is ready.
+    let thumbnailURL: URL?
     let mediaHeight: CGFloat
     public let height: CGFloat
 }
@@ -130,6 +133,7 @@ public struct FeedDisplayModelBuilder: Sendable {
             captionHeight: captionHeight,
             mediaURL: attachment?.url,
             mediaKind: mediaKind,
+            thumbnailURL: attachment?.thumbnailURL,
             mediaHeight: mediaHeight,
             height: height.rounded(.up)
         )
