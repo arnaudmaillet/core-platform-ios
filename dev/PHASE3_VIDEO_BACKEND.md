@@ -147,7 +147,8 @@ the bytes are committed, and become playable once the asset reaches `READY`.
 3. Asset lifecycle is observable via `GetAsset`:
    `PENDING → UPLOADED → PROCESSING → READY` (or `FAILED`/`QUARANTINED`) — no
    more indefinite `PENDING`.
-4. The iOS snap feed in **fleet mode** (`-use-local-fleet -snap-feed`) plays the
+4. The iOS snap feed in **fleet mode** (`-use-local-fleet`; snap is the default)
+   plays the
    real clip end-to-end (playback rate 1, currentTime advances), with the poster
    shown before the first frame.
 
