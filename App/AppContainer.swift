@@ -176,6 +176,13 @@ final class AppContainer {
         authSession: sessionManager
     )
 
+    /// The timeline presentation. `-snap-feed` swaps the classic list for the
+    /// full-screen, page-snapping media feed (Phase 1). Read once here so the
+    /// Feed package stays free of launch-argument parsing, and shared with the
+    /// tab coordinator, which adapts its chrome to match.
+    let feedPresentation: FeedPresentationStyle =
+        ProcessInfo.processInfo.arguments.contains("-snap-feed") ? .snap : .classic
+
     private(set) lazy var feedFeature: any FeedFeatureBuilding = FeedFeatureBuilder(
         repository: feedRepository,
         engagementProvider: feedRepository,
@@ -183,7 +190,8 @@ final class AppContainer {
         realtime: realtimeClient,
         composedPosts: composedPostChannel,
         router: routeResolver,
-        imagePipeline: imagePipeline
+        imagePipeline: imagePipeline,
+        presentation: feedPresentation
     )
 
     // MARK: - Profile

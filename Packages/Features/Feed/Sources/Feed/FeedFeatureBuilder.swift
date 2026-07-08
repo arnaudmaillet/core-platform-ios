@@ -15,6 +15,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     private let composedPosts: ComposedPostChannel?
     private let router: (any Router)?
     private let imagePipeline: ImagePipeline
+    private let presentation: FeedPresentationStyle
 
     public init(
         repository: any FeedProviding,
@@ -23,7 +24,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         realtime: (any FeedRealtimeSubscribing)? = nil,
         composedPosts: ComposedPostChannel? = nil,
         router: (any Router)? = nil,
-        imagePipeline: ImagePipeline
+        imagePipeline: ImagePipeline,
+        presentation: FeedPresentationStyle = .classic
     ) {
         self.repository = repository
         self.engagementProvider = engagementProvider
@@ -32,19 +34,23 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         self.composedPosts = composedPosts
         self.router = router
         self.imagePipeline = imagePipeline
+        self.presentation = presentation
     }
 
     public func makeFeedViewController() -> UIViewController {
-        FeedViewController(
-            viewModel: FeedViewModel(
-                repository: repository,
-                engagementProvider: engagementProvider,
-                realtime: realtime,
-                composedPosts: composedPosts,
-                router: router
-            ),
-            imagePipeline: imagePipeline
+        let viewModel = FeedViewModel(
+            repository: repository,
+            engagementProvider: engagementProvider,
+            realtime: realtime,
+            composedPosts: composedPosts,
+            router: router
         )
+        switch presentation {
+        case .classic:
+            return FeedViewController(viewModel: viewModel, imagePipeline: imagePipeline)
+        case .snap:
+            return SnapFeedViewController(viewModel: viewModel, imagePipeline: imagePipeline)
+        }
     }
 
     public func makePostDetailViewController(for postID: PostID) -> UIViewController {
