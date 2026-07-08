@@ -1,7 +1,8 @@
-import CoreMedia
+import MediaCore
 import CoreModels
 import CoreNavigation
 import FeedInterface
+import MediaPlayback
 import UIKit
 
 /// The feed feature's entry point, resolved by the composition root and
@@ -15,6 +16,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     private let composedPosts: ComposedPostChannel?
     private let router: (any Router)?
     private let imagePipeline: ImagePipeline
+    private let videoPlayback: VideoPlaybackController?
     private let presentation: FeedPresentationStyle
 
     public init(
@@ -25,6 +27,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         composedPosts: ComposedPostChannel? = nil,
         router: (any Router)? = nil,
         imagePipeline: ImagePipeline,
+        videoPlayback: VideoPlaybackController? = nil,
         presentation: FeedPresentationStyle = .classic
     ) {
         self.repository = repository
@@ -34,6 +37,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         self.composedPosts = composedPosts
         self.router = router
         self.imagePipeline = imagePipeline
+        self.videoPlayback = videoPlayback
         self.presentation = presentation
     }
 
@@ -49,7 +53,11 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         case .classic:
             return FeedViewController(viewModel: viewModel, imagePipeline: imagePipeline)
         case .snap:
-            return SnapFeedViewController(viewModel: viewModel, imagePipeline: imagePipeline)
+            return SnapFeedViewController(
+                viewModel: viewModel,
+                imagePipeline: imagePipeline,
+                videoPlayback: videoPlayback
+            )
         }
     }
 

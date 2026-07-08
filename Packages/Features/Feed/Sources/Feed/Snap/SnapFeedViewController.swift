@@ -1,6 +1,7 @@
-import CoreMedia
+import MediaCore
 import CoreModels
 import DesignSystem
+import MediaPlayback
 import UIKit
 
 /// The full-screen, page-snapping timeline. Drives the *same* `FeedViewModel`
@@ -13,6 +14,7 @@ final class SnapFeedViewController: UIViewController {
 
     private let viewModel: FeedViewModel
     private let imagePipeline: ImagePipeline
+    private let videoPlayback: VideoPlaybackController?
 
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, PostID>!
@@ -31,9 +33,10 @@ final class SnapFeedViewController: UIViewController {
     /// released — a nonisolated deinit can't touch the VC's main-actor state.
     private let appObservers = NotificationObserverBag()
 
-    init(viewModel: FeedViewModel, imagePipeline: ImagePipeline) {
+    init(viewModel: FeedViewModel, imagePipeline: ImagePipeline, videoPlayback: VideoPlaybackController? = nil) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
+        self.videoPlayback = videoPlayback
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -105,7 +108,12 @@ final class SnapFeedViewController: UIViewController {
                 for: indexPath
             ) as! SnapFeedCell
             if let self, let model = self.modelsByID[id] {
-                cell.configure(with: model, engagement: self.viewModel.engagementState(for: id), pipeline: pipeline)
+                cell.configure(
+                    with: model,
+                    engagement: self.viewModel.engagementState(for: id),
+                    pipeline: pipeline,
+                    videoPlayback: self.videoPlayback
+                )
                 cell.onLikeTapped = { [weak self] id in self?.viewModel.toggleLike(for: id) }
                 cell.onAuthorTapped = { [weak self] authorID in self?.viewModel.didTapAuthor(authorID) }
             }
@@ -225,9 +233,15 @@ final class SnapFeedViewController: UIViewController {
 extension SnapFeedViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
         viewModel.willDisplayItem(at: indexPath.item)
-        // The active cell may only now have been dequeued; (re)dispatch. The
-        // dispatcher dedupes, so this is a no-op unless it's genuinely active.
+        // Recompute the active index (a new page may have become active), then —
+        // crucially — activate THIS cell if it's the active one. The dispatcher
+        // records the active index the instant a scroll settles or content
+        // loads, which can be before the cell exists; without this net that
+        // activation would be lost, since the index never changes again.
         updateActiveItem()
+        if lifecycle.activeIndex == indexPath.item {
+            (cell as? SnapCellLifecycle)?.willBecomeActive()
+        }
     }
 
     func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
@@ -265,6 +279,14 @@ extension SnapFeedViewController: UICollectionViewDataSourcePrefetching {
         let urls = prefetchURLs(for: indexPaths)
         let pipeline = imagePipeline
         Task { await pipeline.prefetch(urls) }
+        // Warm the synthesizer/asset for upcoming video pages so their play is
+        // instant when they snap into view.
+        for indexPath in indexPaths where orderedIDs.indices.contains(indexPath.item) {
+            let model = modelsByID[orderedIDs[indexPath.item]]
+            if let model, model.mediaKind == .video, let url = model.mediaURL {
+                videoPlayback?.preroll(url)
+            }
+        }
     }
 
     func collectionView(_ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]) {

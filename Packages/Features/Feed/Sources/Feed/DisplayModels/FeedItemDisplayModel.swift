@@ -1,3 +1,4 @@
+import MediaCore
 import CoreModels
 import Foundation
 import UIKit
@@ -63,6 +64,7 @@ public struct FeedItemDisplayModel: Identifiable, Sendable {
     let caption: RenderedText?
     let captionHeight: CGFloat
     let mediaURL: URL?
+    let mediaKind: MediaKind
     let mediaHeight: CGFloat
     public let height: CGFloat
 }
@@ -103,6 +105,7 @@ public struct FeedDisplayModelBuilder: Sendable {
         }
 
         let attachment = entry.post.attachments.first
+        let mediaKind = attachment.map { MediaKind(mimeType: $0.mimeType) } ?? .image
         let mediaHeight = attachment.map {
             FeedCellMetrics.mediaHeight(contentWidth: contentWidth, aspectRatio: $0.aspectRatio)
         } ?? 0
@@ -126,6 +129,7 @@ public struct FeedDisplayModelBuilder: Sendable {
             caption: caption,
             captionHeight: captionHeight,
             mediaURL: attachment?.url,
+            mediaKind: mediaKind,
             mediaHeight: mediaHeight,
             height: height.rounded(.up)
         )

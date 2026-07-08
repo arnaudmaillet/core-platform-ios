@@ -5,8 +5,9 @@ import ChatInterface
 import Connect
 import CoreContracts
 import CoreNavigation
-import CoreMedia
+import MediaCore
 import CoreModels
+import MediaPlayback
 import CoreNetworking
 import CoreNetworkingMocks
 import CoreRealtime
@@ -109,6 +110,17 @@ final class AppContainer {
         return ImagePipeline(fetcher: fetcher)
     }()
 
+    /// Snap-feed video playback. Mock mode synthesizes deterministic clips for
+    /// `mock://video/…` URLs; fleet mode passes delivery URLs straight to the
+    /// player (a no-op today — the backend serves no video renditions yet).
+    private(set) lazy var videoPlayback: VideoPlaybackController = {
+        let source: any VideoSource = switch environment {
+        case .mock: PlaceholderVideoFetcher()
+        case .localFleet: PassthroughVideoSource()
+        }
+        return VideoPlaybackController(source: source)
+    }()
+
     // MARK: - Realtime
 
     // Not `lazy var`: stored-property initializers can't call an
@@ -191,6 +203,7 @@ final class AppContainer {
         composedPosts: composedPostChannel,
         router: routeResolver,
         imagePipeline: imagePipeline,
+        videoPlayback: videoPlayback,
         presentation: feedPresentation
     )
 

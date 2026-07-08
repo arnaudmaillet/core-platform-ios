@@ -17,7 +17,8 @@
 		5F00000000000000000000B8 /* AuthInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000C8 /* AuthInterface */; };
 		5F00000000000000000000B9 /* Auth in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000C9 /* Auth */; };
 		5F00000000000000000000BA /* CoreNetworkingMocks in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000CA /* CoreNetworkingMocks */; };
-		5F00000000000000000000BB /* CoreMedia in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000CB /* CoreMedia */; };
+		5F00000000000000000000BB /* MediaCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000CB /* MediaCore */; };
+		5F00000000000000000010B2 /* MediaPlayback in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000010B1 /* MediaPlayback */; };
 		5F00000000000000000000BC /* Feed in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000CC /* Feed */; };
 		5F00000000000000000000BD /* CoreRealtime in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000CD /* CoreRealtime */; };
 		5F00000000000000000000BE /* CoreRealtimeMocks in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000CE /* CoreRealtimeMocks */; };
@@ -73,7 +74,8 @@
 				5F00000000000000000000B8 /* AuthInterface in Frameworks */,
 				5F00000000000000000000B9 /* Auth in Frameworks */,
 				5F00000000000000000000BA /* CoreNetworkingMocks in Frameworks */,
-				5F00000000000000000000BB /* CoreMedia in Frameworks */,
+				5F00000000000000000000BB /* MediaCore in Frameworks */,
+				5F00000000000000000010B2 /* MediaPlayback in Frameworks */,
 				5F00000000000000000000BC /* Feed in Frameworks */,
 				5F00000000000000000000BD /* CoreRealtime in Frameworks */,
 				5F00000000000000000000BE /* CoreRealtimeMocks in Frameworks */,
@@ -139,7 +141,8 @@
 				5F00000000000000000000C8 /* AuthInterface */,
 				5F00000000000000000000C9 /* Auth */,
 				5F00000000000000000000CA /* CoreNetworkingMocks */,
-				5F00000000000000000000CB /* CoreMedia */,
+				5F00000000000000000000CB /* MediaCore */,
+				5F00000000000000000010B1 /* MediaPlayback */,
 				5F00000000000000000000CC /* Feed */,
 				5F00000000000000000000CD /* CoreRealtime */,
 				5F00000000000000000000CE /* CoreRealtimeMocks */,
@@ -184,7 +187,8 @@
 				5F00000000000000000000A7 /* XCLocalSwiftPackageReference "Packages/Core/CoreStorage" */,
 				5F00000000000000000000A8 /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/AuthInterface" */,
 				5F00000000000000000000A9 /* XCLocalSwiftPackageReference "Packages/Features/Auth" */,
-				5F00000000000000000000AA /* XCLocalSwiftPackageReference "Packages/Core/CoreMedia" */,
+				5F00000000000000000000AA /* XCLocalSwiftPackageReference "Packages/Core/MediaCore" */,
+				5F00000000000000000010B0 /* XCLocalSwiftPackageReference "Packages/Core/MediaPlayback" */,
 				5F00000000000000000000AB /* XCLocalSwiftPackageReference "Packages/Features/Feed" */,
 				5F00000000000000000000AC /* XCLocalSwiftPackageReference "Packages/Core/CoreRealtime" */,
 				5F00000000000000000000AD /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/UploadInterface" */,
@@ -468,9 +472,13 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/Features/Auth;
 		};
-		5F00000000000000000000AA /* XCLocalSwiftPackageReference "Packages/Core/CoreMedia" */ = {
+		5F00000000000000000000AA /* XCLocalSwiftPackageReference "Packages/Core/MediaCore" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = Packages/Core/CoreMedia;
+			relativePath = Packages/Core/MediaCore;
+		};
+		5F00000000000000000010B0 /* XCLocalSwiftPackageReference "Packages/Core/MediaPlayback" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Core/MediaPlayback;
 		};
 		5F00000000000000000000AB /* XCLocalSwiftPackageReference "Packages/Features/Feed" */ = {
 			isa = XCLocalSwiftPackageReference;
@@ -563,9 +571,13 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = CoreNetworkingMocks;
 		};
-		5F00000000000000000000CB /* CoreMedia */ = {
+		5F00000000000000000000CB /* MediaCore */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = CoreMedia;
+			productName = MediaCore;
+		};
+		5F00000000000000000010B1 /* MediaPlayback */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MediaPlayback;
 		};
 		5F00000000000000000000CC /* Feed */ = {
 			isa = XCSwiftPackageProductDependency;

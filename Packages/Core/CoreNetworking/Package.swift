@@ -12,7 +12,7 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../../Kit/CoreContracts"),
-        .package(path: "../CoreMedia"),
+        .package(path: "../MediaCore"),
         .package(url: "https://github.com/connectrpc/connect-swift.git", from: "1.0.0"),
         .package(url: "https://github.com/apple/swift-protobuf.git", from: "1.28.0")
     ],
@@ -28,7 +28,7 @@ let package = Package(
             dependencies: [
                 "CoreNetworking",
                 "CoreContracts",
-                .product(name: "CoreMedia", package: "CoreMedia"),
+                .product(name: "MediaCore", package: "MediaCore"),
                 .product(name: "Connect", package: "connect-swift"),
                 .product(name: "SwiftProtobuf", package: "swift-protobuf")
             ]

@@ -12,7 +12,7 @@ let package = Package(
         .package(path: "../../FeatureInterfaces/AuthInterface"),
         .package(path: "../../Kit/CoreContracts"),
         .package(path: "../../Kit/CoreModels"),
-        .package(path: "../../Core/CoreMedia"),
+        .package(path: "../../Core/MediaCore"),
         .package(path: "../../Core/CoreNetworking"),
         .package(path: "../../Core/DesignSystem")
     ],
@@ -24,7 +24,7 @@ let package = Package(
                 "AuthInterface",
                 "CoreContracts",
                 "CoreModels",
-                "CoreMedia",
+                "MediaCore",
                 "DesignSystem"
             ]
         ),

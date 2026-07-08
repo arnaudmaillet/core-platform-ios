@@ -1,6 +1,7 @@
-import CoreMedia
+import MediaCore
 import CoreModels
 import DesignSystem
+import MediaPlayback
 import UIKit
 
 /// A full-screen snap cell: cover-fit media under a bottom scrim, with the
@@ -16,6 +17,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     static let reuseIdentifier = "SnapFeedCell"
 
     private let mediaView = UIImageView()
+    private let videoRenderView = VideoRenderView()
     private let scrimView = GradientView(colors: [.clear, UIColor.black.withAlphaComponent(0.75)])
     private let textOnlyBackground = GradientView(
         colors: [UIColor(red: 0.15, green: 0.16, blue: 0.24, alpha: 1),
@@ -37,6 +39,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     private var representedID: PostID?
     private var authorID: ProfileID?
+    private var mediaURL: URL?
+    private var mediaKind: MediaKind = .image
+    private var videoPlayback: VideoPlaybackController?
     private var imageTasks: [Task<Void, Never>] = []
     private var isActive = false
 
@@ -99,6 +104,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     private func buildLayout() {
         textOnlyBackground.pin(to: contentView)
         mediaView.pin(to: contentView)
+        videoRenderView.pin(to: contentView)
 
         scrimView.isUserInteractionEnabled = false
         scrimView.constrain(in: contentView) { parent in
@@ -145,9 +151,17 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     // MARK: - Configuration
 
-    func configure(with model: FeedItemDisplayModel, engagement: FeedViewModel.EngagementState, pipeline: ImagePipeline) {
+    func configure(
+        with model: FeedItemDisplayModel,
+        engagement: FeedViewModel.EngagementState,
+        pipeline: ImagePipeline,
+        videoPlayback: VideoPlaybackController?
+    ) {
         representedID = model.id
         authorID = model.authorID
+        mediaURL = model.mediaURL
+        mediaKind = model.mediaKind
+        self.videoPlayback = videoPlayback
         updateEngagement(engagement)
 
         nameLabel.text = model.authorName
@@ -158,7 +172,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         captionLabel.isHidden = (captionText?.isEmpty ?? true)
 
         let hasMedia = model.mediaURL != nil
-        mediaView.isHidden = !hasMedia
+        let isVideo = hasMedia && model.mediaKind == .video
+        let isImage = hasMedia && model.mediaKind == .image
+        mediaView.isHidden = !isImage
+        videoRenderView.isHidden = !isVideo
         scrimView.isHidden = !hasMedia
         textOnlyBackground.isHidden = hasMedia
         // Text-only posts lean on the caption, so give it more room and weight.
@@ -172,7 +189,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         mediaView.transform = .identity
 
         loadImage(model.avatarURL, into: avatarView, expecting: model.id, pipeline: pipeline)
-        if hasMedia {
+        if isImage {
             loadImage(model.mediaURL, into: mediaView, expecting: model.id, pipeline: pipeline)
         }
     }
@@ -214,13 +231,25 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func willBecomeActive() {
         guard !isActive else { return }
         isActive = true
-        startKenBurns()
+        switch mediaKind {
+        case .video:
+            guard let url = mediaURL, let videoPlayback else { return }
+            let view = videoRenderView
+            Task { await videoPlayback.play(url, in: view) }
+        case .image:
+            startKenBurns()
+        }
     }
 
     func didResignActive() {
         guard isActive else { return }
         isActive = false
-        stopKenBurns()
+        switch mediaKind {
+        case .video:
+            videoPlayback?.stop(videoRenderView)
+        case .image:
+            stopKenBurns()
+        }
     }
 
     /// Phase 1's visible proof that activation works: a slow zoom on the active
@@ -242,8 +271,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         super.prepareForReuse()
         isActive = false
         stopKenBurns()
+        videoPlayback?.stop(videoRenderView)
         representedID = nil
         authorID = nil
+        mediaURL = nil
+        mediaKind = .image
         for task in imageTasks { task.cancel() }
         imageTasks.removeAll()
         avatarView.image = nil

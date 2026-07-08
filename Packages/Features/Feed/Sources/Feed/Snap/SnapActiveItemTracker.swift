@@ -37,6 +37,10 @@ struct SnapLifecycleDispatcher: Equatable {
         static let none = Transition(resign: nil, activate: nil)
     }
 
+    /// The item that should currently be active: the snapped page, but only
+    /// while the surface is visible.
+    var activeIndex: Int? { effectiveActive }
+
     private var effectiveActive: Int? { isVisible ? pageIndex : nil }
 
     /// The snapped page changed (a scroll settled, or content reloaded).

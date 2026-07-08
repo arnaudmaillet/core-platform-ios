@@ -122,7 +122,8 @@ public final class MockSocialServices: @unchecked Sendable {
     private func makeAttachment(url: String, width: Int, height: Int) -> Post_V1_MediaAttachmentView {
         var attachment = Post_V1_MediaAttachmentView()
         attachment.cdnURL = url
-        attachment.mimeType = "image/png"
+        // The snap feed routes on MIME: `mock://video/…` posts play, others render as images.
+        attachment.mimeType = url.contains("mock://video/") ? "video/mp4" : "image/png"
         attachment.width = UInt32(width)
         attachment.height = UInt32(height)
         attachment.thumbnailURL = url
