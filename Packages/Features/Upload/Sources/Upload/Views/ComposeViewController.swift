@@ -10,6 +10,7 @@ final class ComposeViewController: UIViewController {
     private let scrollView = UIScrollView()
     private let contentStack = UIStackView()
     private let imageButton = UIButton(configuration: .gray())
+    private let recordButton = UIButton(configuration: .gray())
     private let previewView = UIImageView()
     private let captionView = UITextView()
     private let captionPlaceholder = UILabel()
@@ -60,6 +61,15 @@ final class ComposeViewController: UIViewController {
         imageButton.configuration = imageConfig
         imageButton.addAction(UIAction { [weak self] _ in self?.presentPicker() }, for: .primaryActionTriggered)
 
+        var recordConfig = UIButton.Configuration.gray()
+        recordConfig.title = "Record Video"
+        recordConfig.image = UIImage(systemName: "video.badge.plus")
+        recordConfig.imagePadding = Spacing.sm
+        recordButton.configuration = recordConfig
+        recordButton.addAction(UIAction { [weak self] _ in self?.presentCamera() }, for: .primaryActionTriggered)
+        // No camera on the simulator (or an unauthorized/absent device) → hide it.
+        recordButton.isHidden = !UIImagePickerController.isSourceTypeAvailable(.camera)
+
         previewView.contentMode = .scaleAspectFill
         previewView.clipsToBounds = true
         previewView.layer.cornerRadius = 12
@@ -89,6 +99,7 @@ final class ComposeViewController: UIViewController {
         errorLabel.isHidden = true
 
         contentStack.addArrangedSubview(imageButton)
+        contentStack.addArrangedSubview(recordButton)
         contentStack.addArrangedSubview(previewView)
         contentStack.addArrangedSubview(captionView)
         contentStack.addArrangedSubview(errorLabel)
@@ -115,6 +126,20 @@ final class ComposeViewController: UIViewController {
         config.filter = .any(of: [.images, .videos])
         config.selectionLimit = 1
         let picker = PHPickerViewController(configuration: config)
+        picker.delegate = self
+        present(picker, animated: true)
+    }
+
+    /// Records a new video with the camera. `UIImagePickerController` presents
+    /// the system camera + the mic/camera permission prompts; the recorded clip
+    /// funnels into the same `PickedVideo` path as a library selection.
+    private func presentCamera() {
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else { return }
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.mediaTypes = [UTType.movie.identifier]
+        picker.cameraCaptureMode = .video
+        picker.videoQuality = .typeHigh
         picker.delegate = self
         present(picker, animated: true)
     }
@@ -200,6 +225,31 @@ extension ComposeViewController: PHPickerViewControllerDelegate {
             let poster = await VideoExporter().posterImage(for: url)
             if self.viewModel.pickedVideoURL == url { self.previewView.image = poster }
         }
+    }
+}
+
+// MARK: - Camera capture
+
+extension ComposeViewController: UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+    func imagePickerController(
+        _ picker: UIImagePickerController,
+        didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
+    ) {
+        picker.dismiss(animated: true)
+        guard let url = info[.mediaURL] as? URL else { return }
+        // The recorded file is in a temp location the picker may reclaim — copy it.
+        let dest = FileManager.default.temporaryDirectory
+            .appendingPathComponent("recorded-\(UUID().uuidString).\(url.pathExtension.isEmpty ? "mov" : url.pathExtension)")
+        do {
+            try FileManager.default.copyItem(at: url, to: dest)
+        } catch {
+            return
+        }
+        applyPickedVideo(dest)
+    }
+
+    func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+        picker.dismiss(animated: true)
     }
 }
 
