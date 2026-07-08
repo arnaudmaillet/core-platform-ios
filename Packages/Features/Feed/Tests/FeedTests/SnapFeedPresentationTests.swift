@@ -18,13 +18,13 @@ struct SnapFeedPresentationTests {
         #expect(vc is FeedViewController)
     }
 
-    @Test func defaultPresentationIsClassic() {
-        // Callers that predate the snap feed keep the list, untouched.
+    @Test func defaultPresentationIsSnap() {
+        // Snap is the product default; a caller that omits `presentation` gets it.
         let builder = FeedFeatureBuilder(
             repository: StubFeedProvider(),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
         )
-        #expect(builder.makeFeedViewController() is FeedViewController)
+        #expect(builder.makeFeedViewController() is SnapFeedViewController)
     }
 
     private func makeBuilder(presentation: FeedPresentationStyle) -> FeedFeatureBuilder {

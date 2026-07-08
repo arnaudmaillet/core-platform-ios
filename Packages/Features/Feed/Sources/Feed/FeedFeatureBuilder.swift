@@ -28,7 +28,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         router: (any Router)? = nil,
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController? = nil,
-        presentation: FeedPresentationStyle = .classic
+        presentation: FeedPresentationStyle = .snap
     ) {
         self.repository = repository
         self.engagementProvider = engagementProvider
