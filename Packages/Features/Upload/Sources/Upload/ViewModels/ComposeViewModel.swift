@@ -15,6 +15,7 @@ public final class ComposeViewModel {
     public var onStateChange: ((State) -> Void)?
 
     public private(set) var pickedImage: UIImage?
+    public private(set) var pickedVideoURL: URL?
     public var caption: String = ""
 
     private let composer: any PostComposing
@@ -24,25 +25,40 @@ public final class ComposeViewModel {
         self.composer = composer
     }
 
+    public var hasMedia: Bool { pickedImage != nil || pickedVideoURL != nil }
+
     public var canPost: Bool {
-        state != .uploading && (pickedImage != nil || !caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        state != .uploading && (hasMedia || !caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 
     public func setImage(_ image: UIImage?) {
         pickedImage = image
+        if image != nil { pickedVideoURL = nil } // media kinds are mutually exclusive
         // Nudge observers so the Post button re-evaluates `canPost`.
         if state == .editing { state = .editing }
+    }
+
+    public func setVideo(_ url: URL?) {
+        pickedVideoURL = url
+        if url != nil { pickedImage = nil }
+        if state == .editing { state = .editing }
+    }
+
+    private var composeMedia: ComposeMedia? {
+        if let pickedImage { return .image(PickedImage(pickedImage)) }
+        if let pickedVideoURL { return .video(PickedVideo(sourceURL: pickedVideoURL)) }
+        return nil
     }
 
     public func post() {
         guard canPost, state != .uploading else { return }
         state = .uploading
 
-        let picked = pickedImage.map { PickedImage($0) }
+        let media = composeMedia
         let caption = caption
         submission = Task {
             do {
-                try await composer.publish(image: picked, caption: caption)
+                try await composer.publish(media: media, caption: caption)
                 state = .finished
             } catch let error as ComposeError {
                 state = .failed(message: Self.message(for: error))
@@ -55,11 +71,11 @@ public final class ComposeViewModel {
     private static func message(for error: ComposeError) -> String {
         switch error {
         case .emptyPost:
-            "Add a photo or write something first."
+            "Add a photo or video, or write something first."
         case .notAuthenticated, .noViewerProfile:
             "Your session expired. Sign in again."
         case .media:
-            "Your photo couldn't be uploaded. Try again."
+            "Your media couldn't be uploaded. Try again."
         case .transport:
             "Couldn't reach the server. Check your connection."
         }

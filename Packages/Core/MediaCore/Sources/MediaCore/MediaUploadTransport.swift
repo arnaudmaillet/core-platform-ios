@@ -27,6 +27,23 @@ public enum MediaUploadError: Error, Equatable {
 
 public protocol MediaUploadTransport: Sendable {
     func upload(_ data: Data, using ticket: MediaUploadTicket) async throws -> String
+    /// Uploads the contents of a file. Video payloads are tens-to-hundreds of MB,
+    /// so this streams from disk rather than buffering the whole clip in memory.
+    func upload(fileURL: URL, using ticket: MediaUploadTicket) async throws -> String
+}
+
+public extension MediaUploadTransport {
+    /// Default: read the file and reuse the in-memory path. Real transports
+    /// override this to stream from disk (see `URLSessionMediaUploadTransport`).
+    func upload(fileURL: URL, using ticket: MediaUploadTicket) async throws -> String {
+        let data: Data
+        do {
+            data = try Data(contentsOf: fileURL)
+        } catch {
+            throw MediaUploadError.transport("could not read \(fileURL.lastPathComponent): \(error)")
+        }
+        return try await upload(data, using: ticket)
+    }
 }
 
 /// Rewrites a URL host for reachability while preserving the original host in
@@ -69,7 +86,24 @@ public final class URLSessionMediaUploadTransport: NSObject, MediaUploadTranspor
         guard data.count <= ticket.maxSizeBytes else {
             throw MediaUploadError.payloadTooLarge(limit: ticket.maxSizeBytes)
         }
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try data.write(to: tempURL, options: .atomic)
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+        return try await send(fileURL: tempURL, using: ticket)
+    }
 
+    /// Streams the file straight to storage — no in-memory buffering — for
+    /// large payloads (video).
+    public func upload(fileURL: URL, using ticket: MediaUploadTicket) async throws -> String {
+        let size = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? UInt64) ?? nil
+        if let size, size > ticket.maxSizeBytes {
+            throw MediaUploadError.payloadTooLarge(limit: ticket.maxSizeBytes)
+        }
+        return try await send(fileURL: fileURL, using: ticket)
+    }
+
+    private func send(fileURL: URL, using ticket: MediaUploadTicket) async throws -> String {
         var uploadURL = ticket.uploadURL
         var hostHeader: String?
         if let rewrite = hostRewrite?.apply(to: uploadURL) {
@@ -86,12 +120,7 @@ public final class URLSessionMediaUploadTransport: NSObject, MediaUploadTranspor
             request.setValue(value, forHTTPHeaderField: field)
         }
 
-        let tempURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString)
-        try data.write(to: tempURL, options: .atomic)
-        defer { try? FileManager.default.removeItem(at: tempURL) }
-
-        let (responseData, response) = try await session.upload(for: request, fromFile: tempURL)
+        let (responseData, response) = try await session.upload(for: request, fromFile: fileURL)
         guard let http = response as? HTTPURLResponse else {
             throw MediaUploadError.transport("non-HTTP response")
         }

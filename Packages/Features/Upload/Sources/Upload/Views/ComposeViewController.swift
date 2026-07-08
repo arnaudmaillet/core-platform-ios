@@ -1,6 +1,8 @@
 import DesignSystem
+import MediaPlayback
 import PhotosUI
 import UIKit
+import UniformTypeIdentifiers
 
 final class ComposeViewController: UIViewController {
     private let viewModel: ComposeViewModel
@@ -52,7 +54,7 @@ final class ComposeViewController: UIViewController {
         contentStack.alignment = .fill
 
         var imageConfig = UIButton.Configuration.gray()
-        imageConfig.title = "Add Photo"
+        imageConfig.title = "Add Photo or Video"
         imageConfig.image = UIImage(systemName: "photo.badge.plus")
         imageConfig.imagePadding = Spacing.sm
         imageButton.configuration = imageConfig
@@ -110,7 +112,7 @@ final class ComposeViewController: UIViewController {
 
     private func presentPicker() {
         var config = PHPickerConfiguration()
-        config.filter = .images
+        config.filter = .any(of: [.images, .videos])
         config.selectionLimit = 1
         let picker = PHPickerViewController(configuration: config)
         picker.delegate = self
@@ -147,14 +149,31 @@ final class ComposeViewController: UIViewController {
 extension ComposeViewController: PHPickerViewControllerDelegate {
     func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
         picker.dismiss(animated: true)
-        guard let provider = results.first?.itemProvider, provider.canLoadObject(ofClass: UIImage.self) else {
-            return
-        }
-        provider.loadObject(ofClass: UIImage.self) { [weak self] object, _ in
-            guard let image = object as? UIImage else { return }
-            Task { @MainActor in
-                self?.applyPickedImage(image)
+        guard let provider = results.first?.itemProvider else { return }
+
+        if provider.hasItemConformingToTypeIdentifier(UTType.movie.identifier) {
+            loadPickedVideo(from: provider)
+        } else if provider.canLoadObject(ofClass: UIImage.self) {
+            provider.loadObject(ofClass: UIImage.self) { [weak self] object, _ in
+                guard let image = object as? UIImage else { return }
+                Task { @MainActor in self?.applyPickedImage(image) }
             }
+        }
+    }
+
+    /// Copies the picked movie out of the (soon-deleted) provider sandbox into
+    /// our temp dir, hands the URL to the view model, and shows a poster frame.
+    private func loadPickedVideo(from provider: NSItemProvider) {
+        provider.loadFileRepresentation(forTypeIdentifier: UTType.movie.identifier) { [weak self] url, _ in
+            guard let url else { return }
+            let dest = FileManager.default.temporaryDirectory
+                .appendingPathComponent("picked-\(UUID().uuidString).\(url.pathExtension.isEmpty ? "mov" : url.pathExtension)")
+            do {
+                try FileManager.default.copyItem(at: url, to: dest)
+            } catch {
+                return
+            }
+            Task { @MainActor in self?.applyPickedVideo(dest) }
         }
     }
 
@@ -163,9 +182,24 @@ extension ComposeViewController: PHPickerViewControllerDelegate {
         previewView.image = image
         previewView.isHidden = false
         var config = imageButton.configuration
-        config?.title = "Change Photo"
+        config?.title = "Change Photo or Video"
         imageButton.configuration = config
         postButton.isEnabled = viewModel.canPost
+    }
+
+    private func applyPickedVideo(_ url: URL) {
+        viewModel.setVideo(url)
+        previewView.image = nil
+        previewView.isHidden = false
+        var config = imageButton.configuration
+        config?.title = "Change Photo or Video"
+        imageButton.configuration = config
+        postButton.isEnabled = viewModel.canPost
+        // Poster frame for the preview (best-effort, async).
+        Task { @MainActor in
+            let poster = await VideoExporter().posterImage(for: url)
+            if self.viewModel.pickedVideoURL == url { self.previewView.image = poster }
+        }
     }
 }
 

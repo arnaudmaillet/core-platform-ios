@@ -13,6 +13,7 @@ let package = Package(
         .package(path: "../../Kit/CoreContracts"),
         .package(path: "../../Kit/CoreModels"),
         .package(path: "../../Core/MediaCore"),
+        .package(path: "../../Core/MediaPlayback"),
         .package(path: "../../Core/CoreNetworking"),
         .package(path: "../../Core/DesignSystem")
     ],
@@ -25,6 +26,7 @@ let package = Package(
                 "CoreContracts",
                 "CoreModels",
                 "MediaCore",
+                "MediaPlayback",
                 "DesignSystem"
             ]
         ),
