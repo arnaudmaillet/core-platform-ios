@@ -187,11 +187,25 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         avatarView.image = nil
         mediaView.image = nil
         mediaView.transform = .identity
+        videoRenderView.setPoster(nil)
 
         loadImage(model.avatarURL, into: avatarView, expecting: model.id, pipeline: pipeline)
         if isImage {
             loadImage(model.mediaURL, into: mediaView, expecting: model.id, pipeline: pipeline)
         }
+        if isVideo, let thumbnailURL = model.thumbnailURL {
+            loadPoster(thumbnailURL, expecting: model.id, pipeline: pipeline)
+        }
+    }
+
+    /// Loads the video poster into the render view; shown under the player until
+    /// the first frame is ready (or while an asset is still processing).
+    private func loadPoster(_ url: URL, expecting id: PostID, pipeline: ImagePipeline) {
+        imageTasks.append(Task { [weak self] in
+            guard let image = try? await pipeline.image(for: url) else { return }
+            guard let self, self.representedID == id else { return }
+            self.videoRenderView.setPoster(image)
+        })
     }
 
     /// Updates only the engagement rail — live counter ticks and optimistic
@@ -280,6 +294,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         imageTasks.removeAll()
         avatarView.image = nil
         mediaView.image = nil
+        videoRenderView.setPoster(nil)
     }
 }
 

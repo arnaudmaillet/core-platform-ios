@@ -15,7 +15,7 @@ struct SnapMediaKindTests {
                 caption: "hi",
                 attachments: [MediaAttachment(
                     url: URL(string: "mock://video/0"),
-                    thumbnailURL: nil,
+                    thumbnailURL: URL(string: "mock://poster/0"),
                     mimeType: mimeType,
                     pixelWidth: 1080,
                     pixelHeight: 1920
@@ -30,6 +30,8 @@ struct SnapMediaKindTests {
     @Test func videoAttachmentBecomesVideoKind() {
         let model = FeedDisplayModelBuilder(cellWidth: 390).build([entry(mimeType: "video/mp4")], relativeTo: Date(timeIntervalSince1970: 0)).first
         #expect(model?.mediaKind == .video)
+        // The poster URL threads through for the video cell.
+        #expect(model?.thumbnailURL == URL(string: "mock://poster/0"))
     }
 
     @Test func imageAttachmentBecomesImageKind() {
