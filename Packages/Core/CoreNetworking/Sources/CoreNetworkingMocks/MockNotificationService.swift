@@ -7,6 +7,8 @@ import Foundation
 /// MarkAllRead. Senders are dataset authors, so profile hydration resolves.
 public final class MockNotificationService: @unchecked Sendable {
     private let dataset: MockSocialDataset
+    /// Unread count, cleared by MarkAllRead so the badge demo is realistic.
+    private let unread = Unread()
 
     public init(dataset: MockSocialDataset) {
         self.dataset = dataset
@@ -16,16 +18,24 @@ public final class MockNotificationService: @unchecked Sendable {
         bff.register(path: "/notification.v1.NotificationService/ListNotifications") { [self] (request: Notification_V1_ListNotificationsRequest) in
             list(request)
         }
-        bff.register(path: "/notification.v1.NotificationService/MarkAllRead") { (_: Notification_V1_MarkAllReadRequest) in
+        bff.register(path: "/notification.v1.NotificationService/MarkAllRead") { [self] (_: Notification_V1_MarkAllReadRequest) in
+            unread.clear()
             var response = Notification_V1_CommandResponse()
             response.success = true
             return .success(response)
         }
         bff.register(path: "/notification.v1.NotificationService/GetUnreadCount") { [self] (_: Notification_V1_GetUnreadCountRequest) in
             var response = Notification_V1_GetUnreadCountResponse()
-            response.unreadCount = 2
+            response.unreadCount = Int64(unread.value)
             return .success(response)
         }
+    }
+
+    private final class Unread: @unchecked Sendable {
+        private let lock = NSLock()
+        private var count = 2 // matches the two unread fixtures
+        var value: Int { lock.withLock { count } }
+        func clear() { lock.withLock { count = 0 } }
     }
 
     private func list(_ request: Notification_V1_ListNotificationsRequest) -> Result<Notification_V1_ListNotificationsResponse, ConnectError> {
