@@ -44,6 +44,10 @@ public final class FeedViewModel {
     /// Per-post engagement updates (like toggles, live counter ticks); the
     /// view reconfigures just that cell — never a full snapshot apply.
     public var onEngagementChange: ((PostID, EngagementState) -> Void)?
+    /// Fired when the viewer's own just-composed post is prepended. The
+    /// full-screen snap feed scrolls to the top to reveal it (a normal prepend
+    /// would otherwise shift it above the viewport).
+    public var onOwnPostInserted: (() -> Void)?
 
     private let repository: any FeedProviding
     private let engagementProvider: (any EngagementProviding)?
@@ -250,6 +254,7 @@ public final class FeedViewModel {
         subscribeToCounters(for: [model.id])
         phase = .content
         emit()
+        onOwnPostInserted?()
     }
 
     private func subscribeToCounters(for ids: [PostID]) {

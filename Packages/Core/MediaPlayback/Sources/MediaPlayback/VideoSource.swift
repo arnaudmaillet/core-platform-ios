@@ -41,6 +41,11 @@ public struct PlaceholderVideoFetcher: VideoSource {
     }
 
     public func playableURL(for url: URL) async throws -> URL {
+        // A local file (e.g. a just-picked/exported clip in the optimistic
+        // compose insert) is already playable — play the real video, don't
+        // synthesize over it.
+        if url.isFileURL { return url }
+
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         func dim(_ name: String, _ fallback: Int) -> Int {
             components?.queryItems?.first { $0.name == name }.flatMap { Int($0.value ?? "") } ?? fallback

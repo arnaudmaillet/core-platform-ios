@@ -55,6 +55,16 @@ final class SnapFeedViewController: UIViewController {
         viewModel.onEngagementChange = { [weak self] id, state in
             self?.updateVisibleEngagement(for: id, state: state)
         }
+        viewModel.onOwnPostInserted = { [weak self] in
+            // Reveal the viewer's just-posted item: a prepend on a full-screen
+            // pager otherwise shifts it above the viewport. Defer so the
+            // snapshot apply lands first.
+            DispatchQueue.main.async {
+                guard let self, !self.orderedIDs.isEmpty else { return }
+                self.collectionView.scrollToItem(at: IndexPath(item: 0, section: 0), at: .top, animated: true)
+                self.updateActiveItem()
+            }
+        }
     }
 
     private var didStartLoading = false

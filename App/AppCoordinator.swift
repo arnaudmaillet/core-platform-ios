@@ -4,6 +4,7 @@ import CoreModels
 import CoreNavigation
 import CoreRealtime
 import DesignSystem
+import MediaPlayback
 import UIKit
 import Upload
 
@@ -54,6 +55,7 @@ final class AppCoordinator: Coordinator {
             let sessionManager = container.sessionManager
             let credentials = container.environment.demoCredentials
             let composeDemo = ProcessInfo.processInfo.arguments.contains("-mock-compose-demo")
+            let composeVideoDemo = ProcessInfo.processInfo.arguments.contains("-mock-compose-video-demo")
             let composer = container.postComposer
             Task {
                 await sessionManager.logout()
@@ -62,13 +64,25 @@ final class AppCoordinator: Coordinator {
                     password: credentials.password
                 )
                 // Exercises the real upload+create+publish flow so the compose
-                // wiring is verifiable without driving the photo picker UI.
+                // wiring is verifiable without driving the picker UI.
                 if composeDemo {
                     try? await Task.sleep(for: .seconds(2))
                     try? await composer.publish(
-                        image: PickedImage(Self.demoImage()),
+                        media: .image(PickedImage(Self.demoImage())),
                         caption: "Shipped M4: photo upload + compose 🚀"
                     )
+                }
+                // Same, for the video path: synthesize a source clip and run it
+                // through export → upload → publish → optimistic local playback.
+                if composeVideoDemo {
+                    try? await Task.sleep(for: .seconds(2))
+                    if let source = try? await PlaceholderVideoFetcher()
+                        .playableURL(for: URL(string: "mock://video/demo?w=720&h=1280")!) {
+                        try? await composer.publish(
+                            media: .video(PickedVideo(sourceURL: source)),
+                            caption: "My first video post 🎬"
+                        )
+                    }
                 }
             }
         }

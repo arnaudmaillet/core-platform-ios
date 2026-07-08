@@ -1,6 +1,7 @@
 import AuthInterface
 import CoreContracts
 import MediaCore
+import MediaPlayback
 import CoreModels
 import CoreNetworking
 import CoreNetworkingMocks
@@ -60,7 +61,7 @@ struct PostComposerTests {
         let harness = makeHarness()
         let entries = await harness.channel.entries()
 
-        try await harness.composer.publish(image: PickedImage(solidImage()), caption: "Hello world")
+        try await harness.composer.publish(media: .image(PickedImage(solidImage())), caption: "Hello world")
 
         var iterator = entries.makeAsyncIterator()
         let entry = await iterator.next()
@@ -83,11 +84,37 @@ struct PostComposerTests {
         #expect(paths.firstIndex(of: "/post.v1.PostService/CreatePost")! < paths.firstIndex(of: "/post.v1.PostService/PublishPost")!)
     }
 
+    @Test func videoPostExportsUploadsAndBroadcastsLocalPlayableEntry() async throws {
+        let harness = makeHarness()
+        let entries = await harness.channel.entries()
+
+        // A real source clip to pick.
+        let source = try await PlaceholderVideoFetcher(durationSeconds: 1.0)
+            .playableURL(for: URL(string: "mock://video/compose?w=240&h=320")!)
+
+        try await harness.composer.publish(media: .video(PickedVideo(sourceURL: source)), caption: "my clip")
+
+        var iterator = entries.makeAsyncIterator()
+        let entry = try #require(await iterator.next())
+        let attachment = try #require(entry.post.attachments.first)
+        #expect(attachment.mimeType == "video/mp4")
+        // Optimistic entry plays the exported LOCAL file, not a CDN URL.
+        #expect(attachment.url?.isFileURL == true)
+        #expect(attachment.pixelWidth > 0 && attachment.pixelHeight > 0)
+
+        // Same media + post pipeline as images, in order.
+        let paths = harness.bff.recordedRequests.map(\.path)
+        #expect(paths.contains("/media.v1.MediaService/IssueUploadTicket"))
+        #expect(paths.contains("/media.v1.MediaService/CommitUpload"))
+        #expect(paths.contains("/post.v1.PostService/CreatePost"))
+        #expect(paths.contains("/post.v1.PostService/PublishPost"))
+    }
+
     @Test func textOnlyPostSkipsMediaFlow() async throws {
         let harness = makeHarness()
         let entries = await harness.channel.entries()
 
-        try await harness.composer.publish(image: nil, caption: "Just text")
+        try await harness.composer.publish(media: nil, caption: "Just text")
 
         var iterator = entries.makeAsyncIterator()
         let entry = try #require(await iterator.next())
@@ -102,7 +129,7 @@ struct PostComposerTests {
         let harness = makeHarness()
 
         await #expect(throws: ComposeError.emptyPost) {
-            try await harness.composer.publish(image: nil, caption: "   ")
+            try await harness.composer.publish(media: nil, caption: "   ")
         }
         #expect(harness.bff.recordedRequests.isEmpty)
     }
@@ -110,7 +137,7 @@ struct PostComposerTests {
     @Test func publishedPostAppearsAtTopOfRefreshedFeed() async throws {
         let harness = makeHarness()
 
-        try await harness.composer.publish(image: PickedImage(solidImage()), caption: "Fresh post")
+        try await harness.composer.publish(media: .image(PickedImage(solidImage())), caption: "Fresh post")
 
         // A subsequent timeline read must surface the authored post first.
         let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: harness.bff)
