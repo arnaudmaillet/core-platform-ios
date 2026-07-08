@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNavigation
 import Foundation
 
 @MainActor
@@ -29,6 +30,7 @@ public final class ProfileViewModel {
 
     private let repository: any ProfileProviding
     private let source: Source
+    private let router: (any Router)?
 
     private var phase: Phase = .loading {
         didSet { onPhaseChange?(phase) }
@@ -46,10 +48,14 @@ public final class ProfileViewModel {
     private var load: Task<Void, Never>?
     private var relationshipLoad: Task<Void, Never>?
 
-    public init(repository: any ProfileProviding, source: Source = .currentUser) {
+    public init(repository: any ProfileProviding, source: Source = .currentUser, router: (any Router)? = nil) {
         self.repository = repository
         self.source = source
+        self.router = router
     }
+
+    /// Whether the "Message" action applies (another user's profile).
+    public var canMessage: Bool { followButton == .follow || followButton == .following }
 
     // MARK: - Inputs
 
@@ -86,6 +92,13 @@ public final class ProfileViewModel {
             }
             self.followInFlight = false
         }
+    }
+
+    /// "Message" tapped — open a DM with this profile via routing. Profile never
+    /// imports Chat; it only emits a route.
+    public func messageTapped() {
+        guard canMessage, let profile else { return }
+        router?.route(to: .messageUser(profile.id))
     }
 
     // MARK: - Loading

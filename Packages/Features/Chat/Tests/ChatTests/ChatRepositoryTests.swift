@@ -65,4 +65,23 @@ struct ChatRepositoryTests {
         let messages = try await repository.loadMessages(in: ConversationID("conv-1"))
         #expect(messages.last?.body == "On my way")
     }
+
+    @Test func directConversationReusesAnExistingDM() async throws {
+        // conv-0 is viewer ↔ authors[0]; messaging that author must reuse it.
+        let repository = makeRepository()
+        let author0 = MockSocialDataset().authors[0].profileID
+
+        let id = try await repository.directConversation(with: ProfileID(author0))
+
+        #expect(id == ConversationID("conv-0"))
+    }
+
+    @Test func directConversationCreatesWhenNoneExists() async throws {
+        // A profile with no existing 1:1 conversation → a fresh one is created.
+        let repository = makeRepository()
+
+        let id = try await repository.directConversation(with: ProfileID("prof-stranger"))
+
+        #expect(id.rawValue.hasPrefix("conv-created-"))
+    }
 }

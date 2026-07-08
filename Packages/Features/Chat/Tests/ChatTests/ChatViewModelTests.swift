@@ -24,6 +24,7 @@ private actor StubChatProvider: ChatProviding {
         return message
     }
     func markRead(_ conversationID: ConversationID, upTo messageID: String) async throws { markReadCalls += 1 }
+    func directConversation(with profileID: ProfileID) async throws -> ConversationID { ConversationID("dm") }
 }
 
 @MainActor

@@ -47,6 +47,9 @@ public protocol ChatProviding: Sendable {
     func loadMessages(in conversationID: ConversationID) async throws -> [ChatMessage]
     func send(_ body: String, to conversationID: ConversationID) async throws -> ChatMessage
     func markRead(_ conversationID: ConversationID, upTo messageID: String) async throws
+    /// The direct-message conversation with `profileID`, reusing an existing
+    /// 1:1 conversation or creating one.
+    func directConversation(with profileID: ProfileID) async throws -> ConversationID
 }
 
 /// Reads/writes conversations via chat.v1, hydrating member names via
@@ -181,6 +184,64 @@ public actor ChatRepository: ChatProviding {
         request.memberID = viewer.rawValue
         request.messageID = messageID
         _ = await chatClient.markRead(request: request, headers: [:])
+    }
+
+    // MARK: - Direct message
+
+    public func directConversation(with profileID: ProfileID) async throws -> ConversationID {
+        let viewer = try await resolveViewerProfileID()
+
+        // Reuse an existing 1:1 conversation (exactly viewer + target) if any.
+        if let existing = await existingDirectConversation(viewer: viewer, other: profileID) {
+            return existing
+        }
+
+        // Otherwise create one and add both members.
+        var create = Chat_V1_CreateConversationRequest()
+        create.kind = .group
+        create.ownerID = viewer.rawValue
+        let response = await chatClient.createConversation(request: create, headers: [:])
+        guard let id = response.message?.conversationID, !id.isEmpty else {
+            throw ChatError.transport(message: response.error?.message ?? "couldn't start a conversation")
+        }
+        let conversationID = ConversationID(id)
+        for member in [viewer, profileID] {
+            await joinAndSubscribe(conversationID, member: member)
+        }
+        return conversationID
+    }
+
+    private func existingDirectConversation(viewer: ProfileID, other: ProfileID) async -> ConversationID? {
+        var request = Chat_V1_ListSubscriptionsRequest()
+        request.subscriberID = viewer.rawValue
+        request.limit = pageSize
+        guard let ids = (await chatClient.listSubscriptions(request: request, headers: [:])).message?.conversationIds else {
+            return nil
+        }
+        let wanted: Set<ProfileID> = [viewer, other]
+        for id in ids {
+            var membersRequest = Chat_V1_ListMembersRequest()
+            membersRequest.conversationID = id
+            membersRequest.requesterID = viewer.rawValue
+            let members = (await chatClient.listMembers(request: membersRequest, headers: [:]))
+                .message?.members.map { ProfileID($0.profileID) } ?? []
+            if Set(members) == wanted {
+                return ConversationID(id)
+            }
+        }
+        return nil
+    }
+
+    private func joinAndSubscribe(_ conversationID: ConversationID, member: ProfileID) async {
+        var join = Chat_V1_JoinAsMemberRequest()
+        join.conversationID = conversationID.rawValue
+        join.profileID = member.rawValue
+        _ = await chatClient.joinAsMember(request: join, headers: [:])
+
+        var subscribe = Chat_V1_SubscribeRequest()
+        subscribe.conversationID = conversationID.rawValue
+        subscribe.subscriberID = member.rawValue
+        _ = await chatClient.subscribe(request: subscribe, headers: [:])
     }
 
     // MARK: - Hydration

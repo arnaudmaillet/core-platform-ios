@@ -12,4 +12,6 @@ public enum AppRoute: Equatable, Sendable {
     case post(PostID)
     case upload
     case conversation(ConversationID)
+    /// Open (find-or-create) a direct-message thread with a profile.
+    case messageUser(ProfileID)
 }

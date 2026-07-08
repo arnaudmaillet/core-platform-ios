@@ -19,9 +19,12 @@ final class ProfileHeaderView: UIView {
     private let followersStat = ProfileStatView(caption: "Followers")
     private let followingStat = ProfileStatView(caption: "Following")
     private let actionButton = UIButton(configuration: .filled())
+    private let messageButton = UIButton(configuration: .gray())
 
     /// Invoked when the Follow / Following / Edit Profile button is tapped.
     var onActionTapped: (() -> Void)?
+    /// Invoked when the Message button is tapped (other users only).
+    var onMessageTapped: (() -> Void)?
 
     private let imagePipeline: ImagePipeline
     private var avatarTask: Task<Void, Never>?
@@ -60,17 +63,22 @@ final class ProfileHeaderView: UIView {
     /// Styles the action button per the viewer's relationship. `.follow` is the
     /// one prominent (filled) call to action; Following/Edit are secondary.
     func configureAction(_ state: ProfileViewModel.FollowButton) {
+        // Message shows only for another user (alongside Follow/Following).
         switch state {
         case .hidden:
             actionButton.isHidden = true
+            messageButton.isHidden = true
         case .follow:
             actionButton.isHidden = false
+            messageButton.isHidden = false
             applyActionStyle(title: "Follow", prominent: true)
         case .following:
             actionButton.isHidden = false
+            messageButton.isHidden = false
             applyActionStyle(title: "Following", prominent: false)
         case .edit:
             actionButton.isHidden = false
+            messageButton.isHidden = true
             applyActionStyle(title: "Edit Profile", prominent: false)
         }
     }
@@ -161,7 +169,28 @@ final class ProfileHeaderView: UIView {
             for: .primaryActionTriggered
         )
 
-        let column = UIStackView(arrangedSubviews: [avatarView, nameRow, handleLabel, bioLabel, statsRow, actionButton])
+        var messageConfig = UIButton.Configuration.gray()
+        messageConfig.title = "Message"
+        messageConfig.cornerStyle = .capsule
+        messageConfig.buttonSize = .medium
+        messageConfig.contentInsets = NSDirectionalEdgeInsets(
+            top: Spacing.sm, leading: Spacing.xl, bottom: Spacing.sm, trailing: Spacing.xl
+        )
+        messageButton.configuration = messageConfig
+        messageButton.isHidden = true
+        messageButton.setContentHuggingPriority(.required, for: .horizontal)
+        messageButton.addAction(
+            UIAction { [weak self] _ in self?.onMessageTapped?() },
+            for: .primaryActionTriggered
+        )
+
+        // Follow + Message sit side by side; a trailing spacer keeps them left-aligned.
+        let actionRow = UIStackView(arrangedSubviews: [actionButton, messageButton, UIView()])
+        actionRow.axis = .horizontal
+        actionRow.alignment = .center
+        actionRow.spacing = Spacing.sm
+
+        let column = UIStackView(arrangedSubviews: [avatarView, nameRow, handleLabel, bioLabel, statsRow, actionRow])
         column.axis = .vertical
         column.alignment = .leading
         column.spacing = Spacing.sm

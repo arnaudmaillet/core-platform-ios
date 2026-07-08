@@ -62,6 +62,7 @@ final class AppContainer {
         MockNotificationService(dataset: mockDataset).register(on: bff)
         MockCommentService(dataset: mockDataset).register(on: bff)
         MockChatService(dataset: mockDataset).register(on: bff)
+        MockSocialGraphService(dataset: mockDataset).register(on: bff)
         return bff
     }()
 
@@ -196,7 +197,8 @@ final class AppContainer {
 
     private(set) lazy var profileFeature: any ProfileFeatureBuilding = ProfileFeatureBuilder(
         repository: profileRepository,
-        imagePipeline: imagePipeline
+        imagePipeline: imagePipeline,
+        router: routeResolver
     )
 
     // MARK: - Search
@@ -241,8 +243,8 @@ final class AppContainer {
     /// The one place `AppRoute`s become navigation. Features receive it as an
     /// opaque `Router`; the shell binds its `navigator` when it starts.
     private(set) lazy var routeResolver = RouteResolver(
-        profileFeature: profileFeature,
         uploadFeature: uploadFeature,
+        profileFeature: { [unowned self] in self.profileFeature },
         feedFeature: { [unowned self] in self.feedFeature },
         chatFeature: { [unowned self] in self.chatFeature }
     )

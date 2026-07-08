@@ -52,6 +52,9 @@ final class ProfileViewController: UIViewController {
         headerView.onActionTapped = { [weak self] in
             self?.handleActionTapped()
         }
+        headerView.onMessageTapped = { [weak self] in
+            self?.viewModel.messageTapped()
+        }
         render(.loading)
         viewModel.viewDidLoad()
     }
