@@ -38,7 +38,8 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             viewModel: MapsViewModel(repository: repository),
             imagePipeline: imagePipeline,
             videoPlayback: videoPlayback,
-            makeSnapFeed: { postIDs in feedFeature().makeSnapFeedViewController(postIDs: postIDs) }
+            makeSnapFeed: { postIDs in feedFeature().makeSnapFeedViewController(postIDs: postIDs) },
+            prewarm: { ids in await feedFeature().prewarmPosts(ids) }
         )
     }
 }

@@ -20,6 +20,13 @@ final class MapsViewController: UIViewController {
     /// Builds the snap feed a pin/cluster tap expands into (reuses the Feed
     /// feature via `FeedFeatureBuilding.makeSnapFeedViewController`).
     private let makeSnapFeed: ([PostID]) -> UIViewController
+    /// Warms the given posts into the shared cache so a tap opens instantly.
+    private let prewarm: ([PostID]) async -> Void
+    /// The current viewport's prefetch, cancelled when the map settles elsewhere.
+    private var prewarmTask: Task<Void, Never>?
+    /// Runaway guard: clustering already bounds the visible set to a handful, but
+    /// cap the sweep in case it runs during a pre-cluster frame.
+    private static let prewarmCap = 16
     /// Retains the transitioning delegate for the life of a presentation.
     private var activeTransition: MapsZoomTransition?
     /// Chooses which ≤3 visible video pins autoplay.
@@ -58,12 +65,14 @@ final class MapsViewController: UIViewController {
         viewModel: MapsViewModel,
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController,
-        makeSnapFeed: @escaping ([PostID]) -> UIViewController
+        makeSnapFeed: @escaping ([PostID]) -> UIViewController,
+        prewarm: @escaping ([PostID]) async -> Void
     ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
         self.videoCoordinator = MapVideoPlaybackCoordinator(pool: videoPlayback)
         self.makeSnapFeed = makeSnapFeed
+        self.prewarm = prewarm
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -231,6 +240,33 @@ final class MapsViewController: UIViewController {
         let dLng = a.longitude - b.longitude
         return dLat * dLat + dLng * dLng
     }
+
+    // MARK: - Predictive prefetch
+
+    /// Warms the full post behind every visible annotation — the first member for
+    /// a cluster — so a tap opens the snap feed from cache with no metadata
+    /// desync. Bounded by clustering (a handful of annotations) and capped;
+    /// cancels the prior sweep so a fast pan never piles up speculative fetches.
+    private func prewarmVisiblePosts() {
+        let visible = mapView.annotations(in: mapView.visibleMapRect)
+        var ids: [PostID] = []
+        var seen = Set<PostID>()
+        func add(_ id: PostID) { if seen.insert(id).inserted { ids.append(id) } }
+        for element in visible {
+            if let pin = element as? MapAnnotation {
+                add(pin.pin.postID)
+            } else if let cluster = element as? MKClusterAnnotation,
+                      let first = cluster.memberAnnotations.first as? MapAnnotation {
+                add(first.pin.postID)
+            }
+        }
+        guard !ids.isEmpty else { return }
+
+        let batch = Array(ids.prefix(Self.prewarmCap))
+        prewarmTask?.cancel()
+        let prewarm = prewarm
+        prewarmTask = Task { await prewarm(batch) }
+    }
 }
 
 // MARK: - MKMapViewDelegate
@@ -252,8 +288,10 @@ extension MapsViewController: MKMapViewDelegate {
     }
 
     func mapView(_ mapView: MKMapView, didAdd views: [MKAnnotationView]) {
-        // Annotation views now exist → a pin that should autoplay can be bound.
+        // Annotation views now exist (clustering is current) → bind autoplay and
+        // warm the visible posts so a tap opens instantly.
         refreshVideoPlayback()
+        prewarmVisiblePosts()
         #if DEBUG
         debugOpenFirstPinIfRequested(among: views)
         #endif
