@@ -26,11 +26,23 @@ final class MapClusterAnnotationView: MKAnnotationView {
         frame = CGRect(x: 0, y: 0, width: Self.side, height: Self.side)
         centerOffset = .zero
         backgroundColor = .clear
+        // Share the pins' clustering identifier so clusters keep participating in
+        // the clustering tree — they merge into larger clusters as you zoom out
+        // instead of falling out of clustering entirely.
+        clusteringIdentifier = MapAnnotation.clusteringIdentifier
         buildLayout()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Re-assert the clustering identifier on every display, for the same
+    /// reuse-consumption reason as `MapAnnotationView` — so a recycled cluster
+    /// view never drops out of the clustering tree mid-zoom.
+    override func prepareForDisplay() {
+        super.prepareForDisplay()
+        clusteringIdentifier = MapAnnotation.clusteringIdentifier
+    }
 
     private func buildLayout() {
         thumbnailView.contentMode = .scaleAspectFill

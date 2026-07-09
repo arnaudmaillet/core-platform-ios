@@ -38,6 +38,15 @@ final class MapsViewController: UIViewController {
     private var pendingQuery: DispatchWorkItem?
     private static let settleDelay: TimeInterval = 0.25
 
+    /// True between `regionWillChange` and `regionDidChange` — i.e. while a
+    /// zoom/pan is animating. Mutating annotations during that window can corrupt
+    /// MapKit's clustering pass, so diffs that arrive mid-flight are buffered.
+    private var isRegionTransitioning = false
+    /// Diffs deferred while a transition was in flight, applied in order on
+    /// settle. Order preservation means the applied set still converges to the
+    /// view model's authoritative state.
+    private var pendingDiffs: [MapAnnotationDiff] = []
+
     /// A sensible default until location permission / deep-linking lands: central
     /// Paris at neighbourhood zoom (also where the mock dataset seeds its pins).
     private static let defaultRegion = MKCoordinateRegion(
@@ -123,8 +132,25 @@ final class MapsViewController: UIViewController {
     }
 
     private func bindViewModel() {
-        viewModel.onDiff = { [weak self] diff in self?.apply(diff) }
+        viewModel.onDiff = { [weak self] diff in self?.handleDiff(diff) }
         // `onTileCount` is a "zoom in for more" hint hook; wired to UI later.
+    }
+
+    /// Applies a diff now, or buffers it if a region transition is animating —
+    /// so `add/removeAnnotations` never lands mid-clustering-pass.
+    private func handleDiff(_ diff: MapAnnotationDiff) {
+        if isRegionTransitioning {
+            pendingDiffs.append(diff)
+        } else {
+            apply(diff)
+        }
+    }
+
+    private func flushPendingDiffs() {
+        guard !pendingDiffs.isEmpty else { return }
+        let diffs = pendingDiffs
+        pendingDiffs.removeAll()
+        for diff in diffs { apply(diff) }
     }
 
     // MARK: - Querying
@@ -210,7 +236,16 @@ final class MapsViewController: UIViewController {
 // MARK: - MKMapViewDelegate
 
 extension MapsViewController: MKMapViewDelegate {
+    func mapView(_ mapView: MKMapView, regionWillChangeAnimated animated: Bool) {
+        // A zoom/pan started: hold annotation mutations until it settles.
+        isRegionTransitioning = true
+    }
+
     func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
+        // Settled: safe to mutate again. Apply anything that arrived mid-flight
+        // before requesting the next page.
+        isRegionTransitioning = false
+        flushPendingDiffs()
         scheduleQuery()
         // Panning without new pins still changes which are visible/central.
         refreshVideoPlayback()
