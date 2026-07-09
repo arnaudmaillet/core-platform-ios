@@ -55,4 +55,11 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// scrubs in lockstep with the interactive grab; `collapsed == true` shrinks
     /// it back toward the pin.
     func setInfoOverlayCollapsed(_ collapsed: Bool)
+
+    /// Make the destination's opaque background canvas — its own view, its scroll
+    /// view, and the active cell's content background — transparent for the
+    /// duration of the flight, so the source (the map) stays visible *around* the
+    /// growing cell instead of being curtained off by a full-screen cross-fade.
+    /// Restore with `false`. The animator, not this view, owns any dimming.
+    func setZoomCanvasTransparent(_ transparent: Bool)
 }

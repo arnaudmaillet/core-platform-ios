@@ -33,6 +33,9 @@ final class SnapFeedViewController: UIViewController {
     /// Set when a hero zoom-in asked to expand the info overlay before content
     /// had loaded; the expand runs when the first active page appears.
     private var pendingInfoExpandDuration: TimeInterval?
+    /// While true, cells render with a clear background so the map shows through
+    /// during a hero flight. Applied to cells that appear mid-flight too.
+    private var zoomCanvasTransparent = false
     /// Unregisters its notification tokens when this VC (and thus the bag) is
     /// released — a nonisolated deinit can't touch the VC's main-actor state.
     private let appObservers = NotificationObserverBag()
@@ -273,6 +276,14 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // loads, which can be before the cell exists; without this net that
         // activation would be lost, since the index never changes again.
         updateActiveItem()
+        // A cell that appears while a hero flight is in progress must adopt the
+        // clear canvas and hide its own media immediately — otherwise it flashes
+        // an opaque page (and, for video posts, a black render view) over the map
+        // while the media hero is flying separately.
+        if zoomCanvasTransparent, let snapCell = cell as? SnapFeedCell {
+            snapCell.setContentBackgroundTransparent(true)
+            snapCell.setMediaHidden(true)
+        }
         if lifecycle.activeIndex == indexPath.item {
             (cell as? SnapCellLifecycle)?.willBecomeActive()
             // A hero zoom-in that arrived before content loaded: expand the info
@@ -339,6 +350,16 @@ extension SnapFeedViewController: ZoomTransitionDestination {
 
     public func setInfoOverlayCollapsed(_ collapsed: Bool) {
         activeSnapCell?.setInfoOverlayCollapsed(collapsed)
+    }
+
+    public func setZoomCanvasTransparent(_ transparent: Bool) {
+        zoomCanvasTransparent = transparent
+        let color: UIColor = transparent ? .clear : .black
+        view.backgroundColor = color
+        collectionView.backgroundColor = color
+        for case let cell as SnapFeedCell in collectionView.visibleCells {
+            cell.setContentBackgroundTransparent(transparent)
+        }
     }
 
     public func animateInfoOverlayExpandingIn(duration: TimeInterval) {

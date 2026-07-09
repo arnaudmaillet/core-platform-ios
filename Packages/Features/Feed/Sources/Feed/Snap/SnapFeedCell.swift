@@ -316,6 +316,14 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     private static let collapsedInfoTransform = CGAffineTransform(translationX: 0, y: 52)
         .scaledBy(x: 0.82, y: 0.82)
 
+    /// Clears/restores the full-screen black cell background during a hero
+    /// transition, so the map shows through around the growing cell instead of
+    /// being occluded by an opaque page. The media (hero snapshot), scrim and
+    /// info overlay still render above the see-through canvas.
+    func setContentBackgroundTransparent(_ transparent: Bool) {
+        contentView.backgroundColor = transparent ? .clear : .black
+    }
+
     /// Collapses or restores the info overlays (author + caption, engagement
     /// rail) as a pure transform + alpha change — no relayout — so the hero
     /// animator can grow/shrink them in lockstep with the flying media without
@@ -398,6 +406,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         isActive = false
         stopKenBurns()
         setInfoOverlayCollapsed(false) // never recycle a cell mid-collapse
+        setContentBackgroundTransparent(false) // nor with a cleared canvas
+        setMediaHidden(false) // nor with media left hidden from a flight
         setPauseGlyphVisible(false)
         videoPlayback?.stop(videoRenderView)
         representedID = nil
