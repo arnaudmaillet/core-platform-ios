@@ -53,6 +53,10 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         )
     }
 
+    public func prewarmPosts(_ ids: [PostID]) async {
+        await repository.prewarm(ids)
+    }
+
     public func makeSnapFeedViewController(postIDs: [PostID]) -> UIViewController {
         SnapFeedViewController(
             viewModel: FeedViewModel(

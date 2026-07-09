@@ -22,6 +22,17 @@ public protocol FeedProviding: Sendable {
     /// A single post hydrated with its author and like count — the post-detail
     /// read path.
     func loadPost(_ id: PostID) async throws -> FeedEntry
+    /// Best-effort, cancellable warming of `ids` into the repository's post
+    /// cache, so a later `loadPost` (e.g. a Maps pin tap opening the snap feed)
+    /// resolves from memory instead of the network. Safe to call for ids that
+    /// may never be opened.
+    func prewarm(_ ids: [PostID]) async
+}
+
+public extension FeedProviding {
+    /// Providers without a cache (test doubles, the fixed-set adapter) treat
+    /// warming as a no-op.
+    func prewarm(_ ids: [PostID]) async {}
 }
 
 /// The engagement write/read path the feed UI consumes.
@@ -55,6 +66,17 @@ public actor FeedRepository: FeedProviding {
 
     private var viewerProfileID: ProfileID?
     private var authorCache: [ProfileID: AuthorSummary] = [:]
+
+    /// Bounded LRU cache of hydrated posts, warmed by `prewarm` and read by
+    /// `loadPost`. Kept small so a long map-panning session can't accumulate
+    /// unbounded cards in memory — the point of the lightweight Radar tier.
+    private var postCache: [PostID: FeedEntry] = [:]
+    /// Post ids in least→most-recently-used order (last == most recent).
+    private var postCacheOrder: [PostID] = []
+    private let postCacheLimit = 80
+    /// In-flight hydrations, so a prewarm sweep and a real tap for the same id
+    /// share one network fetch instead of racing (single-flight).
+    private var inFlightPosts: [PostID: Task<FeedEntry, any Error>] = [:]
 
     public init(
         timelineClient: any Timeline_V1_TimelineServiceClientInterface,
@@ -99,7 +121,36 @@ public actor FeedRepository: FeedProviding {
         try await loadPage(token: token)
     }
 
+    /// Cache-first, single-flight hydration of one post. A warm id returns from
+    /// memory; concurrent callers for the same cold id (e.g. a prewarm sweep and
+    /// the tap that races it) share a single fetch.
     public func loadPost(_ id: PostID) async throws -> FeedEntry {
+        if let cached = cachedPost(id) { return cached }
+        if let inFlight = inFlightPosts[id] {
+            return try await inFlight.value
+        }
+        let task = Task { try await hydratePost(id) }
+        inFlightPosts[id] = task
+        defer { inFlightPosts[id] = nil }
+        let entry = try await task.value
+        storeInCache(entry)
+        return entry
+    }
+
+    public func prewarm(_ ids: [PostID]) async {
+        await withTaskGroup(of: Void.self) { group in
+            for id in ids {
+                group.addTask { [self] in
+                    guard !Task.isCancelled else { return }
+                    _ = try? await loadPost(id) // cache-first + single-flight; failures are ignored
+                }
+            }
+        }
+    }
+
+    /// The actual network hydration (post + author + like count), unchanged from
+    /// the pre-cache path. Isolated so `loadPost` can wrap it with the cache.
+    private func hydratePost(_ id: PostID) async throws -> FeedEntry {
         var request = Post_V1_GetPostRequest()
         request.postID = id.rawValue
         let response = await postClient.getPost(request: request, headers: [:])
@@ -114,6 +165,30 @@ public actor FeedRepository: FeedProviding {
             throw FeedError.transport(message: "author \(post.authorID) unavailable")
         }
         return FeedEntry(post: post, author: resolvedAuthor, likeCount: await count)
+    }
+
+    // MARK: - Post cache (LRU)
+
+    private func cachedPost(_ id: PostID) -> FeedEntry? {
+        guard let entry = postCache[id] else { return nil }
+        touchLRU(id)
+        return entry
+    }
+
+    private func storeInCache(_ entry: FeedEntry) {
+        let id = entry.post.id
+        postCache[id] = entry
+        touchLRU(id)
+        while postCacheOrder.count > postCacheLimit {
+            postCache[postCacheOrder.removeFirst()] = nil
+        }
+    }
+
+    private func touchLRU(_ id: PostID) {
+        if let index = postCacheOrder.firstIndex(of: id) {
+            postCacheOrder.remove(at: index)
+        }
+        postCacheOrder.append(id)
     }
 
     /// Fetches (and caches) a single author, reusing the page-hydration cache.

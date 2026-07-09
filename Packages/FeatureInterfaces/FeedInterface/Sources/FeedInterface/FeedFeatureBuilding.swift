@@ -28,4 +28,9 @@ public protocol FeedFeatureBuilding {
     /// cell lifecycle); only the data source differs. The returned VC conforms
     /// to `ZoomTransitionDestination` so a hero transition can drive it.
     func makeSnapFeedViewController(postIDs: [PostID]) -> UIViewController
+    /// Best-effort, cancellable warming of these posts into the shared cache, so
+    /// a subsequent `makeSnapFeedViewController` hydrates from memory rather than
+    /// the network — used by Maps to prefetch the visible pins on viewport
+    /// settle, eliminating the metadata desync on tap. Safe for ids never opened.
+    func prewarmPosts(_ ids: [PostID]) async
 }
