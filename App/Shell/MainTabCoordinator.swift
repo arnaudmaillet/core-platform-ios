@@ -4,6 +4,10 @@ import UIKit
 /// The authenticated app shell: a `UITabBarController` composed of one child
 /// `TabCoordinator` per tab. Each tab owns its own navigation stack; this
 /// coordinator only assembles them and holds them alive.
+///
+/// Tabs are set via the modern `UITabBarController.tabs` API. The Search tab is
+/// a `UISearchTab`, which the system detaches to the trailing edge, producing
+/// the grouped bar `| Maps  Feed  Messages  Profile |  Search |` natively.
 @MainActor
 final class MainTabCoordinator: NSObject, Coordinator {
     var childCoordinators: [Coordinator] = []
@@ -11,36 +15,40 @@ final class MainTabCoordinator: NSObject, Coordinator {
 
     private let container: AppContainer
     private let onLogout: () -> Void
-    private var notificationsTab: NotificationsTabCoordinator?
+    private let profileTab: ProfileTabCoordinator
+    /// Tabs paired with their `AppTab`, in bar order — the lookup `selectTab`
+    /// and the `-select-tab` debug hook resolve against.
+    private var orderedTabs: [(AppTab, any TabCoordinator)] = []
 
     init(container: AppContainer, onLogout: @escaping () -> Void) {
         self.container = container
         self.onLogout = onLogout
+        self.profileTab = ProfileTabCoordinator(container: container, onLogout: onLogout)
         super.init()
     }
 
     func start() {
-        let notificationsTab = NotificationsTabCoordinator(container: container)
-        self.notificationsTab = notificationsTab
-        let tabs: [any TabCoordinator] = [
-            FeedTabCoordinator(container: container),
-            SearchTabCoordinator(container: container),
-            notificationsTab,
-            ProfileTabCoordinator(container: container, onLogout: onLogout)
+        orderedTabs = [
+            (.maps, MapsTabCoordinator()),
+            (.feed, FeedTabCoordinator(container: container)),
+            (.messages, MessagesTabCoordinator(container: container)),
+            (.profile, profileTab),
+            (.search, SearchTabCoordinator(container: container))
         ]
-        for tab in tabs {
+        for (_, tab) in orderedTabs {
             tab.start()
             addChild(tab)
         }
-        tabBarController.viewControllers = tabs.map(\.navigationController)
+        tabBarController.tabs = orderedTabs.map { $0.1.tab }
         tabBarController.delegate = self
 
         #if DEBUG
-        // Dev convenience: `-select-tab N` opens directly on a tab for testing.
+        // Dev convenience: `-select-tab N` opens directly on a tab for testing
+        // (0 = Maps … 4 = Search).
         let arguments = ProcessInfo.processInfo.arguments
         if let index = arguments.firstIndex(of: "-select-tab"), index + 1 < arguments.count,
-           let tabIndex = Int(arguments[index + 1]), tabBarController.viewControllers?.indices.contains(tabIndex) == true {
-            tabBarController.selectedIndex = tabIndex
+           let tabIndex = Int(arguments[index + 1]), orderedTabs.indices.contains(tabIndex) {
+            tabBarController.selectedTab = orderedTabs[tabIndex].1.tab
         }
         #endif
     }
@@ -50,9 +58,9 @@ final class MainTabCoordinator: NSObject, Coordinator {
 
 extension MainTabCoordinator: UITabBarControllerDelegate {
     func tabBarController(_ tabBarController: UITabBarController, didSelect viewController: UIViewController) {
-        // Re-read the unread count on every tab switch, so the Activity badge
-        // reflects state after the user reads/marks notifications.
-        notificationsTab?.refreshBadge()
+        // Re-read the unread count on every tab switch, so the Profile badge
+        // reflects state after the user reads/marks notifications in Activity.
+        profileTab.refreshBadge()
     }
 }
 
@@ -64,7 +72,7 @@ extension MainTabCoordinator: AppNavigating {
     }
 
     func selectTab(_ tab: AppTab) {
-        guard tabBarController.viewControllers?.indices.contains(tab.rawValue) == true else { return }
-        tabBarController.selectedIndex = tab.rawValue
+        guard let match = orderedTabs.first(where: { $0.0 == tab }) else { return }
+        tabBarController.selectedTab = match.1.tab
     }
 }

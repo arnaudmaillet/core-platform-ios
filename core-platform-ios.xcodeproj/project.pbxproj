@@ -18,7 +18,6 @@
 		5F00000000000000000000B9 /* Auth in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000C9 /* Auth */; };
 		5F00000000000000000000BA /* CoreNetworkingMocks in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000CA /* CoreNetworkingMocks */; };
 		5F00000000000000000000BB /* MediaCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000CB /* MediaCore */; };
-		5F00000000000000000010B2 /* MediaPlayback in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000010B1 /* MediaPlayback */; };
 		5F00000000000000000000BC /* Feed in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000CC /* Feed */; };
 		5F00000000000000000000BD /* CoreRealtime in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000CD /* CoreRealtime */; };
 		5F00000000000000000000BE /* CoreRealtimeMocks in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000CE /* CoreRealtimeMocks */; };
@@ -32,6 +31,7 @@
 		5F00000000000000000000FA /* Notifications in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000000FC /* Notifications */; };
 		5F00000000000000000010A3 /* ChatInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000010A5 /* ChatInterface */; };
 		5F00000000000000000010A4 /* Chat in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000010A6 /* Chat */; };
+		5F00000000000000000010B2 /* MediaPlayback in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000010B1 /* MediaPlayback */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -476,10 +476,6 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/Core/MediaCore;
 		};
-		5F00000000000000000010B0 /* XCLocalSwiftPackageReference "Packages/Core/MediaPlayback" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = Packages/Core/MediaPlayback;
-		};
 		5F00000000000000000000AB /* XCLocalSwiftPackageReference "Packages/Features/Feed" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/Features/Feed;
@@ -528,6 +524,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/Features/Chat;
 		};
+		5F00000000000000000010B0 /* XCLocalSwiftPackageReference "Packages/Core/MediaPlayback" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Core/MediaPlayback;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -574,10 +574,6 @@
 		5F00000000000000000000CB /* MediaCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MediaCore;
-		};
-		5F00000000000000000010B1 /* MediaPlayback */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = MediaPlayback;
 		};
 		5F00000000000000000000CC /* Feed */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -630,6 +626,10 @@
 		5F00000000000000000010A6 /* Chat */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = Chat;
+		};
+		5F00000000000000000010B1 /* MediaPlayback */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MediaPlayback;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

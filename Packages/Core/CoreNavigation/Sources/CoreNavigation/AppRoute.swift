@@ -8,6 +8,8 @@ import CoreModels
 /// resolver maps them onto feature coordinators.
 public enum AppRoute: Equatable, Sendable {
     case feed
+    /// The Messages inbox (conversation list), a primary root tab.
+    case messages
     case profile(ProfileID)
     case post(PostID)
     /// The post's comments only (no post header/media) — the snap feed already

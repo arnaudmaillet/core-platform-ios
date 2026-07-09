@@ -1,4 +1,3 @@
-import ChatInterface
 import CoreNavigation
 import DesignSystem
 import FeedInterface
@@ -13,30 +12,24 @@ final class FeedTabCoordinator: TabCoordinator {
 
     private let container: AppContainer
 
+    private(set) lazy var tab = UITab(
+        title: "Feed",
+        image: UIImage(systemName: "house"),
+        identifier: AppTab.feed.rawValue
+    ) { [navigationController] _ in navigationController }
+
     init(container: AppContainer) {
         self.container = container
     }
 
     func start() {
         let feedViewController = container.feedFeature.makeFeedViewController()
-        // The snap feed is immersive (it hides the nav bar itself), so the
-        // compose and messages actions live as overlay controls.
+        // The snap feed is immersive (it hides the nav bar itself), so compose
+        // lives as an overlay control. Messages moved to its own root tab.
         installSnapOverlayControls(on: feedViewController)
         navigationController.viewControllers = [feedViewController]
-        // The feed VC sets its own title ("Timeline"), which UIKit proxies onto
-        // the tab bar item; match it here so the tab reads consistently.
-        navigationController.tabBarItem = UITabBarItem(
-            title: "Timeline",
-            image: UIImage(systemName: "house"),
-            selectedImage: UIImage(systemName: "house.fill")
-        )
 
         #if DEBUG
-        // Dev convenience: `-open-messages` pushes the conversation list on
-        // launch, for testing chat without tapping.
-        if ProcessInfo.processInfo.arguments.contains("-open-messages") {
-            showMessages()
-        }
         // `-present-compose` presents the compose sheet on launch, for
         // driving/screenshotting compose without tapping the overlay button.
         // Deferred: at start() the nav controller isn't in the window yet, so a
@@ -49,18 +42,14 @@ final class FeedTabCoordinator: TabCoordinator {
         #endif
     }
 
-    /// Floating compose + messages buttons for the immersive snap feed, pinned
-    /// top-trailing inside the safe area. They live on the feed VC's own view,
-    /// so a pushed screen (profile, post detail) naturally covers them.
+    /// Floating compose button for the immersive snap feed, pinned top-trailing
+    /// inside the safe area. It lives on the feed VC's own view, so a pushed
+    /// screen (profile, post detail) naturally covers it.
     private func installSnapOverlayControls(on feedViewController: UIViewController) {
-        let messages = Self.overlayButton(symbol: "paperplane") { [weak self] in self?.showMessages() }
         let compose = Self.overlayButton(symbol: "square.and.pencil") { [weak self] in self?.presentCompose() }
-        let stack = UIStackView(arrangedSubviews: [messages, compose])
-        stack.axis = .horizontal
-        stack.spacing = Spacing.md
-        stack.constrain(in: feedViewController.view) { parent in
-            stack.topAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.topAnchor, constant: Spacing.sm)
-            stack.trailingAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.trailingAnchor, constant: -Spacing.lg)
+        compose.constrain(in: feedViewController.view) { parent in
+            compose.topAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.topAnchor, constant: Spacing.sm)
+            compose.trailingAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.trailingAnchor, constant: -Spacing.lg)
         }
     }
 
@@ -80,10 +69,5 @@ final class FeedTabCoordinator: TabCoordinator {
     private func presentCompose() {
         let composeViewController = container.uploadFeature.makeComposeViewController()
         navigationController.present(composeViewController, animated: true)
-    }
-
-    private func showMessages() {
-        let conversationList = container.chatFeature.makeConversationListViewController()
-        navigationController.pushViewController(conversationList, animated: true)
     }
 }
