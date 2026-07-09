@@ -1,5 +1,6 @@
 import MediaCore
 import DesignSystem
+import FeedInterface
 import UIKit
 
 final class PostDetailViewController: UIViewController {
@@ -9,6 +10,7 @@ final class PostDetailViewController: UIViewController {
 
     private let viewModel: PostDetailViewModel
     private let imagePipeline: ImagePipeline
+    private let mode: PostDetailMode
 
     private let scrollView = UIScrollView()
     private let refreshControl = UIRefreshControl()
@@ -37,9 +39,10 @@ final class PostDetailViewController: UIViewController {
     private var mediaAspectConstraint: NSLayoutConstraint?
     private var imageTasks: [Task<Void, Never>] = []
 
-    init(viewModel: PostDetailViewModel, imagePipeline: ImagePipeline) {
+    init(viewModel: PostDetailViewModel, imagePipeline: ImagePipeline, mode: PostDetailMode = .full) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
+        self.mode = mode
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -52,7 +55,7 @@ final class PostDetailViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Post"
+        title = mode == .commentsOnly ? "Comments" : "Post"
         view.backgroundColor = .systemBackground
         configureViews()
 
@@ -147,14 +150,22 @@ final class PostDetailViewController: UIViewController {
         contentStack.axis = .vertical
         contentStack.alignment = .fill
         contentStack.spacing = Spacing.md
-        contentStack.addArrangedSubview(authorRow)
-        contentStack.addArrangedSubview(captionLabel)
-        contentStack.addArrangedSubview(mediaView)
-        contentStack.addArrangedSubview(timestampLabel)
-        contentStack.addArrangedSubview(likeRow)
+        // The post section (header/media/engagement) is grouped so comments-only
+        // mode can hide it as a unit — `configure()` later toggles the inner
+        // views' `isHidden`, which is moot under a hidden parent.
+        let postSectionStack = UIStackView(arrangedSubviews: [authorRow, captionLabel, mediaView, timestampLabel, likeRow])
+        postSectionStack.axis = .vertical
+        postSectionStack.spacing = Spacing.md
+        contentStack.addArrangedSubview(postSectionStack)
         contentStack.addArrangedSubview(commentsHeaderLabel)
         contentStack.addArrangedSubview(commentsStack)
-        contentStack.setCustomSpacing(Spacing.lg, after: likeRow)
+        contentStack.setCustomSpacing(Spacing.lg, after: postSectionStack)
+
+        // Comments-only (from the snap feed, where the post is already on-screen):
+        // drop the post header/media/engagement, keep comments + the compose bar.
+        if mode == .commentsOnly {
+            postSectionStack.isHidden = true
+        }
 
         let content = scrollView.contentLayoutGuide
         let frame = scrollView.frameLayoutGuide

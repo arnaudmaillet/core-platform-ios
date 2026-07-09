@@ -91,10 +91,9 @@ public final class FeedViewModel {
 
     // MARK: - Inputs
 
-    /// Called once the collection view knows its width; display heights are
-    /// computed against it.
-    public func viewDidLoad(layoutWidth: CGFloat) {
-        builder = FeedDisplayModelBuilder(cellWidth: layoutWidth)
+    /// Called once the view is laid out; kicks the initial load.
+    public func viewDidLoad() {
+        builder = FeedDisplayModelBuilder()
         initialLoad = Task { await loadInitial() }
         startRealtimeIfConfigured()
         startComposedPostsIfConfigured()
@@ -145,9 +144,11 @@ public final class FeedViewModel {
         router?.route(to: .profile(id))
     }
 
-    /// A post row tapped — open its detail via routing.
-    public func didTapPost(_ id: PostID) {
-        router?.route(to: .post(id))
+    /// The comment button tapped — open the post's comments via routing. On the
+    /// snap feed the post is already full-screen, so this opens the comments-only
+    /// surface rather than the full post detail.
+    public func didTapComments(_ id: PostID) {
+        router?.route(to: .comments(id))
     }
 
     /// Pagination trigger: called by the view for every cell about to display.

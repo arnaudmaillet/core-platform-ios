@@ -148,6 +148,9 @@ final class AppCoordinator: Coordinator {
             if let index = arguments.firstIndex(of: "-open-post"), index + 1 < arguments.count {
                 container.router.route(to: .post(PostID(arguments[index + 1])))
             }
+            if let index = arguments.firstIndex(of: "-open-comments"), index + 1 < arguments.count {
+                container.router.route(to: .comments(PostID(arguments[index + 1])))
+            }
             if let index = arguments.firstIndex(of: "-open-conversation"), index + 1 < arguments.count {
                 container.router.route(to: .conversation(ConversationID(arguments[index + 1])))
             }

@@ -127,7 +127,7 @@ struct FeedEngagementTests {
                     continuation.resume()
                 }
             }
-            viewModel.viewDidLoad(layoutWidth: 390)
+            viewModel.viewDidLoad()
         }
         return viewModel
     }

@@ -28,14 +28,14 @@ struct SnapMediaKindTests {
     }
 
     @Test func videoAttachmentBecomesVideoKind() {
-        let model = FeedDisplayModelBuilder(cellWidth: 390).build([entry(mimeType: "video/mp4")], relativeTo: Date(timeIntervalSince1970: 0)).first
+        let model = FeedDisplayModelBuilder().build([entry(mimeType: "video/mp4")], relativeTo: Date(timeIntervalSince1970: 0)).first
         #expect(model?.mediaKind == .video)
         // The poster URL threads through for the video cell.
         #expect(model?.thumbnailURL == URL(string: "mock://poster/0"))
     }
 
     @Test func imageAttachmentBecomesImageKind() {
-        let model = FeedDisplayModelBuilder(cellWidth: 390).build([entry(mimeType: "image/png")], relativeTo: Date(timeIntervalSince1970: 0)).first
+        let model = FeedDisplayModelBuilder().build([entry(mimeType: "image/png")], relativeTo: Date(timeIntervalSince1970: 0)).first
         #expect(model?.mediaKind == .image)
     }
 }
