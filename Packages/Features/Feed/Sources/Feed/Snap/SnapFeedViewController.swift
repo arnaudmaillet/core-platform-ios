@@ -30,6 +30,9 @@ final class SnapFeedViewController: UIViewController {
     /// The two facts whose AND is the surface's visibility.
     private var isOnScreen = false
     private var isForeground = true
+    /// Set when a hero zoom-in asked to expand the info overlay before content
+    /// had loaded; the expand runs when the first active page appears.
+    private var pendingInfoExpandDuration: TimeInterval?
     /// Unregisters its notification tokens when this VC (and thus the bag) is
     /// released — a nonisolated deinit can't touch the VC's main-actor state.
     private let appObservers = NotificationObserverBag()
@@ -272,6 +275,12 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         updateActiveItem()
         if lifecycle.activeIndex == indexPath.item {
             (cell as? SnapCellLifecycle)?.willBecomeActive()
+            // A hero zoom-in that arrived before content loaded: expand the info
+            // overlay now that the active page finally exists.
+            if let duration = pendingInfoExpandDuration, let snapCell = cell as? SnapFeedCell {
+                pendingInfoExpandDuration = nil
+                Self.runInfoExpand(on: snapCell, duration: duration)
+            }
         }
     }
 
@@ -326,6 +335,30 @@ extension SnapFeedViewController: ZoomTransitionDestination {
 
     public func setContentScrollEnabled(_ enabled: Bool) {
         collectionView.isScrollEnabled = enabled
+    }
+
+    public func setInfoOverlayCollapsed(_ collapsed: Bool) {
+        activeSnapCell?.setInfoOverlayCollapsed(collapsed)
+    }
+
+    public func animateInfoOverlayExpandingIn(duration: TimeInterval) {
+        if let cell = activeSnapCell {
+            Self.runInfoExpand(on: cell, duration: duration)
+        } else {
+            // Content (the map post) hasn't hydrated yet; run when it appears.
+            pendingInfoExpandDuration = duration
+        }
+    }
+
+    /// Snaps the info overlay to its collapsed state, then animates it back to
+    /// rest over `duration` with the animator's curve — so it grows into place
+    /// in step with the flying hero.
+    private static func runInfoExpand(on cell: SnapFeedCell, duration: TimeInterval) {
+        cell.setInfoOverlayCollapsed(true)
+        cell.layoutIfNeeded()
+        UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseInOut]) {
+            cell.setInfoOverlayCollapsed(false)
+        }
     }
 }
 

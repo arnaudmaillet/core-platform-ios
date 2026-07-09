@@ -37,6 +37,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     private let pauseGlyph = UIImageView()
     /// Subtrees where a touch means "use the control", not "toggle playback".
     private var interactiveViews: [UIView] = []
+    /// The metadata overlays (author + caption, engagement rail) a hero zoom
+    /// expands into place. Animated by transform/alpha only — never relayout — so
+    /// the coordinated animation can't fight Auto Layout or the pager.
+    private var infoOverlays: [UIView] = []
 
     /// Set by the view controller; called on tap with the represented post.
     var onLikeTapped: ((PostID) -> Void)?
@@ -185,6 +189,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // A touch inside the rail or the author header means "use that control",
         // not "toggle playback".
         interactiveViews = [railStack, header]
+        infoOverlays = [leftStack, railStack]
     }
 
     private func headerText() -> UIStackView {
@@ -305,6 +310,25 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         textOnlyBackground.alpha = alpha
     }
 
+    /// The collapsed pre-zoom state for the info overlays: scaled down and
+    /// dropped toward the media, so a hero zoom-in expands them into place (and a
+    /// dismiss collapses them back) — reading as "growing out of the pin".
+    private static let collapsedInfoTransform = CGAffineTransform(translationX: 0, y: 52)
+        .scaledBy(x: 0.82, y: 0.82)
+
+    /// Collapses or restores the info overlays (author + caption, engagement
+    /// rail) as a pure transform + alpha change — no relayout — so the hero
+    /// animator can grow/shrink them in lockstep with the flying media without
+    /// stuttering the pager.
+    func setInfoOverlayCollapsed(_ collapsed: Bool) {
+        let transform = collapsed ? Self.collapsedInfoTransform : .identity
+        let alpha: CGFloat = collapsed ? 0 : 1
+        for view in infoOverlays {
+            view.transform = transform
+            view.alpha = alpha
+        }
+    }
+
     // MARK: - SnapCellLifecycle
 
     func willBecomeActive() {
@@ -373,6 +397,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         super.prepareForReuse()
         isActive = false
         stopKenBurns()
+        setInfoOverlayCollapsed(false) // never recycle a cell mid-collapse
         setPauseGlyphVisible(false)
         videoPlayback?.stop(videoRenderView)
         representedID = nil

@@ -52,6 +52,11 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         destination?.prepareForZoomTransition()
         toView.alpha = 0
 
+        // Grow the info overlay (author, caption, engagement) into place on the
+        // same curve/duration/start as the flying media, so the whole cell reads
+        // as expanding out of the pin — not a flat fade over the top.
+        destination?.animateInfoOverlayExpandingIn(duration: duration)
+
         UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseInOut]) {
             toView.alpha = 1
             hero?.frame = targetFrame
@@ -87,13 +92,18 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseInOut]) {
             fromView.alpha = 0
             hero?.frame = endFrame
+            // Collapse the info overlay back toward the pin inside the block, so
+            // it scrubs in lockstep with the interactive grab (the percent-driven
+            // controller drives this same animation).
+            self.destination?.setInfoOverlayCollapsed(true)
         } completion: { _ in
             let cancelled = context.transitionWasCancelled
             hero?.removeFromSuperview()
             self.destination?.zoomTransitionDidEnd()
             if cancelled {
-                // Returning to the feed: undo the fade so it's fully opaque.
+                // Returning to the feed: undo the fade and restore the overlay.
                 fromView.alpha = 1
+                self.destination?.setInfoOverlayCollapsed(false)
             } else {
                 self.source.zoomSourceDidReturn()
             }

@@ -43,4 +43,16 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// Freeze/unfreeze the feed's own scrolling while a grab-to-dismiss drives,
     /// so its rubber-band doesn't fight the shrinking hero.
     func setContentScrollEnabled(_ enabled: Bool)
+
+    /// Present: animate the info overlay (author, caption, engagement) *expanding*
+    /// into place over `duration`, so the metadata grows out of the pin alongside
+    /// the flying media instead of fading in flat. Uses the animator's curve and
+    /// start time; safe to call before content has loaded — the destination runs
+    /// it as soon as its active page exists.
+    func animateInfoOverlayExpandingIn(duration: TimeInterval)
+    /// Dismiss: set the info overlay's collapsed state as a transform + alpha
+    /// change (no relayout). Called *inside* the animator's animation block so it
+    /// scrubs in lockstep with the interactive grab; `collapsed == true` shrinks
+    /// it back toward the pin.
+    func setInfoOverlayCollapsed(_ collapsed: Bool)
 }
