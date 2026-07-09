@@ -19,21 +19,9 @@ final class FeedTabCoordinator: TabCoordinator {
 
     func start() {
         let feedViewController = container.feedFeature.makeFeedViewController()
-        switch container.feedPresentation {
-        case .classic:
-            feedViewController.navigationItem.leftBarButtonItem = UIBarButtonItem(
-                systemItem: .compose,
-                primaryAction: UIAction { [weak self] _ in self?.presentCompose() }
-            )
-            feedViewController.navigationItem.rightBarButtonItem = UIBarButtonItem(
-                image: UIImage(systemName: "paperplane"),
-                primaryAction: UIAction { [weak self] _ in self?.showMessages() }
-            )
-        case .snap:
-            // The snap feed is immersive (it hides the nav bar itself), so the
-            // compose and messages actions live as overlay controls instead.
-            installSnapOverlayControls(on: feedViewController)
-        }
+        // The snap feed is immersive (it hides the nav bar itself), so the
+        // compose and messages actions live as overlay controls.
+        installSnapOverlayControls(on: feedViewController)
         navigationController.viewControllers = [feedViewController]
         // The feed VC sets its own title ("Timeline"), which UIKit proxies onto
         // the tab bar item; match it here so the tab reads consistently.

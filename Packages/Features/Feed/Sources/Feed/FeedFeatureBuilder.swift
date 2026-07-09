@@ -17,7 +17,6 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     private let router: (any Router)?
     private let imagePipeline: ImagePipeline
     private let videoPlayback: VideoPlaybackController?
-    private let presentation: FeedPresentationStyle
 
     public init(
         repository: any FeedProviding,
@@ -27,8 +26,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         composedPosts: ComposedPostChannel? = nil,
         router: (any Router)? = nil,
         imagePipeline: ImagePipeline,
-        videoPlayback: VideoPlaybackController? = nil,
-        presentation: FeedPresentationStyle = .snap
+        videoPlayback: VideoPlaybackController? = nil
     ) {
         self.repository = repository
         self.engagementProvider = engagementProvider
@@ -38,30 +36,24 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         self.router = router
         self.imagePipeline = imagePipeline
         self.videoPlayback = videoPlayback
-        self.presentation = presentation
     }
 
+    /// The timeline is the full-screen snap feed — the app's sole Timeline.
     public func makeFeedViewController() -> UIViewController {
-        let viewModel = FeedViewModel(
-            repository: repository,
-            engagementProvider: engagementProvider,
-            realtime: realtime,
-            composedPosts: composedPosts,
-            router: router
+        SnapFeedViewController(
+            viewModel: FeedViewModel(
+                repository: repository,
+                engagementProvider: engagementProvider,
+                realtime: realtime,
+                composedPosts: composedPosts,
+                router: router
+            ),
+            imagePipeline: imagePipeline,
+            videoPlayback: videoPlayback
         )
-        switch presentation {
-        case .classic:
-            return FeedViewController(viewModel: viewModel, imagePipeline: imagePipeline)
-        case .snap:
-            return SnapFeedViewController(
-                viewModel: viewModel,
-                imagePipeline: imagePipeline,
-                videoPlayback: videoPlayback
-            )
-        }
     }
 
-    public func makePostDetailViewController(for postID: PostID) -> UIViewController {
+    public func makePostDetailViewController(for postID: PostID, mode: PostDetailMode) -> UIViewController {
         PostDetailViewController(
             viewModel: PostDetailViewModel(
                 postID: postID,
@@ -70,7 +62,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 commentsProvider: commentsProvider,
                 router: router
             ),
-            imagePipeline: imagePipeline
+            imagePipeline: imagePipeline,
+            mode: mode
         )
     }
 }

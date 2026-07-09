@@ -58,8 +58,12 @@ final class RouteResolver: Router {
             navigator.activeNavigationController?.present(compose, animated: true)
 
         case .post(let postID):
-            let detail = feedFeature().makePostDetailViewController(for: postID)
+            let detail = feedFeature().makePostDetailViewController(for: postID, mode: .full)
             navigator.activeNavigationController?.pushViewController(detail, animated: true)
+
+        case .comments(let postID):
+            let comments = feedFeature().makePostDetailViewController(for: postID, mode: .commentsOnly)
+            navigator.activeNavigationController?.pushViewController(comments, animated: true)
 
         case .conversation(let conversationID):
             let thread = chatFeature().makeConversationViewController(for: conversationID)

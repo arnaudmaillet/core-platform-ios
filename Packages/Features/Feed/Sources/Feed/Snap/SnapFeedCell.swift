@@ -213,7 +213,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         nameLabel.text = model.authorName
         metaLabel.text = model.metaText
 
-        let captionText = model.caption?.attributed.string
+        let captionText = model.caption
         captionLabel.text = captionText
         captionLabel.isHidden = (captionText?.isEmpty ?? true)
 

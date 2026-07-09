@@ -76,11 +76,11 @@ struct FeedViewModelTests {
         #expect(router.routes == [.profile(ProfileID("prof-99"))])
     }
 
-    @Test func tappingPostRoutesToDetail() {
+    @Test func tappingCommentsRoutesToComments() {
         let router = SpyRouter()
         let viewModel = FeedViewModel(repository: FakeFeedProvider(), router: router)
-        viewModel.didTapPost(PostID("post-7"))
-        #expect(router.routes == [.post(PostID("post-7"))])
+        viewModel.didTapComments(PostID("post-7"))
+        #expect(router.routes == [.comments(PostID("post-7"))])
     }
 
     @Test func rendersCachedSnapshotBeforeNetworkTruth() async {
@@ -90,7 +90,7 @@ struct FeedViewModelTests {
         let viewModel = FeedViewModel(repository: provider)
 
         async let states = collectStates(viewModel) { $0.items.count == 5 }
-        viewModel.viewDidLoad(layoutWidth: 390)
+        viewModel.viewDidLoad()
         let observed = await states
 
         // First a 3-item render from the snapshot, then the 5-item network truth.
@@ -105,7 +105,7 @@ struct FeedViewModelTests {
         let viewModel = FeedViewModel(repository: provider)
 
         async let first = collectStates(viewModel) { $0.phase == .content }
-        viewModel.viewDidLoad(layoutWidth: 390)
+        viewModel.viewDidLoad()
         #expect(await first.last?.isColdRefreshing == true)
 
         provider.pages[""] = .success(FeedPage(entries: makeEntries(0..<2), nextPageToken: nil, isCold: false))
@@ -122,7 +122,7 @@ struct FeedViewModelTests {
         let viewModel = FeedViewModel(repository: provider)
 
         async let initial = collectStates(viewModel) { $0.items.count == 10 }
-        viewModel.viewDidLoad(layoutWidth: 390)
+        viewModel.viewDidLoad()
         _ = await initial
 
         async let paged = collectStates(viewModel) { $0.items.count > 10 }
@@ -142,7 +142,7 @@ struct FeedViewModelTests {
         async let states = collectStates(viewModel) {
             if case .failed = $0.phase { return true } else { return false }
         }
-        viewModel.viewDidLoad(layoutWidth: 390)
+        viewModel.viewDidLoad()
         let observed = await states
 
         #expect(observed.last?.phase == .failed(message: "Couldn't load your timeline. Pull to retry."))
@@ -155,7 +155,7 @@ struct FeedViewModelTests {
         let viewModel = FeedViewModel(repository: provider)
 
         async let states = collectStates(viewModel) { $0.items.count == 4 }
-        viewModel.viewDidLoad(layoutWidth: 390)
+        viewModel.viewDidLoad()
         let observed = await states
 
         // Snapshot stays on screen; no failure phase while content exists.

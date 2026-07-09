@@ -72,7 +72,7 @@ final class SnapFeedViewController: UIViewController {
         super.viewDidLayoutSubviews()
         if !didStartLoading, view.bounds.width > 0 {
             didStartLoading = true
-            viewModel.viewDidLoad(layoutWidth: view.bounds.width)
+            viewModel.viewDidLoad()
         }
     }
 
@@ -145,7 +145,7 @@ final class SnapFeedViewController: UIViewController {
                 )
                 cell.onLikeTapped = { [weak self] id in self?.viewModel.toggleLike(for: id) }
                 cell.onAuthorTapped = { [weak self] authorID in self?.viewModel.didTapAuthor(authorID) }
-                cell.onCommentTapped = { [weak self] id in self?.viewModel.didTapPost(id) }
+                cell.onCommentTapped = { [weak self] id in self?.viewModel.didTapComments(id) }
             }
             return cell
         }

@@ -188,18 +188,6 @@ final class AppContainer {
         authSession: sessionManager
     )
 
-    /// The timeline presentation. The full-screen, page-snapping snap feed is
-    /// the product default; `-classic-feed` (DEBUG only) falls back to the
-    /// original scrollable list for internal testing. Read once here so the Feed
-    /// package stays free of launch-argument parsing, and shared with the tab
-    /// coordinator, which adapts its chrome to match.
-    let feedPresentation: FeedPresentationStyle = {
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-classic-feed") { return .classic }
-        #endif
-        return .snap
-    }()
-
     private(set) lazy var feedFeature: any FeedFeatureBuilding = FeedFeatureBuilder(
         repository: feedRepository,
         engagementProvider: feedRepository,
@@ -208,8 +196,7 @@ final class AppContainer {
         composedPosts: composedPostChannel,
         router: routeResolver,
         imagePipeline: imagePipeline,
-        videoPlayback: videoPlayback,
-        presentation: feedPresentation
+        videoPlayback: videoPlayback
     )
 
     // MARK: - Profile

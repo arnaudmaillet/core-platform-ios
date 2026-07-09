@@ -4,34 +4,23 @@ import FeedInterface
 import Testing
 @testable import Feed
 
-/// The composition root's presentation switch must route to the right view
-/// controller — that's the entire contract Phase 1 adds to the builder.
+/// The snap feed is the app's sole Timeline; the builder always vends it, and
+/// the post-detail builder honours the requested mode.
 @MainActor
 struct SnapFeedPresentationTests {
-    @Test func snapPresentationBuildsTheSnapViewController() {
-        let vc = makeBuilder(presentation: .snap).makeFeedViewController()
-        #expect(vc is SnapFeedViewController)
+    @Test func feedBuilderVendsTheSnapViewController() {
+        #expect(makeBuilder().makeFeedViewController() is SnapFeedViewController)
     }
 
-    @Test func classicPresentationBuildsTheClassicViewController() {
-        let vc = makeBuilder(presentation: .classic).makeFeedViewController()
-        #expect(vc is FeedViewController)
+    @Test func postDetailBuilderReturnsADetailViewControllerForBothModes() {
+        #expect(makeBuilder().makePostDetailViewController(for: PostID("p1"), mode: .full) is PostDetailViewController)
+        #expect(makeBuilder().makePostDetailViewController(for: PostID("p1"), mode: .commentsOnly) is PostDetailViewController)
     }
 
-    @Test func defaultPresentationIsSnap() {
-        // Snap is the product default; a caller that omits `presentation` gets it.
-        let builder = FeedFeatureBuilder(
-            repository: StubFeedProvider(),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
-        )
-        #expect(builder.makeFeedViewController() is SnapFeedViewController)
-    }
-
-    private func makeBuilder(presentation: FeedPresentationStyle) -> FeedFeatureBuilder {
+    private func makeBuilder() -> FeedFeatureBuilder {
         FeedFeatureBuilder(
             repository: StubFeedProvider(),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            presentation: presentation
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
         )
     }
 }
