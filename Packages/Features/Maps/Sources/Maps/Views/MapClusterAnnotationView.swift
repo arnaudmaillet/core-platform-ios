@@ -1,47 +1,47 @@
+import CoreModels
 import MapKit
+import MediaCore
 import UIKit
 
-/// The bubble shown when MapKit collapses overlapping / co-located pins. It
-/// reports how many of the *returned* pins sit here — honest given the server's
-/// Top-K thinning — and, in Step B, its tap opens a vertical snap feed seeded
-/// with exactly those posts' ids (already held client-side, no extra round-trip).
+/// A cluster of overlapping / co-located pins, rendered to look exactly like a
+/// single post pin: the same rounded, center-anchored square showing the *first*
+/// member post's `thumbnail_url`. MapKit's default count bubble is deliberately
+/// not used. Its tap opens a snap feed seeded with all the cluster's member post
+/// ids — already held client-side, so no extra round-trip.
 final class MapClusterAnnotationView: MKAnnotationView {
     static let reuseIdentifier = "MapClusterAnnotationView"
+    /// Match the individual pin exactly.
+    private static let side = MapAnnotationView.side
 
-    private static let side: CGFloat = 44
-    private let countLabel = UILabel()
-
-    override var annotation: (any MKAnnotation)? {
-        didSet { refreshCount() }
-    }
+    private let thumbnailView = UIImageView()
+    private var imageTask: Task<Void, Never>?
+    /// Guards a slow load against reuse (clusters have no stable id, so key on
+    /// the URL being shown).
+    private var representedURL: URL?
 
     override init(annotation: (any MKAnnotation)?, reuseIdentifier: String?) {
         super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
-        collisionMode = .circle
+        // Square collision + center anchoring, identical to a single pin.
+        collisionMode = .rectangle
         frame = CGRect(x: 0, y: 0, width: Self.side, height: Self.side)
         centerOffset = .zero
+        backgroundColor = .clear
         buildLayout()
-        refreshCount()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     private func buildLayout() {
-        backgroundColor = .clear
-        let circle = UIView(frame: bounds)
-        circle.backgroundColor = .tintColor
-        circle.layer.cornerRadius = Self.side / 2
-        circle.layer.borderWidth = 2
-        circle.layer.borderColor = UIColor.systemBackground.cgColor
-        circle.isUserInteractionEnabled = false
-        addSubview(circle)
-
-        countLabel.frame = bounds
-        countLabel.textAlignment = .center
-        countLabel.textColor = .white
-        countLabel.font = UIFont.preferredFont(forTextStyle: .subheadline).withSemibold()
-        addSubview(countLabel)
+        thumbnailView.contentMode = .scaleAspectFill
+        thumbnailView.clipsToBounds = true
+        thumbnailView.backgroundColor = UIColor.secondarySystemBackground
+        thumbnailView.layer.cornerRadius = 12
+        thumbnailView.layer.cornerCurve = .continuous
+        thumbnailView.layer.borderWidth = 2
+        thumbnailView.layer.borderColor = UIColor.systemBackground.cgColor
+        thumbnailView.frame = bounds
+        addSubview(thumbnailView)
 
         layer.shadowColor = UIColor.black.cgColor
         layer.shadowOpacity = 0.25
@@ -49,18 +49,30 @@ final class MapClusterAnnotationView: MKAnnotationView {
         layer.shadowOffset = CGSize(width: 0, height: 2)
     }
 
-    private func refreshCount() {
-        guard let cluster = annotation as? MKClusterAnnotation else { return }
-        let count = cluster.memberAnnotations.count
-        countLabel.text = count > 99 ? "99+" : String(count)
-    }
-}
+    /// Renders the first member post's thumbnail. Called from the map delegate,
+    /// which owns the image pipeline.
+    func configure(with cluster: MKClusterAnnotation, imagePipeline: ImagePipeline) {
+        let firstThumbnail = cluster.memberAnnotations
+            .lazy
+            .compactMap { ($0 as? MapAnnotation)?.pin.thumbnailURL }
+            .first
 
-private extension UIFont {
-    func withSemibold() -> UIFont {
-        let descriptor = fontDescriptor.addingAttributes([
-            .traits: [UIFontDescriptor.TraitKey.weight: UIFont.Weight.semibold]
-        ])
-        return UIFont(descriptor: descriptor, size: pointSize)
+        imageTask?.cancel()
+        representedURL = firstThumbnail
+        thumbnailView.image = nil
+        guard let url = firstThumbnail else { return }
+        imageTask = Task { [weak self] in
+            guard let image = try? await imagePipeline.image(for: url) else { return }
+            guard let self, self.representedURL == url else { return }
+            self.thumbnailView.image = image
+        }
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        imageTask?.cancel()
+        imageTask = nil
+        representedURL = nil
+        thumbnailView.image = nil
     }
 }

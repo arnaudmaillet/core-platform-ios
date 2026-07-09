@@ -5,18 +5,17 @@ import MediaPlayback
 import UIKit
 
 /// A custom pin: the post's `thumbnail_url` rendered as a small rounded square
-/// on the map surface (UX req #1), with a downward tail so it points at its
-/// coordinate. A play badge overlays video pins — dormant today because the
-/// Radar path carries no media kind yet (see `GeoDiscoveryRepository`), and it
-/// lights up automatically once field 5 lands.
+/// on the map surface (UX req #1), its exact center anchored on the coordinate.
+/// A play badge overlays video pins — dormant today because the Radar path
+/// carries no media kind yet (see `GeoDiscoveryRepository`), and it lights up
+/// automatically once field 5 lands.
 ///
 /// The `VideoRenderView` live-preview pool (UX req #2) attaches here in Step B;
 /// this Step A view is the still-thumbnail seam it plugs into.
 final class MapAnnotationView: MKAnnotationView {
     static let reuseIdentifier = "MapAnnotationView"
 
-    private static let side: CGFloat = 56
-    private static let tailHeight: CGFloat = 8
+    static let side: CGFloat = 56
 
     private let thumbnailView = UIImageView()
     /// Live-preview surface, overlaid on the thumbnail and shown only while this
@@ -55,9 +54,10 @@ final class MapAnnotationView: MKAnnotationView {
     override init(annotation: (any MKAnnotation)?, reuseIdentifier: String?) {
         super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
         clusteringIdentifier = MapAnnotation.clusteringIdentifier
-        // Anchor the marker so the tail tip sits on the coordinate.
-        frame = CGRect(x: 0, y: 0, width: Self.side, height: Self.side + Self.tailHeight)
-        centerOffset = CGPoint(x: 0, y: -(Self.side + Self.tailHeight) / 2)
+        // A plain square whose center sits exactly on the coordinate (no tail):
+        // `centerOffset` stays zero so the marker doesn't drift on pan/zoom.
+        frame = CGRect(x: 0, y: 0, width: Self.side, height: Self.side)
+        centerOffset = .zero
         backgroundColor = .clear
         buildLayout()
     }

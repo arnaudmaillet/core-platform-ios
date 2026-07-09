@@ -239,11 +239,13 @@ extension MapsViewController: MKMapViewDelegate {
     #endif
 
     func mapView(_ mapView: MKMapView, viewFor annotation: any MKAnnotation) -> MKAnnotationView? {
-        if annotation is MKClusterAnnotation {
-            return mapView.dequeueReusableAnnotationView(
+        if let cluster = annotation as? MKClusterAnnotation {
+            let view = mapView.dequeueReusableAnnotationView(
                 withIdentifier: MapClusterAnnotationView.reuseIdentifier,
                 for: annotation
-            )
+            ) as? MapClusterAnnotationView
+            view?.configure(with: cluster, imagePipeline: imagePipeline)
+            return view
         }
         guard let pinAnnotation = annotation as? MapAnnotation else { return nil }
         let view = mapView.dequeueReusableAnnotationView(
