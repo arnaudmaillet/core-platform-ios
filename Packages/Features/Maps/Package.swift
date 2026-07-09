@@ -9,23 +9,27 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../../FeatureInterfaces/MapsInterface"),
+        .package(path: "../../FeatureInterfaces/FeedInterface"),
         .package(path: "../../Kit/CoreContracts"),
         .package(path: "../../Kit/CoreModels"),
         .package(path: "../../Core/CoreNavigation"),
         .package(path: "../../Core/CoreNetworking"),
         .package(path: "../../Core/DesignSystem"),
-        .package(path: "../../Core/MediaCore")
+        .package(path: "../../Core/MediaCore"),
+        .package(path: "../../Core/MediaPlayback")
     ],
     targets: [
         .target(
             name: "Maps",
             dependencies: [
                 "MapsInterface",
+                "FeedInterface",
                 "CoreContracts",
                 "CoreModels",
                 "CoreNavigation",
                 "DesignSystem",
-                "MediaCore"
+                "MediaCore",
+                "MediaPlayback"
             ]
         ),
         .testTarget(

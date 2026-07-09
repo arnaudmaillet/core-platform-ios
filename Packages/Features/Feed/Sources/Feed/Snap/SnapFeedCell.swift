@@ -286,6 +286,25 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         count >= 1000 ? String(format: "%.1fk", Double(count) / 1000) : String(count)
     }
 
+    // MARK: - Hero transition
+
+    /// The media layer a zoom transition should match: the video surface, the
+    /// image, or (text-only posts) the gradient backdrop.
+    var heroMediaView: UIView {
+        if !videoRenderView.isHidden { return videoRenderView }
+        if !mediaView.isHidden { return mediaView }
+        return textOnlyBackground
+    }
+
+    /// Hides/reveals the real media during the hero animation so only the flying
+    /// snapshot is visible (no double image).
+    func setMediaHidden(_ hidden: Bool) {
+        let alpha: CGFloat = hidden ? 0 : 1
+        mediaView.alpha = alpha
+        videoRenderView.alpha = alpha
+        textOnlyBackground.alpha = alpha
+    }
+
     // MARK: - SnapCellLifecycle
 
     func willBecomeActive() {

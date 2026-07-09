@@ -1,5 +1,6 @@
 import MediaCore
 import CoreModels
+import CoreNavigation
 import DesignSystem
 import MediaPlayback
 import UIKit
@@ -290,6 +291,41 @@ extension SnapFeedViewController: UICollectionViewDelegate {
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         if !decelerate { updateActiveItem() }
+    }
+}
+
+// MARK: - ZoomTransitionDestination
+
+extension SnapFeedViewController: ZoomTransitionDestination {
+    /// The cell currently snapped to the viewport — the hero's landing page.
+    /// Falls back to the first visible cell before the first settle.
+    private var activeSnapCell: SnapFeedCell? {
+        if let index = lifecycle.activeIndex,
+           let cell = collectionView.cellForItem(at: IndexPath(item: index, section: 0)) as? SnapFeedCell {
+            return cell
+        }
+        return collectionView.visibleCells.first as? SnapFeedCell
+    }
+
+    public func zoomTargetFrame(in container: UICoordinateSpace) -> CGRect {
+        guard let cell = activeSnapCell else { return view.bounds }
+        let media = cell.heroMediaView
+        return media.convert(media.bounds, to: container)
+    }
+
+    public func prepareForZoomTransition() { activeSnapCell?.setMediaHidden(true) }
+
+    public func zoomTransitionDidEnd() { activeSnapCell?.setMediaHidden(false) }
+
+    /// Dismissal may begin only at the very top of the feed (the first page
+    /// pulled past its top boundary) — an unambiguous, no-scroll region — so a
+    /// downward drag mid-feed keeps paging instead of dismissing.
+    public var isReadyForInteractiveDismissal: Bool {
+        collectionView.contentOffset.y <= 0.5
+    }
+
+    public func setContentScrollEnabled(_ enabled: Bool) {
+        collectionView.isScrollEnabled = enabled
     }
 }
 

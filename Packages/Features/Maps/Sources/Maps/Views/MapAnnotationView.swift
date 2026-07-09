@@ -1,6 +1,7 @@
 import CoreModels
 import MapKit
 import MediaCore
+import MediaPlayback
 import UIKit
 
 /// A custom pin: the post's `thumbnail_url` rendered as a small rounded square
@@ -18,6 +19,9 @@ final class MapAnnotationView: MKAnnotationView {
     private static let tailHeight: CGFloat = 8
 
     private let thumbnailView = UIImageView()
+    /// Live-preview surface, overlaid on the thumbnail and shown only while this
+    /// pin is one of the ≤3 the `MapVideoPlaybackCoordinator` has chosen to play.
+    let videoRenderView = VideoRenderView()
     private let playBadge = UIImageView()
     private var imageTask: Task<Void, Never>?
     /// Guards against a slow image load landing on a recycled view.
@@ -25,6 +29,28 @@ final class MapAnnotationView: MKAnnotationView {
 
     /// Set by the view controller so the view can fetch its own thumbnail.
     var imagePipeline: ImagePipeline?
+
+    /// The loaded cover image, handed to the hero transition to fly.
+    var heroImage: UIImage? { thumbnailView.image }
+
+    /// Invoked when MapKit recycles this view, so the coordinator can return any
+    /// player bound to it to the pool before it's reused for another pin.
+    var onReuse: (() -> Void)?
+
+    /// Reveals the live-preview surface over the thumbnail (playback is attached
+    /// by the coordinator via `videoRenderView`). Seeds the render view's poster
+    /// with the already-loaded thumbnail so the pin shows the still image — not a
+    /// black frame — until the clip's first frame is ready.
+    func beginVideoPreview() {
+        videoRenderView.setPoster(thumbnailView.image)
+        videoRenderView.isHidden = false
+    }
+
+    /// Hides the preview and clears it back to the still thumbnail.
+    func endVideoPreview() {
+        videoRenderView.isHidden = true
+        videoRenderView.setPoster(nil)
+    }
 
     override init(annotation: (any MKAnnotation)?, reuseIdentifier: String?) {
         super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
@@ -49,6 +75,13 @@ final class MapAnnotationView: MKAnnotationView {
         thumbnailView.layer.borderColor = UIColor.systemBackground.cgColor
         thumbnailView.frame = CGRect(x: 0, y: 0, width: Self.side, height: Self.side)
         addSubview(thumbnailView)
+
+        videoRenderView.frame = thumbnailView.frame
+        videoRenderView.clipsToBounds = true
+        videoRenderView.layer.cornerRadius = 12
+        videoRenderView.layer.cornerCurve = .continuous
+        videoRenderView.isHidden = true
+        addSubview(videoRenderView)
 
         // A soft drop shadow lifts the pin off the map tiles.
         layer.shadowColor = UIColor.black.cgColor
@@ -82,11 +115,20 @@ final class MapAnnotationView: MKAnnotationView {
             guard let image = try? await imagePipeline.image(for: url) else { return }
             guard let self, self.representedID == id else { return }
             self.thumbnailView.image = image
+            // If a live preview started before the thumbnail finished loading,
+            // give it a poster now so the pin shows the still until the first
+            // video frame — instead of a black square.
+            if !self.videoRenderView.isHidden {
+                self.videoRenderView.setPoster(image)
+            }
         }
     }
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        onReuse?()
+        onReuse = nil
+        endVideoPreview()
         imageTask?.cancel()
         imageTask = nil
         representedID = nil

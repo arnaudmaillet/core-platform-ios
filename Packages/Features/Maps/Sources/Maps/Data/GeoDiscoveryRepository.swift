@@ -66,25 +66,50 @@ public actor GeoDiscoveryRepository: GeoDiscoveryProviding {
     /// marker image.
     static func makePin(from pin: GeoDiscovery_V1_RadarPin) -> MapPin? {
         guard !pin.postID.isEmpty else { return nil }
+        let thumbnailURL = pin.thumbnailURL.isEmpty ? nil : URL(string: pin.thumbnailURL)
+        let kind = mediaKind(for: pin)
         return MapPin(
             postID: PostID(pin.postID),
             latitude: pin.lat,
             longitude: pin.lng,
-            thumbnailURL: pin.thumbnailURL.isEmpty ? nil : URL(string: pin.thumbnailURL),
-            mediaKind: mediaKind(for: pin)
+            thumbnailURL: thumbnailURL,
+            mediaKind: kind,
+            previewVideoURL: previewVideoURL(for: pin, kind: kind, thumbnailURL: thumbnailURL)
         )
     }
 
     /// Stubbed photo-vs-video discriminator. `RadarPin` has no media kind on the
     /// wire yet — the additive `media.v1.MediaKind media_kind = 5` field is not
-    /// published to BSR — so today every pin reads as an image and the play
-    /// badge / live-preview autoplay stay dark.
+    /// published to BSR — so in production every pin reads as an image and the
+    /// play badge / live-preview autoplay stay dark.
     ///
-    /// When the field ships and the contracts are regenerated, replace this body
-    /// with `pin.mediaKind == .video ? .video : .image` (and add the `.video`
-    /// case to `media.v1.MediaKind`); the whole video branch lights up with no
-    /// other change on the client.
+    /// When the field ships and the contracts are regenerated, replace the
+    /// production branch with `pin.mediaKind == .video ? .video : .image` (and
+    /// add the `.video` case to `media.v1.MediaKind`).
+    ///
+    /// `-maps-force-video` (DEBUG) treats mock `video/*` pins as video so the
+    /// badge and autoplay pool can be exercised live in the simulator before the
+    /// field lands.
     static func mediaKind(for pin: GeoDiscovery_V1_RadarPin) -> MediaKind {
-        .image
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-maps-force-video"),
+           pin.thumbnailURL.contains("video") {
+            return .video
+        }
+        #endif
+        return .image
+    }
+
+    /// The looping preview URL for a video pin. `nil` in production (Radar
+    /// carries no video URL). Under `-maps-force-video`, the mock's
+    /// `mock://video/*` thumbnail doubles as a synthesizable clip, so the pool
+    /// has something real to play.
+    static func previewVideoURL(for pin: GeoDiscovery_V1_RadarPin, kind: MediaKind, thumbnailURL: URL?) -> URL? {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-maps-force-video"), kind == .video {
+            return thumbnailURL
+        }
+        #endif
+        return nil
     }
 }

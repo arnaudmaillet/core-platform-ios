@@ -53,6 +53,18 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         )
     }
 
+    public func makeSnapFeedViewController(postIDs: [PostID]) -> UIViewController {
+        SnapFeedViewController(
+            viewModel: FeedViewModel(
+                repository: FixedPostsFeedProvider(base: repository, ids: postIDs),
+                engagementProvider: engagementProvider,
+                router: router
+            ),
+            imagePipeline: imagePipeline,
+            videoPlayback: videoPlayback
+        )
+    }
+
     public func makePostDetailViewController(for postID: PostID, mode: PostDetailMode) -> UIViewController {
         PostDetailViewController(
             viewModel: PostDetailViewModel(

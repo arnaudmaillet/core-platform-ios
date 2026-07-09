@@ -1,0 +1,46 @@
+import UIKit
+
+/// The two-sided contract for a hero/zoom transition: a thumbnail on one screen
+/// expands to fill another, and drags back into the exact same spot on dismiss.
+///
+/// It lives in CoreNavigation — a module both the source and destination
+/// features already depend on — so neither feature imports the other. The Maps
+/// pin is the `ZoomTransitionSource`; the snap feed is the
+/// `ZoomTransitionDestination`. The animator (owned by the presenting side)
+/// reads geometry from both and never needs their concrete types.
+@MainActor
+public protocol ZoomTransitionSource: AnyObject {
+    /// A detached, styled copy of the thing being expanded (e.g. the pin's
+    /// thumbnail square) to fly across the screen. `nil` falls back to a plain
+    /// cross-fade with no hero.
+    func zoomHeroSnapshot() -> UIView?
+    /// The on-screen rect the hero starts from (present) / returns to (dismiss),
+    /// in `container`'s coordinate space. Recomputed at dismiss time, since the
+    /// source may have moved (a panned map).
+    func zoomHeroFrame(in container: UICoordinateSpace) -> CGRect
+    /// `true` when the source is currently on screen; a dismiss to an off-screen
+    /// source falls back to a centered shrink-and-fade instead of flying to a
+    /// rect that isn't visible.
+    var zoomSourceIsOnScreen: Bool { get }
+    /// The transition finished returning; un-hide the source view.
+    func zoomSourceDidReturn()
+}
+
+@MainActor
+public protocol ZoomTransitionDestination: AnyObject {
+    /// The rect the hero lands on (present) / lifts from (dismiss): the active
+    /// page's media view, in `container`'s coordinate space.
+    func zoomTargetFrame(in container: UICoordinateSpace) -> CGRect
+    /// Hide the real media so only the flying hero is visible during the
+    /// animation (avoids a double image).
+    func prepareForZoomTransition()
+    /// Restore the real media once the hero has landed / been removed.
+    func zoomTransitionDidEnd()
+    /// Whether an interactive downward drag should begin a dismissal now — true
+    /// only when the active page is at its scroll-top boundary, so mid-feed
+    /// scrolling is never hijacked.
+    var isReadyForInteractiveDismissal: Bool { get }
+    /// Freeze/unfreeze the feed's own scrolling while a grab-to-dismiss drives,
+    /// so its rubber-band doesn't fight the shrinking hero.
+    func setContentScrollEnabled(_ enabled: Bool)
+}

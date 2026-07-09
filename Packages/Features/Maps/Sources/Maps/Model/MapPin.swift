@@ -18,23 +18,31 @@ public struct MapPin: Sendable, Equatable, Identifiable {
     public let longitude: Double
     /// Pin cover image; `nil` for text-only posts (never indexed on the map).
     public let thumbnailURL: URL?
-    /// Photo-vs-video discriminator that drives the play badge and live-preview
-    /// autoplay. Until `RadarPin.media_kind` (additive field 5) is published and
-    /// regenerated, the repository maps every pin to `.image`; see
+    /// Photo-vs-video discriminator that drives the play badge. Until
+    /// `RadarPin.media_kind` (additive field 5) is published and regenerated, the
+    /// repository maps every pin to `.image`; see
     /// `GeoDiscoveryRepository.mediaKind(for:)`.
     public let mediaKind: MediaKind
+    /// A lightweight looping clip for the live map preview. `nil` today: the
+    /// Radar path carries no video URL (only a still `thumbnail_url`), so
+    /// production autoplay is blocked on a second additive field
+    /// (`RadarPin.preview_video_url`) the backend hasn't scoped yet. The video
+    /// pool is fully built behind this and lights up when the URL arrives.
+    public let previewVideoURL: URL?
 
     public init(
         postID: PostID,
         latitude: Double,
         longitude: Double,
         thumbnailURL: URL?,
-        mediaKind: MediaKind
+        mediaKind: MediaKind,
+        previewVideoURL: URL? = nil
     ) {
         self.postID = postID
         self.latitude = latitude
         self.longitude = longitude
         self.thumbnailURL = thumbnailURL
         self.mediaKind = mediaKind
+        self.previewVideoURL = previewVideoURL
     }
 }
