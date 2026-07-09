@@ -85,6 +85,24 @@ final class SnapFeedViewController: UIViewController {
         refreshVisibility()
     }
 
+    #if DEBUG
+    private var didDebugPause = false
+    /// `-snap-start-paused`: pauses the active cell shortly after appearing so
+    /// the pause glyph can be screenshotted (taps can't be injected in the sim).
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard !didDebugPause,
+              ProcessInfo.processInfo.arguments.contains("-snap-start-paused") else { return }
+        didDebugPause = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self, let index = self.lifecycle.activeIndex,
+                  let cell = self.collectionView.cellForItem(at: IndexPath(item: index, section: 0)) as? SnapFeedCell
+            else { return }
+            cell.togglePlayback()
+        }
+    }
+    #endif
+
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         navigationController?.setNavigationBarHidden(false, animated: animated)
@@ -98,6 +116,7 @@ final class SnapFeedViewController: UIViewController {
         collectionView = UICollectionView(frame: .zero, collectionViewLayout: Self.makeLayout())
         collectionView.backgroundColor = .black
         collectionView.isPagingEnabled = true
+        collectionView.allowsSelection = false // taps toggle playback, not selection
         collectionView.showsVerticalScrollIndicator = false
         collectionView.contentInsetAdjustmentBehavior = .never
         collectionView.isPrefetchingEnabled = true
@@ -126,6 +145,7 @@ final class SnapFeedViewController: UIViewController {
                 )
                 cell.onLikeTapped = { [weak self] id in self?.viewModel.toggleLike(for: id) }
                 cell.onAuthorTapped = { [weak self] authorID in self?.viewModel.didTapAuthor(authorID) }
+                cell.onCommentTapped = { [weak self] id in self?.viewModel.didTapPost(id) }
             }
             return cell
         }
@@ -260,10 +280,9 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         (cell as? SnapCellLifecycle)?.didResignActive()
     }
 
-    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        guard let id = dataSource.itemIdentifier(for: indexPath) else { return }
-        viewModel.didTapPost(id)
-    }
+    // A full-cell tap toggles play/pause (handled by the cell's own gesture),
+    // not navigation — so there is no `didSelectItemAt` routing. Comments open
+    // via the rail's comment button; the author row opens the profile.
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         updateActiveItem()

@@ -62,6 +62,21 @@ public final class VideoPlaybackController {
         detach(key: key, view: view)
     }
 
+    /// Toggles play/pause for the player bound to `view` (a user tapping the
+    /// full-screen cell). Returns the new paused state. No-op returning `false`
+    /// when no player is active for the view (e.g. an image/text cell).
+    @discardableResult
+    public func togglePlayback(in view: VideoRenderView) -> Bool {
+        guard let player = activePlayers[ObjectIdentifier(view)] else { return false }
+        if player.timeControlStatus == .paused {
+            player.play()
+            return false
+        } else {
+            player.pause()
+            return true
+        }
+    }
+
     /// Warms the source (synthesis/cache) for an upcoming page so its `play` is
     /// instant. No player is loaned.
     public func preroll(_ mediaURL: URL) {
