@@ -49,6 +49,10 @@ final class RouteResolver: Router {
             navigator.selectTab(.feed)
             navigator.activeNavigationController?.popToRootViewController(animated: true)
 
+        case .messages:
+            navigator.selectTab(.messages)
+            navigator.activeNavigationController?.popToRootViewController(animated: true)
+
         case .profile(let profileID):
             let profile = profileFeature().makeProfileViewController(for: profileID)
             navigator.activeNavigationController?.pushViewController(profile, animated: true)

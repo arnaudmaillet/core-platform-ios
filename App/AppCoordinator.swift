@@ -151,6 +151,11 @@ final class AppCoordinator: Coordinator {
             if let index = arguments.firstIndex(of: "-open-comments"), index + 1 < arguments.count {
                 container.router.route(to: .comments(PostID(arguments[index + 1])))
             }
+            // `-open-messages` selects the Messages root tab on launch (chat was
+            // promoted from a feed sub-screen to a tab).
+            if arguments.contains("-open-messages") {
+                container.router.route(to: .messages)
+            }
             if let index = arguments.firstIndex(of: "-open-conversation"), index + 1 < arguments.count {
                 container.router.route(to: .conversation(ConversationID(arguments[index + 1])))
             }

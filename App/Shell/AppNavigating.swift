@@ -1,11 +1,18 @@
 import UIKit
 
-/// The four tabs of the app shell, in bar order.
-enum AppTab: Int, CaseIterable {
+/// The tabs of the app shell, in bar order. The search tab is rendered detached
+/// at the trailing edge by the system (see `SearchTabCoordinator`'s `UISearchTab`),
+/// giving the grouped layout `| Maps  Feed  Messages  Profile |  Search |` with no
+/// custom bar. Activity is not a tab — it lives inside the Profile tab.
+///
+/// Backed by a stable string identifier (not an ordinal), so reordering the bar
+/// never silently repoints a route.
+enum AppTab: String, CaseIterable {
+    case maps
     case feed
-    case search
-    case activity
+    case messages
     case profile
+    case search
 }
 
 /// The navigation surface the `RouteResolver` drives: which tab is showing and

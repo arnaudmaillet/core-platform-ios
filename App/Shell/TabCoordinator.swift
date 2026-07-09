@@ -7,7 +7,12 @@ import UIKit
 /// the others (cross-tab moves go through the router).
 @MainActor
 protocol TabCoordinator: Coordinator {
-    /// The navigation controller shown for this tab (becomes one of the tab
-    /// bar's view controllers). Its `tabBarItem` is configured in `start()`.
+    /// The navigation controller shown for this tab: the stack routed
+    /// destinations are pushed onto, and the content vended by `tab`.
     var navigationController: UINavigationController { get }
+
+    /// The tab this coordinator contributes to the bar. Built once and owned by
+    /// the coordinator (so it can, e.g., update its own badge). `MainTabCoordinator`
+    /// collects these into `UITabBarController.tabs`.
+    var tab: UITab { get }
 }
