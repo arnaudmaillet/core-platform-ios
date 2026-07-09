@@ -56,6 +56,26 @@ struct VideoPlaybackControllerTests {
         #expect(controller.idlePlayerCount == 0)
     }
 
+    @Test func togglePlaybackFlipsPausedStateOfTheActivePlayer() async {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        let view = VideoRenderView()
+        await controller.play(URL(string: "mock://video/1")!, in: view)
+
+        // Playing → tap pauses.
+        #expect(controller.togglePlayback(in: view) == true)
+        #expect(controller.activePlayer(in: view)?.timeControlStatus == .paused)
+
+        // Paused → tap resumes.
+        #expect(controller.togglePlayback(in: view) == false)
+        #expect(controller.activePlayer(in: view)?.timeControlStatus != .paused)
+    }
+
+    @Test func togglePlaybackIsANoOpWithoutAnActivePlayer() async {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        let view = VideoRenderView() // never played
+        #expect(controller.togglePlayback(in: view) == false)
+    }
+
     @Test func concurrentViewsGetDistinctPlayers() async {
         let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
         let viewA = VideoRenderView()

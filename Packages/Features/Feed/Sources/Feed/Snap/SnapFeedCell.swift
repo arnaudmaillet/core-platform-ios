@@ -31,11 +31,19 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     private let likeButton = UIButton(configuration: .plain())
     private let likeCountLabel = UILabel()
+    private let commentButton = UIButton(configuration: .plain())
+
+    /// A large centred play glyph shown while the active video is user-paused.
+    private let pauseGlyph = UIImageView()
+    /// Subtrees where a touch means "use the control", not "toggle playback".
+    private var interactiveViews: [UIView] = []
 
     /// Set by the view controller; called on tap with the represented post.
     var onLikeTapped: ((PostID) -> Void)?
     /// Called when the author's avatar or name is tapped.
     var onAuthorTapped: ((ProfileID) -> Void)?
+    /// Called when the comment button is tapped — opens the post's detail/comments.
+    var onCommentTapped: ((PostID) -> Void)?
 
     private var representedID: PostID?
     private var authorID: ProfileID?
@@ -95,6 +103,32 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         likeCountLabel.textColor = .white
         likeCountLabel.textAlignment = .center
 
+        var commentConfig = UIButton.Configuration.plain()
+        commentConfig.image = UIImage(systemName: "bubble.right")
+        commentConfig.baseForegroundColor = .white
+        commentButton.configuration = commentConfig
+        commentButton.addAction(UIAction { [weak self] _ in
+            guard let id = self?.representedID else { return }
+            self?.onCommentTapped?(id)
+        }, for: .primaryActionTriggered)
+
+        pauseGlyph.image = UIImage(systemName: "play.fill")?
+            .withConfiguration(UIImage.SymbolConfiguration(pointSize: 56, weight: .semibold))
+        pauseGlyph.tintColor = UIColor.white.withAlphaComponent(0.85)
+        pauseGlyph.contentMode = .center
+        pauseGlyph.isUserInteractionEnabled = false
+        pauseGlyph.isHidden = true
+        pauseGlyph.layer.shadowColor = UIColor.black.cgColor
+        pauseGlyph.layer.shadowOpacity = 0.4
+        pauseGlyph.layer.shadowRadius = 6
+        pauseGlyph.layer.shadowOffset = .zero
+
+        // Background tap toggles play/pause; the delegate rejects taps that land
+        // on an interactive control (rail / author row).
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleBackgroundTap))
+        tap.delegate = self
+        contentView.addGestureRecognizer(tap)
+
         buildLayout()
     }
 
@@ -130,15 +164,27 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             leftStack.trailingAnchor.constraint(lessThanOrEqualTo: parent.trailingAnchor, constant: -72)
         }
 
-        // Engagement rail, bottom-right (TikTok-style vertical stack).
-        let likeStack = UIStackView(arrangedSubviews: [likeButton, likeCountLabel])
-        likeStack.axis = .vertical
-        likeStack.spacing = Spacing.xs
-        likeStack.alignment = .center
-        likeStack.constrain(in: contentView) { parent in
-            likeStack.trailingAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.trailingAnchor, constant: -Spacing.md)
-            likeStack.bottomAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.bottomAnchor, constant: -Spacing.lg)
+        // Engagement rail, bottom-right (TikTok-style vertical stack): like +
+        // count, then comment.
+        let railStack = UIStackView(arrangedSubviews: [likeButton, likeCountLabel, commentButton])
+        railStack.axis = .vertical
+        railStack.spacing = Spacing.xs
+        railStack.alignment = .center
+        railStack.setCustomSpacing(Spacing.md, after: likeCountLabel)
+        railStack.constrain(in: contentView) { parent in
+            railStack.trailingAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.trailingAnchor, constant: -Spacing.md)
+            railStack.bottomAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.bottomAnchor, constant: -Spacing.lg)
         }
+
+        // Centred pause glyph (added last so it sits above the media/scrim).
+        pauseGlyph.constrain(in: contentView) { parent in
+            pauseGlyph.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
+            pauseGlyph.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
+        }
+
+        // A touch inside the rail or the author header means "use that control",
+        // not "toggle playback".
+        interactiveViews = [railStack, header]
     }
 
     private func headerText() -> UIStackView {
@@ -245,6 +291,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func willBecomeActive() {
         guard !isActive else { return }
         isActive = true
+        // Activation always starts playing, so any user-paused glyph is stale.
+        setPauseGlyphVisible(false)
         switch mediaKind {
         case .video:
             guard let url = mediaURL, let videoPlayback else { return }
@@ -252,6 +300,27 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             Task { await videoPlayback.play(url, in: view) }
         case .image:
             startKenBurns()
+        }
+    }
+
+    // MARK: - Play/pause toggle
+
+    @objc private func handleBackgroundTap() {
+        togglePlayback()
+    }
+
+    /// Toggles the active video's playback and reflects it in the pause glyph.
+    /// No-op for image/text cells (no player).
+    func togglePlayback() {
+        guard mediaKind == .video, let videoPlayback else { return }
+        let paused = videoPlayback.togglePlayback(in: videoRenderView)
+        setPauseGlyphVisible(paused)
+    }
+
+    private func setPauseGlyphVisible(_ visible: Bool) {
+        guard pauseGlyph.isHidden == visible else { return }
+        UIView.transition(with: pauseGlyph, duration: 0.15, options: .transitionCrossDissolve) {
+            self.pauseGlyph.isHidden = !visible
         }
     }
 
@@ -285,6 +354,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         super.prepareForReuse()
         isActive = false
         stopKenBurns()
+        setPauseGlyphVisible(false)
         videoPlayback?.stop(videoRenderView)
         representedID = nil
         authorID = nil
@@ -295,6 +365,30 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         avatarView.image = nil
         mediaView.image = nil
         videoRenderView.setPoster(nil)
+    }
+}
+
+// MARK: - Tap arbitration
+
+extension SnapFeedCell: UIGestureRecognizerDelegate {
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        !Self.isInteractiveTouch(touch.view, interactiveRoots: interactiveViews, stopAt: contentView)
+    }
+
+    /// True when the touched view is (or descends from) an interactive control —
+    /// a `UIControl`, or any of `interactiveRoots` — walking up to `stopAt`. So
+    /// taps on the rail (like/comment) and the author row use those controls;
+    /// taps on the background/media/caption toggle playback. Pure + static so
+    /// the arbitration is unit-testable.
+    static func isInteractiveTouch(_ touched: UIView?, interactiveRoots: [UIView], stopAt: UIView) -> Bool {
+        var view = touched
+        while let current = view {
+            if current is UIControl { return true }
+            if interactiveRoots.contains(where: { $0 === current }) { return true }
+            if current === stopAt { break }
+            view = current.superview
+        }
+        return false
     }
 }
 
