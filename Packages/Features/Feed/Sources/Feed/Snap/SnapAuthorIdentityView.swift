@@ -228,13 +228,18 @@ enum SnapNavControls {
         let button = UIButton(configuration: config)
         // Strict 1:1 box: the chevron's intrinsic size is asymmetric and the
         // system glass pill wraps the custom view's bounds, which renders
-        // slightly oval without this. Height yields to the bar's item wrapper
-        // (999 — same rule as the identity view), and width *tracks* whatever
-        // height wins, so the pill is a true circle at any bar metric.
-        let height = button.heightAnchor.constraint(equalToConstant: 40)
+        // slightly oval without this. Both metrics are 999, never required:
+        // the bar's FIRST pass pins its item wrapper to the raw intrinsic
+        // size (16.3×23) with autoresizing constraints, and anything required
+        // loses to that with a console break. 36 matches the wrapper's real
+        // item height, so the settled pill is an exact circle (a 40pt box
+        // would settle 40×36 — subtly oval).
+        let height = button.heightAnchor.constraint(equalToConstant: 36)
         height.priority = UILayoutPriority(999)
         height.isActive = true
-        button.widthAnchor.constraint(equalTo: button.heightAnchor).isActive = true
+        let aspect = button.widthAnchor.constraint(equalTo: button.heightAnchor)
+        aspect.priority = UILayoutPriority(999)
+        aspect.isActive = true
         button.layer.shadowColor = UIColor.black.cgColor
         button.layer.shadowOpacity = 0.5
         button.layer.shadowRadius = 3
