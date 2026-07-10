@@ -22,4 +22,16 @@ enum ZoomTransitionGeometry {
         guard viewHeight > 0 else { return 0 }
         return min(max(translationY / viewHeight, 0), 1)
     }
+
+    /// The transform that renders a view laid out at `rect` exactly onto
+    /// `target`: translate center-to-center (in superview points, applied
+    /// before the scale so the scale can't skew it), then scale size-to-size
+    /// about the default centered anchor. Because UIKit interpolates the matrix
+    /// components linearly, animating this to/from `.identity` sweeps the same
+    /// rects as a frame animation between `rect` and `target` at every step.
+    static func collapseTransform(of rect: CGRect, onto target: CGRect) -> CGAffineTransform {
+        guard rect.width > 0, rect.height > 0 else { return .identity }
+        return CGAffineTransform(translationX: target.midX - rect.midX, y: target.midY - rect.midY)
+            .scaledBy(x: target.width / rect.width, y: target.height / rect.height)
+    }
 }

@@ -4,53 +4,49 @@ import DesignSystem
 import MediaPlayback
 import UIKit
 
-/// A full-screen snap cell: cover-fit media under a bottom scrim, with the
-/// author, caption and engagement controls overlaid. Text-only posts drop the
+/// A full-screen snap cell: cover-fit media under a `SnapChromeView` overlay
+/// (scrim, author, caption, engagement controls). Text-only posts drop the
 /// media and show a gradient backdrop instead.
 ///
 /// It reuses `FeedItemDisplayModel` as-is — only the fields relevant to a
 /// full-bleed layout (`mediaURL`, `avatarURL`, author text, caption string) are
 /// read; the precomputed heights are ignored because every cell is bounds-sized.
-/// Captions are re-styled here (white-on-scrim) on the main thread, which is
-/// free when only one or two cells are ever alive at once.
+///
+/// The cell plays no part in the hero transition's animation: the flight is a
+/// self-contained card owned by the animator (carrying its own chrome replica),
+/// and the whole feed is simply revealed at landing. Nothing mutates a live
+/// cell mid-flight.
 final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     static let reuseIdentifier = "SnapFeedCell"
 
     private let mediaView = UIImageView()
     private let videoRenderView = VideoRenderView()
-    private let scrimView = GradientView(colors: [.clear, UIColor.black.withAlphaComponent(0.75)])
     private let textOnlyBackground = GradientView(
         colors: [UIColor(red: 0.15, green: 0.16, blue: 0.24, alpha: 1),
                  UIColor(red: 0.05, green: 0.05, blue: 0.09, alpha: 1)]
     )
-
-    private let avatarView = UIImageView()
-    private let nameLabel = UILabel()
-    private let metaLabel = UILabel()
-    private let captionLabel = UILabel()
-
-    private let likeButton = UIButton(configuration: .plain())
-    private let likeCountLabel = UILabel()
-    private let commentButton = UIButton(configuration: .plain())
+    private let chrome = SnapChromeView()
 
     /// A large centred play glyph shown while the active video is user-paused.
     private let pauseGlyph = UIImageView()
-    /// Subtrees where a touch means "use the control", not "toggle playback".
-    private var interactiveViews: [UIView] = []
-    /// The metadata overlays (author + caption, engagement rail) a hero zoom
-    /// expands into place. Animated by transform/alpha only — never relayout — so
-    /// the coordinated animation can't fight Auto Layout or the pager.
-    private var infoOverlays: [UIView] = []
 
     /// Set by the view controller; called on tap with the represented post.
-    var onLikeTapped: ((PostID) -> Void)?
+    var onLikeTapped: ((PostID) -> Void)? {
+        get { chrome.onLikeTapped }
+        set { chrome.onLikeTapped = newValue }
+    }
     /// Called when the author's avatar or name is tapped.
-    var onAuthorTapped: ((ProfileID) -> Void)?
+    var onAuthorTapped: ((ProfileID) -> Void)? {
+        get { chrome.onAuthorTapped }
+        set { chrome.onAuthorTapped = newValue }
+    }
     /// Called when the comment button is tapped — opens the post's detail/comments.
-    var onCommentTapped: ((PostID) -> Void)?
+    var onCommentTapped: ((PostID) -> Void)? {
+        get { chrome.onCommentTapped }
+        set { chrome.onCommentTapped = newValue }
+    }
 
     private var representedID: PostID?
-    private var authorID: ProfileID?
     private var mediaURL: URL?
     private var mediaKind: MediaKind = .image
     private var videoPlayback: VideoPlaybackController?
@@ -64,57 +60,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
         mediaView.contentMode = .scaleAspectFill
         mediaView.clipsToBounds = true
-
-        avatarView.clipsToBounds = true
-        avatarView.layer.cornerRadius = 18
-        avatarView.backgroundColor = .darkGray
-        avatarView.contentMode = .scaleAspectFill
-        avatarView.widthAnchor.constraint(equalToConstant: 36).isActive = true
-        avatarView.heightAnchor.constraint(equalToConstant: 36).isActive = true
-
-        nameLabel.font = UIFont.preferredFont(forTextStyle: .subheadline).withWeight(.semibold)
-        nameLabel.textColor = .white
-        metaLabel.font = .preferredFont(forTextStyle: .footnote)
-        metaLabel.textColor = UIColor.white.withAlphaComponent(0.75)
-
-        captionLabel.numberOfLines = 4
-        captionLabel.textColor = .white
-
-        // Legibility over arbitrary media, independent of the scrim.
-        for label in [nameLabel, metaLabel, captionLabel] {
-            label.layer.shadowColor = UIColor.black.cgColor
-            label.layer.shadowOpacity = 0.5
-            label.layer.shadowRadius = 3
-            label.layer.shadowOffset = .zero
-        }
-
-        // Avatar + name route to the author's profile.
-        for view in [avatarView, nameLabel] {
-            view.isUserInteractionEnabled = true
-            view.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(authorTapped)))
-        }
-
-        var likeConfig = UIButton.Configuration.plain()
-        likeConfig.image = UIImage(systemName: "heart")
-        likeConfig.baseForegroundColor = .white
-        likeButton.configuration = likeConfig
-        likeButton.addAction(UIAction { [weak self] _ in
-            guard let id = self?.representedID else { return }
-            self?.onLikeTapped?(id)
-        }, for: .primaryActionTriggered)
-
-        likeCountLabel.font = UIFont.preferredFont(forTextStyle: .footnote).withWeight(.semibold)
-        likeCountLabel.textColor = .white
-        likeCountLabel.textAlignment = .center
-
-        var commentConfig = UIButton.Configuration.plain()
-        commentConfig.image = UIImage(systemName: "bubble.right")
-        commentConfig.baseForegroundColor = .white
-        commentButton.configuration = commentConfig
-        commentButton.addAction(UIAction { [weak self] _ in
-            guard let id = self?.representedID else { return }
-            self?.onCommentTapped?(id)
-        }, for: .primaryActionTriggered)
 
         pauseGlyph.image = UIImage(systemName: "play.fill")?
             .withConfiguration(UIImage.SymbolConfiguration(pointSize: 56, weight: .semibold))
@@ -143,61 +88,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         textOnlyBackground.pin(to: contentView)
         mediaView.pin(to: contentView)
         videoRenderView.pin(to: contentView)
+        chrome.pin(to: contentView)
 
-        scrimView.isUserInteractionEnabled = false
-        scrimView.constrain(in: contentView) { parent in
-            scrimView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
-            scrimView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
-            scrimView.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
-            scrimView.heightAnchor.constraint(equalTo: parent.heightAnchor, multiplier: 0.5)
-        }
-
-        // Author + caption, bottom-left, inset from the safe area.
-        let header = UIStackView(arrangedSubviews: [avatarView, headerText()])
-        header.axis = .horizontal
-        header.spacing = Spacing.sm
-        header.alignment = .center
-
-        let leftStack = UIStackView(arrangedSubviews: [header, captionLabel])
-        leftStack.axis = .vertical
-        leftStack.spacing = Spacing.sm
-        leftStack.alignment = .leading
-        leftStack.constrain(in: contentView) { parent in
-            leftStack.leadingAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.leadingAnchor, constant: Spacing.lg)
-            leftStack.bottomAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.bottomAnchor, constant: -Spacing.lg)
-            leftStack.trailingAnchor.constraint(lessThanOrEqualTo: parent.trailingAnchor, constant: -72)
-        }
-
-        // Engagement rail, bottom-right (TikTok-style vertical stack): like +
-        // count, then comment.
-        let railStack = UIStackView(arrangedSubviews: [likeButton, likeCountLabel, commentButton])
-        railStack.axis = .vertical
-        railStack.spacing = Spacing.xs
-        railStack.alignment = .center
-        railStack.setCustomSpacing(Spacing.md, after: likeCountLabel)
-        railStack.constrain(in: contentView) { parent in
-            railStack.trailingAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.trailingAnchor, constant: -Spacing.md)
-            railStack.bottomAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.bottomAnchor, constant: -Spacing.lg)
-        }
-
-        // Centred pause glyph (added last so it sits above the media/scrim).
+        // Centred pause glyph (added last so it sits above the media/chrome).
         pauseGlyph.constrain(in: contentView) { parent in
             pauseGlyph.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
             pauseGlyph.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
         }
-
-        // A touch inside the rail or the author header means "use that control",
-        // not "toggle playback".
-        interactiveViews = [railStack, header]
-        infoOverlays = [leftStack, railStack]
-    }
-
-    private func headerText() -> UIStackView {
-        let stack = UIStackView(arrangedSubviews: [nameLabel, metaLabel])
-        stack.axis = .vertical
-        stack.spacing = 0
-        stack.alignment = .leading
-        return stack
     }
 
     // MARK: - Configuration
@@ -209,38 +106,22 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         videoPlayback: VideoPlaybackController?
     ) {
         representedID = model.id
-        authorID = model.authorID
         mediaURL = model.mediaURL
         mediaKind = model.mediaKind
         self.videoPlayback = videoPlayback
-        updateEngagement(engagement)
-
-        nameLabel.text = model.authorName
-        metaLabel.text = model.metaText
-
-        let captionText = model.caption
-        captionLabel.text = captionText
-        captionLabel.isHidden = (captionText?.isEmpty ?? true)
+        chrome.configure(with: model, engagement: engagement, pipeline: pipeline)
 
         let hasMedia = model.mediaURL != nil
         let isVideo = hasMedia && model.mediaKind == .video
         let isImage = hasMedia && model.mediaKind == .image
         mediaView.isHidden = !isImage
         videoRenderView.isHidden = !isVideo
-        scrimView.isHidden = !hasMedia
         textOnlyBackground.isHidden = hasMedia
-        // Text-only posts lean on the caption, so give it more room and weight.
-        captionLabel.numberOfLines = hasMedia ? 4 : 8
-        captionLabel.font = hasMedia
-            ? .preferredFont(forTextStyle: .body)
-            : UIFont.preferredFont(forTextStyle: .title2).withWeight(.semibold)
 
-        avatarView.image = nil
         mediaView.image = nil
         mediaView.transform = .identity
         videoRenderView.setPoster(nil)
 
-        loadImage(model.avatarURL, into: avatarView, expecting: model.id, pipeline: pipeline)
         if isImage {
             loadImage(model.mediaURL, into: mediaView, expecting: model.id, pipeline: pipeline)
         }
@@ -262,11 +143,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// Updates only the engagement rail — live counter ticks and optimistic
     /// like toggles. Never relayouts.
     func updateEngagement(_ state: FeedViewModel.EngagementState) {
-        likeCountLabel.text = Self.countText(state.likeCount)
-        var config = likeButton.configuration
-        config?.image = UIImage(systemName: state.isLiked ? "heart.fill" : "heart")
-        config?.baseForegroundColor = state.isLiked ? .systemRed : .white
-        likeButton.configuration = config
+        chrome.updateEngagement(state)
     }
 
     private func loadImage(_ url: URL?, into imageView: UIImageView, expecting id: PostID, pipeline: ImagePipeline) {
@@ -280,80 +157,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
                 self.startKenBurns()
             }
         })
-    }
-
-    @objc private func authorTapped() {
-        guard let authorID else { return }
-        onAuthorTapped?(authorID)
-    }
-
-    private static func countText(_ count: Int64) -> String {
-        count >= 1000 ? String(format: "%.1fk", Double(count) / 1000) : String(count)
-    }
-
-    // MARK: - Hero transition
-
-    /// The media layer a zoom transition should match: the video surface, the
-    /// image, or (text-only posts) the gradient backdrop.
-    var heroMediaView: UIView {
-        if !videoRenderView.isHidden { return videoRenderView }
-        if !mediaView.isHidden { return mediaView }
-        return textOnlyBackground
-    }
-
-    /// Hides/reveals the real media during the hero animation so only the flying
-    /// snapshot is visible (no double image).
-    func setMediaHidden(_ hidden: Bool) {
-        let alpha: CGFloat = hidden ? 0 : 1
-        mediaView.alpha = alpha
-        videoRenderView.alpha = alpha
-        textOnlyBackground.alpha = alpha
-    }
-
-    /// The collapsed pre-zoom state for the info overlays: scaled down and
-    /// dropped toward the media, so a hero zoom-in expands them into place (and a
-    /// dismiss collapses them back) — reading as "growing out of the pin".
-    private static let collapsedInfoTransform = CGAffineTransform(translationX: 0, y: 52)
-        .scaledBy(x: 0.82, y: 0.82)
-
-    /// Clears/restores the full-screen black cell background during a hero
-    /// transition, so the map shows through around the growing cell instead of
-    /// being occluded by an opaque page. The media (hero snapshot), scrim and
-    /// info overlay still render above the see-through canvas.
-    func setContentBackgroundTransparent(_ transparent: Bool) {
-        contentView.backgroundColor = transparent ? .clear : .black
-    }
-
-    /// Collapses or restores the info overlays (author + caption, engagement
-    /// rail) as a pure transform + alpha change — no relayout — so the hero
-    /// animator can grow/shrink them in lockstep with the flying media without
-    /// stuttering the pager.
-    ///
-    /// `towardPoint` (the tapped pin, in this cell's coordinate space) parks each
-    /// overlay *at the pin*, scaled down, so it appears to emanate from — and
-    /// return to — the same origin as the media hero. `nil` falls back to a plain
-    /// rise-and-scale.
-    func setInfoOverlayCollapsed(_ collapsed: Bool, towardPoint point: CGPoint? = nil) {
-        let alpha: CGFloat = collapsed ? 0 : 1
-        for view in infoOverlays {
-            view.alpha = alpha
-            if !collapsed {
-                view.transform = .identity
-            } else if let point {
-                view.transform = Self.collapsedTransform(for: view, toward: point)
-            } else {
-                view.transform = Self.collapsedInfoTransform
-            }
-        }
-    }
-
-    /// A transform that parks `view` at `point`, scaled down, so the overlay
-    /// emanates from the pin and fans out to its resting place.
-    private static func collapsedTransform(for view: UIView, toward point: CGPoint) -> CGAffineTransform {
-        let scale: CGFloat = 0.32
-        let dx = point.x - view.center.x
-        let dy = point.y - view.center.y
-        return CGAffineTransform(translationX: dx, y: dy).scaledBy(x: scale, y: scale)
     }
 
     // MARK: - SnapCellLifecycle
@@ -424,18 +227,14 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         super.prepareForReuse()
         isActive = false
         stopKenBurns()
-        setInfoOverlayCollapsed(false) // never recycle a cell mid-collapse
-        setContentBackgroundTransparent(false) // nor with a cleared canvas
-        setMediaHidden(false) // nor with media left hidden from a flight
         setPauseGlyphVisible(false)
         videoPlayback?.stop(videoRenderView)
         representedID = nil
-        authorID = nil
         mediaURL = nil
         mediaKind = .image
         for task in imageTasks { task.cancel() }
         imageTasks.removeAll()
-        avatarView.image = nil
+        chrome.reset()
         mediaView.image = nil
         videoRenderView.setPoster(nil)
     }
@@ -445,7 +244,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
 extension SnapFeedCell: UIGestureRecognizerDelegate {
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        !Self.isInteractiveTouch(touch.view, interactiveRoots: interactiveViews, stopAt: contentView)
+        !Self.isInteractiveTouch(touch.view, interactiveRoots: chrome.interactionRoots, stopAt: contentView)
     }
 
     /// True when the touched view is (or descends from) an interactive control —
@@ -463,23 +262,4 @@ extension SnapFeedCell: UIGestureRecognizerDelegate {
         }
         return false
     }
-}
-
-/// A view backed by a `CAGradientLayer`, sized automatically with its bounds.
-private final class GradientView: UIView {
-    override class var layerClass: AnyClass { CAGradientLayer.self }
-    private var gradientLayer: CAGradientLayer { layer as! CAGradientLayer }
-
-    init(colors: [UIColor],
-         startPoint: CGPoint = CGPoint(x: 0.5, y: 0),
-         endPoint: CGPoint = CGPoint(x: 0.5, y: 1)) {
-        super.init(frame: .zero)
-        isUserInteractionEnabled = false
-        gradientLayer.colors = colors.map(\.cgColor)
-        gradientLayer.startPoint = startPoint
-        gradientLayer.endPoint = endPoint
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }

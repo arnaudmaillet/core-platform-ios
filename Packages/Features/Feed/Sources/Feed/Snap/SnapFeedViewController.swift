@@ -30,17 +30,11 @@ final class SnapFeedViewController: UIViewController {
     /// The two facts whose AND is the surface's visibility.
     private var isOnScreen = false
     private var isForeground = true
-    /// Set when a hero zoom-in asked to expand the info overlay before content
-    /// had loaded; the expand runs when the first active page appears.
-    private var pendingInfoExpandDuration: TimeInterval?
-    /// While true, cells render with a clear background so the map shows through
-    /// during a hero flight. Applied to cells that appear mid-flight too.
-    private var zoomCanvasTransparent = false
-    /// The tapped pin's rect in this view's coords; the info overlay emanates
-    /// from its center so the metadata grows out of the pin with the media.
-    private var zoomHeroAnchor: CGRect?
-    /// The pin center the info overlay collapses toward, if known.
-    private var zoomAnchorPoint: CGPoint? { zoomHeroAnchor.map { CGPoint(x: $0.midX, y: $0.midY) } }
+    /// The inert chrome replica riding in the hero transition's flying card.
+    /// Held weakly for the duration of a flight so a post that hydrates
+    /// mid-flight (cold tap) can still fill in the replica's labels; the card
+    /// owns the view itself.
+    private weak var flightChrome: SnapChromeView?
     /// Unregisters its notification tokens when this VC (and thus the bag) is
     /// released — a nonisolated deinit can't touch the VC's main-actor state.
     private let appObservers = NotificationObserverBag()
@@ -219,6 +213,15 @@ final class SnapFeedViewController: UIViewController {
             self?.updateActiveItem()
         }
 
+        // A hero flight in progress whose post hydrated just now (cold tap):
+        // fill in the flying card's chrome where it is. Its geometry is
+        // data-independent, so only the text/avatar fade in.
+        if let flightChrome {
+            UIView.transition(with: flightChrome, duration: 0.15, options: [.transitionCrossDissolve]) {
+                self.configureFlightChrome(flightChrome)
+            }
+        }
+
         switch state.phase {
         case .loading, .content:
             statusLabel.isHidden = true
@@ -281,22 +284,6 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // loads, which can be before the cell exists; without this net that
         // activation would be lost, since the index never changes again.
         updateActiveItem()
-        // A cell that appears while a hero flight is in progress must adopt the
-        // clear canvas and hide its own media immediately — otherwise it flashes
-        // an opaque page (and, for video posts, a black render view) over the map
-        // while the media hero is flying separately.
-        if zoomCanvasTransparent, let snapCell = cell as? SnapFeedCell {
-            snapCell.setContentBackgroundTransparent(true)
-            snapCell.setMediaHidden(true)
-            // Run the pending info-overlay expand off the flight flag, NOT
-            // `lifecycle.activeIndex` — that's nil during the transition (the
-            // surface isn't "visible" until the present settles), so gating on it
-            // meant the expand never fired and the overlay just appeared at rest.
-            if let duration = pendingInfoExpandDuration {
-                pendingInfoExpandDuration = nil
-                Self.runInfoExpand(on: snapCell, duration: duration, toward: zoomAnchorPoint)
-            }
-        }
         if lifecycle.activeIndex == indexPath.item {
             (cell as? SnapCellLifecycle)?.willBecomeActive()
         }
@@ -324,25 +311,37 @@ extension SnapFeedViewController: UICollectionViewDelegate {
 // MARK: - ZoomTransitionDestination
 
 extension SnapFeedViewController: ZoomTransitionDestination {
-    /// The cell currently snapped to the viewport — the hero's landing page.
-    /// Falls back to the first visible cell before the first settle.
-    private var activeSnapCell: SnapFeedCell? {
-        if let index = lifecycle.activeIndex,
-           let cell = collectionView.cellForItem(at: IndexPath(item: index, section: 0)) as? SnapFeedCell {
-            return cell
-        }
-        return collectionView.visibleCells.first as? SnapFeedCell
-    }
-
     public func zoomTargetFrame(in container: UICoordinateSpace) -> CGRect {
-        guard let cell = activeSnapCell else { return view.bounds }
-        let media = cell.heroMediaView
-        return media.convert(media.bounds, to: container)
+        view.convert(view.bounds, to: container)
     }
 
-    public func prepareForZoomTransition() { activeSnapCell?.setMediaHidden(true) }
+    /// A fresh inert replica of the active page's chrome for the flying card.
+    /// Configured now if the post is already loaded; otherwise `render(_:)`
+    /// fills it in when the data lands mid-flight — the scaffold's geometry is
+    /// data-independent, so late text never moves anything.
+    public func zoomFlightChrome() -> UIView? {
+        let chrome = SnapChromeView()
+        chrome.isUserInteractionEnabled = false
+        configureFlightChrome(chrome)
+        flightChrome = chrome
+        return chrome
+    }
 
-    public func zoomTransitionDidEnd() { activeSnapCell?.setMediaHidden(false) }
+    public func zoomTransitionDidEnd() { flightChrome = nil }
+
+    /// Configures `chrome` from the page the card flies to/from: the active
+    /// page if one is settled, else the first post (a map tap's feed opens on
+    /// its tapped post). No-op until that model exists.
+    private func configureFlightChrome(_ chrome: SnapChromeView) {
+        let index = lifecycle.activeIndex ?? 0
+        guard orderedIDs.indices.contains(index),
+              let model = modelsByID[orderedIDs[index]] else { return }
+        chrome.configure(
+            with: model,
+            engagement: viewModel.engagementState(for: model.id),
+            pipeline: imagePipeline
+        )
+    }
 
     /// Dismissal may begin only at the very top of the feed (the first page
     /// pulled past its top boundary) — an unambiguous, no-scroll region — so a
@@ -353,51 +352,6 @@ extension SnapFeedViewController: ZoomTransitionDestination {
 
     public func setContentScrollEnabled(_ enabled: Bool) {
         collectionView.isScrollEnabled = enabled
-    }
-
-    public func setInfoOverlayCollapsed(_ collapsed: Bool) {
-        activeSnapCell?.setInfoOverlayCollapsed(collapsed, towardPoint: collapsed ? zoomAnchorPoint : nil)
-    }
-
-    public func setZoomHeroAnchor(_ heroRect: CGRect) {
-        zoomHeroAnchor = heroRect
-    }
-
-    public func setZoomCanvasTransparent(_ transparent: Bool) {
-        zoomCanvasTransparent = transparent
-        let color: UIColor = transparent ? .clear : .black
-        view.backgroundColor = color
-        collectionView.backgroundColor = color
-        for case let cell as SnapFeedCell in collectionView.visibleCells {
-            cell.setContentBackgroundTransparent(transparent)
-        }
-    }
-
-    public func animateInfoOverlayExpandingIn(duration: TimeInterval) {
-        if let cell = activeSnapCell {
-            Self.runInfoExpand(on: cell, duration: duration, toward: zoomAnchorPoint)
-        } else {
-            // Content (the map post) hasn't hydrated yet; run when it appears.
-            pendingInfoExpandDuration = duration
-        }
-    }
-
-    /// Snaps the info overlay to its collapsed state, then animates it back to
-    /// rest over `duration` with the animator's curve — so it grows into place
-    /// in step with the flying hero.
-    private static func runInfoExpand(on cell: SnapFeedCell, duration: TimeInterval, toward point: CGPoint?) {
-        // Commit the collapsed state now (parked at the pin, if known)…
-        cell.setInfoOverlayCollapsed(true, towardPoint: point)
-        cell.layoutIfNeeded()
-        // …then animate the expand on the next runloop. Kicking it inside the
-        // same willDisplay pass makes UIKit apply the change instantly (no
-        // animation, cell still mid-display); one hop lets it settle so the
-        // expand actually animates over `duration`.
-        DispatchQueue.main.async {
-            UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseInOut]) {
-                cell.setInfoOverlayCollapsed(false)
-            }
-        }
     }
 }
 
