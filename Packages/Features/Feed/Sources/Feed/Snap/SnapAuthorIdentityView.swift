@@ -88,6 +88,18 @@ final class SnapAuthorIdentityView: UIView {
         row.axis = .horizontal
         row.spacing = Spacing.sm
         row.alignment = .center
+        // The row is edge-pinned, so any width the pill has beyond (or short
+        // of) natural content must be absorbed by exactly one member — and at
+        // UIKit's defaults the button and the labels stack TIE (hugging
+        // 250/250, compression 750/750), letting the solver deform an
+        // arbitrary one per pass: the "+" visibly dances during early bar
+        // passes and the hydration glide. Make the button rigid, and make the
+        // labels area the designated absorber — its content is leading-aligned,
+        // so a stretched frame just gains invisible trailing space.
+        followButton.setContentHuggingPriority(.required, for: .horizontal)
+        followButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+        labelsStack.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        labelsStack.setContentCompressionResistancePriority(UILayoutPriority(749), for: .horizontal)
         // Interaction stays on: the follow button consumes its own taps (a
         // control descendant defeats the container's gesture), while taps on
         // the avatar/labels fall through to the container's author tap.
