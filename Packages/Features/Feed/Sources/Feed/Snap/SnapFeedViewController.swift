@@ -21,6 +21,10 @@ final class SnapFeedViewController: UIViewController {
     private var dataSource: UICollectionViewDiffableDataSource<Section, PostID>!
     private let refreshControl = UIRefreshControl()
     private let statusLabel = UILabel()
+    /// The author identity, hosted as the trailing bar item's custom view —
+    /// content-hugging, so the system glass pill wraps it flush. Content
+    /// follows the active page via the lifecycle seam.
+    private let authorIdentityView = SnapAuthorIdentityView()
 
     /// id → display model; lookups only, never measurement.
     private var modelsByID: [PostID: FeedItemDisplayModel] = [:]
@@ -30,8 +34,8 @@ final class SnapFeedViewController: UIViewController {
     /// The two facts whose AND is the surface's visibility.
     private var isOnScreen = false
     private var isForeground = true
-    /// The inert chrome replica riding in the hero transition's flying card.
-    /// Held weakly for the duration of a flight so a post that hydrates
+    /// The inert page-chrome replica riding in the hero transition's flying
+    /// card. Held weakly for the duration of a flight so a post that hydrates
     /// mid-flight (cold tap) can still fill in the replica's labels; the card
     /// owns the view itself.
     private weak var flightChrome: SnapChromeView?
@@ -54,6 +58,7 @@ final class SnapFeedViewController: UIViewController {
         title = "Timeline"
         view.backgroundColor = .black
         configureCollectionView()
+        configureNavigationItem()
         configureStatusLabel()
         observeAppLifecycle()
 
@@ -84,9 +89,15 @@ final class SnapFeedViewController: UIViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        // Immersive: hide the nav bar while the feed is frontmost; pushed
-        // screens (profile, post detail) restore it on their way in.
-        navigationController?.setNavigationBarHidden(true, animated: animated)
+        // The back item exists only when there is somewhere to go back to — a
+        // presented (map-opened) feed, not the Timeline tab root — and the
+        // presentation relationship is known only here, not at viewDidLoad.
+        // Dismissing runs the interactive-capable zoom-out.
+        if presentingViewController != nil, navigationItem.leftBarButtonItem == nil {
+            let back = SnapNavControls.makeBackButton()
+            back.addAction(UIAction { [weak self] _ in self?.dismiss(animated: true) }, for: .primaryActionTriggered)
+            navigationItem.leftBarButtonItem = UIBarButtonItem(customView: back)
+        }
         isOnScreen = true
         refreshVisibility()
     }
@@ -111,7 +122,6 @@ final class SnapFeedViewController: UIViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        navigationController?.setNavigationBarHidden(false, animated: animated)
         isOnScreen = false
         refreshVisibility()
     }
@@ -125,6 +135,10 @@ final class SnapFeedViewController: UIViewController {
         collectionView.allowsSelection = false // taps toggle playback, not selection
         collectionView.showsVerticalScrollIndicator = false
         collectionView.contentInsetAdjustmentBehavior = .never
+        // No system scroll-edge darkening under the transparent bar: the media
+        // stays unmasked to the top edge; the glass bar items carry their own
+        // legibility backing.
+        collectionView.topEdgeEffect.isHidden = true
         collectionView.isPrefetchingEnabled = true
         collectionView.delegate = self
         collectionView.prefetchDataSource = self
@@ -150,11 +164,41 @@ final class SnapFeedViewController: UIViewController {
                     videoPlayback: self.videoPlayback
                 )
                 cell.onLikeTapped = { [weak self] id in self?.viewModel.toggleLike(for: id) }
-                cell.onAuthorTapped = { [weak self] authorID in self?.viewModel.didTapAuthor(authorID) }
                 cell.onCommentTapped = { [weak self] id in self?.viewModel.didTapComments(id) }
             }
             return cell
         }
+    }
+
+    private func configureNavigationItem() {
+        // Fully transparent bar over the full-bleed media, identical for every
+        // bar state so no scroll-edge transition ever fires. Set per-item (not
+        // on the bar) so pushed screens keep their normal bars with zero
+        // restore choreography.
+        let appearance = UINavigationBarAppearance()
+        appearance.configureWithTransparentBackground()
+        navigationItem.standardAppearance = appearance
+        navigationItem.scrollEdgeAppearance = appearance
+        navigationItem.compactAppearance = appearance
+
+        // The author identity rides the *trailing* bar item (right-aligned,
+        // like a system floating action), not the centered titleView. One
+        // stable custom view, installed exactly once: author changes
+        // cross-fade inside it, never re-negotiating bar layout. Prepend to
+        // whatever the shell already installed (the Timeline tab's compose
+        // item) — items are ordered trailing-first, so identity hugs the edge.
+        let identityItem = UIBarButtonItem(customView: authorIdentityView)
+        navigationItem.rightBarButtonItems = [identityItem] + (navigationItem.rightBarButtonItems ?? [])
+        authorIdentityView.onAuthorTapped = { [weak self] id in self?.viewModel.didTapAuthor(id) }
+        // The feed layer has no follow API (follow state/toggling lives in the
+        // Profile feature), so the follow affordance routes to the author's
+        // profile — the surface that owns the real Follow button. Swap for a
+        // one-tap follow once a social seam exists on the feed side.
+        authorIdentityView.onFollowTapped = { [weak self] id in self?.viewModel.didTapAuthor(id) }
+
+        // Keep `title` (it feeds pushed screens' back labels) but suppress its
+        // centered rendering — the bar's center stays empty by design.
+        navigationItem.titleView = UIView()
     }
 
     /// One item == one full screen; a plain vertical layout, paged by
@@ -258,7 +302,18 @@ final class SnapFeedViewController: UIViewController {
 
     private func apply(_ transition: SnapLifecycleDispatcher.Transition) {
         if let resign = transition.resign { lifecycleCell(at: resign)?.didResignActive() }
-        if let activate = transition.activate { lifecycleCell(at: activate)?.willBecomeActive() }
+        if let activate = transition.activate {
+            lifecycleCell(at: activate)?.willBecomeActive()
+            // Same settle-quantized seam that drives playback: the bar's
+            // author titleView follows the active page.
+            updateIdentityAuthor(at: activate)
+        }
+    }
+
+    private func updateIdentityAuthor(at index: Int) {
+        guard orderedIDs.indices.contains(index),
+              let model = modelsByID[orderedIDs[index]] else { return }
+        authorIdentityView.setAuthor(model, pipeline: imagePipeline)
     }
 
     private func lifecycleCell(at index: Int) -> SnapCellLifecycle? {
@@ -315,10 +370,12 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         view.convert(view.bounds, to: container)
     }
 
-    /// A fresh inert replica of the active page's chrome for the flying card.
-    /// Configured now if the post is already loaded; otherwise `render(_:)`
-    /// fills it in when the data lands mid-flight — the scaffold's geometry is
-    /// data-independent, so late text never moves anything.
+    /// A fresh inert replica of the active page's chrome for the flying card —
+    /// page content only (scrim, caption, rail); the navigation bar stays real
+    /// and static above the flight. Configured now if the post is already
+    /// loaded; otherwise `render(_:)` fills it in when the data lands
+    /// mid-flight — the scaffold's geometry is data-independent, so late text
+    /// never moves anything.
     public func zoomFlightChrome() -> UIView? {
         let chrome = SnapChromeView()
         chrome.isUserInteractionEnabled = false
@@ -327,20 +384,23 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         return chrome
     }
 
+    /// Hides only the feed's own view: the navigation bar above it (owned by
+    /// the wrapping navigation controller) keeps rendering natively while the
+    /// flying card impersonates the page underneath it.
+    public func setZoomContentHidden(_ hidden: Bool) {
+        view.alpha = hidden ? 0 : 1
+    }
+
     public func zoomTransitionDidEnd() { flightChrome = nil }
 
-    /// Configures `chrome` from the page the card flies to/from: the active
+    /// Configures the replica from the page the card flies to/from: the active
     /// page if one is settled, else the first post (a map tap's feed opens on
     /// its tapped post). No-op until that model exists.
     private func configureFlightChrome(_ chrome: SnapChromeView) {
         let index = lifecycle.activeIndex ?? 0
         guard orderedIDs.indices.contains(index),
               let model = modelsByID[orderedIDs[index]] else { return }
-        chrome.configure(
-            with: model,
-            engagement: viewModel.engagementState(for: model.id),
-            pipeline: imagePipeline
-        )
+        chrome.configure(with: model, engagement: viewModel.engagementState(for: model.id))
     }
 
     /// Dismissal may begin only at the very top of the feed (the first page

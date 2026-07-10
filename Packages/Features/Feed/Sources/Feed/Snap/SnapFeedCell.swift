@@ -9,8 +9,9 @@ import UIKit
 /// media and show a gradient backdrop instead.
 ///
 /// It reuses `FeedItemDisplayModel` as-is — only the fields relevant to a
-/// full-bleed layout (`mediaURL`, `avatarURL`, author text, caption string) are
-/// read; the precomputed heights are ignored because every cell is bounds-sized.
+/// full-bleed page (`mediaURL`, `thumbnailURL`, caption, engagement) are read;
+/// author identity is the navigation bar's concern, and the precomputed
+/// heights are ignored because every cell is bounds-sized.
 ///
 /// The cell plays no part in the hero transition's animation: the flight is a
 /// self-contained card owned by the animator (carrying its own chrome replica),
@@ -31,14 +32,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     private let pauseGlyph = UIImageView()
 
     /// Set by the view controller; called on tap with the represented post.
+    /// (Author and back navigation live in the navigation bar.)
     var onLikeTapped: ((PostID) -> Void)? {
         get { chrome.onLikeTapped }
         set { chrome.onLikeTapped = newValue }
-    }
-    /// Called when the author's avatar or name is tapped.
-    var onAuthorTapped: ((ProfileID) -> Void)? {
-        get { chrome.onAuthorTapped }
-        set { chrome.onAuthorTapped = newValue }
     }
     /// Called when the comment button is tapped — opens the post's detail/comments.
     var onCommentTapped: ((PostID) -> Void)? {
@@ -109,7 +106,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         mediaURL = model.mediaURL
         mediaKind = model.mediaKind
         self.videoPlayback = videoPlayback
-        chrome.configure(with: model, engagement: engagement, pipeline: pipeline)
+        chrome.configure(with: model, engagement: engagement)
 
         let hasMedia = model.mediaURL != nil
         let isVideo = hasMedia && model.mediaKind == .video

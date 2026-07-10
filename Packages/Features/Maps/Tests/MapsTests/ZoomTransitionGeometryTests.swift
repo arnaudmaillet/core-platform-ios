@@ -54,4 +54,20 @@ struct ZoomTransitionGeometryTests {
         )
         #expect(t == .identity)
     }
+
+    @Test func compensatedCornerRadiusRendersExactUnderTheCollapseScale() {
+        let full = CGRect(x: 0, y: 0, width: 390, height: 844)
+        let pin = CGRect(x: 120, y: 300, width: 56, height: 56)
+
+        let layerRadius = ZoomTransitionGeometry.compensatedCornerRadius(rendering: 12, of: full, onto: pin)
+
+        // The collapse transform scales the layer radius by its horizontal
+        // factor; the compensated value must render back to exactly 12pt.
+        let scaleX = ZoomTransitionGeometry.collapseTransform(of: full, onto: pin).a
+        #expect(abs(layerRadius * scaleX - 12) < 1e-9)
+    }
+
+    @Test func compensatedCornerRadiusOfDegenerateRectsPassesThrough() {
+        #expect(ZoomTransitionGeometry.compensatedCornerRadius(rendering: 12, of: .zero, onto: .zero) == 12)
+    }
 }

@@ -1,10 +1,11 @@
-import MediaCore
 import CoreModels
 import DesignSystem
 import UIKit
 
-/// The snap page's UI chrome — bottom scrim, author row, caption, and the
-/// engagement rail — as one self-contained full-bleed overlay.
+/// The snap *page's* UI chrome — caption over the bottom scrim and the
+/// engagement rail. Screen-scoped chrome (back item, author identity) lives in
+/// the navigation bar instead (`SnapAuthorIdentityView` / `SnapNavControls`), so
+/// it stays fixed while pages scroll.
 ///
 /// It exists twice per hero flight: embedded in every `SnapFeedCell` (the
 /// live, interactive instance) and inside the transition's flying card (an
@@ -17,75 +18,39 @@ import UIKit
 final class SnapChromeView: UIView {
     private let scrimView = GradientView(colors: [.clear, UIColor.black.withAlphaComponent(0.75)])
 
-    private let avatarView = UIImageView()
-    private let nameLabel = UILabel()
-    private let metaLabel = UILabel()
     private let captionLabel = UILabel()
 
     private let likeButton = UIButton(configuration: .plain())
     private let likeCountLabel = UILabel()
     private let commentButton = UIButton(configuration: .plain())
 
-    private let headerStack: UIStackView
     private let railStack: UIStackView
 
-    /// Set by the owning cell; called on tap with the represented post/author.
+    /// Set by the owning cell; called on tap with the represented post.
     /// The flight replica leaves these nil and disables interaction entirely.
     var onLikeTapped: ((PostID) -> Void)?
-    var onAuthorTapped: ((ProfileID) -> Void)?
     var onCommentTapped: ((PostID) -> Void)?
 
     /// Subtrees where a touch means "use the control", not "toggle playback" —
     /// consumed by the cell's tap arbitration.
-    var interactionRoots: [UIView] { [railStack, headerStack] }
+    var interactionRoots: [UIView] { [railStack] }
 
     private var representedID: PostID?
-    private var authorID: ProfileID?
-    private var avatarTask: Task<Void, Never>?
 
     override init(frame: CGRect) {
-        let headerText = UIStackView(arrangedSubviews: [nameLabel, metaLabel])
-        headerText.axis = .vertical
-        headerText.spacing = 0
-        headerText.alignment = .leading
-        headerStack = UIStackView(arrangedSubviews: [avatarView, headerText])
-        headerStack.axis = .horizontal
-        headerStack.spacing = Spacing.sm
-        headerStack.alignment = .center
         railStack = UIStackView(arrangedSubviews: [likeButton, likeCountLabel, commentButton])
         railStack.axis = .vertical
         railStack.spacing = Spacing.xs
         railStack.alignment = .center
         super.init(frame: frame)
 
-        avatarView.clipsToBounds = true
-        avatarView.layer.cornerRadius = 18
-        avatarView.backgroundColor = .darkGray
-        avatarView.contentMode = .scaleAspectFill
-        avatarView.widthAnchor.constraint(equalToConstant: 36).isActive = true
-        avatarView.heightAnchor.constraint(equalToConstant: 36).isActive = true
-
-        nameLabel.font = UIFont.preferredFont(forTextStyle: .subheadline).withWeight(.semibold)
-        nameLabel.textColor = .white
-        metaLabel.font = .preferredFont(forTextStyle: .footnote)
-        metaLabel.textColor = UIColor.white.withAlphaComponent(0.75)
-
         captionLabel.numberOfLines = 4
         captionLabel.textColor = .white
-
         // Legibility over arbitrary media, independent of the scrim.
-        for label in [nameLabel, metaLabel, captionLabel] {
-            label.layer.shadowColor = UIColor.black.cgColor
-            label.layer.shadowOpacity = 0.5
-            label.layer.shadowRadius = 3
-            label.layer.shadowOffset = .zero
-        }
-
-        // Avatar + name route to the author's profile.
-        for view in [avatarView, nameLabel] {
-            view.isUserInteractionEnabled = true
-            view.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(authorTapped)))
-        }
+        captionLabel.layer.shadowColor = UIColor.black.cgColor
+        captionLabel.layer.shadowOpacity = 0.5
+        captionLabel.layer.shadowRadius = 3
+        captionLabel.layer.shadowOffset = .zero
 
         var likeConfig = UIButton.Configuration.plain()
         likeConfig.image = UIImage(systemName: "heart")
@@ -124,15 +89,12 @@ final class SnapChromeView: UIView {
             scrimView.heightAnchor.constraint(equalTo: parent.heightAnchor, multiplier: 0.5)
         }
 
-        // Author + caption, bottom-left, inset from the safe area.
-        let leftStack = UIStackView(arrangedSubviews: [headerStack, captionLabel])
-        leftStack.axis = .vertical
-        leftStack.spacing = Spacing.sm
-        leftStack.alignment = .leading
-        leftStack.constrain(in: self) { parent in
-            leftStack.leadingAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.leadingAnchor, constant: Spacing.lg)
-            leftStack.bottomAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.bottomAnchor, constant: -Spacing.lg)
-            leftStack.trailingAnchor.constraint(lessThanOrEqualTo: parent.trailingAnchor, constant: -72)
+        // Caption, bottom-left over the scrim; the trailing gap keeps it clear
+        // of the engagement rail.
+        captionLabel.constrain(in: self) { parent in
+            captionLabel.leadingAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.leadingAnchor, constant: Spacing.lg)
+            captionLabel.bottomAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.bottomAnchor, constant: -Spacing.lg)
+            captionLabel.trailingAnchor.constraint(lessThanOrEqualTo: parent.trailingAnchor, constant: -72)
         }
 
         // Engagement rail, bottom-right (TikTok-style vertical stack): like +
@@ -146,17 +108,9 @@ final class SnapChromeView: UIView {
 
     // MARK: - Configuration
 
-    func configure(
-        with model: FeedItemDisplayModel,
-        engagement: FeedViewModel.EngagementState,
-        pipeline: ImagePipeline
-    ) {
+    func configure(with model: FeedItemDisplayModel, engagement: FeedViewModel.EngagementState) {
         representedID = model.id
-        authorID = model.authorID
         updateEngagement(engagement)
-
-        nameLabel.text = model.authorName
-        metaLabel.text = model.metaText
 
         let captionText = model.caption
         captionLabel.text = captionText
@@ -169,17 +123,6 @@ final class SnapChromeView: UIView {
         captionLabel.font = hasMedia
             ? .preferredFont(forTextStyle: .body)
             : UIFont.preferredFont(forTextStyle: .title2).withWeight(.semibold)
-
-        avatarView.image = nil
-        avatarTask?.cancel()
-        if let url = model.avatarURL {
-            let id = model.id
-            avatarTask = Task { [weak self] in
-                guard let image = try? await pipeline.image(for: url) else { return }
-                guard let self, self.representedID == id else { return }
-                self.avatarView.image = image
-            }
-        }
     }
 
     /// Updates only the engagement rail — live counter ticks and optimistic
@@ -192,18 +135,9 @@ final class SnapChromeView: UIView {
         likeButton.configuration = config
     }
 
-    /// Cancels in-flight work and clears post-specific content (cell reuse).
+    /// Clears post-specific content (cell reuse).
     func reset() {
-        avatarTask?.cancel()
-        avatarTask = nil
         representedID = nil
-        authorID = nil
-        avatarView.image = nil
-    }
-
-    @objc private func authorTapped() {
-        guard let authorID else { return }
-        onAuthorTapped?(authorID)
     }
 
     private static func countText(_ count: Int64) -> String {

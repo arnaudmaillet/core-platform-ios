@@ -32,17 +32,25 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// in `container`'s coordinate space — the active page's bounds.
     func zoomTargetFrame(in container: UICoordinateSpace) -> CGRect
 
-    /// A fresh, *inert*, full-bleed replica of the active page's UI chrome
-    /// (scrim, author block, caption, engagement rail), configured from the
-    /// post's data if it has already loaded. The animator embeds it in its
-    /// flying card above the media, so chrome and media share one animated
-    /// matrix and are geometrically incapable of drifting.
+    /// A fresh, *inert*, full-bleed replica of the active page's chrome
+    /// (scrim, caption, engagement rail — page content only, never navigation
+    /// bar chrome, which stays real and static above the flight), configured
+    /// from the post's data if it has already loaded. The animator embeds it
+    /// in its flying card above the media, so chrome and media share one
+    /// animated matrix and are geometrically incapable of drifting.
     ///
     /// The destination keeps a weak reference until `zoomTransitionDidEnd` and
     /// re-configures the replica if the post hydrates mid-flight (a cold tap):
     /// the scaffold's geometry is data-independent, so late text fills in
     /// without moving anything. Return `nil` to fly media-only.
     func zoomFlightChrome() -> UIView?
+
+    /// Hide (`true`) or restore (`false`) the destination's *content* — its own
+    /// view, not its navigation bar. During a flight the card impersonates the
+    /// page while the presented container stays visible, so the real bar keeps
+    /// its native screen-space layout from frame 0 and never pops or morphs;
+    /// the card flies beneath it.
+    func setZoomContentHidden(_ hidden: Bool)
 
     /// The flight is over (landed, returned, or cancelled): release the flight
     /// chrome reference and any transition-scoped state.

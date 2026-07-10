@@ -364,20 +364,27 @@ extension MapsViewController: MKMapViewDelegate {
         let source = MapPinZoomSource(mapView: mapView, annotation: annotation, thumbnail: thumbnail)
         let transition = MapsZoomTransition(source: source, destination: destination)
         activeTransition = transition
-        feedVC.modalPresentationStyle = .overFullScreen
-        feedVC.transitioningDelegate = transition
+        // The feed rides inside a navigation controller so its native bar
+        // (transparent appearance, author titleView, back item) exists on the
+        // presented surface too. UIKit consults the *presented* object for the
+        // transition, so the modal style and delegate live on the wrapper; the
+        // hero seam stays on the feed VC itself.
+        let wrapper = UINavigationController(rootViewController: feedVC)
+        wrapper.modalPresentationStyle = .overFullScreen
+        wrapper.transitioningDelegate = transition
 
-        // Force the feed view to load so the grab-to-dismiss gesture can attach.
-        // On completion (only fires if the grab actually dismisses — a cancelled
-        // grab leaves the feed up), resume the map's previews. An over-full-
-        // screen present doesn't call the map's viewWillAppear, so we resume here.
-        transition.attachInteractiveDismissal(to: feedVC.view) { [weak self, weak feedVC] in
-            feedVC?.dismiss(animated: true) { self?.handleFeedDismissed() }
+        // Force the wrapper's view to load so the grab-to-dismiss gesture can
+        // attach. On completion (only fires if the grab actually dismisses — a
+        // cancelled grab leaves the feed up), resume the map's previews. An
+        // over-full-screen present doesn't call the map's viewWillAppear, so we
+        // resume here.
+        transition.attachInteractiveDismissal(to: wrapper.view) { [weak self, weak wrapper] in
+            wrapper?.dismiss(animated: true) { self?.handleFeedDismissed() }
         }
         source.hideSourcePin()
         // Map is covered by the feed → stop its previews.
         videoCoordinator.setSurfaceVisible(false)
-        present(feedVC, animated: true)
+        present(wrapper, animated: true)
     }
 
     private func handleFeedDismissed() {
