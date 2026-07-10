@@ -283,15 +283,17 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         if zoomCanvasTransparent, let snapCell = cell as? SnapFeedCell {
             snapCell.setContentBackgroundTransparent(true)
             snapCell.setMediaHidden(true)
-        }
-        if lifecycle.activeIndex == indexPath.item {
-            (cell as? SnapCellLifecycle)?.willBecomeActive()
-            // A hero zoom-in that arrived before content loaded: expand the info
-            // overlay now that the active page finally exists.
-            if let duration = pendingInfoExpandDuration, let snapCell = cell as? SnapFeedCell {
+            // Run the pending info-overlay expand off the flight flag, NOT
+            // `lifecycle.activeIndex` — that's nil during the transition (the
+            // surface isn't "visible" until the present settles), so gating on it
+            // meant the expand never fired and the overlay just appeared at rest.
+            if let duration = pendingInfoExpandDuration {
                 pendingInfoExpandDuration = nil
                 Self.runInfoExpand(on: snapCell, duration: duration)
             }
+        }
+        if lifecycle.activeIndex == indexPath.item {
+            (cell as? SnapCellLifecycle)?.willBecomeActive()
         }
     }
 
@@ -375,10 +377,17 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// rest over `duration` with the animator's curve — so it grows into place
     /// in step with the flying hero.
     private static func runInfoExpand(on cell: SnapFeedCell, duration: TimeInterval) {
+        // Commit the collapsed state now…
         cell.setInfoOverlayCollapsed(true)
         cell.layoutIfNeeded()
-        UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseInOut]) {
-            cell.setInfoOverlayCollapsed(false)
+        // …then animate the expand on the next runloop. Kicking it inside the
+        // same willDisplay pass makes UIKit apply the change instantly (no
+        // animation, cell still mid-display); one hop lets it settle so the
+        // expand actually animates over `duration`.
+        DispatchQueue.main.async {
+            UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseInOut]) {
+                cell.setInfoOverlayCollapsed(false)
+            }
         }
     }
 }
