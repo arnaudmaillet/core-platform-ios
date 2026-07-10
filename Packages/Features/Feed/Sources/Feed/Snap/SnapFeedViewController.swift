@@ -36,6 +36,11 @@ final class SnapFeedViewController: UIViewController {
     /// While true, cells render with a clear background so the map shows through
     /// during a hero flight. Applied to cells that appear mid-flight too.
     private var zoomCanvasTransparent = false
+    /// The tapped pin's rect in this view's coords; the info overlay emanates
+    /// from its center so the metadata grows out of the pin with the media.
+    private var zoomHeroAnchor: CGRect?
+    /// The pin center the info overlay collapses toward, if known.
+    private var zoomAnchorPoint: CGPoint? { zoomHeroAnchor.map { CGPoint(x: $0.midX, y: $0.midY) } }
     /// Unregisters its notification tokens when this VC (and thus the bag) is
     /// released — a nonisolated deinit can't touch the VC's main-actor state.
     private let appObservers = NotificationObserverBag()
@@ -289,7 +294,7 @@ extension SnapFeedViewController: UICollectionViewDelegate {
             // meant the expand never fired and the overlay just appeared at rest.
             if let duration = pendingInfoExpandDuration {
                 pendingInfoExpandDuration = nil
-                Self.runInfoExpand(on: snapCell, duration: duration)
+                Self.runInfoExpand(on: snapCell, duration: duration, toward: zoomAnchorPoint)
             }
         }
         if lifecycle.activeIndex == indexPath.item {
@@ -351,7 +356,11 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     }
 
     public func setInfoOverlayCollapsed(_ collapsed: Bool) {
-        activeSnapCell?.setInfoOverlayCollapsed(collapsed)
+        activeSnapCell?.setInfoOverlayCollapsed(collapsed, towardPoint: collapsed ? zoomAnchorPoint : nil)
+    }
+
+    public func setZoomHeroAnchor(_ heroRect: CGRect) {
+        zoomHeroAnchor = heroRect
     }
 
     public func setZoomCanvasTransparent(_ transparent: Bool) {
@@ -366,7 +375,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
 
     public func animateInfoOverlayExpandingIn(duration: TimeInterval) {
         if let cell = activeSnapCell {
-            Self.runInfoExpand(on: cell, duration: duration)
+            Self.runInfoExpand(on: cell, duration: duration, toward: zoomAnchorPoint)
         } else {
             // Content (the map post) hasn't hydrated yet; run when it appears.
             pendingInfoExpandDuration = duration
@@ -376,9 +385,9 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// Snaps the info overlay to its collapsed state, then animates it back to
     /// rest over `duration` with the animator's curve — so it grows into place
     /// in step with the flying hero.
-    private static func runInfoExpand(on cell: SnapFeedCell, duration: TimeInterval) {
-        // Commit the collapsed state now…
-        cell.setInfoOverlayCollapsed(true)
+    private static func runInfoExpand(on cell: SnapFeedCell, duration: TimeInterval, toward point: CGPoint?) {
+        // Commit the collapsed state now (parked at the pin, if known)…
+        cell.setInfoOverlayCollapsed(true, towardPoint: point)
         cell.layoutIfNeeded()
         // …then animate the expand on the next runloop. Kicking it inside the
         // same willDisplay pass makes UIKit apply the change instantly (no

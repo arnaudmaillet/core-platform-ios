@@ -62,4 +62,10 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// growing cell instead of being curtained off by a full-screen cross-fade.
     /// Restore with `false`. The animator, not this view, owns any dimming.
     func setZoomCanvasTransparent(_ transparent: Bool)
+
+    /// The tapped pin's rect (in this view's coordinate space), so the info
+    /// overlay can emanate from — and collapse back toward — the same point the
+    /// media hero grows out of, reading as one expanding unit. Set before the
+    /// info animation each leg.
+    func setZoomHeroAnchor(_ heroRect: CGRect)
 }

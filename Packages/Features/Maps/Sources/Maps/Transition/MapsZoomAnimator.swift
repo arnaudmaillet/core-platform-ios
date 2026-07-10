@@ -5,8 +5,9 @@ import UIKit
 /// full-screen (present) or shrinks back into the pin (dismiss) over a *see-
 /// through* feed canvas, so the map stays visible around the growing cell and
 /// only a dedicated dim recedes it — never a global cross-fade of the opaque
-/// feed. The same animator serves both directions via `isPresenting` so the
-/// dismiss is a literal inverse of the present.
+/// feed. The presenting map recedes to a depth scale and the hero's corner
+/// radius opens/closes with it. The same animator serves both directions via
+/// `isPresenting` so the dismiss is a literal inverse of the present.
 ///
 /// Percent-driven interactive dismissal scrubs this animator's implicit layer
 /// animations; the completion block honours `transitionWasCancelled` so a
@@ -17,6 +18,11 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     private let source: any ZoomTransitionSource
     private weak var destination: (any ZoomTransitionDestination)?
     private let duration: TimeInterval = 0.42
+    /// How far the presenting map recedes during the flight (depth cue).
+    private static let mapDepthScale: CGFloat = 0.95
+    /// The pin thumbnail's corner radius; the hero rounds to this on dismiss and
+    /// opens from it on present (matches `MapAnnotationView`/`MapPinZoomSource`).
+    private static let pinCornerRadius: CGFloat = 12
 
     init(isPresenting: Bool, source: any ZoomTransitionSource, destination: any ZoomTransitionDestination) {
         self.isPresenting = isPresenting
@@ -61,10 +67,20 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // so the map stays visible around the growing cell — no global cross-fade.
         destination?.setZoomCanvasTransparent(true)
 
-        // Grow the info overlay (author, caption, engagement) into place on the
-        // same curve/duration/start as the flying media, so the whole cell reads
-        // as expanding out of the pin — not a flat fade over the top.
+        // Grow the info overlay (author, caption, engagement) *out of the pin* on
+        // the same curve/duration/start as the flying media, so the whole cell
+        // reads as expanding from the pin — not a flat fade over the top.
+        destination?.setZoomHeroAnchor(startFrame)
         destination?.animateInfoOverlayExpandingIn(duration: duration)
+
+        // Depth cue: the presenting map recedes to 0.95 with a gentle spring, so
+        // the feed reads as lifting off a 3D canvas. (`view(forKey:)` is nil under
+        // an over-full-screen present, so reach the root via the view controller.)
+        let presentingView = context.viewController(forKey: .from)?.view
+        UIView.animate(withDuration: duration, delay: 0, usingSpringWithDamping: 0.85,
+                       initialSpringVelocity: 0, options: [.curveEaseInOut]) {
+            presentingView?.transform = CGAffineTransform(scaleX: Self.mapDepthScale, y: Self.mapDepthScale)
+        }
 
         // Tail-weighted (ease-in): the map reads through for most of the flight
         // and only recedes to black as the cell lands.
@@ -73,9 +89,11 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         }
         UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseInOut]) {
             hero?.frame = targetFrame
+            hero?.layer.cornerRadius = 0 // the pin's rounded square opens into full-bleed media
         } completion: { _ in
             hero?.removeFromSuperview()
             dim.removeFromSuperview()
+            presentingView?.transform = .identity
             self.destination?.setZoomCanvasTransparent(false)
             self.destination?.zoomTransitionDidEnd()
             context.completeTransition(!context.transitionWasCancelled)
@@ -100,6 +118,7 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let endFrame = source.zoomHeroFrame(in: container)
         let hero = source.zoomHeroSnapshot()
         hero?.frame = startFrame
+        hero?.layer.cornerRadius = 0 // starts full-bleed; rounds back to the pin
 
         // Dim starts opaque (fully presented) and lifts to reveal the map as the
         // cell shrinks. It sits behind the feed so it dims only the map.
@@ -110,17 +129,26 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
 
         destination?.prepareForZoomTransition()
         destination?.setZoomCanvasTransparent(true)
+        destination?.setZoomHeroAnchor(endFrame)
+
+        // Reverse depth cue: the map starts receded (0.95, covered) and scales
+        // back to full as the feed shrinks — scrubs with the grab.
+        let presentingView = context.viewController(forKey: .to)?.view
+        presentingView?.transform = CGAffineTransform(scaleX: Self.mapDepthScale, y: Self.mapDepthScale)
 
         // Everything inside one block so the interactive grab scrubs it as a unit:
-        // hero shrinks, dim lifts, info collapses back toward the pin.
+        // hero shrinks + rounds, dim lifts, map returns to full, info collapses.
         UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseInOut]) {
             hero?.frame = endFrame
+            hero?.layer.cornerRadius = Self.pinCornerRadius
             dim.alpha = 0
+            presentingView?.transform = .identity
             self.destination?.setInfoOverlayCollapsed(true)
         } completion: { _ in
             let cancelled = context.transitionWasCancelled
             hero?.removeFromSuperview()
             dim.removeFromSuperview()
+            presentingView?.transform = .identity
             self.destination?.zoomTransitionDidEnd()
             if cancelled {
                 // Returning to the feed: restore the overlay and the opaque canvas.

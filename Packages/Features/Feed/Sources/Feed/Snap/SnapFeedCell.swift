@@ -328,13 +328,32 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// rail) as a pure transform + alpha change — no relayout — so the hero
     /// animator can grow/shrink them in lockstep with the flying media without
     /// stuttering the pager.
-    func setInfoOverlayCollapsed(_ collapsed: Bool) {
-        let transform = collapsed ? Self.collapsedInfoTransform : .identity
+    ///
+    /// `towardPoint` (the tapped pin, in this cell's coordinate space) parks each
+    /// overlay *at the pin*, scaled down, so it appears to emanate from — and
+    /// return to — the same origin as the media hero. `nil` falls back to a plain
+    /// rise-and-scale.
+    func setInfoOverlayCollapsed(_ collapsed: Bool, towardPoint point: CGPoint? = nil) {
         let alpha: CGFloat = collapsed ? 0 : 1
         for view in infoOverlays {
-            view.transform = transform
             view.alpha = alpha
+            if !collapsed {
+                view.transform = .identity
+            } else if let point {
+                view.transform = Self.collapsedTransform(for: view, toward: point)
+            } else {
+                view.transform = Self.collapsedInfoTransform
+            }
         }
+    }
+
+    /// A transform that parks `view` at `point`, scaled down, so the overlay
+    /// emanates from the pin and fans out to its resting place.
+    private static func collapsedTransform(for view: UIView, toward point: CGPoint) -> CGAffineTransform {
+        let scale: CGFloat = 0.32
+        let dx = point.x - view.center.x
+        let dy = point.y - view.center.y
+        return CGAffineTransform(translationX: dx, y: dy).scaledBy(x: scale, y: scale)
     }
 
     // MARK: - SnapCellLifecycle
