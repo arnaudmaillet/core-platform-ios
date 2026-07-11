@@ -91,6 +91,16 @@ public final class VideoPlaybackController {
         return true
     }
 
+    /// Re-asserts `view` as its own player's display surface. With multiple
+    /// `AVPlayerLayer`s on one player, only the most recently attached one is
+    /// guaranteed to display — after a mirror surface goes away (a cancelled
+    /// hero flight), the original view reclaims the render slot. No-op if
+    /// `view` has no active player.
+    public func reclaim(_ view: VideoRenderView) {
+        guard let player = activePlayers[ObjectIdentifier(view)] else { return }
+        view.attach(player)
+    }
+
     /// Warms the source (synthesis/cache) for an upcoming page so its `play` is
     /// instant. No player is loaned.
     public func preroll(_ mediaURL: URL) {

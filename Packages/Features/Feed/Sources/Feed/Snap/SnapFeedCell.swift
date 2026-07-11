@@ -194,6 +194,25 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
     }
 
+    // MARK: - Hero-flight live media
+
+    /// Attaches this cell's video player (if one is active) onto `surface` as
+    /// an additional render layer — same player, same clock — so a dismissal
+    /// flight carries the live video instead of a frozen cover. Returns
+    /// whether a mirror was actually made.
+    func mirrorPlayback(to surface: VideoRenderView) -> Bool {
+        guard mediaKind == .video, let videoPlayback else { return false }
+        return videoPlayback.mirror(from: videoRenderView, to: surface)
+    }
+
+    /// Re-asserts this cell as its player's display surface after a mirror
+    /// surface goes away (a cancelled flight) — with multiple layers on one
+    /// player, only the most recently attached is guaranteed to display.
+    func reclaimPlayback() {
+        guard mediaKind == .video, let videoPlayback else { return }
+        videoPlayback.reclaim(videoRenderView)
+    }
+
     func didResignActive() {
         guard isActive else { return }
         isActive = false
