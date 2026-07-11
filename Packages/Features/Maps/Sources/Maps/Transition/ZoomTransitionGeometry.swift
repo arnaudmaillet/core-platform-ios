@@ -23,6 +23,14 @@ enum ZoomTransitionGeometry {
         return min(max(translation / span, 0), 1)
     }
 
+    /// Scroll-view-style rubber banding for the axes a grab may drift along
+    /// but not travel: 1:1 slope at the origin, asymptotic to ±`limit`. Sign
+    /// is preserved, so one call serves upward/downward drift and back-drag.
+    static func rubberBand(_ offset: CGFloat, limit: CGFloat) -> CGFloat {
+        guard limit > 0 else { return 0 }
+        return limit * offset / (limit + abs(offset))
+    }
+
     /// The release contract: a grab completes when it was dragged past the
     /// progress threshold, or released as a flick above the velocity threshold
     /// (in the dismiss direction) — otherwise it cancels and springs back.

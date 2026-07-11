@@ -26,6 +26,23 @@ struct ZoomTransitionGeometryTests {
         #expect(ZoomTransitionGeometry.dismissProgress(translation: 100, span: 0) == 0)
     }
 
+    @Test func rubberBandFollowsCloselyNearTheOriginAndPreservesSign() {
+        // Small drags pass nearly 1:1 (slope 1 at the origin)...
+        let small = ZoomTransitionGeometry.rubberBand(10, limit: 140)
+        #expect(small > 9 && small <= 10)
+        // ...and the sign follows the drag direction.
+        #expect(ZoomTransitionGeometry.rubberBand(-10, limit: 140) == -small)
+    }
+
+    @Test func rubberBandIsMonotonicAndAsymptoticToTheLimit() {
+        let mid = ZoomTransitionGeometry.rubberBand(140, limit: 140)
+        let far = ZoomTransitionGeometry.rubberBand(10_000, limit: 140)
+        #expect(mid == 70) // at offset == limit, exactly half the cap
+        #expect(far > mid)
+        #expect(far < 140) // never reaches the cap
+        #expect(ZoomTransitionGeometry.rubberBand(100, limit: 0) == 0)
+    }
+
     @Test func releaseCompletesPastTheProgressThreshold() {
         #expect(ZoomTransitionGeometry.shouldCompleteDismissal(
             progress: 0.35, velocity: 0, progressThreshold: 0.35, flickVelocity: 900

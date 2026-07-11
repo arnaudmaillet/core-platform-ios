@@ -1,39 +1,76 @@
 import CoreNavigation
 import UIKit
 
-/// Turns a rightward drag on the snap feed into a percent-driven dismissal —
-/// the iOS back-swipe idiom. The horizontal axis is chosen deliberately: the
-/// feed pages *vertically* (and pulls-to-refresh vertically), so a horizontal
-/// grab has no scroll view to fight. Direction is vetted in
-/// `gestureRecognizerShouldBegin` (rightward and predominantly horizontal),
-/// which lets the grab claim the card at `.began` — frame 0 of the drag —
-/// instead of waiting for translation to accumulate. Progress is bound
-/// strictly to swipe distance (translation over the view's width); release
-/// completes past 35% of the width or on a rightward flick, and otherwise
-/// springs back.
+/// Turns a rightward drag on the snap feed into a *free-floating* interactive
+/// dismissal — the iOS back-swipe idiom with a physical hand-grab feel.
+///
+/// Not percent-driven: `UIPercentDrivenInteractiveTransition` scrubs one
+/// pre-baked animation, so the card's position would be a function of a
+/// single scalar — a rail. This controller implements
+/// `UIViewControllerInteractiveTransitioning` directly and splits the drag
+/// into two channels that never fight:
+///
+/// - **Position** (2D, free): `card.center` is set directly on every pan
+///   event — horizontal 1:1, vertical and back-drag through a rubber-band
+///   curve — so the card floats under the finger with zero lag.
+/// - **Morph** (progress-driven): scale, dim, and map depth are pure
+///   functions of `translation.x / width`. The 0.95 detach dip fires as a
+///   real spring at `.began` — instant, independent of drag distance.
+///
+/// Because the drag phase sets *model* values with no animation in flight,
+/// release simply springs from the card's exact current 2D coordinate to
+/// `poseAsPin` (commit: the same clip-morph home the button dismiss flies)
+/// or `poseAsPage` (cancel), seeding the spring with the gesture's release
+/// velocity so the card is visibly "caught". The horizontal axis is chosen
+/// deliberately: the feed pages and pulls-to-refresh vertically, so a
+/// rightward grab has no scroll view to fight; direction is vetted in
+/// `gestureRecognizerShouldBegin`, which is what lets `.began` claim
+/// immediately.
 @MainActor
-final class ZoomDismissInteractionController: UIPercentDrivenInteractiveTransition {
+final class ZoomDismissInteractionController: NSObject, UIViewControllerInteractiveTransitioning {
     /// Whether a grab is currently driving the dismissal — the transitioning
     /// delegate returns this controller only while true.
     private(set) var isInteracting = false
 
+    private var source: MapPinZoomSource?
     private weak var destination: (any ZoomTransitionDestination)?
     /// Kicks off `dismiss(animated:)` on the presented feed when a grab begins.
     private var onBeginDismiss: (() -> Void)?
     private weak var pannedView: UIView?
 
+    // Live-transition state, populated by startInteractiveTransition and
+    // cleared when the release animation completes.
+    private var context: (any UIViewControllerContextTransitioning)?
+    private var flight: ZoomFlight?
+    private var dim: UIView?
+    private weak var presentingView: UIView?
+    private var screenRadius: CGFloat = 0
+    private var pageCenter: CGPoint = .zero
+    /// True while the detach spring is settling; pose sets wait for it so a
+    /// direct set doesn't stomp the dip mid-flight (position is unaffected —
+    /// the dip animates bounds and subviews only).
+    private var isDetachSettling = false
+
     /// Fraction of the view's *width* a drag must cover to complete on release.
     private let completionThreshold: CGFloat = 0.35
     /// A rightward flick above this speed completes regardless of distance.
     private let flickVelocity: CGFloat = 900
+    /// The card keeps shrinking gently past the detach as progress grows.
+    private let floatShrink: CGFloat = 0.08
+    /// Rubber-band caps: generous vertically (the float), tight against
+    /// dragging backwards past the origin.
+    private let verticalDriftLimit: CGFloat = 140
+    private let backDragLimit: CGFloat = 60
 
     /// Installs the pan on the presented feed's view. `onBeginDismiss` should
     /// call `dismiss(animated: true)` on the presented view controller.
     func attach(
         to view: UIView,
+        source: MapPinZoomSource,
         destination: any ZoomTransitionDestination,
         onBeginDismiss: @escaping () -> Void
     ) {
+        self.source = source
         self.destination = destination
         self.onBeginDismiss = onBeginDismiss
         self.pannedView = view
@@ -43,26 +80,24 @@ final class ZoomDismissInteractionController: UIPercentDrivenInteractiveTransiti
         view.addGestureRecognizer(pan)
     }
 
+    // MARK: - Gesture
+
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
         guard let view = pannedView else { return }
-        let progress = ZoomTransitionGeometry.dismissProgress(
-            translation: gesture.translation(in: view).x,
-            span: view.bounds.width
-        )
+        let translation = gesture.translation(in: view)
         switch gesture.state {
         case .began:
             // Direction was vetted by gestureRecognizerShouldBegin — claim
             // immediately so the card detaches under the finger at frame 0.
             beginGrab()
         case .changed:
-            guard isInteracting else { return }
-            update(progress)
+            updateDrag(translation: translation, in: view)
         case .ended, .cancelled:
-            guard isInteracting else { return }
             releaseGrab(
-                progress: progress,
-                velocityX: gesture.velocity(in: view).x,
-                ended: gesture.state == .ended
+                translation: translation,
+                velocity: gesture.velocity(in: view),
+                ended: gesture.state == .ended,
+                in: view
             )
         default:
             break
@@ -70,46 +105,216 @@ final class ZoomDismissInteractionController: UIPercentDrivenInteractiveTransiti
     }
 
     private func beginGrab() {
+        guard !isInteracting else { return }
         isInteracting = true
         // Freeze the pager so a diagonal drag can't page mid-dismiss.
         destination?.setContentScrollEnabled(false)
+        // Triggers dismissal; UIKit calls startInteractiveTransition(_:)
+        // synchronously within, so the flight is staged when this returns.
         onBeginDismiss?()
     }
 
-    private func releaseGrab(progress: CGFloat, velocityX: CGFloat, ended: Bool) {
+    // MARK: - UIViewControllerInteractiveTransitioning
+
+    /// Stages the same flight the non-interactive animator flies — card,
+    /// shadow, dim, receded map — then fires the detach dip and hands control
+    /// to the pan events. No transition animation is started: the drag phase
+    /// owns the card frame-by-frame.
+    func startInteractiveTransition(_ context: any UIViewControllerContextTransitioning) {
+        let container = context.containerView
+        guard let fromView = context.view(forKey: .from), let source else {
+            context.completeTransition(false)
+            return
+        }
+        if let toView = context.view(forKey: .to) {
+            container.insertSubview(toView, at: 0)
+        }
+
+        let pageFrame = destination?.zoomTargetFrame(in: container) ?? container.bounds
+        // The map can't move while the feed covers it, so the pin rect is
+        // stable for the lifetime of the grab.
+        let pinFrame = source.zoomHeroFrame(in: container)
+
+        let dim = ZoomFlight.makeDimView(frame: container.bounds)
+        dim.alpha = 1
+        container.insertSubview(dim, belowSubview: fromView)
+
+        let flight = ZoomFlight.build(
+            source: source, destination: destination, pinFrame: pinFrame, pageFrame: pageFrame
+        )
+        container.insertSubview(flight.card, belowSubview: fromView)
+        container.insertSubview(flight.shadow, belowSubview: flight.card)
+        container.layoutIfNeeded()
+        let screenRadius = ZoomFlight.screenCornerRadius(behind: container)
+        flight.poseAsPage(cornerRadius: screenRadius)
+        destination?.setZoomContentHidden(true)
+        fromView.backgroundColor = .clear
+
+        let presentingView = context.viewController(forKey: .to)?.view
+        ZoomFlight.applyRecededChrome(to: presentingView, radius: screenRadius)
+        presentingView?.transform = CGAffineTransform(
+            scaleX: ZoomFlight.mapDepthScale, y: ZoomFlight.mapDepthScale
+        )
+
+        self.context = context
+        self.flight = flight
+        self.dim = dim
+        self.presentingView = presentingView
+        self.screenRadius = screenRadius
+        self.pageCenter = CGPoint(x: pageFrame.midX, y: pageFrame.midY)
+
+        // The detach: a real spring, not a scrubbed keyframe — it registers
+        // the instant the grab starts, however slowly the finger then moves.
+        // It animates bounds/radius/subviews only; position stays on the live
+        // channel, so pan events keep landing during the settle.
+        isDetachSettling = true
+        UIView.animate(
+            withDuration: 0.18, delay: 0, usingSpringWithDamping: 0.8,
+            initialSpringVelocity: 0.4, options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            flight.poseFloating(scale: ZoomFlight.detachScale, cornerRadius: screenRadius)
+        } completion: { _ in
+            self.isDetachSettling = false
+        }
+        context.updateInteractiveTransition(0)
+    }
+
+    // MARK: - Drag
+
+    private func updateDrag(translation: CGPoint, in view: UIView) {
+        guard isInteracting, let flight, let context else { return }
+        let progress = ZoomTransitionGeometry.dismissProgress(
+            translation: translation.x, span: view.bounds.width
+        )
+
+        // Position channel: free 2D float. Horizontal 1:1 (it is also the
+        // progress axis); vertical and back-drag rubber-band so the card
+        // follows the hand but resists leaving the dismissal axis.
+        let dx = translation.x >= 0
+            ? translation.x
+            : ZoomTransitionGeometry.rubberBand(translation.x, limit: backDragLimit)
+        let dy = ZoomTransitionGeometry.rubberBand(translation.y, limit: verticalDriftLimit)
+        flight.card.center = CGPoint(x: pageCenter.x + dx, y: pageCenter.y + dy)
+
+        // Morph channel: pure functions of progress. Skipped while the detach
+        // spring settles (its endpoint differs from these by well under a
+        // point at small progress, so the handoff is invisible).
+        if !isDetachSettling {
+            flight.poseFloating(
+                scale: ZoomFlight.detachScale - floatShrink * progress,
+                cornerRadius: screenRadius
+            )
+        }
+        dim?.alpha = 1 - progress
+        let mapScale = ZoomFlight.mapDepthScale + (1 - ZoomFlight.mapDepthScale) * progress
+        presentingView?.transform = CGAffineTransform(scaleX: mapScale, y: mapScale)
+        context.updateInteractiveTransition(progress)
+    }
+
+    // MARK: - Release
+
+    private func releaseGrab(translation: CGPoint, velocity: CGPoint, ended: Bool, in view: UIView) {
+        guard isInteracting, let context, let flight else { return }
         isInteracting = false
         destination?.setContentScrollEnabled(true)
-        let shouldFinish = ended && ZoomTransitionGeometry.shouldCompleteDismissal(
+
+        let progress = ZoomTransitionGeometry.dismissProgress(
+            translation: translation.x, span: view.bounds.width
+        )
+        let commit = ended && ZoomTransitionGeometry.shouldCompleteDismissal(
             progress: progress,
-            velocity: velocityX,
+            velocity: velocity.x,
             progressThreshold: completionThreshold,
             flickVelocity: flickVelocity
         )
-        // Speed must stay positive in BOTH directions: an earlier version set
-        // it to 0 on cancel, which makes the rewind take forever — the
-        // transition hangs mid-flight with the feed content hidden, and the
-        // screen is dead until the app restarts. `.easeOut` gives the release
-        // its settle.
-        completionSpeed = 1
-        completionCurve = .easeOut
-        shouldFinish ? finish() : cancel()
+        commit ? context.finishInteractiveTransition() : context.cancelInteractiveTransition()
+
+        // The drag set model values directly, so "current state" needs no
+        // presentation-layer capture: the spring starts from the card's exact
+        // 2D coordinate and inherits the hand's release velocity — the card
+        // is caught mid-air, not restarted.
+        let target = commit
+            ? CGPoint(x: flight.pinFrame.midX, y: flight.pinFrame.midY)
+            : pageCenter
+        let springVelocity = Self.normalizedSpringVelocity(
+            of: velocity, from: flight.card.center, to: target
+        )
+        let dim = dim
+        let presentingView = presentingView
+        let screenRadius = screenRadius
+        UIView.animate(
+            withDuration: 0.38, delay: 0,
+            usingSpringWithDamping: commit ? 0.9 : 0.82,
+            initialSpringVelocity: springVelocity,
+            options: [.beginFromCurrentState]
+        ) {
+            if commit {
+                flight.poseAsPin()
+                dim?.alpha = 0
+                presentingView?.transform = .identity
+            } else {
+                flight.poseAsPage(cornerRadius: screenRadius)
+                dim?.alpha = 1
+                presentingView?.transform = CGAffineTransform(
+                    scaleX: ZoomFlight.mapDepthScale, y: ZoomFlight.mapDepthScale
+                )
+            }
+        } completion: { _ in
+            self.finishTransition(cancelled: !commit)
+        }
+    }
+
+    /// Tears the stage down exactly like the non-interactive animator's
+    /// completion, then reports the outcome to UIKit and drops all state.
+    private func finishTransition(cancelled: Bool) {
+        flight?.card.removeFromSuperview()
+        flight?.shadow.removeFromSuperview()
+        dim?.removeFromSuperview()
+        presentingView?.transform = .identity
+        ZoomFlight.clearRecededChrome(from: presentingView) // reset is covered either way
+        // Restore the feed content for the cancel path; moot when finished.
+        destination?.setZoomContentHidden(false)
+        destination?.zoomTransitionDidEnd()
+        if !cancelled {
+            source?.zoomSourceDidReturn()
+        }
+        context?.completeTransition(!cancelled)
+        context = nil
+        flight = nil
+        dim = nil
+        isDetachSettling = false
+    }
+
+    /// UIKit's spring velocity is normalized to "distances to target per
+    /// second": project the hand's speed onto the remaining travel, clamped
+    /// so a wild flick can't detonate the spring.
+    private static func normalizedSpringVelocity(
+        of velocity: CGPoint, from current: CGPoint, to target: CGPoint
+    ) -> CGFloat {
+        let distance = hypot(target.x - current.x, target.y - current.y)
+        guard distance > 1 else { return 0 }
+        return min(hypot(velocity.x, velocity.y) / distance, 3)
     }
 
     #if DEBUG
     /// Scripted grab for sim recordings (`-maps-demo-grab`): touch injection
     /// is impossible in the simulator, so this walks the exact
-    /// begin/update/release path a finger drives — ramps progress over ~half a
-    /// second, holds, then releases. Whether it completes or springs back is
-    /// decided by the same threshold logic as a real release.
-    func debugPerformGrab(peakProgress: CGFloat) async {
+    /// begin/update/release path a finger drives — a diagonal drag to
+    /// (`peakProgress` × width, `verticalDrift`), a hold, then a release.
+    /// Whether it completes or springs back is decided by the same threshold
+    /// logic as a real release.
+    func debugPerformGrab(peakProgress: CGFloat, verticalDrift: CGFloat = 0) async {
+        guard let view = pannedView else { return }
         beginGrab()
+        let peak = CGPoint(x: peakProgress * view.bounds.width, y: verticalDrift)
         let steps = 30
         for step in 1...steps {
             try? await Task.sleep(nanoseconds: 16_000_000)
-            update(peakProgress * CGFloat(step) / CGFloat(steps))
+            let t = CGFloat(step) / CGFloat(steps)
+            updateDrag(translation: CGPoint(x: peak.x * t, y: peak.y * t), in: view)
         }
         try? await Task.sleep(nanoseconds: 250_000_000)
-        releaseGrab(progress: peakProgress, velocityX: 0, ended: true)
+        releaseGrab(translation: peak, velocity: .zero, ended: true, in: view)
     }
     #endif
 }
@@ -122,7 +327,8 @@ extension ZoomDismissInteractionController: UIGestureRecognizerDelegate {
     /// pull-to-refresh never see a competitor — and when it does begin, the
     /// intent is unambiguous enough to claim on the spot.
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        guard let pan = gestureRecognizer as? UIPanGestureRecognizer,
+        guard !isInteracting,
+              let pan = gestureRecognizer as? UIPanGestureRecognizer,
               let view = pannedView else { return false }
         guard destination?.isReadyForInteractiveDismissal == true else { return false }
         let velocity = pan.velocity(in: view)
