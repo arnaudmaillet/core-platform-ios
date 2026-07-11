@@ -87,15 +87,34 @@ final class SnapFeedViewController: UIViewController {
         }
     }
 
+    /// True when this feed was opened *onto* another surface — pushed above
+    /// the map, or presented — rather than being a tab root. That's the case
+    /// that owns a back item and can be closed.
+    private var isClosable: Bool {
+        if presentingViewController != nil { return true }
+        guard let nav = navigationController else { return false }
+        return nav.viewControllers.first !== self
+    }
+
+    /// Leaves the feed the way it arrived: pop when pushed (runs the
+    /// interactive-capable zoom-out on the map's stack), dismiss when
+    /// presented.
+    private func closeFeed() {
+        if let nav = navigationController, nav.viewControllers.first !== self {
+            nav.popViewController(animated: true)
+        } else {
+            dismiss(animated: true)
+        }
+    }
+
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         // The back item exists only when there is somewhere to go back to — a
-        // presented (map-opened) feed, not the Timeline tab root — and the
+        // map-opened feed, not the Timeline tab root — and the stack/
         // presentation relationship is known only here, not at viewDidLoad.
-        // Dismissing runs the interactive-capable zoom-out.
-        if presentingViewController != nil, navigationItem.leftBarButtonItem == nil {
+        if isClosable, navigationItem.leftBarButtonItem == nil {
             let back = SnapNavControls.makeBackButton()
-            back.addAction(UIAction { [weak self] _ in self?.dismiss(animated: true) }, for: .primaryActionTriggered)
+            back.addAction(UIAction { [weak self] _ in self?.closeFeed() }, for: .primaryActionTriggered)
             navigationItem.leftBarButtonItem = UIBarButtonItem(customView: back)
         }
         isOnScreen = true
@@ -110,9 +129,9 @@ final class SnapFeedViewController: UIViewController {
     /// after it settles, so the zoom-out leg can be recorded in the sim.
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        if ProcessInfo.processInfo.arguments.contains("-snap-auto-dismiss"), presentingViewController != nil {
+        if ProcessInfo.processInfo.arguments.contains("-snap-auto-dismiss"), isClosable {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-                self?.dismiss(animated: true)
+                self?.closeFeed()
             }
         }
         guard !didDebugPause,

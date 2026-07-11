@@ -50,6 +50,12 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// direct set doesn't stomp the dip mid-flight (position is unaffected —
     /// the dip animates bounds and subviews only).
     private var isDetachSettling = false
+    /// Ramps the *reported* progress to its endpoint during the release
+    /// spring, so everything UIKit coordinates off `updateInteractiveTransition`
+    /// (the navigation bar's item cross-fade) settles in step with the card
+    /// instead of freezing at the release value and jumping at completion.
+    private var releaseLink: CADisplayLink?
+    private var releaseRamp: (from: CGFloat, to: CGFloat, start: CFTimeInterval, duration: CFTimeInterval)?
 
     /// Fraction of the view's *width* a drag must cover to complete on release.
     private let completionThreshold: CGFloat = 0.35
@@ -126,7 +132,12 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
             context.completeTransition(false)
             return
         }
+        // Reinstall the map behind the grabbed card — a navigation controller
+        // removes non-top views, so it isn't in the hierarchy yet.
         if let toView = context.view(forKey: .to) {
+            if let toVC = context.viewController(forKey: .to) {
+                toView.frame = context.finalFrame(for: toVC)
+            }
             container.insertSubview(toView, at: 0)
         }
 
@@ -148,7 +159,6 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         let screenRadius = ZoomFlight.screenCornerRadius(behind: container)
         flight.poseAsPage(cornerRadius: screenRadius)
         destination?.setZoomContentHidden(true)
-        fromView.backgroundColor = .clear
 
         let presentingView = context.viewController(forKey: .to)?.view
         ZoomFlight.applyRecededChrome(to: presentingView, radius: screenRadius)
@@ -227,7 +237,10 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
             progressThreshold: completionThreshold,
             flickVelocity: flickVelocity
         )
-        commit ? context.finishInteractiveTransition() : context.cancelInteractiveTransition()
+        // finish/cancelInteractiveTransition is reported at the END of the
+        // release animation (in finishTransition); until then the ramp below
+        // keeps the interaction's reported progress moving with the spring.
+        beginReleaseRamp(from: progress, to: commit ? 1 : 0, duration: 0.38)
 
         // The drag set model values directly, so "current state" needs no
         // presentation-layer capture: the spring starts from the card's exact
@@ -264,9 +277,39 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         }
     }
 
+    private func beginReleaseRamp(from: CGFloat, to: CGFloat, duration: TimeInterval) {
+        releaseRamp = (from, to, CACurrentMediaTime(), duration)
+        let link = CADisplayLink(target: self, selector: #selector(tickReleaseRamp))
+        link.add(to: .main, forMode: .common)
+        releaseLink = link
+    }
+
+    @objc private func tickReleaseRamp() {
+        guard let ramp = releaseRamp, let context else {
+            releaseLink?.invalidate()
+            releaseLink = nil
+            return
+        }
+        let t = min((CACurrentMediaTime() - ramp.start) / ramp.duration, 1)
+        // Quadratic ease-out — close enough to the release spring's settle.
+        let eased = 1 - pow(1 - t, 2)
+        context.updateInteractiveTransition(ramp.from + (ramp.to - ramp.from) * CGFloat(eased))
+        if t >= 1 {
+            releaseLink?.invalidate()
+            releaseLink = nil
+        }
+    }
+
     /// Tears the stage down exactly like the non-interactive animator's
     /// completion, then reports the outcome to UIKit and drops all state.
     private func finishTransition(cancelled: Bool) {
+        releaseLink?.invalidate()
+        releaseLink = nil
+        if let ramp = releaseRamp {
+            context?.updateInteractiveTransition(ramp.to)
+        }
+        releaseRamp = nil
+        cancelled ? context?.cancelInteractiveTransition() : context?.finishInteractiveTransition()
         flight?.card.removeFromSuperview()
         flight?.shadow.removeFromSuperview()
         dim?.removeFromSuperview()

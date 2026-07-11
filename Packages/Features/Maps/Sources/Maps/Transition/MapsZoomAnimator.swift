@@ -63,7 +63,11 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let dim = ZoomFlight.makeDimView(frame: container.bounds)
         container.addSubview(dim)
 
-        toView.frame = container.bounds
+        if let toVC = context.viewController(forKey: .to) {
+            toView.frame = context.finalFrame(for: toVC)
+        } else {
+            toView.frame = container.bounds
+        }
         container.addSubview(toView)
         // Lay the feed out now: it kicks content hydration and settles the safe
         // areas the card's chrome replica bakes in below.
@@ -72,12 +76,12 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let pinFrame = source.zoomHeroFrame(in: container)
         let pageFrame = destination?.zoomTargetFrame(in: container) ?? container.bounds
 
-        // The feed's *content* hides for the flight — the card is its
-        // stand-in — but the presented container stays visible and clear, so
-        // the real navigation bar keeps its native screen-space layout from
-        // frame 0 and never pops or morphs. The card flies beneath it.
+        // The feed hides for the flight — the card is its stand-in. The
+        // navigation bar needs no such care under a push: it belongs to the
+        // navigation controller, above this container, and UIKit cross-fades
+        // its items ("Maps" → back + author capsule) natively alongside this
+        // animator. The card flies beneath it.
         destination?.setZoomContentHidden(true)
-        toView.backgroundColor = .clear
 
         let flight = ZoomFlight.build(
             source: source, destination: destination, pinFrame: pinFrame, pageFrame: pageFrame
@@ -137,9 +141,12 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             context.completeTransition(false)
             return
         }
-        // The map (`.to`) stays visible under an over-full-screen present, but
-        // make sure it sits behind the departing card.
+        // Reinstall the map (`.to`) behind the departing card — a navigation
+        // controller removes non-top views, so it isn't in the hierarchy yet.
         if let toView = context.view(forKey: .to) {
+            if let toVC = context.viewController(forKey: .to) {
+                toView.frame = context.finalFrame(for: toVC)
+            }
             container.insertSubview(toView, at: 0)
         }
 
@@ -162,12 +169,11 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // to the screen-clipped feed it replaces); rounds back to the pin.
         let screenRadius = ZoomFlight.screenCornerRadius(behind: container)
         flight.poseAsPage(cornerRadius: screenRadius)
-        // The card (same chrome scaffold, same layout) replaces the feed's
-        // *content* — pixel-invisible swap — while the presented container
-        // stays visible and clear, so the real navigation bar keeps rendering
-        // natively above the shrinking card.
+        // The card (same chrome scaffold, same layout) replaces the feed —
+        // pixel-invisible swap. The navigation bar is the stack's own, above
+        // this container; UIKit runs its item back-transition natively over
+        // the shrinking card.
         destination?.setZoomContentHidden(true)
-        fromView.backgroundColor = .clear
 
         // Reverse depth cue: the map starts receded (0.95, covered) and scales
         // back to full as the card shrinks.
