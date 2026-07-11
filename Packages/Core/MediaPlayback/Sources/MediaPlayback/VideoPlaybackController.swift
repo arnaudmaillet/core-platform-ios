@@ -77,6 +77,20 @@ public final class VideoPlaybackController {
         }
     }
 
+    /// Attaches the player currently rendering in `view` to `mirrorView` as an
+    /// additional surface. Both layers are driven by the *same* `AVPlayer`, so
+    /// they show the same frame with no clock to synchronize — the seam the
+    /// hero transition uses to fly a live pin without freezing it. The mirror
+    /// is passive: it holds no pool loan, and discarding `mirrorView` (or
+    /// `stop(_:)` on the primary view) simply ends it. Returns whether `view`
+    /// actually had a player to mirror.
+    @discardableResult
+    public func mirror(from view: VideoRenderView, to mirrorView: VideoRenderView) -> Bool {
+        guard let player = activePlayers[ObjectIdentifier(view)] else { return false }
+        mirrorView.attach(player)
+        return true
+    }
+
     /// Warms the source (synthesis/cache) for an upcoming page so its `play` is
     /// instant. No player is loaned.
     public func preroll(_ mediaURL: URL) {

@@ -10,10 +10,6 @@ import UIKit
 /// reads geometry from both and never needs their concrete types.
 @MainActor
 public protocol ZoomTransitionSource: AnyObject {
-    /// A detached, styled copy of the thing being expanded (e.g. the pin's
-    /// thumbnail square), embedded full-bleed as the flying card's media layer.
-    /// `nil` flies the card without media (chrome over its black backing).
-    func zoomHeroSnapshot() -> UIView?
     /// The on-screen rect the hero starts from (present) / returns to (dismiss),
     /// in `container`'s coordinate space. Recomputed at dismiss time, since the
     /// source may have moved (a panned map).

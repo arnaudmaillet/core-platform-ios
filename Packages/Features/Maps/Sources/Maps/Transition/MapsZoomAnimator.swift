@@ -1,12 +1,20 @@
 import CoreNavigation
 import UIKit
 
-/// Drives one leg of the hero/zoom transition with a single *flying card*: one
-/// view holding both the media thumbnail and a live replica of the
-/// destination's UI chrome, animated by one transform from the pin's rect to
-/// full screen (present) or back (dismiss). Because media and chrome share
-/// that one matrix, they are geometrically incapable of drifting — "lockstep"
-/// is a property of the hierarchy, not of synchronized clocks.
+/// Drives one leg of the hero/zoom transition with a single *flying card*: a
+/// `PinCardView` — the very component the map pin renders — carrying the media
+/// plus a live replica of the destination's UI chrome. The card's **frame**
+/// animates between the pin's rect and full screen, so both endpoints are
+/// exact by construction: at the pin end the card *is* a pin (56pt square,
+/// 12pt round corners, 2pt ring, square aspect-fill crop, drop shadow), at the
+/// screen end it *is* the page (full-bleed, display-corner radius). Between
+/// them the crop morphs — no anisotropic squash, no elliptical corners.
+///
+/// A live-previewing pin flies *live*: its pooled player is mirrored onto the
+/// card's own render surface (two `AVPlayerLayer`s, one player, one clock), so
+/// tapping an animating pin never freezes it. The video layer is laid out once
+/// at destination size and driven by a uniform-scale transform, because an
+/// `AVPlayerLayer` does not track a bounds animation smoothly.
 ///
 /// The destination's *content* hides during the flight and is revealed only
 /// at landing, when the card covers the screen exactly (same chrome scaffold,
@@ -20,18 +28,13 @@ import UIKit
 @MainActor
 final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     private let isPresenting: Bool
-    private let source: any ZoomTransitionSource
+    private let source: MapPinZoomSource
     private weak var destination: (any ZoomTransitionDestination)?
     private let duration: TimeInterval = 0.42
     /// How far the presenting map recedes during the flight (depth cue).
     private static let mapDepthScale: CGFloat = 0.95
-    /// The corner radius the card *renders* at the pin end of a flight
-    /// (matches `MapAnnotationView`/`MapPinZoomSource`). The value actually set
-    /// on the layer is scale-compensated, because the flight transform scales
-    /// the rendered radius along with the card.
-    private static let pinCornerRadius: CGFloat = 12
 
-    init(isPresenting: Bool, source: any ZoomTransitionSource, destination: any ZoomTransitionDestination) {
+    init(isPresenting: Bool, source: MapPinZoomSource, destination: any ZoomTransitionDestination) {
         self.isPresenting = isPresenting
         self.source = source
         self.destination = destination
@@ -64,8 +67,8 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // areas the card's chrome replica bakes in below.
         container.layoutIfNeeded()
 
-        let startFrame = source.zoomHeroFrame(in: container)
-        let targetFrame = destination?.zoomTargetFrame(in: container) ?? container.bounds
+        let pinFrame = source.zoomHeroFrame(in: container)
+        let pageFrame = destination?.zoomTargetFrame(in: container) ?? container.bounds
 
         // The feed's *content* hides for the flight — the card is its
         // stand-in — but the presented container stays visible and clear, so
@@ -74,21 +77,21 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         destination?.setZoomContentHidden(true)
         toView.backgroundColor = .clear
 
-        let card = Self.makeFlightCard(
-            frame: targetFrame,
-            media: source.zoomHeroSnapshot(),
-            chrome: destination?.zoomFlightChrome()
-        )
-        container.insertSubview(card.view, belowSubview: toView)
-        // Resolve the replica's full-screen layout (safe areas, text wrapping)
-        // while the card is still untransformed, then freeze it: from here the
-        // flight is transform-only, so nothing can relayout mid-flight.
+        let flight = makeFlight(pinFrame: pinFrame, pageFrame: pageFrame)
+        container.insertSubview(flight.card, belowSubview: toView)
+        container.insertSubview(flight.shadow, belowSubview: flight.card)
+        // Resolve the chrome replica's full-screen layout (safe areas, text
+        // wrapping) while the card still spans the page; its bounds never
+        // change again, so nothing can relayout mid-flight.
         container.layoutIfNeeded()
-        card.view.transform = ZoomTransitionGeometry.collapseTransform(of: targetFrame, onto: startFrame)
-        card.view.layer.cornerRadius = ZoomTransitionGeometry.compensatedCornerRadius(
-            rendering: Self.pinCornerRadius, of: targetFrame, onto: startFrame
-        )
-        card.chrome?.alpha = 0
+
+        // Pose the card as the pin and swap the real pin for it inside this
+        // same transaction: the twin is pixel-identical (same component, same
+        // ring, same crop, live video mirrored), so no frame can render a
+        // mismatch — or both pins, or neither.
+        flight.poseAsPin()
+        source.hideSourcePin()
+
         let screenRadius = Self.screenCornerRadius(behind: container)
 
         // Depth cue: the presenting map recedes to 0.95 with a gentle spring, so
@@ -105,14 +108,13 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             dim.alpha = 1
         }
         UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseInOut]) {
-            card.view.transform = .identity
             // Lands flush with the device's own display corners, so the reveal
             // of the (screen-clipped) feed underneath is seamless.
-            card.view.layer.cornerRadius = screenRadius
-            card.chrome?.alpha = 1
+            flight.poseAsPage(cornerRadius: screenRadius)
         } completion: { _ in
             self.destination?.setZoomContentHidden(false)
-            card.view.removeFromSuperview()
+            flight.card.removeFromSuperview()
+            flight.shadow.removeFromSuperview()
             dim.removeFromSuperview()
             presentingView?.transform = .identity
             Self.clearRecededChrome(from: presentingView) // covered by the opaque feed
@@ -135,8 +137,8 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             container.insertSubview(toView, at: 0)
         }
 
-        let startFrame = destination?.zoomTargetFrame(in: container) ?? container.bounds
-        let endFrame = source.zoomHeroFrame(in: container)
+        let pageFrame = destination?.zoomTargetFrame(in: container) ?? container.bounds
+        let pinFrame = source.zoomHeroFrame(in: container)
 
         // Dim starts opaque (fully presented) and lifts to reveal the map as
         // the card shrinks.
@@ -144,17 +146,14 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         dim.alpha = 1
         container.insertSubview(dim, belowSubview: fromView)
 
-        let card = Self.makeFlightCard(
-            frame: startFrame,
-            media: source.zoomHeroSnapshot(),
-            chrome: destination?.zoomFlightChrome()
-        )
+        let flight = makeFlight(pinFrame: pinFrame, pageFrame: pageFrame)
+        container.insertSubview(flight.card, belowSubview: fromView)
+        container.insertSubview(flight.shadow, belowSubview: flight.card)
+        container.layoutIfNeeded()
         // Starts flush with the device's own display corners (visually identical
         // to the screen-clipped feed it replaces); rounds back to the pin.
         let screenRadius = Self.screenCornerRadius(behind: container)
-        card.view.layer.cornerRadius = screenRadius
-        container.insertSubview(card.view, belowSubview: fromView)
-        container.layoutIfNeeded()
+        flight.poseAsPage(cornerRadius: screenRadius)
         // The card (same chrome scaffold, same layout) replaces the feed's
         // *content* — pixel-invisible swap — while the presented container
         // stays visible and clear, so the real navigation bar keeps rendering
@@ -169,18 +168,16 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         presentingView?.transform = CGAffineTransform(scaleX: Self.mapDepthScale, y: Self.mapDepthScale)
 
         // Everything inside one block so the interactive grab scrubs it as a
-        // unit: card shrinks + rounds, its chrome fades, dim lifts, map returns.
+        // unit: card shrinks + rounds + regrows its ring and shadow, chrome
+        // fades, dim lifts, map returns.
         UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseInOut]) {
-            card.view.transform = ZoomTransitionGeometry.collapseTransform(of: startFrame, onto: endFrame)
-            card.view.layer.cornerRadius = ZoomTransitionGeometry.compensatedCornerRadius(
-                rendering: Self.pinCornerRadius, of: startFrame, onto: endFrame
-            )
-            card.chrome?.alpha = 0
+            flight.poseAsPin()
             dim.alpha = 0
             presentingView?.transform = .identity
         } completion: { _ in
             let cancelled = context.transitionWasCancelled
-            card.view.removeFromSuperview()
+            flight.card.removeFromSuperview()
+            flight.shadow.removeFromSuperview()
             dim.removeFromSuperview()
             presentingView?.transform = .identity
             Self.clearRecededChrome(from: presentingView) // bezel-aligned again at scale 1
@@ -194,38 +191,100 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         }
     }
 
-    // MARK: - Flight card
+    // MARK: - Flight
 
-    /// The single flying unit: `view` clips and rounds like a physical card;
-    /// `chrome` is retained separately only so the animator can fade it.
-    private struct FlightCard {
-        let view: UIView
+    /// The flying unit and its two poses. Every property that differs between
+    /// the poses is UIView-animatable, so setting a pose inside an animation
+    /// block sweeps the whole card — frame, radius, ring, shadow, chrome,
+    /// video scale — as one scrubable unit. Frame, center, and transform all
+    /// interpolate linearly in the same animation parameter, so the chrome and
+    /// video layers stay exactly full-bleed within the morphing card on every
+    /// frame ("lockstep" is a property of the math, not of synchronized
+    /// clocks).
+    private struct Flight {
+        let card: PinCardView
         let chrome: UIView?
+        /// Stand-in for the pin's drop shadow (the card clips, so it can't
+        /// cast one itself). Fixed at the pin rect; fades out as the card
+        /// leaves and back in as it returns.
+        let shadow: UIView
+        let pinFrame: CGRect
+        let pageFrame: CGRect
+
+        /// Exact twin of the annotation at its map rect: pin radius, ring and
+        /// shadow visible, media cropped to the pin square, chrome invisible.
+        func poseAsPin() {
+            card.frame = pinFrame
+            card.setCornerRadius(PinCardView.cornerRadius)
+            card.ringView.alpha = 1
+            shadow.alpha = 1
+            let center = CGPoint(x: pinFrame.width / 2, y: pinFrame.height / 2)
+            if !card.videoRenderView.isHidden {
+                let scale = PinCardView.videoFlightScale(covering: pinFrame.size, surface: pageFrame.size)
+                card.videoRenderView.transform = CGAffineTransform(scaleX: scale, y: scale)
+                card.videoRenderView.center = center
+            }
+            if let chrome {
+                chrome.transform = CGAffineTransform(
+                    scaleX: pinFrame.width / pageFrame.width,
+                    y: pinFrame.height / pageFrame.height
+                )
+                chrome.center = center
+                chrome.alpha = 0
+            }
+        }
+
+        /// Exact stand-in for the landed page: full-bleed, display-corner
+        /// radius, pin chrome gone, page chrome fully readable.
+        func poseAsPage(cornerRadius: CGFloat) {
+            card.frame = pageFrame
+            card.setCornerRadius(cornerRadius)
+            card.ringView.alpha = 0
+            shadow.alpha = 0
+            let center = CGPoint(x: pageFrame.width / 2, y: pageFrame.height / 2)
+            if !card.videoRenderView.isHidden {
+                card.videoRenderView.transform = .identity
+                card.videoRenderView.center = center
+            }
+            if let chrome {
+                chrome.transform = .identity
+                chrome.center = center
+                chrome.alpha = 1
+            }
+        }
     }
 
-    /// Builds the card: black backing (letterboxing), the media thumbnail
-    /// full-bleed, and the destination's chrome replica full-bleed above it —
-    /// the same z-order as the landed page.
-    private static func makeFlightCard(frame: CGRect, media: UIView?, chrome: UIView?) -> FlightCard {
-        let card = UIView(frame: frame)
-        card.backgroundColor = .black
-        card.clipsToBounds = true
-        // Each leg sets its own starting radius; continuous matches both the
-        // pin thumbnail and the display's corner curve.
-        card.layer.cornerCurve = .continuous
+    /// Builds the card in page pose (so the chrome replica can resolve its
+    /// full-screen layout before the first frame) plus its shadow stand-in.
+    private func makeFlight(pinFrame: CGRect, pageFrame: CGRect) -> Flight {
+        let card = source.makeFlightCard()
+        card.frame = pageFrame
         card.isUserInteractionEnabled = false
-        if let media {
-            media.frame = card.bounds
-            media.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            media.layer.cornerRadius = 0 // the card owns the rounding
-            card.addSubview(media)
+        if !card.videoRenderView.isHidden {
+            card.prepareVideoForFlight(destinationSize: pageFrame.size)
         }
+
+        let chrome = destination?.zoomFlightChrome()
         if let chrome {
-            chrome.frame = card.bounds
-            chrome.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            card.addSubview(chrome)
+            chrome.autoresizingMask = []
+            chrome.bounds = CGRect(origin: .zero, size: pageFrame.size)
+            chrome.center = CGPoint(x: pageFrame.width / 2, y: pageFrame.height / 2)
+            // Below the ring: at the pin end the ring must read as the pin's
+            // border over everything, exactly as on the map.
+            card.insertSubview(chrome, belowSubview: card.ringView)
         }
-        return FlightCard(view: card, chrome: chrome)
+
+        let shadow = UIView(frame: pinFrame)
+        shadow.backgroundColor = .clear
+        shadow.isUserInteractionEnabled = false
+        PinCardView.applyPinShadow(to: shadow.layer)
+        // A clear view casts nothing on its own; the explicit path draws the
+        // pin's silhouette.
+        shadow.layer.shadowPath = UIBezierPath(
+            roundedRect: CGRect(origin: .zero, size: pinFrame.size),
+            cornerRadius: PinCardView.cornerRadius
+        ).cgPath
+        return Flight(card: card, chrome: chrome, shadow: shadow, pinFrame: pinFrame, pageFrame: pageFrame)
     }
 
     // MARK: - Receded map chrome
@@ -235,8 +294,7 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     /// the display already clips this exact curve) — and the depth transform
     /// then renders it as `scale × radius` on every frame, spring overshoot
     /// and interactive scrubs included. Proportional corner curvature with
-    /// nothing to synchronize; same principle as the flight card's
-    /// compensated radius, in reverse.
+    /// nothing to synchronize.
     private static func applyRecededChrome(to view: UIView?, radius: CGFloat) {
         guard let view else { return }
         view.layer.cornerRadius = radius

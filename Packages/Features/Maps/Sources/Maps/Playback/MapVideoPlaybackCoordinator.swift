@@ -57,11 +57,26 @@ final class MapVideoPlaybackCoordinator {
     }
 
     /// Tab hidden / feed presented over the map / app backgrounded. Stops all
-    /// playback while invisible; the next `update` re-selects when visible again.
-    func setSurfaceVisible(_ visible: Bool) {
+    /// playback while invisible; the next `update` re-selects when visible
+    /// again. `keeping` exempts one pin from the sweep — the tapped pin whose
+    /// live preview the hero transition is still flying; the caller stops it
+    /// via `stopAll()` once the flight lands.
+    func setSurfaceVisible(_ visible: Bool, keeping kept: PostID? = nil) {
         guard visible != isSurfaceVisible else { return }
         isSurfaceVisible = visible
-        if !visible { stopAll() }
+        guard !visible else { return }
+        for (id, view) in playing where id != kept {
+            stop(id: id, view: view)
+        }
+    }
+
+    /// Mirrors the live preview of `id` (if it is playing) onto `view` — the
+    /// hero transition's flight card — so the flight carries the same player,
+    /// frame-synced, instead of a frozen copy. Returns whether a live preview
+    /// was actually mirrored.
+    func mirrorLivePreview(of id: PostID, to view: VideoRenderView) -> Bool {
+        guard let pinView = playing[id] else { return false }
+        return pool.mirror(from: pinView.videoRenderView, to: view)
     }
 
     func stopAll() {

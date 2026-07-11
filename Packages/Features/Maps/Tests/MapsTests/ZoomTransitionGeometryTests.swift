@@ -26,48 +26,4 @@ struct ZoomTransitionGeometryTests {
         #expect(ZoomTransitionGeometry.dismissProgress(translationY: 100, viewHeight: 0) == 0)
     }
 
-    @Test func collapseTransformRendersTheCardExactlyOntoThePin() {
-        let full = CGRect(x: 0, y: 0, width: 390, height: 844)
-        let pin = CGRect(x: 120, y: 300, width: 56, height: 56)
-
-        let t = ZoomTransitionGeometry.collapseTransform(of: full, onto: pin)
-
-        // UIKit applies `view.transform` about the (default, centered) anchor:
-        // the rendered size is bounds scaled by (a, d), and the rendered center
-        // is the view's center displaced by (tx, ty). Both must land on the pin.
-        let rendered = CGRect(
-            x: full.midX + t.tx - full.width * t.a / 2,
-            y: full.midY + t.ty - full.height * t.d / 2,
-            width: full.width * t.a,
-            height: full.height * t.d
-        )
-        #expect(abs(rendered.minX - pin.minX) < 1e-9)
-        #expect(abs(rendered.minY - pin.minY) < 1e-9)
-        #expect(abs(rendered.width - pin.width) < 1e-9)
-        #expect(abs(rendered.height - pin.height) < 1e-9)
-    }
-
-    @Test func collapseTransformOfZeroSizedRectFallsBackToIdentity() {
-        let t = ZoomTransitionGeometry.collapseTransform(
-            of: .zero,
-            onto: CGRect(x: 10, y: 10, width: 56, height: 56)
-        )
-        #expect(t == .identity)
-    }
-
-    @Test func compensatedCornerRadiusRendersExactUnderTheCollapseScale() {
-        let full = CGRect(x: 0, y: 0, width: 390, height: 844)
-        let pin = CGRect(x: 120, y: 300, width: 56, height: 56)
-
-        let layerRadius = ZoomTransitionGeometry.compensatedCornerRadius(rendering: 12, of: full, onto: pin)
-
-        // The collapse transform scales the layer radius by its horizontal
-        // factor; the compensated value must render back to exactly 12pt.
-        let scaleX = ZoomTransitionGeometry.collapseTransform(of: full, onto: pin).a
-        #expect(abs(layerRadius * scaleX - 12) < 1e-9)
-    }
-
-    @Test func compensatedCornerRadiusOfDegenerateRectsPassesThrough() {
-        #expect(ZoomTransitionGeometry.compensatedCornerRadius(rendering: 12, of: .zero, onto: .zero) == 12)
-    }
 }
