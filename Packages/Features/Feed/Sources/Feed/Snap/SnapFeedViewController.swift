@@ -148,6 +148,19 @@ final class SnapFeedViewController: UIViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        // During any transition (a hero pop, a detail push) the active cell's
+        // player must survive to here-and-beyond: the dismissal flight card
+        // mirrors that very player, and a cancelled grab rewinds to a page
+        // that should still be playing. Resign via viewDidDisappear instead —
+        // it only fires for *completed* disappearances. Instant paths (tab
+        // switch) have no transition coordinator and resign immediately.
+        guard transitionCoordinator == nil else { return }
+        isOnScreen = false
+        refreshVisibility()
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
         isOnScreen = false
         refreshVisibility()
     }
@@ -420,7 +433,28 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         view.alpha = hidden ? 0 : 1
     }
 
-    public func zoomTransitionDidEnd() { flightChrome = nil }
+    public func zoomTransitionDidEnd() {
+        flightChrome = nil
+        // A flight card may have mirrored the active cell's player; with the
+        // card gone, the cell reclaims the render slot (only the most
+        // recently attached layer of a shared player is guaranteed to
+        // display). Harmless when nothing was mirrored.
+        activeSnapCell?.reclaimPlayback()
+    }
+
+    /// The hero transition's dismiss-leg live seam: mirrors the active cell's
+    /// playing video onto the flight card's render surface, so the card flies
+    /// the same frames the page was showing instead of a frozen cover.
+    public func zoomMirrorLiveMedia(onto surface: UIView) -> Bool {
+        guard let renderView = surface as? VideoRenderView,
+              let cell = activeSnapCell else { return false }
+        return cell.mirrorPlayback(to: renderView)
+    }
+
+    private var activeSnapCell: SnapFeedCell? {
+        guard let index = lifecycle.activeIndex else { return nil }
+        return collectionView.cellForItem(at: IndexPath(item: index, section: 0)) as? SnapFeedCell
+    }
 
     /// Configures the replica from the page the card flies to/from: the active
     /// page if one is settled, else the first post (a map tap's feed opens on

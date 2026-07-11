@@ -306,10 +306,14 @@ extension MapsViewController: MKMapViewDelegate {
     #if DEBUG
     /// `-maps-open-first-pin`: taps a pin shortly after it appears so the hero
     /// transition into the snap feed can be driven/screenshotted in the sim.
+    /// Prefers a video pin when any exists (with `-maps-force-video`), so
+    /// live-media flights are exercised deterministically.
     private func debugOpenFirstPinIfRequested(among views: [MKAnnotationView]) {
         guard !didDebugOpenPin,
-              ProcessInfo.processInfo.arguments.contains("-maps-open-first-pin"),
-              let annotation = views.compactMap({ $0.annotation as? MapAnnotation }).first else { return }
+              ProcessInfo.processInfo.arguments.contains("-maps-open-first-pin") else { return }
+        let annotations = views.compactMap { $0.annotation as? MapAnnotation }
+        guard let annotation = annotations.first(where: { $0.pin.mediaKind == .video }) ?? annotations.first
+        else { return }
         didDebugOpenPin = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             self?.mapView.selectAnnotation(annotation, animated: true)

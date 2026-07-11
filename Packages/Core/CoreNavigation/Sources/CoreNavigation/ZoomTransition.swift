@@ -52,6 +52,14 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// chrome reference and any transition-scoped state.
     func zoomTransitionDidEnd()
 
+    /// Attaches the destination's live media player — if its active page is
+    /// playing one — onto `surface` as an additional render layer, so a
+    /// dismissal flight carries the live video rather than a frozen cover.
+    /// `surface` is typed loosely (`UIView`) to keep this module
+    /// playback-agnostic; the destination downcasts to its own render-surface
+    /// type and refuses gracefully. Defaults to "no live media".
+    func zoomMirrorLiveMedia(onto surface: UIView) -> Bool
+
     /// Whether an interactive grab may begin a dismissal right now — false
     /// while the destination's own scrolling still owns the user's intent
     /// (e.g. a page-snap fling that hasn't settled).
@@ -59,4 +67,8 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// Freeze/unfreeze the feed's own scrolling while a grab-to-dismiss drives,
     /// so its rubber-band doesn't fight the shrinking card.
     func setContentScrollEnabled(_ enabled: Bool)
+}
+
+public extension ZoomTransitionDestination {
+    func zoomMirrorLiveMedia(onto surface: UIView) -> Bool { false }
 }
