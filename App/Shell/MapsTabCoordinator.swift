@@ -11,6 +11,7 @@ final class MapsTabCoordinator: TabCoordinator {
     let navigationController = UINavigationController()
 
     private let container: AppContainer
+    private let profileButtonItem: UIBarButtonItem
 
     private(set) lazy var tab = UITab(
         title: "Maps",
@@ -18,12 +19,18 @@ final class MapsTabCoordinator: TabCoordinator {
         identifier: AppTab.maps.rawValue
     ) { [navigationController] _ in navigationController }
 
-    init(container: AppContainer) {
+    init(container: AppContainer, profileButtonItem: UIBarButtonItem) {
         self.container = container
+        self.profileButtonItem = profileButtonItem
     }
 
     func start() {
         let mapViewController = container.mapsFeature.makeMapViewController()
+        // The Profile entry point lives here — and only here — as the viewer's
+        // avatar: a navigationItem belongs to this one view controller, so no
+        // other tab can show it and nothing needs conditional hiding. Injected
+        // by the shell so the Maps package stays Profile-agnostic.
+        mapViewController.navigationItem.rightBarButtonItem = profileButtonItem
         navigationController.viewControllers = [mapViewController]
     }
 }
