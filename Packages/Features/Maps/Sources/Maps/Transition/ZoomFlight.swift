@@ -44,6 +44,16 @@ struct ZoomFlight {
         let card = source.makeFlightCard()
         card.frame = pageFrame
         card.isUserInteractionEnabled = false
+        // Live media, either direction: the source mirrors a live-previewing
+        // pin (present leg, inside makeFlightCard); failing that, the
+        // destination mirrors its active page's player (dismiss leg) — so a
+        // playing video never freezes into a cover at either handshake. On a
+        // present the destination's page isn't playing yet and refuses.
+        if card.videoRenderView.isHidden,
+           destination?.zoomMirrorLiveMedia(onto: card.videoRenderView) == true {
+            card.videoRenderView.setPoster(card.imageView.image)
+            card.videoRenderView.isHidden = false
+        }
         if !card.videoRenderView.isHidden {
             card.prepareVideoForFlight(destinationSize: pageFrame.size)
         }

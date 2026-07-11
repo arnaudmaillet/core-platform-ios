@@ -89,6 +89,23 @@ struct VideoPlaybackControllerTests {
         #expect(controller.activePlayer(in: primary) != nil)
     }
 
+    @Test func reclaimReassertsTheOwningViewAndIgnoresStrangers() async {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        let primary = VideoRenderView()
+        let mirror = VideoRenderView()
+
+        await controller.play(URL(string: "mock://video/1")!, in: primary)
+        controller.mirror(from: primary, to: mirror)
+        controller.reclaim(primary)
+        // Still the same pool binding, and the view is attached again.
+        #expect(primary.isAttached)
+        #expect(controller.activePlayer(in: primary) != nil)
+        // A view with no player is a no-op.
+        let stranger = VideoRenderView()
+        controller.reclaim(stranger)
+        #expect(!stranger.isAttached)
+    }
+
     @Test func mirrorFromAViewWithoutAPlayerIsRefused() {
         let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
         let mirror = VideoRenderView()
