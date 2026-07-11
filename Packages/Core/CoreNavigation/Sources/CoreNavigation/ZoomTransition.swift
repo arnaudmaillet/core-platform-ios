@@ -52,9 +52,9 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// chrome reference and any transition-scoped state.
     func zoomTransitionDidEnd()
 
-    /// Whether an interactive downward drag should begin a dismissal now — true
-    /// only when the active page is at its scroll-top boundary, so mid-feed
-    /// scrolling is never hijacked.
+    /// Whether an interactive grab may begin a dismissal right now — false
+    /// while the destination's own scrolling still owns the user's intent
+    /// (e.g. a page-snap fling that hasn't settled).
     var isReadyForInteractiveDismissal: Bool { get }
     /// Freeze/unfreeze the feed's own scrolling while a grab-to-dismiss drives,
     /// so its rubber-band doesn't fight the shrinking card.
