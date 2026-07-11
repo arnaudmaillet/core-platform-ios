@@ -2,8 +2,9 @@ import UIKit
 
 /// The tabs of the app shell, in bar order. The search tab is rendered detached
 /// at the trailing edge by the system (see `SearchTabCoordinator`'s `UISearchTab`),
-/// giving the grouped layout `| Maps  Feed  Messages  Profile |  Search |` with no
-/// custom bar. Activity is not a tab — it lives inside the Profile tab.
+/// giving the grouped layout `| Maps  Feed  Messages |  Search |` with no custom
+/// bar. Profile is not a tab — it opens as a sheet from the Maps nav-bar avatar
+/// (with Activity folded inside it, behind the bell).
 ///
 /// Backed by a stable string identifier (not an ordinal), so reordering the bar
 /// never silently repoints a route.
@@ -11,7 +12,6 @@ enum AppTab: String, CaseIterable {
     case maps
     case feed
     case messages
-    case profile
     case search
 }
 

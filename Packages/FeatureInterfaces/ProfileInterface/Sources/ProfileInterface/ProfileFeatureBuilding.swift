@@ -16,4 +16,9 @@ public protocol ProfileFeatureBuilding {
     /// profile route fires (e.g. tapping a post author). Carries no account
     /// actions; the nav stack's back button returns to the origin.
     func makeProfileViewController(for profileID: ProfileID) -> UIViewController
+
+    /// The signed-in viewer's avatar, decoded and cached — for shell chrome
+    /// (the Maps nav-bar avatar button). Best-effort: `nil` when the viewer has
+    /// no avatar or it can't be fetched; callers render a placeholder glyph.
+    func viewerAvatarImage() async -> UIImage?
 }

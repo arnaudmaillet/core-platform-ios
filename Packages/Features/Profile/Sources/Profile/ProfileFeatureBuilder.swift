@@ -39,4 +39,9 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             onLogout: nil
         )
     }
+
+    public func viewerAvatarImage() async -> UIImage? {
+        guard let url = (try? await repository.currentUserProfile())?.avatarURL else { return nil }
+        return try? await imagePipeline.image(for: url)
+    }
 }
