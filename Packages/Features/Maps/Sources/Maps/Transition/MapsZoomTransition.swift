@@ -24,6 +24,20 @@ final class MapsZoomTransition: NSObject, UIViewControllerTransitioningDelegate 
         interaction.attach(to: view, destination: destination, onBeginDismiss: onDismiss)
     }
 
+    #if DEBUG
+    /// `-maps-demo-grab`: drives the interactive dismissal without touches
+    /// (the sim can't inject pans) — one grab below the completion threshold
+    /// (springs back through the detach dip), then one past it (completes the
+    /// clip-morph home). Exercises the exact percent-driven path a finger does.
+    func debugScriptedGrab() {
+        Task { @MainActor [weak self] in
+            await self?.interaction.debugPerformGrab(peakProgress: 0.22)
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            await self?.interaction.debugPerformGrab(peakProgress: 0.55)
+        }
+    }
+    #endif
+
     func animationController(
         forPresented presented: UIViewController,
         presenting: UIViewController,

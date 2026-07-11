@@ -413,11 +413,12 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         chrome.configure(with: model, engagement: viewModel.engagementState(for: model.id))
     }
 
-    /// Dismissal may begin only at the very top of the feed (the first page
-    /// pulled past its top boundary) — an unambiguous, no-scroll region — so a
-    /// downward drag mid-feed keeps paging instead of dismissing.
+    /// A rightward grab may begin from any page — the horizontal axis is free
+    /// (paging and pull-to-refresh are both vertical) — but not mid-fling,
+    /// where the user's intent is still vertical and freezing the pager would
+    /// strand it between pages.
     public var isReadyForInteractiveDismissal: Bool {
-        collectionView.contentOffset.y <= 0.5
+        !collectionView.isDecelerating
     }
 
     public func setContentScrollEnabled(_ enabled: Bool) {

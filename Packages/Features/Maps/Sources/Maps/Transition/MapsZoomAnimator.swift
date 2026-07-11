@@ -33,6 +33,12 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     private let duration: TimeInterval = 0.42
     /// How far the presenting map recedes during the flight (depth cue).
     private static let mapDepthScale: CGFloat = 0.95
+    /// Grab feedback: the card's scale the instant a dismissal starts — it
+    /// visibly detaches from the screen canvas before flying home.
+    private static let detachScale: CGFloat = 0.95
+    /// Fraction of the dismissal spent on the detach dip. Front-loaded so a
+    /// grab reads as "picked up" within the first few percent of drag.
+    private static let detachPhase: Double = 0.15
 
     init(isPresenting: Bool, source: MapPinZoomSource, destination: any ZoomTransitionDestination) {
         self.isPresenting = isPresenting
@@ -167,27 +173,43 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         Self.applyRecededChrome(to: presentingView, radius: screenRadius)
         presentingView?.transform = CGAffineTransform(scaleX: Self.mapDepthScale, y: Self.mapDepthScale)
 
-        // Everything inside one block so the interactive grab scrubs it as a
-        // unit: card shrinks + rounds + regrows its ring and shadow, chrome
-        // fades, dim lifts, map returns.
-        UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseInOut]) {
-            flight.poseAsPin()
-            dim.alpha = 0
-            presentingView?.transform = .identity
-        } completion: { _ in
-            let cancelled = context.transitionWasCancelled
-            flight.card.removeFromSuperview()
-            flight.shadow.removeFromSuperview()
-            dim.removeFromSuperview()
-            presentingView?.transform = .identity
-            Self.clearRecededChrome(from: presentingView) // bezel-aligned again at scale 1
-            // Restore the feed content for the cancel path; moot when finished.
-            self.destination?.setZoomContentHidden(false)
-            self.destination?.zoomTransitionDidEnd()
-            if !cancelled {
-                self.source.zoomSourceDidReturn()
+        // Everything inside one keyframed block so the interactive grab scrubs
+        // it as a unit. Phase 1 (front-loaded): the card dips to 0.95 — the
+        // "detach" that makes a grab feel held from its first few percent of
+        // drag. Phase 2: the clip-morph home — card shrinks + rounds + regrows
+        // its ring and shadow, chrome fades, while dim lifts and the map
+        // returns across the whole flight. Keyframe segments interpolate
+        // linearly, so a scrub tracks the finger 1:1; a cancelled grab rewinds
+        // back through the detach to exactly full screen.
+        UIView.animateKeyframes(withDuration: duration, delay: 0, options: []) {
+            UIView.addKeyframe(withRelativeStartTime: 0, relativeDuration: Self.detachPhase) {
+                flight.poseDetached(scale: Self.detachScale, cornerRadius: screenRadius)
             }
-            context.completeTransition(!cancelled)
+            UIView.addKeyframe(withRelativeStartTime: Self.detachPhase, relativeDuration: 1 - Self.detachPhase) {
+                flight.poseAsPin()
+            }
+            UIView.addKeyframe(withRelativeStartTime: 0, relativeDuration: 1) {
+                dim.alpha = 0
+                presentingView?.transform = .identity
+            }
+        } completion: { _ in
+            // Unlike UIView.animate, the keyframe API's completion isn't
+            // @MainActor-annotated in the SDK; UIKit still delivers it on main.
+            MainActor.assumeIsolated {
+                let cancelled = context.transitionWasCancelled
+                flight.card.removeFromSuperview()
+                flight.shadow.removeFromSuperview()
+                dim.removeFromSuperview()
+                presentingView?.transform = .identity
+                Self.clearRecededChrome(from: presentingView) // bezel-aligned again at scale 1
+                // Restore the feed content for the cancel path; moot when finished.
+                self.destination?.setZoomContentHidden(false)
+                self.destination?.zoomTransitionDidEnd()
+                if !cancelled {
+                    self.source.zoomSourceDidReturn()
+                }
+                context.completeTransition(!cancelled)
+            }
         }
     }
 
@@ -231,6 +253,30 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                 )
                 chrome.center = center
                 chrome.alpha = 0
+            }
+        }
+
+        /// The page pose scaled about its center — the "grab" feedback: the
+        /// card has detached from the screen canvas and is held by the finger.
+        /// Chrome and video shrink with it (same scale, same center), so the
+        /// whole page reads as one physical card being picked up.
+        func poseDetached(scale: CGFloat, cornerRadius: CGFloat) {
+            card.frame = pageFrame.insetBy(
+                dx: pageFrame.width * (1 - scale) / 2,
+                dy: pageFrame.height * (1 - scale) / 2
+            )
+            card.setCornerRadius(cornerRadius)
+            card.ringView.alpha = 0
+            shadow.alpha = 0
+            let center = CGPoint(x: card.bounds.width / 2, y: card.bounds.height / 2)
+            if !card.videoRenderView.isHidden {
+                card.videoRenderView.transform = CGAffineTransform(scaleX: scale, y: scale)
+                card.videoRenderView.center = center
+            }
+            if let chrome {
+                chrome.transform = CGAffineTransform(scaleX: scale, y: scale)
+                chrome.center = center
+                chrome.alpha = 1
             }
         }
 

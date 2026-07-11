@@ -12,18 +12,36 @@ struct ZoomTransitionGeometryTests {
         #expect(rect.midY == bounds.midY)
     }
 
-    @Test func dismissProgressIsFractionOfHeight() {
-        #expect(ZoomTransitionGeometry.dismissProgress(translationY: 200, viewHeight: 800) == 0.25)
-        #expect(ZoomTransitionGeometry.dismissProgress(translationY: 400, viewHeight: 800) == 0.5)
+    @Test func dismissProgressIsFractionOfSpan() {
+        #expect(ZoomTransitionGeometry.dismissProgress(translation: 100, span: 400) == 0.25)
+        #expect(ZoomTransitionGeometry.dismissProgress(translation: 200, span: 400) == 0.5)
     }
 
-    @Test func dismissProgressClampsAndIgnoresUpwardOrZeroHeight() {
-        // Past the bottom → clamped to 1.
-        #expect(ZoomTransitionGeometry.dismissProgress(translationY: 2000, viewHeight: 800) == 1)
-        // Upward drag → no dismissal progress.
-        #expect(ZoomTransitionGeometry.dismissProgress(translationY: -100, viewHeight: 800) == 0)
-        // Degenerate height → safe zero, no divide-by-zero.
-        #expect(ZoomTransitionGeometry.dismissProgress(translationY: 100, viewHeight: 0) == 0)
+    @Test func dismissProgressClampsAndIgnoresBackwardOrZeroSpan() {
+        // Past the far edge → clamped to 1.
+        #expect(ZoomTransitionGeometry.dismissProgress(translation: 900, span: 400) == 1)
+        // Drag against the dismiss direction → no progress.
+        #expect(ZoomTransitionGeometry.dismissProgress(translation: -100, span: 400) == 0)
+        // Degenerate span → safe zero, no divide-by-zero.
+        #expect(ZoomTransitionGeometry.dismissProgress(translation: 100, span: 0) == 0)
     }
 
+    @Test func releaseCompletesPastTheProgressThreshold() {
+        #expect(ZoomTransitionGeometry.shouldCompleteDismissal(
+            progress: 0.35, velocity: 0, progressThreshold: 0.35, flickVelocity: 900
+        ))
+        #expect(!ZoomTransitionGeometry.shouldCompleteDismissal(
+            progress: 0.34, velocity: 0, progressThreshold: 0.35, flickVelocity: 900
+        ))
+    }
+
+    @Test func releaseCompletesOnAForwardFlickRegardlessOfDistance() {
+        #expect(ZoomTransitionGeometry.shouldCompleteDismissal(
+            progress: 0.05, velocity: 1200, progressThreshold: 0.35, flickVelocity: 900
+        ))
+        // A backward (negative) flick never completes a short drag.
+        #expect(!ZoomTransitionGeometry.shouldCompleteDismissal(
+            progress: 0.05, velocity: -1200, progressThreshold: 0.35, flickVelocity: 900
+        ))
+    }
 }

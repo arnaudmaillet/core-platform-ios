@@ -397,13 +397,24 @@ extension MapsViewController: MKMapViewDelegate {
         // pin's, which the flight card is still rendering. (The pin itself is
         // hidden by the animator, atomically with the card's first frame.)
         videoCoordinator.setSurfaceVisible(false, keeping: tappedID)
-        present(wrapper, animated: true) { [weak self] in
+        present(wrapper, animated: true) { [weak self, weak transition] in
             // Landed: the flight card is gone, so release the donor player.
             self?.videoCoordinator.stopAll()
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-maps-demo-grab") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    transition?.debugScriptedGrab()
+                }
+            }
+            #endif
         }
     }
 
     private func handleFeedDismissed() {
+        // A cancelled grab runs the dismiss completion too, with the feed
+        // still presented — tear down only when it actually left, or the
+        // transition (and with it, every future grab) dies under a live feed.
+        guard presentedViewController == nil else { return }
         activeTransition = nil
         videoCoordinator.setSurfaceVisible(true)
         refreshVideoPlayback()

@@ -15,11 +15,23 @@ enum ZoomTransitionGeometry {
         )
     }
 
-    /// The interactive-dismiss progress for a downward drag: vertical translation
-    /// over a full-height threshold, clamped to 0...1. Kept pure so the scrub
-    /// curve is testable.
-    static func dismissProgress(translationY: CGFloat, viewHeight: CGFloat) -> CGFloat {
-        guard viewHeight > 0 else { return 0 }
-        return min(max(translationY / viewHeight, 0), 1)
+    /// The interactive-dismiss progress for a directional drag: translation
+    /// along the dismiss axis over the view's span on that axis, clamped to
+    /// 0...1. Kept pure so the scrub curve is testable.
+    static func dismissProgress(translation: CGFloat, span: CGFloat) -> CGFloat {
+        guard span > 0 else { return 0 }
+        return min(max(translation / span, 0), 1)
+    }
+
+    /// The release contract: a grab completes when it was dragged past the
+    /// progress threshold, or released as a flick above the velocity threshold
+    /// (in the dismiss direction) — otherwise it cancels and springs back.
+    static func shouldCompleteDismissal(
+        progress: CGFloat,
+        velocity: CGFloat,
+        progressThreshold: CGFloat,
+        flickVelocity: CGFloat
+    ) -> Bool {
+        progress >= progressThreshold || velocity >= flickVelocity
     }
 }
