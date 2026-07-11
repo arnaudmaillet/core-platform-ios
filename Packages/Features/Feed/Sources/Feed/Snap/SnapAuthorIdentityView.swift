@@ -17,6 +17,9 @@ import UIKit
 final class SnapAuthorIdentityView: UIView {
     /// Matches the bar's standard control height.
     private static let height: CGFloat = 40
+    /// The fixed height of the bar's own item wrapper on iOS 26 — the box the
+    /// avatar centers in (see the breathing math at the row constraints).
+    private static let barItemWrapperHeight: CGFloat = 36
     /// Long display names truncate here rather than crowding the back item.
     private static let maxWidth: CGFloat = 220
     /// The unhydrated (cold-tap) floor: the pill opens at a plausible
@@ -28,7 +31,7 @@ final class SnapAuthorIdentityView: UIView {
     /// Called when the follow icon is tapped, with the shown author.
     var onFollowTapped: ((ProfileID) -> Void)?
 
-    private let avatarView = UIImageView()
+    private let avatarView = AvatarImageView()
     private let nameLabel = UILabel()
     private let metaLabel = UILabel()
     private let followButton = UIButton(configuration: .plain())
@@ -45,12 +48,12 @@ final class SnapAuthorIdentityView: UIView {
     init() {
         super.init(frame: .zero)
 
-        avatarView.clipsToBounds = true
-        avatarView.layer.cornerRadius = 14
+        // Size and circle geometry come from the shared component: the same
+        // diameter as the Maps toolbar's profile avatar, and a radius bound
+        // to the bounds each layout pass — a perfect circle by construction.
         avatarView.backgroundColor = .darkGray
-        avatarView.contentMode = .scaleAspectFill
-        avatarView.widthAnchor.constraint(equalToConstant: 28).isActive = true
-        avatarView.heightAnchor.constraint(equalToConstant: 28).isActive = true
+        avatarView.widthAnchor.constraint(equalToConstant: AvatarImageView.barDiameter).isActive = true
+        avatarView.heightAnchor.constraint(equalToConstant: AvatarImageView.barDiameter).isActive = true
 
         nameLabel.font = UIFont.preferredFont(forTextStyle: .footnote).withWeight(.semibold)
         nameLabel.textColor = .white
@@ -104,14 +107,16 @@ final class SnapAuthorIdentityView: UIView {
         // control descendant defeats the container's gesture), while taps on
         // the avatar/labels fall through to the container's author tap.
         // The avatar's leading inset matches its vertical breathing exactly:
-        // the bar's item wrapper renders 36pt tall, the avatar is 28pt and
-        // vertically centered → 4pt above and below, so 4pt on the left keeps
-        // the gap uniform on all three sides. A slightly larger trailing inset
-        // gives the follow glyph room against the pill's rounded end. The bar
-        // self-sizes custom views through Auto Layout; the height pin and
-        // width cap are the only external metrics.
+        // the bar's item wrapper renders 36pt tall and the avatar is
+        // vertically centered, so the same computed gap on the left keeps it
+        // uniform on all three sides whatever the shared diameter is. A
+        // slightly larger trailing inset gives the follow glyph room against
+        // the pill's rounded end. The bar self-sizes custom views through
+        // Auto Layout; the height pin and width cap are the only external
+        // metrics.
+        let avatarBreathing = (Self.barItemWrapperHeight - AvatarImageView.barDiameter) / 2
         row.constrain(in: self) { parent in
-            row.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Spacing.xs)
+            row.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: avatarBreathing)
             row.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Spacing.sm)
             row.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
         }
