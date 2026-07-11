@@ -44,6 +44,17 @@ final class SnapChromeView: UIView {
         railStack.alignment = .center
         super.init(frame: frame)
 
+        // The chrome pins to its margins guide, NOT the safe-area guide
+        // directly: with zero margins the guide tracks the safe area exactly
+        // in the live cell, and `setFixedInsets` swaps in *captured* insets
+        // for the flight replica — ambient safe-area propagation into a
+        // transition container is unreliable (it resolved with a zero bottom
+        // inset on the dismiss leg, dropping the caption/rail ~34pt at the
+        // live→card swap).
+        layoutMargins = .zero
+        insetsLayoutMarginsFromSafeArea = true
+        preservesSuperviewLayoutMargins = false
+
         captionLabel.numberOfLines = 4
         captionLabel.textColor = .white
         // Legibility over arbitrary media, independent of the scrim.
@@ -92,8 +103,8 @@ final class SnapChromeView: UIView {
         // Caption, bottom-left over the scrim; the trailing gap keeps it clear
         // of the engagement rail.
         captionLabel.constrain(in: self) { parent in
-            captionLabel.leadingAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.leadingAnchor, constant: Spacing.lg)
-            captionLabel.bottomAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.bottomAnchor, constant: -Spacing.lg)
+            captionLabel.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor, constant: Spacing.lg)
+            captionLabel.bottomAnchor.constraint(equalTo: parent.layoutMarginsGuide.bottomAnchor, constant: -Spacing.lg)
             captionLabel.trailingAnchor.constraint(lessThanOrEqualTo: parent.trailingAnchor, constant: -72)
         }
 
@@ -101,9 +112,18 @@ final class SnapChromeView: UIView {
         // count, then comment.
         railStack.setCustomSpacing(Spacing.md, after: likeCountLabel)
         railStack.constrain(in: self) { parent in
-            railStack.trailingAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.trailingAnchor, constant: -Spacing.md)
-            railStack.bottomAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.bottomAnchor, constant: -Spacing.lg)
+            railStack.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md)
+            railStack.bottomAnchor.constraint(equalTo: parent.layoutMarginsGuide.bottomAnchor, constant: -Spacing.lg)
         }
+    }
+
+    /// Flight replica: freeze the guide to *captured* insets (the live feed's
+    /// real safe area) instead of ambient propagation, so the replica's
+    /// geometry equals the live cell's regardless of what the transition
+    /// container resolves.
+    func setFixedInsets(_ insets: UIEdgeInsets) {
+        insetsLayoutMarginsFromSafeArea = false
+        layoutMargins = insets
     }
 
     // MARK: - Configuration

@@ -106,8 +106,15 @@ final class SnapFeedViewController: UIViewController {
     private var didDebugPause = false
     /// `-snap-start-paused`: pauses the active cell shortly after appearing so
     /// the pause glyph can be screenshotted (taps can't be injected in the sim).
+    /// `-snap-auto-dismiss`: dismisses a presented (map-opened) feed shortly
+    /// after it settles, so the zoom-out leg can be recorded in the sim.
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        if ProcessInfo.processInfo.arguments.contains("-snap-auto-dismiss"), presentingViewController != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                self?.dismiss(animated: true)
+            }
+        }
         guard !didDebugPause,
               ProcessInfo.processInfo.arguments.contains("-snap-start-paused") else { return }
         didDebugPause = true
@@ -379,6 +386,9 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     public func zoomFlightChrome() -> UIView? {
         let chrome = SnapChromeView()
         chrome.isUserInteractionEnabled = false
+        // Captured, not ambient: the replica must render at the live cell's
+        // exact insets even though it lives in the transition container.
+        chrome.setFixedInsets(view.safeAreaInsets)
         configureFlightChrome(chrome)
         flightChrome = chrome
         return chrome
