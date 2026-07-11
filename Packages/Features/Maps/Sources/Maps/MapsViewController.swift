@@ -361,7 +361,19 @@ extension MapsViewController: MKMapViewDelegate {
             present(feedVC, animated: true)
             return
         }
-        let source = MapPinZoomSource(mapView: mapView, annotation: annotation, thumbnail: thumbnail)
+        // A live-previewing pin flies live: its pooled player is mirrored onto
+        // the flight card's own render surface (same player → same frame), so
+        // the flight never freezes the preview mid-loop.
+        let tappedID = (annotation as? MapAnnotation)?.pin.postID
+        let coordinator = videoCoordinator
+        let source = MapPinZoomSource(
+            mapView: mapView,
+            annotation: annotation,
+            thumbnail: thumbnail,
+            mirrorLive: tappedID.map { id in
+                { renderView in coordinator.mirrorLivePreview(of: id, to: renderView) }
+            }
+        )
         let transition = MapsZoomTransition(source: source, destination: destination)
         activeTransition = transition
         // The feed rides inside a navigation controller so its native bar
@@ -381,10 +393,14 @@ extension MapsViewController: MKMapViewDelegate {
         transition.attachInteractiveDismissal(to: wrapper.view) { [weak self, weak wrapper] in
             wrapper?.dismiss(animated: true) { self?.handleFeedDismissed() }
         }
-        source.hideSourcePin()
-        // Map is covered by the feed → stop its previews.
-        videoCoordinator.setSurfaceVisible(false)
-        present(wrapper, animated: true)
+        // Map is covered by the feed → stop its previews, except the tapped
+        // pin's, which the flight card is still rendering. (The pin itself is
+        // hidden by the animator, atomically with the card's first frame.)
+        videoCoordinator.setSurfaceVisible(false, keeping: tappedID)
+        present(wrapper, animated: true) { [weak self] in
+            // Landed: the flight card is gone, so release the donor player.
+            self?.videoCoordinator.stopAll()
+        }
     }
 
     private func handleFeedDismissed() {

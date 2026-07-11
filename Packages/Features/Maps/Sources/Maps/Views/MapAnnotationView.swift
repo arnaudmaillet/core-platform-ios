@@ -6,21 +6,18 @@ import UIKit
 
 /// A custom pin: the post's `thumbnail_url` rendered as a small rounded square
 /// on the map surface (UX req #1), its exact center anchored on the coordinate.
+/// The face itself is a `PinCardView` — the same component the hero transition
+/// flies — so the pin and the flight card are twins by construction.
 /// A play badge overlays video pins — dormant today because the Radar path
 /// carries no media kind yet (see `GeoDiscoveryRepository`), and it lights up
 /// automatically once field 5 lands.
-///
-/// The `VideoRenderView` live-preview pool (UX req #2) attaches here in Step B;
-/// this Step A view is the still-thumbnail seam it plugs into.
 final class MapAnnotationView: MKAnnotationView {
     static let reuseIdentifier = "MapAnnotationView"
 
     static let side: CGFloat = 56
 
-    private let thumbnailView = UIImageView()
-    /// Live-preview surface, overlaid on the thumbnail and shown only while this
-    /// pin is one of the ≤3 the `MapVideoPlaybackCoordinator` has chosen to play.
-    let videoRenderView = VideoRenderView()
+    /// The pin's face; also the exact blueprint of the flying card.
+    private let card = PinCardView(frame: CGRect(x: 0, y: 0, width: side, height: side))
     private let playBadge = UIImageView()
     private var imageTask: Task<Void, Never>?
     /// Guards against a slow image load landing on a recycled view.
@@ -29,8 +26,12 @@ final class MapAnnotationView: MKAnnotationView {
     /// Set by the view controller so the view can fetch its own thumbnail.
     var imagePipeline: ImagePipeline?
 
+    /// Live-preview surface, overlaid on the thumbnail and shown only while this
+    /// pin is one of the ≤3 the `MapVideoPlaybackCoordinator` has chosen to play.
+    var videoRenderView: VideoRenderView { card.videoRenderView }
+
     /// The loaded cover image, handed to the hero transition to fly.
-    var heroImage: UIImage? { thumbnailView.image }
+    var heroImage: UIImage? { card.imageView.image }
 
     /// Invoked when MapKit recycles this view, so the coordinator can return any
     /// player bound to it to the pool before it's reused for another pin.
@@ -41,14 +42,14 @@ final class MapAnnotationView: MKAnnotationView {
     /// with the already-loaded thumbnail so the pin shows the still image — not a
     /// black frame — until the clip's first frame is ready.
     func beginVideoPreview() {
-        videoRenderView.setPoster(thumbnailView.image)
-        videoRenderView.isHidden = false
+        card.videoRenderView.setPoster(card.imageView.image)
+        card.videoRenderView.isHidden = false
     }
 
     /// Hides the preview and clears it back to the still thumbnail.
     func endVideoPreview() {
-        videoRenderView.isHidden = true
-        videoRenderView.setPoster(nil)
+        card.videoRenderView.isHidden = true
+        card.videoRenderView.setPoster(nil)
     }
 
     override init(annotation: (any MKAnnotation)?, reuseIdentifier: String?) {
@@ -76,28 +77,11 @@ final class MapAnnotationView: MKAnnotationView {
     }
 
     private func buildLayout() {
-        thumbnailView.contentMode = .scaleAspectFill
-        thumbnailView.clipsToBounds = true
-        thumbnailView.backgroundColor = UIColor.secondarySystemBackground
-        thumbnailView.layer.cornerRadius = 12
-        thumbnailView.layer.cornerCurve = .continuous
-        thumbnailView.layer.borderWidth = 2
-        thumbnailView.layer.borderColor = UIColor.systemBackground.cgColor
-        thumbnailView.frame = CGRect(x: 0, y: 0, width: Self.side, height: Self.side)
-        addSubview(thumbnailView)
+        addSubview(card)
 
-        videoRenderView.frame = thumbnailView.frame
-        videoRenderView.clipsToBounds = true
-        videoRenderView.layer.cornerRadius = 12
-        videoRenderView.layer.cornerCurve = .continuous
-        videoRenderView.isHidden = true
-        addSubview(videoRenderView)
-
-        // A soft drop shadow lifts the pin off the map tiles.
-        layer.shadowColor = UIColor.black.cgColor
-        layer.shadowOpacity = 0.25
-        layer.shadowRadius = 4
-        layer.shadowOffset = CGSize(width: 0, height: 2)
+        // A soft drop shadow lifts the pin off the map tiles (the card clips,
+        // so the shadow must live on this outer, non-clipping layer).
+        PinCardView.applyPinShadow(to: layer)
 
         playBadge.image = UIImage(systemName: "play.circle.fill")?
             .withConfiguration(UIImage.SymbolConfiguration(pointSize: 18, weight: .bold))
@@ -118,18 +102,18 @@ final class MapAnnotationView: MKAnnotationView {
         playBadge.isHidden = pin.mediaKind != .video
 
         imageTask?.cancel()
-        thumbnailView.image = nil
+        card.imageView.image = nil
         guard let url = pin.thumbnailURL else { return }
         let id = pin.postID
         imageTask = Task { [weak self] in
             guard let image = try? await imagePipeline.image(for: url) else { return }
             guard let self, self.representedID == id else { return }
-            self.thumbnailView.image = image
+            self.card.imageView.image = image
             // If a live preview started before the thumbnail finished loading,
             // give it a poster now so the pin shows the still until the first
             // video frame — instead of a black square.
-            if !self.videoRenderView.isHidden {
-                self.videoRenderView.setPoster(image)
+            if !self.card.videoRenderView.isHidden {
+                self.card.videoRenderView.setPoster(image)
             }
         }
     }
@@ -145,7 +129,7 @@ final class MapAnnotationView: MKAnnotationView {
         imageTask?.cancel()
         imageTask = nil
         representedID = nil
-        thumbnailView.image = nil
+        card.imageView.image = nil
         playBadge.isHidden = true
     }
 }

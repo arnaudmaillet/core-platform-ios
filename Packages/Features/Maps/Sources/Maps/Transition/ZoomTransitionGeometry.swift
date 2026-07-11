@@ -22,28 +22,4 @@ enum ZoomTransitionGeometry {
         guard viewHeight > 0 else { return 0 }
         return min(max(translationY / viewHeight, 0), 1)
     }
-
-    /// The transform that renders a view laid out at `rect` exactly onto
-    /// `target`: translate center-to-center (in superview points, applied
-    /// before the scale so the scale can't skew it), then scale size-to-size
-    /// about the default centered anchor. Because UIKit interpolates the matrix
-    /// components linearly, animating this to/from `.identity` sweeps the same
-    /// rects as a frame animation between `rect` and `target` at every step.
-    static func collapseTransform(of rect: CGRect, onto target: CGRect) -> CGAffineTransform {
-        guard rect.width > 0, rect.height > 0 else { return .identity }
-        return CGAffineTransform(translationX: target.midX - rect.midX, y: target.midY - rect.midY)
-            .scaledBy(x: target.width / rect.width, y: target.height / rect.height)
-    }
-
-    /// `layer.cornerRadius` is applied in a view's untransformed space and then
-    /// scaled by its transform, so a card laid out at `rect` but collapsed onto
-    /// `target` needs its radius *divided* by the collapse scale to render as
-    /// `rendered` points on screen. The collapse is anisotropic; compensating
-    /// on width keeps the visible horizontal curvature exact (the vertical
-    /// reads slightly flatter at pin size — sub-point, and it converges to
-    /// exact as the scale approaches 1).
-    static func compensatedCornerRadius(rendering rendered: CGFloat, of rect: CGRect, onto target: CGRect) -> CGFloat {
-        guard rect.width > 0, target.width > 0 else { return rendered }
-        return rendered * rect.width / target.width
-    }
 }

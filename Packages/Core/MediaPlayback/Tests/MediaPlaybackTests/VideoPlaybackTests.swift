@@ -76,6 +76,26 @@ struct VideoPlaybackControllerTests {
         #expect(controller.togglePlayback(in: view) == false)
     }
 
+    @Test func mirrorAttachesTheSamePlayerToASecondSurface() async {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        let primary = VideoRenderView()
+        let mirror = VideoRenderView()
+
+        await controller.play(URL(string: "mock://video/1")!, in: primary)
+        #expect(controller.mirror(from: primary, to: mirror) == true)
+        // The mirror renders but holds no pool loan of its own.
+        #expect(mirror.isAttached)
+        #expect(controller.activePlayer(in: mirror) == nil)
+        #expect(controller.activePlayer(in: primary) != nil)
+    }
+
+    @Test func mirrorFromAViewWithoutAPlayerIsRefused() {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        let mirror = VideoRenderView()
+        #expect(controller.mirror(from: VideoRenderView(), to: mirror) == false)
+        #expect(!mirror.isAttached)
+    }
+
     @Test func concurrentViewsGetDistinctPlayers() async {
         let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
         let viewA = VideoRenderView()
