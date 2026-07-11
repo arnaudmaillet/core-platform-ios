@@ -96,14 +96,20 @@ final class MapsViewController: UIViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        // Tab became frontmost (or returned from the feed): resume previews.
+        // Tab became frontmost: resume previews. NOT while a hero transition
+        // is alive — under a push, this fires the moment a pop *begins*, and
+        // an interactive grab can cancel; the completed return resumes via
+        // the transition's onMapReturned instead.
+        guard activeTransition == nil else { return }
         videoCoordinator.setSurfaceVisible(true)
         refreshVideoPlayback()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        // Tab hidden: stop previews.
+        // Tab hidden: stop previews. During a feed push this is a no-op —
+        // presentSnapFeed already covered the surface (keeping the donor).
+        guard activeTransition == nil else { return }
         videoCoordinator.setSurfaceVisible(false)
     }
 
@@ -356,9 +362,15 @@ extension MapsViewController: MKMapViewDelegate {
 
     private func presentSnapFeed(postIDs: [PostID], from annotation: any MKAnnotation, thumbnail: UIImage?) {
         let feedVC = makeSnapFeed(postIDs)
-        guard let destination = feedVC as? any ZoomTransitionDestination else {
-            // Defensive: without the hero seam, fall back to a plain present.
-            present(feedVC, animated: true)
+        guard let nav = navigationController,
+              let destination = feedVC as? any ZoomTransitionDestination else {
+            // Defensive: without the hero seam (or a stack), show it plainly.
+            if let nav = navigationController {
+                feedVC.hidesBottomBarWhenPushed = true
+                nav.pushViewController(feedVC, animated: true)
+            } else {
+                present(feedVC, animated: true)
+            }
             return
         }
         // A live-previewing pin flies live: its pooled player is mirrored onto
@@ -374,31 +386,19 @@ extension MapsViewController: MKMapViewDelegate {
                 { renderView in coordinator.mirrorLivePreview(of: id, to: renderView) }
             }
         )
+        // A *push*, not a modal: the feed joins this tab's stack, so the one
+        // navigation bar cross-fades "Maps" into the feed's back item + author
+        // capsule natively — no second bar to pop in over the first. The
+        // transition object is the stack's delegate for the feed's lifetime.
         let transition = MapsZoomTransition(source: source, destination: destination)
         activeTransition = transition
-        // The feed rides inside a navigation controller so its native bar
-        // (transparent appearance, author titleView, back item) exists on the
-        // presented surface too. UIKit consults the *presented* object for the
-        // transition, so the modal style and delegate live on the wrapper; the
-        // hero seam stays on the feed VC itself.
-        let wrapper = UINavigationController(rootViewController: feedVC)
-        wrapper.modalPresentationStyle = .overFullScreen
-        wrapper.transitioningDelegate = transition
 
-        // Force the wrapper's view to load so the grab-to-dismiss gesture can
-        // attach. On completion (only fires if the grab actually dismisses — a
-        // cancelled grab leaves the feed up), resume the map's previews. An
-        // over-full-screen present doesn't call the map's viewWillAppear, so we
-        // resume here.
-        transition.attachInteractiveDismissal(to: wrapper.view) { [weak self, weak wrapper] in
-            wrapper?.dismiss(animated: true) { self?.handleFeedDismissed() }
-        }
-        // Map is covered by the feed → stop its previews, except the tapped
-        // pin's, which the flight card is still rendering. (The pin itself is
-        // hidden by the animator, atomically with the card's first frame.)
-        videoCoordinator.setSurfaceVisible(false, keeping: tappedID)
-        present(wrapper, animated: true) { [weak self, weak transition] in
-            // Landed: the flight card is gone, so release the donor player.
+        var didLand = false
+        transition.onFeedShown = { [weak self, weak transition] in
+            // Landed (fires again if a detail above the feed pops back — the
+            // flight-scoped work must run once): release the donor player.
+            guard !didLand else { return }
+            didLand = true
             self?.videoCoordinator.stopAll()
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-maps-demo-grab") {
@@ -408,16 +408,36 @@ extension MapsViewController: MKMapViewDelegate {
             }
             #endif
         }
-    }
-
-    private func handleFeedDismissed() {
-        // A cancelled grab runs the dismiss completion too, with the feed
-        // still presented — tear down only when it actually left, or the
-        // transition (and with it, every future grab) dies under a live feed.
-        guard presentedViewController == nil else { return }
-        activeTransition = nil
-        videoCoordinator.setSurfaceVisible(true)
-        refreshVideoPlayback()
+        transition.onMapReturned = { [weak self, weak nav] in
+            // Completed pop only — a cancelled grab reports nothing, so the
+            // transition (and future grabs) survives it by construction.
+            nav?.delegate = nil
+            guard let self else { return }
+            self.tabBarController?.setTabBarHidden(false, animated: true)
+            self.activeTransition = nil
+            self.videoCoordinator.setSurfaceVisible(true)
+            self.refreshVideoPlayback()
+        }
+        // Accessing `view` loads it so the grab-to-dismiss pan can attach.
+        transition.attachInteractiveDismissal(to: feedVC.view) { [weak nav] in
+            nav?.popViewController(animated: true)
+        }
+        // Map is covered by the feed → stop its previews, except the tapped
+        // pin's, which the flight card is still rendering. Set *before* the
+        // push so the map's viewWillDisappear sweep is a no-op that can't
+        // touch the donor.
+        videoCoordinator.setSurfaceVisible(false, keeping: tappedID)
+        // Tab bar managed by hand, NOT hidesBottomBarWhenPushed: that flag's
+        // bottom-bar choreography doesn't scrub with a custom interactive pop
+        // (the bar snaps in at pop-begin and flashes over the feed when a grab
+        // cancels). Manually it slides away with the lift-off, stays hidden
+        // through cancelled grabs, and returns only on the completed pop
+        // (onMapReturned above). Constraint: a programmatic cross-tab route
+        // while the feed is pushed would find the bar hidden — today no such
+        // route fires from inside the feed.
+        tabBarController?.setTabBarHidden(true, animated: true)
+        nav.delegate = transition
+        nav.pushViewController(feedVC, animated: true)
     }
 }
 

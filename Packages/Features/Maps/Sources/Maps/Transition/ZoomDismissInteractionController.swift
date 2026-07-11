@@ -105,7 +105,9 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     }
 
     private func beginGrab() {
-        guard !isInteracting else { return }
+        // `context == nil` also gates the debug path: a new grab must never
+        // begin while a previous transition is still completing.
+        guard !isInteracting, context == nil else { return }
         isInteracting = true
         // Freeze the pager so a diagonal drag can't page mid-dismiss.
         destination?.setContentScrollEnabled(false)
@@ -126,7 +128,12 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
             context.completeTransition(false)
             return
         }
+        // Reinstall the map behind the grabbed card — a navigation controller
+        // removes non-top views, so it isn't in the hierarchy yet.
         if let toView = context.view(forKey: .to) {
+            if let toVC = context.viewController(forKey: .to) {
+                toView.frame = context.finalFrame(for: toVC)
+            }
             container.insertSubview(toView, at: 0)
         }
 
@@ -148,7 +155,6 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         let screenRadius = ZoomFlight.screenCornerRadius(behind: container)
         flight.poseAsPage(cornerRadius: screenRadius)
         destination?.setZoomContentHidden(true)
-        fromView.backgroundColor = .clear
 
         let presentingView = context.viewController(forKey: .to)?.view
         ZoomFlight.applyRecededChrome(to: presentingView, radius: screenRadius)
@@ -167,14 +173,24 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // the instant the grab starts, however slowly the finger then moves.
         // It animates bounds/radius/subviews only; position stays on the live
         // channel, so pan events keep landing during the settle.
+        //
+        // Deferred one runloop turn, deliberately: a navigation controller
+        // *defers* interactive-transition start and runs this method inside
+        // setup machinery where `UIView.animate` blocks apply without
+        // animating — the dip silently became an instant jump under the push
+        // pivot. One hop later the scope is a normal animation context. (Not
+        // a UIViewPropertyAnimator: its tracked animations entangled the
+        // release spring's completion under the transition, freezing it.)
         isDetachSettling = true
-        UIView.animate(
-            withDuration: 0.18, delay: 0, usingSpringWithDamping: 0.8,
-            initialSpringVelocity: 0.4, options: [.allowUserInteraction, .beginFromCurrentState]
-        ) {
-            flight.poseFloating(scale: ZoomFlight.detachScale, cornerRadius: screenRadius)
-        } completion: { _ in
-            self.isDetachSettling = false
+        DispatchQueue.main.async {
+            UIView.animate(
+                withDuration: 0.18, delay: 0, usingSpringWithDamping: 0.8,
+                initialSpringVelocity: 0.4, options: [.allowUserInteraction, .beginFromCurrentState]
+            ) {
+                flight.poseFloating(scale: ZoomFlight.detachScale, cornerRadius: self.screenRadius)
+            } completion: { _ in
+                self.isDetachSettling = false
+            }
         }
         context.updateInteractiveTransition(0)
     }
@@ -227,14 +243,40 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
             progressThreshold: completionThreshold,
             flickVelocity: flickVelocity
         )
+        // The outcome is reported NOW, at release — the framework's contract
+        // for the end of the user-driven phase. UIKit then runs the remaining
+        // coordinated choreography (the navigation bar's item cross-fade)
+        // over the transition's leftover duration on its own clock. An
+        // earlier design deferred this to the spring's completion while
+        // ramping updateInteractiveTransition alongside — that froze the
+        // release animation's clock under the nav pipeline: the completion
+        // arrived seconds late, and if a new grab had started by then, the
+        // stale completion tore down the NEW grab's transition.
         commit ? context.finishInteractiveTransition() : context.cancelInteractiveTransition()
+
+        // The landing rect is recomputed NOW, not reused from grab-begin: the
+        // stage-time value was taken on a map view freshly re-attached after
+        // the navigation controller unloaded it, before its restored camera
+        // fully settled — and a grab can hold for seconds. The programmatic
+        // pop lands pixel-perfect precisely because it converts the pin rect
+        // milliseconds before flying; this matches it. Converted at map
+        // *identity* (the partial recede would skew the rect, and the spring
+        // returns the map to identity by landing time); the toggle is within
+        // one transaction, so nothing renders it.
+        var landing = flight.pinFrame
+        if commit, let source, source.zoomSourceIsOnScreen {
+            let recede = presentingView?.transform ?? .identity
+            presentingView?.transform = .identity
+            landing = source.zoomHeroFrame(in: context.containerView)
+            presentingView?.transform = recede
+        }
 
         // The drag set model values directly, so "current state" needs no
         // presentation-layer capture: the spring starts from the card's exact
         // 2D coordinate and inherits the hand's release velocity — the card
         // is caught mid-air, not restarted.
         let target = commit
-            ? CGPoint(x: flight.pinFrame.midX, y: flight.pinFrame.midY)
+            ? CGPoint(x: landing.midX, y: landing.midY)
             : pageCenter
         let springVelocity = Self.normalizedSpringVelocity(
             of: velocity, from: flight.card.center, to: target
@@ -246,10 +288,10 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
             withDuration: 0.38, delay: 0,
             usingSpringWithDamping: commit ? 0.9 : 0.82,
             initialSpringVelocity: springVelocity,
-            options: [.beginFromCurrentState]
+            options: [.beginFromCurrentState, .allowUserInteraction]
         ) {
             if commit {
-                flight.poseAsPin()
+                flight.poseAsPin(at: landing)
                 dim?.alpha = 0
                 presentingView?.transform = .identity
             } else {
@@ -259,13 +301,21 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
                     scaleX: ZoomFlight.mapDepthScale, y: ZoomFlight.mapDepthScale
                 )
             }
-        } completion: { _ in
-            self.finishTransition(cancelled: !commit)
+        }
+        // Completion by wall clock, NOT by the animation's completion block:
+        // UIView completions delivered inside an interactive nav transition's
+        // ambit can be deferred indefinitely (observed: a cancel's completion
+        // frozen for seconds, then flushed by the NEXT grab's animation — and
+        // tearing down that newer grab's transition). A timer makes teardown
+        // deterministic; the spring is visuals-only.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) { [weak self] in
+            self?.finishTransition(cancelled: !commit)
         }
     }
 
     /// Tears the stage down exactly like the non-interactive animator's
     /// completion, then reports the outcome to UIKit and drops all state.
+    /// (finish/cancelInteractiveTransition was already reported at release.)
     private func finishTransition(cancelled: Bool) {
         flight?.card.removeFromSuperview()
         flight?.shadow.removeFromSuperview()
@@ -327,7 +377,9 @@ extension ZoomDismissInteractionController: UIGestureRecognizerDelegate {
     /// pull-to-refresh never see a competitor — and when it does begin, the
     /// intent is unambiguous enough to claim on the spot.
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        guard !isInteracting,
+        // `context == nil` also gates on the PREVIOUS grab's transition having
+        // fully completed — overlapping lifecycles must never share state.
+        guard !isInteracting, context == nil,
               let pan = gestureRecognizer as? UIPanGestureRecognizer,
               let view = pannedView else { return false }
         guard destination?.isReadyForInteractiveDismissal == true else { return false }

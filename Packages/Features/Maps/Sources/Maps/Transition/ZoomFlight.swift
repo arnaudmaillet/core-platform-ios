@@ -76,20 +76,31 @@ struct ZoomFlight {
     /// Exact twin of the annotation at its map rect: pin radius, ring and
     /// shadow visible, media cropped to the pin square, chrome invisible.
     func poseAsPin() {
-        card.frame = pinFrame
+        poseAsPin(at: pinFrame)
+    }
+
+    /// `poseAsPin` with a freshly computed landing rect — the interactive
+    /// driver recomputes the pin's on-screen rect at *release* time, because
+    /// its stage-time value can be seconds old and taken on a map view that
+    /// was re-attached before its restored camera fully settled. The shadow
+    /// stand-in retargets with it (repositioned here at whatever alpha it
+    /// has; callers animate only its alpha).
+    func poseAsPin(at landing: CGRect) {
+        card.frame = landing
         card.setCornerRadius(PinCardView.cornerRadius)
         card.ringView.alpha = 1
+        shadow.frame = CGRect(origin: landing.origin, size: shadow.frame.size)
         shadow.alpha = 1
-        let center = CGPoint(x: pinFrame.width / 2, y: pinFrame.height / 2)
+        let center = CGPoint(x: landing.width / 2, y: landing.height / 2)
         if !card.videoRenderView.isHidden {
-            let scale = PinCardView.videoFlightScale(covering: pinFrame.size, surface: pageFrame.size)
+            let scale = PinCardView.videoFlightScale(covering: landing.size, surface: pageFrame.size)
             card.videoRenderView.transform = CGAffineTransform(scaleX: scale, y: scale)
             card.videoRenderView.center = center
         }
         if let chrome {
             chrome.transform = CGAffineTransform(
-                scaleX: pinFrame.width / pageFrame.width,
-                y: pinFrame.height / pageFrame.height
+                scaleX: landing.width / pageFrame.width,
+                y: landing.height / pageFrame.height
             )
             chrome.center = center
             chrome.alpha = 0
