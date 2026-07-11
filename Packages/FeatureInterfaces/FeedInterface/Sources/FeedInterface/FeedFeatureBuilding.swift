@@ -22,4 +22,15 @@ public protocol FeedFeatureBuilding {
     /// from a notification); `.commentsOnly` for the `.comments` route (the snap
     /// feed's comment button).
     func makePostDetailViewController(for postID: PostID, mode: PostDetailMode) -> UIViewController
+    /// A full-screen snap feed seeded with a fixed, ordered set of posts rather
+    /// than the following timeline — the surface a Maps pin/cluster tap expands
+    /// into. Reuses the entire snap feed (video pool, likes, comments, active-
+    /// cell lifecycle); only the data source differs. The returned VC conforms
+    /// to `ZoomTransitionDestination` so a hero transition can drive it.
+    func makeSnapFeedViewController(postIDs: [PostID]) -> UIViewController
+    /// Best-effort, cancellable warming of these posts into the shared cache, so
+    /// a subsequent `makeSnapFeedViewController` hydrates from memory rather than
+    /// the network — used by Maps to prefetch the visible pins on viewport
+    /// settle, eliminating the metadata desync on tap. Safe for ids never opened.
+    func prewarmPosts(_ ids: [PostID]) async
 }

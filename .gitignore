@@ -8,6 +8,11 @@ xcuserdata/
 # Swift Package Manager
 .build/
 .swiftpm/
+# Resolved-package checkout dir used by xcodebuild -clonedSourcePackagesDirPath
+.spm/
+
+# Local build output (xcodebuild -derivedDataPath)
+.dd/
 
 # Derived artifacts
 DerivedData/

@@ -32,6 +32,8 @@
 		5F00000000000000000010A3 /* ChatInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000010A5 /* ChatInterface */; };
 		5F00000000000000000010A4 /* Chat in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000010A6 /* Chat */; };
 		5F00000000000000000010B2 /* MediaPlayback in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000010B1 /* MediaPlayback */; };
+		5F00000000000000000020B1 /* MapsInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000020C1 /* MapsInterface */; };
+		5F00000000000000000020B2 /* Maps in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000020C2 /* Maps */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -89,6 +91,8 @@
 				5F00000000000000000000FA /* Notifications in Frameworks */,
 				5F00000000000000000010A3 /* ChatInterface in Frameworks */,
 				5F00000000000000000010A4 /* Chat in Frameworks */,
+				5F00000000000000000020B1 /* MapsInterface in Frameworks */,
+				5F00000000000000000020B2 /* Maps in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -148,6 +152,8 @@
 				5F00000000000000000000CE /* CoreRealtimeMocks */,
 				5F00000000000000000000CF /* UploadInterface */,
 				5F00000000000000000000D1 /* Upload */,
+				5F00000000000000000020C1 /* MapsInterface */,
+				5F00000000000000000020C2 /* Maps */,
 			);
 			productName = "core-platform-ios";
 			productReference = 51A1B7722FFBCAB6005918BC /* core-platform-ios.app */;
@@ -201,6 +207,8 @@
 				5F00000000000000000000F8 /* XCLocalSwiftPackageReference "Packages/Features/Notifications" */,
 				5F00000000000000000010A1 /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/ChatInterface" */,
 				5F00000000000000000010A2 /* XCLocalSwiftPackageReference "Packages/Features/Chat" */,
+				5F00000000000000000020A1 /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/MapsInterface" */,
+				5F00000000000000000020A2 /* XCLocalSwiftPackageReference "Packages/Features/Maps" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 51A1B7732FFBCAB6005918BC /* Products */;
@@ -528,6 +536,14 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/Core/MediaPlayback;
 		};
+		5F00000000000000000020A1 /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/MapsInterface" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/FeatureInterfaces/MapsInterface;
+		};
+		5F00000000000000000020A2 /* XCLocalSwiftPackageReference "Packages/Features/Maps" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Features/Maps;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -630,6 +646,14 @@
 		5F00000000000000000010B1 /* MediaPlayback */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MediaPlayback;
+		};
+		5F00000000000000000020C1 /* MapsInterface */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MapsInterface;
+		};
+		5F00000000000000000020C2 /* Maps */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Maps;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

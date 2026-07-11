@@ -16,6 +16,8 @@ import CoreStorage
 import Feed
 import FeedInterface
 import Foundation
+import Maps
+import MapsInterface
 import Notifications
 import NotificationsInterface
 import Profile
@@ -64,6 +66,7 @@ final class AppContainer {
         MockCommentService(dataset: mockDataset).register(on: bff)
         MockChatService(dataset: mockDataset).register(on: bff)
         MockSocialGraphService(dataset: mockDataset).register(on: bff)
+        MockGeoDiscoveryService(dataset: mockDataset).register(on: bff)
         return bff
     }()
 
@@ -197,6 +200,32 @@ final class AppContainer {
         router: routeResolver,
         imagePipeline: imagePipeline,
         videoPlayback: videoPlayback
+    )
+
+    // MARK: - Maps
+
+    /// Reads map pins from geo_discovery.v1 (Radar path). Fleet mode hits the
+    /// real service through the gateway; mock mode is served by
+    /// `MockGeoDiscoveryService`, which scatters the shared dataset around Paris.
+    private lazy var mapsRepository = GeoDiscoveryRepository(
+        geoClient: GeoDiscovery_V1_GeoDiscoveryServiceClient(client: authenticatedRPCClient)
+    )
+
+    /// A Maps-dedicated player pool for live pin previews, separate from the
+    /// feed's, so the two surfaces never contend for players.
+    private lazy var mapsVideoPlayback: VideoPlaybackController = {
+        let source: any VideoSource = switch environment {
+        case .mock: PlaceholderVideoFetcher()
+        case .localFleet: PassthroughVideoSource()
+        }
+        return VideoPlaybackController(source: source)
+    }()
+
+    private(set) lazy var mapsFeature: any MapsFeatureBuilding = MapsFeatureBuilder(
+        repository: mapsRepository,
+        imagePipeline: imagePipeline,
+        videoPlayback: mapsVideoPlayback,
+        feedFeature: { [unowned self] in self.feedFeature }
     )
 
     // MARK: - Profile

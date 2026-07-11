@@ -143,4 +143,44 @@ struct FeedRepositoryTests {
         }
         #expect(lookups.count == 1)
     }
+
+    // MARK: - Post cache / prewarm
+
+    private func getPostCount(_ bff: MockBFF) -> Int {
+        bff.recordedRequests.filter { $0.path == "/post.v1.PostService/GetPost" }.count
+    }
+
+    @Test func loadPostCachesSoASecondCallSkipsTheNetwork() async throws {
+        let (repository, bff) = makeRepository()
+        let id = PostID("post-0000")
+
+        _ = try await repository.loadPost(id)
+        _ = try await repository.loadPost(id)
+
+        #expect(getPostCount(bff) == 1) // second call served from cache
+    }
+
+    @Test func concurrentLoadsOfTheSameIdShareOneFetch() async throws {
+        let (repository, bff) = makeRepository()
+        let id = PostID("post-0001")
+
+        // Single-flight: three racing callers must collapse to one GetPost.
+        async let a = repository.loadPost(id)
+        async let b = repository.loadPost(id)
+        async let c = repository.loadPost(id)
+        _ = try await (a, b, c)
+
+        #expect(getPostCount(bff) == 1)
+    }
+
+    @Test func prewarmMakesTheSubsequentLoadServeFromCache() async throws {
+        let (repository, bff) = makeRepository()
+        let ids = [PostID("post-0002"), PostID("post-0003")]
+
+        await repository.prewarm(ids)
+        #expect(getPostCount(bff) == 2) // one fetch per warmed id
+
+        _ = try await repository.loadPost(ids[0])
+        #expect(getPostCount(bff) == 2) // tap after warming hits the cache, no new fetch
+    }
 }

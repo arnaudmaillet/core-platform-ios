@@ -29,7 +29,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
 
     func start() {
         orderedTabs = [
-            (.maps, MapsTabCoordinator()),
+            (.maps, MapsTabCoordinator(container: container)),
             (.feed, FeedTabCoordinator(container: container)),
             (.messages, MessagesTabCoordinator(container: container)),
             (.profile, profileTab),
