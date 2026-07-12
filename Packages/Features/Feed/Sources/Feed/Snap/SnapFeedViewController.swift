@@ -123,15 +123,31 @@ final class SnapFeedViewController: UIViewController {
 
     #if DEBUG
     private var didDebugPause = false
+    private var didDebugScroll = false
     /// `-snap-start-paused`: pauses the active cell shortly after appearing so
     /// the pause glyph can be screenshotted (taps can't be injected in the sim).
     /// `-snap-auto-dismiss`: dismisses a presented (map-opened) feed shortly
     /// after it settles, so the zoom-out leg can be recorded in the sim.
+    /// `-snap-start-index N`: snaps to page N shortly after appearing (mock:
+    /// every index%3==2 is text-only) — deterministic access to a given page
+    /// kind without scroll injection.
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         if ProcessInfo.processInfo.arguments.contains("-snap-auto-dismiss"), isClosable {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
                 self?.closeFeed()
+            }
+        }
+        let arguments = ProcessInfo.processInfo.arguments
+        if !didDebugScroll,
+           let flagIndex = arguments.firstIndex(of: "-snap-start-index"),
+           arguments.indices.contains(flagIndex + 1),
+           let target = Int(arguments[flagIndex + 1]) {
+            didDebugScroll = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                guard let self, self.orderedIDs.indices.contains(target) else { return }
+                self.collectionView.scrollToItem(at: IndexPath(item: target, section: 0), at: .top, animated: false)
+                self.updateActiveItem()
             }
         }
         guard !didDebugPause,

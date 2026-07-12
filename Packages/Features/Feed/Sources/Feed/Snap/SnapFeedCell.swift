@@ -22,10 +22,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     private let mediaView = UIImageView()
     private let videoRenderView = VideoRenderView()
-    private let textOnlyBackground = GradientView(
-        colors: [UIColor(red: 0.15, green: 0.16, blue: 0.24, alpha: 1),
-                 UIColor(red: 0.05, green: 0.05, blue: 0.09, alpha: 1)]
-    )
     private let chrome = SnapChromeView()
 
     /// A large centred play glyph shown while the active video is user-paused.
@@ -82,7 +78,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     private func buildLayout() {
-        textOnlyBackground.pin(to: contentView)
+        // Text-only posts' gradient page background lives inside the chrome
+        // (shared with the hero flight's replica, so the landing swap can't
+        // mismatch), not here.
         mediaView.pin(to: contentView)
         videoRenderView.pin(to: contentView)
         chrome.pin(to: contentView)
@@ -113,7 +111,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         let isImage = hasMedia && model.mediaKind == .image
         mediaView.isHidden = !isImage
         videoRenderView.isHidden = !isVideo
-        textOnlyBackground.isHidden = hasMedia
 
         mediaView.image = nil
         mediaView.transform = .identity

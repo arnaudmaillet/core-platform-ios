@@ -41,9 +41,23 @@ private func comment(_ id: String, _ body: String) -> CommentEntry {
 
 @MainActor
 struct PostDetailCommentsTests {
+    /// Polls until `condition` holds, up to a generous deadline — CI runners
+    /// can starve the cooperative pool far past any fixed sleep (observed: a
+    /// 50ms settle losing the race on a hosted runner and reddening
+    /// build-test). Returns either way; the caller's asserts do the judging.
+    private func settle(until condition: () -> Bool) async {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while !condition(), ContinuousClock.now < deadline {
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
+    /// Fixed grace for negative assertions ("nothing should have happened"),
+    /// where there is no positive condition to poll for.
     private func settle() async {
         await Task.yield()
-        try? await Task.sleep(for: .milliseconds(50))
+        try? await Task.sleep(for: .milliseconds(100))
     }
 
     private func makeViewModel(_ comments: StubCommentsProvider) -> PostDetailViewModel {
@@ -60,7 +74,9 @@ struct PostDetailCommentsTests {
         viewModel.onCommentsChange = { lastComments = $0 }
 
         viewModel.viewDidLoad()
-        await settle()
+        await settle {
+            if case .loaded = lastComments { return true } else { return false }
+        }
 
         guard case .loaded(let models) = lastComments else {
             Issue.record("expected loaded comments, got \(String(describing: lastComments))")
@@ -76,10 +92,15 @@ struct PostDetailCommentsTests {
         var lastComments: PostDetailViewModel.CommentsState?
         viewModel.onCommentsChange = { lastComments = $0 }
         viewModel.viewDidLoad()
-        await settle()
+        await settle {
+            if case .loaded = lastComments { return true } else { return false }
+        }
 
         viewModel.submitComment("  my thoughts  ")
-        await settle()
+        await settle {
+            if case .loaded(let models) = lastComments { return models.first?.id == "new" }
+            return false
+        }
 
         #expect(await provider.addedBodies == ["my thoughts"]) // trimmed
         guard case .loaded(let models) = lastComments else {
@@ -92,11 +113,15 @@ struct PostDetailCommentsTests {
     @Test func blankCommentIsIgnored() async {
         let provider = StubCommentsProvider([])
         let viewModel = makeViewModel(provider)
+        var lastComments: PostDetailViewModel.CommentsState?
+        viewModel.onCommentsChange = { lastComments = $0 }
         viewModel.viewDidLoad()
-        await settle()
+        await settle {
+            if case .loaded = lastComments { return true } else { return false }
+        }
 
         viewModel.submitComment("   ")
-        await settle()
+        await settle() // negative assertion: fixed grace, nothing to poll for
 
         #expect(await provider.addedBodies.isEmpty)
     }
