@@ -23,6 +23,11 @@ final class FeedFlowCoordinator: Coordinator {
     /// pin-opened feed's (one construction truth — see `FeedFeatureBuilder`).
     private lazy var feedViewController: UIViewController = makeFeedViewController()
 
+    /// Swipe-right-to-pop, the timeline counterpart of the pin feed's grab.
+    /// One instance for the one retained feed; re-installed on the target
+    /// stack at every push.
+    private let slideDismissal = TimelineSlideDismissal()
+
     init(container: AppContainer) {
         self.container = container
     }
@@ -49,16 +54,52 @@ final class FeedFlowCoordinator: Coordinator {
                 animated: false
             )
         }
+        // Accessing `view` loads it so the swipe-to-pop pan can attach (a
+        // no-op after the first push); the delegate slot is taken per push
+        // and handed back when the feed leaves this stack.
+        slideDismissal.attach(to: feed)
+        slideDismissal.onFeedPopped = { [weak self] nav in self?.restoreTabBar(on: nav) }
+        slideDismissal.install(on: navigationController)
+        // Tab bar managed by hand, NOT hidesBottomBarWhenPushed: that flag's
+        // bottom-bar choreography doesn't scrub with a custom interactive pop
+        // (verified here too: the bar snapped in fully rendered at pop-begin,
+        // over the feed's caption). Same cure as the pin path: hide with the
+        // push, keep hidden through cancelled swipes, restore on the
+        // completed pop (`restoreTabBar`) and on tab switches
+        // (`MainTabCoordinator.syncTabBarVisibility`).
+        navigationController.tabBarController?.setTabBarHidden(true, animated: true)
         navigationController.pushViewController(feed, animated: true)
     }
 
-    private func makeFeedViewController() -> UIViewController {
-        let feedViewController = container.feedFeature.makeFeedViewController()
-        // Native bottom-bar choreography: the bar slides out with the push and
-        // scrubs with the edge-swipe pop. (The pin-opened feed manages the bar
-        // by hand instead — its custom interactive pop doesn't scrub this
-        // flag; see MapsViewController. The two never share a pushed VC.)
-        feedViewController.hidesBottomBarWhenPushed = true
-        return feedViewController
+    /// Completed pops only (a cancelled swipe never gets here): bring the bar
+    /// back — unless the pop revealed another full-bleed snap surface (the
+    /// timeline was deep-linked above a pin-opened feed), whose own mechanic
+    /// owns the bar, or the feed is already on its way onto another stack
+    /// (the relocation path re-hides immediately; don't flash it in between).
+    private func restoreTabBar(on navigationController: UINavigationController) {
+        guard feedViewController.navigationController == nil,
+              !(navigationController.topViewController is any ZoomTransitionDestination)
+        else { return }
+        navigationController.tabBarController?.setTabBarHidden(false, animated: true)
     }
+
+    private func makeFeedViewController() -> UIViewController {
+        // No hidesBottomBarWhenPushed: the bar is managed by hand (see
+        // `push(on:)`) so the interactive swipe-to-pop scrubs cleanly, exactly
+        // like the pin path.
+        container.feedFeature.makeFeedViewController()
+    }
+
+    #if DEBUG
+    /// `-feed-swipe-demo` (see `MainTabCoordinator`): one swipe below the
+    /// completion threshold (springs back), then one past it (pops) — the
+    /// exact begin/update/release path a finger drives.
+    func debugScriptedSwipe() {
+        Task { @MainActor [slideDismissal] in
+            await slideDismissal.debugPerformSwipe(peakProgress: 0.22)
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            await slideDismissal.debugPerformSwipe(peakProgress: 0.55)
+        }
+    }
+    #endif
 }

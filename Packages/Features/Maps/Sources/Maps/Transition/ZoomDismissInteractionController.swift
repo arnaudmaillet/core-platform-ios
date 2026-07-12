@@ -51,10 +51,6 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// the dip animates bounds and subviews only).
     private var isDetachSettling = false
 
-    /// Fraction of the view's *width* a drag must cover to complete on release.
-    private let completionThreshold: CGFloat = 0.35
-    /// A rightward flick above this speed completes regardless of distance.
-    private let flickVelocity: CGFloat = 900
     /// The card keeps shrinking gently past the detach as progress grows.
     private let floatShrink: CGFloat = 0.08
     /// Rubber-band caps: generous vertically (the float), tight against
@@ -237,11 +233,10 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         let progress = ZoomTransitionGeometry.dismissProgress(
             translation: translation.x, span: view.bounds.width
         )
+        // Thresholds come from the shared release contract (CoreNavigation),
+        // so the pin grab and the timeline slide complete identically.
         let commit = ended && ZoomTransitionGeometry.shouldCompleteDismissal(
-            progress: progress,
-            velocity: velocity.x,
-            progressThreshold: completionThreshold,
-            flickVelocity: flickVelocity
+            progress: progress, velocity: velocity.x
         )
         // The outcome is reported NOW, at release — the framework's contract
         // for the end of the user-driven phase. UIKit then runs the remaining

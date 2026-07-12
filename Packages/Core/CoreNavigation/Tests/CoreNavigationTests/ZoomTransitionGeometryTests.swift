@@ -1,8 +1,15 @@
 import CoreGraphics
+import CoreNavigation
 import Testing
-@testable import Maps
 
 struct ZoomTransitionGeometryTests {
+    @Test func sharedReleaseContractDefaults() {
+        // Both dismissals (pin grab, timeline slide) release on these; a tune
+        // here is a deliberate, app-wide decision.
+        #expect(ZoomTransitionGeometry.completionThreshold == 0.35)
+        #expect(ZoomTransitionGeometry.flickVelocity == 900)
+    }
+
     @Test func centeredFallbackIsASquareAtTheMiddle() {
         let bounds = CGRect(x: 0, y: 0, width: 400, height: 800)
         let rect = ZoomTransitionGeometry.centeredFallback(in: bounds, side: 56)
