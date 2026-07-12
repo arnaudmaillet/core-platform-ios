@@ -5,10 +5,12 @@ import UIKit
 /// unread-notifications dot (the badge surface the removed Profile tab used to
 /// provide). Shows a placeholder glyph until — or instead of — the avatar.
 final class ProfileAvatarButton: UIControl {
-    private static let diameter: CGFloat = 32
+    /// Shared with every other bar avatar (e.g. the snap feed's author pill)
+    /// via the design system, so the surfaces cannot drift apart.
+    private static let diameter = AvatarImageView.barDiameter
     private static let dotDiameter: CGFloat = 10
 
-    private let avatarView = UIImageView()
+    private let avatarView = AvatarImageView()
     private let unreadDot = UIView()
 
     init() {
@@ -18,15 +20,29 @@ final class ProfileAvatarButton: UIControl {
         accessibilityTraits = .button
         accessibilityIdentifier = "profile-avatar-button"
 
-        avatarView.contentMode = .scaleAspectFill
         avatarView.tintColor = .secondaryLabel
-        avatarView.clipsToBounds = true
-        avatarView.layer.cornerRadius = Self.diameter / 2
         avatarView.isUserInteractionEnabled = false
         avatarView.image = Self.placeholder
-        avatarView.pin(to: self)
-        widthAnchor.constraint(equalToConstant: Self.diameter).isActive = true
-        heightAnchor.constraint(equalToConstant: Self.diameter).isActive = true
+        // The avatar is fixed at the shared diameter and *centered*, never
+        // edge-pinned: the bar's item wrapper renders custom views in its own
+        // fixed-height box (36pt on iOS 26) and breaks required external
+        // constraints, so an edge-pinned avatar silently stretched to 36pt —
+        // and with a hardcoded radius, out of round. Centered, it keeps the
+        // exact diameter the feed's author pill uses whatever the wrapper does.
+        avatarView.constrain(in: self) { parent in
+            avatarView.widthAnchor.constraint(equalToConstant: Self.diameter)
+            avatarView.heightAnchor.constraint(equalToConstant: Self.diameter)
+            avatarView.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
+            avatarView.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
+        }
+        // 999, not required: yield to the wrapper's own sizing (see above).
+        for constraint in [
+            widthAnchor.constraint(equalToConstant: Self.diameter),
+            heightAnchor.constraint(equalToConstant: Self.diameter),
+        ] {
+            constraint.priority = UILayoutPriority(999)
+            constraint.isActive = true
+        }
 
         unreadDot.backgroundColor = .systemRed
         unreadDot.layer.cornerRadius = Self.dotDiameter / 2
@@ -36,11 +52,13 @@ final class ProfileAvatarButton: UIControl {
         unreadDot.layer.borderColor = UIColor.systemBackground.cgColor
         unreadDot.isUserInteractionEnabled = false
         unreadDot.isHidden = true
-        unreadDot.constrain(in: self) { parent in
+        // Anchored to the avatar, not the control: the wrapper may size the
+        // control differently, but the dot must hug the visible circle.
+        unreadDot.constrain(in: self) { _ in
             unreadDot.widthAnchor.constraint(equalToConstant: Self.dotDiameter)
             unreadDot.heightAnchor.constraint(equalToConstant: Self.dotDiameter)
-            unreadDot.topAnchor.constraint(equalTo: parent.topAnchor, constant: -1)
-            unreadDot.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: 1)
+            unreadDot.topAnchor.constraint(equalTo: avatarView.topAnchor, constant: -1)
+            unreadDot.trailingAnchor.constraint(equalTo: avatarView.trailingAnchor, constant: 1)
         }
     }
 
