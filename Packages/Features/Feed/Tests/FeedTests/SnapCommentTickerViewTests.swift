@@ -119,6 +119,64 @@ struct SnapCommentTickerViewTests {
         #expect(labels.allSatisfy { $0.layer.animation(forKey: "flight") != nil })
     }
 
+    // MARK: - Device-bug regressions (2026-07-13)
+
+    /// Bug 1: the band's pan must preempt other pan recognizers (timeline
+    /// slide-to-pop, pin grab) over its own frame — they are required to
+    /// wait for the band's pan to fail.
+    @Test func bandPanPreemptsOtherPanRecognizers() throws {
+        let ticker = makeTicker()
+        let bandPan = try #require(ticker.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
+        let dismissalPan = UIPanGestureRecognizer()
+        let tap = UITapGestureRecognizer()
+
+        #expect(ticker.gestureRecognizer(bandPan, shouldBeRequiredToFailBy: dismissalPan))
+        // Taps (play/pause) are not held hostage.
+        #expect(!ticker.gestureRecognizer(bandPan, shouldBeRequiredToFailBy: tap))
+    }
+
+    /// Bug 2: the entry spawn is geometry-checked — an uncleared entry edge
+    /// (e.g. the layer clock frozen by a percent-driven transition while
+    /// wall-clock timers keep firing) defers the spawn instead of stacking a
+    /// new bubble onto the frozen one.
+    @Test func entrySpawnDefersUntilTheGapIsOpen() {
+        // Rightmost bubble frozen exactly at the entry edge: the full
+        // (width-independent) gap must elapse first.
+        let blocked = SnapCommentTickerView.entryDeferral(lastRightEdge: 400, bandWidth: 400, speed: 22)
+        #expect(abs(blocked - TimeInterval(SnapCommentTickerView.interItemGap / 22)) < 0.001)
+
+        // Gap already open → no deferral.
+        let clear = SnapCommentTickerView.entryDeferral(
+            lastRightEdge: 400 - SnapCommentTickerView.interItemGap, bandWidth: 400, speed: 22
+        )
+        #expect(clear == 0)
+
+        // Beyond-open never goes negative.
+        #expect(SnapCommentTickerView.entryDeferral(lastRightEdge: 100, bandWidth: 400, speed: 22) == 0)
+    }
+
+    /// Bug 3: the kinetic blur must actually render during manual control —
+    /// visible with a live effect while the coast is fast, gone at handover.
+    @Test func kineticBlurAppearsDuringCoastAndClearsAtHandover() throws {
+        let ticker = makeTicker()
+        ticker.setActive(true)
+        ticker.beginScrub()
+        ticker.applyScrubTranslation(-40)
+        ticker.endScrub(releaseVelocity: 1200)
+
+        let blur = try #require(ticker.subviews.compactMap { $0 as? UIVisualEffectView }.first)
+        let start = CACurrentMediaTime()
+        ticker.coastStep(now: start + 0.016) // one fast frame into the decay
+        #expect(!blur.isHidden)
+        #expect(blur.effect != nil) // the .inactive-animator bug rendered nothing
+
+        ticker.coastStep(now: start + 30) // decay long settled → handover
+        #expect(blur.isHidden)
+        let labels = bubbleLabels(ticker)
+        #expect(!labels.isEmpty)
+        #expect(labels.allSatisfy { $0.layer.animation(forKey: "flight") != nil })
+    }
+
     // MARK: - Decay math
 
     @Test func coastVelocityRelaxesToDriftWithoutOvershoot() {

@@ -151,7 +151,10 @@ final class SnapCommentTickerView: UIView {
         // Horizontal-only pan; taps still fall through to the cell's
         // playback toggle (the band is neither a UIControl nor one of the
         // chrome's interactionRoots, so the cell's arbitration ignores it).
+        // The delegate declares the band's priority over other pans (the
+        // timeline slide-to-pop, the pin grab) inside its own frame.
         panRecognizer.addTarget(self, action: #selector(handlePan(_:)))
+        panRecognizer.delegate = self
         addGestureRecognizer(panRecognizer)
     }
 
@@ -302,12 +305,36 @@ final class SnapCommentTickerView: UIView {
         armSpawn(lane: lane, after: TimeInterval((cursor - bandWidth) / speed))
     }
 
+    /// Seconds until the entry edge is clear given the rightmost bubble's
+    /// current right edge; 0 when the gap is already open. Pure — this is
+    /// the no-overlap contract.
+    static func entryDeferral(lastRightEdge: CGFloat, bandWidth: CGFloat, speed: CGFloat) -> TimeInterval {
+        TimeInterval(max(0, (lastRightEdge + interItemGap - bandWidth) / speed))
+    }
+
     /// The steady loop: one fresh bubble at the entry edge, then re-arm for
     /// when it has fully entered plus the gap — at constant per-lane speed
     /// that guarantees no overlap.
     private func spawn(inLane lane: Int) {
         let bandWidth = bounds.width
         guard mode == .conveying, !laneQueues[lane].isEmpty, bandWidth > 0 else { return }
+
+        // Geometry-checked entry: never trust the timer cadence alone. A
+        // percent-driven transition (swipe-to-pop, pin grab) freezes the
+        // layer clock while wall-clock timers keep firing — the presentation
+        // layer reports the frozen truth, so measuring the actual gap makes
+        // overlap impossible by construction and simply defers the spawn
+        // until the clock runs again.
+        if let last = laneBubbles[lane].last {
+            let lastRight = currentVisualCenterX(of: last, lane: lane) + last.width / 2
+            let deferral = Self.entryDeferral(
+                lastRightEdge: lastRight, bandWidth: bandWidth, speed: Self.laneSpeeds[lane]
+            )
+            if deferral > 0 {
+                armSpawn(lane: lane, after: max(0.1, deferral))
+                return
+            }
+        }
 
         let itemIndex = laneNextIndex[lane]
         let item = laneItem(lane, at: itemIndex)
@@ -409,17 +436,7 @@ final class SnapCommentTickerView: UIView {
             for lane in 0..<Self.laneCount {
                 for bubble in laneBubbles[lane] {
                     let layer = bubble.label.layer
-                    // Prefer the render server's truth; fall back to the
-                    // analytic flight position (start − speed·elapsed) for a
-                    // flight grabbed before its first committed frame. The
-                    // parked model value would be wrong — it rests at the
-                    // exit by design.
-                    let frozenX = layer.presentation()?.position.x
-                        ?? max(
-                            -bubble.width / 2,
-                            bubble.flightStartX - Self.laneSpeeds[lane]
-                                * CGFloat(CACurrentMediaTime() - bubble.flightStartTime)
-                        )
+                    let frozenX = currentVisualCenterX(of: bubble, lane: lane)
                     layer.removeAnimation(forKey: "flight")
                     layer.position.x = frozenX
                 }
@@ -468,11 +485,16 @@ final class SnapCommentTickerView: UIView {
     }
 
     fileprivate func coastTick(_ link: CADisplayLink) {
+        coastStep(now: link.timestamp)
+    }
+
+    /// One decay integration step, separated from the display link so the
+    /// coast is deterministically drivable in tests.
+    func coastStep(now: CFTimeInterval) {
         guard mode == .coasting else {
             stopCoast()
             return
         }
-        let now = link.timestamp
         let dt = CGFloat(now - coastLastTimestamp)
         coastLastTimestamp = now
         let elapsed = now - coastStart
@@ -626,10 +648,35 @@ final class SnapCommentTickerView: UIView {
             let animator = UIViewPropertyAnimator(duration: 1, curve: .linear) { [blurView] in
                 blurView.effect = UIBlurEffect(style: .systemUltraThinMaterialDark)
             }
-            animator.pausesOnCompletion = true
+            // An animator left `.inactive` silently ignores
+            // `fractionComplete`; pausing activates it. This single call is
+            // what makes the fraction-driven variable blur render at all.
+            animator.pauseAnimation()
             blurAnimator = animator
         }
         blurAnimator?.fractionComplete = fraction
+    }
+
+    /// The bubble's on-screen center-x: the render server's truth when
+    /// available (authoritative even while an interactive transition freezes
+    /// the layer clock), else the analytic flight position (start −
+    /// speed·elapsed, for a flight grabbed before its first committed
+    /// frame), else the model (scrub-owned bubbles). The parked model value
+    /// of an in-flight bubble must never be used — it rests at the exit by
+    /// design.
+    private func currentVisualCenterX(of bubble: Bubble, lane: Int) -> CGFloat {
+        let layer = bubble.label.layer
+        if let presented = layer.presentation() {
+            return presented.position.x
+        }
+        if layer.animation(forKey: "flight") != nil {
+            return max(
+                -bubble.width / 2,
+                bubble.flightStartX - Self.laneSpeeds[lane]
+                    * CGFloat(CACurrentMediaTime() - bubble.flightStartTime)
+            )
+        }
+        return layer.position.x
     }
 
     // MARK: - Queue & pool plumbing
@@ -658,6 +705,23 @@ final class SnapCommentTickerView: UIView {
         // Steady state needs a handful per lane; a wide scrub can hold a few
         // more. Anything beyond is a transient and can be released.
         if pool.count < 24 { pool.append(bubble) }
+    }
+}
+
+// MARK: - Gesture priority
+
+extension SnapCommentTickerView: UIGestureRecognizerDelegate {
+    /// The band owns horizontal gestures inside its own frame: any OTHER pan
+    /// hearing the same touches — the timeline slide-to-pop, the pin grab,
+    /// the vertical pager — must wait for the band's pan to fail first.
+    /// Failure is fast (vertical intent fails in `shouldBegin`), so page
+    /// scrolls aren't perceptibly delayed; rightward scrubs stop being
+    /// stolen by the interactive dismissal.
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        gestureRecognizer === panRecognizer && otherGestureRecognizer is UIPanGestureRecognizer
     }
 }
 
