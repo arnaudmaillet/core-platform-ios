@@ -202,7 +202,9 @@ final class SnapChromeView: UIView {
         commentTicker.setComments(comments)
     }
 
-    /// Streams only while the owning cell is the active page.
+    /// Streams while the owning cell is on screen (visibility-scoped — a
+    /// page dragged partway in already flows; see the cell's
+    /// `setTickerStreaming`).
     func setTickerActive(_ active: Bool) {
         commentTicker.setActive(active)
     }

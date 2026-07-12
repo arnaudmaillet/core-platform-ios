@@ -99,15 +99,25 @@ final class SnapCommentTickerView: UIView {
     /// is a no-op so cached re-deliveries don't restart a running stream.
     func setComments(_ comments: [TickerCommentModel]) {
         guard comments != queue else { return }
+        let wasEmpty = queue.isEmpty
         stopStream()
         queue = comments
         nextIndex = 0
         isHidden = comments.isEmpty || UIAccessibility.isReduceMotionEnabled
         startIfNeeded()
+        // Data landing on a page that is ALREADY on screen (a slow network
+        // beat the prefetch): ease the pre-filled train in instead of popping
+        // it. Off-screen configuration (`window == nil`) skips this — the
+        // band is simply there when the page scrolls in.
+        if wasEmpty, !comments.isEmpty, window != nil {
+            alpha = 0
+            UIView.animate(withDuration: 0.3) { self.alpha = 1 }
+        }
     }
 
-    /// Rides the cell's `SnapCellLifecycle`: only the settled, foreground,
-    /// on-screen page streams.
+    /// Visibility-scoped: any on-screen page streams — including one being
+    /// dragged partway in — with the cell's activation seam doubling as the
+    /// backgrounding stop / foregrounding restart edge.
     func setActive(_ active: Bool) {
         guard isActive != active else { return }
         isActive = active
@@ -122,6 +132,7 @@ final class SnapCommentTickerView: UIView {
         queue = []
         nextIndex = 0
         isHidden = true
+        alpha = 1 // a reuse mid-entrance-fade must not strand a dim band
     }
 
     override func layoutSubviews() {

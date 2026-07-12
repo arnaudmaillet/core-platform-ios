@@ -142,10 +142,18 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     /// Hands the post's ticker queue to the chrome's comment band. Arrives
     /// from the view model whenever loaded — before or after this cell
-    /// becomes the active page; the band starts streaming once both content
-    /// and activation are in place.
+    /// becomes visible; the band starts streaming once both content and
+    /// visibility are in place.
     func updateTickerComments(_ comments: [TickerCommentModel]) {
         chrome.updateTickerComments(comments)
+    }
+
+    /// Visibility-scoped ticker control, driven by the view controller's
+    /// `willDisplay`/`didEndDisplaying`: the band flows on any on-screen
+    /// page, including one being dragged in, unlike playback which stays on
+    /// the settle-quantized active seam.
+    func setTickerStreaming(_ streaming: Bool) {
+        chrome.setTickerActive(streaming)
     }
 
     private func loadImage(_ url: URL?, into imageView: UIImageView, expecting id: PostID, pipeline: ImagePipeline) {
@@ -168,6 +176,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         isActive = true
         // Activation always starts playing, so any user-paused glyph is stale.
         setPauseGlyphVisible(false)
+        // Normally redundant with the visibility path (`setTickerStreaming`),
+        // but it is the restart edge after backgrounding: foregrounding
+        // re-activates the settled page without a fresh `willDisplay`.
         chrome.setTickerActive(true)
         switch mediaKind {
         case .video:
@@ -222,6 +233,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func didResignActive() {
         guard isActive else { return }
         isActive = false
+        // Covers the paths visibility can't see: backgrounding and the
+        // feed's own disappearance, where no `didEndDisplaying` fires.
         chrome.setTickerActive(false)
         switch mediaKind {
         case .video:

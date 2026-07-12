@@ -144,6 +144,7 @@ final class SnapFeedViewController: UIViewController {
     #if DEBUG
     private var didDebugPause = false
     private var didDebugScroll = false
+    private var didDebugScrollDemo = false
     /// `-snap-start-paused`: pauses the active cell shortly after appearing so
     /// the pause glyph can be screenshotted (taps can't be injected in the sim).
     /// `-snap-auto-dismiss`: dismisses a presented (map-opened) feed shortly
@@ -168,6 +169,23 @@ final class SnapFeedViewController: UIViewController {
                 guard let self, self.orderedIDs.indices.contains(target) else { return }
                 self.collectionView.scrollToItem(at: IndexPath(item: target, section: 0), at: .top, animated: false)
                 self.updateActiveItem()
+            }
+        }
+        // `-snap-scroll-demo`: animated-scrolls one page forward shortly
+        // after settle, so a page *transition* can be recorded in the sim
+        // (scroll gestures can't be injected) — the comment ticker must be
+        // flowing on both pages during the motion, not pop in at rest.
+        if !didDebugScrollDemo, arguments.contains("-snap-scroll-demo") {
+            didDebugScrollDemo = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { [weak self] in
+                guard let self else { return }
+                let target = (self.lifecycle.activeIndex ?? 0) + 1
+                guard self.orderedIDs.indices.contains(target) else { return }
+                self.collectionView.scrollToItem(at: IndexPath(item: target, section: 0), at: .top, animated: true)
+                // Animated scrolls end in scrollViewDidEndScrollingAnimation,
+                // which this VC doesn't observe (finger scrolls don't emit
+                // it); settle the active page manually like the jump arg.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { self.updateActiveItem() }
             }
         }
         guard !didDebugPause,
@@ -627,12 +645,21 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         if lifecycle.activeIndex == indexPath.item {
             (cell as? SnapCellLifecycle)?.willBecomeActive()
         }
+        // The comment ticker streams on VISIBILITY, not on the settle-
+        // quantized active seam: a page dragged partway in must already show
+        // its band flowing, not pop it in at rest. (Video stays settle-
+        // gated — an AVPlayer per half-visible page is real cost; bubbles
+        // aren't.)
+        (cell as? SnapFeedCell)?.setTickerStreaming(true)
     }
 
     func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
         // Belt-and-suspenders release: a cell scrolled fully off is never active,
         // and this guarantees the resign even if it's recycled before a settle.
         (cell as? SnapCellLifecycle)?.didResignActive()
+        // The resign above no-ops for a cell that was displayed but never
+        // became active (a swiped-past page); its ticker must still stop.
+        (cell as? SnapFeedCell)?.setTickerStreaming(false)
     }
 
     // A full-cell tap toggles play/pause (handled by the cell's own gesture),
@@ -746,6 +773,11 @@ extension SnapFeedViewController: UICollectionViewDataSourcePrefetching {
             let model = modelsByID[orderedIDs[indexPath.item]]
             if let model, model.mediaKind == .video, let url = model.mediaURL {
                 videoPlayback?.preroll(url)
+            }
+            // Ticker queues too: loaded before the page scrolls in, so its
+            // band enters the viewport already streaming.
+            if let model {
+                viewModel.ensureTickerComments(for: model.id)
             }
         }
     }

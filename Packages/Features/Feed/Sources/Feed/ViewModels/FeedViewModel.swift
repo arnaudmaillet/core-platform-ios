@@ -164,10 +164,18 @@ public final class FeedViewModel {
         router?.route(to: .comments(id))
     }
 
-    /// The settle seam's comment hook: a page became the active page. Loads
-    /// that post's ticker queue once (single-flight, cached for the session)
-    /// and emits it via `onTickerCommentsChange`.
+    /// The settle seam's comment hook: a page became the active page.
     public func pageDidBecomeActive(_ id: PostID) {
+        ensureTickerComments(for: id)
+    }
+
+    /// Loads a post's ticker queue once (single-flight, cached for the
+    /// session) and emits it via `onTickerCommentsChange`. Also the prefetch
+    /// side of the seam: called for pages *about to* scroll in — via
+    /// `willDisplayItem` and the collection view's prefetcher — so a page
+    /// arrives with its band already populated instead of popping it in at
+    /// settle. Idempotent and cheap on the cached path.
+    public func ensureTickerComments(for id: PostID) {
         guard commentsProvider != nil else { return }
         if let cached = tickerQueues[id] {
             onTickerCommentsChange?(id, cached)
@@ -195,8 +203,13 @@ public final class FeedViewModel {
         onTickerCommentsChange?(id, queue)
     }
 
-    /// Pagination trigger: called by the view for every cell about to display.
+    /// Called by the view for every cell about to display: pagination
+    /// trigger, and the last-resort ticker prefetch (the collection view's
+    /// prefetcher usually got there earlier).
     public func willDisplayItem(at index: Int) {
+        if items.indices.contains(index) {
+            ensureTickerComments(for: items[index].id)
+        }
         guard nextPageToken != nil, pagingLoad == nil, index >= items.count - 5 else { return }
         pagingLoad = Task { await loadNextPage() }
     }
