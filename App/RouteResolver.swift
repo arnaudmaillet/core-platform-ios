@@ -46,8 +46,10 @@ final class RouteResolver: Router {
 
         switch route {
         case .feed:
-            navigator.selectTab(.feed)
-            navigator.activeNavigationController?.popToRootViewController(animated: true)
+            // Not a tab switch: the feed is pushed onto the current tab's
+            // stack (or popped back to, if already there) — openFeed owns
+            // the dismiss-then-push choreography.
+            navigator.openFeed()
 
         case .messages:
             navigator.selectTab(.messages)

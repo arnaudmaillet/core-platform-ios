@@ -239,11 +239,11 @@ final class SnapFeedViewController: UIViewController {
         // The author identity rides the *trailing* bar item (right-aligned,
         // like a system floating action), not the centered titleView. One
         // stable custom view, installed exactly once: author changes
-        // cross-fade inside it, never re-negotiating bar layout. Prepend to
-        // whatever the shell already installed (the Timeline tab's compose
-        // item) — items are ordered trailing-first, so identity hugs the edge.
-        let identityItem = UIBarButtonItem(customView: authorIdentityView)
-        navigationItem.rightBarButtonItems = [identityItem] + (navigationItem.rightBarButtonItems ?? [])
+        // cross-fade inside it, never re-negotiating bar layout. It is the
+        // bar's ONLY trailing item — the feed's chrome is identical on every
+        // entry path (menu push and pin flight), so nothing may install
+        // extra items, here or from outside.
+        navigationItem.rightBarButtonItems = [UIBarButtonItem(customView: authorIdentityView)]
         authorIdentityView.onAuthorTapped = { [weak self] id in self?.viewModel.didTapAuthor(id) }
         // The feed layer has no follow API (follow state/toggling lives in the
         // Profile feature), so the follow affordance routes to the author's
