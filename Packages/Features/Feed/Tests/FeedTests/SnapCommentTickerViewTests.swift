@@ -155,23 +155,26 @@ struct SnapCommentTickerViewTests {
         #expect(SnapCommentTickerView.entryDeferral(lastRightEdge: 100, bandWidth: 400, speed: 22) == 0)
     }
 
-    /// Bug 3: the kinetic blur must actually render during manual control —
-    /// visible with a live effect while the coast is fast, gone at handover.
-    @Test func kineticBlurAppearsDuringCoastAndClearsAtHandover() throws {
+    /// Bug 3: the kinetic backdrop (currently the debug red surface) must
+    /// render during manual control — visible while the coast is fast, gone
+    /// at handover.
+    @Test func kineticBackdropAppearsDuringCoastAndClearsAtHandover() throws {
         let ticker = makeTicker()
         ticker.setActive(true)
         ticker.beginScrub()
         ticker.applyScrubTranslation(-40)
         ticker.endScrub(releaseVelocity: 1200)
 
-        let blur = try #require(ticker.subviews.compactMap { $0 as? UIVisualEffectView }.first)
+        let backdrop = try #require(
+            ticker.subviews.first { $0.accessibilityIdentifier == "ticker-kinetic-backdrop" }
+        )
         let start = CACurrentMediaTime()
         ticker.coastStep(now: start + 0.016) // one fast frame into the decay
-        #expect(!blur.isHidden)
-        #expect(blur.effect != nil) // the .inactive-animator bug rendered nothing
+        #expect(!backdrop.isHidden)
+        #expect(backdrop.alpha > 0)
 
         ticker.coastStep(now: start + 30) // decay long settled → handover
-        #expect(blur.isHidden)
+        #expect(backdrop.isHidden)
         let labels = bubbleLabels(ticker)
         #expect(!labels.isEmpty)
         #expect(labels.allSatisfy { $0.layer.animation(forKey: "flight") != nil })

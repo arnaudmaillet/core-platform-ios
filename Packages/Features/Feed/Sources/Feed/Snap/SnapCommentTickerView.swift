@@ -128,12 +128,12 @@ final class SnapCommentTickerView: UIView {
     private var coastStart: CFTimeInterval = 0
     private var coastLastTimestamp: CFTimeInterval = 0
     private var lastPanTranslation: CGFloat = 0
-    /// The kinetic depth-of-field surface, hidden (zero render cost) except
-    /// during manual interaction.
-    private let blurView = UIVisualEffectView(effect: nil)
-    /// Paused animator whose `fractionComplete` IS the blur intensity — the
-    /// standard variable-blur technique.
-    private var blurAnimator: UIViewPropertyAnimator?
+    /// DEBUG SURFACE (temporary, 2026-07-13): the kinetic blur is swapped
+    /// for a flat red backdrop while we chase the invisible-blur report —
+    /// same velocity→intensity mapping, unmissable rendering. Restore the
+    /// `UIVisualEffectView` + paused-animator pair once the velocity plumbing
+    /// is validated on device.
+    private let kineticBackdrop = UIView()
 
     override init(frame: CGRect) {
         bubbleHeight = ceil(UIFont.preferredFont(forTextStyle: .caption1).lineHeight)
@@ -144,9 +144,12 @@ final class SnapCommentTickerView: UIView {
         // already off screen (the band spans the page's full width), and the
         // cell's own `clipsToBounds` bounds the rest.
 
-        blurView.isHidden = true
-        blurView.isUserInteractionEnabled = false
-        insertSubview(blurView, at: 0)
+        kineticBackdrop.backgroundColor = .systemRed
+        kineticBackdrop.isHidden = true
+        kineticBackdrop.alpha = 0
+        kineticBackdrop.isUserInteractionEnabled = false
+        kineticBackdrop.accessibilityIdentifier = "ticker-kinetic-backdrop"
+        insertSubview(kineticBackdrop, at: 0)
 
         // Horizontal-only pan; taps still fall through to the cell's
         // playback toggle (the band is neither a UIControl nor one of the
@@ -231,7 +234,7 @@ final class SnapCommentTickerView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        blurView.frame = bounds
+        kineticBackdrop.frame = bounds
         // Activation can precede first layout (configure → willBecomeActive
         // before the cell is sized); spawning needs a real width.
         startIfNeeded()
@@ -402,15 +405,21 @@ final class SnapCommentTickerView: UIView {
     @objc private func handlePan(_ pan: UIPanGestureRecognizer) {
         switch pan.state {
         case .began:
+            print("[ticker-debug] pan BEGAN") // absence ⇒ gesture never fires: arbitration, not rendering
             lastPanTranslation = 0
             beginScrub()
         case .changed:
             let translation = pan.translation(in: self).x
             applyScrubTranslation(translation - lastPanTranslation)
             lastPanTranslation = translation
-            setBlurIntensity(blurFraction(forSpeed: abs(pan.velocity(in: self).x)))
+            let velocity = pan.velocity(in: self).x
+            let fraction = blurFraction(forSpeed: abs(velocity))
+            print("[ticker-debug] scrub velocity=\(Int(velocity))pt/s fraction=\(String(format: "%.2f", fraction))")
+            setBlurIntensity(fraction)
         case .ended, .cancelled, .failed:
-            endScrub(releaseVelocity: pan.velocity(in: self).x)
+            let release = pan.velocity(in: self).x
+            print("[ticker-debug] release velocity=\(Int(release))pt/s state=\(pan.state.rawValue)")
+            endScrub(releaseVelocity: release)
         default:
             break
         }
@@ -508,7 +517,9 @@ final class SnapCommentTickerView: UIView {
             laneDx.append(velocity * dt)
         }
         displaceLanes(by: laneDx)
-        setBlurIntensity(blurFraction(forSpeed: maxResidual))
+        let fraction = blurFraction(forSpeed: maxResidual)
+        print("[ticker-debug] coast residual=\(Int(maxResidual))pt/s fraction=\(String(format: "%.2f", fraction))")
+        setBlurIntensity(fraction)
 
         if maxResidual < Self.restVelocityTolerance {
             stopCoast()
@@ -632,29 +643,17 @@ final class SnapCommentTickerView: UIView {
         Self.maxBlurFraction * min(1, speed / Self.blurVelocityScale)
     }
 
-    /// Drives the paused animator's `fractionComplete`. Zero tears the
-    /// animator down and hides the effect view, so the steady conveyor pays
-    /// no live-blur cost over the video.
+    /// DEBUG: drives the red backdrop's alpha directly — bulletproof
+    /// rendering, so any remaining invisibility must be in the velocity
+    /// plumbing upstream, not the surface.
     private func setBlurIntensity(_ fraction: CGFloat) {
         if fraction <= 0 {
-            blurAnimator?.stopAnimation(false)
-            blurAnimator?.finishAnimation(at: .start)
-            blurAnimator = nil
-            blurView.isHidden = true
+            kineticBackdrop.isHidden = true
+            kineticBackdrop.alpha = 0
             return
         }
-        if blurAnimator == nil {
-            blurView.isHidden = false
-            let animator = UIViewPropertyAnimator(duration: 1, curve: .linear) { [blurView] in
-                blurView.effect = UIBlurEffect(style: .systemUltraThinMaterialDark)
-            }
-            // An animator left `.inactive` silently ignores
-            // `fractionComplete`; pausing activates it. This single call is
-            // what makes the fraction-driven variable blur render at all.
-            animator.pauseAnimation()
-            blurAnimator = animator
-        }
-        blurAnimator?.fractionComplete = fraction
+        kineticBackdrop.isHidden = false
+        kineticBackdrop.alpha = fraction
     }
 
     /// The bubble's on-screen center-x: the render server's truth when
