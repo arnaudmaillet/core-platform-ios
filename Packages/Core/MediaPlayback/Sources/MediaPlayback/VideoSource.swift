@@ -123,8 +123,19 @@ public struct PlaceholderVideoFetcher: VideoSource {
         await writer.finishWriting()
         guard writer.status == .completed else { throw VideoSynthesisError.encodingFailed }
 
-        try? FileManager.default.removeItem(at: outputURL)
-        try FileManager.default.moveItem(at: scratch, to: outputURL)
+        do {
+            try FileManager.default.moveItem(at: scratch, to: outputURL)
+        } catch let error as CocoaError where error.code == .fileWriteFileExists {
+            // A concurrent resolve of the same URL finished first (parallel
+            // tests hit this constantly): its identical, complete clip is
+            // already in place — only complete files ever land at the cache
+            // path, since everything goes through this scratch-then-move.
+            // The old remove-then-move finalize made this a race instead:
+            // two resolves interleaving remove/remove/move/move blew up the
+            // second move with "file exists" — the CI flake in
+            // VideoExporterTests.
+            try? FileManager.default.removeItem(at: scratch)
+        }
     }
 
     /// One frame: a solid hue background with a vertical band sweeping across,
