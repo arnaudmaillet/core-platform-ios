@@ -17,6 +17,14 @@ import UIKit
 /// only once the previous one has fully entered plus a gap, so a lane can
 /// never overlap itself. The queue wraps around indefinitely.
 ///
+/// There is no cold start: activation PRE-FILLS every lane as if the stream
+/// had always been running — bubbles laid across the visible band at
+/// steady-state spacing, each animated to the exit over its remaining
+/// distance at the lane's constant speed, and the first fresh spawn timed to
+/// continue exactly the cadence the fill implies. The band lands populated
+/// and moving on its first frame, and the handover to the entry-edge loop is
+/// seamless by construction (same speed, same gap arithmetic).
+///
 /// Lifecycle is a hard stop/start, not a freeze: `setActive(false)` retires
 /// everything in flight. Every path that deactivates a page (swipe away,
 /// backgrounding, pop) also takes the band off screen, so nothing is ever
@@ -28,10 +36,12 @@ final class SnapCommentTickerView: UIView {
     /// the three lanes drift out of phase instead of moving as a block.
     /// Calibrated low: the band is a micro-reaction dump and should glide
     /// calmly under the media, not race across it.
-    static let laneSpeeds: [CGFloat] = [25, 32, 38]
-    /// First-spawn offsets per lane, so a fresh stream doesn't enter as a
-    /// rigid three-row column; scaled with the gentle speeds.
-    static let laneLeadDelays: [TimeInterval] = [0.3, 1.5, 2.7]
+    static let laneSpeeds: [CGFloat] = [22, 26, 24]
+    /// Per-lane phase, in seconds of travel. The pre-fill shifts each lane's
+    /// bubble train left by `phase × speed` points — as if that lane had
+    /// entered the loop this much earlier — so the three lanes land visibly
+    /// out of step instead of column-aligned at the left edge.
+    static let lanePhases: [TimeInterval] = [0.3, 1.5, 2.7]
     /// Minimum horizontal daylight between two bubbles in the same lane —
     /// generous, so the slow glide reads sparse rather than congested.
     static let interItemGap: CGFloat = 32
@@ -53,6 +63,9 @@ final class SnapCommentTickerView: UIView {
     private var spawnTimers: [Timer?] = Array(repeating: nil, count: SnapCommentTickerView.laneCount)
     private var flying: [TickerBubbleLabel] = []
     private var pool: [TickerBubbleLabel] = []
+    /// Measures widths without touching the pool — the pre-fill must know a
+    /// bubble's width before deciding whether it is even on screen.
+    private let measuringBubble = TickerBubbleLabel()
 
     override init(frame: CGRect) {
         bubbleHeight = ceil(UIFont.preferredFont(forTextStyle: .caption1).lineHeight)
@@ -125,8 +138,33 @@ final class SnapCommentTickerView: UIView {
               !UIAccessibility.isReduceMotionEnabled else { return }
         isStreaming = true
         for lane in 0..<Self.laneCount {
-            armSpawn(lane: lane, after: Self.laneLeadDelays[lane])
+            prefillLane(lane)
         }
+    }
+
+    /// Populates one lane the way it would look mid-stream: a left-to-right
+    /// train of bubbles at steady-state spacing (each width + gap apart),
+    /// phase-shifted left so lanes don't align, every bubble flying at the
+    /// lane's constant speed over exactly its remaining distance. The cursor
+    /// ends past the entry edge; the delay until the next real spawn is that
+    /// overshoot at lane speed, so the loop's cadence continues the fill's
+    /// without a seam, and the entry-gap invariant holds across the handover.
+    private func prefillLane(_ lane: Int) {
+        let bandWidth = bounds.width
+        let speed = Self.laneSpeeds[lane]
+        var cursor = -CGFloat(Self.lanePhases[lane]) * speed
+        while cursor < bandWidth {
+            let item = takeNextItem()
+            let width = measuredBubbleWidth(for: item.text, in: bandWidth)
+            // A slot wholly left of the band is a bubble that "already
+            // exited": consume its queue slot (the wrap-around doesn't care)
+            // but materialize nothing.
+            if cursor + width > 0 {
+                launchBubble(item, lane: lane, leftEdge: cursor, width: width)
+            }
+            cursor += width + Self.interItemGap
+        }
+        armSpawn(lane: lane, after: TimeInterval((cursor - bandWidth) / speed))
     }
 
     private func stopStream() {
@@ -151,32 +189,54 @@ final class SnapCommentTickerView: UIView {
         spawnTimers[lane] = timer
     }
 
+    /// The steady loop: one fresh bubble at the entry edge, then re-arm for
+    /// when it has fully entered plus the gap — at constant per-lane speed
+    /// that guarantees no overlap.
     private func spawn(inLane lane: Int) {
         let bandWidth = bounds.width
         guard isStreaming, !queue.isEmpty, bandWidth > 0 else { return }
 
+        let item = takeNextItem()
+        let width = measuredBubbleWidth(for: item.text, in: bandWidth)
+        launchBubble(item, lane: lane, leftEdge: bandWidth, width: width)
+        armSpawn(lane: lane, after: TimeInterval((width + Self.interItemGap) / Self.laneSpeeds[lane]))
+    }
+
+    private func takeNextItem() -> TickerCommentModel {
         let item = queue[nextIndex % queue.count]
         nextIndex = (nextIndex + 1) % queue.count // infinite wrap-around
+        return item
+    }
 
+    private func measuredBubbleWidth(for text: String, in bandWidth: CGFloat) -> CGFloat {
+        measuringBubble.text = text
+        let fitted = measuringBubble.sizeThatFits(CGSize(width: .greatestFiniteMagnitude, height: bubbleHeight))
+        return min(ceil(fitted.width), bandWidth * 0.9)
+    }
+
+    /// The one flight path for both origins — pre-filled mid-band and steady
+    /// entry-edge spawns: place at `leftEdge`, fly to the exit over exactly
+    /// the remaining distance at the lane's constant speed. One code path
+    /// means the handover cannot change velocity or stutter.
+    private func launchBubble(_ item: TickerCommentModel, lane: Int, leftEdge: CGFloat, width: CGFloat) {
         let bubble = dequeueBubble()
         bubble.text = item.text
-        let fitted = bubble.sizeThatFits(CGSize(width: .greatestFiniteMagnitude, height: bubbleHeight))
-        let bubbleWidth = min(ceil(fitted.width), bandWidth * 0.9)
         bubble.frame = CGRect(
-            x: bandWidth,
+            x: leftEdge,
             y: CGFloat(lane) * (bubbleHeight + Self.laneSpacing),
-            width: bubbleWidth,
+            width: width,
             height: bubbleHeight
         )
         bubble.layer.cornerRadius = bubbleHeight / 2
         addSubview(bubble)
         flying.append(bubble)
 
-        let speed = Self.laneSpeeds[lane]
+        let startX = leftEdge + width / 2
+        let exitX = -width / 2
         let flight = CABasicAnimation(keyPath: "position.x")
-        flight.fromValue = bandWidth + bubbleWidth / 2
-        flight.toValue = -bubbleWidth / 2
-        flight.duration = CFTimeInterval((bandWidth + bubbleWidth) / speed)
+        flight.fromValue = startX
+        flight.toValue = exitX
+        flight.duration = CFTimeInterval((startX - exitX) / Self.laneSpeeds[lane])
         flight.timingFunction = CAMediaTimingFunction(name: .linear)
 
         let flightGeneration = generation
@@ -189,13 +249,9 @@ final class SnapCommentTickerView: UIView {
         // Model value rests at the exit before the animation is added, so if
         // the system strips animations the bubble sits off screen left rather
         // than snapping back to the entry edge.
-        bubble.layer.position.x = -bubbleWidth / 2
+        bubble.layer.position.x = exitX
         bubble.layer.add(flight, forKey: "flight")
         CATransaction.commit()
-
-        // This lane may spawn again once this bubble has fully entered plus
-        // the gap; at constant per-lane speed that guarantees no overlap.
-        armSpawn(lane: lane, after: TimeInterval((bubbleWidth + Self.interItemGap) / speed))
     }
 
     // MARK: - Bubble pool
