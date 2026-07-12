@@ -82,6 +82,9 @@ final class SnapFeedViewController: UIViewController {
         viewModel.onEngagementChange = { [weak self] id, state in
             self?.updateVisibleEngagement(for: id, state: state)
         }
+        viewModel.onTickerCommentsChange = { [weak self] id, comments in
+            self?.updateVisibleTicker(for: id, comments: comments)
+        }
         viewModel.onOwnPostInserted = { [weak self] in
             // Reveal the viewer's just-posted item: a prepend on a full-screen
             // pager otherwise shifts it above the viewport. Defer so the
@@ -243,6 +246,10 @@ final class SnapFeedViewController: UIViewController {
                 )
                 cell.onLikeTapped = { [weak self] id in self?.viewModel.toggleLike(for: id) }
                 cell.onCommentTapped = { [weak self] id in self?.viewModel.didTapComments(id) }
+                // Pull side of the ticker seam: a recycled cell for an
+                // already-visited post gets its queue back immediately; async
+                // arrivals ride `onTickerCommentsChange` instead.
+                cell.updateTickerComments(self.viewModel.tickerComments(for: id))
             }
             return cell
         }
@@ -510,6 +517,15 @@ final class SnapFeedViewController: UIViewController {
         cell.updateEngagement(state)
     }
 
+    /// Same routing shape as engagement: a ticker queue lands on exactly the
+    /// cell showing that post (visible or active — the band only streams on
+    /// the active one). A cell that's gone by now re-pulls at reconfigure.
+    private func updateVisibleTicker(for id: PostID, comments: [TickerCommentModel]) {
+        guard let indexPath = dataSource.indexPath(for: id),
+              let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell else { return }
+        cell.updateTickerComments(comments)
+    }
+
     // MARK: - Active-item lifecycle
 
     private func refreshVisibility() {
@@ -533,6 +549,11 @@ final class SnapFeedViewController: UIViewController {
             // surfaces (identity pill above, media attribution below) follow
             // the active page.
             updateBarChrome(at: activate)
+            // And the comment ticker: activation is what triggers (or
+            // re-emits) the page's queue.
+            if orderedIDs.indices.contains(activate) {
+                viewModel.pageDidBecomeActive(orderedIDs[activate])
+            }
         }
     }
 

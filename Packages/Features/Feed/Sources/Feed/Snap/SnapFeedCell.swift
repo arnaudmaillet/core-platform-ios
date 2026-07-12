@@ -140,6 +140,14 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         chrome.updateEngagement(state)
     }
 
+    /// Hands the post's ticker queue to the chrome's comment band. Arrives
+    /// from the view model whenever loaded — before or after this cell
+    /// becomes the active page; the band starts streaming once both content
+    /// and activation are in place.
+    func updateTickerComments(_ comments: [TickerCommentModel]) {
+        chrome.updateTickerComments(comments)
+    }
+
     private func loadImage(_ url: URL?, into imageView: UIImageView, expecting id: PostID, pipeline: ImagePipeline) {
         guard let url else { return }
         imageTasks.append(Task { [weak self, weak imageView] in
@@ -160,6 +168,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         isActive = true
         // Activation always starts playing, so any user-paused glyph is stale.
         setPauseGlyphVisible(false)
+        chrome.setTickerActive(true)
         switch mediaKind {
         case .video:
             guard let url = mediaURL, let videoPlayback else { return }
@@ -213,6 +222,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func didResignActive() {
         guard isActive else { return }
         isActive = false
+        chrome.setTickerActive(false)
         switch mediaKind {
         case .video:
             videoPlayback?.stop(videoRenderView)

@@ -31,6 +31,12 @@ final class SnapChromeView: UIView {
 
     private let captionLabel = UILabel()
 
+    /// The danmaku band, floating over the media directly above the caption.
+    /// Content reaches it only through `updateTickerComments` — never through
+    /// `configure` — so the flight replica renders an empty, invisible band
+    /// by construction and the card stays pixel-identical to the landed page.
+    private let commentTicker = SnapCommentTickerView()
+
     private let likeButton = UIButton(configuration: .plain())
     private let likeCountLabel = UILabel()
     private let commentButton = UIButton(configuration: .plain())
@@ -128,6 +134,18 @@ final class SnapChromeView: UIView {
             captionLabel.trailingAnchor.constraint(lessThanOrEqualTo: parent.trailingAnchor, constant: -72)
         }
 
+        // The comment ticker rides directly above the caption, full-width so
+        // bubbles traverse the whole page. It is an overlay over the media:
+        // its presence or absence never moves the caption, which keeps the
+        // flight replica's geometry identical whether or not comments exist.
+        // (Constrained after the caption — its bottom hangs off the caption's
+        // top — and before the rail, so bubbles pass under the rail's top.)
+        commentTicker.constrain(in: self) { _ in
+            commentTicker.leadingAnchor.constraint(equalTo: leadingAnchor)
+            commentTicker.trailingAnchor.constraint(equalTo: trailingAnchor)
+            commentTicker.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.sm)
+        }
+
         // Engagement rail, bottom-right (TikTok-style vertical stack): like +
         // count, then comment.
         railStack.setCustomSpacing(Spacing.md, after: likeCountLabel)
@@ -176,9 +194,23 @@ final class SnapChromeView: UIView {
         likeButton.configuration = config
     }
 
+    /// Replaces the comment ticker's wrap-around queue. Live cells only —
+    /// the flight replica must never receive this (a moving band cannot be
+    /// pixel-identical across two instances), which is why it is not part of
+    /// `configure`. An empty queue hides the band.
+    func updateTickerComments(_ comments: [TickerCommentModel]) {
+        commentTicker.setComments(comments)
+    }
+
+    /// Streams only while the owning cell is the active page.
+    func setTickerActive(_ active: Bool) {
+        commentTicker.setActive(active)
+    }
+
     /// Clears post-specific content (cell reuse).
     func reset() {
         representedID = nil
+        commentTicker.reset()
     }
 
     private static func countText(_ count: Int64) -> String {

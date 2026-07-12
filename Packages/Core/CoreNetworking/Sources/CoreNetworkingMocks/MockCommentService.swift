@@ -28,14 +28,75 @@ public final class MockCommentService: @unchecked Sendable {
         }
     }
 
+    /// Posts deliberately seeded with a dense set of short comments (18), so
+    /// the snap feed's comment ticker (3-lane density, staggered speeds,
+    /// infinite wrap-around) can be exercised deterministically in mock mode:
+    /// the dataset's first three video posts and first three text-only posts.
+    /// Every other post keeps the sparse two-comment seed — the ticker's
+    /// minimum-engagement gate must keep the band hidden there.
+    private static let denselySeededPostIDs: Set<String> = [
+        "post-0000", "post-0003", "post-0006", // video pages (index % 3 == 0)
+        "post-0002", "post-0005", "post-0008", // text-only pages (index % 3 == 2)
+    ]
+
+    /// Short, diverse bodies for the dense seed. Two entries intentionally
+    /// violate the ticker's filters (over-length, embedded newline) so mock
+    /// mode also proves the filtering; the qualifying remainder stays well
+    /// above the band's minimum gate.
+    private static let denseCommentBank: [String] = [
+        "This is unreal 🔥",
+        "POV: perfection",
+        "Watched this five times already",
+        "The colors!!",
+        "Tutorial when?",
+        "Certified banger",
+        "I needed this today 🙏",
+        "Bro really did that",
+        "Sound ON for this one",
+        "Low-key iconic",
+        "How is this free content",
+        "Saving this immediately",
+        "Frame it.",
+        "Chef's kiss 🤌",
+        "Not me rewatching at 2am",
+        "Algorithm finally got one right",
+        "Wait for the ending…",
+        "This goes hard",
+        "Instant follow",
+        "Petition for part two ✋",
+        "Honestly, a whole documentary could be made about how this clip came together and it still would not be enough.",
+        "Multi\nline comments never ride the ticker",
+        "GOAT behavior",
+        "The way I gasped",
+    ]
+
     private func seedComments(for postID: String) -> [Comment_V1_CommentView] {
         let authors = dataset.authors
         guard authors.count >= 3 else { return [] }
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-        return [
-            makeComment(id: "\(postID)-c0", postID: postID, author: authors[1].profileID, body: "Love this shot 🔥", ageMs: 20 * 60_000),
-            makeComment(id: "\(postID)-c1", postID: postID, author: authors[2].profileID, body: "Where was this taken?", ageMs: 5 * 60_000)
-        ].map {
+
+        let raw: [Comment_V1_CommentView]
+        if Self.denselySeededPostIDs.contains(postID) {
+            // Rotate the bank by the post's index so each dense post gets a
+            // different (but stable) slice, authors cycling the whole cast.
+            let offset = Int(postID.suffix(4)) ?? 0
+            let bank = Self.denseCommentBank
+            raw = (0..<18).map { position in
+                makeComment(
+                    id: "\(postID)-dense-\(position)",
+                    postID: postID,
+                    author: authors[(offset + position) % authors.count].profileID,
+                    body: bank[(offset + position) % bank.count],
+                    ageMs: Int64(position + 1) * 3 * 60_000
+                )
+            }
+        } else {
+            raw = [
+                makeComment(id: "\(postID)-c0", postID: postID, author: authors[1].profileID, body: "Love this shot 🔥", ageMs: 20 * 60_000),
+                makeComment(id: "\(postID)-c1", postID: postID, author: authors[2].profileID, body: "Where was this taken?", ageMs: 5 * 60_000)
+            ]
+        }
+        return raw.map {
             var view = $0
             view.createdAtMs = nowMs - view.createdAtMs
             return view
