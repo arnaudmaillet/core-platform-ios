@@ -86,6 +86,17 @@ final class MapsViewController: UIViewController {
         bindViewModel()
         observeAppLifecycle()
         mapView.setRegion(Self.defaultRegion, animated: false)
+        #if DEBUG
+        // `-maps-wide-region`: open zoomed out far enough that the mock pins
+        // collapse into clusters — for screenshotting/driving cluster UI in
+        // the sim, where pinch gestures can't be injected.
+        if ProcessInfo.processInfo.arguments.contains("-maps-wide-region") {
+            var region = Self.defaultRegion
+            region.span.latitudeDelta *= 6
+            region.span.longitudeDelta *= 6
+            mapView.setRegion(region, animated: false)
+        }
+        #endif
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -355,7 +366,9 @@ extension MapsViewController: MKMapViewDelegate {
             thumbnail = (view as? MapAnnotationView)?.heroImage
         case let cluster as MKClusterAnnotation:
             postIDs = cluster.memberAnnotations.compactMap { ($0 as? MapAnnotation)?.pin.postID }
-            thumbnail = nil
+            // The cluster's face is the first member's cover — fly it, so the
+            // frame-0 handshake holds for clusters exactly as for pins.
+            thumbnail = (view as? MapClusterAnnotationView)?.heroImage
         default:
             return
         }

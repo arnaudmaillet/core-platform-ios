@@ -8,16 +8,24 @@ import UIKit
 /// member post's `thumbnail_url`. MapKit's default count bubble is deliberately
 /// not used. Its tap opens a snap feed seeded with all the cluster's member post
 /// ids — already held client-side, so no extra round-trip.
+///
+/// The face is a `PinCardView` — the same component the single pin renders and
+/// the hero transition flies — so pin, cluster, and flight card are twins by
+/// construction, with no per-surface styling constants left to drift.
 final class MapClusterAnnotationView: MKAnnotationView {
     static let reuseIdentifier = "MapClusterAnnotationView"
     /// Match the individual pin exactly.
     private static let side = MapAnnotationView.side
 
-    private let thumbnailView = UIImageView()
+    /// The cluster's face; also the exact blueprint of the flying card.
+    private let card = PinCardView(frame: CGRect(x: 0, y: 0, width: side, height: side))
     private var imageTask: Task<Void, Never>?
     /// Guards a slow load against reuse (clusters have no stable id, so key on
     /// the URL being shown).
     private var representedURL: URL?
+
+    /// The loaded cover image, handed to the hero transition to fly.
+    var heroImage: UIImage? { card.imageView.image }
 
     override init(annotation: (any MKAnnotation)?, reuseIdentifier: String?) {
         super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
@@ -30,7 +38,11 @@ final class MapClusterAnnotationView: MKAnnotationView {
         // the clustering tree — they merge into larger clusters as you zoom out
         // instead of falling out of clustering entirely.
         clusteringIdentifier = MapAnnotation.clusteringIdentifier
-        buildLayout()
+
+        addSubview(card)
+        // The card clips, so the shadow lives on this outer layer — same as
+        // the single pin.
+        PinCardView.applyPinShadow(to: layer)
     }
 
     @available(*, unavailable)
@@ -44,23 +56,6 @@ final class MapClusterAnnotationView: MKAnnotationView {
         clusteringIdentifier = MapAnnotation.clusteringIdentifier
     }
 
-    private func buildLayout() {
-        thumbnailView.contentMode = .scaleAspectFill
-        thumbnailView.clipsToBounds = true
-        thumbnailView.backgroundColor = UIColor.secondarySystemBackground
-        thumbnailView.layer.cornerRadius = 12
-        thumbnailView.layer.cornerCurve = .continuous
-        thumbnailView.layer.borderWidth = 2
-        thumbnailView.layer.borderColor = UIColor.systemBackground.cgColor
-        thumbnailView.frame = bounds
-        addSubview(thumbnailView)
-
-        layer.shadowColor = UIColor.black.cgColor
-        layer.shadowOpacity = 0.25
-        layer.shadowRadius = 4
-        layer.shadowOffset = CGSize(width: 0, height: 2)
-    }
-
     /// Renders the first member post's thumbnail. Called from the map delegate,
     /// which owns the image pipeline.
     func configure(with cluster: MKClusterAnnotation, imagePipeline: ImagePipeline) {
@@ -71,12 +66,12 @@ final class MapClusterAnnotationView: MKAnnotationView {
 
         imageTask?.cancel()
         representedURL = firstThumbnail
-        thumbnailView.image = nil
+        card.imageView.image = nil
         guard let url = firstThumbnail else { return }
         imageTask = Task { [weak self] in
             guard let image = try? await imagePipeline.image(for: url) else { return }
             guard let self, self.representedURL == url else { return }
-            self.thumbnailView.image = image
+            self.card.imageView.image = image
         }
     }
 
@@ -85,6 +80,6 @@ final class MapClusterAnnotationView: MKAnnotationView {
         imageTask?.cancel()
         imageTask = nil
         representedURL = nil
-        thumbnailView.image = nil
+        card.imageView.image = nil
     }
 }
