@@ -16,6 +16,17 @@ import UIKit
 /// Geometry is data-independent: labels fill in whenever `configure` runs
 /// (possibly mid-flight, on a cold tap) without moving the scaffold.
 final class SnapChromeView: UIView {
+    /// The text-only post's page background, defined once here for both the
+    /// live cell and the flight replica. Living *inside* the chrome means the
+    /// hero flight's existing chrome fade doubles as the thumbnail↔gradient
+    /// crossfade: a text post's card lifts off showing the pin's cover and
+    /// lands showing exactly the page the cell renders — no pop at the swap.
+    static let textPostGradientColors: [UIColor] = [
+        UIColor(red: 0.15, green: 0.16, blue: 0.24, alpha: 1),
+        UIColor(red: 0.05, green: 0.05, blue: 0.09, alpha: 1),
+    ]
+
+    private let textBackdrop = GradientView(colors: SnapChromeView.textPostGradientColors)
     private let scrimView = GradientView(colors: [.clear, UIColor.black.withAlphaComponent(0.75)])
 
     private let captionLabel = UILabel()
@@ -92,6 +103,12 @@ final class SnapChromeView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     private func buildLayout() {
+        // At the very back, under the scrim: for text posts it IS the page.
+        textBackdrop.isUserInteractionEnabled = false
+        textBackdrop.isHidden = true
+        textBackdrop.pin(to: self)
+        sendSubviewToBack(textBackdrop)
+
         scrimView.isUserInteractionEnabled = false
         scrimView.constrain(in: self) { parent in
             scrimView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
@@ -138,6 +155,7 @@ final class SnapChromeView: UIView {
 
         let hasMedia = model.mediaURL != nil
         scrimView.isHidden = !hasMedia
+        textBackdrop.isHidden = hasMedia
         // Text-only posts lean on the caption, so give it more room and weight.
         captionLabel.numberOfLines = hasMedia ? 4 : 8
         captionLabel.font = hasMedia
