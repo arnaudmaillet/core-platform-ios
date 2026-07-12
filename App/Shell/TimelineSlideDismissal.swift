@@ -251,6 +251,22 @@ private final class TimelineSlidePopAnimator: NSObject, UIViewControllerAnimated
         dim.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         toView.addSubview(dim)
 
+        // Bezel-matched corner rounding, SET (not animated) at frame 0: at
+        // rest the clipped corners sit exactly behind the device's own
+        // rounded bezel, so the mask is invisible until the slide carries the
+        // view away from it — no entry animation to jump, and (crucially)
+        // nothing for the percent driver's frozen layer clock to strand
+        // mid-value during a scrub. The radius is a static model value for
+        // the transition's whole life. A plain cornerRadius clip with no
+        // shadow composites on the GPU without an offscreen pass, so the
+        // 1:1 tracking stays cheap.
+        let radius = ScreenGeometry.cornerRadius(behind: fromView)
+        if radius > 0 {
+            fromView.layer.cornerCurve = .continuous
+            fromView.layer.cornerRadius = radius
+            fromView.layer.masksToBounds = true
+        }
+
         toView.transform = CGAffineTransform(translationX: -container.bounds.width * parallax, y: 0)
         UIView.animate(
             withDuration: transitionDuration(using: context),
@@ -264,6 +280,22 @@ private final class TimelineSlidePopAnimator: NSObject, UIViewControllerAnimated
             dim.removeFromSuperview()
             fromView.transform = .identity
             toView.transform = .identity
+            if context.transitionWasCancelled {
+                // The feed is back at full screen, where the rounding hides
+                // behind the bezel again — animate it off anyway so the
+                // retained view carries no mask outside dismissals.
+                UIView.animate(withDuration: 0.2, delay: 0, options: [.beginFromCurrentState]) {
+                    fromView.layer.cornerRadius = 0
+                } completion: { _ in
+                    fromView.layer.masksToBounds = false
+                }
+            } else {
+                // Committed: the view held the bezel radius to its last
+                // on-screen frame; it is unparented now, so reset silently
+                // for the retained feed's next push.
+                fromView.layer.cornerRadius = 0
+                fromView.layer.masksToBounds = false
+            }
             context.completeTransition(!context.transitionWasCancelled)
         }
     }
