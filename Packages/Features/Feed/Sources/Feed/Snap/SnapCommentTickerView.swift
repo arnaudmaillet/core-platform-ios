@@ -1,35 +1,40 @@
 import UIKit
 
-/// The danmaku band: three lanes of short comments conveying right-to-left
-/// over the page's media, stacked between the caption and the media above it.
+/// The danmaku band: three lanes of naked micro-reaction text conveying
+/// right-to-left over the page's media, directly above the caption. Text
+/// carries no capsule — legibility comes from the chrome's bottom scrim,
+/// which extends behind the whole band.
 ///
-/// The engine is pure Core Animation. Each bubble's flight is one linear
-/// `CABasicAnimation` on `position.x`, executed entirely on the render server:
-/// the main thread is touched only at spawn/retire (a few times per second),
-/// so the stream stays fluid at the display's native rate over playing video
-/// and is immune to main-thread hitches. There is no display link and no
-/// scroll view — a lane holds at most a handful of bubbles, recycled through
-/// a small pool.
+/// # The conveyor
+/// Steady state is pure Core Animation. Each bubble's flight is one linear
+/// `CABasicAnimation` on `position.x`, executed entirely on the render
+/// server: the main thread is touched only at spawn/retire, so the stream
+/// stays fluid at the display's native rate over playing video and is immune
+/// to main-thread hitches. Each lane runs at its own constant speed
+/// (staggered across lanes, never within one) and spawns its next bubble
+/// only once the previous one has fully entered plus a gap. Activation
+/// pre-fills every lane mid-stream, so the band lands populated; the first
+/// fresh spawn continues the fill's cadence seamlessly.
 ///
-/// Density and organic flow come from the lane scheduling: each lane runs at
-/// its own constant speed (staggered across lanes, never within one — a
-/// faster follower would overtake a slower leader) and spawns its next bubble
-/// only once the previous one has fully entered plus a gap, so a lane can
-/// never overlap itself. The queue wraps around indefinitely.
+/// # The scrub
+/// The band is directly manipulable: a horizontal pan freezes the conveyor
+/// (presentation positions written into the model layers — the standard
+/// interruptible-animation takeover), tracks the finger 1:1, and backfills
+/// both edges from the wrap-around queue so the user can scrub forward and
+/// backward without holes. Release relaxes each lane's velocity
+/// exponentially from the finger's release velocity to the lane's steady
+/// drift (`v(t) = -vₖ + (V₀+vₖ)·e^(-t/τ)`), integrated by a `CADisplayLink`
+/// that lives only for the interaction transient; when the residual is
+/// imperceptible the bubbles are handed back to CA at exactly matched
+/// velocity. A kinetic blur behind the band tracks |manual velocity| via a
+/// paused `UIViewPropertyAnimator`'s `fractionComplete`, and vanishes
+/// (hidden, zero cost) at steady state.
 ///
-/// There is no cold start: activation PRE-FILLS every lane as if the stream
-/// had always been running — bubbles laid across the visible band at
-/// steady-state spacing, each animated to the exit over its remaining
-/// distance at the lane's constant speed, and the first fresh spawn timed to
-/// continue exactly the cadence the fill implies. The band lands populated
-/// and moving on its first frame, and the handover to the entry-edge loop is
-/// seamless by construction (same speed, same gap arithmetic).
-///
-/// Lifecycle is a hard stop/start, not a freeze: `setActive(false)` retires
-/// everything in flight. Every path that deactivates a page (swipe away,
-/// backgrounding, pop) also takes the band off screen, so nothing is ever
-/// seen stopping — and stopping outright is what makes backgrounding safe,
-/// since the system strips CA animations from backgrounded apps.
+/// # Lifecycle
+/// Hard stop/start, not a freeze: deactivation retires everything in flight,
+/// which keeps backgrounding safe (the system strips CA animations from
+/// backgrounded apps) and cell reuse leak-proof. Every deactivation path
+/// also takes the band off screen, so nothing is ever seen stopping.
 final class SnapCommentTickerView: UIView {
     static let laneCount = 3
     /// Per-lane speeds (pt/s). Deliberately staggered and incommensurate so
@@ -47,37 +52,117 @@ final class SnapCommentTickerView: UIView {
     static let interItemGap: CGFloat = 32
     private static let laneSpacing: CGFloat = 3
 
+    // MARK: Interaction tuning
+
+    /// Exponential time constant for the release decay back to steady drift.
+    static let decayTimeConstant: TimeInterval = 0.35
+    /// Residual manual velocity (pt/s) under which the conveyor resumes CA —
+    /// below perception, so the handover cannot be seen.
+    static let restVelocityTolerance: CGFloat = 2
+    /// |manual velocity| (pt/s) that maps to the maximum kinetic blur.
+    static let blurVelocityScale: CGFloat = 900
+    /// The blur animator's fraction ceiling: enough depth-of-field to read
+    /// as kinetic, not enough to obliterate the reactions being scrubbed.
+    static let maxBlurFraction: CGFloat = 0.65
+    /// How far past either edge a scrubbed bubble may sit before retiring.
+    private static let scrubMargin: CGFloat = 48
+
+    /// One in-flight reaction and where its text lives in the lane's queue —
+    /// the index is what makes bidirectional backfill well-defined. A class:
+    /// flight bookkeeping mutates as ownership moves between CA and touch.
+    private final class Bubble {
+        let label: TickerBubbleLabel
+        let width: CGFloat
+        let itemIndex: Int
+        /// Where and when the current CA flight departed — the analytic
+        /// freeze fallback for a flight grabbed before its first frame was
+        /// committed (`presentation()` is nil until then).
+        var flightStartX: CGFloat = 0
+        var flightStartTime: CFTimeInterval = 0
+
+        init(label: TickerBubbleLabel, width: CGFloat, itemIndex: Int) {
+            self.label = label
+            self.width = width
+            self.itemIndex = itemIndex
+        }
+    }
+
+    /// `conveying` = render-server CA flights; `scrubbing` = finger owns the
+    /// positions; `coasting` = display-link decay back toward `conveying`.
+    private enum Mode {
+        case parked
+        case conveying
+        case scrubbing
+        case coasting
+    }
+
     private let bubbleHeight: CGFloat
     private var queue: [TickerCommentModel] = []
-    /// Next queue index to spawn, shared by all lanes; wraps around so the
-    /// stream is infinite.
-    private var nextIndex = 0
-    /// Mirrors the owning cell's active-page state; content may arrive before
-    /// or after activation, so both paths funnel into `startIfNeeded`.
+    /// The queue dealt round-robin into one sub-queue per lane: scrubbing
+    /// backward needs "the previous item of THIS lane", which only exists if
+    /// lane membership is a property of the item, not of spawn timing.
+    private var laneQueues: [[TickerCommentModel]] = Array(repeating: [], count: SnapCommentTickerView.laneCount)
+    /// Per lane: the sub-queue index the next right-edge spawn will show.
+    private var laneNextIndex: [Int] = Array(repeating: 0, count: SnapCommentTickerView.laneCount)
+    /// Per lane, ordered left → right.
+    private var laneBubbles: [[Bubble]] = Array(repeating: [], count: SnapCommentTickerView.laneCount)
+    /// Mirrors the owning cell's visibility; content may arrive before or
+    /// after it, so both paths funnel into `startIfNeeded`.
     private var isActive = false
-    private var isStreaming = false
-    /// Invalidates in-flight CA completion blocks across a stop: completions
-    /// fire even for removed animations, and a stale one must not touch a
-    /// bubble that a newer stream already owns.
+    private var mode: Mode = .parked
+    /// Invalidates in-flight CA completion blocks across a stop or a scrub
+    /// takeover: completions fire even for removed animations, and a stale
+    /// one must not touch a bubble a newer owner already controls.
     private var generation = 0
     private var spawnTimers: [Timer?] = Array(repeating: nil, count: SnapCommentTickerView.laneCount)
-    private var flying: [TickerBubbleLabel] = []
     private var pool: [TickerBubbleLabel] = []
-    /// Measures widths without touching the pool — the pre-fill must know a
-    /// bubble's width before deciding whether it is even on screen.
+    /// Measures widths without touching the pool — pre-fill and backfill must
+    /// know a bubble's width before deciding whether it is even on screen.
     private let measuringBubble = TickerBubbleLabel()
+
+    // MARK: Interaction state
+
+    private let panRecognizer = UIPanGestureRecognizer()
+    private var coastLink: CADisplayLink?
+    private var coastReleaseVelocity: CGFloat = 0
+    private var coastStart: CFTimeInterval = 0
+    private var coastLastTimestamp: CFTimeInterval = 0
+    private var lastPanTranslation: CGFloat = 0
+    /// The kinetic depth-of-field surface, hidden (zero render cost) except
+    /// during manual interaction.
+    private let blurView = UIVisualEffectView(effect: nil)
+    /// Paused animator whose `fractionComplete` IS the blur intensity — the
+    /// standard variable-blur technique.
+    private var blurAnimator: UIViewPropertyAnimator?
 
     override init(frame: CGRect) {
         bubbleHeight = ceil(UIFont.preferredFont(forTextStyle: .caption1).lineHeight)
             + TickerBubbleLabel.textInsets.top + TickerBubbleLabel.textInsets.bottom
         super.init(frame: frame)
-        // Passive by construction: taps fall through to the cell's playback
-        // toggle, and the chrome's `interactionRoots` never mention the band.
-        isUserInteractionEnabled = false
         isHidden = true
         // No clipping: bubbles spawn just past the trailing edge, which is
         // already off screen (the band spans the page's full width), and the
         // cell's own `clipsToBounds` bounds the rest.
+
+        blurView.isHidden = true
+        blurView.isUserInteractionEnabled = false
+        insertSubview(blurView, at: 0)
+
+        // Horizontal-only pan; taps still fall through to the cell's
+        // playback toggle (the band is neither a UIControl nor one of the
+        // chrome's interactionRoots, so the cell's arbitration ignores it).
+        panRecognizer.addTarget(self, action: #selector(handlePan(_:)))
+        addGestureRecognizer(panRecognizer)
+    }
+
+    /// Horizontal intent only: vertical drags stay with the page scroller.
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === panRecognizer else {
+            return super.gestureRecognizerShouldBegin(gestureRecognizer)
+        }
+        guard mode != .parked else { return false }
+        let velocity = panRecognizer.velocity(in: self)
+        return abs(velocity.x) > abs(velocity.y)
     }
 
     @available(*, unavailable)
@@ -102,7 +187,12 @@ final class SnapCommentTickerView: UIView {
         let wasEmpty = queue.isEmpty
         stopStream()
         queue = comments
-        nextIndex = 0
+        for lane in 0..<Self.laneCount {
+            laneQueues[lane] = comments.enumerated()
+                .filter { $0.offset % Self.laneCount == lane }
+                .map(\.element)
+            laneNextIndex[lane] = 0
+        }
         isHidden = comments.isEmpty || UIAccessibility.isReduceMotionEnabled
         startIfNeeded()
         // Data landing on a page that is ALREADY on screen (a slow network
@@ -130,68 +220,52 @@ final class SnapCommentTickerView: UIView {
         stopStream()
         isActive = false
         queue = []
-        nextIndex = 0
+        laneQueues = Array(repeating: [], count: Self.laneCount)
+        laneNextIndex = Array(repeating: 0, count: Self.laneCount)
         isHidden = true
         alpha = 1 // a reuse mid-entrance-fade must not strand a dim band
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        blurView.frame = bounds
         // Activation can precede first layout (configure → willBecomeActive
         // before the cell is sized); spawning needs a real width.
         startIfNeeded()
     }
 
-    // MARK: - Lane scheduling
+    // MARK: - Lane scheduling (steady conveyor)
 
     private func startIfNeeded() {
-        guard isActive, !isStreaming, !queue.isEmpty, bounds.width > 0,
+        guard isActive, mode == .parked, !queue.isEmpty, bounds.width > 0,
               !UIAccessibility.isReduceMotionEnabled else { return }
-        isStreaming = true
+        mode = .conveying
         for lane in 0..<Self.laneCount {
             prefillLane(lane)
         }
     }
 
-    /// Populates one lane the way it would look mid-stream: a left-to-right
-    /// train of bubbles at steady-state spacing (each width + gap apart),
-    /// phase-shifted left so lanes don't align, every bubble flying at the
-    /// lane's constant speed over exactly its remaining distance. The cursor
-    /// ends past the entry edge; the delay until the next real spawn is that
-    /// overshoot at lane speed, so the loop's cadence continues the fill's
-    /// without a seam, and the entry-gap invariant holds across the handover.
-    private func prefillLane(_ lane: Int) {
-        let bandWidth = bounds.width
-        let speed = Self.laneSpeeds[lane]
-        var cursor = -CGFloat(Self.lanePhases[lane]) * speed
-        while cursor < bandWidth {
-            let item = takeNextItem()
-            let width = measuredBubbleWidth(for: item.text, in: bandWidth)
-            // A slot wholly left of the band is a bubble that "already
-            // exited": consume its queue slot (the wrap-around doesn't care)
-            // but materialize nothing.
-            if cursor + width > 0 {
-                launchBubble(item, lane: lane, leftEdge: cursor, width: width)
-            }
-            cursor += width + Self.interItemGap
-        }
-        armSpawn(lane: lane, after: TimeInterval((cursor - bandWidth) / speed))
-    }
-
     private func stopStream() {
         generation += 1
-        isStreaming = false
+        mode = .parked
         for timer in spawnTimers { timer?.invalidate() }
         spawnTimers = Array(repeating: nil, count: Self.laneCount)
-        for bubble in flying {
-            bubble.layer.removeAllAnimations()
-            recycle(bubble)
+        stopCoast()
+        setBlurIntensity(0)
+        // Cancel any in-progress grab (a page can deactivate mid-touch).
+        panRecognizer.isEnabled = false
+        panRecognizer.isEnabled = true
+        for lane in 0..<Self.laneCount {
+            for bubble in laneBubbles[lane] {
+                bubble.label.layer.removeAllAnimations()
+                recycle(bubble.label)
+            }
+            laneBubbles[lane].removeAll()
         }
-        flying.removeAll()
     }
 
     private func armSpawn(lane: Int, after delay: TimeInterval) {
-        let timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+        let timer = Timer.scheduledTimer(withTimeInterval: max(0, delay), repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.spawn(inLane: lane) }
         }
         // Spawn timing is not frame-precise work; tolerance keeps the timer
@@ -200,23 +274,372 @@ final class SnapCommentTickerView: UIView {
         spawnTimers[lane] = timer
     }
 
+    /// Populates one lane the way it would look mid-stream: a left-to-right
+    /// train at steady-state spacing, phase-shifted left so lanes don't
+    /// align, every bubble flying at the lane's constant speed over exactly
+    /// its remaining distance. The cursor's overshoot past the entry edge,
+    /// at lane speed, times the first fresh spawn — the loop continues the
+    /// fill's cadence without a seam.
+    private func prefillLane(_ lane: Int) {
+        guard !laneQueues[lane].isEmpty else { return }
+        let bandWidth = bounds.width
+        let speed = Self.laneSpeeds[lane]
+        var cursor = -CGFloat(Self.lanePhases[lane]) * speed
+        while cursor < bandWidth {
+            let itemIndex = laneNextIndex[lane]
+            let item = laneItem(lane, at: itemIndex)
+            laneNextIndex[lane] = wrapped(itemIndex + 1, laneQueues[lane].count)
+            let width = measuredBubbleWidth(for: item.text, in: bandWidth)
+            // A slot wholly left of the band is a bubble that "already
+            // exited": consume its queue slot but materialize nothing.
+            if cursor + width > 0 {
+                let bubble = materializeBubble(item, atIndex: itemIndex, lane: lane, leftEdge: cursor, width: width)
+                laneBubbles[lane].append(bubble)
+                animateToExit(bubble, lane: lane)
+            }
+            cursor += width + Self.interItemGap
+        }
+        armSpawn(lane: lane, after: TimeInterval((cursor - bandWidth) / speed))
+    }
+
     /// The steady loop: one fresh bubble at the entry edge, then re-arm for
     /// when it has fully entered plus the gap — at constant per-lane speed
     /// that guarantees no overlap.
     private func spawn(inLane lane: Int) {
         let bandWidth = bounds.width
-        guard isStreaming, !queue.isEmpty, bandWidth > 0 else { return }
+        guard mode == .conveying, !laneQueues[lane].isEmpty, bandWidth > 0 else { return }
 
-        let item = takeNextItem()
+        let itemIndex = laneNextIndex[lane]
+        let item = laneItem(lane, at: itemIndex)
+        laneNextIndex[lane] = wrapped(itemIndex + 1, laneQueues[lane].count)
         let width = measuredBubbleWidth(for: item.text, in: bandWidth)
-        launchBubble(item, lane: lane, leftEdge: bandWidth, width: width)
+        let bubble = materializeBubble(item, atIndex: itemIndex, lane: lane, leftEdge: bandWidth, width: width)
+        laneBubbles[lane].append(bubble)
+        animateToExit(bubble, lane: lane)
         armSpawn(lane: lane, after: TimeInterval((width + Self.interItemGap) / Self.laneSpeeds[lane]))
     }
 
-    private func takeNextItem() -> TickerCommentModel {
-        let item = queue[nextIndex % queue.count]
-        nextIndex = (nextIndex + 1) % queue.count // infinite wrap-around
-        return item
+    /// Places a label in the lane at `leftEdge` — model geometry only, no
+    /// motion. The one materialization path for pre-fill, steady spawns, and
+    /// scrub backfill.
+    private func materializeBubble(
+        _ item: TickerCommentModel, atIndex itemIndex: Int, lane: Int, leftEdge: CGFloat, width: CGFloat
+    ) -> Bubble {
+        let label = dequeueBubble()
+        label.text = item.text
+        label.frame = CGRect(
+            x: leftEdge,
+            y: CGFloat(lane) * (bubbleHeight + Self.laneSpacing),
+            width: width,
+            height: bubbleHeight
+        )
+        addSubview(label)
+        return Bubble(label: label, width: width, itemIndex: itemIndex)
+    }
+
+    /// Flies a bubble from wherever its model currently sits to the exit at
+    /// the lane's constant speed — the single flight path, so pre-filled,
+    /// entry-edge, and scrub-released bubbles cannot differ in velocity.
+    private func animateToExit(_ bubble: Bubble, lane: Int) {
+        let layer = bubble.label.layer
+        let startX = layer.position.x
+        let exitX = -bubble.width / 2
+        guard startX > exitX else { return }
+        bubble.flightStartX = startX
+        bubble.flightStartTime = CACurrentMediaTime()
+
+        let flight = CABasicAnimation(keyPath: "position.x")
+        flight.fromValue = startX
+        flight.toValue = exitX
+        flight.duration = CFTimeInterval((startX - exitX) / Self.laneSpeeds[lane])
+        flight.timingFunction = CAMediaTimingFunction(name: .linear)
+
+        let flightGeneration = generation
+        let label = bubble.label
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { [weak self] in
+            guard let self, flightGeneration == self.generation else { return }
+            self.laneBubbles[lane].removeAll { $0.label === label }
+            self.recycle(label)
+        }
+        // Model value rests at the exit before the animation is added, so if
+        // the system strips animations the bubble sits off screen left rather
+        // than snapping back to the entry edge.
+        layer.position.x = exitX
+        layer.add(flight, forKey: "flight")
+        CATransaction.commit()
+    }
+
+    // MARK: - Manual scrub
+
+    @objc private func handlePan(_ pan: UIPanGestureRecognizer) {
+        switch pan.state {
+        case .began:
+            lastPanTranslation = 0
+            beginScrub()
+        case .changed:
+            let translation = pan.translation(in: self).x
+            applyScrubTranslation(translation - lastPanTranslation)
+            lastPanTranslation = translation
+            setBlurIntensity(blurFraction(forSpeed: abs(pan.velocity(in: self).x)))
+        case .ended, .cancelled, .failed:
+            endScrub(releaseVelocity: pan.velocity(in: self).x)
+        default:
+            break
+        }
+    }
+
+    /// Takes the conveyor away from Core Animation: every bubble's on-screen
+    /// (presentation) position becomes its model position and the flight is
+    /// removed — the standard interruptible-animation takeover. Bumping the
+    /// generation first turns the flights' pending completions into no-ops,
+    /// so the pool is untouched.
+    func beginScrub() {
+        switch mode {
+        case .parked, .scrubbing:
+            return
+        case .coasting:
+            stopCoast() // grab mid-decay: positions are already model-owned
+        case .conveying:
+            generation += 1
+            for timer in spawnTimers { timer?.invalidate() }
+            spawnTimers = Array(repeating: nil, count: Self.laneCount)
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            for lane in 0..<Self.laneCount {
+                for bubble in laneBubbles[lane] {
+                    let layer = bubble.label.layer
+                    // Prefer the render server's truth; fall back to the
+                    // analytic flight position (start − speed·elapsed) for a
+                    // flight grabbed before its first committed frame. The
+                    // parked model value would be wrong — it rests at the
+                    // exit by design.
+                    let frozenX = layer.presentation()?.position.x
+                        ?? max(
+                            -bubble.width / 2,
+                            bubble.flightStartX - Self.laneSpeeds[lane]
+                                * CGFloat(CACurrentMediaTime() - bubble.flightStartTime)
+                        )
+                    layer.removeAnimation(forKey: "flight")
+                    layer.position.x = frozenX
+                }
+            }
+            CATransaction.commit()
+        }
+        mode = .scrubbing
+    }
+
+    /// Direct manipulation: the whole band tracks the finger by `dx`, then
+    /// both edges are re-normalized from the wrap-around queue.
+    func applyScrubTranslation(_ dx: CGFloat) {
+        guard mode == .scrubbing else { return }
+        displaceLanes(by: Array(repeating: dx, count: Self.laneCount))
+    }
+
+    /// Release: relax each lane from the finger's velocity back to its
+    /// steady drift. If the release is already indistinguishable from the
+    /// drift, hand straight back to CA; otherwise integrate the decay on a
+    /// display link that lives only for this transient.
+    func endScrub(releaseVelocity: CGFloat) {
+        guard mode == .scrubbing else { return }
+        let maxResidual = Self.laneSpeeds
+            .map { abs(releaseVelocity - (-$0)) }
+            .max() ?? 0
+        guard maxResidual > Self.restVelocityTolerance else {
+            resumeConveying()
+            return
+        }
+        mode = .coasting
+        coastReleaseVelocity = releaseVelocity
+        coastStart = CACurrentMediaTime()
+        coastLastTimestamp = coastStart
+        let link = CADisplayLink(target: DisplayLinkProxy(self), selector: #selector(DisplayLinkProxy.tick(_:)))
+        link.add(to: .main, forMode: .common)
+        coastLink = link
+    }
+
+    /// Residual-decay velocity for one lane, `elapsed` seconds after release:
+    /// `v(t) = drift + (V₀ - drift)·e^(-t/τ)`. Pure — the handover contract
+    /// (converges to drift, never overshoots) is unit-testable.
+    static func coastVelocity(
+        release: CGFloat, steadyDrift: CGFloat, elapsed: TimeInterval, tau: TimeInterval = decayTimeConstant
+    ) -> CGFloat {
+        steadyDrift + (release - steadyDrift) * CGFloat(exp(-elapsed / tau))
+    }
+
+    fileprivate func coastTick(_ link: CADisplayLink) {
+        guard mode == .coasting else {
+            stopCoast()
+            return
+        }
+        let now = link.timestamp
+        let dt = CGFloat(now - coastLastTimestamp)
+        coastLastTimestamp = now
+        let elapsed = now - coastStart
+
+        var maxResidual: CGFloat = 0
+        var laneDx: [CGFloat] = []
+        for lane in 0..<Self.laneCount {
+            let drift = -Self.laneSpeeds[lane]
+            let velocity = Self.coastVelocity(release: coastReleaseVelocity, steadyDrift: drift, elapsed: elapsed)
+            maxResidual = max(maxResidual, abs(velocity - drift))
+            laneDx.append(velocity * dt)
+        }
+        displaceLanes(by: laneDx)
+        setBlurIntensity(blurFraction(forSpeed: maxResidual))
+
+        if maxResidual < Self.restVelocityTolerance {
+            stopCoast()
+            resumeConveying()
+        }
+    }
+
+    private func stopCoast() {
+        coastLink?.invalidate()
+        coastLink = nil
+    }
+
+    /// Hands the band back to the render server: every bubble flies from its
+    /// current (model) position to the exit at lane speed — velocity-matched
+    /// to the decayed drift within `restVelocityTolerance`, so the handover
+    /// is invisible — and the entry cadence resumes from the actual gap at
+    /// the right edge.
+    private func resumeConveying() {
+        mode = .conveying
+        setBlurIntensity(0)
+        let bandWidth = bounds.width
+        for lane in 0..<Self.laneCount {
+            // A scrub can strand a bubble past the exit (model position ≤
+            // exit); `animateToExit` skips those — retire them here.
+            var kept: [Bubble] = []
+            for bubble in laneBubbles[lane] {
+                if bubble.label.layer.position.x <= -bubble.width / 2 {
+                    recycle(bubble.label)
+                } else {
+                    kept.append(bubble)
+                }
+            }
+            laneBubbles[lane] = kept
+            for bubble in laneBubbles[lane] {
+                animateToExit(bubble, lane: lane)
+            }
+            let speed = Self.laneSpeeds[lane]
+            if let last = laneBubbles[lane].last {
+                let rightEdge = last.label.layer.position.x + last.width / 2
+                armSpawn(lane: lane, after: TimeInterval(max(0, (rightEdge + Self.interItemGap - bandWidth) / speed)))
+            } else {
+                armSpawn(lane: lane, after: 0)
+            }
+        }
+    }
+
+    /// Moves each lane by its own dx (identical during a drag, per-lane
+    /// during the decay), then retires what left the scrub margin and
+    /// backfills both edges from the wrap-around queue — scrubbing has no
+    /// holes in either direction.
+    private func displaceLanes(by laneDx: [CGFloat]) {
+        let bandWidth = bounds.width
+        guard bandWidth > 0 else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for lane in 0..<Self.laneCount where !laneQueues[lane].isEmpty {
+            for bubble in laneBubbles[lane] {
+                bubble.label.layer.position.x += laneDx[lane]
+            }
+            normalizeLaneEdges(lane, bandWidth: bandWidth)
+        }
+        CATransaction.commit()
+    }
+
+    private func normalizeLaneEdges(_ lane: Int, bandWidth: CGFloat) {
+        let count = laneQueues[lane].count
+
+        // Retire beyond the margins. A right-edge retire "un-consumes" its
+        // queue slot so the item reappears when scrubbed back.
+        while let first = laneBubbles[lane].first,
+              first.label.layer.position.x + first.width / 2 < -Self.scrubMargin {
+            recycle(first.label)
+            laneBubbles[lane].removeFirst()
+        }
+        while let last = laneBubbles[lane].last,
+              last.label.layer.position.x - last.width / 2 > bandWidth + Self.scrubMargin {
+            recycle(last.label)
+            laneBubbles[lane].removeLast()
+            laneNextIndex[lane] = last.itemIndex
+        }
+
+        // An emptied lane re-anchors at the entry edge before backfilling.
+        if laneBubbles[lane].isEmpty {
+            let itemIndex = laneNextIndex[lane]
+            let item = laneItem(lane, at: itemIndex)
+            laneNextIndex[lane] = wrapped(itemIndex + 1, count)
+            let width = measuredBubbleWidth(for: item.text, in: bandWidth)
+            laneBubbles[lane] = [materializeBubble(item, atIndex: itemIndex, lane: lane, leftEdge: bandWidth - width, width: width)]
+        }
+
+        // Backfill right (scrubbing forward pulls future items in early).
+        while let last = laneBubbles[lane].last {
+            let lastRight = last.label.layer.position.x + last.width / 2
+            guard lastRight + Self.interItemGap < bandWidth + Self.scrubMargin else { break }
+            let itemIndex = laneNextIndex[lane]
+            let item = laneItem(lane, at: itemIndex)
+            laneNextIndex[lane] = wrapped(itemIndex + 1, count)
+            let width = measuredBubbleWidth(for: item.text, in: bandWidth)
+            laneBubbles[lane].append(
+                materializeBubble(item, atIndex: itemIndex, lane: lane, leftEdge: lastRight + Self.interItemGap, width: width)
+            )
+        }
+
+        // Backfill left (scrubbing backward rewinds into already-shown items).
+        while let first = laneBubbles[lane].first {
+            let firstLeft = first.label.layer.position.x - first.width / 2
+            guard firstLeft - Self.interItemGap > -Self.scrubMargin else { break }
+            let itemIndex = wrapped(first.itemIndex - 1, count)
+            let item = laneItem(lane, at: itemIndex)
+            let width = measuredBubbleWidth(for: item.text, in: bandWidth)
+            laneBubbles[lane].insert(
+                materializeBubble(item, atIndex: itemIndex, lane: lane, leftEdge: firstLeft - Self.interItemGap - width, width: width),
+                at: 0
+            )
+        }
+    }
+
+    // MARK: - Kinetic blur
+
+    private func blurFraction(forSpeed speed: CGFloat) -> CGFloat {
+        Self.maxBlurFraction * min(1, speed / Self.blurVelocityScale)
+    }
+
+    /// Drives the paused animator's `fractionComplete`. Zero tears the
+    /// animator down and hides the effect view, so the steady conveyor pays
+    /// no live-blur cost over the video.
+    private func setBlurIntensity(_ fraction: CGFloat) {
+        if fraction <= 0 {
+            blurAnimator?.stopAnimation(false)
+            blurAnimator?.finishAnimation(at: .start)
+            blurAnimator = nil
+            blurView.isHidden = true
+            return
+        }
+        if blurAnimator == nil {
+            blurView.isHidden = false
+            let animator = UIViewPropertyAnimator(duration: 1, curve: .linear) { [blurView] in
+                blurView.effect = UIBlurEffect(style: .systemUltraThinMaterialDark)
+            }
+            animator.pausesOnCompletion = true
+            blurAnimator = animator
+        }
+        blurAnimator?.fractionComplete = fraction
+    }
+
+    // MARK: - Queue & pool plumbing
+
+    private func laneItem(_ lane: Int, at index: Int) -> TickerCommentModel {
+        laneQueues[lane][wrapped(index, laneQueues[lane].count)]
+    }
+
+    private func wrapped(_ index: Int, _ count: Int) -> Int {
+        ((index % count) + count) % count
     }
 
     private func measuredBubbleWidth(for text: String, in bandWidth: CGFloat) -> CGFloat {
@@ -225,48 +648,6 @@ final class SnapCommentTickerView: UIView {
         return min(ceil(fitted.width), bandWidth * 0.9)
     }
 
-    /// The one flight path for both origins — pre-filled mid-band and steady
-    /// entry-edge spawns: place at `leftEdge`, fly to the exit over exactly
-    /// the remaining distance at the lane's constant speed. One code path
-    /// means the handover cannot change velocity or stutter.
-    private func launchBubble(_ item: TickerCommentModel, lane: Int, leftEdge: CGFloat, width: CGFloat) {
-        let bubble = dequeueBubble()
-        bubble.text = item.text
-        bubble.frame = CGRect(
-            x: leftEdge,
-            y: CGFloat(lane) * (bubbleHeight + Self.laneSpacing),
-            width: width,
-            height: bubbleHeight
-        )
-        bubble.layer.cornerRadius = bubbleHeight / 2
-        addSubview(bubble)
-        flying.append(bubble)
-
-        let startX = leftEdge + width / 2
-        let exitX = -width / 2
-        let flight = CABasicAnimation(keyPath: "position.x")
-        flight.fromValue = startX
-        flight.toValue = exitX
-        flight.duration = CFTimeInterval((startX - exitX) / Self.laneSpeeds[lane])
-        flight.timingFunction = CAMediaTimingFunction(name: .linear)
-
-        let flightGeneration = generation
-        CATransaction.begin()
-        CATransaction.setCompletionBlock { [weak self] in
-            guard let self, flightGeneration == self.generation else { return }
-            self.flying.removeAll { $0 === bubble }
-            self.recycle(bubble)
-        }
-        // Model value rests at the exit before the animation is added, so if
-        // the system strips animations the bubble sits off screen left rather
-        // than snapping back to the entry edge.
-        bubble.layer.position.x = exitX
-        bubble.layer.add(flight, forKey: "flight")
-        CATransaction.commit()
-    }
-
-    // MARK: - Bubble pool
-
     private func dequeueBubble() -> TickerBubbleLabel {
         pool.popLast() ?? TickerBubbleLabel()
     }
@@ -274,28 +655,43 @@ final class SnapCommentTickerView: UIView {
     private func recycle(_ bubble: TickerBubbleLabel) {
         bubble.removeFromSuperview()
         bubble.text = nil
-        // Steady state needs ~4 bubbles per lane; anything beyond that is a
-        // transient and can be released.
-        if pool.count < 16 { pool.append(bubble) }
+        // Steady state needs a handful per lane; a wide scrub can hold a few
+        // more. Anything beyond is a transient and can be released.
+        if pool.count < 24 { pool.append(bubble) }
     }
 }
 
-/// A pooled danmaku bubble: white caption text on a translucent capsule.
-/// Legibility comes from the capsule fill, NOT `layer.shadow*` — a shadow on
-/// a moving layer forces an offscreen render pass per frame per bubble over
-/// the video.
+/// Breaks the CADisplayLink → target retain cycle so a mid-coast cell
+/// teardown can't leak the band. Main-actor because the link is scheduled on
+/// the main run loop — ticks arrive there by construction.
+@MainActor
+private final class DisplayLinkProxy: NSObject {
+    private weak var ticker: SnapCommentTickerView?
+
+    init(_ ticker: SnapCommentTickerView) { self.ticker = ticker }
+
+    @objc func tick(_ link: CADisplayLink) {
+        guard let ticker else {
+            link.invalidate()
+            return
+        }
+        ticker.coastTick(link)
+    }
+}
+
+/// A pooled danmaku label: naked semibold caption text, no capsule, no
+/// border — legibility comes from the chrome's extended scrim, and
+/// deliberately NOT from `layer.shadow*` (a shadow on a moving layer forces
+/// an offscreen render pass per frame per bubble over the video).
 private final class TickerBubbleLabel: UILabel {
-    static let textInsets = UIEdgeInsets(top: 3, left: 8, bottom: 3, right: 8)
+    static let textInsets = UIEdgeInsets(top: 3, left: 0, bottom: 3, right: 0)
 
     init() {
         super.init(frame: .zero)
-        font = .preferredFont(forTextStyle: .caption1)
+        font = UIFont.preferredFont(forTextStyle: .caption1).withWeight(.semibold)
         textColor = .white
         lineBreakMode = .byTruncatingTail
         isUserInteractionEnabled = false
-        // Background on the layer (not the view) so cornerRadius rounds it
-        // without masksToBounds; both composite directly, no offscreen pass.
-        layer.backgroundColor = UIColor.black.withAlphaComponent(0.35).cgColor
     }
 
     @available(*, unavailable)

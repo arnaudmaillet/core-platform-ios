@@ -4,10 +4,16 @@ import UIKit
 
 @MainActor
 struct SnapCommentTickerViewTests {
+    private let bandWidth: CGFloat = 400
+
     private func makeTicker(itemCount: Int = 12) -> SnapCommentTickerView {
-        let ticker = SnapCommentTickerView(frame: CGRect(x: 0, y: 0, width: 400, height: 69))
+        let ticker = SnapCommentTickerView(frame: CGRect(x: 0, y: 0, width: bandWidth, height: 69))
         ticker.setComments((0..<itemCount).map { TickerCommentModel(id: "r\($0)", text: "GG 🔥 \($0)") })
         return ticker
+    }
+
+    private func bubbleLabels(_ ticker: SnapCommentTickerView) -> [UILabel] {
+        ticker.subviews.compactMap { $0 as? UILabel }
     }
 
     /// The cold-start contract: the instant the band activates, every lane is
@@ -17,25 +23,122 @@ struct SnapCommentTickerViewTests {
         let ticker = makeTicker()
         ticker.setActive(true)
 
-        #expect(ticker.subviews.count >= SnapCommentTickerView.laneCount)
-        #expect(ticker.subviews.allSatisfy { $0.layer.animation(forKey: "flight") != nil })
+        let labels = bubbleLabels(ticker)
+        #expect(labels.count >= SnapCommentTickerView.laneCount)
+        #expect(labels.allSatisfy { $0.layer.animation(forKey: "flight") != nil })
     }
 
     @Test func deactivationClearsEveryBubble() {
         let ticker = makeTicker()
         ticker.setActive(true)
-        #expect(!ticker.subviews.isEmpty)
+        #expect(!bubbleLabels(ticker).isEmpty)
 
         ticker.setActive(false)
-        #expect(ticker.subviews.isEmpty)
+        #expect(bubbleLabels(ticker).isEmpty)
     }
 
     @Test func emptyQueueKeepsTheBandHiddenAndUnpopulated() {
-        let ticker = SnapCommentTickerView(frame: CGRect(x: 0, y: 0, width: 400, height: 69))
+        let ticker = SnapCommentTickerView(frame: CGRect(x: 0, y: 0, width: bandWidth, height: 69))
         ticker.setComments([])
         ticker.setActive(true)
 
         #expect(ticker.isHidden)
-        #expect(ticker.subviews.isEmpty)
+        #expect(bubbleLabels(ticker).isEmpty)
+    }
+
+    // MARK: - Scrub
+
+    /// Grabbing the band freezes CA flights into model positions: every
+    /// bubble keeps an on-screen coordinate and no animation remains.
+    @Test func beginScrubFreezesFlightsIntoModelPositions() {
+        let ticker = makeTicker()
+        ticker.setActive(true)
+
+        ticker.beginScrub()
+
+        let labels = bubbleLabels(ticker)
+        #expect(!labels.isEmpty)
+        #expect(labels.allSatisfy { $0.layer.animation(forKey: "flight") == nil })
+        // Frozen positions are the visible train, not the parked exit values.
+        #expect(labels.contains { $0.layer.position.x > 0 })
+    }
+
+    /// Dragging displaces the surviving bubbles exactly with the finger, and
+    /// backfill keeps the band covered right up to the entry edge in both
+    /// scrub directions.
+    @Test func scrubTranslatesAndBackfillsBothDirections() {
+        let ticker = makeTicker()
+        ticker.setActive(true)
+        ticker.beginScrub()
+
+        // Only mid-band labels: ones near the left edge retire under the
+        // translation and their (pooled) label can be reused by backfill in
+        // the same pass, which would alias the identity check.
+        let before = Dictionary(
+            uniqueKeysWithValues: bubbleLabels(ticker)
+                .filter { (150..<300).contains($0.layer.position.x) }
+                .map { ($0, $0.layer.position.x) }
+        )
+        #expect(!before.isEmpty)
+
+        ticker.applyScrubTranslation(-120) // scrub forward
+        for (label, x) in before {
+            #expect(abs(label.layer.position.x - (x - 120)) < 0.5)
+        }
+        let rightmostAfterForward = bubbleLabels(ticker).map { $0.frame.maxX }.max() ?? 0
+        #expect(rightmostAfterForward > bandWidth - SnapCommentTickerView.interItemGap - 48)
+
+        ticker.applyScrubTranslation(600) // scrub far backward: rewinds the queue
+        let labels = bubbleLabels(ticker)
+        #expect(!labels.isEmpty)
+        let leftmostAfterBackward = labels.map { $0.frame.minX }.min() ?? 0
+        #expect(leftmostAfterBackward < SnapCommentTickerView.interItemGap + 48)
+    }
+
+    /// A release near the drift hands back to CA: flights reattach and the
+    /// train keeps flowing. Needs a real window — flights on layers outside
+    /// a render tree "complete" immediately, which would recycle everything.
+    @Test func releaseHandsBubblesBackToTheConveyor() async throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: bandWidth, height: 100))
+        let ticker = makeTicker()
+        window.addSubview(ticker)
+        window.isHidden = false
+        defer { window.isHidden = true }
+
+        ticker.setActive(true)
+        ticker.beginScrub()
+        ticker.applyScrubTranslation(-60)
+
+        ticker.endScrub(releaseVelocity: -24) // near drift → immediate handover
+        // Give the render server a beat; steady flights run for many seconds,
+        // so the train must still be flowing afterwards.
+        try await Task.sleep(for: .seconds(1.0))
+
+        let labels = bubbleLabels(ticker)
+        #expect(!labels.isEmpty)
+        #expect(labels.allSatisfy { $0.layer.animation(forKey: "flight") != nil })
+    }
+
+    // MARK: - Decay math
+
+    @Test func coastVelocityRelaxesToDriftWithoutOvershoot() {
+        let release: CGFloat = 800
+        let drift: CGFloat = -26
+        var previous = release
+        for step in 1...40 {
+            let velocity = SnapCommentTickerView.coastVelocity(
+                release: release, steadyDrift: drift, elapsed: TimeInterval(step) * 0.05
+            )
+            #expect(velocity < previous) // monotonic toward drift
+            #expect(velocity > drift) // never overshoots past steady state
+            previous = velocity
+        }
+        let settled = SnapCommentTickerView.coastVelocity(release: release, steadyDrift: drift, elapsed: 10)
+        #expect(abs(settled - drift) < 0.01)
+    }
+
+    @Test func coastVelocityStartsAtTheReleaseVelocity() {
+        let velocity = SnapCommentTickerView.coastVelocity(release: -300, steadyDrift: -22, elapsed: 0)
+        #expect(abs(velocity - -300) < 0.01)
     }
 }

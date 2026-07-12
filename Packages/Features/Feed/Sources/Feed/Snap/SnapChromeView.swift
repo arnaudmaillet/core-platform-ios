@@ -27,7 +27,14 @@ final class SnapChromeView: UIView {
     ]
 
     private let textBackdrop = GradientView(colors: SnapChromeView.textPostGradientColors)
-    private let scrimView = GradientView(colors: [.clear, UIColor.black.withAlphaComponent(0.75)])
+    /// The bottom legibility scrim. The mid-stop pulls meaningful darkness up
+    /// behind the comment ticker's three lanes — the band's naked text has no
+    /// capsules, so the scrim is its only contrast — while the bottom stays
+    /// as dark as before under the caption and toolbar.
+    private let scrimView = GradientView(
+        colors: [.clear, UIColor.black.withAlphaComponent(0.45), UIColor.black.withAlphaComponent(0.75)],
+        locations: [0, 0.55, 1]
+    )
 
     private let captionLabel = UILabel()
 
@@ -120,7 +127,9 @@ final class SnapChromeView: UIView {
             scrimView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
             scrimView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
             scrimView.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
-            scrimView.heightAnchor.constraint(equalTo: parent.heightAnchor, multiplier: 0.5)
+            // 0.62, not 0.5: tall enough that the gradient's mid-stop sits
+            // behind the ticker band even over a 4-line caption.
+            scrimView.heightAnchor.constraint(equalTo: parent.heightAnchor, multiplier: 0.62)
         }
 
         // Caption, bottom-left over the scrim; the trailing gap keeps it clear
@@ -226,11 +235,13 @@ final class GradientView: UIView {
     private var gradientLayer: CAGradientLayer { layer as! CAGradientLayer }
 
     init(colors: [UIColor],
+         locations: [NSNumber]? = nil,
          startPoint: CGPoint = CGPoint(x: 0.5, y: 0),
          endPoint: CGPoint = CGPoint(x: 0.5, y: 1)) {
         super.init(frame: .zero)
         isUserInteractionEnabled = false
         gradientLayer.colors = colors.map(\.cgColor)
+        gradientLayer.locations = locations
         gradientLayer.startPoint = startPoint
         gradientLayer.endPoint = endPoint
     }
