@@ -40,16 +40,14 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
 
     /// The timeline is the full-screen snap feed — the app's sole Timeline.
     public func makeFeedViewController() -> UIViewController {
-        SnapFeedViewController(
+        makeSnapFeed(
             viewModel: FeedViewModel(
                 repository: repository,
                 engagementProvider: engagementProvider,
                 realtime: realtime,
                 composedPosts: composedPosts,
                 router: router
-            ),
-            imagePipeline: imagePipeline,
-            videoPlayback: videoPlayback
+            )
         )
     }
 
@@ -58,12 +56,24 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     }
 
     public func makeSnapFeedViewController(postIDs: [PostID]) -> UIViewController {
-        SnapFeedViewController(
+        makeSnapFeed(
             viewModel: FeedViewModel(
                 repository: FixedPostsFeedProvider(base: repository, ids: postIDs),
                 engagementProvider: engagementProvider,
                 router: router
-            ),
+            )
+        )
+    }
+
+    /// The single construction truth for BOTH feed surfaces — the timeline
+    /// pushed from the bar's Feed button and the pin-opened contextual feed.
+    /// They must stay visually and behaviorally identical; the only sanctioned
+    /// difference is the view model's data scope (full timeline vs. the pin's
+    /// posts, plus the live channels only an open-ended timeline consumes).
+    /// Add screen configuration here, never in one caller.
+    private func makeSnapFeed(viewModel: FeedViewModel) -> UIViewController {
+        SnapFeedViewController(
+            viewModel: viewModel,
             imagePipeline: imagePipeline,
             videoPlayback: videoPlayback
         )
