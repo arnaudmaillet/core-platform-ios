@@ -59,8 +59,9 @@ struct CommentsRepositoryTests {
 
     /// The mock's densely-seeded ticker posts must clear the comment ticker's
     /// engagement gate end-to-end: repository load → builder → non-empty
-    /// queue. post-0006's bank slice includes both deliberately disqualified
-    /// bodies (over-length, embedded newline), so it also proves the filter.
+    /// queue. post-0006's bank slice includes all three deliberately
+    /// disqualified bodies (over-length, embedded newline, semantic phrase
+    /// past the word cap), so it also proves the filter.
     @Test func denselySeededPostFeedsTheTicker() async throws {
         let repository = makeRepository()
 
@@ -68,7 +69,7 @@ struct CommentsRepositoryTests {
         #expect(comments.count >= 15)
 
         let queue = CommentTickerBuilder().build(comments, postID: PostID("post-0006"))
-        #expect(queue.count == comments.count - 2) // the two disqualified seeds
+        #expect(queue.count == comments.count - 3) // the three disqualified seeds
         #expect(queue.count >= CommentTickerBuilder.minTickerCount)
         #expect(queue.allSatisfy { $0.text.count <= CommentTickerBuilder.maxCharacterCount })
         #expect(queue.allSatisfy { !$0.text.contains(where: \.isNewline) })

@@ -26,13 +26,16 @@ final class SnapCommentTickerView: UIView {
     static let laneCount = 3
     /// Per-lane speeds (pt/s). Deliberately staggered and incommensurate so
     /// the three lanes drift out of phase instead of moving as a block.
-    static let laneSpeeds: [CGFloat] = [46, 55, 63]
+    /// Calibrated low: the band is a micro-reaction dump and should glide
+    /// calmly under the media, not race across it.
+    static let laneSpeeds: [CGFloat] = [25, 32, 38]
     /// First-spawn offsets per lane, so a fresh stream doesn't enter as a
-    /// rigid three-row column.
-    static let laneLeadDelays: [TimeInterval] = [0.2, 0.9, 1.6]
-    /// Minimum horizontal daylight between two bubbles in the same lane.
-    static let interItemGap: CGFloat = 28
-    private static let laneSpacing: CGFloat = 6
+    /// rigid three-row column; scaled with the gentle speeds.
+    static let laneLeadDelays: [TimeInterval] = [0.3, 1.5, 2.7]
+    /// Minimum horizontal daylight between two bubbles in the same lane —
+    /// generous, so the slow glide reads sparse rather than congested.
+    static let interItemGap: CGFloat = 32
+    private static let laneSpacing: CGFloat = 3
 
     private let bubbleHeight: CGFloat
     private var queue: [TickerCommentModel] = []
@@ -215,7 +218,7 @@ final class SnapCommentTickerView: UIView {
 /// a moving layer forces an offscreen render pass per frame per bubble over
 /// the video.
 private final class TickerBubbleLabel: UILabel {
-    static let textInsets = UIEdgeInsets(top: 4, left: 10, bottom: 4, right: 10)
+    static let textInsets = UIEdgeInsets(top: 3, left: 8, bottom: 3, right: 8)
 
     init() {
         super.init(frame: .zero)

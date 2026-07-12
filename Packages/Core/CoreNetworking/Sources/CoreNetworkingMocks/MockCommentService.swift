@@ -39,35 +39,37 @@ public final class MockCommentService: @unchecked Sendable {
         "post-0002", "post-0005", "post-0008", // text-only pages (index % 3 == 2)
     ]
 
-    /// Short, diverse bodies for the dense seed. Two entries intentionally
-    /// violate the ticker's filters (over-length, embedded newline) so mock
-    /// mode also proves the filtering; the qualifying remainder stays well
-    /// above the band's minimum gate.
+    /// Micro-reaction bodies for the dense seed — the ticker is a reaction
+    /// dump, so the bank is emoji runs and short slang, not sentences. The
+    /// three entries at indices 20–22 intentionally violate the ticker's
+    /// filters (over-length, embedded newline, semantic phrase past the word
+    /// cap) so mock mode also proves the filtering; the qualifying remainder
+    /// stays well above the band's minimum gate.
     private static let denseCommentBank: [String] = [
-        "This is unreal 🔥",
+        "GG 🔥🔥",
+        "W",
+        "no way 😭",
+        "so clean",
         "POV: perfection",
-        "Watched this five times already",
-        "The colors!!",
-        "Tutorial when?",
-        "Certified banger",
-        "I needed this today 🙏",
-        "Bro really did that",
-        "Sound ON for this one",
-        "Low-key iconic",
-        "How is this free content",
-        "Saving this immediately",
-        "Frame it.",
-        "Chef's kiss 🤌",
-        "Not me rewatching at 2am",
-        "Algorithm finally got one right",
-        "Wait for the ending…",
-        "This goes hard",
-        "Instant follow",
-        "Petition for part two ✋",
-        "Honestly, a whole documentary could be made about how this clip came together and it still would not be enough.",
-        "Multi\nline comments never ride the ticker",
-        "GOAT behavior",
-        "The way I gasped",
+        "goated 🐐",
+        "🔥🔥🔥",
+        "LFG!!",
+        "😭😭😭",
+        "certified banger",
+        "sheesh 💀",
+        "the colors!!",
+        "frame it.",
+        "chef's kiss 🤌",
+        "unreal 🔥",
+        "instant follow",
+        "this goes hard",
+        "sound ON 🔊",
+        "🐐🐐🐐🐐",
+        "im crying 😭😭",
+        "Honestly, a whole documentary could be made about this clip.",
+        "no\nway",
+        "how is this so good",
+        "10/10 🍿",
     ]
 
     private func seedComments(for postID: String) -> [Comment_V1_CommentView] {

@@ -16,9 +16,18 @@ public struct TickerCommentModel: Equatable, Sendable, Identifiable {
 /// Distills a post's comments into the ticker's wrap-around queue. Pure and
 /// deterministic: the same comments for the same post always produce the same
 /// queue, so re-activating a page resumes an identical stream.
+///
+/// The band is a micro-reaction dump, not a comment stream: it exists to
+/// offload "GG 🔥🔥"-class reactions from the primary comment sheet. The
+/// filter is shaped accordingly — dense emoji runs and short slang tokens
+/// ride; semantic phrases stay in the sheet.
 public struct CommentTickerBuilder: Sendable {
-    /// Longest body (in characters, post-trim) that qualifies as "short".
-    public static let maxCharacterCount = 48
+    /// Longest body (grapheme clusters, post-trim) that can ride the band.
+    public static let maxCharacterCount = 20
+    /// Emoji-free bodies additionally may carry at most this many words:
+    /// within the character cap, "this goes hard" is a reaction, while
+    /// "how is this so good" is a sentence that belongs in the sheet.
+    public static let maxWordCount = 3
     /// The engagement gate: fewer qualifying comments than this returns an
     /// empty queue and the band stays hidden — three lanes fed by a sparse
     /// loop read as a glitch, not a stream.
@@ -38,6 +47,7 @@ public struct CommentTickerBuilder: Sendable {
             guard !body.isEmpty,
                   body.count <= Self.maxCharacterCount,
                   !body.contains(where: \.isNewline),
+                  Self.isReactionShaped(body),
                   seenBodies.insert(body.lowercased()).inserted else { continue }
             qualifying.append(TickerCommentModel(id: entry.id, text: body))
         }
@@ -48,6 +58,22 @@ public struct CommentTickerBuilder: Sendable {
         var generator = SplitMix64(seed: Self.fnv1a(postID.rawValue))
         qualifying.shuffle(using: &generator)
         return Array(qualifying.prefix(Self.maxItems))
+    }
+
+    /// Reaction shape: any emoji-bearing body qualifies outright (dense emoji
+    /// runs are the band's favorite payload — the character cap alone bounds
+    /// them), while plain text must also clear the word cap so short slang
+    /// passes and semantic phrases don't.
+    static func isReactionShaped(_ body: String) -> Bool {
+        let hasEmoji = body.unicodeScalars.contains { scalar in
+            // `isEmojiPresentation` covers default-emoji scalars (🔥 😭 🐐);
+            // U+FE0F catches text-default scalars forced into emoji form
+            // (❤️). Plain `isEmoji` would be wrong here — it is true for
+            // digits and '#'.
+            scalar.properties.isEmojiPresentation || scalar.value == 0xFE0F
+        }
+        if hasEmoji { return true }
+        return body.split(whereSeparator: \.isWhitespace).count <= Self.maxWordCount
     }
 
     /// Stable across launches — `Hasher` is per-process seeded, and the

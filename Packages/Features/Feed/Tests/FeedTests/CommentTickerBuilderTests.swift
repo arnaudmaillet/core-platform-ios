@@ -30,11 +30,12 @@ struct CommentTickerBuilderTests {
     }
 
     @Test func gateCountsOnlyQualifyingComments() {
-        // 5 short + 3 disqualified: the gate must see 5, not 8.
+        // 5 short + 4 disqualified: the gate must see 5, not 9.
         let entries = shortEntries(5) + [
             entry("long", String(repeating: "x", count: CommentTickerBuilder.maxCharacterCount + 1)),
             entry("multiline", "two\nlines"),
             entry("dupe", "Nice one 0"),
+            entry("phrase", "how is this so good"), // within chars, past the word cap
         ]
         #expect(builder.build(entries, postID: PostID("post-1")).isEmpty)
     }
@@ -60,6 +61,19 @@ struct CommentTickerBuilderTests {
         let queue = builder.build(entries, postID: PostID("post-1"))
         #expect(queue.count == 6)
         #expect(queue.first { $0.id == "padded" }?.text == String(repeating: "y", count: CommentTickerBuilder.maxCharacterCount))
+    }
+
+    @Test func emojiRelaxesTheWordCapButPlainPhrasesAreRejected() {
+        let entries = shortEntries(5) + [
+            entry("emoji-run", "🔥🔥🔥"),
+            entry("emoji-phrase", "so good 😭 fr fr"), // >3 words, emoji-borne → rides
+            entry("vs16-emoji", "love this ❤️"), // text-default scalar forced emoji (U+FE0F)
+            entry("plain-phrase", "how is this so good"), // >3 words, no emoji → sheet
+        ]
+        let queue = builder.build(entries, postID: PostID("post-1"))
+        let ids = Set(queue.map(\.id))
+        #expect(ids.isSuperset(of: ["emoji-run", "emoji-phrase", "vs16-emoji"]))
+        #expect(!ids.contains("plain-phrase"))
     }
 
     @Test func capsQueueAtMaxItems() {
