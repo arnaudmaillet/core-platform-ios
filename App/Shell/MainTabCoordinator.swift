@@ -147,6 +147,15 @@ final class MainTabCoordinator: NSObject, Coordinator {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in self?.openFeed() }
             DispatchQueue.main.asyncAfter(deadline: .now() + 7.0) { [weak self] in self?.openFeed() }
         }
+        // `-feed-swipe-demo` pushes the feed, then drives the swipe-to-pop
+        // twice: below the completion threshold (springs back), then past it
+        // (pops home, bar returns) — the sim can't inject pans.
+        if arguments.contains("-feed-swipe-demo") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in self?.openFeed() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+                self?.feedFlow?.debugScriptedSwipe()
+            }
+        }
         #endif
     }
 
@@ -189,6 +198,17 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
 
     func tabBarController(_ tabBarController: UITabBarController, didSelect viewController: UIViewController) {
         refreshUnreadDot()
+        syncTabBarVisibility()
+    }
+
+    /// The bar is managed by hand around full-bleed snap surfaces (the pushed
+    /// timeline and the pin-opened feed both hide it), and manual state is
+    /// global to the shell's one bar — so a tab switch must reconcile it with
+    /// whatever the newly selected tab has on top: hidden over a snap
+    /// surface, visible otherwise.
+    private func syncTabBarVisibility() {
+        let top = (tabBarController.selectedViewController as? UINavigationController)?.topViewController
+        tabBarController.setTabBarHidden(top is any ZoomTransitionDestination, animated: false)
     }
 }
 
@@ -222,6 +242,8 @@ extension MainTabCoordinator: AppNavigating {
             tabBarController.dismiss(animated: true)
         }
         tabBarController.selectedTab = match.1.tab
+        // Programmatic selection skips `didSelect` — reconcile the bar here.
+        syncTabBarVisibility()
     }
 
     func openFeed() {

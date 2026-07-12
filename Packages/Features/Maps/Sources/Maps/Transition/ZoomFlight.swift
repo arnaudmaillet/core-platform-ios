@@ -207,19 +207,9 @@ struct ZoomFlight {
     /// The physical display's corner radius, so the card's corners land flush
     /// on the device's own — dynamic because it differs per model (0 on
     /// square-cornered devices, ~39–62 across the notch/Dynamic Island fleet).
-    ///
-    /// Read via KVC from UIKit's undocumented `_displayCornerRadius` (the key
-    /// is assembled, and guarded by `responds(to:)` so a future rename
-    /// degrades to the fallback instead of throwing). Fallback: any device
-    /// with a home indicator has rounded corners (44 is mid-fleet and close
-    /// enough for a half-second flight); everything else is square.
+    /// Shared with the timeline slide via CoreNavigation's `ScreenGeometry`,
+    /// so every screen-impersonating surface rounds identically.
     static func screenCornerRadius(behind view: UIView) -> CGFloat {
-        guard let window = view.window else { return 0 }
-        let key = ["_display", "Corner", "Radius"].joined()
-        if window.screen.responds(to: NSSelectorFromString(key)),
-           let radius = window.screen.value(forKey: key) as? CGFloat, radius > 0 {
-            return radius
-        }
-        return window.safeAreaInsets.bottom > 0 ? 44 : 0
+        ScreenGeometry.cornerRadius(behind: view)
     }
 }
