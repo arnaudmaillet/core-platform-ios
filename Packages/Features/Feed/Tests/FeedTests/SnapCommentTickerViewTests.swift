@@ -174,10 +174,22 @@ struct SnapCommentTickerViewTests {
         #expect(backdrop.alpha > 0)
 
         ticker.coastStep(now: start + 30) // decay long settled → handover
-        #expect(backdrop.isHidden)
+        #expect(backdrop.alpha == 0) // dismissed via fade; hides on completion
         let labels = bubbleLabels(ticker)
         #expect(!labels.isEmpty)
         #expect(labels.allSatisfy { $0.layer.animation(forKey: "flight") != nil })
+    }
+
+    /// The backdrop must never vanish under a live touch: a stationary hold
+    /// (velocity 0) keeps the engagement floor, and velocity only raises it.
+    @Test func scrubFractionHoldsTheEngagementFloorThroughAHold() {
+        #expect(SnapCommentTickerView.scrubFraction(forSpeed: 0) == SnapCommentTickerView.scrubEngagementFloor)
+        #expect(SnapCommentTickerView.scrubFraction(forSpeed: 100) == SnapCommentTickerView.scrubEngagementFloor)
+        #expect(SnapCommentTickerView.scrubFraction(forSpeed: 2000) == SnapCommentTickerView.maxBlurFraction)
+        #expect(SnapCommentTickerView.scrubFraction(forSpeed: 700) > SnapCommentTickerView.scrubEngagementFloor)
+
+        // The coast (finger up) has no floor — it decays to nothing.
+        #expect(SnapCommentTickerView.coastFraction(forSpeed: 0) == 0)
     }
 
     // MARK: - Decay math

@@ -64,6 +64,23 @@ final class SnapCommentTickerView: UIView {
     /// The blur animator's fraction ceiling: enough depth-of-field to read
     /// as kinetic, not enough to obliterate the reactions being scrubbed.
     static let maxBlurFraction: CGFloat = 0.65
+    /// The backdrop never disappears under a live touch: a stationary hold
+    /// keeps this floor — control feedback is continuous for the entire
+    /// gesture — and velocity can only raise it.
+    static let scrubEngagementFloor: CGFloat = 0.25
+
+    /// Velocity → backdrop fraction while coasting (finger up): decays to
+    /// zero alongside the residual.
+    static func coastFraction(forSpeed speed: CGFloat) -> CGFloat {
+        maxBlurFraction * min(1, speed / blurVelocityScale)
+    }
+
+    /// Velocity → backdrop fraction while the finger is down: the same
+    /// mapping, floored at the engagement level so a mid-scrub hold never
+    /// blanks the feedback.
+    static func scrubFraction(forSpeed speed: CGFloat) -> CGFloat {
+        max(scrubEngagementFloor, coastFraction(forSpeed: speed))
+    }
     /// How far past either edge a scrubbed bubble may sit before retiring.
     private static let scrubMargin: CGFloat = 48
 
@@ -408,12 +425,14 @@ final class SnapCommentTickerView: UIView {
             print("[ticker-debug] pan BEGAN") // absence ⇒ gesture never fires: arbitration, not rendering
             lastPanTranslation = 0
             beginScrub()
+            // Feedback engages with the grab itself, before any movement.
+            setBlurIntensity(Self.scrubEngagementFloor)
         case .changed:
             let translation = pan.translation(in: self).x
             applyScrubTranslation(translation - lastPanTranslation)
             lastPanTranslation = translation
             let velocity = pan.velocity(in: self).x
-            let fraction = blurFraction(forSpeed: abs(velocity))
+            let fraction = Self.scrubFraction(forSpeed: abs(velocity))
             print("[ticker-debug] scrub velocity=\(Int(velocity))pt/s fraction=\(String(format: "%.2f", fraction))")
             setBlurIntensity(fraction)
         case .ended, .cancelled, .failed:
@@ -517,7 +536,7 @@ final class SnapCommentTickerView: UIView {
             laneDx.append(velocity * dt)
         }
         displaceLanes(by: laneDx)
-        let fraction = blurFraction(forSpeed: maxResidual)
+        let fraction = Self.coastFraction(forSpeed: maxResidual)
         print("[ticker-debug] coast residual=\(Int(maxResidual))pt/s fraction=\(String(format: "%.2f", fraction))")
         setBlurIntensity(fraction)
 
@@ -539,7 +558,7 @@ final class SnapCommentTickerView: UIView {
     /// the right edge.
     private func resumeConveying() {
         mode = .conveying
-        setBlurIntensity(0)
+        dismissKineticBackdrop()
         let bandWidth = bounds.width
         for lane in 0..<Self.laneCount {
             // A scrub can strand a bubble past the exit (model position ≤
@@ -639,21 +658,37 @@ final class SnapCommentTickerView: UIView {
 
     // MARK: - Kinetic blur
 
-    private func blurFraction(forSpeed speed: CGFloat) -> CGFloat {
-        Self.maxBlurFraction * min(1, speed / Self.blurVelocityScale)
-    }
-
     /// DEBUG: drives the red backdrop's alpha directly — bulletproof
     /// rendering, so any remaining invisibility must be in the velocity
     /// plumbing upstream, not the surface.
     private func setBlurIntensity(_ fraction: CGFloat) {
         if fraction <= 0 {
+            kineticBackdrop.layer.removeAllAnimations()
             kineticBackdrop.isHidden = true
             kineticBackdrop.alpha = 0
             return
         }
+        // A re-grab during the dismiss fade takes the surface back over.
+        kineticBackdrop.layer.removeAllAnimations()
         kineticBackdrop.isHidden = false
         kineticBackdrop.alpha = fraction
+    }
+
+    /// Ends the interaction's feedback with a short fade instead of a snap —
+    /// releasing from a stationary hold sits at the engagement floor, and
+    /// popping that off reads as a glitch. A fade from a fast coast is
+    /// equally fine: the fraction has already decayed to nothing.
+    private func dismissKineticBackdrop() {
+        guard !kineticBackdrop.isHidden else { return }
+        UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState]) {
+            self.kineticBackdrop.alpha = 0
+        } completion: { _ in
+            // A re-engage mid-fade resets alpha upward; only a completed
+            // dismiss hides the surface.
+            if self.kineticBackdrop.alpha == 0 {
+                self.kineticBackdrop.isHidden = true
+            }
+        }
     }
 
     /// The bubble's on-screen center-x: the render server's truth when
