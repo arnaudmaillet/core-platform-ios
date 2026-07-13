@@ -155,26 +155,27 @@ struct SnapCommentTickerViewTests {
         #expect(SnapCommentTickerView.entryDeferral(lastRightEdge: 100, bandWidth: 400, speed: 22) == 0)
     }
 
-    /// Bug 3: the kinetic backdrop (currently the debug red surface) must
-    /// render during manual control — visible while the coast is fast, gone
-    /// at handover.
-    @Test func kineticBackdropAppearsDuringCoastAndClearsAtHandover() throws {
+    /// Bug 3: the kinetic blur must engage during manual control — a live,
+    /// fraction-driven animator while the coast is fast (an `.inactive`
+    /// animator silently ignores `fractionComplete`), disengaged at
+    /// handover, where the reversal run owns the fade-out.
+    @Test func kineticBlurEngagesDuringCoastAndDisengagesAtHandover() throws {
         let ticker = makeTicker()
         ticker.setActive(true)
         ticker.beginScrub()
         ticker.applyScrubTranslation(-40)
         ticker.endScrub(releaseVelocity: 1200)
 
-        let backdrop = try #require(
+        let blur = try #require(
             ticker.subviews.first { $0.accessibilityIdentifier == "ticker-kinetic-backdrop" }
         )
         let start = CACurrentMediaTime()
         ticker.coastStep(now: start + 0.016) // one fast frame into the decay
-        #expect(!backdrop.isHidden)
-        #expect(backdrop.alpha > 0)
+        #expect(!blur.isHidden)
+        #expect(ticker.currentKineticFraction > 0)
 
         ticker.coastStep(now: start + 30) // decay long settled → handover
-        #expect(backdrop.alpha == 0) // dismissed via fade; hides on completion
+        #expect(ticker.currentKineticFraction == 0) // disengaged; reversal fades out
         let labels = bubbleLabels(ticker)
         #expect(!labels.isEmpty)
         #expect(labels.allSatisfy { $0.layer.animation(forKey: "flight") != nil })
@@ -205,10 +206,9 @@ struct SnapCommentTickerViewTests {
         ticker.applyScrubTranslation(200) // net translation: zero
         ticker.endScrub(releaseVelocity: 1200)
 
-        let backdrop = ticker.subviews.first { $0.accessibilityIdentifier == "ticker-kinetic-backdrop" }
         ticker.coastStep(now: CACurrentMediaTime() + 0.001)
         // 400pt of absolute travel ≥ blurDistanceScale → released at the cap.
-        #expect((backdrop?.alpha ?? 0) > SnapCommentTickerView.maxBlurFraction - 0.05)
+        #expect(ticker.currentKineticFraction > SnapCommentTickerView.maxBlurFraction - 0.05)
     }
 
     // MARK: - Decay math
