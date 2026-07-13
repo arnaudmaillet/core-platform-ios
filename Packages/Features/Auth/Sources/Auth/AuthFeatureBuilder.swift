@@ -12,6 +12,6 @@ public struct AuthFeatureBuilder: AuthFeatureBuilding {
     }
 
     public func makeLoginViewController() -> UIViewController {
-        LoginViewController(viewModel: LoginViewModel(loginService: sessionManager))
+        LoginFlowCoordinator(loginService: sessionManager).start()
     }
 }

@@ -149,6 +149,16 @@ the image path is exercisable end to end.
 rejected the credentials`). Worth documenting, or aligning the IdP to accept the
 email form.
 
+Related forward-looking gap: the login screen now accepts **phone numbers**
+as identifiers (client normalizes to bare digits and forwards them through
+`LoginRequest.username` — the wire contract has a single opaque string field).
+There is no phone identity or OTP plane on the BFF/IdP. The client ships the
+full phone UX (country-prefix entry, live formatting, OTP verification sheet
+with `.oneTimeCode` AutoFill) but verification lands on an "isn't available
+yet" alert; the seam is `LoginFlowCoordinator.beginOTPVerification(e164:display:)`
+— SMS dispatch goes there before presenting, and `onVerify` exchanges the
+code for a session once the backend exists.
+
 ---
 
 ## 7. `counter.v1` does not project profile follower/following counts
