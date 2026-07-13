@@ -116,7 +116,14 @@ struct SnapCommentTickerViewTests {
 
         let labels = bubbleLabels(ticker)
         #expect(!labels.isEmpty)
-        #expect(labels.allSatisfy { $0.layer.animation(forKey: "flight") != nil })
+        // Time-dilation safe (a starved CI runner stretched this sleep to
+        // 44s once, long enough for flights to finish): every label either
+        // carries its flight, or has legitimately completed and rests at its
+        // exit (negative x) awaiting the recycle completion.
+        #expect(labels.allSatisfy {
+            $0.layer.animation(forKey: "flight") != nil || $0.layer.position.x <= 0
+        })
+        #expect(labels.contains { $0.layer.animation(forKey: "flight") != nil })
     }
 
     // MARK: - Device-bug regressions (2026-07-13)
