@@ -44,6 +44,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             viewModel: FeedViewModel(
                 repository: repository,
                 engagementProvider: engagementProvider,
+                commentsProvider: commentsProvider,
                 realtime: realtime,
                 composedPosts: composedPosts,
                 router: router
@@ -60,6 +61,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             viewModel: FeedViewModel(
                 repository: FixedPostsFeedProvider(base: repository, ids: postIDs),
                 engagementProvider: engagementProvider,
+                commentsProvider: commentsProvider,
                 router: router
             )
         )

@@ -48,9 +48,14 @@ public final class FeedViewModel {
     /// full-screen snap feed scrolls to the top to reveal it (a normal prepend
     /// would otherwise shift it above the viewport).
     public var onOwnPostInserted: (() -> Void)?
+    /// A post's comment-ticker queue became available (or re-emitted from
+    /// cache on re-activation); the view routes it to just that post's cell.
+    /// An empty queue means the post failed the ticker's engagement gate.
+    public var onTickerCommentsChange: ((PostID, [TickerCommentModel]) -> Void)?
 
     private let repository: any FeedProviding
     private let engagementProvider: (any EngagementProviding)?
+    private let commentsProvider: (any CommentsProviding)?
     private let realtime: (any FeedRealtimeSubscribing)?
     private let composedPosts: ComposedPostChannel?
     private let router: (any Router)?
@@ -66,10 +71,14 @@ public final class FeedViewModel {
     private var initialLoad: Task<Void, Never>?
     private var pagingLoad: Task<Void, Never>?
     private var realtimeTasks: [Task<Void, Never>] = []
+    private let tickerBuilder = CommentTickerBuilder()
+    private var tickerQueues: [PostID: [TickerCommentModel]] = [:]
+    private var tickerLoads: [PostID: Task<Void, Never>] = [:]
 
     public init(
         repository: any FeedProviding,
         engagementProvider: (any EngagementProviding)? = nil,
+        commentsProvider: (any CommentsProviding)? = nil,
         realtime: (any FeedRealtimeSubscribing)? = nil,
         composedPosts: ComposedPostChannel? = nil,
         router: (any Router)? = nil,
@@ -77,6 +86,7 @@ public final class FeedViewModel {
     ) {
         self.repository = repository
         self.engagementProvider = engagementProvider
+        self.commentsProvider = commentsProvider
         self.realtime = realtime
         self.composedPosts = composedPosts
         self.router = router
@@ -85,6 +95,9 @@ public final class FeedViewModel {
 
     deinit {
         for task in realtimeTasks {
+            task.cancel()
+        }
+        for task in tickerLoads.values {
             task.cancel()
         }
     }
@@ -151,8 +164,52 @@ public final class FeedViewModel {
         router?.route(to: .comments(id))
     }
 
-    /// Pagination trigger: called by the view for every cell about to display.
+    /// The settle seam's comment hook: a page became the active page.
+    public func pageDidBecomeActive(_ id: PostID) {
+        ensureTickerComments(for: id)
+    }
+
+    /// Loads a post's ticker queue once (single-flight, cached for the
+    /// session) and emits it via `onTickerCommentsChange`. Also the prefetch
+    /// side of the seam: called for pages *about to* scroll in — via
+    /// `willDisplayItem` and the collection view's prefetcher — so a page
+    /// arrives with its band already populated instead of popping it in at
+    /// settle. Idempotent and cheap on the cached path.
+    public func ensureTickerComments(for id: PostID) {
+        guard commentsProvider != nil else { return }
+        if let cached = tickerQueues[id] {
+            onTickerCommentsChange?(id, cached)
+            return
+        }
+        guard tickerLoads[id] == nil else { return }
+        tickerLoads[id] = Task { await loadTickerQueue(for: id) }
+    }
+
+    /// The cached ticker queue for `id` — the pull side for cell
+    /// (re)configuration; `[]` until `pageDidBecomeActive` has loaded it or
+    /// when the post failed the engagement gate.
+    public func tickerComments(for id: PostID) -> [TickerCommentModel] {
+        tickerQueues[id] ?? []
+    }
+
+    private func loadTickerQueue(for id: PostID) async {
+        defer { tickerLoads[id] = nil }
+        guard let commentsProvider else { return }
+        // Silent on failure: the load slot frees up, so the next activation
+        // of this page retries.
+        guard let entries = try? await commentsProvider.loadComments(for: id) else { return }
+        let queue = tickerBuilder.build(entries, postID: id)
+        tickerQueues[id] = queue
+        onTickerCommentsChange?(id, queue)
+    }
+
+    /// Called by the view for every cell about to display: pagination
+    /// trigger, and the last-resort ticker prefetch (the collection view's
+    /// prefetcher usually got there earlier).
     public func willDisplayItem(at index: Int) {
+        if items.indices.contains(index) {
+            ensureTickerComments(for: items[index].id)
+        }
         guard nextPageToken != nil, pagingLoad == nil, index >= items.count - 5 else { return }
         pagingLoad = Task { await loadNextPage() }
     }

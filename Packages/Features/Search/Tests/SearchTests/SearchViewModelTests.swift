@@ -50,13 +50,25 @@ struct SearchViewModelTests {
         return (viewModel, { box.phases })
     }
 
+    /// Waits (bounded) for the async search pipeline to emit a terminal
+    /// phase. A fixed 50ms sleep raced the actor hop and flaked repeatedly
+    /// on loaded CI runners — the last phase was still `.loading`.
+    private func settledPhase(
+        _ phases: () -> [SearchViewModel.Phase]
+    ) async -> SearchViewModel.Phase? {
+        for _ in 0..<500 { // ≤ 5s; terminal phases arrive in ms when healthy
+            if let last = phases().last, last != .loading { return last }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return phases().last
+    }
+
     @Test func nonEmptyQueryProducesResults() async {
         let (viewModel, phases) = makeViewModel([result("prof-1", "alice")])
 
         viewModel.queryChanged("alice")
-        try? await Task.sleep(for: .milliseconds(50))
 
-        guard case .results(let models) = phases().last else {
+        guard case .results(let models) = await settledPhase(phases) else {
             Issue.record("expected results, got \(String(describing: phases().last))")
             return
         }
@@ -67,16 +79,15 @@ struct SearchViewModelTests {
         let (viewModel, phases) = makeViewModel([])
 
         viewModel.queryChanged("zzz")
-        try? await Task.sleep(for: .milliseconds(50))
 
-        #expect(phases().last == .empty(query: "zzz"))
+        #expect(await settledPhase(phases) == .empty(query: "zzz"))
     }
 
     @Test func clearingQueryReturnsToIdle() async {
         let (viewModel, phases) = makeViewModel([result("prof-1", "alice")])
 
         viewModel.queryChanged("alice")
-        try? await Task.sleep(for: .milliseconds(50))
+        _ = await settledPhase(phases) // let the first query land first
         viewModel.queryChanged("")
 
         #expect(phases().last == .idle)
