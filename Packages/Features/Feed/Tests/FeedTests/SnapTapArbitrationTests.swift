@@ -3,13 +3,14 @@ import UIKit
 @testable import Feed
 
 /// The background tap (play/pause) must not fire when the touch lands on an
-/// interactive control — the engagement rail or the author row — but must fire
-/// for taps on the media/caption/background.
+/// interactive control or a declared interactive root, but must fire for taps
+/// on the media/caption/background. (Today's chrome declares no roots — the
+/// engagement rail is gone — so these exercise the seam with fixtures.)
 @MainActor
 struct SnapTapArbitrationTests {
     @Test func controlTouchesAndInteractiveRootsAreRejected() {
         let contentView = UIView()   // stands in for the cell's contentView (stopAt)
-        let rail = UIView()          // an interactive root (like/comment stack)
+        let rail = UIView()          // a synthetic interactive root
         contentView.addSubview(rail)
         let button = UIButton()
         rail.addSubview(button)
