@@ -26,6 +26,11 @@ public struct FeedItemDisplayModel: Identifiable, Sendable {
     /// Poster/thumbnail; for a video it's shown under the player until the first
     /// frame is ready.
     let thumbnailURL: URL?
+    /// The media toolbar's audio attribution line ("Original audio · @handle").
+    /// Derived — the BFF exposes no track metadata yet; swap for the real
+    /// track title/artist once the post proto carries audio. Nil for
+    /// non-video posts (the toolbar falls back to `metaText`).
+    let audioText: String?
 }
 
 /// Builds display models from hydrated feed entries. Pure, deterministic, and
@@ -40,6 +45,7 @@ public struct FeedDisplayModelBuilder: Sendable {
     func build(_ entry: FeedEntry, now: Date) -> FeedItemDisplayModel {
         let trimmed = entry.post.caption.trimmingCharacters(in: .whitespacesAndNewlines)
         let attachment = entry.post.attachments.first
+        let mediaKind = attachment.map { MediaKind(mimeType: $0.mimeType) } ?? .image
         return FeedItemDisplayModel(
             id: entry.post.id,
             authorID: entry.author.id,
@@ -48,8 +54,10 @@ public struct FeedDisplayModelBuilder: Sendable {
             avatarURL: entry.author.avatarURL,
             caption: trimmed.isEmpty ? nil : trimmed,
             mediaURL: attachment?.url,
-            mediaKind: attachment.map { MediaKind(mimeType: $0.mimeType) } ?? .image,
-            thumbnailURL: attachment?.thumbnailURL
+            mediaKind: mediaKind,
+            thumbnailURL: attachment?.thumbnailURL,
+            audioText: (attachment != nil && mediaKind == .video)
+                ? "Original audio · @\(entry.author.handle)" : nil
         )
     }
 

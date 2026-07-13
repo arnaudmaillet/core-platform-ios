@@ -118,7 +118,10 @@ final class SnapChromeView: UIView {
         }
 
         // Caption, bottom-left over the scrim; the trailing gap keeps it clear
-        // of the engagement rail.
+        // of the engagement rail. The margins guide tracks the safe area, so
+        // when the navigation controller's toolbar is visible the caption and
+        // rail sit above it automatically — live cell and flight replica
+        // alike (`setFixedInsets` captures the toolbar-inflated insets).
         captionLabel.constrain(in: self) { parent in
             captionLabel.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor, constant: Spacing.lg)
             captionLabel.bottomAnchor.constraint(equalTo: parent.layoutMarginsGuide.bottomAnchor, constant: -Spacing.lg)

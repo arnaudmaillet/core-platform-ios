@@ -25,6 +25,21 @@ final class SnapFeedViewController: UIViewController {
     /// content-hugging, so the system glass pill wraps it flush. Content
     /// follows the active page via the lifecycle seam.
     private let authorIdentityView = SnapAuthorIdentityView()
+    /// The media attribution (cover + author + audio line), hosted as the
+    /// native bottom toolbar's leading item. Same stable-custom-view contract
+    /// as the identity pill: installed once, content follows the active page.
+    private let mediaAttributionView = SnapMediaAttributionView()
+    /// The navigation controller whose toolbar this feed is showing — held
+    /// weakly across its own pop, when `navigationController` is already nil
+    /// but the toolbar bookkeeping must still be settled (`viewDidDisappear`).
+    private weak var toolbarHost: UINavigationController?
+    /// The share bubble's bookmark action; a property because its glyph
+    /// (bookmark / bookmark.fill) follows the active page's saved state.
+    private let bookmarkButton = SnapNavControls.makeToolbarActionButton(systemName: "bookmark")
+    /// Session-local optimistic bookmark state: the BFF exposes no save/
+    /// bookmark API yet (dev/BACKEND_GAPS.md), so the toggle lives here until
+    /// a real seam exists on `FeedViewModel` — swap this set for it.
+    private var bookmarkedPostIDs: Set<PostID> = []
 
     /// id → display model; lookups only, never measurement.
     private var modelsByID: [PostID: FeedItemDisplayModel] = [:]
@@ -59,6 +74,7 @@ final class SnapFeedViewController: UIViewController {
         view.backgroundColor = .black
         configureCollectionView()
         configureNavigationItem()
+        configureToolbarItems()
         configureStatusLabel()
         observeAppLifecycle()
 
@@ -117,6 +133,7 @@ final class SnapFeedViewController: UIViewController {
             back.addAction(UIAction { [weak self] _ in self?.closeFeed() }, for: .primaryActionTriggered)
             navigationItem.leftBarButtonItem = UIBarButtonItem(customView: back)
         }
+        presentToolbar()
         isOnScreen = true
         refreshVisibility()
     }
@@ -164,6 +181,10 @@ final class SnapFeedViewController: UIViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        // Unlike the visibility bookkeeping below, the toolbar choreography
+        // runs for every disappearance: it registers on the coordinator when
+        // one exists (fade, restore-on-cancel) and hides instantly otherwise.
+        concealToolbar()
         // During any transition (a hero pop, a detail push) the active cell's
         // player must survive to here-and-beyond: the dismissal flight card
         // mirrors that very player, and a cancelled grab rewinds to a page
@@ -177,6 +198,7 @@ final class SnapFeedViewController: UIViewController {
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
+        settleToolbarAfterDisappearance()
         isOnScreen = false
         refreshVisibility()
     }
@@ -190,10 +212,11 @@ final class SnapFeedViewController: UIViewController {
         collectionView.allowsSelection = false // taps toggle playback, not selection
         collectionView.showsVerticalScrollIndicator = false
         collectionView.contentInsetAdjustmentBehavior = .never
-        // No system scroll-edge darkening under the transparent bar: the media
-        // stays unmasked to the top edge; the glass bar items carry their own
-        // legibility backing.
+        // No system scroll-edge darkening under the transparent bars: the media
+        // stays unmasked to the top edge (bar) and bottom edge (toolbar); the
+        // glass bar items carry their own legibility backing.
         collectionView.topEdgeEffect.isHidden = true
+        collectionView.bottomEdgeEffect.isHidden = true
         collectionView.isPrefetchingEnabled = true
         collectionView.delegate = self
         collectionView.prefetchDataSource = self
@@ -254,6 +277,153 @@ final class SnapFeedViewController: UIViewController {
         // Keep `title` (it feeds pushed screens' back labels) but suppress its
         // centered rendering — the bar's center stays empty by design.
         navigationItem.titleView = UIView()
+    }
+
+    /// The native bottom toolbar's content, left to right: the attribution
+    /// bubble, the system flexible spacer, the share bubble (bookmark +
+    /// share in ONE capsule), a fixed gap, the more bubble. Three *isolated*
+    /// glass bubbles by construction — every item is a custom view, and
+    /// custom views never join a shared item background — each on the 36pt
+    /// bar-bubble invariant the top bar's controls already follow.
+    ///
+    /// Items are installed exactly once; only the attribution's content and
+    /// the bookmark glyph follow the active page (same stable-view contract
+    /// as the identity pill). Every action resolves the active post at
+    /// action time, so none can act on a page the user has scrolled past.
+    private func configureToolbarItems() {
+        bookmarkButton.addAction(UIAction { [weak self] _ in
+            guard let self, let model = self.activeModel else { return }
+            self.toggleBookmark(for: model.id)
+        }, for: .primaryActionTriggered)
+
+        let share = SnapNavControls.makeToolbarActionButton(systemName: "square.and.arrow.up")
+        share.addAction(UIAction { [weak self] _ in
+            guard let self, let model = self.activeModel else { return }
+            self.presentShareSheet(for: model.id)
+        }, for: .primaryActionTriggered)
+
+        // One glass capsule, two 36pt slots: the stack is the item's custom
+        // view, so the system wraps the pair in a single bubble — bookmark
+        // leading, share keeping its slot beside the more bubble.
+        let shareCluster = UIStackView(arrangedSubviews: [bookmarkButton, share])
+        shareCluster.axis = .horizontal
+
+        let more = SnapNavControls.makeToolbarActionButton(systemName: "ellipsis")
+        more.showsMenuAsPrimaryAction = true
+        more.menu = UIMenu(children: [
+            UIDeferredMenuElement.uncached { [weak self] completion in
+                guard let self, let model = self.activeModel else { return completion([]) }
+                completion(self.moreMenuActions(for: model.id))
+            }
+        ])
+
+        toolbarItems = [
+            UIBarButtonItem(customView: mediaAttributionView),
+            .flexibleSpace(),
+            UIBarButtonItem(customView: shareCluster),
+            .fixedSpace(Spacing.sm),
+            UIBarButtonItem(customView: more),
+        ]
+    }
+
+    /// Optimistic local toggle (no backend seam yet — see the set's comment);
+    /// the glyph flips immediately, scoped to the acted-on post.
+    private func toggleBookmark(for id: PostID) {
+        if !bookmarkedPostIDs.insert(id).inserted {
+            bookmarkedPostIDs.remove(id)
+        }
+        refreshBookmarkGlyph(for: id)
+    }
+
+    /// Points the bookmark glyph at `id`'s state — called on toggle and when
+    /// the active page changes.
+    private func refreshBookmarkGlyph(for id: PostID) {
+        let saved = bookmarkedPostIDs.contains(id)
+        var config = bookmarkButton.configuration
+        config?.image = UIImage(systemName: saved ? "bookmark.fill" : "bookmark")?
+            .withConfiguration(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
+        bookmarkButton.configuration = config
+    }
+
+    // MARK: - Toolbar visibility
+
+    /// The toolbar's push/pop choreography, mirroring the navigation bar's
+    /// contract: bar chrome belongs to the navigation controller, ABOVE the
+    /// transition container, so it is never part of a flight card or a
+    /// sliding view — it cross-fades in place while content transitions
+    /// beneath it.
+    ///
+    /// Shown non-animated so the bottom safe area is final before a zoom
+    /// present's `layoutIfNeeded` bakes the flight replica's insets; the
+    /// *visual* entrance is an alpha fade registered on the transition
+    /// coordinator, which every entry path coordinates (and a cancelled pop,
+    /// re-firing this, skips — the toolbar was never hidden).
+    private func presentToolbar() {
+        guard let nav = navigationController else { return }
+        toolbarHost = nav
+
+        // The stack's toolbar is shown by this screen alone, so configuring
+        // the shared instance here cannot fight another owner. Transparent
+        // for the same reason the navigation bar is: full-bleed media, no
+        // scroll-edge darkening, items carry their own legibility.
+        let appearance = UIToolbarAppearance()
+        appearance.configureWithTransparentBackground()
+        nav.toolbar.standardAppearance = appearance
+        nav.toolbar.compactAppearance = appearance
+        nav.toolbar.scrollEdgeAppearance = appearance
+        nav.toolbar.tintColor = .white
+
+        let wasHidden = nav.isToolbarHidden
+        nav.setToolbarHidden(false, animated: false)
+        nav.toolbar.alpha = 1
+        if wasHidden, let coordinator = transitionCoordinator {
+            nav.toolbar.alpha = 0
+            coordinator.animate(alongsideTransition: { _ in
+                nav.toolbar.alpha = 1
+            }, completion: { _ in
+                // A push cannot cancel; pin the end state either way.
+                nav.toolbar.alpha = 1
+            })
+        }
+    }
+
+    /// The exit leg. Fades the toolbar alongside whatever transition is
+    /// carrying the feed away — the percent-driven timeline slide scrubs it
+    /// with the finger; the zoom pop runs it on the transition clock; the
+    /// free-floating pin grab (not percent-driven) runs it over the
+    /// post-release remainder, exactly like the navigation bar's own item
+    /// cross-fade on that leg. Only a *completed* disappearance hides the
+    /// bar; a cancelled swipe's completion restores alpha and keeps it.
+    private func concealToolbar() {
+        guard let nav = navigationController, !nav.isToolbarHidden else { return }
+        guard let coordinator = transitionCoordinator else {
+            // Instant paths (tab switch): no transition to ride.
+            nav.setToolbarHidden(true, animated: false)
+            return
+        }
+        coordinator.animate(alongsideTransition: { _ in
+            nav.toolbar.alpha = 0
+        }, completion: { context in
+            if context.isCancelled {
+                nav.toolbar.alpha = 1
+            } else {
+                nav.setToolbarHidden(true, animated: false)
+                nav.toolbar.alpha = 1
+            }
+        })
+    }
+
+    /// Deterministic backstop for the toolbar's hide, in the one callback
+    /// that fires only for *completed* disappearances. The interactive pin
+    /// grab's coordinator completions can be deferred indefinitely (see
+    /// `ZoomDismissInteractionController` — it tears down by wall clock for
+    /// the same reason); if the fade above never settled, settle it here so
+    /// the map can never inherit a visible empty toolbar.
+    private func settleToolbarAfterDisappearance() {
+        guard let nav = toolbarHost, !nav.isToolbarHidden,
+              nav.topViewController !== self else { return }
+        nav.setToolbarHidden(true, animated: false)
+        nav.toolbar.alpha = 1
     }
 
     /// One item == one full screen; a plain vertical layout, paged by
@@ -359,16 +529,55 @@ final class SnapFeedViewController: UIViewController {
         if let resign = transition.resign { lifecycleCell(at: resign)?.didResignActive() }
         if let activate = transition.activate {
             lifecycleCell(at: activate)?.willBecomeActive()
-            // Same settle-quantized seam that drives playback: the bar's
-            // author titleView follows the active page.
-            updateIdentityAuthor(at: activate)
+            // Same settle-quantized seam that drives playback: both bar
+            // surfaces (identity pill above, media attribution below) follow
+            // the active page.
+            updateBarChrome(at: activate)
         }
     }
 
-    private func updateIdentityAuthor(at index: Int) {
+    private func updateBarChrome(at index: Int) {
         guard orderedIDs.indices.contains(index),
               let model = modelsByID[orderedIDs[index]] else { return }
         authorIdentityView.setAuthor(model, pipeline: imagePipeline)
+        mediaAttributionView.setPost(model, pipeline: imagePipeline)
+        refreshBookmarkGlyph(for: model.id)
+    }
+
+    /// The settled page's model — what the toolbar's share/more act on.
+    private var activeModel: FeedItemDisplayModel? {
+        guard let index = lifecycle.activeIndex,
+              orderedIDs.indices.contains(index) else { return nil }
+        return modelsByID[orderedIDs[index]]
+    }
+
+    // MARK: - Media toolbar actions
+
+    /// Shares what the model actually carries — the BFF exposes no canonical
+    /// post web URL yet, so caption + media URL stand in until it does.
+    private func presentShareSheet(for id: PostID) {
+        guard let model = modelsByID[id] else { return }
+        var items: [Any] = []
+        if let caption = model.caption { items.append(caption) }
+        if let url = model.mediaURL { items.append(url) }
+        if items.isEmpty { items.append(model.authorName) }
+        let activity = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        activity.popoverPresentationController?.sourceView = view
+        present(activity, animated: true)
+    }
+
+    /// The "more" menu routes to existing view-model seams; grow it as
+    /// social affordances (save, report) gain real backends.
+    private func moreMenuActions(for id: PostID) -> [UIMenuElement] {
+        [
+            UIAction(title: "View comments", image: UIImage(systemName: "bubble.right")) { [weak self] _ in
+                self?.viewModel.didTapComments(id)
+            },
+            UIAction(title: "View profile", image: UIImage(systemName: "person.circle")) { [weak self] _ in
+                guard let model = self?.modelsByID[id] else { return }
+                self?.viewModel.didTapAuthor(model.authorID)
+            },
+        ]
     }
 
     private func lifecycleCell(at index: Int) -> SnapCellLifecycle? {
