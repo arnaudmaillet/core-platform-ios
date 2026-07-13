@@ -40,6 +40,22 @@ public final class FeedViewModel {
         }
     }
 
+    /// Both comment surfaces' content for one post, built together from a
+    /// single comments fetch: the conveyor's micro-reactions and the subtitle
+    /// zone's semantic cues. One comment rides exactly one surface (the
+    /// builders partition by precedence).
+    public nonisolated struct CommentStreams: Equatable, Sendable {
+        public let reactions: [TickerCommentModel]
+        public let subtitles: [SubtitleCue]
+
+        public static let empty = CommentStreams(reactions: [], subtitles: [])
+
+        public init(reactions: [TickerCommentModel], subtitles: [SubtitleCue]) {
+            self.reactions = reactions
+            self.subtitles = subtitles
+        }
+    }
+
     public var onStateChange: ((RenderState) -> Void)?
     /// Per-post engagement updates (like toggles, live counter ticks); the
     /// view reconfigures just that cell — never a full snapshot apply.
@@ -48,10 +64,11 @@ public final class FeedViewModel {
     /// full-screen snap feed scrolls to the top to reveal it (a normal prepend
     /// would otherwise shift it above the viewport).
     public var onOwnPostInserted: (() -> Void)?
-    /// A post's comment-ticker queue became available (or re-emitted from
-    /// cache on re-activation); the view routes it to just that post's cell.
-    /// An empty queue means the post failed the ticker's engagement gate.
-    public var onTickerCommentsChange: ((PostID, [TickerCommentModel]) -> Void)?
+    /// A post's comment streams (ticker queue + subtitle cues) became
+    /// available (or re-emitted from cache on re-activation); the view routes
+    /// them to just that post's cell. An empty stream means the post failed
+    /// that surface's engagement gate.
+    public var onCommentStreamsChange: ((PostID, CommentStreams) -> Void)?
 
     private let repository: any FeedProviding
     private let engagementProvider: (any EngagementProviding)?
@@ -72,8 +89,9 @@ public final class FeedViewModel {
     private var pagingLoad: Task<Void, Never>?
     private var realtimeTasks: [Task<Void, Never>] = []
     private let tickerBuilder = CommentTickerBuilder()
-    private var tickerQueues: [PostID: [TickerCommentModel]] = [:]
-    private var tickerLoads: [PostID: Task<Void, Never>] = [:]
+    private let subtitleBuilder = SubtitleCommentBuilder()
+    private var streamsByPost: [PostID: CommentStreams] = [:]
+    private var streamLoads: [PostID: Task<Void, Never>] = [:]
 
     public init(
         repository: any FeedProviding,
@@ -97,7 +115,7 @@ public final class FeedViewModel {
         for task in realtimeTasks {
             task.cancel()
         }
-        for task in tickerLoads.values {
+        for task in streamLoads.values {
             task.cancel()
         }
     }
@@ -166,41 +184,44 @@ public final class FeedViewModel {
 
     /// The settle seam's comment hook: a page became the active page.
     public func pageDidBecomeActive(_ id: PostID) {
-        ensureTickerComments(for: id)
+        ensureCommentStreams(for: id)
     }
 
-    /// Loads a post's ticker queue once (single-flight, cached for the
-    /// session) and emits it via `onTickerCommentsChange`. Also the prefetch
-    /// side of the seam: called for pages *about to* scroll in — via
-    /// `willDisplayItem` and the collection view's prefetcher — so a page
-    /// arrives with its band already populated instead of popping it in at
-    /// settle. Idempotent and cheap on the cached path.
-    public func ensureTickerComments(for id: PostID) {
+    /// Loads a post's comment streams once (single-flight, cached for the
+    /// session) and emits them via `onCommentStreamsChange`. Also the
+    /// prefetch side of the seam: called for pages *about to* scroll in —
+    /// via `willDisplayItem` and the collection view's prefetcher — so a
+    /// page arrives with its band already populated instead of popping it in
+    /// at settle. Idempotent and cheap on the cached path.
+    public func ensureCommentStreams(for id: PostID) {
         guard commentsProvider != nil else { return }
-        if let cached = tickerQueues[id] {
-            onTickerCommentsChange?(id, cached)
+        if let cached = streamsByPost[id] {
+            onCommentStreamsChange?(id, cached)
             return
         }
-        guard tickerLoads[id] == nil else { return }
-        tickerLoads[id] = Task { await loadTickerQueue(for: id) }
+        guard streamLoads[id] == nil else { return }
+        streamLoads[id] = Task { await loadCommentStreams(for: id) }
     }
 
-    /// The cached ticker queue for `id` — the pull side for cell
-    /// (re)configuration; `[]` until `pageDidBecomeActive` has loaded it or
-    /// when the post failed the engagement gate.
-    public func tickerComments(for id: PostID) -> [TickerCommentModel] {
-        tickerQueues[id] ?? []
+    /// The cached streams for `id` — the pull side for cell
+    /// (re)configuration; `.empty` until `pageDidBecomeActive` has loaded
+    /// them or when the post failed both engagement gates.
+    public func commentStreams(for id: PostID) -> CommentStreams {
+        streamsByPost[id] ?? .empty
     }
 
-    private func loadTickerQueue(for id: PostID) async {
-        defer { tickerLoads[id] = nil }
+    private func loadCommentStreams(for id: PostID) async {
+        defer { streamLoads[id] = nil }
         guard let commentsProvider else { return }
         // Silent on failure: the load slot frees up, so the next activation
         // of this page retries.
         guard let entries = try? await commentsProvider.loadComments(for: id) else { return }
-        let queue = tickerBuilder.build(entries, postID: id)
-        tickerQueues[id] = queue
-        onTickerCommentsChange?(id, queue)
+        let streams = CommentStreams(
+            reactions: tickerBuilder.build(entries, postID: id),
+            subtitles: subtitleBuilder.build(entries, postID: id)
+        )
+        streamsByPost[id] = streams
+        onCommentStreamsChange?(id, streams)
     }
 
     /// Called by the view for every cell about to display: pagination
@@ -208,7 +229,7 @@ public final class FeedViewModel {
     /// prefetcher usually got there earlier).
     public func willDisplayItem(at index: Int) {
         if items.indices.contains(index) {
-            ensureTickerComments(for: items[index].id)
+            ensureCommentStreams(for: items[index].id)
         }
         guard nextPageToken != nil, pagingLoad == nil, index >= items.count - 5 else { return }
         pagingLoad = Task { await loadNextPage() }

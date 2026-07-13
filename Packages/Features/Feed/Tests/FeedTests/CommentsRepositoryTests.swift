@@ -57,21 +57,32 @@ struct CommentsRepositoryTests {
         #expect(comments.count == 3)
     }
 
-    /// The mock's densely-seeded ticker posts must clear the comment ticker's
-    /// engagement gate end-to-end: repository load → builder → non-empty
-    /// queue. post-0006's bank slice includes all three deliberately
-    /// disqualified bodies (over-length, embedded newline, semantic phrase
-    /// past the word cap), so it also proves the filter.
-    @Test func denselySeededPostFeedsTheTicker() async throws {
+    /// The mock's densely-seeded posts must clear BOTH comment surfaces'
+    /// engagement gates end-to-end: repository load → builders → non-empty
+    /// queue and cue list, partitioned with no overlap. post-0006's reaction
+    /// slice includes all three deliberately disqualified bodies (over-length,
+    /// embedded newline, semantic phrase past the word cap), so it also
+    /// proves the filters: the newline body vanishes (collapsed, it's
+    /// band-shaped — and the band takes no newlines), while the other two are
+    /// semantic and land in the subtitle zone with the six seeded sentences.
+    @Test func denselySeededPostFeedsBothSurfaces() async throws {
         let repository = makeRepository()
 
         let comments = try await repository.loadComments(for: PostID("post-0006"))
-        #expect(comments.count >= 15)
+        #expect(comments.count == 24) // 18 reactions + 6 semantic seeds
 
         let queue = CommentTickerBuilder().build(comments, postID: PostID("post-0006"))
-        #expect(queue.count == comments.count - 3) // the three disqualified seeds
+        // 24 − 3 disqualified reaction-bank bodies − 6 semantic seeds.
+        #expect(queue.count == comments.count - 9)
         #expect(queue.count >= CommentTickerBuilder.minTickerCount)
         #expect(queue.allSatisfy { $0.text.count <= CommentTickerBuilder.maxCharacterCount })
         #expect(queue.allSatisfy { !$0.text.contains(where: \.isNewline) })
+
+        let cues = SubtitleCommentBuilder().build(comments, postID: PostID("post-0006"))
+        // 6 semantic seeds + the 2 semantic bodies in the reaction bank.
+        #expect(cues.count == 8)
+        #expect(cues.count >= SubtitleCommentBuilder.minCueCount)
+        #expect(Set(cues.map(\.id)).isDisjoint(with: queue.map(\.id))) // one comment, one surface
+        #expect(cues.allSatisfy { !$0.text.contains(where: \.isNewline) })
     }
 }

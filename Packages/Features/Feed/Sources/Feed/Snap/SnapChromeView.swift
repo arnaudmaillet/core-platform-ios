@@ -29,10 +29,17 @@ final class SnapChromeView: UIView {
     private let captionLabel = UILabel()
 
     /// The danmaku band, floating over the media directly above the caption.
-    /// Content reaches it only through `updateTickerComments` — never through
+    /// Content reaches it only through `updateCommentStreams` — never through
     /// `configure` — so the flight replica renders an empty, invisible band
     /// by construction and the card stays pixel-identical to the landed page.
     private let commentTicker = SnapCommentTickerView()
+
+    /// The subtitle zone, directly above the band: semantic comments fading
+    /// in and out one at a time. Same content contract as the band (arrives
+    /// only via `updateCommentStreams`, so the flight replica's zone is
+    /// empty by construction), but activation is settle-scoped like video,
+    /// not visibility-scoped like the conveyor.
+    private let subtitleView = SnapSubtitleView()
 
     /// Subtrees where a touch means "use the control", not "toggle playback" —
     /// consumed by the cell's tap arbitration. Empty since the engagement rail
@@ -78,9 +85,10 @@ final class SnapChromeView: UIView {
             scrimView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
             scrimView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
             scrimView.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
-            // 0.62, not 0.5: tall enough that the gradient's mid-stop sits
-            // behind the ticker band riding above the caption block.
-            scrimView.heightAnchor.constraint(equalTo: parent.heightAnchor, multiplier: 0.62)
+            // 0.68 (was 0.62 pre-subtitles): tall enough that the gradient's
+            // mid-stop sits behind the subtitle zone AND the ticker band
+            // stacked above the caption block.
+            scrimView.heightAnchor.constraint(equalTo: parent.heightAnchor, multiplier: 0.68)
         }
 
         // Caption, full-width over the scrim (the engagement rail that once
@@ -105,6 +113,16 @@ final class SnapChromeView: UIView {
             commentTicker.leadingAnchor.constraint(equalTo: leadingAnchor)
             commentTicker.trailingAnchor.constraint(equalTo: trailingAnchor)
             commentTicker.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.sm)
+        }
+
+        // The subtitle zone extends the same one-directional chain one link
+        // up (caption ← band ← subtitles): nothing constrains back onto it,
+        // so cue presence/absence can never move the stack below. Inset to
+        // the caption's edges — subtitles are read, not skimmed.
+        subtitleView.constrain(in: self) { parent in
+            subtitleView.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor, constant: Spacing.lg)
+            subtitleView.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.lg)
+            subtitleView.bottomAnchor.constraint(equalTo: commentTicker.topAnchor, constant: -Spacing.sm)
         }
     }
 
@@ -131,7 +149,10 @@ final class SnapChromeView: UIView {
         scrimView.isHidden = !hasMedia
         caption = hasMedia ? model.caption : nil
         captionLabel.isHidden = (caption?.isEmpty ?? true)
-        if !hasMedia { commentTicker.setComments([]) }
+        if !hasMedia {
+            commentTicker.setComments([])
+            subtitleView.setCues([])
+        }
     }
 
     /// The raw caption, kept so Dynamic Type changes can re-resolve the
@@ -167,15 +188,17 @@ final class SnapChromeView: UIView {
         ])
     }
 
-    /// Replaces the comment ticker's wrap-around queue. Live cells only —
-    /// the flight replica must never receive this (a moving band cannot be
+    /// Replaces both comment surfaces' content (the ticker's wrap-around
+    /// queue and the subtitle zone's cue list). Live cells only — the flight
+    /// replica must never receive this (moving/timed content cannot be
     /// pixel-identical across two instances), which is why it is not part of
-    /// `configure`. An empty queue hides the band. Text-only posts refuse
-    /// queues entirely (empty shell) — gated here, not at the callers, so
+    /// `configure`. Empty streams hide their surface. Text-only posts refuse
+    /// content entirely (empty shell) — gated here, not at the callers, so
     /// every arrival path (dequeue pull, async push) hits the same wall.
-    func updateTickerComments(_ comments: [TickerCommentModel]) {
+    func updateCommentStreams(_ streams: FeedViewModel.CommentStreams) {
         guard hasMedia else { return }
-        commentTicker.setComments(comments)
+        commentTicker.setComments(streams.reactions)
+        subtitleView.setCues(streams.subtitles)
     }
 
     /// Streams while the owning cell is on screen (visibility-scoped — a
@@ -185,12 +208,21 @@ final class SnapChromeView: UIView {
         commentTicker.setActive(active)
     }
 
+    /// Cycles while the owning cell is the settled ACTIVE page — the same
+    /// seam as playback, deliberately narrower than the band's visibility
+    /// scope: subtitles belong to the playback timeline, and a half-dragged
+    /// page has no playing media to subtitle.
+    func setSubtitlesActive(_ active: Bool) {
+        subtitleView.setActive(active)
+    }
+
     /// Clears post-specific content (cell reuse).
     func reset() {
         representedID = nil
         caption = nil
         hasMedia = true
         commentTicker.reset()
+        subtitleView.reset()
     }
 }
 

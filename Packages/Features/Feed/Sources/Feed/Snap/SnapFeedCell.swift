@@ -123,12 +123,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         })
     }
 
-    /// Hands the post's ticker queue to the chrome's comment band. Arrives
-    /// from the view model whenever loaded — before or after this cell
-    /// becomes visible; the band starts streaming once both content and
-    /// visibility are in place.
-    func updateTickerComments(_ comments: [TickerCommentModel]) {
-        chrome.updateTickerComments(comments)
+    /// Hands the post's comment streams to the chrome's two surfaces (the
+    /// band's queue, the subtitle zone's cues). Arrives from the view model
+    /// whenever loaded — before or after this cell becomes visible; each
+    /// surface starts once both content and its own gate (visibility for the
+    /// band, settled-active for subtitles) are in place.
+    func updateCommentStreams(_ streams: FeedViewModel.CommentStreams) {
+        chrome.updateCommentStreams(streams)
     }
 
     /// Visibility-scoped ticker control, driven by the view controller's
@@ -163,6 +164,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // but it is the restart edge after backgrounding: foregrounding
         // re-activates the settled page without a fresh `willDisplay`.
         chrome.setTickerActive(true)
+        // Subtitles are settle-scoped like playback (this IS their primary
+        // gate, not a backstop): they cycle only on the active page.
+        chrome.setSubtitlesActive(true)
         switch mediaKind {
         case .video:
             guard let url = mediaURL, let videoPlayback else { return }
@@ -219,6 +223,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // Covers the paths visibility can't see: backgrounding and the
         // feed's own disappearance, where no `didEndDisplaying` fires.
         chrome.setTickerActive(false)
+        chrome.setSubtitlesActive(false)
         switch mediaKind {
         case .video:
             videoPlayback?.stop(videoRenderView)
