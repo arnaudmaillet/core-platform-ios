@@ -180,16 +180,35 @@ struct SnapCommentTickerViewTests {
         #expect(labels.allSatisfy { $0.layer.animation(forKey: "flight") != nil })
     }
 
-    /// The backdrop must never vanish under a live touch: a stationary hold
-    /// (velocity 0) keeps the engagement floor, and velocity only raises it.
-    @Test func scrubFractionHoldsTheEngagementFloorThroughAHold() {
-        #expect(SnapCommentTickerView.scrubFraction(forSpeed: 0) == SnapCommentTickerView.scrubEngagementFloor)
-        #expect(SnapCommentTickerView.scrubFraction(forSpeed: 100) == SnapCommentTickerView.scrubEngagementFloor)
-        #expect(SnapCommentTickerView.scrubFraction(forSpeed: 2000) == SnapCommentTickerView.maxBlurFraction)
-        #expect(SnapCommentTickerView.scrubFraction(forSpeed: 700) > SnapCommentTickerView.scrubEngagementFloor)
+    /// The backdrop is a true accumulator during a touch: monotone
+    /// non-decreasing in accumulated absolute travel — floor at touch-down,
+    /// cap at full travel, and NO velocity term anywhere in the mapping.
+    @Test func scrubFractionIsAMonotoneNonDecayingAccumulator() {
+        #expect(SnapCommentTickerView.scrubFraction(forAccumulatedDistance: 0) == SnapCommentTickerView.scrubEngagementFloor)
+        #expect(SnapCommentTickerView.scrubFraction(forAccumulatedDistance: 10_000) == SnapCommentTickerView.maxBlurFraction)
 
-        // The coast (finger up) has no floor — it decays to nothing.
-        #expect(SnapCommentTickerView.coastFraction(forSpeed: 0) == 0)
+        var previous: CGFloat = -1
+        for distance in stride(from: CGFloat(0), through: 600, by: 20) {
+            let fraction = SnapCommentTickerView.scrubFraction(forAccumulatedDistance: distance)
+            #expect(fraction >= previous) // can build or hold, never drop
+            previous = fraction
+        }
+    }
+
+    /// The accumulator sums |Δx|, not net translation: scrubbing forward
+    /// then all the way back builds intensity instead of cancelling out.
+    @Test func accumulatorSumsAbsoluteDeltasNotNetTranslation() {
+        let ticker = makeTicker()
+        ticker.setActive(true)
+        ticker.beginScrub()
+        ticker.applyScrubTranslation(-200)
+        ticker.applyScrubTranslation(200) // net translation: zero
+        ticker.endScrub(releaseVelocity: 1200)
+
+        let backdrop = ticker.subviews.first { $0.accessibilityIdentifier == "ticker-kinetic-backdrop" }
+        ticker.coastStep(now: CACurrentMediaTime() + 0.001)
+        // 400pt of absolute travel ≥ blurDistanceScale → released at the cap.
+        #expect((backdrop?.alpha ?? 0) > SnapCommentTickerView.maxBlurFraction - 0.05)
     }
 
     // MARK: - Decay math

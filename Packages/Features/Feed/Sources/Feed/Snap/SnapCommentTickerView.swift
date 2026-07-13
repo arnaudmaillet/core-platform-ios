@@ -59,27 +59,24 @@ final class SnapCommentTickerView: UIView {
     /// Residual manual velocity (pt/s) under which the conveyor resumes CA —
     /// below perception, so the handover cannot be seen.
     static let restVelocityTolerance: CGFloat = 2
-    /// |manual velocity| (pt/s) that maps to the maximum kinetic blur.
-    static let blurVelocityScale: CGFloat = 900
     /// The blur animator's fraction ceiling: enough depth-of-field to read
     /// as kinetic, not enough to obliterate the reactions being scrubbed.
     static let maxBlurFraction: CGFloat = 0.65
-    /// The backdrop never disappears under a live touch: a stationary hold
-    /// keeps this floor — control feedback is continuous for the entire
-    /// gesture — and velocity can only raise it.
+    /// The backdrop never disappears under a live touch: engagement starts
+    /// here at touch-down, and the accumulator can only raise it.
     static let scrubEngagementFloor: CGFloat = 0.25
+    /// Accumulated absolute travel (pt) at which the backdrop reaches its
+    /// cap.
+    static let blurDistanceScale: CGFloat = 260
 
-    /// Velocity → backdrop fraction while coasting (finger up): decays to
-    /// zero alongside the residual.
-    static func coastFraction(forSpeed speed: CGFloat) -> CGFloat {
-        maxBlurFraction * min(1, speed / blurVelocityScale)
-    }
-
-    /// Velocity → backdrop fraction while the finger is down: the same
-    /// mapping, floored at the engagement level so a mid-scrub hold never
-    /// blanks the feedback.
-    static func scrubFraction(forSpeed speed: CGFloat) -> CGFloat {
-        max(scrubEngagementFloor, coastFraction(forSpeed: speed))
+    /// Accumulated |Δx| → backdrop fraction while the finger is down. A true
+    /// accumulator: monotone non-decreasing over the touch lifecycle — it
+    /// starts at the engagement floor, builds with absolute travel, and
+    /// FREEZES at its peak when the thumb slows or stops. Instantaneous
+    /// velocity plays no part until the gesture ends.
+    static func scrubFraction(forAccumulatedDistance distance: CGFloat) -> CGFloat {
+        scrubEngagementFloor
+            + (maxBlurFraction - scrubEngagementFloor) * min(1, distance / blurDistanceScale)
     }
     /// How far past either edge a scrubbed bubble may sit before retiring.
     private static let scrubMargin: CGFloat = 48
@@ -142,9 +139,15 @@ final class SnapCommentTickerView: UIView {
     private let panRecognizer = UIPanGestureRecognizer()
     private var coastLink: CADisplayLink?
     private var coastReleaseVelocity: CGFloat = 0
+    /// The backdrop value held at release — the coast's fade envelope starts
+    /// here, so lifting the finger never discontinues the feedback.
+    private var coastReleaseFraction: CGFloat = 0
     private var coastStart: CFTimeInterval = 0
     private var coastLastTimestamp: CFTimeInterval = 0
     private var lastPanTranslation: CGFloat = 0
+    /// The accumulator: total absolute travel of the current touch. Only
+    /// ever grows while scrubbing; reset by the next `beginScrub`.
+    private var scrubAccumulatedDistance: CGFloat = 0
     /// DEBUG SURFACE (temporary, 2026-07-13): the kinetic blur is swapped
     /// for a flat red backdrop while we chase the invisible-blur report —
     /// same velocity→intensity mapping, unmissable rendering. Restore the
@@ -426,14 +429,15 @@ final class SnapCommentTickerView: UIView {
             lastPanTranslation = 0
             beginScrub()
             // Feedback engages with the grab itself, before any movement.
-            setBlurIntensity(Self.scrubEngagementFloor)
+            setBlurIntensity(Self.scrubFraction(forAccumulatedDistance: 0))
         case .changed:
             let translation = pan.translation(in: self).x
             applyScrubTranslation(translation - lastPanTranslation)
             lastPanTranslation = translation
-            let velocity = pan.velocity(in: self).x
-            let fraction = Self.scrubFraction(forSpeed: abs(velocity))
-            print("[ticker-debug] scrub velocity=\(Int(velocity))pt/s fraction=\(String(format: "%.2f", fraction))")
+            // Accumulator only: no velocity term while the finger is down,
+            // so the intensity can rise or hold but never drop mid-touch.
+            let fraction = Self.scrubFraction(forAccumulatedDistance: scrubAccumulatedDistance)
+            print("[ticker-debug] scrub accumulated=\(Int(scrubAccumulatedDistance))pt fraction=\(String(format: "%.2f", fraction)) (velocity=\(Int(pan.velocity(in: self).x))pt/s)")
             setBlurIntensity(fraction)
         case .ended, .cancelled, .failed:
             let release = pan.velocity(in: self).x
@@ -472,12 +476,16 @@ final class SnapCommentTickerView: UIView {
             CATransaction.commit()
         }
         mode = .scrubbing
+        scrubAccumulatedDistance = 0 // each touch is its own accumulation lifecycle
     }
 
     /// Direct manipulation: the whole band tracks the finger by `dx`, then
-    /// both edges are re-normalized from the wrap-around queue.
+    /// both edges are re-normalized from the wrap-around queue. Every delta
+    /// feeds the accumulator by its absolute value — back-and-forth travel
+    /// builds intensity; nothing subtracts.
     func applyScrubTranslation(_ dx: CGFloat) {
         guard mode == .scrubbing else { return }
+        scrubAccumulatedDistance += abs(dx)
         displaceLanes(by: Array(repeating: dx, count: Self.laneCount))
     }
 
@@ -487,6 +495,7 @@ final class SnapCommentTickerView: UIView {
     /// display link that lives only for this transient.
     func endScrub(releaseVelocity: CGFloat) {
         guard mode == .scrubbing else { return }
+        coastReleaseFraction = Self.scrubFraction(forAccumulatedDistance: scrubAccumulatedDistance)
         let maxResidual = Self.laneSpeeds
             .map { abs(releaseVelocity - (-$0)) }
             .max() ?? 0
@@ -536,7 +545,10 @@ final class SnapCommentTickerView: UIView {
             laneDx.append(velocity * dt)
         }
         displaceLanes(by: laneDx)
-        let fraction = Self.coastFraction(forSpeed: maxResidual)
+        // The fade envelope starts at the value held at release (the
+        // accumulator's peak) and relaxes on the same exponential clock as
+        // the velocities — continuous at lift-off, zero at handover.
+        let fraction = coastReleaseFraction * CGFloat(exp(-elapsed / Self.decayTimeConstant))
         print("[ticker-debug] coast residual=\(Int(maxResidual))pt/s fraction=\(String(format: "%.2f", fraction))")
         setBlurIntensity(fraction)
 
