@@ -28,7 +28,7 @@ final class SnapChromeView: UIView {
 
     private let textBackdrop = GradientView(colors: SnapChromeView.textPostGradientColors)
     /// The bottom legibility scrim. The mid-stop pulls meaningful darkness up
-    /// behind the comment ticker's three lanes — the band's naked text has no
+    /// behind the comment ticker's lanes — the band's naked text has no
     /// capsules, so the scrim is its only contrast — while the bottom stays
     /// as dark as before under the caption and toolbar.
     private let scrimView = GradientView(

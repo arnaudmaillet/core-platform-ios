@@ -1,6 +1,6 @@
 import UIKit
 
-/// The danmaku band: three lanes of naked micro-reaction text conveying
+/// The danmaku band: `laneCount` lanes of naked micro-reaction text conveying
 /// right-to-left over the page's media, directly above the caption. Text
 /// carries no capsule — legibility comes from the chrome's bottom scrim,
 /// which extends behind the whole band.
@@ -39,20 +39,21 @@ import UIKit
 /// backgrounded apps) and cell reuse leak-proof. Every deactivation path
 /// also takes the band off screen, so nothing is ever seen stopping.
 final class SnapCommentTickerView: UIView {
-    static let laneCount = 3
+    static let laneCount = 2
     /// Per-lane speeds (pt/s). Deliberately staggered and incommensurate so
-    /// the three lanes drift out of phase instead of moving as a block.
+    /// the lanes drift out of phase instead of moving as a block.
     /// Calibrated low: the band is a micro-reaction dump and should glide
     /// calmly under the media, not race across it.
-    static let laneSpeeds: [CGFloat] = [22, 26, 24]
+    static let laneSpeeds: [CGFloat] = [22, 26]
     /// Per-lane phase, in seconds of travel. The pre-fill shifts each lane's
     /// bubble train left by `phase × speed` points — as if that lane had
-    /// entered the loop this much earlier — so the three lanes land visibly
-    /// out of step instead of column-aligned at the left edge.
+    /// entered the loop this much earlier — so the lanes land visibly out of
+    /// step instead of column-aligned at the left edge. (Sized for up to
+    /// three lanes; only the first `laneCount` entries are read.)
     static let lanePhases: [TimeInterval] = [0.3, 1.5, 2.7]
     /// Minimum horizontal daylight between two bubbles in the same lane —
     /// generous, so the slow glide reads sparse rather than congested.
-    static let interItemGap: CGFloat = 32
+    static let interItemGap: CGFloat = 16
     private static let laneSpacing: CGFloat = 3
 
     // MARK: Interaction tuning
