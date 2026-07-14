@@ -90,51 +90,17 @@ struct SnapShortcutRailViewTests {
         #expect(rail.visibleIconCount == 0)
     }
 
-    @Test func releasesSnapToTheStepGrid() {
-        let step = SnapShortcutRailView.step
-        let rest: CGFloat = -388 // arbitrary rest offset
-        let max: CGFloat = -100
-
-        // Mid-flick proposals round to the nearest detent.
-        #expect(SnapShortcutRailView.snappedTarget(
-            proposed: rest + 1.4 * step, restOffset: rest, step: step, maxOffset: max
-        ) == rest + step)
-        #expect(SnapShortcutRailView.snappedTarget(
-            proposed: rest + 1.6 * step, restOffset: rest, step: step, maxOffset: max
-        ) == rest + 2 * step)
-        // Undershoot clamps to rest; overshoot clamps to the (off-grid)
-        // bottom-aligned column.
-        #expect(SnapShortcutRailView.snappedTarget(
-            proposed: rest - step, restOffset: rest, step: step, maxOffset: max
-        ) == rest)
-        #expect(SnapShortcutRailView.snappedTarget(
-            proposed: 0, restOffset: rest, step: step, maxOffset: max
-        ) == max)
-        // A payload too small to scroll (maxOffset below rest) pins to rest.
-        #expect(SnapShortcutRailView.snappedTarget(
-            proposed: 0, restOffset: rest, step: step, maxOffset: rest - 40
-        ) == rest)
-    }
-
-    @Test func edgeFlicksAreLeftToTheNativeSpring() {
+    @Test func scrollPhysicsAreNative() {
         let rail = makeRail()
-        let restOffset = -rail.contentInset.top
-        let maxOffset = rail.contentSize.height - rail.bounds.height + rail.contentInset.bottom
-
-        // A proposal past either boundary is an edge flick: the delegate
-        // must not touch it — handing UIKit a boundary-clamped target kills
-        // the overshoot spring and the edge reads as a hard wall.
-        var pastTop = CGPoint(x: 0, y: maxOffset + 120)
-        rail.scrollViewWillEndDragging(rail, withVelocity: CGPoint(x: 0, y: 2), targetContentOffset: &pastTop)
-        #expect(pastTop.y == maxOffset + 120)
-        var pastRest = CGPoint(x: 0, y: restOffset - 80)
-        rail.scrollViewWillEndDragging(rail, withVelocity: CGPoint(x: 0, y: -2), targetContentOffset: &pastRest)
-        #expect(pastRest.y == restOffset - 80)
-
-        // In-range releases still settle on the detent grid.
-        var inRange = CGPoint(x: 0, y: restOffset + 1.4 * SnapShortcutRailView.step)
-        rail.scrollViewWillEndDragging(rail, withVelocity: .zero, targetContentOffset: &inRange)
-        #expect(inRange.y == restOffset + SnapShortcutRailView.step)
+        // The wheel's motion is UIKit's, untouched. Detent snapping was
+        // tried and retired: retargeting `targetContentOffset` lurched
+        // low-velocity releases onto the grid (micro-jitter) and its
+        // boundary-coincident detents deadened the edge spring. Any scroll
+        // delegate or custom rate reappearing here is that regression.
+        #expect(rail.delegate == nil)
+        #expect(rail.decelerationRate == .normal)
+        #expect(rail.bounces)
+        #expect(rail.alwaysBounceVertical)
     }
 
     @Test func railPanTrapsVerticalTouchesFromTheFeed() {

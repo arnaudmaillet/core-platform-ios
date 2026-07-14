@@ -9,14 +9,17 @@ import UIKit
 /// the real feature: icons only, no text or counts.
 ///
 /// # Wheel
-/// A plain vertical `UIScrollView` (its own delegate), not a collection view:
-/// the payload is a handful of fixed-size bubbles with no reuse pressure, and
-/// frames are laid manually (the hot-cell doctrine — no Auto Layout inside a
-/// surface that moves every frame). `decelerationRate = .fast` plus detent
-/// snapping in `scrollViewWillEndDragging` gives the wheel feel: releases
-/// settle with bubbles on the step grid, never straddling the clip edge.
-/// Snapping applies only to in-range targets — an edge flick's overshooting
-/// proposal is left alone, so UIKit's native spring owns the rubber-band.
+/// A plain vertical `UIScrollView`, not a collection view: the payload is a
+/// handful of fixed-size bubbles with no reuse pressure, and frames are laid
+/// manually (the hot-cell doctrine — no Auto Layout inside a surface that
+/// moves every frame). Scroll physics are UIKit's, UNTOUCHED: no detent
+/// snapping, no deceleration retargeting, no custom rate. Detents were
+/// tried and retired — retargeting `targetContentOffset` lurches every
+/// low-velocity release onto the grid (micro-jumps), and a grid whose
+/// endpoints coincide with the scroll boundaries hands deceleration
+/// boundary-exact dead-stop targets that suppress the edge spring. The
+/// edge-fade masks already cover what detents were for: a bubble straddling
+/// the clip edge dissolves instead of sitting cut in half.
 ///
 /// # Resting window
 /// At rest exactly `restingIconCount` bubbles show, docked at the rail's
@@ -91,7 +94,6 @@ final class SnapShortcutRailView: UIScrollView {
         // The cell sits under the transparent nav bar; ambient inset
         // adjustment would shove the wheel's scroll range around.
         contentInsetAdjustmentBehavior = .never
-        decelerationRate = .fast
         // The wheel always answers a swipe with the native rubber-band,
         // even when the payload is too small to reveal anything.
         alwaysBounceVertical = true
@@ -99,7 +101,6 @@ final class SnapShortcutRailView: UIScrollView {
         scrollsToTop = false // the status-bar tap belongs to the feed
         isHidden = true
         accessibilityIdentifier = "shortcut-rail"
-        delegate = self
 
         // White = shown, clear = dissolved; locations resolved per layout
         // pass (they depend on the rail's height).
@@ -202,20 +203,6 @@ final class SnapShortcutRailView: UIScrollView {
         contentOffset = CGPoint(x: 0, y: restOffset + progress)
     }
 
-    // MARK: - Detents
-
-    /// Snaps a proposed deceleration target onto the step grid measured from
-    /// the rest offset, clamped to the scrollable range. The top clamp
-    /// (`maxOffset`, the bottom-aligned full column) is deliberately allowed
-    /// off-grid: the fully revealed wheel aligns to the rail's frame, not to
-    /// a detent. Pure + static so the arithmetic is unit-testable.
-    static func snappedTarget(
-        proposed: CGFloat, restOffset: CGFloat, step: CGFloat, maxOffset: CGFloat
-    ) -> CGFloat {
-        let snapped = restOffset + (step > 0 ? (proposed - restOffset) / step : 0).rounded() * step
-        return min(max(snapped, restOffset), max(maxOffset, restOffset))
-    }
-
     // MARK: - Placeholder payload
 
     /// Temporary stand-ins for the react-GIF shortcuts. Seeded by post id
@@ -297,27 +284,3 @@ extension SnapShortcutRailView: UIGestureRecognizerDelegate {
     }
 }
 
-// MARK: - Deceleration snapping
-
-extension SnapShortcutRailView: UIScrollViewDelegate {
-    func scrollViewWillEndDragging(
-        _ scrollView: UIScrollView,
-        withVelocity velocity: CGPoint,
-        targetContentOffset: UnsafeMutablePointer<CGPoint>
-    ) {
-        let restOffset = -contentInset.top
-        let maxOffset = contentSize.height - bounds.height + contentInset.bottom
-        let proposed = targetContentOffset.pointee.y
-        // A proposal beyond the scrollable range is an edge flick: leave it
-        // UNTOUCHED so UIKit's own spring overshoots and rubber-bands back.
-        // Clamping it to the boundary here handed deceleration a dead-stop
-        // target — the edges felt like a hard wall instead of native bounce.
-        guard proposed > restOffset, proposed < maxOffset else { return }
-        targetContentOffset.pointee.y = Self.snappedTarget(
-            proposed: proposed,
-            restOffset: restOffset,
-            step: Self.step,
-            maxOffset: maxOffset
-        )
-    }
-}
