@@ -79,9 +79,9 @@ final class SnapFeedViewController: UIViewController {
         observeAppLifecycle()
 
         viewModel.onStateChange = { [weak self] state in self?.render(state) }
-        viewModel.onEngagementChange = { [weak self] id, state in
-            self?.updateVisibleEngagement(for: id, state: state)
-        }
+        // No onEngagementChange subscription: the page shows no like/comment
+        // affordances this iteration (the engagement rail was removed; the
+        // view-model seam stays for their return).
         viewModel.onTickerCommentsChange = { [weak self] id, comments in
             self?.updateVisibleTicker(for: id, comments: comments)
         }
@@ -258,12 +258,9 @@ final class SnapFeedViewController: UIViewController {
             if let self, let model = self.modelsByID[id] {
                 cell.configure(
                     with: model,
-                    engagement: self.viewModel.engagementState(for: id),
                     pipeline: pipeline,
                     videoPlayback: self.videoPlayback
                 )
-                cell.onLikeTapped = { [weak self] id in self?.viewModel.toggleLike(for: id) }
-                cell.onCommentTapped = { [weak self] id in self?.viewModel.didTapComments(id) }
                 // Pull side of the ticker seam: a recycled cell for an
                 // already-visited post gets its queue back immediately; async
                 // arrivals ride `onTickerCommentsChange` instead.
@@ -528,16 +525,9 @@ final class SnapFeedViewController: UIViewController {
         }
     }
 
-    /// Live path: touch only the affected on-screen cell's engagement rail.
-    private func updateVisibleEngagement(for id: PostID, state: FeedViewModel.EngagementState) {
-        guard let indexPath = dataSource.indexPath(for: id),
-              let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell else { return }
-        cell.updateEngagement(state)
-    }
-
-    /// Same routing shape as engagement: a ticker queue lands on exactly the
-    /// cell showing that post (visible or active — the band only streams on
-    /// the active one). A cell that's gone by now re-pulls at reconfigure.
+    /// A ticker queue lands on exactly the cell showing that post (visible or
+    /// active — the band only streams on the active one). A cell that's gone
+    /// by now re-pulls at reconfigure.
     private func updateVisibleTicker(for id: PostID, comments: [TickerCommentModel]) {
         guard let indexPath = dataSource.indexPath(for: id),
               let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell else { return }
@@ -664,7 +654,7 @@ extension SnapFeedViewController: UICollectionViewDelegate {
 
     // A full-cell tap toggles play/pause (handled by the cell's own gesture),
     // not navigation — so there is no `didSelectItemAt` routing. Comments open
-    // via the rail's comment button; the author row opens the profile.
+    // via the toolbar's more menu; the identity pill opens the profile.
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         updateActiveItem()
@@ -683,7 +673,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     }
 
     /// A fresh inert replica of the active page's chrome for the flying card —
-    /// page content only (scrim, caption, rail); the navigation bar stays real
+    /// page content only (scrim, caption); the navigation bar stays real
     /// and static above the flight. Configured now if the post is already
     /// loaded; otherwise `render(_:)` fills it in when the data lands
     /// mid-flight — the scaffold's geometry is data-independent, so late text
@@ -736,7 +726,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         let index = lifecycle.activeIndex ?? 0
         guard orderedIDs.indices.contains(index),
               let model = modelsByID[orderedIDs[index]] else { return }
-        chrome.configure(with: model, engagement: viewModel.engagementState(for: model.id))
+        chrome.configure(with: model)
     }
 
     /// A rightward grab may begin from any page — the horizontal axis is free

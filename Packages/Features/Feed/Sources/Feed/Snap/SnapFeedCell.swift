@@ -5,13 +5,14 @@ import MediaPlayback
 import UIKit
 
 /// A full-screen snap cell: cover-fit media under a `SnapChromeView` overlay
-/// (scrim, author, caption, engagement controls). Text-only posts drop the
-/// media and show a gradient backdrop instead.
+/// (scrim, full-width caption). Text-only posts render as an empty shell —
+/// black page, no caption/ticker — under the screen chrome, until their
+/// dedicated layout exists.
 ///
 /// It reuses `FeedItemDisplayModel` as-is — only the fields relevant to a
-/// full-bleed page (`mediaURL`, `thumbnailURL`, caption, engagement) are read;
-/// author identity is the navigation bar's concern, and the precomputed
-/// heights are ignored because every cell is bounds-sized.
+/// full-bleed page (`mediaURL`, `thumbnailURL`, caption) are read; author
+/// identity is the navigation bar's concern, and the precomputed heights are
+/// ignored because every cell is bounds-sized.
 ///
 /// The cell plays no part in the hero transition's animation: the flight is a
 /// self-contained card owned by the animator (carrying its own chrome replica),
@@ -26,18 +27,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     /// A large centred play glyph shown while the active video is user-paused.
     private let pauseGlyph = UIImageView()
-
-    /// Set by the view controller; called on tap with the represented post.
-    /// (Author and back navigation live in the navigation bar.)
-    var onLikeTapped: ((PostID) -> Void)? {
-        get { chrome.onLikeTapped }
-        set { chrome.onLikeTapped = newValue }
-    }
-    /// Called when the comment button is tapped — opens the post's detail/comments.
-    var onCommentTapped: ((PostID) -> Void)? {
-        get { chrome.onCommentTapped }
-        set { chrome.onCommentTapped = newValue }
-    }
 
     private var representedID: PostID?
     private var mediaURL: URL?
@@ -65,8 +54,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         pauseGlyph.layer.shadowRadius = 6
         pauseGlyph.layer.shadowOffset = .zero
 
-        // Background tap toggles play/pause; the delegate rejects taps that land
-        // on an interactive control (rail / author row).
+        // Background tap toggles play/pause; the delegate rejects taps that
+        // land on an interactive control (none in today's chrome — the seam
+        // guards whatever returns).
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleBackgroundTap))
         tap.delegate = self
         contentView.addGestureRecognizer(tap)
@@ -96,7 +86,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     func configure(
         with model: FeedItemDisplayModel,
-        engagement: FeedViewModel.EngagementState,
         pipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController?
     ) {
@@ -104,7 +93,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         mediaURL = model.mediaURL
         mediaKind = model.mediaKind
         self.videoPlayback = videoPlayback
-        chrome.configure(with: model, engagement: engagement)
+        chrome.configure(with: model)
 
         let hasMedia = model.mediaURL != nil
         let isVideo = hasMedia && model.mediaKind == .video
@@ -132,12 +121,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             guard let self, self.representedID == id else { return }
             self.videoRenderView.setPoster(image)
         })
-    }
-
-    /// Updates only the engagement rail — live counter ticks and optimistic
-    /// like toggles. Never relayouts.
-    func updateEngagement(_ state: FeedViewModel.EngagementState) {
-        chrome.updateEngagement(state)
     }
 
     /// Hands the post's ticker queue to the chrome's comment band. Arrives
@@ -285,9 +268,9 @@ extension SnapFeedCell: UIGestureRecognizerDelegate {
 
     /// True when the touched view is (or descends from) an interactive control —
     /// a `UIControl`, or any of `interactiveRoots` — walking up to `stopAt`. So
-    /// taps on the rail (like/comment) and the author row use those controls;
-    /// taps on the background/media/caption toggle playback. Pure + static so
-    /// the arbitration is unit-testable.
+    /// taps on interactive chrome use those controls; taps on the background/
+    /// media/caption toggle playback. Pure + static so the arbitration is
+    /// unit-testable.
     static func isInteractiveTouch(_ touched: UIView?, interactiveRoots: [UIView], stopAt: UIView) -> Bool {
         var view = touched
         while let current = view {

@@ -2,10 +2,11 @@ import CoreModels
 import DesignSystem
 import UIKit
 
-/// The snap *page's* UI chrome — caption over the bottom scrim and the
-/// engagement rail. Screen-scoped chrome (back item, author identity) lives in
-/// the navigation bar instead (`SnapAuthorIdentityView` / `SnapNavControls`), so
-/// it stays fixed while pages scroll.
+/// The snap *page's* UI chrome — the caption over the bottom scrim.
+/// Screen-scoped chrome (back item, author identity) lives in the navigation
+/// bar instead (`SnapAuthorIdentityView` / `SnapNavControls`), so it stays
+/// fixed while pages scroll. (Like/comment affordances were removed with the
+/// engagement rail; they will return on a different surface.)
 ///
 /// It exists twice per hero flight: embedded in every `SnapFeedCell` (the
 /// live, interactive instance) and inside the transition's flying card (an
@@ -16,17 +17,6 @@ import UIKit
 /// Geometry is data-independent: labels fill in whenever `configure` runs
 /// (possibly mid-flight, on a cold tap) without moving the scaffold.
 final class SnapChromeView: UIView {
-    /// The text-only post's page background, defined once here for both the
-    /// live cell and the flight replica. Living *inside* the chrome means the
-    /// hero flight's existing chrome fade doubles as the thumbnail↔gradient
-    /// crossfade: a text post's card lifts off showing the pin's cover and
-    /// lands showing exactly the page the cell renders — no pop at the swap.
-    static let textPostGradientColors: [UIColor] = [
-        UIColor(red: 0.15, green: 0.16, blue: 0.24, alpha: 1),
-        UIColor(red: 0.05, green: 0.05, blue: 0.09, alpha: 1),
-    ]
-
-    private let textBackdrop = GradientView(colors: SnapChromeView.textPostGradientColors)
     /// The bottom legibility scrim. The mid-stop pulls meaningful darkness up
     /// behind the comment ticker's lanes — the band's naked text has no
     /// capsules, so the scrim is its only contrast — while the bottom stays
@@ -44,28 +34,14 @@ final class SnapChromeView: UIView {
     /// by construction and the card stays pixel-identical to the landed page.
     private let commentTicker = SnapCommentTickerView()
 
-    private let likeButton = UIButton(configuration: .plain())
-    private let likeCountLabel = UILabel()
-    private let commentButton = UIButton(configuration: .plain())
-
-    private let railStack: UIStackView
-
-    /// Set by the owning cell; called on tap with the represented post.
-    /// The flight replica leaves these nil and disables interaction entirely.
-    var onLikeTapped: ((PostID) -> Void)?
-    var onCommentTapped: ((PostID) -> Void)?
-
     /// Subtrees where a touch means "use the control", not "toggle playback" —
-    /// consumed by the cell's tap arbitration.
-    var interactionRoots: [UIView] { [railStack] }
+    /// consumed by the cell's tap arbitration. Empty since the engagement rail
+    /// was removed; the seam stays for future interactive chrome.
+    var interactionRoots: [UIView] { [] }
 
     private var representedID: PostID?
 
     override init(frame: CGRect) {
-        railStack = UIStackView(arrangedSubviews: [likeButton, likeCountLabel, commentButton])
-        railStack.axis = .vertical
-        railStack.spacing = Spacing.xs
-        railStack.alignment = .center
         super.init(frame: frame)
 
         // The chrome pins to its margins guide, NOT the safe-area guide
@@ -79,35 +55,16 @@ final class SnapChromeView: UIView {
         insetsLayoutMarginsFromSafeArea = true
         preservesSuperviewLayoutMargins = false
 
-        captionLabel.numberOfLines = 4
-        captionLabel.textColor = .white
-        // Legibility over arbitrary media, independent of the scrim.
-        captionLabel.layer.shadowColor = UIColor.black.cgColor
-        captionLabel.layer.shadowOpacity = 0.5
-        captionLabel.layer.shadowRadius = 3
-        captionLabel.layer.shadowOffset = .zero
+        captionLabel.numberOfLines = 2
+        captionLabel.lineBreakMode = .byTruncatingTail
 
-        var likeConfig = UIButton.Configuration.plain()
-        likeConfig.image = UIImage(systemName: "heart")
-        likeConfig.baseForegroundColor = .white
-        likeButton.configuration = likeConfig
-        likeButton.addAction(UIAction { [weak self] _ in
-            guard let id = self?.representedID else { return }
-            self?.onLikeTapped?(id)
-        }, for: .primaryActionTriggered)
-
-        likeCountLabel.font = UIFont.preferredFont(forTextStyle: .footnote).withWeight(.semibold)
-        likeCountLabel.textColor = .white
-        likeCountLabel.textAlignment = .center
-
-        var commentConfig = UIButton.Configuration.plain()
-        commentConfig.image = UIImage(systemName: "bubble.right")
-        commentConfig.baseForegroundColor = .white
-        commentButton.configuration = commentConfig
-        commentButton.addAction(UIAction { [weak self] _ in
-            guard let id = self?.representedID else { return }
-            self?.onCommentTapped?(id)
-        }, for: .primaryActionTriggered)
+        // The caption's font lives in its attributed string (see
+        // `renderedCaption`), which `adjustsFontForContentSizeCategory`
+        // cannot track — re-resolve on Dynamic Type changes so live and
+        // reused cells can never show two different caption sizes.
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: SnapChromeView, _) in
+            self.renderCaption()
+        }
 
         buildLayout()
     }
@@ -116,31 +73,26 @@ final class SnapChromeView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     private func buildLayout() {
-        // At the very back, under the scrim: for text posts it IS the page.
-        textBackdrop.isUserInteractionEnabled = false
-        textBackdrop.isHidden = true
-        textBackdrop.pin(to: self)
-        sendSubviewToBack(textBackdrop)
-
         scrimView.isUserInteractionEnabled = false
         scrimView.constrain(in: self) { parent in
             scrimView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
             scrimView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
             scrimView.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
             // 0.62, not 0.5: tall enough that the gradient's mid-stop sits
-            // behind the ticker band even over a 4-line caption.
+            // behind the ticker band riding above the caption block.
             scrimView.heightAnchor.constraint(equalTo: parent.heightAnchor, multiplier: 0.62)
         }
 
-        // Caption, bottom-left over the scrim; the trailing gap keeps it clear
-        // of the engagement rail. The margins guide tracks the safe area, so
-        // when the navigation controller's toolbar is visible the caption and
-        // rail sit above it automatically — live cell and flight replica
-        // alike (`setFixedInsets` captures the toolbar-inflated insets).
+        // Caption, full-width over the scrim (the engagement rail that once
+        // reserved the trailing edge is gone). The margins guide tracks the
+        // safe area, so when the navigation controller's toolbar is visible
+        // the caption sits above it automatically — live cell and flight
+        // replica alike (`setFixedInsets` captures the toolbar-inflated
+        // insets).
         captionLabel.constrain(in: self) { parent in
             captionLabel.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor, constant: Spacing.lg)
             captionLabel.bottomAnchor.constraint(equalTo: parent.layoutMarginsGuide.bottomAnchor, constant: -Spacing.lg)
-            captionLabel.trailingAnchor.constraint(lessThanOrEqualTo: parent.trailingAnchor, constant: -72)
+            captionLabel.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.lg)
         }
 
         // The comment ticker rides directly above the caption, full-width so
@@ -148,19 +100,11 @@ final class SnapChromeView: UIView {
         // its presence or absence never moves the caption, which keeps the
         // flight replica's geometry identical whether or not comments exist.
         // (Constrained after the caption — its bottom hangs off the caption's
-        // top — and before the rail, so bubbles pass under the rail's top.)
+        // top.)
         commentTicker.constrain(in: self) { _ in
             commentTicker.leadingAnchor.constraint(equalTo: leadingAnchor)
             commentTicker.trailingAnchor.constraint(equalTo: trailingAnchor)
             commentTicker.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.sm)
-        }
-
-        // Engagement rail, bottom-right (TikTok-style vertical stack): like +
-        // count, then comment.
-        railStack.setCustomSpacing(Spacing.md, after: likeCountLabel)
-        railStack.constrain(in: self) { parent in
-            railStack.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md)
-            railStack.bottomAnchor.constraint(equalTo: parent.layoutMarginsGuide.bottomAnchor, constant: -Spacing.lg)
         }
     }
 
@@ -175,39 +119,62 @@ final class SnapChromeView: UIView {
 
     // MARK: - Configuration
 
-    func configure(with model: FeedItemDisplayModel, engagement: FeedViewModel.EngagementState) {
+    func configure(with model: FeedItemDisplayModel) {
         representedID = model.id
-        updateEngagement(engagement)
 
-        let captionText = model.caption
-        captionLabel.text = captionText
-        captionLabel.isHidden = (captionText?.isEmpty ?? true)
-
-        let hasMedia = model.mediaURL != nil
+        // Text-only posts render an EMPTY shell (product call, 2026-07-14):
+        // no caption, no scrim, no ticker — just the black page under the
+        // screen chrome (identity pill, toolbar attribution), until their
+        // dedicated layout arrives with the Phase 2/3 cell split. `hasMedia`
+        // therefore gates every piece of page content at once.
+        hasMedia = model.mediaURL != nil
         scrimView.isHidden = !hasMedia
-        textBackdrop.isHidden = hasMedia
-        // Text-only posts lean on the caption, so give it more room and weight.
-        captionLabel.numberOfLines = hasMedia ? 4 : 8
-        captionLabel.font = hasMedia
-            ? .preferredFont(forTextStyle: .body)
-            : UIFont.preferredFont(forTextStyle: .title2).withWeight(.semibold)
+        caption = hasMedia ? model.caption : nil
+        captionLabel.isHidden = (caption?.isEmpty ?? true)
+        if !hasMedia { commentTicker.setComments([]) }
     }
 
-    /// Updates only the engagement rail — live counter ticks and optimistic
-    /// like toggles. Never relayouts.
-    func updateEngagement(_ state: FeedViewModel.EngagementState) {
-        likeCountLabel.text = Self.countText(state.likeCount)
-        var config = likeButton.configuration
-        config?.image = UIImage(systemName: state.isLiked ? "heart.fill" : "heart")
-        config?.baseForegroundColor = state.isLiked ? .systemRed : .white
-        likeButton.configuration = config
+    /// The raw caption, kept so Dynamic Type changes can re-resolve the
+    /// attributed rendering (the font is baked into the string).
+    private var caption: String? {
+        didSet { renderCaption() }
+    }
+
+    /// Whether the represented post carries media. Text-only posts show an
+    /// empty shell, so this gates page content — including ticker queues
+    /// arriving *after* configure (`updateTickerComments`).
+    private var hasMedia = true
+
+    private func renderCaption() {
+        captionLabel.attributedText = caption.map(Self.renderedCaption)
+    }
+
+    /// The caption's attributed rendering — the single source of caption
+    /// typography for every post kind and both chrome instances (live cell
+    /// and flight replica); no caller may size it conditionally. The text
+    /// shadow lives here (an `NSShadow` drawn with the glyphs) rather than
+    /// as a `CALayer` shadow: a layer shadow on a full-width label has no
+    /// `shadowPath` and costs an offscreen pass every scrolled frame.
+    private static func renderedCaption(_ text: String) -> NSAttributedString {
+        let shadow = NSShadow()
+        shadow.shadowColor = UIColor.black.withAlphaComponent(0.5)
+        shadow.shadowBlurRadius = 3
+        shadow.shadowOffset = .zero
+        return NSAttributedString(string: text, attributes: [
+            .font: UIFont.preferredFont(forTextStyle: .body),
+            .foregroundColor: UIColor.white,
+            .shadow: shadow,
+        ])
     }
 
     /// Replaces the comment ticker's wrap-around queue. Live cells only —
     /// the flight replica must never receive this (a moving band cannot be
     /// pixel-identical across two instances), which is why it is not part of
-    /// `configure`. An empty queue hides the band.
+    /// `configure`. An empty queue hides the band. Text-only posts refuse
+    /// queues entirely (empty shell) — gated here, not at the callers, so
+    /// every arrival path (dequeue pull, async push) hits the same wall.
     func updateTickerComments(_ comments: [TickerCommentModel]) {
+        guard hasMedia else { return }
         commentTicker.setComments(comments)
     }
 
@@ -221,11 +188,9 @@ final class SnapChromeView: UIView {
     /// Clears post-specific content (cell reuse).
     func reset() {
         representedID = nil
+        caption = nil
+        hasMedia = true
         commentTicker.reset()
-    }
-
-    private static func countText(_ count: Int64) -> String {
-        count >= 1000 ? String(format: "%.1fk", Double(count) / 1000) : String(count)
     }
 }
 
