@@ -31,12 +31,15 @@ public final class MockCommentService: @unchecked Sendable {
     /// Posts deliberately seeded with a dense comment set (18 micro-reactions
     /// + 6 semantic sentences), so both snap-feed comment surfaces — the
     /// conveyor band and the subtitle zone — can be exercised
-    /// deterministically in mock mode: the dataset's first three video posts
-    /// and first three text-only posts. Every other post keeps the sparse
-    /// two-comment seed — both surfaces' minimum-engagement gates must keep
-    /// them hidden there.
+    /// deterministically in mock mode, covering every media kind: video,
+    /// image (whose bright synthesized fills are the legibility worst case
+    /// the surfaces' contrast treatments exist for), and text-only. Every
+    /// other post keeps the sparse two-comment seed — both surfaces'
+    /// minimum-engagement gates must keep them hidden there. post-0001 stays
+    /// sparse on purpose: repository tests pin its two-comment seed.
     private static let denselySeededPostIDs: Set<String> = [
         "post-0000", "post-0003", "post-0006", // video pages (index % 3 == 0)
+        "post-0004", "post-0007", // image pages (index % 3 == 1; post-0001 stays sparse)
         "post-0002", "post-0005", "post-0008", // text-only pages (index % 3 == 2)
     ]
 

@@ -117,8 +117,10 @@ final class SnapChromeView: UIView {
 
         // The subtitle zone extends the same one-directional chain one link
         // up (caption ← band ← subtitles): nothing constrains back onto it,
-        // so cue presence/absence can never move the stack below. Inset to
-        // the caption's edges — subtitles are read, not skimmed.
+        // so cue presence/absence can never move the stack below. The slot
+        // spans the caption's edges; the view right-aligns its pill inside
+        // it, so the pill's right edge locks to the caption's trailing
+        // margin and long cues grow toward the leading edge.
         subtitleView.constrain(in: self) { parent in
             subtitleView.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor, constant: Spacing.lg)
             subtitleView.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.lg)

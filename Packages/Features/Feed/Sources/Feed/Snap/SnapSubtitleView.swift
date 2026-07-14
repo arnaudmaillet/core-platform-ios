@@ -5,6 +5,13 @@ import UIKit
 /// subtitle style — fade in, hold, fade out — directly above the reaction
 /// band. The conveyor drifts; this zone breathes.
 ///
+/// # Look
+/// A right-aligned translucent pill hugging its text, one typographic tier
+/// below the caption (footnote/medium vs the caption's body): the caption is
+/// the post's voice and stays dominant; cues are ambient commentary that
+/// keeps clear of the frame's center. The pill (not a glyph shadow) carries
+/// legibility over bright or moving video.
+///
 /// # Engine
 /// One `CAKeyframeAnimation` on `opacity` per cue (gap → fade-in → hold →
 /// fade-out), whose completion advances the wrap-around queue. Deliberately
@@ -51,7 +58,7 @@ final class SnapSubtitleView: UIView {
     private var generation = 0
     /// Double buffer: the next cue rasterizes on the off-screen label while
     /// the current one holds, so text drawing never lands mid-fade.
-    private let labels = [UILabel(), UILabel()]
+    private let labels = [SubtitlePillLabel(), SubtitlePillLabel()]
     private var frontLabelIndex = 0
 
     override init(frame: CGRect) {
@@ -61,12 +68,24 @@ final class SnapSubtitleView: UIView {
         for label in labels {
             label.numberOfLines = 2
             label.lineBreakMode = .byTruncatingTail
-            label.textAlignment = .center
+            label.textAlignment = .right
             label.layer.opacity = 0
-            // Bottom-pinned so a one-line cue sits where a two-line cue's
-            // last line does — the subtitle baseline never jumps.
+            // The pill lives on the label's own layer so the cue animation
+            // still touches exactly one layer (background and glyphs fade as
+            // a unit). Deliberately no `masksToBounds`: `backgroundColor`
+            // clips to the radius on its own, the text never reaches the
+            // corners (it's inset — see `SubtitlePillLabel`), and an
+            // unmasked layer keeps the opacity fade a direct composite.
+            label.layer.backgroundColor = UIColor.black.withAlphaComponent(0.45).cgColor
+            label.layer.cornerRadius = 12 // fixed, so 1- and 2-line cues share one shape
+            label.layer.cornerCurve = .continuous
+            // Trailing-pinned and content-hugging: the pill hugs its text,
+            // growing leftward, so its right edge locks to the caption's
+            // trailing margin and the frame's center stays clear. Bottom-
+            // pinned so a one-line cue sits where a two-line cue's last
+            // line does — the subtitle baseline never jumps.
             label.constrain(in: self) { parent in
-                label.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+                label.leadingAnchor.constraint(greaterThanOrEqualTo: parent.leadingAnchor)
                 label.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
                 label.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
             }
@@ -84,9 +103,11 @@ final class SnapSubtitleView: UIView {
     /// and the flight replica (which never receives cues) occupies identical
     /// space by construction.
     override var intrinsicContentSize: CGSize {
-        CGSize(
+        let insets = SubtitlePillLabel.textInsets
+        return CGSize(
             width: UIView.noIntrinsicMetric,
-            height: ceil(UIFont.preferredFont(forTextStyle: .body).lineHeight * 2)
+            height: ceil(UIFont.preferredFont(forTextStyle: .footnote).lineHeight * 2)
+                + insets.top + insets.bottom
         )
     }
 
@@ -178,18 +199,40 @@ final class SnapSubtitleView: UIView {
         CATransaction.commit()
     }
 
-    /// Same legibility recipe as the chrome's caption: glyph-drawn shadow,
-    /// never `layer.shadow*` — a layer shadow on an animating layer is a
-    /// per-frame offscreen pass (the band's locked lesson).
+    /// One tier below the caption on the chrome's type ladder (caption
+    /// body-17 → cue footnote-13 → ticker caption1-12): the size drop is
+    /// what keeps the caption dominant. Medium weight holds 13pt text
+    /// legible over motion, and the pill supplies the contrast — so no
+    /// glyph shadow (a shadow inside a translucent container reads as
+    /// smudge, not depth).
     private static func renderedCue(_ text: String) -> NSAttributedString {
-        let shadow = NSShadow()
-        shadow.shadowColor = UIColor.black.withAlphaComponent(0.5)
-        shadow.shadowBlurRadius = 3
-        shadow.shadowOffset = .zero
-        return NSAttributedString(string: text, attributes: [
-            .font: UIFont.preferredFont(forTextStyle: .body),
+        NSAttributedString(string: text, attributes: [
+            .font: UIFont.preferredFont(forTextStyle: .footnote).withWeight(.medium),
             .foregroundColor: UIColor.white,
-            .shadow: shadow,
         ])
+    }
+}
+
+/// A label that bakes the pill's padding into its text rect (rather than
+/// wrapping the label in a padded container), so the pill and its glyphs
+/// stay one view on one layer — the shape the cue animation depends on.
+private final class SubtitlePillLabel: UILabel {
+    static let textInsets = UIEdgeInsets(top: 6, left: 12, bottom: 6, right: 12)
+
+    override func textRect(forBounds bounds: CGRect, limitedToNumberOfLines numberOfLines: Int) -> CGRect {
+        let textBounds = super.textRect(
+            forBounds: bounds.inset(by: Self.textInsets),
+            limitedToNumberOfLines: numberOfLines
+        )
+        return CGRect(
+            x: textBounds.minX - Self.textInsets.left,
+            y: textBounds.minY - Self.textInsets.top,
+            width: textBounds.width + Self.textInsets.left + Self.textInsets.right,
+            height: textBounds.height + Self.textInsets.top + Self.textInsets.bottom
+        )
+    }
+
+    override func drawText(in rect: CGRect) {
+        super.drawText(in: rect.inset(by: Self.textInsets))
     }
 }
