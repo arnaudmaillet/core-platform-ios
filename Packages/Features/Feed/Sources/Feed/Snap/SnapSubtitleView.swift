@@ -1,9 +1,14 @@
 import DesignSystem
 import UIKit
 
-/// The subtitle zone: semantic comments rendered one at a time, movie-
-/// subtitle style — fade in, hold, fade out — directly above the reaction
-/// band. The conveyor drifts; this zone breathes.
+/// The subtitle zone: semantic comments rendered one at a time, directly
+/// above the reaction band — a PERSISTENT subtitle track. The first cue
+/// fades in; from then on the pill stays pinned at full opacity and every
+/// cue holds until the timeline delivers its successor, which replaces it
+/// as an instant text swap on the same pill (a hard cut). Nothing ever
+/// fades out into an empty zone mid-watch: the pill leaves the screen only
+/// when the page deactivates (swipe away, playback stops) or the cell is
+/// recycled.
 ///
 /// # Look
 /// A left-aligned translucent pill hugging its text, one typographic tier
@@ -13,69 +18,49 @@ import UIKit
 /// glyph shadow) carries legibility over bright or moving video.
 ///
 /// # Engine
-/// One `CAKeyframeAnimation` on `opacity` per cue segment, whose completion
-/// advances the wrap-around queue. Deliberately no timers: the band's
-/// device triage proved wall-clock cadence desyncs from the layer clock
-/// under percent-driven transitions, and a single animation per segment
-/// keeps pacing and rendering on the same clock. Steady state costs the
-/// compositor one alpha-blended pill layer; the main thread is touched once
-/// per cue to rasterize the next text (double-buffered labels, off the
-/// fade path).
-///
-/// # Transitions: fade vs hard cut
-/// Each cue handoff is planned up front (`plannedTransitions`): the default
-/// is the subtitle idiom — fade out, dark beat, fade in. But when two cues
-/// sit closer on the playback timeline than `hardCutThreshold`, that cycle
-/// compresses into a stroboscopic flash, so the handoff becomes a HARD CUT:
-/// the outgoing segment ends at full opacity and *fills forwards* (not
-/// removed), and its completion swaps the text on the same label and
-/// replaces the filled animation on the same key in one transaction. The
-/// pill never leaves 100% opacity and — critically — there is no frame
-/// where an ended animation's removal exposes the invisible model value.
-/// Cues without timestamps (v1 even pacing) always fade. Filled segments
-/// stay backgrounding-safe: stripping animations drops the layer to its
-/// model opacity of 0, hiding the zone rather than stranding a pill.
+/// One `CAKeyframeAnimation` on `opacity` per cue segment, used as the
+/// pacing clock — deliberately no timers: the band's device triage proved
+/// wall-clock cadence desyncs from the layer clock under percent-driven
+/// transitions. Persistence is built from the fill-forwards handoff: every
+/// segment ends AT full opacity and is NOT removed on completion, so the
+/// pill stays clamped visible while the completion swaps the next cue's
+/// text on the same label and replaces the animation on the same key in
+/// one transaction. No frame can fall back to the invisible model value —
+/// the pill is continuous by construction, and the swap is a single-frame
+/// text refresh under a perfectly stable container. Steady state costs the
+/// compositor one alpha-blended pill layer; the main thread is touched
+/// once per handoff to rasterize the next text.
 ///
 /// # Timing seam
-/// Cues carry an optional playback-timeline anchor (`SubtitleCue.at`),
-/// unused today: v1 paces evenly from activation, which is also the
-/// permanent fallback for image posts (no timeline). When the API delivers
-/// timestamps, scheduling moves onto the player clock; this view keeps
-/// rendering "the current cue" either way.
+/// Display duration is "until the next cue arrives", never a decay of its
+/// own. Cues carry an optional playback-timeline anchor (`SubtitleCue.at`),
+/// unused today: v1 paces arrivals evenly (`cueInterval` from activation),
+/// which is also the permanent fallback for image posts (no timeline).
+/// When the API delivers timestamps, arrivals move onto the player clock;
+/// this view keeps rendering "the current cue" either way.
 ///
 /// # Lifecycle
 /// Settle-scoped (active), deliberately unlike the band's visibility scope:
 /// subtitles belong to the playback timeline, and a page dragged halfway in
 /// has no playing media — its zone stays blank until the page settles, the
 /// same gate video uses. Hard stop/start with a generation counter (the
-/// band's doctrine): deactivation removes animations and zeroes both labels'
-/// model opacity, so backgrounding (which strips CA animations) can never
-/// strand a visible stale cue. Fade-only motion, so the zone stays on under
-/// Reduce Motion even while the conveyor hides.
+/// band's doctrine): deactivation removes animations — filled segments
+/// included — and the model opacity parked at 0 means backgrounding (which
+/// strips CA animations) hides the zone rather than stranding a pill.
+/// Fade-only motion, so the zone stays on under Reduce Motion even while
+/// the conveyor hides.
 final class SnapSubtitleView: UIView {
+    /// The first appearance only — handoffs between cues are hard cuts.
     static let fadeDuration: TimeInterval = 0.10
-    static let holdDuration: TimeInterval = 3.5
-    /// Dark beat between consecutive cues — the subtitle idiom needs a gap
-    /// so replacement reads as a new line, not a text mutation. Also the
-    /// lead-in delay after activation.
-    static let interCueGap: TimeInterval = 0.35
-    /// The flicker floor for timestamped cues: a delta shorter than one
-    /// complete dark cycle (fade-out + dark beat + fade-in) cannot fade
-    /// without reading as a flash, so handoffs under it hard-cut instead.
-    static var hardCutThreshold: TimeInterval { interCueGap + 2 * fadeDuration }
-
-    /// How one cue hands off to the next.
-    enum CueTransition {
-        /// Fade out, dark beat, fade in — the subtitle idiom.
-        case fade
-        /// Instant text swap at full opacity; the pill never blinks.
-        case cut
-    }
+    /// Dark lead-in between activation and the first cue, so the zone
+    /// doesn't pop the instant the page settles.
+    static let leadInDelay: TimeInterval = 0.35
+    /// v1 even pacing: how often "the next cue arrives" while cues carry no
+    /// timeline anchors. This is the successor's arrival cadence, NOT an
+    /// expiry — a cue is never taken down, only replaced.
+    static let cueInterval: TimeInterval = 3.5
 
     private var cues: [SubtitleCue] = []
-    /// Element `i` is the planned handoff cue `i` → cue `(i + 1) % count`,
-    /// derived once per cue list from timestamp deltas.
-    private var transitions: [CueTransition] = []
     private var nextIndex = 0
     /// Mirrors the owning cell's settled-active state; content may arrive
     /// before or after it, so both paths funnel into `startIfNeeded`.
@@ -85,39 +70,36 @@ final class SnapSubtitleView: UIView {
     /// for removed animations, and a stale one must not advance a cycle a
     /// newer owner already reset.
     private var generation = 0
-    /// Double buffer: the next cue rasterizes on the off-screen label while
-    /// the current one holds, so text drawing never lands mid-fade.
-    private let labels = [SubtitlePillLabel(), SubtitlePillLabel()]
-    private var frontLabelIndex = 0
+    /// One persistent pill: hard cuts swap text on the visible label, so
+    /// there is nothing to double-buffer.
+    private let label = SubtitlePillLabel()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         isHidden = true
         isUserInteractionEnabled = false // taps fall through to play/pause
-        for label in labels {
-            label.numberOfLines = 2
-            label.lineBreakMode = .byTruncatingTail
-            label.textAlignment = .left
-            label.layer.opacity = 0
-            // The pill lives on the label's own layer so the cue animation
-            // still touches exactly one layer (background and glyphs fade as
-            // a unit). Deliberately no `masksToBounds`: `backgroundColor`
-            // clips to the radius on its own, the text never reaches the
-            // corners (it's inset — see `SubtitlePillLabel`), and an
-            // unmasked layer keeps the opacity fade a direct composite.
-            label.layer.backgroundColor = UIColor.black.withAlphaComponent(0.45).cgColor
-            label.layer.cornerRadius = 12 // fixed, so 1- and 2-line cues share one shape
-            label.layer.cornerCurve = .continuous
-            // Leading-pinned and content-hugging: the pill hugs its text,
-            // growing rightward, so its left edge locks to the caption's
-            // leading margin — cues and caption share one text axis. Bottom-
-            // pinned so a one-line cue sits where a two-line cue's last
-            // line does — the subtitle baseline never jumps.
-            label.constrain(in: self) { parent in
-                label.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
-                label.trailingAnchor.constraint(lessThanOrEqualTo: parent.trailingAnchor)
-                label.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
-            }
+        label.numberOfLines = 2
+        label.lineBreakMode = .byTruncatingTail
+        label.textAlignment = .left
+        label.layer.opacity = 0
+        // The pill lives on the label's own layer so a segment still touches
+        // exactly one layer (background and glyphs move as a unit).
+        // Deliberately no `masksToBounds`: `backgroundColor` clips to the
+        // radius on its own, the text never reaches the corners (it's inset
+        // — see `SubtitlePillLabel`), and an unmasked layer keeps the fade
+        // a direct composite.
+        label.layer.backgroundColor = UIColor.black.withAlphaComponent(0.45).cgColor
+        label.layer.cornerRadius = 12 // fixed, so 1- and 2-line cues share one shape
+        label.layer.cornerCurve = .continuous
+        // Leading-pinned and content-hugging: the pill hugs its text,
+        // growing rightward, so its left edge locks to the caption's
+        // leading margin — cues and caption share one text axis. Bottom-
+        // pinned so a one-line cue sits where a two-line cue's last line
+        // does — the subtitle baseline never jumps.
+        label.constrain(in: self) { parent in
+            label.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+            label.trailingAnchor.constraint(lessThanOrEqualTo: parent.trailingAnchor)
+            label.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
         }
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: SnapSubtitleView, _) in
             self.invalidateIntrinsicContentSize()
@@ -149,26 +131,9 @@ final class SnapSubtitleView: UIView {
         guard newCues != cues else { return }
         stopCycle()
         cues = newCues
-        transitions = Self.plannedTransitions(for: newCues)
         nextIndex = 0
         isHidden = newCues.isEmpty
         startIfNeeded()
-    }
-
-    /// Plans every handoff from the cues' timeline anchors: closer than
-    /// `hardCutThreshold` → `.cut`, otherwise (or when either side has no
-    /// timestamp — v1's even pacing) → `.fade`. The wrap-around restart
-    /// always fades: the loop rejoining its start is a new pass, not a
-    /// dense neighbor.
-    static func plannedTransitions(for cues: [SubtitleCue]) -> [CueTransition] {
-        cues.indices.map { index in
-            let next = index + 1
-            guard next < cues.count, // wrap boundary → .fade
-                  let currentAt = cues[index].at, let nextAt = cues[next].at,
-                  nextAt - currentAt < hardCutThreshold
-            else { return .fade }
-            return .cut
-        }
     }
 
     /// Follows the page's settled-active state (the same seam as playback),
@@ -187,7 +152,6 @@ final class SnapSubtitleView: UIView {
     func reset() {
         stopCycle()
         cues = []
-        transitions = []
         nextIndex = 0
         isActive = false
         isHidden = true
@@ -196,90 +160,69 @@ final class SnapSubtitleView: UIView {
     private func startIfNeeded() {
         guard isActive, !cues.isEmpty, !isCycling else { return }
         isCycling = true
-        presentNextCue(entry: .fade)
+        presentNextCue(fadingIn: true)
     }
 
     private func stopCycle() {
         generation += 1
         isCycling = false
-        for label in labels {
-            label.layer.removeAllAnimations()
-            label.layer.opacity = 0
-        }
+        label.layer.removeAllAnimations()
+        label.layer.opacity = 0
     }
 
-    private func presentNextCue(entry: CueTransition) {
+    private func presentNextCue(fadingIn: Bool) {
         guard isActive, !cues.isEmpty else {
             isCycling = false
             return
         }
         let index = nextIndex % cues.count
-        let cue = cues[index]
-        let exit = transitions.indices.contains(index) ? transitions[index] : .fade
         nextIndex = (index + 1) % cues.count
-
-        // A fade rasterizes the next text on the off-screen label (the
-        // double buffer, so drawing never lands mid-fade). A cut stays on
-        // the FRONT label: swapping its text while the filled outgoing
-        // segment holds opacity 1 is the hard cut — same pill, new line.
-        if entry == .fade { frontLabelIndex = 1 - frontLabelIndex }
-        let label = labels[frontLabelIndex]
-        label.attributedText = Self.renderedCue(cue.text)
+        // On a handoff (`fadingIn == false`) the predecessor's filled
+        // segment is still clamping the pill at full opacity, so setting the
+        // text here IS the hard cut — same pill, new line, one frame.
+        label.attributedText = Self.renderedCue(cues[index].text)
 
         let expected = generation
         CATransaction.begin()
         CATransaction.setCompletionBlock { [weak self] in
             guard let self, self.generation == expected else { return }
-            self.presentNextCue(entry: exit)
+            self.presentNextCue(fadingIn: false)
         }
-        // The model opacity stays 0 for the whole flight: if the system
-        // strips the animations (backgrounding), the labels are invisible —
-        // never a frozen mid-fade cue or a stranded pill. Adding on the
-        // same key atomically replaces a filled predecessor in this same
-        // commit, so a cut never exposes that model value in between.
+        // The model opacity stays 0 forever: if the system strips the
+        // animations (backgrounding), the label is invisible — never a
+        // stranded pill. Adding on the same key atomically replaces the
+        // filled predecessor in this same commit, so a handoff never
+        // exposes that model value in between.
         label.layer.opacity = 0
-        label.layer.add(Self.segmentAnimation(entry: entry, exit: exit), forKey: "subtitle-cue")
+        label.layer.add(Self.segmentAnimation(fadingIn: fadingIn), forKey: "subtitle-cue")
         CATransaction.commit()
     }
 
-    /// One cue's opacity envelope, shaped by how it arrives and leaves:
-    /// a fade entry opens with the dark beat + fade-in ramp, a cut entry
-    /// starts at full opacity instantly; a fade exit closes to 0, a cut
-    /// exit ends AT 1 and fills forwards so the pill holds until the
-    /// completion swaps in the next cue's text.
-    private static func segmentAnimation(entry: CueTransition, exit: CueTransition) -> CAKeyframeAnimation {
-        let fade = fadeDuration
-        var values: [Float] = []
-        var times: [TimeInterval] = []
-
-        switch entry {
-        case .fade:
-            values += [0, 0, 1]
-            times += [0, interCueGap, interCueGap + fade]
-        case .cut:
-            values += [1]
-            times += [0]
-        }
-        let holdEnd = (times.last ?? 0) + holdDuration
-        values.append(1)
-        times.append(holdEnd)
-        if exit == .fade {
-            values.append(0)
-            times.append(holdEnd + fade)
-        }
-
-        let total = times.last ?? 1
+    /// One cue's opacity segment. The first fades in after the lead-in;
+    /// every segment — first included — ends AT full opacity and fills
+    /// forwards, because a cue's exit does not exist: it is only ever
+    /// replaced by its successor (or torn down with the page). The
+    /// animation's end is nothing but the successor's arrival clock.
+    /// Internal (not private) so tests can pin the envelope shapes.
+    static func segmentAnimation(fadingIn: Bool) -> CAKeyframeAnimation {
         let animation = CAKeyframeAnimation(keyPath: "opacity")
-        animation.values = values
-        animation.keyTimes = times.map { NSNumber(value: $0 / total) }
-        animation.duration = total
-        if exit == .cut {
-            // Clamp the final value past the animation's end instead of
-            // snapping back to the (invisible) model: the successor replaces
-            // this animation in the completion's own transaction.
-            animation.fillMode = .forwards
-            animation.isRemovedOnCompletion = false
+        if fadingIn {
+            let total = leadInDelay + fadeDuration + cueInterval
+            animation.values = [0, 0, 1, 1]
+            animation.keyTimes = [
+                0,
+                leadInDelay / total,
+                (leadInDelay + fadeDuration) / total,
+                1,
+            ].map { NSNumber(value: $0) }
+            animation.duration = total
+        } else {
+            animation.values = [1, 1]
+            animation.keyTimes = [0, 1]
+            animation.duration = cueInterval
         }
+        animation.fillMode = .forwards
+        animation.isRemovedOnCompletion = false
         return animation
     }
 
