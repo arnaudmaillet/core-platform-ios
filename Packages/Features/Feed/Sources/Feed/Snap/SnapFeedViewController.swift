@@ -635,11 +635,23 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         if lifecycle.activeIndex == indexPath.item {
             (cell as? SnapCellLifecycle)?.willBecomeActive()
         }
-        // The comment ticker streams on VISIBILITY, not on the settle-
-        // quantized active seam: a page dragged partway in must already show
-        // its band flowing, not pop it in at rest. (Video stays settle-
-        // gated — an AVPlayer per half-visible page is real cost; bubbles
-        // aren't.)
+        // Re-pull the cached streams BEFORE raising the visibility gate: a
+        // cell configured while the prefetch load was still in flight
+        // pulled `.empty` at dequeue, and the async push only reaches
+        // visible cells — this cell missed it. Synchronous on a cache hit,
+        // so the surfaces own their content when activation lands and the
+        // subtitle zone takes its INSTANT entrance (riding the swipe like
+        // static chrome) instead of the content-arrival fade after settle.
+        // (`updateCommentStreams` no-ops on identical content; still-
+        // uncached posts stay empty here and fade in when the push lands.)
+        if let snapCell = cell as? SnapFeedCell, orderedIDs.indices.contains(indexPath.item) {
+            snapCell.updateCommentStreams(viewModel.commentStreams(for: orderedIDs[indexPath.item]))
+        }
+        // Both comment surfaces render on VISIBILITY, not on the settle-
+        // quantized active seam: a page dragged partway in must already
+        // show its band flowing and its subtitle pill pinned, not pop them
+        // in at rest. (Video stays settle-gated — an AVPlayer per
+        // half-visible page is real cost; text layers aren't.)
         (cell as? SnapFeedCell)?.setTickerStreaming(true)
     }
 

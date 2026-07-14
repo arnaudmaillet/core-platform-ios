@@ -47,15 +47,18 @@ import UIKit
 /// this view keeps rendering "the current cue" either way.
 ///
 /// # Lifecycle
-/// Settle-scoped (active), deliberately unlike the band's visibility scope:
-/// subtitles belong to the playback timeline, and a page dragged halfway in
-/// has no playing media — its zone stays blank until the page settles, the
-/// same gate video uses. Hard stop/start with a generation counter (the
-/// band's doctrine): deactivation removes animations — filled segments
-/// included — and the model opacity parked at 0 means backgrounding (which
-/// strips CA animations) hides the zone rather than stranding a pill.
-/// Fade-only motion, so the zone stays on under Reduce Motion even while
-/// the conveyor hides.
+/// Visibility-scoped (the band's seam, plus the settle backstop for
+/// foregrounding): the persistent pill is static content between handoffs,
+/// so a page dragged partway in must show its zone riding the cell like
+/// the caption — not pop it in after settle. Entrances split on who moved
+/// first: a page that already owns its cues (prefetched at dequeue, or a
+/// revisit) presents INSTANTLY; cues that land while the page is already
+/// on screen announce themselves with the lead-in + fade. Hard stop/start
+/// with a generation counter (the band's doctrine): deactivation removes
+/// animations — filled segments included — and the model opacity parked at
+/// 0 means backgrounding (which strips CA animations) hides the zone
+/// rather than stranding a pill. Fade-only motion, so the zone stays on
+/// under Reduce Motion even while the conveyor hides.
 final class SnapSubtitleView: UIView {
     /// The first appearance only — handoffs between cues are hard cuts.
     static let fadeDuration: TimeInterval = 0.10
@@ -172,7 +175,9 @@ final class SnapSubtitleView: UIView {
         cues = newCues
         nextIndex = 0
         isHidden = newCues.isEmpty
-        startIfNeeded()
+        // Content landing under the user's eyes announces itself with the
+        // fade entrance.
+        startIfNeeded(fadingIn: true)
     }
 
     /// Updates the count bubble's engagement figure. Rides the same
@@ -184,13 +189,18 @@ final class SnapSubtitleView: UIView {
         countLabel.text = count > 0 ? Self.countText(count) : nil
     }
 
-    /// Follows the page's settled-active state (the same seam as playback),
-    /// NOT visibility — see the class doc.
+    /// Follows the owning page's visibility (the band's seam): a page
+    /// dragged partway in is already showing its zone — see the class doc.
     func setActive(_ active: Bool) {
         guard active != isActive else { return }
         isActive = active
         if active {
-            startIfNeeded()
+            // A page that already owns its cues (prefetched at dequeue, or
+            // a revisit) presents the current cue INSTANTLY: during a swipe
+            // the pill is static content riding the cell, like the caption
+            // — an entrance fade here would read as the pop-in this seam
+            // exists to prevent.
+            startIfNeeded(fadingIn: false)
         } else {
             stopCycle()
         }
@@ -206,10 +216,10 @@ final class SnapSubtitleView: UIView {
         countLabel.text = nil
     }
 
-    private func startIfNeeded() {
+    private func startIfNeeded(fadingIn: Bool) {
         guard isActive, !cues.isEmpty, !isCycling else { return }
         isCycling = true
-        presentNextCue(fadingIn: true)
+        presentNextCue(fadingIn: fadingIn)
     }
 
     private func stopCycle() {
@@ -246,28 +256,37 @@ final class SnapSubtitleView: UIView {
         // exposes that model value in between.
         label.layer.opacity = 0
         label.layer.add(Self.segmentAnimation(fadingIn: fadingIn), forKey: "subtitle-cue")
-        // The count bubble fades in alongside the first cue, then its
-        // filled animation clamps it visible for the page's whole active
-        // life — handoffs never touch this layer, so the bubble is inert
-        // through every hard cut (and backgrounding still hides it, same
-        // model-at-0 doctrine).
-        if fadingIn, countLabel.text != nil {
+        // The count bubble rises once, alongside the first cue and with the
+        // same entrance kind, then its filled animation clamps it visible
+        // for the page's whole visible life — handoffs never touch this
+        // layer (the key-presence guard makes this idempotent), so the
+        // bubble is inert through every hard cut (and backgrounding still
+        // hides it, same model-at-0 doctrine).
+        if countLabel.text != nil, countBubble.layer.animation(forKey: "subtitle-count") == nil {
             countBubble.layer.opacity = 0
-            countBubble.layer.add(Self.bubbleFadeIn(), forKey: "subtitle-count")
+            countBubble.layer.add(Self.bubbleEntrance(fadingIn: fadingIn), forKey: "subtitle-count")
         }
         CATransaction.commit()
     }
 
-    /// The bubble's one-shot entrance: the first cue's lead-in + fade
-    /// envelope, ending AT 1 and filled forwards indefinitely (its "hold"
-    /// is the page's active lifetime; only `stopCycle` takes it down).
-    /// Internal (not private) so tests can pin the envelope.
-    static func bubbleFadeIn() -> CAKeyframeAnimation {
-        let total = leadInDelay + fadeDuration
+    /// The bubble's one-shot entrance, matching the first cue's kind:
+    /// the lead-in + fade envelope when content announces itself, or an
+    /// immediate clamp when the page slides in already owning its cues.
+    /// Either way it ends AT 1 and fills forwards indefinitely (its "hold"
+    /// is the page's visible lifetime; only `stopCycle` takes it down).
+    /// Internal (not private) so tests can pin the envelopes.
+    static func bubbleEntrance(fadingIn: Bool) -> CAKeyframeAnimation {
         let animation = CAKeyframeAnimation(keyPath: "opacity")
-        animation.values = [0, 0, 1]
-        animation.keyTimes = [0, NSNumber(value: leadInDelay / total), 1]
-        animation.duration = total
+        if fadingIn {
+            let total = leadInDelay + fadeDuration
+            animation.values = [0, 0, 1]
+            animation.keyTimes = [0, NSNumber(value: leadInDelay / total), 1]
+            animation.duration = total
+        } else {
+            animation.values = [1, 1]
+            animation.keyTimes = [0, 1]
+            animation.duration = fadeDuration // any span; the fill does the work
+        }
         animation.fillMode = .forwards
         animation.isRemovedOnCompletion = false
         return animation
@@ -280,11 +299,13 @@ final class SnapSubtitleView: UIView {
         count >= 1000 ? String(format: "%.1fk", Double(count) / 1000) : String(count)
     }
 
-    /// One cue's opacity segment. The first fades in after the lead-in;
-    /// every segment — first included — ends AT full opacity and fills
-    /// forwards, because a cue's exit does not exist: it is only ever
-    /// replaced by its successor (or torn down with the page). The
-    /// animation's end is nothing but the successor's arrival clock.
+    /// One cue's opacity segment. `fadingIn` opens with the lead-in + ramp
+    /// (content announcing itself); otherwise the segment is a flat clamp
+    /// at 1 — the shape shared by hard-cut handoffs and instant entrances
+    /// alike. Every segment ends AT full opacity and fills forwards,
+    /// because a cue's exit does not exist: it is only ever replaced by
+    /// its successor (or torn down with the page). The animation's end is
+    /// nothing but the successor's arrival clock.
     /// Internal (not private) so tests can pin the envelope shapes.
     static func segmentAnimation(fadingIn: Bool) -> CAKeyframeAnimation {
         let animation = CAKeyframeAnimation(keyPath: "opacity")

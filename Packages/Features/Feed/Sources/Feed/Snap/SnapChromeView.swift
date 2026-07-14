@@ -34,11 +34,12 @@ final class SnapChromeView: UIView {
     /// by construction and the card stays pixel-identical to the landed page.
     private let commentTicker = SnapCommentTickerView()
 
-    /// The subtitle zone, directly above the band: semantic comments fading
-    /// in and out one at a time. Same content contract as the band (arrives
-    /// only via `updateCommentStreams`, so the flight replica's zone is
-    /// empty by construction), but activation is settle-scoped like video,
-    /// not visibility-scoped like the conveyor.
+    /// The subtitle zone, directly above the band: a persistent pill of
+    /// semantic comments, one at a time, with the count bubble leading it.
+    /// Same content contract as the band (arrives only via
+    /// `updateCommentStreams`, so the flight replica's zone is empty by
+    /// construction) and the same visibility-scoped activation, so the
+    /// zone rides a page being dragged in.
     private let subtitleView = SnapSubtitleView()
 
     /// Subtrees where a touch means "use the control", not "toggle playback" —
@@ -212,10 +213,11 @@ final class SnapChromeView: UIView {
         commentTicker.setActive(active)
     }
 
-    /// Cycles while the owning cell is the settled ACTIVE page — the same
-    /// seam as playback, deliberately narrower than the band's visibility
-    /// scope: subtitles belong to the playback timeline, and a half-dragged
-    /// page has no playing media to subtitle.
+    /// Cycles while the owning cell is on screen — the band's visibility
+    /// seam (plus the settle backstop for foregrounding), NOT playback's
+    /// settle scope: the persistent pill is static content between
+    /// handoffs, so it must ride a half-dragged page like the caption
+    /// does instead of popping in after settle.
     func setSubtitlesActive(_ active: Bool) {
         subtitleView.setActive(active)
     }

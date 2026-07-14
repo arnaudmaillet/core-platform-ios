@@ -186,9 +186,20 @@ public final class FeedViewModel {
         router?.route(to: .comments(id))
     }
 
-    /// The settle seam's comment hook: a page became the active page.
+    /// The settle seam's comment hook: a page became the active page. Also
+    /// warms the immediate neighbors' streams — deterministically, unlike
+    /// the collection view's prefetcher (which is velocity-driven and stays
+    /// silent after programmatic jumps and at rest) — so the page the user
+    /// swipes to next already OWNS its comment content and its subtitle
+    /// zone rides the transition with the instant entrance instead of
+    /// fading in after arrival.
     public func pageDidBecomeActive(_ id: PostID) {
         ensureCommentStreams(for: id)
+        if let index = items.firstIndex(where: { $0.id == id }) {
+            for neighbor in [index - 1, index + 1] where items.indices.contains(neighbor) {
+                ensureCommentStreams(for: items[neighbor].id)
+            }
+        }
     }
 
     /// Loads a post's comment streams once (single-flight, cached for the

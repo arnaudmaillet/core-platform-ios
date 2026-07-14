@@ -48,9 +48,26 @@ struct SnapSubtitleViewTests {
 
     // MARK: - Lifecycle
 
-    @Test func activationStartsTheFadeInSegment() {
+    /// A page that already owns its cues (prefetched at dequeue, revisit)
+    /// presents INSTANTLY on activation: during a swipe the pill is static
+    /// content riding the cell — an entrance fade would be the pop-in the
+    /// visibility seam exists to prevent.
+    @Test func activationWithOwnedCuesPresentsInstantly() {
         let view = makeView([cue("a"), cue("b"), cue("c")])
         view.setActive(true)
+
+        let animation = try! #require(cueAnimation(view))
+        #expect(animation.values?.count == 2) // flat clamp at 1 — no ramp
+        #expect((animation.values?.first as? NSNumber)?.doubleValue == 1)
+        #expect(!animation.isRemovedOnCompletion)
+    }
+
+    /// Content landing while the page is already on screen announces
+    /// itself: lead-in + fade entrance.
+    @Test func cuesArrivingWhileVisibleFadeIn() {
+        let view = SnapSubtitleView(frame: CGRect(x: 0, y: 0, width: 350, height: 50))
+        view.setActive(true)
+        view.setCues([cue("a"), cue("b"), cue("c")])
 
         let animation = try! #require(cueAnimation(view))
         #expect(animation.values?.count == 4) // the fade-in envelope
@@ -94,16 +111,21 @@ struct SnapSubtitleViewTests {
         view.subviews.compactMap { $0 as? UIVisualEffectView }.first
     }
 
-    /// The bubble's one-shot entrance: the first cue's lead-in + fade
-    /// envelope, ending AT 1 and filled forwards — its hold is the page's
-    /// active lifetime.
-    @Test func bubbleEntranceFadesInAndFillsForwards() {
-        let animation = SnapSubtitleView.bubbleFadeIn()
-        #expect((animation.values as? [NSNumber])?.map(\.doubleValue) == [0, 0, 1])
-        #expect(animation.fillMode == .forwards)
-        #expect(!animation.isRemovedOnCompletion)
+    /// The bubble's one-shot entrance matches the first cue's kind — fade
+    /// envelope or immediate clamp — and either way ends AT 1 and fills
+    /// forwards: its hold is the page's visible lifetime.
+    @Test func bubbleEntranceMatchesTheCueEntranceKind() {
+        let fade = SnapSubtitleView.bubbleEntrance(fadingIn: true)
+        #expect((fade.values as? [NSNumber])?.map(\.doubleValue) == [0, 0, 1])
+        #expect(fade.fillMode == .forwards)
+        #expect(!fade.isRemovedOnCompletion)
         let expected = SnapSubtitleView.leadInDelay + SnapSubtitleView.fadeDuration
-        #expect(abs(animation.duration - expected) < 0.001)
+        #expect(abs(fade.duration - expected) < 0.001)
+
+        let instant = SnapSubtitleView.bubbleEntrance(fadingIn: false)
+        #expect((instant.values as? [NSNumber])?.map(\.doubleValue) == [1, 1])
+        #expect(instant.fillMode == .forwards)
+        #expect(!instant.isRemovedOnCompletion)
     }
 
     @Test func activationRaisesTheBubbleOnlyWhenACountExists() {
