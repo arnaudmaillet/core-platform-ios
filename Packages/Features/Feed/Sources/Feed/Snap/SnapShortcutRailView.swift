@@ -32,10 +32,13 @@ import UIKit
 /// fresh payload parks the wheel back at rest.
 ///
 /// # Feed arbitration
-/// Nested same-axis scrolling: a touch that lands on the rail belongs to the
-/// rail — UIKit's inner-scroll-view precedence keeps the vertical pager still
-/// while the wheel spins, and edge overshoot rubber-bands inside the rail
-/// instead of handing off a page transition. `gestureRecognizerShouldBegin`
+/// A vertical touch that lands on the rail belongs to the rail, completely:
+/// UIKit's DEFAULT for same-axis nesting is cooperative chaining (at a
+/// content boundary the outer pager inherits the drag), so the rail's
+/// gesture-delegate methods sever it — no simultaneous recognition, and
+/// every other pan waits for the rail's pan to fail (the ticker's doctrine,
+/// mirrored; see the extension below). Edge overshoot rubber-bands inside
+/// the rail instead of paging the feed. `gestureRecognizerShouldBegin`
 /// mirrors the ticker's axis test in the other direction: only vertically
 /// dominant drags begin, so a rightward slide-to-pop that starts on the rail
 /// stays with the navigation gesture. Taps are the cell's arbitration seam:
@@ -256,6 +259,39 @@ final class SnapShortcutRailView: UIScrollView {
         let window = CGRect(origin: contentOffset, size: bounds.size)
             .insetBy(dx: 0, dy: Self.edgeFadeLength)
         return icons.count(where: { $0.frame.intersects(window) })
+    }
+}
+
+// MARK: - Feed isolation
+
+/// The wheel traps every touch that begins on it. UIKit's default for
+/// same-axis nested scroll views is COOPERATIVE chaining: the scroll view's
+/// own gesture delegate volunteers simultaneous recognition, so when the
+/// inner rail hits a content boundary, the outer pager's still-live pan
+/// inherits the translation and the feed starts paging mid-gesture. The
+/// rail is its own pan's delegate (UIScrollView semantics), so declaring
+/// the delegate methods here overrides that bargain: no simultaneity with
+/// any other recognizer, and — the ticker's doctrine, mirrored — every
+/// other pan must wait for the rail's pan to fail before acting. Vertical
+/// touches therefore live and die inside the rail (boundary overshoot
+/// rubber-bands); horizontal intent still fails fast in
+/// `gestureRecognizerShouldBegin`, releasing the slide-to-pop untouched.
+extension SnapShortcutRailView: UIGestureRecognizerDelegate {
+    // UIScrollView's UIGestureRecognizerDelegate conformance is private in
+    // the SDK, so these are fresh declarations, not overrides — UIKit still
+    // reaches them by selector because the rail IS its pan's delegate.
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        false
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        gestureRecognizer === panGestureRecognizer && otherGestureRecognizer is UIPanGestureRecognizer
     }
 }
 

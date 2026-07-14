@@ -116,6 +116,19 @@ struct SnapShortcutRailViewTests {
         ) == rest)
     }
 
+    @Test func railPanTrapsVerticalTouchesFromTheFeed() {
+        let rail = makeRail()
+        let feedPan = UIPanGestureRecognizer()
+        // Same-axis scroll chaining is severed: no simultaneity with the
+        // pager's pan, and any other pan must wait for the rail's pan to
+        // fail — a boundary overshoot rubber-bands instead of paging the
+        // feed.
+        #expect(rail.gestureRecognizer(rail.panGestureRecognizer, shouldRecognizeSimultaneouslyWith: feedPan) == false)
+        #expect(rail.gestureRecognizer(rail.panGestureRecognizer, shouldBeRequiredToFailBy: feedPan) == true)
+        // Non-pan recognizers (taps) are not held hostage by the wheel.
+        #expect(rail.gestureRecognizer(rail.panGestureRecognizer, shouldBeRequiredToFailBy: UITapGestureRecognizer()) == false)
+    }
+
     @Test func placeholderPayloadIsDeterministicPerPost() {
         let id = PostID("0198c5f2-1111-7000-8000-000000000001")
         // Same post → same wheel (the live cell and its flight replica must
