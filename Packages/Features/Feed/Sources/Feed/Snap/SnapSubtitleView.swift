@@ -6,11 +6,11 @@ import UIKit
 /// band. The conveyor drifts; this zone breathes.
 ///
 /// # Look
-/// A right-aligned translucent pill hugging its text, one typographic tier
+/// A left-aligned translucent pill hugging its text, one typographic tier
 /// below the caption (footnote/medium vs the caption's body): the caption is
-/// the post's voice and stays dominant; cues are ambient commentary that
-/// keeps clear of the frame's center. The pill (not a glyph shadow) carries
-/// legibility over bright or moving video.
+/// the post's voice and stays dominant; cues stack on the same leading axis
+/// as the caption below, one column of text up the page. The pill (not a
+/// glyph shadow) carries legibility over bright or moving video.
 ///
 /// # Engine
 /// One `CAKeyframeAnimation` on `opacity` per cue (gap → fade-in → hold →
@@ -68,7 +68,7 @@ final class SnapSubtitleView: UIView {
         for label in labels {
             label.numberOfLines = 2
             label.lineBreakMode = .byTruncatingTail
-            label.textAlignment = .right
+            label.textAlignment = .left
             label.layer.opacity = 0
             // The pill lives on the label's own layer so the cue animation
             // still touches exactly one layer (background and glyphs fade as
@@ -79,14 +79,14 @@ final class SnapSubtitleView: UIView {
             label.layer.backgroundColor = UIColor.black.withAlphaComponent(0.45).cgColor
             label.layer.cornerRadius = 12 // fixed, so 1- and 2-line cues share one shape
             label.layer.cornerCurve = .continuous
-            // Trailing-pinned and content-hugging: the pill hugs its text,
-            // growing leftward, so its right edge locks to the caption's
-            // trailing margin and the frame's center stays clear. Bottom-
+            // Leading-pinned and content-hugging: the pill hugs its text,
+            // growing rightward, so its left edge locks to the caption's
+            // leading margin — cues and caption share one text axis. Bottom-
             // pinned so a one-line cue sits where a two-line cue's last
             // line does — the subtitle baseline never jumps.
             label.constrain(in: self) { parent in
-                label.leadingAnchor.constraint(greaterThanOrEqualTo: parent.leadingAnchor)
-                label.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
+                label.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+                label.trailingAnchor.constraint(lessThanOrEqualTo: parent.trailingAnchor)
                 label.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
             }
         }
