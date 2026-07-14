@@ -4,8 +4,9 @@ import UIKit
 
 /// The background tap (play/pause) must not fire when the touch lands on an
 /// interactive control or a declared interactive root, but must fire for taps
-/// on the media/caption/background. (Today's chrome declares no roots — the
-/// engagement rail is gone — so these exercise the seam with fixtures.)
+/// on the media/caption/background. The walk itself is exercised with
+/// fixtures; the chrome's real declaration (the shortcut rail) is pinned
+/// separately below.
 @MainActor
 struct SnapTapArbitrationTests {
     @Test func controlTouchesAndInteractiveRootsAreRejected() {
@@ -34,5 +35,13 @@ struct SnapTapArbitrationTests {
         #expect(SnapFeedCell.isInteractiveTouch(caption, interactiveRoots: [rail], stopAt: contentView) == false)
         // A nil hit view → allowed.
         #expect(SnapFeedCell.isInteractiveTouch(nil, interactiveRoots: [rail], stopAt: contentView) == false)
+    }
+
+    @Test func chromeDeclaresTheShortcutRail() {
+        // The chrome's real declaration: touches on the shortcut wheel use
+        // the wheel, never toggle playback.
+        let chrome = SnapChromeView()
+        #expect(chrome.interactionRoots.count == 1)
+        #expect(chrome.interactionRoots.first is SnapShortcutRailView)
     }
 }

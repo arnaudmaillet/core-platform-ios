@@ -55,8 +55,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         pauseGlyph.layer.shadowOffset = .zero
 
         // Background tap toggles play/pause; the delegate rejects taps that
-        // land on an interactive control (none in today's chrome — the seam
-        // guards whatever returns).
+        // land on an interactive control (the chrome's shortcut rail).
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleBackgroundTap))
         tap.delegate = self
         contentView.addGestureRecognizer(tap)

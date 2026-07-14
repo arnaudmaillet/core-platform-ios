@@ -42,10 +42,17 @@ final class SnapChromeView: UIView {
     /// zone rides a page being dragged in.
     private let subtitleView = SnapSubtitleView()
 
+    /// The vertical shortcut wheel on the trailing edge: quick-react
+    /// shortcuts (placeholder symbols today, favorite GIFs later), spanning
+    /// the ticker's top up to the nav bar. Static content like the caption —
+    /// populated from `configure` with a per-post deterministic payload, so
+    /// the flight replica draws the identical wheel.
+    private let shortcutRail = SnapShortcutRailView()
+
     /// Subtrees where a touch means "use the control", not "toggle playback" —
-    /// consumed by the cell's tap arbitration. Empty since the engagement rail
-    /// was removed; the seam stays for future interactive chrome.
-    var interactionRoots: [UIView] { [] }
+    /// consumed by the cell's tap arbitration. The shortcut rail is the sole
+    /// interactive chrome since the engagement rail's removal.
+    var interactionRoots: [UIView] { [shortcutRail] }
 
     private var representedID: PostID?
 
@@ -116,16 +123,30 @@ final class SnapChromeView: UIView {
             commentTicker.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.sm)
         }
 
+        // The shortcut rail owns the trailing column above the band: bottom
+        // on the ticker's top edge (same horizon as the subtitle zone),
+        // top under the nav bar — the margins guide tracks the top safe
+        // area in the live cell and `setFixedInsets` freezes it for the
+        // flight replica, exactly like the caption's bottom edge.
+        shortcutRail.constrain(in: self) { parent in
+            shortcutRail.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md)
+            shortcutRail.widthAnchor.constraint(equalToConstant: SnapShortcutRailView.railWidth)
+            shortcutRail.topAnchor.constraint(equalTo: parent.layoutMarginsGuide.topAnchor, constant: Spacing.sm)
+            shortcutRail.bottomAnchor.constraint(equalTo: commentTicker.topAnchor, constant: -Spacing.sm)
+        }
+
         // The subtitle zone extends the same one-directional chain one link
         // up (caption ← band ← subtitles): nothing constrains back onto it,
         // so cue presence/absence can never move the stack below. The slot
-        // spans the caption's edges; the view left-aligns its pill inside
-        // it, so the pill's left edge locks to the caption's leading margin
-        // — cues stack on the caption's text axis — and long cues grow
-        // toward the trailing edge.
+        // spans from the caption's leading edge to the shortcut rail — the
+        // zone no longer runs the full width; the trailing column is the
+        // rail's. The view left-aligns its pill inside the slot, so the
+        // pill's left edge locks to the caption's leading margin — cues
+        // stack on the caption's text axis — and long cues grow toward the
+        // rail's clearance.
         subtitleView.constrain(in: self) { parent in
             subtitleView.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor, constant: Spacing.lg)
-            subtitleView.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.lg)
+            subtitleView.trailingAnchor.constraint(equalTo: shortcutRail.leadingAnchor, constant: -Spacing.md)
             subtitleView.bottomAnchor.constraint(equalTo: commentTicker.topAnchor, constant: -Spacing.sm)
         }
     }
@@ -157,6 +178,10 @@ final class SnapChromeView: UIView {
             commentTicker.setComments([])
             subtitleView.setCues([])
         }
+        // Static chrome, so it loads here (not via `updateCommentStreams`)
+        // and the flight replica shows it too — the seeded payload keeps
+        // both instances identical. Empty shell for text-only posts.
+        shortcutRail.setSymbols(hasMedia ? SnapShortcutRailView.placeholderPayload(for: model.id) : [])
     }
 
     /// The raw caption, kept so Dynamic Type changes can re-resolve the
@@ -229,6 +254,7 @@ final class SnapChromeView: UIView {
         hasMedia = true
         commentTicker.reset()
         subtitleView.reset()
+        shortcutRail.reset()
     }
 }
 
