@@ -17,6 +17,13 @@ import UIKit
 /// as the caption below, one column of text up the page. The pill (not a
 /// glyph shadow) carries legibility over bright or moving video.
 ///
+/// Leading the pill sits the count bubble — a material-blur chip with the
+/// post's total comment count, the layer's engagement anchor. The row flows
+/// `[bubble] [gap] [pill →]`, both bottom-pinned to the zone: a two-line
+/// cue grows the pill upward while the bubble holds the shared bottom edge.
+/// The bubble fades in once with the first cue and stays clamped visible;
+/// handoffs never touch its layer.
+///
 /// # Engine
 /// One `CAKeyframeAnimation` on `opacity` per cue segment, used as the
 /// pacing clock — deliberately no timers: the band's device triage proved
@@ -73,6 +80,12 @@ final class SnapSubtitleView: UIView {
     /// One persistent pill: hard cuts swap text on the visible label, so
     /// there is nothing to double-buffer.
     private let label = SubtitlePillLabel()
+    /// The engagement anchor: a material-blur bubble carrying the post's
+    /// total comment count, leading the pill. It fades in once with the
+    /// first cue and then just sits there — cue handoffs never touch it,
+    /// so it can't participate in (or break) the zero-flicker pipeline.
+    private let countBubble = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
+    private let countLabel = UILabel()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -91,13 +104,39 @@ final class SnapSubtitleView: UIView {
         label.layer.backgroundColor = UIColor.black.withAlphaComponent(0.45).cgColor
         label.layer.cornerRadius = 12 // fixed, so 1- and 2-line cues share one shape
         label.layer.cornerCurve = .continuous
-        // Leading-pinned and content-hugging: the pill hugs its text,
-        // growing rightward, so its left edge locks to the caption's
-        // leading margin — cues and caption share one text axis. Bottom-
-        // pinned so a one-line cue sits where a two-line cue's last line
-        // does — the subtitle baseline never jumps.
+        // The count bubble: a rounded material chip that hugs its count.
+        // Blur NEEDS `clipsToBounds` for the rounded shape (unlike the
+        // pill's backgroundColor, an effect view's backdrop doesn't clip to
+        // the layer radius on its own) — safe here because the bubble's
+        // layer never animates after its one fade-in.
+        countBubble.clipsToBounds = true
+        countBubble.layer.cornerRadius = 12
+        countBubble.layer.cornerCurve = .continuous
+        countBubble.layer.opacity = 0
+        countLabel.font = UIFont.preferredFont(forTextStyle: .footnote).withWeight(.semibold)
+        countLabel.textColor = .white
+        // The pill's vertical insets on the same footnote tier, so the
+        // bubble's height exactly equals a one-line pill — flush top and
+        // bottom when the cue is short.
+        countLabel.constrain(in: countBubble.contentView) { parent in
+            countLabel.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: 10)
+            countLabel.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -10)
+            countLabel.topAnchor.constraint(equalTo: parent.topAnchor, constant: SubtitlePillLabel.textInsets.top)
+            countLabel.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -SubtitlePillLabel.textInsets.bottom)
+        }
+
+        // Horizontal flow: [count bubble] [gap] [pill →]. Both BOTTOM-pin
+        // to the zone, which IS the vertical alignment invariant: a cue
+        // wrapping to two lines grows the pill upward while the bubble
+        // holds the shared bottom edge — it never centers or rides to the
+        // top. The bubble hugs its count; the pill hugs its text and may
+        // reclaim all remaining width.
+        countBubble.constrain(in: self) { parent in
+            countBubble.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+            countBubble.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
+        }
         label.constrain(in: self) { parent in
-            label.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+            label.leadingAnchor.constraint(equalTo: countBubble.trailingAnchor, constant: Spacing.sm)
             label.trailingAnchor.constraint(lessThanOrEqualTo: parent.trailingAnchor)
             label.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
         }
@@ -136,6 +175,15 @@ final class SnapSubtitleView: UIView {
         startIfNeeded()
     }
 
+    /// Updates the count bubble's engagement figure. Rides the same
+    /// update path as the cues (`updateCommentStreams`, never `configure`),
+    /// so the flight replica's bubble stays empty and invisible by
+    /// construction. Text-only (no relayout beyond the bubble's own hug);
+    /// visibility is owned by the cue cycle's fade-in.
+    func setCommentCount(_ count: Int) {
+        countLabel.text = count > 0 ? Self.countText(count) : nil
+    }
+
     /// Follows the page's settled-active state (the same seam as playback),
     /// NOT visibility — see the class doc.
     func setActive(_ active: Bool) {
@@ -155,6 +203,7 @@ final class SnapSubtitleView: UIView {
         nextIndex = 0
         isActive = false
         isHidden = true
+        countLabel.text = nil
     }
 
     private func startIfNeeded() {
@@ -168,6 +217,8 @@ final class SnapSubtitleView: UIView {
         isCycling = false
         label.layer.removeAllAnimations()
         label.layer.opacity = 0
+        countBubble.layer.removeAllAnimations()
+        countBubble.layer.opacity = 0
     }
 
     private func presentNextCue(fadingIn: Bool) {
@@ -195,7 +246,38 @@ final class SnapSubtitleView: UIView {
         // exposes that model value in between.
         label.layer.opacity = 0
         label.layer.add(Self.segmentAnimation(fadingIn: fadingIn), forKey: "subtitle-cue")
+        // The count bubble fades in alongside the first cue, then its
+        // filled animation clamps it visible for the page's whole active
+        // life — handoffs never touch this layer, so the bubble is inert
+        // through every hard cut (and backgrounding still hides it, same
+        // model-at-0 doctrine).
+        if fadingIn, countLabel.text != nil {
+            countBubble.layer.opacity = 0
+            countBubble.layer.add(Self.bubbleFadeIn(), forKey: "subtitle-count")
+        }
         CATransaction.commit()
+    }
+
+    /// The bubble's one-shot entrance: the first cue's lead-in + fade
+    /// envelope, ending AT 1 and filled forwards indefinitely (its "hold"
+    /// is the page's active lifetime; only `stopCycle` takes it down).
+    /// Internal (not private) so tests can pin the envelope.
+    static func bubbleFadeIn() -> CAKeyframeAnimation {
+        let total = leadInDelay + fadeDuration
+        let animation = CAKeyframeAnimation(keyPath: "opacity")
+        animation.values = [0, 0, 1]
+        animation.keyTimes = [0, NSNumber(value: leadInDelay / total), 1]
+        animation.duration = total
+        animation.fillMode = .forwards
+        animation.isRemovedOnCompletion = false
+        return animation
+    }
+
+    /// Compact engagement figure — the engagement rail's old recipe,
+    /// verbatim, so counts read identically wherever they resurface.
+    /// Internal (not private) for tests.
+    static func countText(_ count: Int) -> String {
+        count >= 1000 ? String(format: "%.1fk", Double(count) / 1000) : String(count)
     }
 
     /// One cue's opacity segment. The first fades in after the lead-in;

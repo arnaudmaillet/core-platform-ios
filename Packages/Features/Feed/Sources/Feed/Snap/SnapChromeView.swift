@@ -201,6 +201,7 @@ final class SnapChromeView: UIView {
     func updateCommentStreams(_ streams: FeedViewModel.CommentStreams) {
         guard hasMedia else { return }
         commentTicker.setComments(streams.reactions)
+        subtitleView.setCommentCount(streams.commentCount)
         subtitleView.setCues(streams.subtitles)
     }
 

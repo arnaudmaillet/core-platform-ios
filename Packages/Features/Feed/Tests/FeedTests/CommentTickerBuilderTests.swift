@@ -144,6 +144,7 @@ struct FeedViewModelStreamsTests {
         #expect(emittedID == id)
         #expect(streams.reactions.count == 8)
         #expect(streams.subtitles.isEmpty) // all short bodies — nothing semantic
+        #expect(streams.commentCount == 8) // raw total, before any surface filter
         #expect(viewModel.commentStreams(for: id) == streams)
 
         // Re-activation re-emits the cached streams without another load.
@@ -162,15 +163,21 @@ struct FeedViewModelStreamsTests {
         let (_, streams) = await awaitStreamsEmission(viewModel, activating: PostID("post-0042"))
         #expect(streams.reactions.count == 6)
         #expect(streams.subtitles.count == 3)
+        #expect(streams.commentCount == 9)
         #expect(Set(streams.reactions.map(\.id)).isDisjoint(with: streams.subtitles.map(\.id)))
         #expect(provider.loads == 1)
     }
 
-    @Test func gatedPostEmitsEmptyStreams() async {
+    /// Both surfaces gate below their minimums, but `commentCount` is a
+    /// post fact, not a surface artifact — it carries the true total even
+    /// when nothing renders (the hidden zone never shows it).
+    @Test func gatedPostEmitsEmptySurfacesButTheTrueCount() async {
         let provider = FakeCommentsProvider(comments: shortEntries(3))
         let viewModel = FeedViewModel(repository: StubFeedProvider(), commentsProvider: provider)
 
         let (_, streams) = await awaitStreamsEmission(viewModel, activating: PostID("post-0001"))
-        #expect(streams == .empty)
+        #expect(streams.reactions.isEmpty)
+        #expect(streams.subtitles.isEmpty)
+        #expect(streams.commentCount == 3)
     }
 }

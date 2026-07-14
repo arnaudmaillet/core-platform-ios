@@ -87,4 +87,67 @@ struct SnapSubtitleViewTests {
         #expect(view.isHidden)
         #expect(cueAnimation(view) == nil)
     }
+
+    // MARK: - Count bubble
+
+    private func bubble(_ view: SnapSubtitleView) -> UIVisualEffectView? {
+        view.subviews.compactMap { $0 as? UIVisualEffectView }.first
+    }
+
+    /// The bubble's one-shot entrance: the first cue's lead-in + fade
+    /// envelope, ending AT 1 and filled forwards — its hold is the page's
+    /// active lifetime.
+    @Test func bubbleEntranceFadesInAndFillsForwards() {
+        let animation = SnapSubtitleView.bubbleFadeIn()
+        #expect((animation.values as? [NSNumber])?.map(\.doubleValue) == [0, 0, 1])
+        #expect(animation.fillMode == .forwards)
+        #expect(!animation.isRemovedOnCompletion)
+        let expected = SnapSubtitleView.leadInDelay + SnapSubtitleView.fadeDuration
+        #expect(abs(animation.duration - expected) < 0.001)
+    }
+
+    @Test func activationRaisesTheBubbleOnlyWhenACountExists() {
+        let counted = makeView([cue("a"), cue("b"), cue("c")])
+        counted.setCommentCount(24)
+        counted.setActive(true)
+        #expect(bubble(counted)?.layer.animation(forKey: "subtitle-count") != nil)
+
+        let uncounted = makeView([cue("a"), cue("b"), cue("c")])
+        uncounted.setActive(true)
+        #expect(bubble(uncounted)?.layer.animation(forKey: "subtitle-count") == nil)
+    }
+
+    /// The vertical alignment invariant: bubble and pill share the zone's
+    /// bottom edge, so a two-line cue grows the pill upward while the
+    /// bubble holds its ground — never centered, never at the top.
+    @Test func bubbleBottomAlignsWithThePillAcrossLineWraps() {
+        let view = makeView([cue("a")])
+        view.setCommentCount(24)
+        let oneLine = SubtitleCue(id: "one", text: "Short cue.")
+        let twoLine = SubtitleCue(
+            id: "two",
+            text: "A deliberately much longer semantic comment that has no chance of fitting on a single rendered line at this width."
+        )
+
+        for probe in [oneLine, twoLine] {
+            view.setCues([probe, cue("b"), cue("c")])
+            view.setActive(true)
+            view.layoutIfNeeded()
+            let pill = view.subviews.compactMap { $0 as? UILabel }.first
+            let chip = bubble(view)
+            #expect(pill != nil && chip != nil)
+            if let pill, let chip {
+                #expect(abs(pill.frame.maxY - chip.frame.maxY) < 0.5)
+                #expect(chip.frame.minX == 0) // bubble leads the row
+                #expect(pill.frame.minX > chip.frame.maxX) // pill flows after it
+            }
+            view.setActive(false)
+        }
+    }
+
+    @Test func countTextFormatsCompactly() {
+        #expect(SnapSubtitleView.countText(12) == "12")
+        #expect(SnapSubtitleView.countText(999) == "999")
+        #expect(SnapSubtitleView.countText(1400) == "1.4k")
+    }
 }

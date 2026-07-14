@@ -47,12 +47,16 @@ public final class FeedViewModel {
     public nonisolated struct CommentStreams: Equatable, Sendable {
         public let reactions: [TickerCommentModel]
         public let subtitles: [SubtitleCue]
+        /// Total top-level comments on the post — every loaded entry, before
+        /// either surface's filters. Feeds the subtitle zone's count bubble.
+        public let commentCount: Int
 
-        public static let empty = CommentStreams(reactions: [], subtitles: [])
+        public static let empty = CommentStreams(reactions: [], subtitles: [], commentCount: 0)
 
-        public init(reactions: [TickerCommentModel], subtitles: [SubtitleCue]) {
+        public init(reactions: [TickerCommentModel], subtitles: [SubtitleCue], commentCount: Int) {
             self.reactions = reactions
             self.subtitles = subtitles
+            self.commentCount = commentCount
         }
     }
 
@@ -218,7 +222,8 @@ public final class FeedViewModel {
         guard let entries = try? await commentsProvider.loadComments(for: id) else { return }
         let streams = CommentStreams(
             reactions: tickerBuilder.build(entries, postID: id),
-            subtitles: subtitleBuilder.build(entries, postID: id)
+            subtitles: subtitleBuilder.build(entries, postID: id),
+            commentCount: entries.count
         )
         streamsByPost[id] = streams
         onCommentStreamsChange?(id, streams)
