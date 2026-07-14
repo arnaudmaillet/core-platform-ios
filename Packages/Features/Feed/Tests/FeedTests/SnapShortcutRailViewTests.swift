@@ -41,6 +41,27 @@ struct SnapShortcutRailViewTests {
         #expect(rail.visibleIconCount == 9)
     }
 
+    @Test func hiddenIconsAreScrollDiscoverable() {
+        let rail = makeRail()
+        // contentSize covers the whole column, clipped bubbles included…
+        let step = SnapShortcutRailView.step
+        #expect(rail.contentSize.height == 9 * SnapShortcutRailView.iconDiameter + 8 * SnapShortcutRailView.iconSpacing)
+        // …and the scrollable range (rest → top clamp) is exactly the six
+        // hidden bubbles' worth of travel. A zero or negative range here is
+        // the "wheel is frozen" regression.
+        let travel = (rail.contentSize.height - rail.bounds.height) - (-rail.contentInset.top)
+        #expect(travel == 6 * step)
+        // The wheel always rubber-bands, even below the scrollability line.
+        #expect(rail.alwaysBounceVertical)
+    }
+
+    @Test func placeholderPayloadOutnumbersTheRestingWindow() {
+        // The wheel ships more shortcuts than the resting window shows —
+        // otherwise there is nothing to discover and the rail reads dead.
+        #expect(SnapShortcutRailView.symbolPool.count >= 8)
+        #expect(SnapShortcutRailView.symbolPool.count > SnapShortcutRailView.restingIconCount)
+    }
+
     @Test func emptyPayloadHidesTheRail() {
         let rail = makeRail()
         #expect(rail.isHidden == false)

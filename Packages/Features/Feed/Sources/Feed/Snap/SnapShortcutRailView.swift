@@ -72,6 +72,9 @@ final class SnapShortcutRailView: UIScrollView {
         // adjustment would shove the wheel's scroll range around.
         contentInsetAdjustmentBehavior = .never
         decelerationRate = .fast
+        // The wheel always answers a swipe with the native rubber-band,
+        // even when the payload is too small to reveal anything.
+        alwaysBounceVertical = true
         clipsToBounds = true
         scrollsToTop = false // the status-bar tap belongs to the feed
         isHidden = true
@@ -84,12 +87,21 @@ final class SnapShortcutRailView: UIScrollView {
 
     /// Vertical intent only — the ticker's axis test, mirrored: horizontal
     /// drags starting on the rail stay with the timeline slide-to-pop.
+    /// Translation, NOT velocity: UIKit consults this for the scroll view's
+    /// own pan on early touch samples where velocity is still zero — a
+    /// velocity test reads those as "not vertical" and freezes the wheel
+    /// for the whole touch. (The ticker can test velocity because its pan
+    /// is a standalone recognizer, only consulted after real movement.)
+    /// A directionless sample stays with the wheel: the rail is a dead
+    /// zone for other pans either way, and refusing here would kill the
+    /// gesture outright.
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         guard gestureRecognizer === panGestureRecognizer else {
             return super.gestureRecognizerShouldBegin(gestureRecognizer)
         }
-        let velocity = panGestureRecognizer.velocity(in: self)
-        return abs(velocity.y) > abs(velocity.x)
+        let translation = panGestureRecognizer.translation(in: self)
+        guard translation != .zero else { return true }
+        return abs(translation.y) > abs(translation.x)
     }
 
     // MARK: - Content
