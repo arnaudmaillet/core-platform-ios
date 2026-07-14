@@ -116,6 +116,27 @@ struct SnapShortcutRailViewTests {
         ) == rest)
     }
 
+    @Test func edgeFlicksAreLeftToTheNativeSpring() {
+        let rail = makeRail()
+        let restOffset = -rail.contentInset.top
+        let maxOffset = rail.contentSize.height - rail.bounds.height + rail.contentInset.bottom
+
+        // A proposal past either boundary is an edge flick: the delegate
+        // must not touch it — handing UIKit a boundary-clamped target kills
+        // the overshoot spring and the edge reads as a hard wall.
+        var pastTop = CGPoint(x: 0, y: maxOffset + 120)
+        rail.scrollViewWillEndDragging(rail, withVelocity: CGPoint(x: 0, y: 2), targetContentOffset: &pastTop)
+        #expect(pastTop.y == maxOffset + 120)
+        var pastRest = CGPoint(x: 0, y: restOffset - 80)
+        rail.scrollViewWillEndDragging(rail, withVelocity: CGPoint(x: 0, y: -2), targetContentOffset: &pastRest)
+        #expect(pastRest.y == restOffset - 80)
+
+        // In-range releases still settle on the detent grid.
+        var inRange = CGPoint(x: 0, y: restOffset + 1.4 * SnapShortcutRailView.step)
+        rail.scrollViewWillEndDragging(rail, withVelocity: .zero, targetContentOffset: &inRange)
+        #expect(inRange.y == restOffset + SnapShortcutRailView.step)
+    }
+
     @Test func railPanTrapsVerticalTouchesFromTheFeed() {
         let rail = makeRail()
         let feedPan = UIPanGestureRecognizer()

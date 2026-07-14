@@ -15,6 +15,8 @@ import UIKit
 /// surface that moves every frame). `decelerationRate = .fast` plus detent
 /// snapping in `scrollViewWillEndDragging` gives the wheel feel: releases
 /// settle with bubbles on the step grid, never straddling the clip edge.
+/// Snapping applies only to in-range targets — an edge flick's overshooting
+/// proposal is left alone, so UIKit's native spring owns the rubber-band.
 ///
 /// # Resting window
 /// At rest exactly `restingIconCount` bubbles show, docked at the rail's
@@ -303,11 +305,19 @@ extension SnapShortcutRailView: UIScrollViewDelegate {
         withVelocity velocity: CGPoint,
         targetContentOffset: UnsafeMutablePointer<CGPoint>
     ) {
+        let restOffset = -contentInset.top
+        let maxOffset = contentSize.height - bounds.height + contentInset.bottom
+        let proposed = targetContentOffset.pointee.y
+        // A proposal beyond the scrollable range is an edge flick: leave it
+        // UNTOUCHED so UIKit's own spring overshoots and rubber-bands back.
+        // Clamping it to the boundary here handed deceleration a dead-stop
+        // target — the edges felt like a hard wall instead of native bounce.
+        guard proposed > restOffset, proposed < maxOffset else { return }
         targetContentOffset.pointee.y = Self.snappedTarget(
-            proposed: targetContentOffset.pointee.y,
-            restOffset: -contentInset.top,
+            proposed: proposed,
+            restOffset: restOffset,
             step: Self.step,
-            maxOffset: contentSize.height - bounds.height + contentInset.bottom
+            maxOffset: maxOffset
         )
     }
 }
