@@ -48,6 +48,14 @@ final class SnapChromeView: UIView {
     /// populated from `configure` with a per-post deterministic payload, so
     /// the flight replica draws the identical wheel.
     private let shortcutRail = SnapShortcutRailView()
+    /// The rail's top edge as a cell-relative constant (see `buildLayout`).
+    /// Optional: margins change during `init` before the layout exists.
+    private var railTopConstraint: NSLayoutConstraint?
+    /// Top margins beyond this are transition churn (safe-area insets
+    /// re-propagating into a cell mid-flight), not a settled state — a real
+    /// settled top (status bar + transparent nav bar) stays well under it
+    /// on every device class.
+    static let maxSettledTopMargin: CGFloat = 160
 
     /// Subtrees where a touch means "use the control", not "toggle playback" —
     /// consumed by the cell's tap arbitration. The shortcut rail is the sole
@@ -125,13 +133,23 @@ final class SnapChromeView: UIView {
 
         // The shortcut rail owns the trailing column above the band: bottom
         // on the ticker's top edge (same horizon as the subtitle zone),
-        // top under the nav bar — the margins guide tracks the top safe
-        // area in the live cell and `setFixedInsets` freezes it for the
-        // flight replica, exactly like the caption's bottom edge.
+        // top under the nav bar. The top is NOT anchored to the margins
+        // guide: cells ride page transitions, and UIKit re-propagates
+        // safe-area insets into a moving cell continuously — a guide-anchored
+        // top made the rail's geometry churn every transition frame (icons
+        // drifted off the page toward the screen's safe boundary instead of
+        // riding the cell). Instead the top pins to the CELL's top with a
+        // constant that tracks the margin only while it is a plausible
+        // settled value (`layoutMarginsDidChange` below), freezing through
+        // the flight so the rail rides like the rest of the chrome.
+        let railTop = shortcutRail.topAnchor.constraint(
+            equalTo: topAnchor, constant: layoutMargins.top + Spacing.sm
+        )
+        railTopConstraint = railTop
         shortcutRail.constrain(in: self) { parent in
             shortcutRail.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md)
             shortcutRail.widthAnchor.constraint(equalToConstant: SnapShortcutRailView.railWidth)
-            shortcutRail.topAnchor.constraint(equalTo: parent.layoutMarginsGuide.topAnchor, constant: Spacing.sm)
+            railTop
             shortcutRail.bottomAnchor.constraint(equalTo: commentTicker.topAnchor, constant: -Spacing.sm)
         }
 
@@ -158,6 +176,19 @@ final class SnapChromeView: UIView {
     func setFixedInsets(_ insets: UIEdgeInsets) {
         insetsLayoutMarginsFromSafeArea = false
         layoutMargins = insets
+    }
+
+    /// Tracks the settled top margin into the rail's cell-relative top.
+    /// Mid-flight safe-area churn (which can push the margin far past any
+    /// real nav-bar clearance) is rejected, so the rail's frame — and with
+    /// it the wheel's scroll geometry — holds still while the page rides a
+    /// transition. Settled updates (initial layout, the flight replica's
+    /// captured insets, trait changes) pass through.
+    override func layoutMarginsDidChange() {
+        super.layoutMarginsDidChange()
+        let top = layoutMargins.top
+        guard top <= Self.maxSettledTopMargin else { return }
+        railTopConstraint?.constant = top + Spacing.sm
     }
 
     // MARK: - Configuration

@@ -18,14 +18,18 @@ import UIKit
 ///
 /// # Resting window
 /// At rest exactly `restingIconCount` bubbles show, docked at the rail's
-/// BOTTOM (on the subtitle zone's horizon), with the rest clipped below the
-/// frame's bottom edge. This is pure contentInset arithmetic: the rail's
-/// frame spans the full ticker→nav-bar band (so the whole strip is grabbable
-/// and revealed icons have somewhere to go), `contentInset.top` pads the
-/// scroll range by `frame height − resting window`, and the rest offset is
-/// `-contentInset.top`. Swiping up walks the hidden icons in from the bottom
-/// edge; the top clamp bottom-aligns the whole column, filling the rail
-/// toward the nav bar.
+/// BOTTOM (on the subtitle zone's horizon), with the rest dissolved through
+/// the edge-fade band below. This is pure contentInset arithmetic: the
+/// rail's frame spans the full ticker→nav-bar band (so the whole strip is
+/// grabbable and revealed icons have somewhere to go), `contentInset.top`
+/// pads the scroll range down to the resting window (one fade band above
+/// the bottom edge), and the rest offset is `-contentInset.top`. Swiping up
+/// walks the hidden icons in through the fade; the top clamp bottom-aligns
+/// the whole column, filling the rail toward the nav bar. Both invisible
+/// clip edges are soft (`edgeFade` mask), so an icon leaving the window
+/// slides out through a dissolve — never a hard cut on a mid-screen line.
+/// Geometry rebuilds (size ticks) preserve the reveal progress; only a
+/// fresh payload parks the wheel back at rest.
 ///
 /// # Feed arbitration
 /// Nested same-axis scrolling: a touch that lands on the rail belongs to the
@@ -59,10 +63,21 @@ final class SnapShortcutRailView: UIScrollView {
     static var restingWindowHeight: CGFloat {
         CGFloat(restingIconCount) * iconDiameter + CGFloat(restingIconCount - 1) * iconSpacing
     }
+    /// The soft clip band at both edges: icons dissolve through it instead
+    /// of vanishing on the rail's invisible clip line mid-screen. The
+    /// resting window docks this far above the rail's bottom (via
+    /// `contentInset.bottom`), so resting bubbles sit clear of the fade.
+    static let edgeFadeLength: CGFloat = Spacing.lg
 
     private var icons: [UIButton] = []
     private var lastLaidOutSize: CGSize = .zero
     private var needsContentRebuild = false
+    /// Fresh payloads park at rest; mere size churn must NOT — geometry
+    /// rebuilds preserve the user's reveal progress instead.
+    private var needsRestReset = false
+    /// The mask doing the soft clip (`layer.mask`); repositioned every
+    /// layout pass because a scroll view's layer bounds ride its offset.
+    private let edgeFade = CAGradientLayer()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -80,6 +95,14 @@ final class SnapShortcutRailView: UIScrollView {
         isHidden = true
         accessibilityIdentifier = "shortcut-rail"
         delegate = self
+
+        // White = shown, clear = dissolved; locations resolved per layout
+        // pass (they depend on the rail's height).
+        edgeFade.colors = [
+            UIColor.clear.cgColor, UIColor.white.cgColor,
+            UIColor.white.cgColor, UIColor.clear.cgColor,
+        ]
+        layer.mask = edgeFade
     }
 
     @available(*, unavailable)
@@ -116,6 +139,7 @@ final class SnapShortcutRailView: UIScrollView {
         for icon in icons { addSubview(icon) }
         isHidden = names.isEmpty
         needsContentRebuild = true
+        needsRestReset = true
         setNeedsLayout()
     }
 
@@ -126,6 +150,16 @@ final class SnapShortcutRailView: UIScrollView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        // The mask lives in layer coordinates, which ride the scroll offset —
+        // re-cover the visible window on every pass (cheap: one frame set,
+        // no allocation; implicit actions off so it can't lag a fast flick).
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        edgeFade.frame = bounds
+        let fade = min(Self.edgeFadeLength / max(bounds.height, 1), 0.5)
+        edgeFade.locations = [0, NSNumber(value: fade), NSNumber(value: 1 - fade), 1]
+        CATransaction.commit()
+
         // layoutSubviews fires on every scrolled frame (bounds.origin moves);
         // geometry only changes when the size or the payload does.
         guard needsContentRebuild || bounds.size != lastLaidOutSize else { return }
@@ -135,6 +169,11 @@ final class SnapShortcutRailView: UIScrollView {
     }
 
     private func rebuildGeometry() {
+        // A size tick mid-life (safe-area churn, rotation) must not stomp
+        // the wheel: carry the reveal progress across the rebuild. Only a
+        // fresh payload (`setSymbols`) parks back at rest.
+        let previousProgress = contentOffset.y + contentInset.top
+
         let diameter = Self.iconDiameter
         let x = (bounds.width - diameter) / 2
         for (index, icon) in icons.enumerated() {
@@ -144,13 +183,18 @@ final class SnapShortcutRailView: UIScrollView {
             ? 0
             : CGFloat(icons.count) * diameter + CGFloat(icons.count - 1) * Self.iconSpacing
         contentSize = CGSize(width: bounds.width, height: contentHeight)
-        // The rest offset parks icon 0 at the top of the resting window —
-        // everything past `restingIconCount` sits clipped below the frame.
+        // The rest offset parks icon 0 at the top of the resting window,
+        // docked one fade band above the rail's bottom edge — everything
+        // past `restingIconCount` dissolves through the fade below.
         contentInset = UIEdgeInsets(
-            top: max(0, bounds.height - Self.restingWindowHeight),
-            left: 0, bottom: 0, right: 0
+            top: max(0, bounds.height - Self.restingWindowHeight - Self.edgeFadeLength),
+            left: 0, bottom: Self.edgeFadeLength, right: 0
         )
-        contentOffset = CGPoint(x: 0, y: -contentInset.top)
+        let restOffset = -contentInset.top
+        let maxOffset = max(contentSize.height - bounds.height + contentInset.bottom, restOffset)
+        let progress = needsRestReset ? 0 : min(max(previousProgress, 0), maxOffset - restOffset)
+        needsRestReset = false
+        contentOffset = CGPoint(x: 0, y: restOffset + progress)
     }
 
     // MARK: - Detents
@@ -204,11 +248,13 @@ final class SnapShortcutRailView: UIScrollView {
 
     // MARK: - Test seams
 
-    /// Bubbles currently inside the visible window (edge-touching a clip
-    /// boundary does not count). Internal so tests can pin the resting
-    /// window to exactly `restingIconCount`.
+    /// Bubbles currently inside the visible window, the edge-fade bands
+    /// excluded (a bubble dissolving in the fade is an affordance, not a
+    /// shown shortcut; edge-touching does not count). Internal so tests
+    /// can pin the resting window to exactly `restingIconCount`.
     var visibleIconCount: Int {
         let window = CGRect(origin: contentOffset, size: bounds.size)
+            .insetBy(dx: 0, dy: Self.edgeFadeLength)
         return icons.count(where: { $0.frame.intersects(window) })
     }
 }
@@ -225,7 +271,7 @@ extension SnapShortcutRailView: UIScrollViewDelegate {
             proposed: targetContentOffset.pointee.y,
             restOffset: -contentInset.top,
             step: Self.step,
-            maxOffset: contentSize.height - bounds.height
+            maxOffset: contentSize.height - bounds.height + contentInset.bottom
         )
     }
 }

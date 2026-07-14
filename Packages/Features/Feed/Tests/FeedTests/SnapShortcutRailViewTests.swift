@@ -25,8 +25,10 @@ struct SnapShortcutRailViewTests {
 
     @Test func restingWindowShowsExactlyThreeIcons() {
         let rail = makeRail()
-        // The top inset pads the scroll range down to the resting window…
-        #expect(rail.contentInset.top == Self.railHeight - SnapShortcutRailView.restingWindowHeight)
+        // The top inset pads the scroll range down to the resting window,
+        // docked one fade band clear of the rail's soft bottom edge…
+        #expect(rail.contentInset.top
+            == Self.railHeight - SnapShortcutRailView.restingWindowHeight - SnapShortcutRailView.edgeFadeLength)
         // …and the rail rests parked against it.
         #expect(rail.contentOffset.y == -rail.contentInset.top)
         #expect(rail.visibleIconCount == SnapShortcutRailView.restingIconCount)
@@ -34,11 +36,28 @@ struct SnapShortcutRailViewTests {
 
     @Test func scrollingUpRevealsTheFullColumn() {
         let rail = makeRail()
-        let maxOffset = rail.contentSize.height - rail.bounds.height
+        let maxOffset = rail.contentSize.height - rail.bounds.height + rail.contentInset.bottom
         // Nine bubbles fit inside the 520pt rail, so the top clamp reveals
-        // them all, bottom-aligned to the rail's frame.
+        // them all, bottom-aligned above the fade band.
         rail.contentOffset = CGPoint(x: 0, y: maxOffset)
         #expect(rail.visibleIconCount == 9)
+    }
+
+    @Test func sizeChurnPreservesRevealProgress() {
+        let rail = makeRail()
+        // The user has revealed two detents…
+        let revealed = -rail.contentInset.top + 2 * SnapShortcutRailView.step
+        rail.contentOffset = CGPoint(x: 0, y: revealed)
+        // …then the rail's height ticks (safe-area churn, rotation). The
+        // rebuild must carry the reveal progress, not stomp back to rest —
+        // the stomp is the "icons abruptly vanish mid-scroll" bug.
+        rail.frame.size.height = Self.railHeight - 40
+        rail.layoutIfNeeded()
+        #expect(rail.contentOffset.y == -rail.contentInset.top + 2 * SnapShortcutRailView.step)
+        // A fresh payload, by contrast, parks back at rest.
+        rail.setSymbols(Array(SnapShortcutRailView.symbolPool.prefix(9)))
+        rail.layoutIfNeeded()
+        #expect(rail.contentOffset.y == -rail.contentInset.top)
     }
 
     @Test func hiddenIconsAreScrollDiscoverable() {
@@ -49,7 +68,8 @@ struct SnapShortcutRailViewTests {
         // …and the scrollable range (rest → top clamp) is exactly the six
         // hidden bubbles' worth of travel. A zero or negative range here is
         // the "wheel is frozen" regression.
-        let travel = (rail.contentSize.height - rail.bounds.height) - (-rail.contentInset.top)
+        let maxOffset = rail.contentSize.height - rail.bounds.height + rail.contentInset.bottom
+        let travel = maxOffset - (-rail.contentInset.top)
         #expect(travel == 6 * step)
         // The wheel always rubber-bands, even below the scrollability line.
         #expect(rail.alwaysBounceVertical)
@@ -141,6 +161,25 @@ struct SnapShortcutRailViewTests {
         #expect(subtitle.frame.maxX == rail.frame.minX - Spacing.md)
         // A media post shows its wheel.
         #expect(rail.isHidden == false)
+    }
+
+    @Test func railTopTracksSettledMarginsButFreezesThroughFlightChurn() throws {
+        let chrome = SnapChromeView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
+
+        // A settled top margin (status bar + nav bar) flows into the rail's
+        // cell-relative top…
+        chrome.setFixedInsets(UIEdgeInsets(top: 103, left: 0, bottom: 34, right: 0))
+        chrome.layoutIfNeeded()
+        #expect(rail.frame.minY == 103 + Spacing.sm)
+
+        // …but mid-flight safe-area churn (insets far past any real nav
+        // clearance, re-propagated while the cell rides a transition) is
+        // rejected: the rail's frame holds still so icons ride the page
+        // instead of drifting toward the screen's safe boundary.
+        chrome.setFixedInsets(UIEdgeInsets(top: 420, left: 0, bottom: 34, right: 0))
+        chrome.layoutIfNeeded()
+        #expect(rail.frame.minY == 103 + Spacing.sm)
     }
 
     @Test func textOnlyPostsKeepTheEmptyShell() throws {
