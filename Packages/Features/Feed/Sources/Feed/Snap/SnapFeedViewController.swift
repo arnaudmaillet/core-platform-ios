@@ -82,8 +82,8 @@ final class SnapFeedViewController: UIViewController {
         // No onEngagementChange subscription: the page shows no like/comment
         // affordances this iteration (the engagement rail was removed; the
         // view-model seam stays for their return).
-        viewModel.onTickerCommentsChange = { [weak self] id, comments in
-            self?.updateVisibleTicker(for: id, comments: comments)
+        viewModel.onCommentStreamsChange = { [weak self] id, streams in
+            self?.updateVisibleStreams(for: id, streams: streams)
         }
         viewModel.onOwnPostInserted = { [weak self] in
             // Reveal the viewer's just-posted item: a prepend on a full-screen
@@ -261,10 +261,10 @@ final class SnapFeedViewController: UIViewController {
                     pipeline: pipeline,
                     videoPlayback: self.videoPlayback
                 )
-                // Pull side of the ticker seam: a recycled cell for an
-                // already-visited post gets its queue back immediately; async
-                // arrivals ride `onTickerCommentsChange` instead.
-                cell.updateTickerComments(self.viewModel.tickerComments(for: id))
+                // Pull side of the comments seam: a recycled cell for an
+                // already-visited post gets its streams back immediately;
+                // async arrivals ride `onCommentStreamsChange` instead.
+                cell.updateCommentStreams(self.viewModel.commentStreams(for: id))
             }
             return cell
         }
@@ -525,13 +525,13 @@ final class SnapFeedViewController: UIViewController {
         }
     }
 
-    /// A ticker queue lands on exactly the cell showing that post (visible or
-    /// active — the band only streams on the active one). A cell that's gone
-    /// by now re-pulls at reconfigure.
-    private func updateVisibleTicker(for id: PostID, comments: [TickerCommentModel]) {
+    /// Comment streams land on exactly the cell showing that post; each
+    /// surface applies its own gate from there. A cell that's gone by now
+    /// re-pulls at reconfigure.
+    private func updateVisibleStreams(for id: PostID, streams: FeedViewModel.CommentStreams) {
         guard let indexPath = dataSource.indexPath(for: id),
               let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell else { return }
-        cell.updateTickerComments(comments)
+        cell.updateCommentStreams(streams)
     }
 
     // MARK: - Active-item lifecycle
@@ -635,11 +635,23 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         if lifecycle.activeIndex == indexPath.item {
             (cell as? SnapCellLifecycle)?.willBecomeActive()
         }
-        // The comment ticker streams on VISIBILITY, not on the settle-
-        // quantized active seam: a page dragged partway in must already show
-        // its band flowing, not pop it in at rest. (Video stays settle-
-        // gated — an AVPlayer per half-visible page is real cost; bubbles
-        // aren't.)
+        // Re-pull the cached streams BEFORE raising the visibility gate: a
+        // cell configured while the prefetch load was still in flight
+        // pulled `.empty` at dequeue, and the async push only reaches
+        // visible cells — this cell missed it. Synchronous on a cache hit,
+        // so the surfaces own their content when activation lands and the
+        // subtitle zone takes its INSTANT entrance (riding the swipe like
+        // static chrome) instead of the content-arrival fade after settle.
+        // (`updateCommentStreams` no-ops on identical content; still-
+        // uncached posts stay empty here and fade in when the push lands.)
+        if let snapCell = cell as? SnapFeedCell, orderedIDs.indices.contains(indexPath.item) {
+            snapCell.updateCommentStreams(viewModel.commentStreams(for: orderedIDs[indexPath.item]))
+        }
+        // Both comment surfaces render on VISIBILITY, not on the settle-
+        // quantized active seam: a page dragged partway in must already
+        // show its band flowing and its subtitle pill pinned, not pop them
+        // in at rest. (Video stays settle-gated — an AVPlayer per
+        // half-visible page is real cost; text layers aren't.)
         (cell as? SnapFeedCell)?.setTickerStreaming(true)
     }
 
@@ -764,10 +776,11 @@ extension SnapFeedViewController: UICollectionViewDataSourcePrefetching {
             if let model, model.mediaKind == .video, let url = model.mediaURL {
                 videoPlayback?.preroll(url)
             }
-            // Ticker queues too: loaded before the page scrolls in, so its
-            // band enters the viewport already streaming.
+            // Comment streams too: loaded before the page scrolls in, so its
+            // band enters the viewport already streaming (subtitles wait for
+            // settle regardless — their gate is activation, not content).
             if let model {
-                viewModel.ensureTickerComments(for: model.id)
+                viewModel.ensureCommentStreams(for: model.id)
             }
         }
     }

@@ -28,14 +28,18 @@ public final class MockCommentService: @unchecked Sendable {
         }
     }
 
-    /// Posts deliberately seeded with a dense set of short comments (18), so
-    /// the snap feed's comment ticker (3-lane density, staggered speeds,
-    /// infinite wrap-around) can be exercised deterministically in mock mode:
-    /// the dataset's first three video posts and first three text-only posts.
-    /// Every other post keeps the sparse two-comment seed — the ticker's
-    /// minimum-engagement gate must keep the band hidden there.
+    /// Posts deliberately seeded with a dense comment set (18 micro-reactions
+    /// + 6 semantic sentences), so both snap-feed comment surfaces — the
+    /// conveyor band and the subtitle zone — can be exercised
+    /// deterministically in mock mode, covering every media kind: video,
+    /// image (whose bright synthesized fills are the legibility worst case
+    /// the surfaces' contrast treatments exist for), and text-only. Every
+    /// other post keeps the sparse two-comment seed — both surfaces'
+    /// minimum-engagement gates must keep them hidden there. post-0001 stays
+    /// sparse on purpose: repository tests pin its two-comment seed.
     private static let denselySeededPostIDs: Set<String> = [
         "post-0000", "post-0003", "post-0006", // video pages (index % 3 == 0)
+        "post-0004", "post-0007", // image pages (index % 3 == 1; post-0001 stays sparse)
         "post-0002", "post-0005", "post-0008", // text-only pages (index % 3 == 2)
     ]
 
@@ -72,6 +76,19 @@ public final class MockCommentService: @unchecked Sendable {
         "10/10 🍿",
     ]
 
+    /// Semantic bodies for the subtitle zone's dense seed — full sentences
+    /// that must fail the ticker's reaction filter and pass the subtitle
+    /// builder's semantic shape (≥ 4 words), so the two surfaces partition
+    /// the dense posts' comments deterministically.
+    private static let semanticCommentBank: [String] = [
+        "The light in this is absolutely something else.",
+        "I have rewatched this more times than I want to admit.",
+        "Whoever did the edit understood the assignment completely.",
+        "This is exactly why I keep coming back to this app.",
+        "The pacing on that last cut is genuinely perfect.",
+        "Feels like a memory I never actually had, somehow.",
+    ]
+
     private func seedComments(for postID: String) -> [Comment_V1_CommentView] {
         let authors = dataset.authors
         guard authors.count >= 3 else { return [] }
@@ -83,7 +100,7 @@ public final class MockCommentService: @unchecked Sendable {
             // different (but stable) slice, authors cycling the whole cast.
             let offset = Int(postID.suffix(4)) ?? 0
             let bank = Self.denseCommentBank
-            raw = (0..<18).map { position in
+            let reactions = (0..<18).map { position in
                 makeComment(
                     id: "\(postID)-dense-\(position)",
                     postID: postID,
@@ -92,6 +109,20 @@ public final class MockCommentService: @unchecked Sendable {
                     ageMs: Int64(position + 1) * 3 * 60_000
                 )
             }
+            // The subtitle slice, appended after the reactions so the band's
+            // seed (and the slices tests pin) stays byte-identical. Rotated
+            // like the reaction bank so each post's cue order differs.
+            let semantic = Self.semanticCommentBank
+            let subtitles = semantic.indices.map { position in
+                makeComment(
+                    id: "\(postID)-sem-\(position)",
+                    postID: postID,
+                    author: authors[(offset + position + 3) % authors.count].profileID,
+                    body: semantic[(offset + position) % semantic.count],
+                    ageMs: Int64(position + 1) * 7 * 60_000
+                )
+            }
+            raw = reactions + subtitles
         } else {
             raw = [
                 makeComment(id: "\(postID)-c0", postID: postID, author: authors[1].profileID, body: "Love this shot 🔥", ageMs: 20 * 60_000),

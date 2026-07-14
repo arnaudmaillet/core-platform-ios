@@ -123,20 +123,26 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         })
     }
 
-    /// Hands the post's ticker queue to the chrome's comment band. Arrives
-    /// from the view model whenever loaded — before or after this cell
-    /// becomes visible; the band starts streaming once both content and
-    /// visibility are in place.
-    func updateTickerComments(_ comments: [TickerCommentModel]) {
-        chrome.updateTickerComments(comments)
+    /// Hands the post's comment streams to the chrome's two surfaces (the
+    /// band's queue, the subtitle zone's cues). Arrives from the view model
+    /// whenever loaded — before or after this cell becomes visible; each
+    /// surface starts once both its content and the visibility gate are in
+    /// place.
+    func updateCommentStreams(_ streams: FeedViewModel.CommentStreams) {
+        chrome.updateCommentStreams(streams)
     }
 
-    /// Visibility-scoped ticker control, driven by the view controller's
-    /// `willDisplay`/`didEndDisplaying`: the band flows on any on-screen
-    /// page, including one being dragged in, unlike playback which stays on
-    /// the settle-quantized active seam.
+    /// Visibility-scoped comment-surface control, driven by the view
+    /// controller's `willDisplay`/`didEndDisplaying`: both surfaces render
+    /// on any on-screen page, including one being dragged in, unlike
+    /// playback which stays on the settle-quantized active seam.
     func setTickerStreaming(_ streaming: Bool) {
         chrome.setTickerActive(streaming)
+        // The subtitle zone rides the same visibility seam: a page dragged
+        // partway in slides in with its pill already rendered (the
+        // persistent cue is static content between handoffs, like the
+        // caption), instead of popping in after settle.
+        chrome.setSubtitlesActive(streaming)
     }
 
     private func loadImage(_ url: URL?, into imageView: UIImageView, expecting id: PostID, pipeline: ImagePipeline) {
@@ -162,7 +168,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // Normally redundant with the visibility path (`setTickerStreaming`),
         // but it is the restart edge after backgrounding: foregrounding
         // re-activates the settled page without a fresh `willDisplay`.
+        // Both comment surfaces share it.
         chrome.setTickerActive(true)
+        chrome.setSubtitlesActive(true)
         switch mediaKind {
         case .video:
             guard let url = mediaURL, let videoPlayback else { return }
@@ -219,6 +227,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // Covers the paths visibility can't see: backgrounding and the
         // feed's own disappearance, where no `didEndDisplaying` fires.
         chrome.setTickerActive(false)
+        chrome.setSubtitlesActive(false)
         switch mediaKind {
         case .video:
             videoPlayback?.stop(videoRenderView)
