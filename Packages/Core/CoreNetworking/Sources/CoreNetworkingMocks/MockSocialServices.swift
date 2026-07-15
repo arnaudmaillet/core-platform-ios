@@ -140,6 +140,8 @@ public final class MockSocialServices: @unchecked Sendable {
             view.handle = MockPostStore.viewer.handle
             view.displayName = MockPostStore.viewer.displayName
             view.avatarURL = MockPostStore.viewer.avatarURL
+            view.bio = MockPostStore.viewer.bio
+            view.websiteURL = MockPostStore.viewer.websiteURL
             return .success(view)
         }
         guard let author = dataset.author(for: request.profileID) else {
@@ -150,6 +152,8 @@ public final class MockSocialServices: @unchecked Sendable {
         view.handle = author.handle
         view.displayName = author.displayName
         view.avatarURL = author.avatarURL
+        view.bio = author.bio
+        view.websiteURL = author.websiteURL
         return .success(view)
     }
 

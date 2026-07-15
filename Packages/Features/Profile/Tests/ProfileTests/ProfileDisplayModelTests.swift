@@ -70,6 +70,18 @@ struct ProfileDisplayModelTests {
         #expect(model.followingText == "—")
     }
 
+    @Test func formatsWebsiteInstagramStyle() {
+        // Scheme and "www." stripped, trailing slash trimmed, path kept.
+        #expect(ProfileDisplayModel.websiteDisplay(URL(string: "https://www.ada.dev/notes/")) == "ada.dev/notes")
+        #expect(ProfileDisplayModel.websiteDisplay(URL(string: "http://ada.dev")) == "ada.dev")
+        #expect(ProfileDisplayModel.websiteDisplay(nil) == nil)
+    }
+
+    @Test func postsCountReadsUnavailableUntilServed() {
+        // No backend serves a post count yet; the strip must not claim "0".
+        #expect(ProfileDisplayModel(profile: profile()).postsText == "—")
+    }
+
     @Test func derivesEstimateFromEdgeSample() {
         // A complete page → exact; a truncated page → "at least".
         #expect(CountEstimate.fromSample(count: 2, hasMore: false) == .exact(2))

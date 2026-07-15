@@ -2,20 +2,25 @@ import MediaCore
 import DesignSystem
 import UIKit
 
-/// The profile identity block: avatar, name + verified badge, @handle, bio, and
-/// the followers/following counter row. Pure presentation — it is handed a
-/// finished `ProfileDisplayModel` and an `ImagePipeline`; it owns no data.
+/// The profile identity block, laid out like a classic Instagram header:
+/// avatar on the left with the Posts/Followers/Following strip beside it,
+/// then name + verified badge, bio, website link, and an edge-to-edge action
+/// row (Edit Profile alone, or Follow + Message split half-and-half).
+/// Pure presentation — it is handed a finished `ProfileDisplayModel` and an
+/// `ImagePipeline`; it owns no data.
 final class ProfileHeaderView: UIView {
     private enum Metrics {
-        static let avatarSize: CGFloat = 88
+        static let avatarSize: CGFloat = 86
+        static let badgeSize: CGFloat = 18
     }
 
     private let avatarView = UIImageView()
     private let monogramLabel = UILabel()
     private let nameLabel = UILabel()
     private let verifiedBadge = UIImageView(image: UIImage(systemName: "checkmark.seal.fill"))
-    private let handleLabel = UILabel()
     private let bioLabel = UILabel()
+    private let websiteButton = UIButton(configuration: .plain())
+    private let postsStat = ProfileStatView(caption: "Posts")
     private let followersStat = ProfileStatView(caption: "Followers")
     private let followingStat = ProfileStatView(caption: "Following")
     private let actionButton = UIButton(configuration: .filled())
@@ -25,10 +30,13 @@ final class ProfileHeaderView: UIView {
     var onActionTapped: (() -> Void)?
     /// Invoked when the Message button is tapped (other users only).
     var onMessageTapped: (() -> Void)?
+    /// Invoked with the profile's website URL when the link row is tapped.
+    var onWebsiteTapped: ((URL) -> Void)?
 
     private let imagePipeline: ImagePipeline
     private var avatarTask: Task<Void, Never>?
     private var currentAvatarURL: URL?
+    private var websiteURL: URL?
 
     init(imagePipeline: ImagePipeline) {
         self.imagePipeline = imagePipeline
@@ -49,21 +57,26 @@ final class ProfileHeaderView: UIView {
         monogramLabel.text = model.avatarMonogram
         nameLabel.text = model.displayName
         verifiedBadge.isHidden = !model.isVerified
-        handleLabel.text = model.handle
 
         bioLabel.text = model.bio
         bioLabel.isHidden = !model.hasBio
 
+        websiteURL = model.websiteURL
+        websiteButton.configuration?.title = model.websiteText
+        websiteButton.isHidden = model.websiteText == nil
+
+        postsStat.setValue(model.postsText)
         followersStat.setValue(model.followerText)
         followingStat.setValue(model.followingText)
 
         loadAvatar(model.avatarURL)
     }
 
-    /// Styles the action button per the viewer's relationship. `.follow` is the
-    /// one prominent (filled) call to action; Following/Edit are secondary.
+    /// Styles the action row per the viewer's relationship. The viewer's own
+    /// profile gets a lone full-width "Edit Profile"; another user's profile
+    /// splits the row between Follow/Following and Message. `.follow` is the
+    /// one prominent (filled) call to action.
     func configureAction(_ state: ProfileViewModel.FollowButton) {
-        // Message shows only for another user (alongside Follow/Following).
         switch state {
         case .hidden:
             actionButton.isHidden = true
@@ -86,16 +99,27 @@ final class ProfileHeaderView: UIView {
     private func applyActionStyle(title: String, prominent: Bool) {
         var config: UIButton.Configuration = prominent ? .filled() : .gray()
         config.title = title
-        config.cornerStyle = .capsule
-        config.buttonSize = .medium
-        config.contentInsets = NSDirectionalEdgeInsets(
-            top: Spacing.sm, leading: Spacing.xl, bottom: Spacing.sm, trailing: Spacing.xl
-        )
         if prominent {
             config.baseBackgroundColor = .systemBlue
             config.baseForegroundColor = .white
         }
-        actionButton.configuration = config
+        actionButton.configuration = Self.styledAction(config)
+    }
+
+    /// Shared chrome for the action row: squared-off Instagram-style buttons
+    /// (rounded rect, not capsule) with a semibold compact title.
+    private static func styledAction(_ base: UIButton.Configuration) -> UIButton.Configuration {
+        var config = base
+        config.cornerStyle = .medium
+        config.contentInsets = NSDirectionalEdgeInsets(
+            top: Spacing.sm, leading: Spacing.sm, bottom: Spacing.sm, trailing: Spacing.sm
+        )
+        config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var attributes = attributes
+            attributes.font = UIFont.preferredFont(forTextStyle: .subheadline).withWeight(.semibold)
+            return attributes
+        }
+        return config
     }
 
     private func loadAvatar(_ url: URL?) {
@@ -127,9 +151,19 @@ final class ProfileHeaderView: UIView {
         monogramLabel.textAlignment = .center
         monogramLabel.pin(to: avatarView)
 
-        nameLabel.font = .preferredFont(forTextStyle: .title2)
+        // Top row: avatar on the left, counters filling the remaining width.
+        let statsRow = UIStackView(arrangedSubviews: [postsStat, followersStat, followingStat])
+        statsRow.axis = .horizontal
+        statsRow.alignment = .center
+        statsRow.distribution = .fillEqually
+
+        let topRow = UIStackView(arrangedSubviews: [avatarView, statsRow])
+        topRow.axis = .horizontal
+        topRow.alignment = .center
+        topRow.spacing = Spacing.lg
+
+        nameLabel.font = UIFont.preferredFont(forTextStyle: .subheadline).withWeight(.semibold)
         nameLabel.adjustsFontForContentSizeCategory = true
-        nameLabel.font = UIFont.boldSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .title2).pointSize)
         nameLabel.textColor = .label
         nameLabel.numberOfLines = 1
 
@@ -137,74 +171,91 @@ final class ProfileHeaderView: UIView {
         verifiedBadge.contentMode = .scaleAspectFit
         verifiedBadge.setContentHuggingPriority(.required, for: .horizontal)
 
-        handleLabel.font = .preferredFont(forTextStyle: .subheadline)
-        handleLabel.adjustsFontForContentSizeCategory = true
-        handleLabel.textColor = .secondaryLabel
-
-        bioLabel.font = .preferredFont(forTextStyle: .body)
+        bioLabel.font = .preferredFont(forTextStyle: .subheadline)
         bioLabel.adjustsFontForContentSizeCategory = true
         bioLabel.textColor = .label
         bioLabel.numberOfLines = 0
 
-        // Name + verified badge sit on one line, left-aligned.
-        let nameRow = UIStackView(arrangedSubviews: [nameLabel, verifiedBadge])
+        // Name + verified badge sit on one line; a spacer keeps them leading
+        // while the row itself stretches with the fill-aligned column.
+        let nameRow = UIStackView(arrangedSubviews: [nameLabel, verifiedBadge, UIView()])
         nameRow.axis = .horizontal
         nameRow.alignment = .center
         nameRow.spacing = Spacing.xs
         NSLayoutConstraint.activate([
-            verifiedBadge.widthAnchor.constraint(equalToConstant: 20),
-            verifiedBadge.heightAnchor.constraint(equalToConstant: 20)
+            verifiedBadge.widthAnchor.constraint(equalToConstant: Metrics.badgeSize),
+            verifiedBadge.heightAnchor.constraint(equalToConstant: Metrics.badgeSize)
         ])
 
-        let statsRow = UIStackView(arrangedSubviews: [followersStat, followingStat, UIView()])
-        statsRow.axis = .horizontal
-        statsRow.alignment = .center
-        statsRow.spacing = Spacing.xl
-        statsRow.distribution = .fill
+        var websiteConfig = UIButton.Configuration.plain()
+        websiteConfig.image = UIImage(systemName: "link")
+        websiteConfig.imagePadding = Spacing.xs
+        websiteConfig.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(textStyle: .footnote)
+        websiteConfig.baseForegroundColor = .systemBlue
+        websiteConfig.contentInsets = .zero
+        websiteConfig.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var attributes = attributes
+            attributes.font = UIFont.preferredFont(forTextStyle: .subheadline).withWeight(.semibold)
+            return attributes
+        }
+        websiteButton.configuration = websiteConfig
+        websiteButton.contentHorizontalAlignment = .leading
+        websiteButton.isHidden = true
+        websiteButton.addAction(
+            UIAction { [weak self] _ in
+                guard let self, let websiteURL = self.websiteURL else { return }
+                self.onWebsiteTapped?(websiteURL)
+            },
+            for: .primaryActionTriggered
+        )
 
         actionButton.isHidden = true
-        actionButton.setContentHuggingPriority(.required, for: .horizontal)
         actionButton.addAction(
             UIAction { [weak self] _ in self?.onActionTapped?() },
             for: .primaryActionTriggered
         )
 
-        var messageConfig = UIButton.Configuration.gray()
+        var messageConfig = Self.styledAction(.gray())
         messageConfig.title = "Message"
-        messageConfig.cornerStyle = .capsule
-        messageConfig.buttonSize = .medium
-        messageConfig.contentInsets = NSDirectionalEdgeInsets(
-            top: Spacing.sm, leading: Spacing.xl, bottom: Spacing.sm, trailing: Spacing.xl
-        )
         messageButton.configuration = messageConfig
         messageButton.isHidden = true
-        messageButton.setContentHuggingPriority(.required, for: .horizontal)
         messageButton.addAction(
             UIAction { [weak self] _ in self?.onMessageTapped?() },
             for: .primaryActionTriggered
         )
 
-        // Follow + Message sit side by side; a trailing spacer keeps them left-aligned.
-        let actionRow = UIStackView(arrangedSubviews: [actionButton, messageButton, UIView()])
+        // Edge-to-edge action row: Follow + Message split it half-and-half;
+        // when Message is hidden (own profile) Edit Profile takes the full width.
+        let actionRow = UIStackView(arrangedSubviews: [actionButton, messageButton])
         actionRow.axis = .horizontal
-        actionRow.alignment = .center
+        actionRow.alignment = .fill
+        actionRow.distribution = .fillEqually
         actionRow.spacing = Spacing.sm
+        // The row carries its own top gap: custom stack spacing would collapse
+        // when the preceding bio/website rows are hidden.
+        actionRow.isLayoutMarginsRelativeArrangement = true
+        actionRow.directionalLayoutMargins = NSDirectionalEdgeInsets(
+            top: Spacing.sm, leading: 0, bottom: 0, trailing: 0
+        )
 
-        let column = UIStackView(arrangedSubviews: [avatarView, nameRow, handleLabel, bioLabel, statsRow, actionRow])
+        let column = UIStackView(arrangedSubviews: [topRow, nameRow, bioLabel, websiteButton, actionRow])
         column.axis = .vertical
-        column.alignment = .leading
-        column.spacing = Spacing.sm
-        column.setCustomSpacing(Spacing.md, after: avatarView)
-        column.setCustomSpacing(Spacing.md, after: handleLabel)
-        column.setCustomSpacing(Spacing.lg, after: bioLabel)
-        column.setCustomSpacing(Spacing.lg, after: statsRow)
+        column.alignment = .fill
+        column.spacing = Spacing.xs
+        column.setCustomSpacing(Spacing.md, after: topRow)
 
         column.pin(to: self, insets: NSDirectionalEdgeInsets(
-            top: Spacing.lg, leading: Spacing.lg, bottom: Spacing.lg, trailing: Spacing.lg
+            top: Spacing.md, leading: Spacing.lg, bottom: Spacing.lg, trailing: Spacing.lg
         ))
         NSLayoutConstraint.activate([
             avatarView.widthAnchor.constraint(equalToConstant: Metrics.avatarSize),
             avatarView.heightAnchor.constraint(equalToConstant: Metrics.avatarSize)
         ])
+    }
+}
+
+private extension UIFont {
+    func withWeight(_ weight: UIFont.Weight) -> UIFont {
+        .systemFont(ofSize: pointSize, weight: weight)
     }
 }

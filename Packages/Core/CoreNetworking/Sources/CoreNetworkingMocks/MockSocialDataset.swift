@@ -10,6 +10,10 @@ public struct MockSocialDataset: Sendable {
         public let handle: String
         public let displayName: String
         public let avatarURL: String
+        /// Empty = no bio, so the profile header's collapsed-bio path is covered.
+        public let bio: String
+        /// Empty = no website link row.
+        public let websiteURL: String
     }
 
     public struct PostRecord: Sendable {
@@ -28,22 +32,26 @@ public struct MockSocialDataset: Sendable {
     public let posts: [PostRecord]
 
     public init(postCount: Int = 120) {
-        let names: [(String, String)] = [
-            ("ava.moreau", "Ava Moreau"),
-            ("kenji.dev", "Kenji Tanaka"),
-            ("lena_klein", "Lena Klein"),
-            ("marcus.holt", "Marcus Holt"),
-            ("sofia.reyes", "Sofía Reyes"),
-            ("tom.okafor", "Tom Okafor"),
-            ("yuki.snow", "Yuki Shirakawa"),
-            ("zed.aldrin", "Zed Aldrin")
+        // (handle, name, bio, website) — bios vary from empty to multi-line so
+        // the profile header exercises every identity-row combination.
+        let names: [(String, String, String, String)] = [
+            ("ava.moreau", "Ava Moreau", "Street photography, mostly Lyon.\nPrints on request.", "https://www.avamoreau.example/prints/"),
+            ("kenji.dev", "Kenji Tanaka", "Building small tools for small teams. Coffee first, commits later.", "https://kenji.example"),
+            ("lena_klein", "Lena Klein", "", ""),
+            ("marcus.holt", "Marcus Holt", "Trail runner · Amateur baker", ""),
+            ("sofia.reyes", "Sofía Reyes", "Cocino, viajo, repito.", "https://sofia.example/blog"),
+            ("tom.okafor", "Tom Okafor", "Bass, mostly.", ""),
+            ("yuki.snow", "Yuki Shirakawa", "Snow reports and mountain film.\nSee you in Hakuba.", ""),
+            ("zed.aldrin", "Zed Aldrin", "", "https://zed.example")
         ]
         authors = names.enumerated().map { index, name in
             Author(
                 profileID: "prof-\(index)",
                 handle: name.0,
                 displayName: name.1,
-                avatarURL: "mock://avatar/\(index)?w=128&h=128"
+                avatarURL: "mock://avatar/\(index)?w=128&h=128",
+                bio: name.2,
+                websiteURL: name.3
             )
         }
 
