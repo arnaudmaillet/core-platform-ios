@@ -82,6 +82,10 @@ final class SnapShortcutRailView: UIScrollView {
     /// `contentInset.bottom`), so resting bubbles sit clear of the fade.
     static let edgeFadeLength: CGFloat = Spacing.lg
 
+    /// How small an emote gets at full top-exit (t == 0): scale interpolates
+    /// linearly from this floor back to 1 across one detent of travel.
+    static let exitScaleFloor: CGFloat = 0.6
+
     /// The bottom strip reserved for FIXED chrome (the compose "+" square
     /// riding the ticker overlap): the resting window and the top clamp
     /// both dock ABOVE it, so no emote ever settles obscured behind the
@@ -143,10 +147,12 @@ final class SnapShortcutRailView: UIScrollView {
         delegate = self
 
         // White = shown, clear = dissolved; locations resolved per layout
-        // pass (they depend on the rail's height).
+        // pass (they depend on the rail's height). BOTTOM duty only (the
+        // fade into the reserved "+" strip): the TOP exit is per-icon
+        // fade+scale interpolation on the detent grid (see layoutSubviews),
+        // which a flat gradient cannot express.
         edgeFade.colors = [
-            UIColor.clear.cgColor, UIColor.white.cgColor,
-            UIColor.white.cgColor, UIColor.clear.cgColor,
+            UIColor.white.cgColor, UIColor.white.cgColor, UIColor.clear.cgColor,
         ]
         layer.mask = edgeFade
     }
@@ -274,14 +280,29 @@ final class SnapShortcutRailView: UIScrollView {
         CATransaction.setDisableActions(true)
         edgeFade.frame = bounds
         let height = max(bounds.height, 1)
-        let topFade = min(Self.edgeFadeLength / height, 0.4)
         let reserved = min(bottomReservedInset / height, 0.4)
         let bottomFadeStart = min((bottomReservedInset + Self.edgeFadeLength) / height, 0.5)
         edgeFade.locations = [
-            0, NSNumber(value: topFade),
-            NSNumber(value: 1 - bottomFadeStart), NSNumber(value: 1 - reserved),
+            0, NSNumber(value: 1 - bottomFadeStart), NSNumber(value: 1 - reserved),
         ]
         CATransaction.commit()
+
+        // Top exit on the DETENT GRID: an emote leaving through the top
+        // fades and dezooms as a pure function of its window position —
+        // t = viewTop / step, so one full step of travel spans full-size
+        // to collapsed. Because the chrome grid-aligns the headroom
+        // (`contentInset.top` is a whole number of steps), every settled
+        // detent lands the exiting emote at exactly t == 0 (gone) or
+        // t == 1 (at rest) — a half-faded straddler cannot exist at rest.
+        for icon in icons {
+            // Center, not frame: frame is the TRANSFORMED bounding box, and
+            // reading it under last pass's scale feeds back into t.
+            let viewTop = icon.center.y - Self.iconDiameter / 2 - bounds.origin.y
+            let t = max(0, min(1, viewTop / Self.step))
+            icon.alpha = t
+            let scale = Self.exitScaleFloor + (1 - Self.exitScaleFloor) * t
+            icon.transform = t >= 1 ? .identity : CGAffineTransform(scaleX: scale, y: scale)
+        }
     }
 
     private func rebuildGeometry() {
@@ -293,6 +314,9 @@ final class SnapShortcutRailView: UIScrollView {
         let diameter = Self.iconDiameter
         let x = (bounds.width - diameter) / 2
         for (index, icon) in icons.enumerated() {
+            // Frame under an active exit transform is undefined — reset
+            // first; the interpolation pass right after reapplies it.
+            icon.transform = .identity
             icon.frame = CGRect(x: x, y: CGFloat(index) * Self.step, width: diameter, height: diameter)
         }
         let contentHeight = icons.isEmpty

@@ -178,8 +178,14 @@ final class SnapCommentTickerView: UIView {
         // screen), and bubbles spawn just past it — clipping is what makes
         // them materialize UNDER the frosted square and slide out of its
         // seam instead of popping in over bare media. (A rightward scrub
-        // sends them back INTO the square the same way.)
+        // sends them back INTO the square the same way.) The clip's RIGHT
+        // corners mirror the square's rounding exactly, so the band can't
+        // peek past the glass's curved corners; the left corners stay
+        // square — that edge is full-bleed at the screen.
         clipsToBounds = true
+        layer.cornerRadius = 12 // == the "+" square's radius, by contract
+        layer.cornerCurve = .continuous
+        layer.maskedCorners = [.layerMaxXMinYCorner, .layerMaxXMaxYCorner]
 
         blurView.isHidden = true
         blurView.isUserInteractionEnabled = false

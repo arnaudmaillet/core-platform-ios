@@ -231,9 +231,12 @@ struct SnapShortcutRailViewTests {
         #expect(rail.frame.width == ticker.frame.height)
         #expect(rail.frame.maxX == 390 - Spacing.md)
         // Vertical span: under the nav bar down THROUGH the ticker band —
-        // the wheel's bubbles overlap the band on the glass pedestal.
-        #expect(rail.frame.minY == Spacing.sm)
-        #expect(rail.frame.maxY == ticker.frame.maxY)
+        // the wheel's bubbles overlap the band on the glass pedestal. The
+        // top sits at base clearance PLUS the sub-step excess the chrome
+        // absorbs to grid-align the headroom (always less than one step).
+        #expect(rail.frame.minY >= Spacing.sm)
+        #expect(rail.frame.minY - Spacing.sm < SnapShortcutRailView.step)
+        #expect(abs(rail.frame.maxY - ticker.frame.maxY) < 0.01)
         // The subtitle zone stops short of the rail — the width reduction.
         #expect(subtitle.frame.maxX == rail.frame.minX - Spacing.md)
         // A media post shows its wheel.
@@ -254,10 +257,26 @@ struct SnapShortcutRailViewTests {
         // The band's trailing edge sits exactly on the square's outer
         // threshold (and the band clips): bubbles are born under the
         // frosted square and slide out of its seam — the storytelling
-        // alignment. Leading stays full-bleed.
-        #expect(ticker.frame.maxX == glass.frame.maxX)
+        // alignment. Leading stays full-bleed, and the clip's RIGHT
+        // corners mirror the square's radius so the band can't peek past
+        // the glass's curved corners.
+        // (Sub-point tuck inside the glass — pixel-snapped from 0.5pt —
+        // so independent rounding can't leave a clip-line sliver proud of
+        // the square's edge. Strictly inside, less than a point.)
+        let tuck = glass.frame.maxX - ticker.frame.maxX
+        #expect(tuck > 0)
+        #expect(tuck < 1)
         #expect(ticker.frame.minX == 0)
         #expect(ticker.clipsToBounds)
+        #expect(ticker.layer.cornerRadius == glass.layer.cornerRadius)
+        #expect(ticker.layer.maskedCorners == [.layerMaxXMinYCorner, .layerMaxXMaxYCorner])
+
+        // Grid-aligned headroom: the chrome absorbs sub-step excess into
+        // the rail's top constant so `contentInset.top` is a whole number
+        // of detents — the invariant that makes settled top-exits pure
+        // (tolerance: frames pixel-align to the 3x grid).
+        let remainder = rail.contentInset.top.truncatingRemainder(dividingBy: SnapShortcutRailView.step)
+        #expect(remainder < 0.34 || remainder > SnapShortcutRailView.step - 0.34)
 
         // The fixed "+" centers in the square, ABOVE the rail (a chrome
         // sibling — it never scrolls), and the rail reserves its bottom
@@ -268,6 +287,36 @@ struct SnapShortcutRailViewTests {
         #expect(abs(compose.center.y - glass.frame.midY) < 0.5)
         #expect(order.firstIndex(of: rail)! < order.firstIndex(of: compose)!)
         #expect(rail.bottomReservedInset == ticker.frame.height)
+    }
+
+    @Test func topExitInterpolationIsPureOnTheDetentGrid() {
+        // A rail whose headroom IS grid-aligned (the chrome's invariant):
+        // 132 resting + 16 fade + 288 headroom (= 6 detents) = 436.
+        let rail = SnapShortcutRailView(frame: CGRect(x: 0, y: 0, width: 44, height: 436))
+        rail.setSymbols(Array(SnapShortcutRailView.symbolPool.prefix(9)))
+        rail.layoutIfNeeded()
+        let icons = rail.subviews.compactMap { $0 as? UIButton }.sorted { $0.center.y < $1.center.y }
+
+        // At rest: every emote is full-size and fully opaque.
+        #expect(icons.allSatisfy { $0.alpha == 1 })
+        #expect(icons.allSatisfy { $0.transform == .identity })
+
+        // Fully revealed (the top clamp, a settled detent): the exiting
+        // emote is COMPLETELY collapsed, its successor perfectly at rest —
+        // no half state can survive a settle.
+        rail.contentOffset = CGPoint(x: 0, y: rail.contentSize.height - rail.bounds.height + rail.contentInset.bottom)
+        rail.layoutIfNeeded()
+        #expect(icons[0].alpha == 0)
+        #expect(icons[1].alpha == 1)
+        #expect(icons[1].transform == .identity)
+
+        // Mid-drag between detents: smooth interpolation (half a step in
+        // the exit zone = half faded, scale halfway to the floor).
+        rail.contentOffset.y -= SnapShortcutRailView.step / 2
+        rail.layoutIfNeeded()
+        #expect(abs(icons[0].alpha - 0.5) < 0.01)
+        let expectedScale = SnapShortcutRailView.exitScaleFloor + (1 - SnapShortcutRailView.exitScaleFloor) * 0.5
+        #expect(abs(icons[0].transform.a - expectedScale) < 0.01)
     }
 
     @Test func edgeMaskCoversTheVisibleWindowFromTheFirstLayout() throws {
@@ -339,10 +388,12 @@ struct SnapShortcutRailViewTests {
         let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
 
         // A settled top margin (status bar + nav bar) flows into the rail's
-        // cell-relative top…
+        // cell-relative top (plus the sub-step grid-alignment excess)…
         chrome.setFixedInsets(UIEdgeInsets(top: 103, left: 0, bottom: 34, right: 0))
         chrome.layoutIfNeeded()
-        #expect(rail.frame.minY == 103 + Spacing.sm)
+        let settledMinY = rail.frame.minY
+        #expect(settledMinY >= 103 + Spacing.sm)
+        #expect(settledMinY - (103 + Spacing.sm) < SnapShortcutRailView.step)
 
         // …but mid-flight safe-area churn (insets far past any real nav
         // clearance, re-propagated while the cell rides a transition) is
@@ -350,7 +401,7 @@ struct SnapShortcutRailViewTests {
         // instead of drifting toward the screen's safe boundary.
         chrome.setFixedInsets(UIEdgeInsets(top: 420, left: 0, bottom: 34, right: 0))
         chrome.layoutIfNeeded()
-        #expect(rail.frame.minY == 103 + Spacing.sm)
+        #expect(rail.frame.minY == settledMinY)
     }
 
     @Test func cellFreezesChromeToPushedBarThresholds() throws {

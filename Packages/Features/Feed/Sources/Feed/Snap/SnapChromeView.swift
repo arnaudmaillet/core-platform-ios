@@ -145,9 +145,13 @@ final class SnapChromeView: UIView {
         // so every comment is born hidden under the frosted square and
         // slides out of its seam — the square reads as the stream's source.
         // (Leading stays full-bleed; exits keep using the screen's edge.)
+        // The half-point tuck: band and glass edges pixel-round
+        // independently, and a coincident clip line can land 1/3pt proud
+        // of the glass — tucking the band's trailing strictly inside the
+        // square kills the sliver at every pixel alignment.
         commentTicker.constrain(in: self) { parent in
             commentTicker.leadingAnchor.constraint(equalTo: leadingAnchor)
-            commentTicker.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md)
+            commentTicker.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md - 0.5)
             commentTicker.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.sm)
         }
 
@@ -229,9 +233,31 @@ final class SnapChromeView: UIView {
     /// font-derived value (the ticker's intrinsic height), so it is read
     /// off the resolved layout rather than duplicated as a constant. The
     /// rail's own setter no-ops on identical values, so this cannot loop.
+    ///
+    /// The rail's HEIGHT is then grid-aligned: the headroom above the
+    /// resting window (`contentInset.top`) must be an exact multiple of
+    /// the emote step, or settles leave the top-most exiting emote
+    /// stranded half-faded/half-scaled. The tallest fit under the nav bar
+    /// is computed and the sub-step excess absorbed into the rail's top
+    /// constant. Idempotent (the formula reads margins + ticker frames,
+    /// never the current constant), so re-layout converges immediately.
     override func layoutSubviews() {
         super.layoutSubviews()
         shortcutRail.bottomReservedInset = commentTicker.bounds.height
+
+        let top = layoutMargins.top
+        guard top <= Self.maxSettledTopMargin, commentTicker.frame.maxY > 0 else { return }
+        let base = top + Spacing.sm
+        let fixedZones = SnapShortcutRailView.restingWindowHeight
+            + SnapShortcutRailView.edgeFadeLength
+            + commentTicker.bounds.height
+        let headroom = commentTicker.frame.maxY - base - fixedZones
+        guard headroom > 0 else { return }
+        let aligned = (headroom / SnapShortcutRailView.step).rounded(.down) * SnapShortcutRailView.step
+        let constant = base + (headroom - aligned)
+        if railTopConstraint?.constant != constant {
+            railTopConstraint?.constant = constant
+        }
     }
 
     /// Flight replica: freeze the guide to *captured* insets (the live feed's
