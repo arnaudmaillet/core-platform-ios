@@ -87,7 +87,13 @@ final class SnapSubtitleView: UIView {
     /// total comment count, leading the pill. It fades in once with the
     /// first cue and then just sits there — cue handoffs never touch it,
     /// so it can't participate in (or break) the zero-flicker pipeline.
-    private let countBubble = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
+    ///
+    /// Built with a nil effect (the ticker's blur does the same): the
+    /// material materializes on window attach (`didMoveToWindow`), because
+    /// creating a real `UIBlurEffect` contacts the render server — a
+    /// multi-second main-thread stall on headless CI simulators, where
+    /// unit-tested views never join a window and must never pay it.
+    private let countBubble = UIVisualEffectView(effect: nil)
     private let countLabel = UILabel()
 
     override init(frame: CGRect) {
@@ -150,6 +156,16 @@ final class SnapSubtitleView: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Materializes the bubble's material on first window attach — see
+    /// `countBubble`. Idempotent; the bubble is invisible pre-window
+    /// (model opacity 0), so the effect can never pop in view.
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil, countBubble.effect == nil {
+            countBubble.effect = UIBlurEffect(style: .systemThinMaterialDark)
+        }
+    }
 
     /// A fixed two-line slot: the zone's geometry is content-independent, so
     /// cue arrival, length, or absence can never move anything around it —
