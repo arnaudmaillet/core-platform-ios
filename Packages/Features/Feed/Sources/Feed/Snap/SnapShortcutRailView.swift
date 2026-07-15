@@ -409,11 +409,45 @@ final class SnapShortcutRailView: UIScrollView {
     }
 }
 
-/// The rail column's fixed compose affordance ("add a react"), centered in
-/// the glass square at the rail's bottom. A marker class: the feed pager's
+/// The rail column's fixed compose affordance ("add a react"), filling the
+/// glass square at the rail's bottom. A marker class: the feed pager's
 /// geometric veto (`SnapFeedCollectionView`) treats it as rail territory,
 /// so a swipe born on the button can never page the feed.
-final class SnapRailComposeButton: UIButton {}
+///
+/// Configured PLAIN at init; the Liquid Glass configuration materializes
+/// on first window attach — the subtitle count bubble's doctrine (#46):
+/// creating a system material contacts the render server, a multi-second
+/// main-thread stall on headless CI simulators, where unit-tested views
+/// never join a window and must never pay it.
+final class SnapRailComposeButton: UIButton {
+    private var hasGlass = false
+
+    init() {
+        super.init(frame: .zero)
+        configuration = Self.makeConfiguration(glass: false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil, !hasGlass {
+            hasGlass = true
+            configuration = Self.makeConfiguration(glass: true)
+        }
+    }
+
+    private static func makeConfiguration(glass: Bool) -> UIButton.Configuration {
+        var config: UIButton.Configuration = glass ? .glass() : .plain()
+        config.image = UIImage(systemName: "plus")?
+            .withConfiguration(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
+        config.baseForegroundColor = .white
+        config.contentInsets = .zero
+        config.cornerStyle = .capsule
+        return config
+    }
+}
 
 // MARK: - Feed lock (overscroll dead-end)
 

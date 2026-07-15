@@ -191,20 +191,12 @@ final class SnapChromeView: UIView {
 
         // The fixed "+" fills 100% of the overlap square, above the rail:
         // emotes scroll (and rubber-band) beneath it while it holds still.
-        // Skinned in the SYSTEM's Liquid Glass (`.glass()` configuration,
-        // not a blur imitation — it refracts, highlights, and responds to
-        // touch like the bar bubbles do); capsule on the square box
+        // Skinned in the SYSTEM's Liquid Glass (materialized on window
+        // attach — see `SnapRailComposeButton`); capsule on the square box
         // (width == the band's height) renders a perfect circle inscribed
         // in the zone — the zone's only layer, now that the frosted chip
         // is gone. Constrained off ticker + margins, exactly the bounds
         // the old backdrop occupied.
-        var composeConfig = UIButton.Configuration.glass()
-        composeConfig.image = UIImage(systemName: "plus")?
-            .withConfiguration(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
-        composeConfig.baseForegroundColor = .white
-        composeConfig.contentInsets = .zero
-        composeConfig.cornerStyle = .capsule
-        composeButton.configuration = composeConfig
         composeButton.isHidden = true
         // The anchor is fully framed from outside (band edges + margins);
         // its intrinsic content size must exert ZERO back-pressure on the
