@@ -242,33 +242,37 @@ struct SnapShortcutRailViewTests {
         // A media post shows its wheel.
         #expect(rail.isHidden == false)
 
-        // The glass pedestal covers exactly the rail↔ticker overlap — a
-        // PERFECT SQUARE (width == the band's height) — and sits BETWEEN
-        // them: above the band's text, below the bubbles.
-        let glass = try #require(chrome.subviews.compactMap { $0 as? UIVisualEffectView }.first)
-        #expect(glass.frame.minY == ticker.frame.minY)
-        #expect(glass.frame.maxY == ticker.frame.maxY)
-        #expect(glass.frame.maxX == rail.frame.maxX)
-        #expect(glass.frame.width == glass.frame.height)
+        // The fixed "+" anchor is the overlap zone's ONLY layer (the old
+        // frosted chip is gone): a Liquid Glass circle whose box fills
+        // 100% of the square — width == height == the band's height —
+        // sitting ABOVE the rail (a chrome sibling; it never scrolls).
+        let compose = try #require(chrome.subviews.compactMap { $0 as? SnapRailComposeButton }.first)
+        #expect(chrome.subviews.compactMap { $0 as? UIVisualEffectView }.isEmpty)
+        #expect(compose.frame.minY == ticker.frame.minY)
+        #expect(abs(compose.frame.maxY - ticker.frame.maxY) < 0.01)
+        #expect(abs(compose.frame.maxX - rail.frame.maxX) < 0.01)
+        #expect(abs(compose.frame.width - compose.frame.height) < 0.01)
+        #expect(compose.configuration?.cornerStyle == .capsule)
         let order = chrome.subviews
-        #expect(order.firstIndex(of: ticker)! < order.firstIndex(of: glass)!)
-        #expect(order.firstIndex(of: glass)! < order.firstIndex(of: rail)!)
+        #expect(order.firstIndex(of: ticker)! < order.firstIndex(of: rail)!)
+        #expect(order.firstIndex(of: rail)! < order.firstIndex(of: compose)!)
+        #expect(rail.bottomReservedInset == ticker.frame.height)
 
-        // The band's trailing edge sits exactly on the square's outer
-        // threshold (and the band clips): bubbles are born under the
-        // frosted square and slide out of its seam — the storytelling
-        // alignment. Leading stays full-bleed, and the clip's RIGHT
-        // corners mirror the square's radius so the band can't peek past
-        // the glass's curved corners.
-        // (Sub-point tuck inside the glass — pixel-snapped from 0.5pt —
+        // The band's trailing edge sits at the anchor's outer threshold
+        // (and the band clips): bubbles are born under the glass circle
+        // and slide out of its seam — the storytelling alignment. Leading
+        // stays full-bleed, and the clip's RIGHT end is a CAPSULE (radius
+        // = half the band's height) nesting inside the circle's curvature,
+        // so no clipped bubble sliver peeks out of the corner gaps.
+        // (Sub-point tuck inside the anchor — pixel-snapped from 0.5pt —
         // so independent rounding can't leave a clip-line sliver proud of
-        // the square's edge. Strictly inside, less than a point.)
-        let tuck = glass.frame.maxX - ticker.frame.maxX
+        // the zone's edge. Strictly inside, less than a point.)
+        let tuck = compose.frame.maxX - ticker.frame.maxX
         #expect(tuck > 0)
         #expect(tuck < 1)
         #expect(ticker.frame.minX == 0)
         #expect(ticker.clipsToBounds)
-        #expect(ticker.layer.cornerRadius == glass.layer.cornerRadius)
+        #expect(ticker.layer.cornerRadius == ticker.frame.height / 2)
         #expect(ticker.layer.maskedCorners == [.layerMaxXMinYCorner, .layerMaxXMaxYCorner])
 
         // Grid-aligned headroom: the chrome absorbs sub-step excess into
@@ -277,20 +281,6 @@ struct SnapShortcutRailViewTests {
         // (tolerance: frames pixel-align to the 3x grid).
         let remainder = rail.contentInset.top.truncatingRemainder(dividingBy: SnapShortcutRailView.step)
         #expect(remainder < 0.34 || remainder > SnapShortcutRailView.step - 0.34)
-
-        // The fixed "+" centers in the square, ABOVE the rail (a chrome
-        // sibling — it never scrolls), and the rail reserves its bottom
-        // strip so no emote settles behind it.
-        let compose = try #require(chrome.subviews.compactMap { $0 as? SnapRailComposeButton }.first)
-        // Pixel-snapped centering (frames align to the 3x grid), and the
-        // Liquid Glass bubble is a perfect circle at the 36pt invariant.
-        #expect(abs(compose.center.x - glass.frame.midX) < 0.5)
-        #expect(abs(compose.center.y - glass.frame.midY) < 0.5)
-        #expect(compose.bounds.width == 36)
-        #expect(compose.bounds.height == 36)
-        #expect(compose.configuration?.cornerStyle == .capsule)
-        #expect(order.firstIndex(of: rail)! < order.firstIndex(of: compose)!)
-        #expect(rail.bottomReservedInset == ticker.frame.height)
     }
 
     @Test func topExitInterpolationIsPureOnTheDetentGrid() {
@@ -358,7 +348,7 @@ struct SnapShortcutRailViewTests {
         #expect(maxOffset - (-rail.contentInset.top) == 6 * SnapShortcutRailView.step)
     }
 
-    @Test func glassPedestalMirrorsTheTickerBand() throws {
+    @Test func composeAnchorMirrorsTheTickerBand() throws {
         let chrome = SnapChromeView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         chrome.configure(with: FeedItemDisplayModel(
             id: PostID("post-3"),
@@ -372,19 +362,19 @@ struct SnapShortcutRailViewTests {
             thumbnailURL: nil,
             audioText: nil
         ))
-        let glass = try #require(chrome.subviews.compactMap { $0 as? UIVisualEffectView }.first)
-        // No band content → no glass floating over bare media.
-        #expect(glass.isHidden == true)
-        // The band arriving brings its pedestal with it…
+        let compose = try #require(chrome.subviews.compactMap { $0 as? SnapRailComposeButton }.first)
+        // No band content → no "+" anchor floating over bare media.
+        #expect(compose.isHidden == true)
+        // The band arriving brings its anchor with it…
         chrome.updateCommentStreams(FeedViewModel.CommentStreams(
             reactions: (0..<8).map { TickerCommentModel(id: "c\($0)", text: "fire \($0)") },
             subtitles: [],
             commentCount: 8
         ))
-        #expect(glass.isHidden == UIAccessibility.isReduceMotionEnabled)
+        #expect(compose.isHidden == UIAccessibility.isReduceMotionEnabled)
         // …and an emptied stream takes it back down.
         chrome.updateCommentStreams(.empty)
-        #expect(glass.isHidden == true)
+        #expect(compose.isHidden == true)
     }
 
     @Test func railTopTracksSettledMarginsButFreezesThroughFlightChurn() throws {

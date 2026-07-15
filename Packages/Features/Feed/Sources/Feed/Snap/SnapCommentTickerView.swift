@@ -183,9 +183,12 @@ final class SnapCommentTickerView: UIView {
         // peek past the glass's curved corners; the left corners stay
         // square — that edge is full-bleed at the screen.
         clipsToBounds = true
-        layer.cornerRadius = 12 // == the "+" square's radius, by contract
         layer.cornerCurve = .continuous
         layer.maskedCorners = [.layerMaxXMinYCorner, .layerMaxXMaxYCorner]
+        // Radius resolved in layoutSubviews: half the band's height, a
+        // CAPSULE end — the "+" anchor is a full-height circle, and a
+        // capsule end nests inside its curvature, so no clipped bubble
+        // sliver can peek out of the square zone's corner gaps.
 
         blurView.isHidden = true
         blurView.isUserInteractionEnabled = false
@@ -275,6 +278,7 @@ final class SnapCommentTickerView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        layer.cornerRadius = bounds.height / 2 // capsule end (see init)
         blurView.frame = bounds
         // Activation can precede first layout (configure → willBecomeActive
         // before the cell is sized); spawning needs a real width.
