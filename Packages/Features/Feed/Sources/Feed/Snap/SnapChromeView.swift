@@ -55,6 +55,12 @@ final class SnapChromeView: UIView {
     /// the count bubble; visibility mirrors the ticker's (no band, no
     /// glass, so it never floats over bare media).
     private let railBackdrop = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
+    /// The fixed compose affordance centered in the glass square: a chrome
+    /// sibling ABOVE the rail (never a scroll subview), so it holds still
+    /// while emotes scroll — and escapes the rail's edge-fade mask, which
+    /// would otherwise dissolve it. The rail reserves its bottom strip
+    /// (`bottomReservedInset`) so nothing settles behind it.
+    private let composeButton = SnapRailComposeButton()
     /// The rail's top edge as a cell-relative constant (see `buildLayout`).
     /// Optional: margins change during `init` before the layout exists.
     private var railTopConstraint: NSLayoutConstraint?
@@ -151,9 +157,11 @@ final class SnapChromeView: UIView {
         railBackdrop.layer.cornerRadius = 12
         railBackdrop.layer.cornerCurve = .continuous
         railBackdrop.isHidden = true
+        // Width == the ticker's height, so the overlap zone is a PERFECT
+        // SQUARE (and the rail column inherits the same width below).
         railBackdrop.constrain(in: self) { parent in
             railBackdrop.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md)
-            railBackdrop.widthAnchor.constraint(equalToConstant: SnapShortcutRailView.railWidth)
+            railBackdrop.widthAnchor.constraint(equalTo: commentTicker.heightAnchor)
             railBackdrop.topAnchor.constraint(equalTo: commentTicker.topAnchor)
             railBackdrop.bottomAnchor.constraint(equalTo: commentTicker.bottomAnchor)
         }
@@ -177,9 +185,23 @@ final class SnapChromeView: UIView {
         railTopConstraint = railTop
         shortcutRail.constrain(in: self) { parent in
             shortcutRail.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md)
-            shortcutRail.widthAnchor.constraint(equalToConstant: SnapShortcutRailView.railWidth)
+            shortcutRail.widthAnchor.constraint(equalTo: commentTicker.heightAnchor)
             railTop
             shortcutRail.bottomAnchor.constraint(equalTo: commentTicker.bottomAnchor)
+        }
+
+        // The fixed "+" sits centered in the glass square, above the rail:
+        // emotes scroll (and rubber-band) beneath it while it holds still.
+        var composeConfig = UIButton.Configuration.plain()
+        composeConfig.image = UIImage(systemName: "plus")?
+            .withConfiguration(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
+        composeConfig.baseForegroundColor = .white
+        composeConfig.contentInsets = .zero
+        composeButton.configuration = composeConfig
+        composeButton.isHidden = true
+        composeButton.constrain(in: self) { _ in
+            composeButton.centerXAnchor.constraint(equalTo: railBackdrop.centerXAnchor)
+            composeButton.centerYAnchor.constraint(equalTo: railBackdrop.centerYAnchor)
         }
 
         // The subtitle zone extends the same one-directional chain one link
@@ -196,6 +218,15 @@ final class SnapChromeView: UIView {
             subtitleView.trailingAnchor.constraint(equalTo: shortcutRail.leadingAnchor, constant: -Spacing.md)
             subtitleView.bottomAnchor.constraint(equalTo: commentTicker.topAnchor, constant: -Spacing.sm)
         }
+    }
+
+    /// The rail's reserved bottom strip is the glass square's height — a
+    /// font-derived value (the ticker's intrinsic height), so it is read
+    /// off the resolved layout rather than duplicated as a constant. The
+    /// rail's own setter no-ops on identical values, so this cannot loop.
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        shortcutRail.bottomReservedInset = commentTicker.bounds.height
     }
 
     /// Flight replica: freeze the guide to *captured* insets (the live feed's
@@ -237,6 +268,7 @@ final class SnapChromeView: UIView {
         if !hasMedia {
             commentTicker.setComments([])
             railBackdrop.isHidden = true
+            composeButton.isHidden = true
             subtitleView.setCues([])
         }
         // Static chrome, so it loads here (not via `updateCommentStreams`)
@@ -292,6 +324,7 @@ final class SnapChromeView: UIView {
         // (mirrors the ticker's own hidden state, Reduce Motion included) —
         // it must never float frosted over bare media.
         railBackdrop.isHidden = commentTicker.isHidden
+        composeButton.isHidden = commentTicker.isHidden
         subtitleView.setCommentCount(streams.commentCount)
         subtitleView.setCues(streams.subtitles)
     }
@@ -319,6 +352,7 @@ final class SnapChromeView: UIView {
         hasMedia = true
         commentTicker.reset()
         railBackdrop.isHidden = true
+        composeButton.isHidden = true
         subtitleView.reset()
         shortcutRail.reset()
     }

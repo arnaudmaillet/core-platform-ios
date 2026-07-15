@@ -68,8 +68,6 @@ final class SnapShortcutRailView: UIScrollView {
     /// The feed's bubble invariant (nav/toolbar circles are 36pt).
     static let iconDiameter: CGFloat = 36
     static let iconSpacing: CGFloat = Spacing.md
-    /// The rail is exactly one bubble wide; the frame is the hit area.
-    static let railWidth: CGFloat = iconDiameter
     /// How many bubbles the resting window shows.
     static let restingIconCount = 3
     /// One detent: a bubble plus its gap.
@@ -83,6 +81,19 @@ final class SnapShortcutRailView: UIScrollView {
     /// resting window docks this far above the rail's bottom (via
     /// `contentInset.bottom`), so resting bubbles sit clear of the fade.
     static let edgeFadeLength: CGFloat = Spacing.lg
+
+    /// The bottom strip reserved for FIXED chrome (the compose "+" square
+    /// riding the ticker overlap): the resting window and the top clamp
+    /// both dock ABOVE it, so no emote ever settles obscured behind the
+    /// button — bubbles only dip through during rubber-band overshoot.
+    /// Owned by the chrome (it knows the square's font-derived height).
+    var bottomReservedInset: CGFloat = 0 {
+        didSet {
+            guard bottomReservedInset != oldValue else { return }
+            needsContentRebuild = true
+            setNeedsLayout()
+        }
+    }
 
     private var icons: [UIButton] = []
     private var lastLaidOutSize: CGSize = .zero
@@ -104,6 +115,13 @@ final class SnapShortcutRailView: UIScrollView {
         // The cell sits under the transparent nav bar; ambient inset
         // adjustment would shove the wheel's scroll range around.
         contentInsetAdjustmentBehavior = .never
+        // The system's scroll-edge effects manage `layer.mask` themselves
+        // and silently evict the custom edge-fade gradient (the feed's
+        // collection view disables its own for the same reason). Without
+        // this, the reserved "+" strip renders unmasked and overflow
+        // bubbles sit on the button.
+        topEdgeEffect.isHidden = true
+        bottomEdgeEffect.isHidden = true
         decelerationRate = .fast
         // The wheel always answers a swipe with the native rubber-band,
         // even when the payload is too small to reveal anything.
@@ -229,22 +247,41 @@ final class SnapShortcutRailView: UIScrollView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        // Geometry FIRST: on the very first pass, `rebuildGeometry` is what
+        // parks the wheel at its rest offset. The mask below frames itself
+        // against `bounds` — masking before the rebuild framed it against
+        // the pre-rest origin, so the first rendered frame mapped the
+        // reserved "+" strip onto the wrong slice of content and the
+        // overflow bubble sat opaque on the button until the first scroll
+        // re-laid the mask.
+        // (layoutSubviews fires on every scrolled frame — bounds.origin
+        // moves; geometry only changes when the size or the payload does.)
+        if needsContentRebuild || bounds.size != lastLaidOutSize {
+            needsContentRebuild = false
+            lastLaidOutSize = bounds.size
+            rebuildGeometry()
+        }
+
         // The mask lives in layer coordinates, which ride the scroll offset —
         // re-cover the visible window on every pass (cheap: one frame set,
         // no allocation; implicit actions off so it can't lag a fast flick).
+        // The bottom fade ends ABOVE the reserved strip (the fixed "+"
+        // square), and the strip itself is fully masked out: overflow
+        // bubbles dissolve on approach and never render over the button —
+        // not at rest (the 4th bubble hangs one gap below the window) and
+        // not mid-bounce.
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         edgeFade.frame = bounds
-        let fade = min(Self.edgeFadeLength / max(bounds.height, 1), 0.5)
-        edgeFade.locations = [0, NSNumber(value: fade), NSNumber(value: 1 - fade), 1]
+        let height = max(bounds.height, 1)
+        let topFade = min(Self.edgeFadeLength / height, 0.4)
+        let reserved = min(bottomReservedInset / height, 0.4)
+        let bottomFadeStart = min((bottomReservedInset + Self.edgeFadeLength) / height, 0.5)
+        edgeFade.locations = [
+            0, NSNumber(value: topFade),
+            NSNumber(value: 1 - bottomFadeStart), NSNumber(value: 1 - reserved),
+        ]
         CATransaction.commit()
-
-        // layoutSubviews fires on every scrolled frame (bounds.origin moves);
-        // geometry only changes when the size or the payload does.
-        guard needsContentRebuild || bounds.size != lastLaidOutSize else { return }
-        needsContentRebuild = false
-        lastLaidOutSize = bounds.size
-        rebuildGeometry()
     }
 
     private func rebuildGeometry() {
@@ -264,11 +301,13 @@ final class SnapShortcutRailView: UIScrollView {
         contentSize = CGSize(width: bounds.width, height: contentHeight)
 
         // The rest offset parks icon 0 at the top of the resting window,
-        // docked one fade band above the rail's bottom edge — everything
-        // past `restingIconCount` dissolves through the fade below.
+        // docked one fade band above the reserved bottom strip (the fixed
+        // "+" square) — everything past `restingIconCount` dissolves
+        // through the fade below, and settles can never park an emote
+        // behind the button.
         contentInset = UIEdgeInsets(
-            top: max(0, bounds.height - Self.restingWindowHeight - Self.edgeFadeLength),
-            left: 0, bottom: Self.edgeFadeLength, right: 0
+            top: max(0, bounds.height - Self.restingWindowHeight - Self.edgeFadeLength - bottomReservedInset),
+            left: 0, bottom: bottomReservedInset + Self.edgeFadeLength, right: 0
         )
         let restOffset = -contentInset.top
         let maxOffset = max(contentSize.height - bounds.height + contentInset.bottom, restOffset)
@@ -333,16 +372,24 @@ final class SnapShortcutRailView: UIScrollView {
 
     // MARK: - Test seams
 
-    /// Bubbles currently inside the visible window, the edge-fade bands
-    /// excluded (a bubble dissolving in the fade is an affordance, not a
+    /// Bubbles currently inside the visible window — the edge-fade bands
+    /// and the reserved bottom strip excluded (a bubble dissolving in the
+    /// fade or dipping through the "+" square is an affordance, not a
     /// shown shortcut; edge-touching does not count). Internal so tests
     /// can pin the resting window to exactly `restingIconCount`.
     var visibleIconCount: Int {
-        let window = CGRect(origin: contentOffset, size: bounds.size)
-            .insetBy(dx: 0, dy: Self.edgeFadeLength)
+        var window = CGRect(origin: contentOffset, size: bounds.size)
+        window.origin.y += Self.edgeFadeLength
+        window.size.height -= 2 * Self.edgeFadeLength + bottomReservedInset
         return icons.count(where: { $0.frame.intersects(window) })
     }
 }
+
+/// The rail column's fixed compose affordance ("add a react"), centered in
+/// the glass square at the rail's bottom. A marker class: the feed pager's
+/// geometric veto (`SnapFeedCollectionView`) treats it as rail territory,
+/// so a swipe born on the button can never page the feed.
+final class SnapRailComposeButton: UIButton {}
 
 // MARK: - Feed lock (overscroll dead-end)
 

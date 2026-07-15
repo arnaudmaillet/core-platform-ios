@@ -16,7 +16,7 @@ struct SnapShortcutRailViewTests {
 
     private func makeRail(symbolCount: Int = 9) -> SnapShortcutRailView {
         let rail = SnapShortcutRailView(
-            frame: CGRect(x: 0, y: 0, width: SnapShortcutRailView.railWidth, height: Self.railHeight)
+            frame: CGRect(x: 0, y: 0, width: 44, height: Self.railHeight)
         )
         rail.setSymbols(Array(SnapShortcutRailView.symbolPool.prefix(symbolCount)))
         rail.layoutIfNeeded()
@@ -184,6 +184,9 @@ struct SnapShortcutRailViewTests {
         rail.addSubview(bubble)
         #expect(SnapFeedCollectionView.belongsToShortcutRail(rail) == true)
         #expect(SnapFeedCollectionView.belongsToShortcutRail(bubble) == true)
+        // The fixed compose "+" is rail territory too (chrome sibling, so
+        // the walk-up can't find the rail — its class is the marker).
+        #expect(SnapFeedCollectionView.belongsToShortcutRail(SnapRailComposeButton()) == true)
         let caption = UILabel()
         #expect(SnapFeedCollectionView.belongsToShortcutRail(caption) == false)
     }
@@ -222,9 +225,10 @@ struct SnapShortcutRailViewTests {
         let subtitle = try #require(chrome.subviews.compactMap { $0 as? SnapSubtitleView }.first)
         let ticker = try #require(chrome.subviews.compactMap { $0 as? SnapCommentTickerView }.first)
 
-        // Trailing column: one bubble wide, Spacing.md off the margin
-        // (no window → zero safe area → margins guide == bounds).
-        #expect(rail.frame.width == SnapShortcutRailView.railWidth)
+        // Trailing column: as wide as the ticker band is TALL (the square
+        // contract), Spacing.md off the margin (no window → zero safe area
+        // → margins guide == bounds).
+        #expect(rail.frame.width == ticker.frame.height)
         #expect(rail.frame.maxX == 390 - Spacing.md)
         // Vertical span: under the nav bar down THROUGH the ticker band —
         // the wheel's bubbles overlap the band on the glass pedestal.
@@ -235,16 +239,62 @@ struct SnapShortcutRailViewTests {
         // A media post shows its wheel.
         #expect(rail.isHidden == false)
 
-        // The glass pedestal covers exactly the rail↔ticker overlap and
-        // sits BETWEEN them: above the band's text, below the bubbles.
+        // The glass pedestal covers exactly the rail↔ticker overlap — a
+        // PERFECT SQUARE (width == the band's height) — and sits BETWEEN
+        // them: above the band's text, below the bubbles.
         let glass = try #require(chrome.subviews.compactMap { $0 as? UIVisualEffectView }.first)
         #expect(glass.frame.minY == ticker.frame.minY)
         #expect(glass.frame.maxY == ticker.frame.maxY)
         #expect(glass.frame.maxX == rail.frame.maxX)
-        #expect(glass.frame.width == SnapShortcutRailView.railWidth)
+        #expect(glass.frame.width == glass.frame.height)
         let order = chrome.subviews
         #expect(order.firstIndex(of: ticker)! < order.firstIndex(of: glass)!)
         #expect(order.firstIndex(of: glass)! < order.firstIndex(of: rail)!)
+
+        // The fixed "+" centers in the square, ABOVE the rail (a chrome
+        // sibling — it never scrolls), and the rail reserves its bottom
+        // strip so no emote settles behind it.
+        let compose = try #require(chrome.subviews.compactMap { $0 as? SnapRailComposeButton }.first)
+        // Pixel-snapped centering (frames align to the 3x grid).
+        #expect(abs(compose.center.x - glass.frame.midX) < 0.5)
+        #expect(abs(compose.center.y - glass.frame.midY) < 0.5)
+        #expect(order.firstIndex(of: rail)! < order.firstIndex(of: compose)!)
+        #expect(rail.bottomReservedInset == ticker.frame.height)
+    }
+
+    @Test func edgeMaskCoversTheVisibleWindowFromTheFirstLayout() throws {
+        let rail = makeRail()
+        rail.bottomReservedInset = 45
+        rail.layoutIfNeeded()
+        // The fade mask must frame the VISIBLE window — bounds at the rest
+        // offset — on the FIRST layout, not content-zero. A stale origin
+        // maps the reserved "+" strip onto the wrong content slice, and
+        // the overflow bubble renders opaque on the button until the first
+        // scroll re-lays the mask ("icons above the + on first frame").
+        let mask = try #require(rail.layer.mask as? CAGradientLayer)
+        #expect(mask.frame.origin.y == rail.contentOffset.y)
+        #expect(mask.frame.height == rail.bounds.height)
+        // And the strip is fully masked out at the bottom: the last color
+        // stop (clear) sits one reserved-strip above the bottom edge.
+        let lastStop = try #require(mask.locations?.last).doubleValue
+        #expect(abs(lastStop - (1 - 45 / Self.railHeight)) < 0.001)
+    }
+
+    @Test func reservedBottomStripKeepsSettlesClearOfTheComposeSquare() {
+        let rail = makeRail()
+        rail.bottomReservedInset = 45
+        rail.layoutIfNeeded()
+        // The resting window rises by the reserved strip…
+        #expect(rail.contentInset.top
+            == Self.railHeight - SnapShortcutRailView.restingWindowHeight - SnapShortcutRailView.edgeFadeLength - 45)
+        #expect(rail.contentOffset.y == -rail.contentInset.top)
+        #expect(rail.visibleIconCount == SnapShortcutRailView.restingIconCount)
+        // …and the top clamp's bottom alignment clears it too.
+        let maxOffset = rail.contentSize.height - rail.bounds.height + rail.contentInset.bottom
+        #expect(rail.contentInset.bottom == 45 + SnapShortcutRailView.edgeFadeLength)
+        // Travel stays exactly the hidden bubbles' worth — the strip
+        // shifts both endpoints, never the range.
+        #expect(maxOffset - (-rail.contentInset.top) == 6 * SnapShortcutRailView.step)
     }
 
     @Test func glassPedestalMirrorsTheTickerBand() throws {

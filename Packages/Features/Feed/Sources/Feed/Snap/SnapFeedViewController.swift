@@ -842,9 +842,13 @@ final class SnapFeedCollectionView: UICollectionView {
         return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }
 
-    /// Whether the hit view lives inside a shortcut rail. Pure walk-up so
+    /// Whether the hit view lives inside a shortcut rail — including its
+    /// fixed compose "+" (a chrome sibling above the rail, marked by its
+    /// class so a swipe born on it stays rail territory). Pure walk-up so
     /// the routing rule is unit-testable.
     static func belongsToShortcutRail(_ view: UIView) -> Bool {
-        sequence(first: view, next: { $0.superview }).contains { $0 is SnapShortcutRailView }
+        sequence(first: view, next: { $0.superview }).contains {
+            $0 is SnapShortcutRailView || $0 is SnapRailComposeButton
+        }
     }
 }
