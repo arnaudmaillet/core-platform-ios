@@ -68,12 +68,14 @@ final class SnapChromeView: UIView {
         super.init(frame: frame)
 
         // The chrome pins to its margins guide, NOT the safe-area guide
-        // directly: with zero margins the guide tracks the safe area exactly
-        // in the live cell, and `setFixedInsets` swaps in *captured* insets
-        // for the flight replica — ambient safe-area propagation into a
-        // transition container is unreliable (it resolved with a zero bottom
-        // inset on the dismiss leg, dropping the caption/rail ~34pt at the
-        // live→card swap).
+        // directly, because the margins are meant to be OWNED from outside:
+        // live cells receive the feed view's safe-area insets via
+        // `applyChromeInsets` (the screen's header/footer thresholds — a
+        // moving cell's ambient safe area re-derives every transition frame
+        // and is structurally untrustworthy), and the flight replica
+        // receives captured insets the same way. Ambient tracking below is
+        // only the pre-first-push fallback until an owner pushes real
+        // thresholds.
         layoutMargins = .zero
         insetsLayoutMarginsFromSafeArea = true
         preservesSuperviewLayoutMargins = false

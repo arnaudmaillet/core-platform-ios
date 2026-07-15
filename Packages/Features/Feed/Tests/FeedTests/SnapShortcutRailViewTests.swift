@@ -90,30 +90,102 @@ struct SnapShortcutRailViewTests {
         #expect(rail.visibleIconCount == 0)
     }
 
-    @Test func scrollPhysicsAreNative() {
-        let rail = makeRail()
-        // The wheel's motion is UIKit's, untouched. Detent snapping was
-        // tried and retired: retargeting `targetContentOffset` lurched
-        // low-velocity releases onto the grid (micro-jitter) and its
-        // boundary-coincident detents deadened the edge spring. Any scroll
-        // delegate or custom rate reappearing here is that regression.
-        #expect(rail.delegate == nil)
-        #expect(rail.decelerationRate == .normal)
-        #expect(rail.bounces)
-        #expect(rail.alwaysBounceVertical)
+    @Test func releasesSnapToTheStepGrid() {
+        let step = SnapShortcutRailView.step
+        let rest: CGFloat = -388 // arbitrary rest offset
+        let max: CGFloat = -100
+
+        // In-range proposals round to the nearest detent…
+        #expect(SnapShortcutRailView.snappedTarget(
+            proposed: rest + 1.4 * step, restOffset: rest, step: step, maxOffset: max
+        ) == rest + step)
+        #expect(SnapShortcutRailView.snappedTarget(
+            proposed: rest + 1.6 * step, restOffset: rest, step: step, maxOffset: max
+        ) == rest + 2 * step)
+        // …and rounding can never escape the scrollable range.
+        #expect(SnapShortcutRailView.snappedTarget(
+            proposed: rest - step, restOffset: rest, step: step, maxOffset: max
+        ) == rest)
+        #expect(SnapShortcutRailView.snappedTarget(
+            proposed: 0, restOffset: rest, step: step, maxOffset: max
+        ) == max)
     }
 
-    @Test func railPanTrapsVerticalTouchesFromTheFeed() {
+    @Test func edgeFlicksAreLeftToTheNativeSpring() {
         let rail = makeRail()
-        let feedPan = UIPanGestureRecognizer()
-        // Same-axis scroll chaining is severed: no simultaneity with the
-        // pager's pan, and any other pan must wait for the rail's pan to
-        // fail — a boundary overshoot rubber-bands instead of paging the
-        // feed.
-        #expect(rail.gestureRecognizer(rail.panGestureRecognizer, shouldRecognizeSimultaneouslyWith: feedPan) == false)
-        #expect(rail.gestureRecognizer(rail.panGestureRecognizer, shouldBeRequiredToFailBy: feedPan) == true)
-        // Non-pan recognizers (taps) are not held hostage by the wheel.
-        #expect(rail.gestureRecognizer(rail.panGestureRecognizer, shouldBeRequiredToFailBy: UITapGestureRecognizer()) == false)
+        #expect(rail.bounces)
+        #expect(rail.alwaysBounceVertical)
+        #expect(rail.decelerationRate == .fast)
+
+        let restOffset = -rail.contentInset.top
+        let maxOffset = rail.contentSize.height - rail.bounds.height + rail.contentInset.bottom
+
+        // A proposal past either boundary is an edge flick: the delegate
+        // must not touch it — handing UIKit a boundary-clamped target kills
+        // the overshoot spring and the edge reads as a hard wall.
+        var pastTop = CGPoint(x: 0, y: maxOffset + 120)
+        rail.scrollViewWillEndDragging(rail, withVelocity: CGPoint(x: 0, y: 2), targetContentOffset: &pastTop)
+        #expect(pastTop.y == maxOffset + 120)
+        var pastRest = CGPoint(x: 0, y: restOffset - 80)
+        rail.scrollViewWillEndDragging(rail, withVelocity: CGPoint(x: 0, y: -2), targetContentOffset: &pastRest)
+        #expect(pastRest.y == restOffset - 80)
+
+        // In-range releases still settle on the detent grid.
+        var inRange = CGPoint(x: 0, y: restOffset + 1.4 * SnapShortcutRailView.step)
+        rail.scrollViewWillEndDragging(rail, withVelocity: .zero, targetContentOffset: &inRange)
+        #expect(inRange.y == restOffset + SnapShortcutRailView.step)
+    }
+
+    @Test func railGestureSuspendsAncestorScrollingUntilSettle() {
+        let rail = makeRail()
+        let pager = UIScrollView()
+        pager.addSubview(rail)
+
+        // Gesture arbitration can't stop UIKit's overscroll chaining (it
+        // writes the ancestor's offset directly, no recognizer involved) —
+        // the pager is suspended for the gesture's whole span instead.
+        rail.scrollViewWillBeginDragging(rail)
+        #expect(pager.isScrollEnabled == false)
+        // Release into deceleration: still the rail's gesture — stay locked.
+        rail.scrollViewDidEndDragging(rail, willDecelerate: true)
+        #expect(pager.isScrollEnabled == false)
+        rail.scrollViewDidEndDecelerating(rail)
+        #expect(pager.isScrollEnabled == true)
+
+        // A dead-stop release thaws immediately.
+        rail.scrollViewWillBeginDragging(rail)
+        rail.scrollViewDidEndDragging(rail, willDecelerate: false)
+        #expect(pager.isScrollEnabled == true)
+
+        // Teardown mid-gesture (cell recycle) can never strand the feed.
+        rail.scrollViewWillBeginDragging(rail)
+        #expect(pager.isScrollEnabled == false)
+        rail.reset()
+        #expect(pager.isScrollEnabled == true)
+    }
+
+    @Test func swipesWinOverBubblePressStates() {
+        let rail = makeRail()
+        // Un-delayed content touches (`delaysContentTouches = false`) need
+        // both cancellation halves, or a finger landing on a bubble locks
+        // the wheel for the whole press: the rail may cancel content
+        // touches, and specifically may cancel a UIControl's.
+        #expect(rail.canCancelContentTouches)
+        #expect(rail.touchesShouldCancel(in: UIButton()) == true)
+    }
+
+    @Test func pagerDeclinesTouchesBornInTheRail() {
+        // The geometric divorce: anything hit-tested inside the rail (a
+        // bubble, a gap between bubbles, the rail itself) belongs to the
+        // rail — the feed's recognizers must decline it. Anything else
+        // (media, caption, chrome) is the pager's.
+        let rail = makeRail()
+        let bubble = UIButton()
+        rail.addSubview(bubble)
+        #expect(SnapFeedCollectionView.belongsToShortcutRail(rail) == true)
+        #expect(SnapFeedCollectionView.belongsToShortcutRail(bubble) == true)
+        let caption = UILabel()
+        #expect(SnapFeedCollectionView.belongsToShortcutRail(caption) == false)
     }
 
     @Test func placeholderPayloadIsDeterministicPerPost() {
@@ -180,6 +252,19 @@ struct SnapShortcutRailViewTests {
         chrome.setFixedInsets(UIEdgeInsets(top: 420, left: 0, bottom: 34, right: 0))
         chrome.layoutIfNeeded()
         #expect(rail.frame.minY == 103 + Spacing.sm)
+    }
+
+    @Test func cellFreezesChromeToPushedBarThresholds() throws {
+        let cell = SnapFeedCell(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        // The feed VC pushes the SCREEN's header/footer thresholds (its own
+        // safe-area insets); the cell freezes its chrome to them, ending
+        // ambient safe-area tracking — a moving cell's ambient insets
+        // re-derive every transition frame and must not bound the zone.
+        cell.applyChromeInsets(UIEdgeInsets(top: 116, left: 0, bottom: 83, right: 0))
+        let chrome = try #require(cell.contentView.subviews.compactMap { $0 as? SnapChromeView }.first)
+        #expect(chrome.layoutMargins.top == 116)
+        #expect(chrome.layoutMargins.bottom == 83)
+        #expect(chrome.insetsLayoutMarginsFromSafeArea == false)
     }
 
     @Test func textOnlyPostsKeepTheEmptyShell() throws {

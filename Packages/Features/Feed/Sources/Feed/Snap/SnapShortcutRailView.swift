@@ -12,14 +12,14 @@ import UIKit
 /// A plain vertical `UIScrollView`, not a collection view: the payload is a
 /// handful of fixed-size bubbles with no reuse pressure, and frames are laid
 /// manually (the hot-cell doctrine — no Auto Layout inside a surface that
-/// moves every frame). Scroll physics are UIKit's, UNTOUCHED: no detent
-/// snapping, no deceleration retargeting, no custom rate. Detents were
-/// tried and retired — retargeting `targetContentOffset` lurches every
-/// low-velocity release onto the grid (micro-jumps), and a grid whose
-/// endpoints coincide with the scroll boundaries hands deceleration
-/// boundary-exact dead-stop targets that suppress the edge spring. The
-/// edge-fade masks already cover what detents were for: a bubble straddling
-/// the clip edge dissolves instead of sitting cut in half.
+/// moves every frame). `decelerationRate = .fast` plus detent snapping in
+/// `scrollViewWillEndDragging` gives the wheel feel — releases settle on
+/// the step grid. Snapping applies ONLY to in-range targets: an edge
+/// flick's overshooting proposal is left alone so UIKit's native spring
+/// owns the rubber-band (clamping those to the boundary once made the
+/// edges read as a hard wall). The detents were briefly retired on a
+/// jitter suspicion; the stripped-baseline experiment exonerated them —
+/// the jitter was the gesture arena all along (see # Feed arbitration).
 ///
 /// # Resting window
 /// At rest exactly `restingIconCount` bubbles show, docked at the rail's
@@ -37,18 +37,25 @@ import UIKit
 /// fresh payload parks the wheel back at rest.
 ///
 /// # Feed arbitration
-/// A vertical touch that lands on the rail belongs to the rail, completely:
-/// UIKit's DEFAULT for same-axis nesting is cooperative chaining (at a
-/// content boundary the outer pager inherits the drag), so the rail's
-/// gesture-delegate methods sever it — no simultaneous recognition, and
-/// every other pan waits for the rail's pan to fail (the ticker's doctrine,
-/// mirrored; see the extension below). Edge overshoot rubber-bands inside
-/// the rail instead of paging the feed. `gestureRecognizerShouldBegin`
-/// mirrors the ticker's axis test in the other direction: only vertically
-/// dominant drags begin, so a rightward slide-to-pop that starts on the rail
-/// stays with the navigation gesture. Taps are the cell's arbitration seam:
-/// the chrome declares this rail an `interactionRoot`, so touches here never
-/// toggle playback.
+/// A vertical touch that lands on the rail belongs to the rail, completely
+/// — and the GESTURE GRAPH STAYS NATIVE. Two failed campaigns are law here:
+/// shadowing UIScrollView's private gesture-delegate methods choked system
+/// machinery (the scroll-edge flex driver) and wedged the arena, and
+/// `require(toFail:)` edges into the pager's recognizers (its pan, its
+/// paging-swipe, the system gates) formed a requirement cycle that froze
+/// the entire subtree. Neither returns. Isolation is two local moves:
+/// 1. REACTIVE LOCK — the instant the wheel's own pan begins
+///    (`scrollViewWillBeginDragging`), every ancestor scroll view is
+///    suspended (`isScrollEnabled = false`) until the gesture fully
+///    settles. One lock kills both leaks: the pager cannot recognize the
+///    touch, and UIKit's recognizer-less boundary chaining finds no
+///    scrollable ancestor to hand overshoot to — the rubber-band absorbs
+///    it. Touches off the rail never engage the lock.
+/// 2. AXIS — `gestureRecognizerShouldBegin` mirrors the ticker's test the
+///    other way: only vertically dominant drags begin, so a rightward
+///    slide-to-pop that starts on the rail stays with navigation.
+/// Taps are the cell's arbitration seam: the chrome declares this rail an
+/// `interactionRoot`, so touches here never toggle playback.
 ///
 /// # Flight replica
 /// Populated from `configure` (static content, like the caption), so the
@@ -83,6 +90,9 @@ final class SnapShortcutRailView: UIScrollView {
     /// Fresh payloads park at rest; mere size churn must NOT — geometry
     /// rebuilds preserve the user's reveal progress instead.
     private var needsRestReset = false
+    /// Ancestor scroll views suspended for the duration of a rail gesture
+    /// (weakly held: a mid-gesture teardown must not retain the feed).
+    private let suspendedAncestors = NSHashTable<UIScrollView>.weakObjects()
     /// The mask doing the soft clip (`layer.mask`); repositioned every
     /// layout pass because a scroll view's layer bounds ride its offset.
     private let edgeFade = CAGradientLayer()
@@ -94,13 +104,25 @@ final class SnapShortcutRailView: UIScrollView {
         // The cell sits under the transparent nav bar; ambient inset
         // adjustment would shove the wheel's scroll range around.
         contentInsetAdjustmentBehavior = .never
+        decelerationRate = .fast
         // The wheel always answers a swipe with the native rubber-band,
         // even when the payload is too small to reveal anything.
         alwaysBounceVertical = true
         clipsToBounds = true
+        // Icon touches track instantly (the wheel's pan cancels them when a
+        // drag wins) — same un-delayed pipeline as the feed collection view.
+        // `touchesShouldCancel(in:)` below is this line's mandatory other
+        // half: without it, a bubble's press state owns the touch and the
+        // wheel can't scroll from a finger that landed on an icon.
+        delaysContentTouches = false
+        canCancelContentTouches = true
         scrollsToTop = false // the status-bar tap belongs to the feed
         isHidden = true
         accessibilityIdentifier = "shortcut-rail"
+        // The delegate serves two seams: the feed lock (lifecycle
+        // observation) and the in-range detent snap. It never clamps
+        // out-of-range targets — the edge spring is UIKit's.
+        delegate = self
 
         // White = shown, clear = dissolved; locations resolved per layout
         // pass (they depend on the rail's height).
@@ -113,6 +135,55 @@ final class SnapShortcutRailView: UIScrollView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        // Torn down mid-gesture (cell recycled, feed dismissed): the
+        // suspended pager must never stay locked behind us. Deliberately
+        // NO require(toFail:) wiring here — inserting failure edges into
+        // the pager's recognizer graph (its pan, its paging-swipe, the
+        // system gates) once formed a requirement cycle that froze every
+        // recognizer in the subtree. The graph stays native; isolation is
+        // the reactive lock below.
+        if window == nil { setAncestorScrollingSuspended(false) }
+    }
+
+    /// The dead-end sink for overscroll: gesture arbitration can only gate
+    /// the pager's PAN, but UIKit's boundary chaining bypasses recognizers
+    /// entirely — the inner scroll machinery walks the ancestor chain and
+    /// writes the ancestor's offset directly when the rail hits its elastic
+    /// limit (velocity hand-off on deceleration too). A suspended scroll
+    /// view is skipped by that walk, so: pager frozen for exactly the span
+    /// of a rail gesture (drag through deceleration), thawed the moment the
+    /// wheel settles. Only ancestors that were enabled are suspended, and
+    /// they're held weakly with teardown unlocks (`didMoveToWindow`,
+    /// `reset`) so the feed can never be stranded unscrollable.
+    private func setAncestorScrollingSuspended(_ suspended: Bool) {
+        if suspended {
+            var view = superview
+            while let current = view {
+                if let scroll = current as? UIScrollView, scroll.isScrollEnabled {
+                    scroll.isScrollEnabled = false
+                    suspendedAncestors.add(scroll)
+                }
+                view = current.superview
+            }
+        } else {
+            for scroll in suspendedAncestors.allObjects { scroll.isScrollEnabled = true }
+            suspendedAncestors.removeAllObjects()
+        }
+    }
+
+    /// The bubbles are scroll surface first, buttons second: UIScrollView's
+    /// default answers `false` for `UIControl`s here, which — combined with
+    /// un-delayed content touches — lets a bubble's press state OWN the
+    /// touch and paralyze the wheel until the finger lifts. A swipe must
+    /// win from anywhere, including directly on an icon; the press it
+    /// cancels was a scroll, not a tap (taps never move enough to drag).
+    override func touchesShouldCancel(in view: UIView) -> Bool {
+        if view is UIControl { return true }
+        return super.touchesShouldCancel(in: view)
+    }
 
     /// Vertical intent only — the ticker's axis test, mirrored: horizontal
     /// drags starting on the rail stay with the timeline slide-to-pop.
@@ -149,8 +220,10 @@ final class SnapShortcutRailView: UIScrollView {
         setNeedsLayout()
     }
 
-    /// Back to the resting window (cell reuse).
+    /// Back to the resting window (cell reuse). Also releases any feed lock
+    /// a mid-gesture recycle would otherwise strand.
     func reset() {
+        setAncestorScrollingSuspended(false)
         setSymbols([])
     }
 
@@ -189,6 +262,7 @@ final class SnapShortcutRailView: UIScrollView {
             ? 0
             : CGFloat(icons.count) * diameter + CGFloat(icons.count - 1) * Self.iconSpacing
         contentSize = CGSize(width: bounds.width, height: contentHeight)
+
         // The rest offset parks icon 0 at the top of the resting window,
         // docked one fade band above the rail's bottom edge — everything
         // past `restingIconCount` dissolves through the fade below.
@@ -203,6 +277,20 @@ final class SnapShortcutRailView: UIScrollView {
         contentOffset = CGPoint(x: 0, y: restOffset + progress)
     }
 
+    // MARK: - Detents
+
+    /// Snaps a proposed deceleration target onto the step grid measured from
+    /// the rest offset, clamped to the scrollable range. Callers must hand
+    /// this IN-RANGE proposals only — out-of-range ones belong to UIKit's
+    /// edge spring (see `scrollViewWillEndDragging`). Pure + static so the
+    /// arithmetic is unit-testable.
+    static func snappedTarget(
+        proposed: CGFloat, restOffset: CGFloat, step: CGFloat, maxOffset: CGFloat
+    ) -> CGFloat {
+        let snapped = restOffset + (step > 0 ? (proposed - restOffset) / step : 0).rounded() * step
+        return min(max(snapped, restOffset), max(maxOffset, restOffset))
+    }
+
     // MARK: - Placeholder payload
 
     /// Temporary stand-ins for the react-GIF shortcuts. Seeded by post id
@@ -214,10 +302,15 @@ final class SnapShortcutRailView: UIScrollView {
     }
 
     /// Reaction-shaped symbols only — the wheel reads as "react", not "menu".
+    /// 19 deep so the wheel always has plenty to discover past the resting
+    /// window.
     static let symbolPool = [
         "heart.fill", "flame.fill", "hands.clap.fill", "face.smiling.fill",
         "bolt.fill", "star.fill", "party.popper.fill", "hand.thumbsup.fill",
         "sparkles",
+        "hand.wave.fill", "hand.raised.fill", "eyes", "crown.fill",
+        "trophy.fill", "medal.fill", "balloon.fill", "birthday.cake.fill",
+        "music.note", "moon.stars.fill",
     ]
 
     /// One shortcut bubble: the subtitle pill's flat translucent black (a
@@ -251,36 +344,49 @@ final class SnapShortcutRailView: UIScrollView {
     }
 }
 
-// MARK: - Feed isolation
+// MARK: - Feed lock (overscroll dead-end)
 
-/// The wheel traps every touch that begins on it. UIKit's default for
-/// same-axis nested scroll views is COOPERATIVE chaining: the scroll view's
-/// own gesture delegate volunteers simultaneous recognition, so when the
-/// inner rail hits a content boundary, the outer pager's still-live pan
-/// inherits the translation and the feed starts paging mid-gesture. The
-/// rail is its own pan's delegate (UIScrollView semantics), so declaring
-/// the delegate methods here overrides that bargain: no simultaneity with
-/// any other recognizer, and — the ticker's doctrine, mirrored — every
-/// other pan must wait for the rail's pan to fail before acting. Vertical
-/// touches therefore live and die inside the rail (boundary overshoot
-/// rubber-bands); horizontal intent still fails fast in
-/// `gestureRecognizerShouldBegin`, releasing the slide-to-pop untouched.
-extension SnapShortcutRailView: UIGestureRecognizerDelegate {
-    // UIScrollView's UIGestureRecognizerDelegate conformance is private in
-    // the SDK, so these are fresh declarations, not overrides — UIKit still
-    // reaches them by selector because the rail IS its pan's delegate.
-    func gestureRecognizer(
-        _ gestureRecognizer: UIGestureRecognizer,
-        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
-    ) -> Bool {
-        false
+extension SnapShortcutRailView: UIScrollViewDelegate {
+    // Lifecycle observation only — no offset retargeting, no physics.
+    // The lock spans the entire gesture: drag begin → (deceleration →)
+    // settle. A new drag catching a live deceleration re-locks before the
+    // old gesture's end callback could thaw (UIKit orders willBeginDragging
+    // first), so the pager stays frozen across catch-and-throw scrubbing.
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        setAncestorScrollingSuspended(true)
     }
 
-    func gestureRecognizer(
-        _ gestureRecognizer: UIGestureRecognizer,
-        shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
-    ) -> Bool {
-        gestureRecognizer === panGestureRecognizer && otherGestureRecognizer is UIPanGestureRecognizer
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        if !decelerate { setAncestorScrollingSuspended(false) }
+    }
+
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        // A finger catching the deceleration can deliver this end callback
+        // AFTER its willBeginDragging — never thaw under a live touch.
+        guard !isTracking, !isDragging else { return }
+        setAncestorScrollingSuspended(false)
+    }
+
+    // MARK: Detent snapping (in-range only)
+
+    func scrollViewWillEndDragging(
+        _ scrollView: UIScrollView,
+        withVelocity velocity: CGPoint,
+        targetContentOffset: UnsafeMutablePointer<CGPoint>
+    ) {
+        let restOffset = -contentInset.top
+        let maxOffset = contentSize.height - bounds.height + contentInset.bottom
+        let proposed = targetContentOffset.pointee.y
+        // A proposal beyond the scrollable range is an edge flick: leave it
+        // UNTOUCHED so UIKit's own spring overshoots and rubber-bands back.
+        // Clamping it to the boundary hands deceleration a dead-stop target
+        // and the edge reads as a hard wall.
+        guard proposed > restOffset, proposed < maxOffset else { return }
+        targetContentOffset.pointee.y = Self.snappedTarget(
+            proposed: proposed,
+            restOffset: restOffset,
+            step: Self.step,
+            maxOffset: maxOffset
+        )
     }
 }
-

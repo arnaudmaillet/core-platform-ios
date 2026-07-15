@@ -122,6 +122,18 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         })
     }
 
+    /// Freezes the chrome's layout bounds to the SCREEN's header/footer
+    /// thresholds (the feed view's safe-area insets — nav bar bottom,
+    /// toolbar top) instead of the cell's ambient safe area. Cells move
+    /// during page transitions and ambient insets re-derive every frame;
+    /// the pushed thresholds hold still, so the interaction zone (caption,
+    /// ticker, subtitle, shortcut rail) rides the page with structurally
+    /// accurate bounds. Same doctrine as the flight replica's captured
+    /// insets — one chrome scaffold, one inset authority.
+    func applyChromeInsets(_ insets: UIEdgeInsets) {
+        chrome.setFixedInsets(insets)
+    }
+
     /// Hands the post's comment streams to the chrome's two surfaces (the
     /// band's queue, the subtitle zone's cues). Arrives from the view model
     /// whenever loaded — before or after this cell becomes visible; each
