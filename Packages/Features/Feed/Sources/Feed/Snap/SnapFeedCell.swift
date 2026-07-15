@@ -55,8 +55,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         pauseGlyph.layer.shadowOffset = .zero
 
         // Background tap toggles play/pause; the delegate rejects taps that
-        // land on an interactive control (none in today's chrome — the seam
-        // guards whatever returns).
+        // land on an interactive control (the chrome's shortcut rail).
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleBackgroundTap))
         tap.delegate = self
         contentView.addGestureRecognizer(tap)
@@ -121,6 +120,18 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             guard let self, self.representedID == id else { return }
             self.videoRenderView.setPoster(image)
         })
+    }
+
+    /// Freezes the chrome's layout bounds to the SCREEN's header/footer
+    /// thresholds (the feed view's safe-area insets — nav bar bottom,
+    /// toolbar top) instead of the cell's ambient safe area. Cells move
+    /// during page transitions and ambient insets re-derive every frame;
+    /// the pushed thresholds hold still, so the interaction zone (caption,
+    /// ticker, subtitle, shortcut rail) rides the page with structurally
+    /// accurate bounds. Same doctrine as the flight replica's captured
+    /// insets — one chrome scaffold, one inset authority.
+    func applyChromeInsets(_ insets: UIEdgeInsets) {
+        chrome.setFixedInsets(insets)
     }
 
     /// Hands the post's comment streams to the chrome's two surfaces (the

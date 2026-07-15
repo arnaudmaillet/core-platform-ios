@@ -42,10 +42,37 @@ final class SnapChromeView: UIView {
     /// zone rides a page being dragged in.
     private let subtitleView = SnapSubtitleView()
 
+    /// The vertical shortcut wheel on the trailing edge: quick-react
+    /// shortcuts (placeholder symbols today, favorite GIFs later), spanning
+    /// the ticker's top up to the nav bar. Static content like the caption —
+    /// populated from `configure` with a per-post deterministic payload, so
+    /// the flight replica draws the identical wheel.
+    private let shortcutRail = SnapShortcutRailView()
+    /// The fixed compose affordance: a Liquid Glass circle filling the
+    /// square where the rail overlaps the ticker band (diameter == the
+    /// band's height), the zone's ONLY layer — the old frosted backdrop
+    /// chip was removed in its favor. A chrome sibling ABOVE the rail
+    /// (never a scroll subview), so it holds still while emotes scroll —
+    /// and escapes the rail's edge-fade mask, which would otherwise
+    /// dissolve it. The rail reserves its bottom strip
+    /// (`bottomReservedInset`) so nothing settles behind it; the band's
+    /// bubbles are born under this glass and slide out of its seam.
+    /// Visibility mirrors the ticker's (no band → no anchor floating
+    /// over bare media).
+    private let composeButton = SnapRailComposeButton()
+    /// The rail's top edge as a cell-relative constant (see `buildLayout`).
+    /// Optional: margins change during `init` before the layout exists.
+    private var railTopConstraint: NSLayoutConstraint?
+    /// Top margins beyond this are transition churn (safe-area insets
+    /// re-propagating into a cell mid-flight), not a settled state — a real
+    /// settled top (status bar + transparent nav bar) stays well under it
+    /// on every device class.
+    static let maxSettledTopMargin: CGFloat = 160
+
     /// Subtrees where a touch means "use the control", not "toggle playback" —
-    /// consumed by the cell's tap arbitration. Empty since the engagement rail
-    /// was removed; the seam stays for future interactive chrome.
-    var interactionRoots: [UIView] { [] }
+    /// consumed by the cell's tap arbitration. The shortcut rail is the sole
+    /// interactive chrome since the engagement rail's removal.
+    var interactionRoots: [UIView] { [shortcutRail] }
 
     private var representedID: PostID?
 
@@ -53,12 +80,14 @@ final class SnapChromeView: UIView {
         super.init(frame: frame)
 
         // The chrome pins to its margins guide, NOT the safe-area guide
-        // directly: with zero margins the guide tracks the safe area exactly
-        // in the live cell, and `setFixedInsets` swaps in *captured* insets
-        // for the flight replica — ambient safe-area propagation into a
-        // transition container is unreliable (it resolved with a zero bottom
-        // inset on the dismiss leg, dropping the caption/rail ~34pt at the
-        // live→card swap).
+        // directly, because the margins are meant to be OWNED from outside:
+        // live cells receive the feed view's safe-area insets via
+        // `applyChromeInsets` (the screen's header/footer thresholds — a
+        // moving cell's ambient safe area re-derives every transition frame
+        // and is structurally untrustworthy), and the flight replica
+        // receives captured insets the same way. Ambient tracking below is
+        // only the pre-first-push fallback until an owner pushes real
+        // thresholds.
         layoutMargins = .zero
         insetsLayoutMarginsFromSafeArea = true
         preservesSuperviewLayoutMargins = false
@@ -110,23 +139,124 @@ final class SnapChromeView: UIView {
         // flight replica's geometry identical whether or not comments exist.
         // (Constrained after the caption — its bottom hangs off the caption's
         // top.)
-        commentTicker.constrain(in: self) { _ in
+        // The band's trailing edge is the "+" square's OUTER threshold, not
+        // the screen's: bubbles spawn just past it and the band clips there,
+        // so every comment is born hidden under the frosted square and
+        // slides out of its seam — the square reads as the stream's source.
+        // (Leading stays full-bleed; exits keep using the screen's edge.)
+        // The half-point tuck: band and glass edges pixel-round
+        // independently, and a coincident clip line can land 1/3pt proud
+        // of the glass — tucking the band's trailing strictly inside the
+        // square kills the sliver at every pixel alignment.
+        // HEIGHT AUTHORITY: the band's intrinsic height (type metrics,
+        // fixed at init) is the master for the whole corner — the "+"
+        // anchor's edges pin to it, the rail's width and reserved strip
+        // derive from it. Intrinsic sizes bind at 750 by default, and the
+        // glass button's OWN intrinsic size (glyph + material insets)
+        // joined the same equations when it stretched to the band's edges:
+        // two 750s through equality constraints = an ambiguous system that
+        // resolved either way pass to pass (the height jitter). Required
+        // hugging/resistance makes the band unsqueezable and unstretchable.
+        commentTicker.setContentHuggingPriority(.required, for: .vertical)
+        commentTicker.setContentCompressionResistancePriority(.required, for: .vertical)
+        commentTicker.constrain(in: self) { parent in
             commentTicker.leadingAnchor.constraint(equalTo: leadingAnchor)
-            commentTicker.trailingAnchor.constraint(equalTo: trailingAnchor)
+            commentTicker.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md - 0.5)
             commentTicker.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.sm)
+        }
+
+        // The shortcut rail owns the trailing column, layered OVER the
+        // band: its bottom rides down to the ticker's BOTTOM edge, so the
+        // wheel's bubbles rest into — and scroll through — the band's
+        // territory on the glass pedestal above. The top is NOT anchored
+        // to the margins guide: cells ride page transitions, and UIKit
+        // re-propagates safe-area insets into a moving cell continuously —
+        // a guide-anchored top made the rail's geometry churn every
+        // transition frame (icons drifted off the page toward the screen's
+        // safe boundary instead of riding the cell). Instead the top pins
+        // to the CELL's top with a constant that tracks the margin only
+        // while it is a plausible settled value (`layoutMarginsDidChange`
+        // below), freezing through the flight so the rail rides like the
+        // rest of the chrome.
+        let railTop = shortcutRail.topAnchor.constraint(
+            equalTo: topAnchor, constant: layoutMargins.top + Spacing.sm
+        )
+        railTopConstraint = railTop
+        shortcutRail.constrain(in: self) { parent in
+            shortcutRail.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md)
+            shortcutRail.widthAnchor.constraint(equalTo: commentTicker.heightAnchor)
+            railTop
+            shortcutRail.bottomAnchor.constraint(equalTo: commentTicker.bottomAnchor)
+        }
+
+        // The fixed "+" fills 100% of the overlap square, above the rail:
+        // emotes scroll (and rubber-band) beneath it while it holds still.
+        // Skinned in the SYSTEM's Liquid Glass (materialized on window
+        // attach — see `SnapRailComposeButton`); capsule on the square box
+        // (width == the band's height) renders a perfect circle inscribed
+        // in the zone — the zone's only layer, now that the frosted chip
+        // is gone. Constrained off ticker + margins, exactly the bounds
+        // the old backdrop occupied.
+        composeButton.isHidden = true
+        // The anchor is fully framed from outside (band edges + margins);
+        // its intrinsic content size must exert ZERO back-pressure on the
+        // graph — floor priorities mean it can never squeeze the band or
+        // stretch itself (the other half of the height-authority contract).
+        composeButton.setContentHuggingPriority(UILayoutPriority(1), for: .vertical)
+        composeButton.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
+        composeButton.setContentCompressionResistancePriority(UILayoutPriority(1), for: .vertical)
+        composeButton.setContentCompressionResistancePriority(UILayoutPriority(1), for: .horizontal)
+        composeButton.constrain(in: self) { parent in
+            composeButton.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md)
+            composeButton.widthAnchor.constraint(equalTo: commentTicker.heightAnchor)
+            composeButton.topAnchor.constraint(equalTo: commentTicker.topAnchor)
+            composeButton.bottomAnchor.constraint(equalTo: commentTicker.bottomAnchor)
         }
 
         // The subtitle zone extends the same one-directional chain one link
         // up (caption ← band ← subtitles): nothing constrains back onto it,
         // so cue presence/absence can never move the stack below. The slot
-        // spans the caption's edges; the view left-aligns its pill inside
-        // it, so the pill's left edge locks to the caption's leading margin
-        // — cues stack on the caption's text axis — and long cues grow
-        // toward the trailing edge.
+        // spans from the caption's leading edge to the shortcut rail — the
+        // zone no longer runs the full width; the trailing column is the
+        // rail's. The view left-aligns its pill inside the slot, so the
+        // pill's left edge locks to the caption's leading margin — cues
+        // stack on the caption's text axis — and long cues grow toward the
+        // rail's clearance.
         subtitleView.constrain(in: self) { parent in
             subtitleView.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor, constant: Spacing.lg)
-            subtitleView.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.lg)
+            subtitleView.trailingAnchor.constraint(equalTo: shortcutRail.leadingAnchor, constant: -Spacing.md)
             subtitleView.bottomAnchor.constraint(equalTo: commentTicker.topAnchor, constant: -Spacing.sm)
+        }
+    }
+
+    /// The rail's reserved bottom strip is the glass square's height — a
+    /// font-derived value (the ticker's intrinsic height), so it is read
+    /// off the resolved layout rather than duplicated as a constant. The
+    /// rail's own setter no-ops on identical values, so this cannot loop.
+    ///
+    /// The rail's HEIGHT is then grid-aligned: the headroom above the
+    /// resting window (`contentInset.top`) must be an exact multiple of
+    /// the emote step, or settles leave the top-most exiting emote
+    /// stranded half-faded/half-scaled. The tallest fit under the nav bar
+    /// is computed and the sub-step excess absorbed into the rail's top
+    /// constant. Idempotent (the formula reads margins + ticker frames,
+    /// never the current constant), so re-layout converges immediately.
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        shortcutRail.bottomReservedInset = commentTicker.bounds.height
+
+        let top = layoutMargins.top
+        guard top <= Self.maxSettledTopMargin, commentTicker.frame.maxY > 0 else { return }
+        let base = top + Spacing.sm
+        let fixedZones = SnapShortcutRailView.restingWindowHeight
+            + SnapShortcutRailView.edgeFadeLength
+            + commentTicker.bounds.height
+        let headroom = commentTicker.frame.maxY - base - fixedZones
+        guard headroom > 0 else { return }
+        let aligned = (headroom / SnapShortcutRailView.step).rounded(.down) * SnapShortcutRailView.step
+        let constant = base + (headroom - aligned)
+        if railTopConstraint?.constant != constant {
+            railTopConstraint?.constant = constant
         }
     }
 
@@ -137,6 +267,19 @@ final class SnapChromeView: UIView {
     func setFixedInsets(_ insets: UIEdgeInsets) {
         insetsLayoutMarginsFromSafeArea = false
         layoutMargins = insets
+    }
+
+    /// Tracks the settled top margin into the rail's cell-relative top.
+    /// Mid-flight safe-area churn (which can push the margin far past any
+    /// real nav-bar clearance) is rejected, so the rail's frame — and with
+    /// it the wheel's scroll geometry — holds still while the page rides a
+    /// transition. Settled updates (initial layout, the flight replica's
+    /// captured insets, trait changes) pass through.
+    override func layoutMarginsDidChange() {
+        super.layoutMarginsDidChange()
+        let top = layoutMargins.top
+        guard top <= Self.maxSettledTopMargin else { return }
+        railTopConstraint?.constant = top + Spacing.sm
     }
 
     // MARK: - Configuration
@@ -155,8 +298,13 @@ final class SnapChromeView: UIView {
         captionLabel.isHidden = (caption?.isEmpty ?? true)
         if !hasMedia {
             commentTicker.setComments([])
+            composeButton.isHidden = true
             subtitleView.setCues([])
         }
+        // Static chrome, so it loads here (not via `updateCommentStreams`)
+        // and the flight replica shows it too — the seeded payload keeps
+        // both instances identical. Empty shell for text-only posts.
+        shortcutRail.setSymbols(hasMedia ? SnapShortcutRailView.placeholderPayload(for: model.id) : [])
     }
 
     /// The raw caption, kept so Dynamic Type changes can re-resolve the
@@ -202,6 +350,10 @@ final class SnapChromeView: UIView {
     func updateCommentStreams(_ streams: FeedViewModel.CommentStreams) {
         guard hasMedia else { return }
         commentTicker.setComments(streams.reactions)
+        // The "+" anchor exists exactly when the band beneath it does
+        // (mirrors the ticker's own hidden state, Reduce Motion included) —
+        // it must never float over bare media.
+        composeButton.isHidden = commentTicker.isHidden
         subtitleView.setCommentCount(streams.commentCount)
         subtitleView.setCues(streams.subtitles)
     }
@@ -228,7 +380,9 @@ final class SnapChromeView: UIView {
         caption = nil
         hasMedia = true
         commentTicker.reset()
+        composeButton.isHidden = true
         subtitleView.reset()
+        shortcutRail.reset()
     }
 }
 

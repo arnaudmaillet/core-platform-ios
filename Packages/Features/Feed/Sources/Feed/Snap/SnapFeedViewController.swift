@@ -226,8 +226,22 @@ final class SnapFeedViewController: UIViewController {
 
     // MARK: - Setup
 
+    /// The system bars are the interaction zone's structural bounds: when
+    /// they actually change (the toolbar presents/conceals with the push,
+    /// rotation, Dynamic Island class changes), push the new thresholds
+    /// into every live cell. Page transitions never fire this — this view
+    /// does not move with them, which is precisely why its safe area is
+    /// the authority and the cells' ambient one is not.
+    override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        guard let collectionView else { return }
+        for cell in collectionView.visibleCells {
+            (cell as? SnapFeedCell)?.applyChromeInsets(view.safeAreaInsets)
+        }
+    }
+
     private func configureCollectionView() {
-        collectionView = UICollectionView(frame: .zero, collectionViewLayout: Self.makeLayout())
+        collectionView = SnapFeedCollectionView(frame: .zero, collectionViewLayout: Self.makeLayout())
         collectionView.backgroundColor = .black
         collectionView.isPagingEnabled = true
         collectionView.allowsSelection = false // taps toggle playback, not selection
@@ -239,6 +253,12 @@ final class SnapFeedViewController: UIViewController {
         collectionView.topEdgeEffect.isHidden = true
         collectionView.bottomEdgeEffect.isHidden = true
         collectionView.isPrefetchingEnabled = true
+        // Interactive chrome lives INSIDE cells (the shortcut rail, the
+        // ticker scrub): deliver touches to them immediately instead of
+        // holding every touch-down ~150ms to see if it's a page scroll.
+        // The pager still cancels content touches when it legitimately
+        // wins a drag (canCancelContentTouches stays true).
+        collectionView.delaysContentTouches = false
         collectionView.delegate = self
         collectionView.prefetchDataSource = self
         collectionView.register(SnapFeedCell.self, forCellWithReuseIdentifier: SnapFeedCell.reuseIdentifier)
@@ -261,6 +281,14 @@ final class SnapFeedViewController: UIViewController {
                     pipeline: pipeline,
                     videoPlayback: self.videoPlayback
                 )
+                // The post's interaction zone is bounded by the SCREEN's
+                // header/footer thresholds (nav bar bottom, toolbar top),
+                // not by the cell's ambient safe area: this view's insets
+                // are the stable authority — a cell mid-page-transition
+                // re-derives ambient insets every frame, which is exactly
+                // the geometry churn that destabilized the shortcut rail.
+                // Same frozen-inset doctrine as the flight replica.
+                cell.applyChromeInsets(self.view.safeAreaInsets)
                 // Pull side of the comments seam: a recycled cell for an
                 // already-visited post gets its streams back immediately;
                 // async arrivals ride `onCommentStreamsChange` instead.
@@ -789,5 +817,38 @@ extension SnapFeedViewController: UICollectionViewDataSourcePrefetching {
         let urls = prefetchURLs(for: indexPaths)
         let pipeline = imagePipeline
         Task { await pipeline.cancelPrefetch(urls) }
+    }
+}
+
+// MARK: - Geometric touch divorce
+
+/// The feed's collection view, amended with one rule: touches born inside a
+/// shortcut rail belong to the rail, so NONE of the pager's own recognizers
+/// (its pan, iOS 26's paging swipe) may begin there. This is the inversion
+/// that finally made the rail responsive — a scroll view nested in a PAGING
+/// scroll view loses UIKit's usual inner-first arbitration (the paging
+/// ancestor's recognizers outrank descendants), and every attempt to fight
+/// upward from the rail (delegate shadowing, require(toFail:) edges) broke
+/// system machinery. Here the pager simply DECLINES, per touch, via the
+/// public `gestureRecognizerShouldBegin` seam — the same pattern as the
+/// ticker's axis test, with zero edges added to the gesture graph. Left of
+/// the rail's column nothing hit-tests into the rail, so the feed is stock.
+final class SnapFeedCollectionView: UICollectionView {
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        let location = gestureRecognizer.location(in: self)
+        if let hit = hitTest(location, with: nil), Self.belongsToShortcutRail(hit) {
+            return false
+        }
+        return super.gestureRecognizerShouldBegin(gestureRecognizer)
+    }
+
+    /// Whether the hit view lives inside a shortcut rail — including its
+    /// fixed compose "+" (a chrome sibling above the rail, marked by its
+    /// class so a swipe born on it stays rail territory). Pure walk-up so
+    /// the routing rule is unit-testable.
+    static func belongsToShortcutRail(_ view: UIView) -> Bool {
+        sequence(first: view, next: { $0.superview }).contains {
+            $0 is SnapShortcutRailView || $0 is SnapRailComposeButton
+        }
     }
 }

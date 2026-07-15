@@ -44,9 +44,13 @@ struct PostDetailCommentsTests {
     /// Polls until `condition` holds, up to a generous deadline — CI runners
     /// can starve the cooperative pool far past any fixed sleep (observed: a
     /// 50ms settle losing the race on a hosted runner and reddening
-    /// build-test). Returns either way; the caller's asserts do the judging.
+    /// build-test; then a 5s deadline losing the same race once the
+    /// shortcut-wheel suite added main-actor UI tests to the parallel
+    /// process). The deadline is a CEILING, not a pace — success returns
+    /// immediately, so a fast run pays nothing. Returns either way; the
+    /// caller's asserts do the judging.
     private func settle(until condition: () -> Bool) async {
-        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        let deadline = ContinuousClock.now.advanced(by: .seconds(20))
         while !condition(), ContinuousClock.now < deadline {
             await Task.yield()
             try? await Task.sleep(for: .milliseconds(20))
