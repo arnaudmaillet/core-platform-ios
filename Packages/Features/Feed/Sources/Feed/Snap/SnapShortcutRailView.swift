@@ -119,13 +119,6 @@ final class SnapShortcutRailView: UIScrollView {
         // The cell sits under the transparent nav bar; ambient inset
         // adjustment would shove the wheel's scroll range around.
         contentInsetAdjustmentBehavior = .never
-        // The system's scroll-edge effects manage `layer.mask` themselves
-        // and silently evict the custom edge-fade gradient (the feed's
-        // collection view disables its own for the same reason). Without
-        // this, the reserved "+" strip renders unmasked and overflow
-        // bubbles sit on the button.
-        topEdgeEffect.isHidden = true
-        bottomEdgeEffect.isHidden = true
         decelerationRate = .fast
         // The wheel always answers a swipe with the native rubber-band,
         // even when the payload is too small to reveal anything.
@@ -169,7 +162,21 @@ final class SnapShortcutRailView: UIScrollView {
         // system gates) once formed a requirement cycle that froze every
         // recognizer in the subtree. The graph stays native; isolation is
         // the reactive lock below.
-        if window == nil { setAncestorScrollingSuspended(false) }
+        guard window != nil else {
+            setAncestorScrollingSuspended(false)
+            return
+        }
+        // The system's scroll-edge effects manage `layer.mask` themselves
+        // and silently evict the custom edge-fade gradient (the feed's
+        // collection view disables its own for the same reason). Hidden on
+        // WINDOW ATTACH, not init: the edge effects are Liquid Glass
+        // machinery, and even touching them materializes it — a ~60s
+        // render-server broker timeout on headless CI simulators (the
+        // count bubble/compose anchor doctrine; this access blocked the
+        // whole Feed test process once). Window attach precedes first
+        // render, so the mask never loses ownership on screen.
+        topEdgeEffect.isHidden = true
+        bottomEdgeEffect.isHidden = true
     }
 
     /// The dead-end sink for overscroll: gesture arbitration can only gate
