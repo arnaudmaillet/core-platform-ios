@@ -140,9 +140,14 @@ final class SnapChromeView: UIView {
         // flight replica's geometry identical whether or not comments exist.
         // (Constrained after the caption — its bottom hangs off the caption's
         // top.)
-        commentTicker.constrain(in: self) { _ in
+        // The band's trailing edge is the "+" square's OUTER threshold, not
+        // the screen's: bubbles spawn just past it and the band clips there,
+        // so every comment is born hidden under the frosted square and
+        // slides out of its seam — the square reads as the stream's source.
+        // (Leading stays full-bleed; exits keep using the screen's edge.)
+        commentTicker.constrain(in: self) { parent in
             commentTicker.leadingAnchor.constraint(equalTo: leadingAnchor)
-            commentTicker.trailingAnchor.constraint(equalTo: trailingAnchor)
+            commentTicker.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md)
             commentTicker.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.sm)
         }
 

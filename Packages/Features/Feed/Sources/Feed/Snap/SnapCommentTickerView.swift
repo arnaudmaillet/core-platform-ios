@@ -173,9 +173,13 @@ final class SnapCommentTickerView: UIView {
             + TickerBubbleLabel.textInsets.top + TickerBubbleLabel.textInsets.bottom
         super.init(frame: frame)
         isHidden = true
-        // No clipping: bubbles spawn just past the trailing edge, which is
-        // already off screen (the band spans the page's full width), and the
-        // cell's own `clipsToBounds` bounds the rest.
+        // CLIPPED at the band's own edges: the trailing edge is no longer
+        // the screen's (it sits at the shortcut rail's glass square, mid
+        // screen), and bubbles spawn just past it — clipping is what makes
+        // them materialize UNDER the frosted square and slide out of its
+        // seam instead of popping in over bare media. (A rightward scrub
+        // sends them back INTO the square the same way.)
+        clipsToBounds = true
 
         blurView.isHidden = true
         blurView.isUserInteractionEnabled = false

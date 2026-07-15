@@ -251,6 +251,14 @@ struct SnapShortcutRailViewTests {
         #expect(order.firstIndex(of: ticker)! < order.firstIndex(of: glass)!)
         #expect(order.firstIndex(of: glass)! < order.firstIndex(of: rail)!)
 
+        // The band's trailing edge sits exactly on the square's outer
+        // threshold (and the band clips): bubbles are born under the
+        // frosted square and slide out of its seam — the storytelling
+        // alignment. Leading stays full-bleed.
+        #expect(ticker.frame.maxX == glass.frame.maxX)
+        #expect(ticker.frame.minX == 0)
+        #expect(ticker.clipsToBounds)
+
         // The fixed "+" centers in the square, ABOVE the rail (a chrome
         // sibling — it never scrolls), and the rail reserves its bottom
         // strip so no emote settles behind it.
