@@ -226,13 +226,54 @@ struct SnapShortcutRailViewTests {
         // (no window → zero safe area → margins guide == bounds).
         #expect(rail.frame.width == SnapShortcutRailView.railWidth)
         #expect(rail.frame.maxX == 390 - Spacing.md)
-        // Vertical span: under the nav bar down to the ticker's top edge.
+        // Vertical span: under the nav bar down THROUGH the ticker band —
+        // the wheel's bubbles overlap the band on the glass pedestal.
         #expect(rail.frame.minY == Spacing.sm)
-        #expect(rail.frame.maxY == ticker.frame.minY - Spacing.sm)
+        #expect(rail.frame.maxY == ticker.frame.maxY)
         // The subtitle zone stops short of the rail — the width reduction.
         #expect(subtitle.frame.maxX == rail.frame.minX - Spacing.md)
         // A media post shows its wheel.
         #expect(rail.isHidden == false)
+
+        // The glass pedestal covers exactly the rail↔ticker overlap and
+        // sits BETWEEN them: above the band's text, below the bubbles.
+        let glass = try #require(chrome.subviews.compactMap { $0 as? UIVisualEffectView }.first)
+        #expect(glass.frame.minY == ticker.frame.minY)
+        #expect(glass.frame.maxY == ticker.frame.maxY)
+        #expect(glass.frame.maxX == rail.frame.maxX)
+        #expect(glass.frame.width == SnapShortcutRailView.railWidth)
+        let order = chrome.subviews
+        #expect(order.firstIndex(of: ticker)! < order.firstIndex(of: glass)!)
+        #expect(order.firstIndex(of: glass)! < order.firstIndex(of: rail)!)
+    }
+
+    @Test func glassPedestalMirrorsTheTickerBand() throws {
+        let chrome = SnapChromeView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        chrome.configure(with: FeedItemDisplayModel(
+            id: PostID("post-3"),
+            authorID: ProfileID("profile-1"),
+            authorName: "Ana",
+            metaText: "@ana · 3m",
+            avatarURL: nil,
+            caption: "caption",
+            mediaURL: URL(string: "mock://media/3"),
+            mediaKind: .image,
+            thumbnailURL: nil,
+            audioText: nil
+        ))
+        let glass = try #require(chrome.subviews.compactMap { $0 as? UIVisualEffectView }.first)
+        // No band content → no glass floating over bare media.
+        #expect(glass.isHidden == true)
+        // The band arriving brings its pedestal with it…
+        chrome.updateCommentStreams(FeedViewModel.CommentStreams(
+            reactions: (0..<8).map { TickerCommentModel(id: "c\($0)", text: "fire \($0)") },
+            subtitles: [],
+            commentCount: 8
+        ))
+        #expect(glass.isHidden == UIAccessibility.isReduceMotionEnabled)
+        // …and an emptied stream takes it back down.
+        chrome.updateCommentStreams(.empty)
+        #expect(glass.isHidden == true)
     }
 
     @Test func railTopTracksSettledMarginsButFreezesThroughFlightChurn() throws {

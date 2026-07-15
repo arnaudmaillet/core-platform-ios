@@ -48,6 +48,13 @@ final class SnapChromeView: UIView {
     /// populated from `configure` with a per-post deterministic payload, so
     /// the flight replica draws the identical wheel.
     private let shortcutRail = SnapShortcutRailView()
+    /// The glass under the rail's ticker overlap: the rail's bottom rides
+    /// down to the ticker's bottom edge, and this material chip backs the
+    /// bubbles crossing the band — danmaku text streams behind frosted
+    /// glass instead of colliding with raw icons. Same material family as
+    /// the count bubble; visibility mirrors the ticker's (no band, no
+    /// glass, so it never floats over bare media).
+    private let railBackdrop = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
     /// The rail's top edge as a cell-relative constant (see `buildLayout`).
     /// Optional: margins change during `init` before the layout exists.
     private var railTopConstraint: NSLayoutConstraint?
@@ -133,17 +140,37 @@ final class SnapChromeView: UIView {
             commentTicker.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.sm)
         }
 
-        // The shortcut rail owns the trailing column above the band: bottom
-        // on the ticker's top edge (same horizon as the subtitle zone),
-        // top under the nav bar. The top is NOT anchored to the margins
-        // guide: cells ride page transitions, and UIKit re-propagates
-        // safe-area insets into a moving cell continuously — a guide-anchored
-        // top made the rail's geometry churn every transition frame (icons
-        // drifted off the page toward the screen's safe boundary instead of
-        // riding the cell). Instead the top pins to the CELL's top with a
-        // constant that tracks the margin only while it is a plausible
-        // settled value (`layoutMarginsDidChange` below), freezing through
-        // the flight so the rail rides like the rest of the chrome.
+        // The rail's glass pedestal: the exact rectangle where the rail
+        // overlaps the ticker band. Constrained off the ticker + margins
+        // (not the rail) so it can be added BEFORE the rail — z-order goes
+        // scrim < ticker < glass < rail, putting the blur between the
+        // band's streaming text and the bubbles crossing it. Blur needs
+        // `clipsToBounds` for the rounded shape (the count bubble's rule).
+        railBackdrop.isUserInteractionEnabled = false
+        railBackdrop.clipsToBounds = true
+        railBackdrop.layer.cornerRadius = 12
+        railBackdrop.layer.cornerCurve = .continuous
+        railBackdrop.isHidden = true
+        railBackdrop.constrain(in: self) { parent in
+            railBackdrop.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md)
+            railBackdrop.widthAnchor.constraint(equalToConstant: SnapShortcutRailView.railWidth)
+            railBackdrop.topAnchor.constraint(equalTo: commentTicker.topAnchor)
+            railBackdrop.bottomAnchor.constraint(equalTo: commentTicker.bottomAnchor)
+        }
+
+        // The shortcut rail owns the trailing column, layered OVER the
+        // band: its bottom rides down to the ticker's BOTTOM edge, so the
+        // wheel's bubbles rest into — and scroll through — the band's
+        // territory on the glass pedestal above. The top is NOT anchored
+        // to the margins guide: cells ride page transitions, and UIKit
+        // re-propagates safe-area insets into a moving cell continuously —
+        // a guide-anchored top made the rail's geometry churn every
+        // transition frame (icons drifted off the page toward the screen's
+        // safe boundary instead of riding the cell). Instead the top pins
+        // to the CELL's top with a constant that tracks the margin only
+        // while it is a plausible settled value (`layoutMarginsDidChange`
+        // below), freezing through the flight so the rail rides like the
+        // rest of the chrome.
         let railTop = shortcutRail.topAnchor.constraint(
             equalTo: topAnchor, constant: layoutMargins.top + Spacing.sm
         )
@@ -152,7 +179,7 @@ final class SnapChromeView: UIView {
             shortcutRail.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md)
             shortcutRail.widthAnchor.constraint(equalToConstant: SnapShortcutRailView.railWidth)
             railTop
-            shortcutRail.bottomAnchor.constraint(equalTo: commentTicker.topAnchor, constant: -Spacing.sm)
+            shortcutRail.bottomAnchor.constraint(equalTo: commentTicker.bottomAnchor)
         }
 
         // The subtitle zone extends the same one-directional chain one link
@@ -209,6 +236,7 @@ final class SnapChromeView: UIView {
         captionLabel.isHidden = (caption?.isEmpty ?? true)
         if !hasMedia {
             commentTicker.setComments([])
+            railBackdrop.isHidden = true
             subtitleView.setCues([])
         }
         // Static chrome, so it loads here (not via `updateCommentStreams`)
@@ -260,6 +288,10 @@ final class SnapChromeView: UIView {
     func updateCommentStreams(_ streams: FeedViewModel.CommentStreams) {
         guard hasMedia else { return }
         commentTicker.setComments(streams.reactions)
+        // The glass pedestal exists exactly when the band beneath it does
+        // (mirrors the ticker's own hidden state, Reduce Motion included) —
+        // it must never float frosted over bare media.
+        railBackdrop.isHidden = commentTicker.isHidden
         subtitleView.setCommentCount(streams.commentCount)
         subtitleView.setCues(streams.subtitles)
     }
@@ -286,6 +318,7 @@ final class SnapChromeView: UIView {
         caption = nil
         hasMedia = true
         commentTicker.reset()
+        railBackdrop.isHidden = true
         subtitleView.reset()
         shortcutRail.reset()
     }
