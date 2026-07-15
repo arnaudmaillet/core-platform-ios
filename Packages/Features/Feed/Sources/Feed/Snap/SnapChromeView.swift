@@ -148,6 +148,17 @@ final class SnapChromeView: UIView {
         // independently, and a coincident clip line can land 1/3pt proud
         // of the glass — tucking the band's trailing strictly inside the
         // square kills the sliver at every pixel alignment.
+        // HEIGHT AUTHORITY: the band's intrinsic height (type metrics,
+        // fixed at init) is the master for the whole corner — the "+"
+        // anchor's edges pin to it, the rail's width and reserved strip
+        // derive from it. Intrinsic sizes bind at 750 by default, and the
+        // glass button's OWN intrinsic size (glyph + material insets)
+        // joined the same equations when it stretched to the band's edges:
+        // two 750s through equality constraints = an ambiguous system that
+        // resolved either way pass to pass (the height jitter). Required
+        // hugging/resistance makes the band unsqueezable and unstretchable.
+        commentTicker.setContentHuggingPriority(.required, for: .vertical)
+        commentTicker.setContentCompressionResistancePriority(.required, for: .vertical)
         commentTicker.constrain(in: self) { parent in
             commentTicker.leadingAnchor.constraint(equalTo: leadingAnchor)
             commentTicker.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md - 0.5)
@@ -195,6 +206,14 @@ final class SnapChromeView: UIView {
         composeConfig.cornerStyle = .capsule
         composeButton.configuration = composeConfig
         composeButton.isHidden = true
+        // The anchor is fully framed from outside (band edges + margins);
+        // its intrinsic content size must exert ZERO back-pressure on the
+        // graph — floor priorities mean it can never squeeze the band or
+        // stretch itself (the other half of the height-authority contract).
+        composeButton.setContentHuggingPriority(UILayoutPriority(1), for: .vertical)
+        composeButton.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
+        composeButton.setContentCompressionResistancePriority(UILayoutPriority(1), for: .vertical)
+        composeButton.setContentCompressionResistancePriority(UILayoutPriority(1), for: .horizontal)
         composeButton.constrain(in: self) { parent in
             composeButton.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md)
             composeButton.widthAnchor.constraint(equalTo: commentTicker.heightAnchor)

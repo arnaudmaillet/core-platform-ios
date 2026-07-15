@@ -348,6 +348,39 @@ struct SnapShortcutRailViewTests {
         #expect(maxOffset - (-rail.contentInset.top) == 6 * SnapShortcutRailView.step)
     }
 
+    @Test func bandHeightIsAuthoritativeOverTheAnchor() throws {
+        let chrome = SnapChromeView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        chrome.configure(with: FeedItemDisplayModel(
+            id: PostID("post-4"),
+            authorID: ProfileID("profile-1"),
+            authorName: "Ana",
+            metaText: "@ana · 3m",
+            avatarURL: nil,
+            caption: "caption",
+            mediaURL: URL(string: "mock://media/4"),
+            mediaKind: .image,
+            thumbnailURL: nil,
+            audioText: nil
+        ))
+        chrome.layoutIfNeeded()
+        let ticker = try #require(chrome.subviews.compactMap { $0 as? SnapCommentTickerView }.first)
+        let compose = try #require(chrome.subviews.compactMap { $0 as? SnapRailComposeButton }.first)
+
+        // One-directional height authority: the band resolves to exactly
+        // its intrinsic (type-metric) height — the anchor pinned to its
+        // edges can neither squeeze nor stretch it — and the system is
+        // UNAMBIGUOUS (two competing 750-priority intrinsic sizes joined
+        // by equality constraints once resolved either way per pass: the
+        // height jitter).
+        #expect(ticker.frame.height == ticker.intrinsicContentSize.height)
+        #expect(ticker.hasAmbiguousLayout == false)
+        #expect(compose.hasAmbiguousLayout == false)
+        #expect(ticker.contentHuggingPriority(for: .vertical) == .required)
+        #expect(ticker.contentCompressionResistancePriority(for: .vertical) == .required)
+        #expect(compose.contentHuggingPriority(for: .vertical) == UILayoutPriority(1))
+        #expect(compose.contentCompressionResistancePriority(for: .vertical) == UILayoutPriority(1))
+    }
+
     @Test func composeAnchorMirrorsTheTickerBand() throws {
         let chrome = SnapChromeView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         chrome.configure(with: FeedItemDisplayModel(
