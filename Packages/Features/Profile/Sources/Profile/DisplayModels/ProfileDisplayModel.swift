@@ -19,6 +19,13 @@ public struct ProfileDisplayModel: Equatable, Sendable {
     /// unreachable — never a misleading "0".
     public let followerText: String
     public let followingText: String
+    /// Post counter for the stats strip. No backend serves a post count yet,
+    /// so this is always the "unavailable" glyph — never a misleading "0".
+    public let postsText: String
+    /// Compact link under the bio, Instagram-style: scheme and "www." stripped
+    /// ("ada.dev/notes"). Nil when the profile has no website.
+    public let websiteText: String?
+    public let websiteURL: URL?
 
     public init(profile: UserProfile) {
         id = profile.id
@@ -31,6 +38,20 @@ public struct ProfileDisplayModel: Equatable, Sendable {
         isVerified = profile.isVerified
         followerText = Self.format(profile.followerCount)
         followingText = Self.format(profile.followingCount)
+        postsText = Self.format(.unavailable)
+        websiteText = Self.websiteDisplay(profile.websiteURL)
+        websiteURL = profile.websiteURL
+    }
+
+    /// "https://www.ada.dev/notes/" → "ada.dev/notes".
+    static func websiteDisplay(_ url: URL?) -> String? {
+        guard let url else { return nil }
+        var host = url.host ?? ""
+        if host.hasPrefix("www.") { host.removeFirst("www.".count) }
+        var path = url.path
+        while path.hasSuffix("/") { path.removeLast() }
+        let display = host + path
+        return display.isEmpty ? nil : display
     }
 
     private static func monogram(displayName: String, handle: String) -> String {

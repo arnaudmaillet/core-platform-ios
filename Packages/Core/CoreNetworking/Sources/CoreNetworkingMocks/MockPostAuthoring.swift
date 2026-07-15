@@ -22,12 +22,23 @@ public final class MockPostStore: @unchecked Sendable {
         public let handle: String
         public let displayName: String
         public let avatarURL: String
+        public let bio: String
+        public let websiteURL: String
 
-        public init(profileID: String, handle: String, displayName: String, avatarURL: String) {
+        public init(
+            profileID: String,
+            handle: String,
+            displayName: String,
+            avatarURL: String,
+            bio: String = "",
+            websiteURL: String = ""
+        ) {
             self.profileID = profileID
             self.handle = handle
             self.displayName = displayName
             self.avatarURL = avatarURL
+            self.bio = bio
+            self.websiteURL = websiteURL
         }
     }
 
@@ -35,7 +46,9 @@ public final class MockPostStore: @unchecked Sendable {
         profileID: MockSocialDataset.viewerProfileID,
         handle: "you",
         displayName: "Demo Viewer",
-        avatarURL: "mock://avatar/viewer?w=128&h=128"
+        avatarURL: "mock://avatar/viewer?w=128&h=128",
+        bio: "Kicking the tires. Everything here is mock data.",
+        websiteURL: "https://www.example.com/demo/"
     )
 
     private let lock = NSLock()

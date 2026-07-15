@@ -55,6 +55,9 @@ final class ProfileViewController: UIViewController {
         headerView.onMessageTapped = { [weak self] in
             self?.viewModel.messageTapped()
         }
+        headerView.onWebsiteTapped = { url in
+            UIApplication.shared.open(url)
+        }
         render(.loading)
         viewModel.viewDidLoad()
     }
@@ -158,11 +161,9 @@ final class ProfileViewController: UIViewController {
             refreshControl.endRefreshing()
             statusLabel.isHidden = true
             scrollView.isHidden = false
-            // A routed profile titles itself with the person's name; the
-            // viewer's own tab keeps the static "Profile" title.
-            if onLogout == nil {
-                title = model.displayName
-            }
+            // Instagram-style: the @handle is the screen's title (the header
+            // shows the bold display name). "Profile" only until first load.
+            title = model.handle
             headerView.configure(with: model)
 
         case .failed(let message):
