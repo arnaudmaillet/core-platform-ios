@@ -201,16 +201,23 @@ final class SnapChromeView: UIView {
 
         // The fixed "+" sits centered in the glass square, above the rail:
         // emotes scroll (and rubber-band) beneath it while it holds still.
-        var composeConfig = UIButton.Configuration.plain()
+        // Skinned in the SYSTEM's Liquid Glass (`.glass()` configuration,
+        // not a blur imitation — it refracts, highlights, and responds to
+        // touch like the bar bubbles do), capsule on a 1:1 box = a perfect
+        // circle at the feed's 36pt bubble invariant.
+        var composeConfig = UIButton.Configuration.glass()
         composeConfig.image = UIImage(systemName: "plus")?
             .withConfiguration(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
         composeConfig.baseForegroundColor = .white
         composeConfig.contentInsets = .zero
+        composeConfig.cornerStyle = .capsule
         composeButton.configuration = composeConfig
         composeButton.isHidden = true
         composeButton.constrain(in: self) { _ in
             composeButton.centerXAnchor.constraint(equalTo: railBackdrop.centerXAnchor)
             composeButton.centerYAnchor.constraint(equalTo: railBackdrop.centerYAnchor)
+            composeButton.widthAnchor.constraint(equalToConstant: 36)
+            composeButton.heightAnchor.constraint(equalToConstant: 36)
         }
 
         // The subtitle zone extends the same one-directional chain one link

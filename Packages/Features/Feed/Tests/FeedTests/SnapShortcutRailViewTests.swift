@@ -282,9 +282,13 @@ struct SnapShortcutRailViewTests {
         // sibling — it never scrolls), and the rail reserves its bottom
         // strip so no emote settles behind it.
         let compose = try #require(chrome.subviews.compactMap { $0 as? SnapRailComposeButton }.first)
-        // Pixel-snapped centering (frames align to the 3x grid).
+        // Pixel-snapped centering (frames align to the 3x grid), and the
+        // Liquid Glass bubble is a perfect circle at the 36pt invariant.
         #expect(abs(compose.center.x - glass.frame.midX) < 0.5)
         #expect(abs(compose.center.y - glass.frame.midY) < 0.5)
+        #expect(compose.bounds.width == 36)
+        #expect(compose.bounds.height == 36)
+        #expect(compose.configuration?.cornerStyle == .capsule)
         #expect(order.firstIndex(of: rail)! < order.firstIndex(of: compose)!)
         #expect(rail.bottomReservedInset == ticker.frame.height)
     }
