@@ -14,9 +14,52 @@ final class ProfileViewController: UIViewController {
 
     private let scrollView = UIScrollView()
     private let headerView: ProfileHeaderView
+    private let galleryPager: ProfileGalleryPagerView
+    /// The filter tray's two selectors, hosted as custom bar items in the
+    /// navigation controller's native toolbar. They carry no material of
+    /// their own: the iOS 26 bar wraps each item in the system's Liquid
+    /// Glass capsule (same rule as the nav-bar items — see
+    /// `updateActionBarItem`). Ownership of the shared toolbar is handed
+    /// over between screens by the successor rule — see
+    /// `concealFilterToolbar` and `SnapFeedViewController.concealToolbar`.
+    private let formatRow = GlassSegmentRow(segments: [
+        .title("Activity"), .title("Media"), .title("Short")
+    ])
+    /// The source filter: one drop-down button — the native single-selection
+    /// menu carries the options (checkmark on the active one), and the button
+    /// shows the pick's glyph. Lazy: the menu actions capture self.
+    private lazy var sourceMenuButton = GlassMenuButton(
+        menu: UIMenu(options: .singleSelection, children: [
+            makeSourceAction(.all, title: "All", symbol: "rectangle.stack"),
+            makeSourceAction(.posts, title: "Posts", symbol: "square.and.pencil"),
+            makeSourceAction(.reposts, title: "Reposts", symbol: "arrow.2.squarepath"),
+            makeSourceAction(.tagged, title: "Tagged", symbol: "at")
+        ]),
+        accessibilityLabel: "Content source"
+    )
+
+    private func makeSourceAction(
+        _ source: GalleryFilter.Source, title: String, symbol: String
+    ) -> UIAction {
+        UIAction(
+            title: title,
+            image: UIImage(systemName: symbol),
+            // The checkmark starts on the user's GLOBAL preference (seeded
+            // into the view model's filter), not a hardcoded default.
+            state: source == viewModel.galleryFilter.source ? .on : .off
+        ) { [weak self] action in
+            guard let self else { return }
+            self.viewModel.setGallerySource(source)
+            // The icon-only button carries no system mirroring: adopt the
+            // picked action's glyph (and its title for VoiceOver) by hand.
+            self.sourceMenuButton.button.configuration?.image = action.image
+            self.sourceMenuButton.button.accessibilityValue = action.title
+        }
+    }
     private let refreshControl = UIRefreshControl()
     private let spinner = UIActivityIndicatorView(style: .large)
     private let statusLabel = UILabel()
+    private var didSubordinatePagerToPop = false
 
     /// The own-profile overflow menu (Log Out); sits inside the action item.
     private var overflowItem: UIBarButtonItem?
@@ -66,7 +109,14 @@ final class ProfileViewController: UIViewController {
         self.onLogout = onLogout
         self.makeEditViewController = makeEditViewController
         headerView = ProfileHeaderView(imagePipeline: imagePipeline)
+        galleryPager = ProfileGalleryPagerView(imagePipeline: imagePipeline)
         super.init(nibName: nil, bundle: nil)
+
+        // The gallery's filter tray floats at the screen bottom; the tab bar
+        // would stack underneath it. Safe with the standard pop gesture (chat
+        // thread precedent); the feed-pushed contexts hide the bar manually
+        // anyway, where this flag is a no-op.
+        hidesBottomBarWhenPushed = true
 
         // Seed the navigation chrome from the origin's synchronous identity
         // slice: the title and relationship button are populated from the
@@ -121,6 +171,22 @@ final class ProfileViewController: UIViewController {
         headerView.onWebsiteTapped = { url in
             UIApplication.shared.open(url)
         }
+        viewModel.onGalleryChange = { [weak self] snapshot in
+            self?.galleryPager.render(snapshot)
+        }
+        galleryPager.onItemTapped = { [weak self] post in
+            self?.viewModel.galleryItemTapped(post.id)
+        }
+        // Swipe ↔ tabs: a settled swipe adopts the format and mirrors the
+        // tabs; a tab tap records the format and pages.
+        galleryPager.onPageSettled = { [weak self] format in
+            guard let self else { return }
+            self.viewModel.setGalleryFormat(format)
+            if let index = ProfileGalleryPagerView.pageOrder.firstIndex(of: format) {
+                self.formatRow.select(index, notify: false)
+            }
+        }
+        configureFilterTray()
         // Mirror the (possibly stub-seeded) relationship into the header's
         // tray, so Message visibility agrees with the toolbar from the start.
         headerView.configureAction(followButtonState)
@@ -136,12 +202,31 @@ final class ProfileViewController: UIViewController {
         // so the title and Follow item ride the push natively instead of
         // popping in after it.
         applyNavigationState()
+        presentFilterToolbar()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        concealFilterToolbar()
     }
 
     #if DEBUG
     private var didAutoPresentEdit = false
+    #endif
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // The pager's horizontal pan yields to the stack's edge-swipe pop:
+        // without this, an edge-start drag over the grid PAGES instead of
+        // popping (verified in-sim) — the platform contract loses. Mid-surface
+        // drags are unaffected: the edge recognizer fails immediately for
+        // touches that don't start in its edge zone. Deferred to first
+        // appearance — the navigation controller isn't set at viewDidLoad.
+        if !didSubordinatePagerToPop, let pop = navigationController?.interactivePopGestureRecognizer {
+            didSubordinatePagerToPop = true
+            galleryPager.horizontalPan.require(toFail: pop)
+        }
+        #if DEBUG
         // Dev convenience: `-edit-profile` opens the edit form on the viewer's
         // own profile, so the form is testable without tapping the button.
         if !didAutoPresentEdit, makeEditViewController != nil,
@@ -169,8 +254,8 @@ final class ProfileViewController: UIViewController {
                 print("PROFILE-LAYOUT-AUDIT\n\(description.map(String.init(describing:)) ?? "unavailable")")
             }
         }
+        #endif
     }
-    #endif
 
     override func viewSafeAreaInsetsDidChange() {
         super.viewSafeAreaInsetsDidChange()
@@ -178,6 +263,20 @@ final class ProfileViewController: UIViewController {
         // safe-area inset is exactly the status-bar + navigation-bar height the
         // header's overlay content must clear.
         headerView.chromeTopInset = view.safeAreaInsets.top
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // The scroll view opts out of automatic inset adjustment (the banner
+        // must start at y = 0), so the bottom safe area — which includes the
+        // toolbar while it shows — is re-added by hand, plus breathing room
+        // so the grid's last row scrolls clear of the transparent bar's glass
+        // capsules.
+        let bottom = view.safeAreaInsets.bottom + (viewModel.hasGallery ? 8 : 0)
+        if scrollView.contentInset.bottom != bottom {
+            scrollView.contentInset.bottom = bottom
+            scrollView.verticalScrollIndicatorInsets.bottom = bottom
+        }
     }
 
     /// The header's action button means different things per state: Edit opens
@@ -206,6 +305,13 @@ final class ProfileViewController: UIViewController {
     /// top scrim) and snaps back to the system bar once content scrolls up
     /// underneath it.
     private func configureNavigationBar() {
+        // A custom leading item silently disables the navigation controller's
+        // interactive pop gesture (the feed had to build a whole replacement
+        // pan for that reason). The profile must keep the native edge swipe in
+        // every pushed context, so any leading item an owner installs (the
+        // sheet flow's bell today) supplements the back button instead of
+        // replacing it. Harmless at a stack root, where no back button exists.
+        navigationItem.leftItemsSupplementBackButton = true
         let transparent = UINavigationBarAppearance()
         transparent.configureWithTransparentBackground()
         transparent.titleTextAttributes = [.foregroundColor: UIColor.white]
@@ -313,9 +419,19 @@ final class ProfileViewController: UIViewController {
             headerView.topAnchor.constraint(equalTo: content.topAnchor)
             headerView.leadingAnchor.constraint(equalTo: content.leadingAnchor)
             headerView.trailingAnchor.constraint(equalTo: content.trailingAnchor)
-            headerView.bottomAnchor.constraint(equalTo: content.bottomAnchor)
             headerView.widthAnchor.constraint(equalTo: frame.widthAnchor)
         }
+        // The gallery pager continues the header's column; its height tracks
+        // the active page, so together they define the content height.
+        galleryPager.isHidden = !viewModel.hasGallery
+        galleryPager.constrain(in: scrollView) { _ in
+            galleryPager.topAnchor.constraint(equalTo: headerView.bottomAnchor, constant: 12)
+            galleryPager.leadingAnchor.constraint(equalTo: content.leadingAnchor)
+            galleryPager.trailingAnchor.constraint(equalTo: content.trailingAnchor)
+            galleryPager.widthAnchor.constraint(equalTo: frame.widthAnchor)
+            galleryPager.bottomAnchor.constraint(equalTo: content.bottomAnchor)
+        }
+
         // Stretchy banner: on downward overscroll the banner must keep
         // covering the screen from the very top instead of riding down with
         // the header and exposing the background.
@@ -338,6 +454,93 @@ final class ProfileViewController: UIViewController {
             statusLabel.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor)
             statusLabel.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor)
         }
+    }
+
+    /// Wires the bottom filter tray and installs it as this screen's toolbar
+    /// items: a format tab records the selection and pages the gallery; a
+    /// source pick re-filters every page in place. The items must exist by
+    /// the time a push starts — the feed's handover rule reads the incoming
+    /// screen's `toolbarItems` in its own viewWillDisappear.
+    private func configureFilterTray() {
+        guard viewModel.hasGallery else { return }
+
+        formatRow.onSelect = { [weak self] index in
+            guard let self else { return }
+            let format = ProfileGalleryPagerView.pageOrder[index]
+            self.viewModel.setGalleryFormat(format)
+            self.galleryPager.setActivePage(format, animated: true)
+        }
+        // Land on the user's global preference: tab selection and pager page
+        // adopt the (possibly stored) filter before first layout, so the
+        // screen OPENS there — no visible jump.
+        let format = viewModel.galleryFilter.format
+        if let index = ProfileGalleryPagerView.pageOrder.firstIndex(of: format) {
+            formatRow.select(index, notify: false)
+        }
+        galleryPager.setActivePage(format, animated: false)
+        toolbarItems = [
+            UIBarButtonItem(customView: formatRow),
+            .flexibleSpace(),
+            UIBarButtonItem(customView: sourceMenuButton)
+        ]
+    }
+
+    /// Shows the shared toolbar for this screen, riding the transition. The
+    /// mechanics mirror the feed's `presentToolbar`: shown non-animated so the
+    /// safe area is final immediately; the *visual* entrance is an alpha fade
+    /// on the transition coordinator — but only when the bar was hidden. When
+    /// it arrives from another toolbar owner (pushed from the feed), the bar
+    /// is already up and UIKit cross-fades the items natively.
+    private func presentFilterToolbar() {
+        guard viewModel.hasGallery, let nav = navigationController else { return }
+        // Transparent BAR background (exactly what the feed's toolbar uses,
+        // so handoffs between the two never restyle a visible bar); the
+        // items' glass comes from the system's per-item capsules.
+        let appearance = UIToolbarAppearance()
+        appearance.configureWithTransparentBackground()
+        nav.toolbar.standardAppearance = appearance
+        nav.toolbar.compactAppearance = appearance
+        nav.toolbar.scrollEdgeAppearance = appearance
+
+        let wasHidden = nav.isToolbarHidden
+        nav.setToolbarHidden(false, animated: false)
+        nav.toolbar.alpha = 1
+        if wasHidden, let coordinator = transitionCoordinator {
+            nav.toolbar.alpha = 0
+            coordinator.animate(alongsideTransition: { _ in
+                nav.toolbar.alpha = 1
+            }, completion: { _ in
+                // A push cannot cancel; pin the end state either way.
+                nav.toolbar.alpha = 1
+            })
+        }
+    }
+
+    /// The exit leg, fading the bar with whatever transition is carrying this
+    /// screen away — unless the successor is a toolbar owner itself (the feed
+    /// on pop-back), in which case the bar is handed over intact and the
+    /// successor's own presentation reconfigures it. A cancelled interactive
+    /// pop restores the alpha and keeps the bar.
+    private func concealFilterToolbar() {
+        guard viewModel.hasGallery, let nav = navigationController, !nav.isToolbarHidden else { return }
+        if let successor = nav.topViewController, successor !== self,
+           successor.toolbarItems?.isEmpty == false {
+            return
+        }
+        guard let coordinator = transitionCoordinator else {
+            nav.setToolbarHidden(true, animated: false)
+            return
+        }
+        coordinator.animate(alongsideTransition: { _ in
+            nav.toolbar.alpha = 0
+        }, completion: { context in
+            if context.isCancelled {
+                nav.toolbar.alpha = 1
+            } else {
+                nav.setToolbarHidden(true, animated: false)
+                nav.toolbar.alpha = 1
+            }
+        })
     }
 
     // MARK: - Render

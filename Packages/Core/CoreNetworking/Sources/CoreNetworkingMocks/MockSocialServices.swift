@@ -45,6 +45,9 @@ public final class MockSocialServices: @unchecked Sendable {
         bff.register(path: "/post.v1.PostService/GetPost") { [self] (request: Post_V1_GetPostRequest) in
             getPost(request)
         }
+        bff.register(path: "/post.v1.PostService/ListPostsByProfile") { [self] (request: Post_V1_ListPostsByProfileRequest) in
+            listPostsByProfile(request)
+        }
         bff.register(path: "/profile.v1.ProfileService/GetProfileById") { [self] (request: Profile_V1_GetProfileByIdRequest) in
             getProfileByID(request)
         }
@@ -113,10 +116,51 @@ public final class MockSocialServices: @unchecked Sendable {
         view.profileID = record.authorProfileID
         view.caption = record.caption
         view.publishedAtMs = record.publishedAtMS
+        view.kind = Self.kind(forMediaURL: record.media?.url)
+        view.parentID = record.parentID
         if let media = record.media {
             view.attachments = [makeAttachment(url: media.url, width: media.width, height: media.height)]
         }
         return .success(view)
+    }
+
+    /// The author's own posts, newest first, with cursor pagination — the
+    /// profile gallery's source. Client-authored posts only exist for the
+    /// viewer's own profile; seeded authors serve the dataset.
+    private func listPostsByProfile(_ request: Post_V1_ListPostsByProfileRequest) -> Result<Post_V1_ListPostsByProfileResponse, ConnectError> {
+        let authored = (postStore?.publishedRecords ?? [])
+            .filter { $0.profileID == request.profileID }
+            .map { (postID: $0.postID, mediaURL: $0.media?.url, createdAtMS: $0.createdAtMS) }
+        let seeded = dataset.posts
+            .filter { $0.authorProfileID == request.profileID }
+            .map { (postID: $0.postID, mediaURL: $0.media?.url, createdAtMS: $0.publishedAtMS) }
+        let all = (authored + seeded).sorted { $0.createdAtMS > $1.createdAtMS }
+
+        let start = Int(request.pageToken) ?? 0
+        let limit = Int(min(max(request.limit, 1), pageSizeCap))
+        let end = min(start + limit, all.count)
+        guard start <= end else {
+            return .failure(ConnectError(code: .invalidArgument, message: "bad page token"))
+        }
+
+        var response = Post_V1_ListPostsByProfileResponse()
+        response.posts = all[start..<end].map { record in
+            var summary = Post_V1_PostSummary()
+            summary.postID = record.postID
+            summary.kind = Self.kind(forMediaURL: record.mediaURL)
+            summary.status = .published
+            summary.createdAtMs = record.createdAtMS
+            return summary
+        }
+        response.nextToken = end < all.count ? String(end) : ""
+        return .success(response)
+    }
+
+    /// The dataset encodes post kind in the media URL host (`video` vs
+    /// `media`); no media at all is a text-only post.
+    private static func kind(forMediaURL url: String?) -> Post_V1_PostKind {
+        guard let url else { return .textOnly }
+        return url.contains("mock://video/") ? .mainVideo : .carousel
     }
 
     private func makeAttachment(url: String, width: Int, height: Int) -> Post_V1_MediaAttachmentView {

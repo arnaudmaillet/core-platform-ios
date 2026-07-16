@@ -401,6 +401,11 @@ extension ZoomDismissInteractionController: UIGestureRecognizerDelegate {
               let pan = gestureRecognizer as? UIPanGestureRecognizer,
               let view = pannedView else { return false }
         guard destination?.isReadyForInteractiveDismissal == true else { return false }
+        // `context == nil` only covers OUR transitions. A pop of a screen
+        // pushed above the feed (profile, comments) can still be settling —
+        // the feed is already `topViewController` then, and beginning a grab
+        // would start a second pop mid-transition. Refuse; the next grab retries.
+        guard (destination as? UIViewController)?.transitionCoordinator == nil else { return false }
         let velocity = pan.velocity(in: view)
         return velocity.x > 0 && abs(velocity.x) > abs(velocity.y)
     }
