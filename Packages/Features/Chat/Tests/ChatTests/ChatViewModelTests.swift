@@ -224,7 +224,7 @@ struct ChatViewModelTests {
         viewModel.viewDidLoad()
 
         viewModel.didTapIdentity()
-        #expect(router.routes == [.profile(ProfileID("peer-9"))])
+        #expect(router.routes == [.profile(ProfileID("peer-9"), stub: nil)])
     }
 
     @Test func identityTapResolvesThePeerOnColdEntry() async {
@@ -238,7 +238,7 @@ struct ChatViewModelTests {
         await settle()
 
         viewModel.didTapIdentity()
-        #expect(router.routes == [.profile(ProfileID("peer-9"))])
+        #expect(router.routes == [.profile(ProfileID("peer-9"), stub: nil)])
     }
 
     @Test func identityTapIsANoOpWithoutASinglePeer() {
