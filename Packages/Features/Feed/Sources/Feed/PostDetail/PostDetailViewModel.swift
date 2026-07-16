@@ -43,6 +43,9 @@ public final class PostDetailViewModel {
     private var engagement = EngagementState(likeCount: 0, isLiked: false)
     private var likeInFlight = false
     private var authorID: ProfileID?
+    /// The loaded author's identity slice — attached to the `.profile` route
+    /// so the destination composes its chrome synchronously.
+    private var authorStub: ProfileIdentityStub?
     private var load: Task<Void, Never>?
 
     public init(
@@ -101,7 +104,7 @@ public final class PostDetailViewModel {
     /// feed uses). Post detail never imports Profile.
     public func didTapAuthor() {
         guard let authorID else { return }
-        router?.route(to: .profile(authorID))
+        router?.route(to: .profile(authorID, stub: authorStub))
     }
 
     /// Posts a comment. Disables the composer while in flight; on success the
@@ -129,6 +132,10 @@ public final class PostDetailViewModel {
             do {
                 let entry = try await self.repository.loadPost(self.postID)
                 self.authorID = entry.author.id
+                self.authorStub = ProfileIdentityStub(
+                    handle: entry.author.handle,
+                    displayName: entry.author.displayName
+                )
                 self.engagement = EngagementState(likeCount: entry.likeCount, isLiked: false)
                 self.phase = .content(PostDetailDisplayModel(entry: entry, now: self.now()))
                 self.onEngagementChange?(self.engagement)

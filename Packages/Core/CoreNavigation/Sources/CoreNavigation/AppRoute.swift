@@ -10,7 +10,11 @@ public enum AppRoute: Equatable, Sendable {
     case feed
     /// The Messages inbox (conversation list), a primary root tab.
     case messages
-    case profile(ProfileID)
+    /// A user's profile. Origins that already render the user (feed cells,
+    /// search rows) attach a `ProfileIdentityStub` so the destination can
+    /// compose its navigation chrome before the push animates; `nil` when the
+    /// origin knows nothing beyond the id (deep links, debug args).
+    case profile(ProfileID, stub: ProfileIdentityStub?)
     case post(PostID)
     /// The post's comments only (no post header/media) — the snap feed already
     /// shows the post full-screen, so its comment button routes here.

@@ -106,7 +106,7 @@ struct NotificationsViewModelTests {
         await settle()
 
         viewModel.didSelect("n1")
-        #expect(router.routes == [.profile(ProfileID("prof-42"))])
+        #expect(router.routes == [.profile(ProfileID("prof-42"), stub: nil)])
     }
 
     @Test func markAllReadIsOptimisticAndCallsRepository() async {

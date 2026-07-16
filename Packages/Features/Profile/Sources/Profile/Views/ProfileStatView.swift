@@ -16,7 +16,10 @@ final class ProfileStatView: UIView {
         valueLabel.textAlignment = .center
 
         captionLabel.text = caption
-        captionLabel.font = .preferredFont(forTextStyle: .footnote)
+        // caption1, not footnote: four of these share the identity column
+        // beside the avatar (~64pt per cell on a 393pt screen), and
+        // "Followers" must fit that cell without truncating.
+        captionLabel.font = .preferredFont(forTextStyle: .caption1)
         captionLabel.adjustsFontForContentSizeCategory = true
         captionLabel.textColor = .secondaryLabel
         captionLabel.textAlignment = .center

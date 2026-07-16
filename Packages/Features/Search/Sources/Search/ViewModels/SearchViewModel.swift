@@ -62,9 +62,19 @@ public final class SearchViewModel {
     }
 
     /// Result tapped — hand off to cross-feature routing. Search never imports
-    /// Profile; it only emits a route.
+    /// Profile; it only emits a route. The identity slice the row already
+    /// renders rides along so the profile screen composes its navigation
+    /// chrome before the push animates.
     public func didSelectResult(_ id: ProfileID) {
-        router?.route(to: .profile(id))
+        var stub: ProfileIdentityStub?
+        if case .results(let models) = phase, let hit = models.first(where: { $0.id == id }) {
+            // The display model's handle carries the "@" sigil; the stub is raw.
+            stub = ProfileIdentityStub(
+                handle: String(hit.handle.dropFirst(hit.handle.hasPrefix("@") ? 1 : 0)),
+                displayName: hit.displayName
+            )
+        }
+        router?.route(to: .profile(id, stub: stub))
     }
 
     // MARK: - Search

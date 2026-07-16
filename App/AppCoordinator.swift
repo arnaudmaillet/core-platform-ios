@@ -143,7 +143,16 @@ final class AppCoordinator: Coordinator {
             // — so cross-tab routing is testable without driving the UI.
             let arguments = ProcessInfo.processInfo.arguments
             if let index = arguments.firstIndex(of: "-open-profile"), index + 1 < arguments.count {
-                container.router.route(to: .profile(ProfileID(arguments[index + 1])))
+                container.router.route(to: .profile(ProfileID(arguments[index + 1]), stub: nil))
+            }
+            // `-open-profile-stubbed <id> <handle> <name>` fires the same route
+            // WITH an identity stub — the feed-origin path — so the pre-seeded
+            // navigation chrome is verifiable without driving a cell tap.
+            if let index = arguments.firstIndex(of: "-open-profile-stubbed"), index + 3 < arguments.count {
+                container.router.route(to: .profile(
+                    ProfileID(arguments[index + 1]),
+                    stub: ProfileIdentityStub(handle: arguments[index + 2], displayName: arguments[index + 3])
+                ))
             }
             if let index = arguments.firstIndex(of: "-open-post"), index + 1 < arguments.count {
                 container.router.route(to: .post(PostID(arguments[index + 1])))
