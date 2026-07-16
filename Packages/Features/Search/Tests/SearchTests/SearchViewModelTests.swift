@@ -97,8 +97,9 @@ struct SearchViewModelTests {
         let router = SpyRouter()
         let (viewModel, _) = makeViewModel([], router: router)
 
+        // No results loaded → the route carries no identity stub.
         viewModel.didSelectResult(ProfileID("prof-7"))
 
-        #expect(router.routes == [.profile(ProfileID("prof-7"))])
+        #expect(router.routes == [.profile(ProfileID("prof-7"), stub: nil)])
     }
 }

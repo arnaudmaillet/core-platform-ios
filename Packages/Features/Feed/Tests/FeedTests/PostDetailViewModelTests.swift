@@ -127,7 +127,11 @@ struct PostDetailViewModelTests {
         viewModel.viewDidLoad()
         await settle()
 
+        // The loaded entry's identity slice rides along, pre-seeding the
+        // profile screen's navigation chrome.
         viewModel.didTapAuthor()
-        #expect(router.routes == [.profile(ProfileID("prof-9"))])
+        #expect(router.routes == [
+            .profile(ProfileID("prof-9"), stub: ProfileIdentityStub(handle: "ava", displayName: "Ava Moreau"))
+        ])
     }
 }

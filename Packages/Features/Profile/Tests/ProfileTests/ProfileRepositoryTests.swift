@@ -75,6 +75,26 @@ struct ProfileRepositoryTests {
 
         #expect(profile.followerCount == .unavailable)
         #expect(profile.followingCount == .unavailable)
+        // VIEW has no counter projection and no fallback source at all.
+        #expect(profile.viewCount == .unavailable)
+    }
+
+    @Test func readsProfileReactionsFromCounterAggregate() async throws {
+        // Profile-scoped LIKE is the one metric the mock projects: the sum of
+        // like counts across the author's posts. An author with posts reads a
+        // real total; the demo viewer owns no posts, so their total is a
+        // truthful zero (served exact — distinct from `.unavailable`).
+        let repository = makeRepository()
+
+        let author = try await repository.profile(id: ProfileID("prof-3"))
+        guard case .exact(let total) = author.reactionCount else {
+            Issue.record("expected an exact reaction count, got \(author.reactionCount)")
+            return
+        }
+        #expect(total > 0)
+
+        let viewer = try await repository.currentUserProfile()
+        #expect(viewer.reactionCount == .exact(0))
     }
 
     @Test func throwsWhenNotAuthenticated() async {

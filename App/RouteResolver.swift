@@ -55,8 +55,8 @@ final class RouteResolver: Router {
             navigator.selectTab(.messages)
             navigator.activeNavigationController?.popToRootViewController(animated: true)
 
-        case .profile(let profileID):
-            let profile = profileFeature().makeProfileViewController(for: profileID)
+        case .profile(let profileID, let stub):
+            let profile = profileFeature().makeProfileViewController(for: profileID, identityStub: stub)
             navigator.activeNavigationController?.pushViewController(profile, animated: true)
 
         case .upload:

@@ -55,7 +55,9 @@ public final class NotificationsViewModel {
         if let postID = item.postSubjectID {
             router?.route(to: .post(postID))
         } else {
-            router?.route(to: .profile(item.senderID))
+            // Notification rows render an aggregated sentence, not the raw
+            // handle, so there is no identity slice to attach.
+            router?.route(to: .profile(item.senderID, stub: nil))
         }
     }
 

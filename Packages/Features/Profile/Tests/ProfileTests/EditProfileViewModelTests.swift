@@ -37,7 +37,9 @@ private func viewerProfile() -> UserProfile {
         websiteURL: URL(string: "https://ada.example"),
         isVerified: false,
         followerCount: .exact(3),
-        followingCount: .exact(5)
+        followingCount: .exact(5),
+        reactionCount: .unavailable,
+        viewCount: .unavailable
     )
 }
 

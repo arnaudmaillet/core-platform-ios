@@ -15,7 +15,11 @@ public protocol ProfileFeatureBuilding {
     /// Any user's profile by id — the destination the router pushes when a
     /// profile route fires (e.g. tapping a post author). Carries no account
     /// actions; the nav stack's back button returns to the origin.
-    func makeProfileViewController(for profileID: ProfileID) -> UIViewController
+    /// `identityStub` is the origin's synchronously-known identity slice
+    /// (handle, display name, follow state if known): it lets the screen
+    /// compose its navigation chrome before the push animates. Pass nil when
+    /// the origin only has the id.
+    func makeProfileViewController(for profileID: ProfileID, identityStub: ProfileIdentityStub?) -> UIViewController
 
     /// The signed-in viewer's avatar, decoded and cached — for shell chrome
     /// (the Maps nav-bar avatar button). Best-effort: `nil` when the viewer has

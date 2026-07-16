@@ -86,6 +86,10 @@ public final class FeedViewModel {
     private var items: [FeedItemDisplayModel] = []
     private var engagement: [PostID: EngagementState] = [:]
     private var likesInFlight: Set<PostID> = []
+    /// Identity slices of every author rendered so far, keyed by profile id —
+    /// attached to `.profile` routes so the destination composes its chrome
+    /// synchronously (see `didTapAuthor`).
+    private var authorStubs: [ProfileID: ProfileIdentityStub] = [:]
     private var isColdRefreshing = false
     private var nextPageToken: String?
     private var builder: FeedDisplayModelBuilder?
@@ -174,9 +178,11 @@ public final class FeedViewModel {
     }
 
     /// Author tapped in a cell — hand off to cross-feature routing. The feed
-    /// never imports Profile; it only emits a route.
+    /// never imports Profile; it only emits a route. The identity slice the
+    /// cell already renders (handle, name) rides along so the profile screen
+    /// can compose its navigation chrome before the push animates.
     public func didTapAuthor(_ id: ProfileID) {
-        router?.route(to: .profile(id))
+        router?.route(to: .profile(id, stub: authorStubs[id]))
     }
 
     /// The comment button tapped — open the post's comments via routing. On the
@@ -390,6 +396,15 @@ public final class FeedViewModel {
 
     private func build(_ entries: [FeedEntry]) async -> [FeedItemDisplayModel]? {
         guard let builder else { return nil }
+        // Every entry that can reach the screen passes through here (pages,
+        // refreshes, composed-post prepends), so this is the one place to
+        // remember each author's identity slice for profile routing.
+        for entry in entries {
+            authorStubs[entry.author.id] = ProfileIdentityStub(
+                handle: entry.author.handle,
+                displayName: entry.author.displayName
+            )
+        }
         let now = now()
         // Text measurement runs off the main actor by design.
         return await Task.detached(priority: .userInitiated) {

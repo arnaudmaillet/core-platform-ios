@@ -8,19 +8,24 @@ struct ProfileDisplayModelTests {
         handle: String = "ada",
         displayName: String = "Ada Lovelace",
         bio: String = "",
+        avatarURL: URL? = nil,
         followers: CountEstimate = .unavailable,
-        following: CountEstimate = .unavailable
+        following: CountEstimate = .unavailable,
+        reactions: CountEstimate = .unavailable,
+        views: CountEstimate = .unavailable
     ) -> UserProfile {
         UserProfile(
             id: ProfileID("prof-1"),
             handle: handle,
             displayName: displayName,
             bio: bio,
-            avatarURL: nil,
+            avatarURL: avatarURL,
             websiteURL: nil,
             isVerified: false,
             followerCount: followers,
-            followingCount: following
+            followingCount: following,
+            reactionCount: reactions,
+            viewCount: views
         )
     }
 
@@ -77,9 +82,25 @@ struct ProfileDisplayModelTests {
         #expect(ProfileDisplayModel.websiteDisplay(nil) == nil)
     }
 
-    @Test func postsCountReadsUnavailableUntilServed() {
-        // No backend serves a post count yet; the strip must not claim "0".
-        #expect(ProfileDisplayModel(profile: profile()).postsText == "—")
+    @Test func formatsReactionsAndViews() {
+        let model = ProfileDisplayModel(profile: profile(reactions: .exact(1_234), views: .atLeast(200)))
+        #expect(model.reactionsText == "1.2K")
+        #expect(model.viewsText == "200+")
+    }
+
+    @Test func reactionsAndViewsReadUnavailableWhenUnprojected() {
+        // Wherever counter.v1 doesn't project these metrics (the fleet, and
+        // views on the mock), the band must not claim "0".
+        let model = ProfileDisplayModel(profile: profile())
+        #expect(model.reactionsText == "—")
+        #expect(model.viewsText == "—")
+    }
+
+    @Test func bannerMirrorsAvatarUntilCoverAssetExists() {
+        // profile.v1 has no cover-media field yet; the banner reuses the avatar.
+        let url = URL(string: "https://cdn.example/ada.jpg")
+        #expect(ProfileDisplayModel(profile: profile(avatarURL: url)).bannerImageURL == url)
+        #expect(ProfileDisplayModel(profile: profile()).bannerImageURL == nil)
     }
 
     @Test func derivesEstimateFromEdgeSample() {

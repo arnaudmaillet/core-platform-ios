@@ -19,9 +19,16 @@ public struct ProfileDisplayModel: Equatable, Sendable {
     /// unreachable — never a misleading "0".
     public let followerText: String
     public let followingText: String
-    /// Post counter for the stats strip. No backend serves a post count yet,
-    /// so this is always the "unavailable" glyph — never a misleading "0".
-    public let postsText: String
+    /// Total reactions received across the profile's posts. Served only by
+    /// counter.v1; "—" wherever that projection isn't live.
+    public let reactionsText: String
+    /// Total content views. Served only by counter.v1; "—" wherever that
+    /// projection isn't live (it isn't on the fleet or the mock today).
+    public let viewsText: String
+    /// The immersive banner's media. profile.v1 has no dedicated cover asset
+    /// yet, so this mirrors the avatar image until the contract grows one —
+    /// swap the source here, and the header needs no change.
+    public let bannerImageURL: URL?
     /// Compact link under the bio, Instagram-style: scheme and "www." stripped
     /// ("ada.dev/notes"). Nil when the profile has no website.
     public let websiteText: String?
@@ -38,7 +45,9 @@ public struct ProfileDisplayModel: Equatable, Sendable {
         isVerified = profile.isVerified
         followerText = Self.format(profile.followerCount)
         followingText = Self.format(profile.followingCount)
-        postsText = Self.format(.unavailable)
+        reactionsText = Self.format(profile.reactionCount)
+        viewsText = Self.format(profile.viewCount)
+        bannerImageURL = profile.avatarURL
         websiteText = Self.websiteDisplay(profile.websiteURL)
         websiteURL = profile.websiteURL
     }

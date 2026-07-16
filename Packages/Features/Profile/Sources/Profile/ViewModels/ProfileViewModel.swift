@@ -106,7 +106,10 @@ public final class ProfileViewModel {
     private func reload() {
         load?.cancel()
         relationshipLoad?.cancel()
-        followButton = .hidden
+        // Deliberately NOT resetting `followButton` here: the controller may
+        // have pre-seeded a provisional state from the route's identity stub,
+        // and a refresh keeps showing the last known state. The relationship
+        // read overwrites with the authoritative answer when it lands.
         load = Task { [weak self] in
             guard let self else { return }
             do {
@@ -139,6 +142,15 @@ public final class ProfileViewModel {
     private func loadRelationship(for id: ProfileID) {
         relationshipLoad = Task { [weak self] in
             guard let self else { return }
+            #if DEBUG
+            // Dev convenience: `-profile-relationship-delay` holds the
+            // relationship answer for a few seconds, making the nav-bar
+            // skeleton capsule and its cross-fade to Follow/Following
+            // observable (the mock otherwise answers before the push starts).
+            if ProcessInfo.processInfo.arguments.contains("-profile-relationship-delay") {
+                try? await Task.sleep(for: .seconds(3))
+            }
+            #endif
             guard let relationship = try? await self.repository.relationship(for: id) else { return }
             switch relationship {
             case .me:
@@ -167,7 +179,9 @@ public final class ProfileViewModel {
             websiteURL: profile.websiteURL,
             isVerified: profile.isVerified,
             followerCount: profile.followerCount.adjusted(by: following ? 1 : -1),
-            followingCount: profile.followingCount
+            followingCount: profile.followingCount,
+            reactionCount: profile.reactionCount,
+            viewCount: profile.viewCount
         )
         self.profile = updated
         phase = .content(ProfileDisplayModel(profile: updated))

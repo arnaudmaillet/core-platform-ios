@@ -32,11 +32,12 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         )
     }
 
-    public func makeProfileViewController(for profileID: ProfileID) -> UIViewController {
+    public func makeProfileViewController(for profileID: ProfileID, identityStub: ProfileIdentityStub?) -> UIViewController {
         ProfileViewController(
             viewModel: ProfileViewModel(repository: repository, source: .profile(profileID), router: router),
             imagePipeline: imagePipeline,
-            onLogout: nil
+            onLogout: nil,
+            identityStub: identityStub
         )
     }
 

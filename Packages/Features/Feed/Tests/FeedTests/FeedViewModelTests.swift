@@ -72,8 +72,9 @@ struct FeedViewModelTests {
     @Test func tappingAuthorRoutesToProfile() {
         let router = SpyRouter()
         let viewModel = FeedViewModel(repository: FakeFeedProvider(), router: router)
+        // No entries loaded yet → the route carries no identity stub.
         viewModel.didTapAuthor(ProfileID("prof-99"))
-        #expect(router.routes == [.profile(ProfileID("prof-99"))])
+        #expect(router.routes == [.profile(ProfileID("prof-99"), stub: nil)])
     }
 
     @Test func tappingCommentsRoutesToComments() {
