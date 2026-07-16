@@ -45,7 +45,9 @@ struct ChatRepositoryTests {
     @Test func loadsMessagesWithMineFlag() async throws {
         let repository = makeRepository()
 
-        let messages = try await repository.loadMessages(in: ConversationID("conv-0"))
+        // conv-1 keeps the short 3-message seed (conv-0 is the dense
+        // thread-screen demo seed and grows with it).
+        let messages = try await repository.loadMessages(in: ConversationID("conv-1"))
 
         #expect(messages.count == 3)
         // Ordered oldest → newest.

@@ -33,8 +33,14 @@ private final class SpyRouter: Router {
     func route(to route: AppRoute) { routes.append(route) }
 }
 
-private func conversation(_ id: String, title: String = "Ava") -> Conversation {
-    Conversation(id: ConversationID(id), title: title, lastMessage: "hi", lastActivityAt: Date(timeIntervalSince1970: 0))
+private func conversation(_ id: String, title: String = "Ava", others: [String] = ["peer-1"]) -> Conversation {
+    Conversation(
+        id: ConversationID(id),
+        title: title,
+        lastMessage: "hi",
+        lastActivityAt: Date(timeIntervalSince1970: 0),
+        otherMemberIDs: others.map { ProfileID($0) }
+    )
 }
 
 private func message(_ id: String, mine: Bool) -> ChatMessage {
@@ -82,6 +88,174 @@ struct ChatViewModelTests {
 
         viewModel.didSelect(ConversationID("c7"))
         #expect(router.routes == [.conversation(ConversationID("c7"))])
+    }
+
+    @Test func pinningReordersPinnedFirstAndFlagsTheRow() async {
+        let viewModel = ConversationListViewModel(
+            repository: StubChatProvider(conversations: [conversation("c1"), conversation("c2")])
+        )
+        var last: ConversationListViewModel.Phase?
+        viewModel.onPhaseChange = { last = $0 }
+        viewModel.viewWillAppear()
+        await settle()
+
+        viewModel.togglePin(ConversationID("c2"))
+
+        guard case .content(let models) = last else {
+            Issue.record("expected content, got \(String(describing: last))")
+            return
+        }
+        #expect(models.map(\.id) == [ConversationID("c2"), ConversationID("c1")])
+        #expect(models[0].isPinned)
+        #expect(!models[1].isPinned)
+        #expect(viewModel.isPinned(ConversationID("c2")))
+    }
+
+    @Test func mutingFlagsTheRowWithoutReordering() async {
+        let viewModel = ConversationListViewModel(
+            repository: StubChatProvider(conversations: [conversation("c1"), conversation("c2")])
+        )
+        var last: ConversationListViewModel.Phase?
+        viewModel.onPhaseChange = { last = $0 }
+        viewModel.viewWillAppear()
+        await settle()
+
+        viewModel.toggleMute(ConversationID("c1"))
+
+        guard case .content(let models) = last else {
+            Issue.record("expected content, got \(String(describing: last))")
+            return
+        }
+        #expect(models.map(\.id) == [ConversationID("c1"), ConversationID("c2")])
+        #expect(models[0].isMuted)
+        #expect(viewModel.isMuted(ConversationID("c1")))
+    }
+
+    @Test func deletionRemovesRowsAndSurvivesReloads() async {
+        let viewModel = ConversationListViewModel(
+            repository: StubChatProvider(conversations: [conversation("c1"), conversation("c2")])
+        )
+        var last: ConversationListViewModel.Phase?
+        viewModel.onPhaseChange = { last = $0 }
+        viewModel.viewWillAppear()
+        await settle()
+
+        viewModel.delete([ConversationID("c1")])
+        guard case .content(let afterDelete) = last else {
+            Issue.record("expected content, got \(String(describing: last))")
+            return
+        }
+        #expect(afterDelete.map(\.id) == [ConversationID("c2")])
+
+        // A refresh re-fetches both from the repository; the local delete
+        // filter must keep the row out for the session.
+        viewModel.refresh()
+        await settle()
+        guard case .content(let afterReload) = last else {
+            Issue.record("expected content, got \(String(describing: last))")
+            return
+        }
+        #expect(afterReload.map(\.id) == [ConversationID("c2")])
+    }
+
+    @Test func deletingEverythingLandsOnEmpty() async {
+        let viewModel = ConversationListViewModel(
+            repository: StubChatProvider(conversations: [conversation("c1")])
+        )
+        var last: ConversationListViewModel.Phase?
+        viewModel.onPhaseChange = { last = $0 }
+        viewModel.viewWillAppear()
+        await settle()
+
+        viewModel.delete([ConversationID("c1")])
+        #expect(last == .empty)
+    }
+
+    @Test func composeRoutesToNewMessage() {
+        let router = SpyRouter()
+        let viewModel = ConversationListViewModel(repository: StubChatProvider(), router: router)
+
+        viewModel.didTapCompose()
+        #expect(router.routes == [.newMessage])
+    }
+
+    @Test func listWarmsTheConversationDirectory() async {
+        let directory = ConversationDirectory()
+        let viewModel = ConversationListViewModel(
+            repository: StubChatProvider(conversations: [conversation("c1", title: "Ava Moreau")]),
+            directory: directory
+        )
+        viewModel.viewWillAppear()
+        await settle()
+
+        #expect(directory.title(for: ConversationID("c1")) == "Ava Moreau")
+    }
+
+    /// The push-transition contract: a warm directory binds the header
+    /// identity SYNCHRONOUSLY in `viewDidLoad` — no async settle — so it is
+    /// laid out before the transition's first frame.
+    @Test func warmThreadTitleBindsSynchronously() {
+        let directory = ConversationDirectory()
+        directory.remember([conversation("c1", title: "Ava Moreau")])
+        let viewModel = ConversationViewModel(
+            conversationID: ConversationID("c1"),
+            repository: StubChatProvider(),
+            directory: directory
+        )
+        var title: String?
+        viewModel.onTitleChange = { title = $0 }
+
+        viewModel.viewDidLoad()
+
+        // Asserted immediately: the whole point is no await before the bind.
+        #expect(title == "Ava Moreau")
+    }
+
+    @Test func identityTapRoutesToThePeerProfile() {
+        let router = SpyRouter()
+        let directory = ConversationDirectory()
+        directory.remember([conversation("c1", others: ["peer-9"])])
+        let viewModel = ConversationViewModel(
+            conversationID: ConversationID("c1"),
+            repository: StubChatProvider(),
+            directory: directory,
+            router: router
+        )
+        viewModel.viewDidLoad()
+
+        viewModel.didTapIdentity()
+        #expect(router.routes == [.profile(ProfileID("peer-9"))])
+    }
+
+    @Test func identityTapResolvesThePeerOnColdEntry() async {
+        let router = SpyRouter()
+        let viewModel = ConversationViewModel(
+            conversationID: ConversationID("c1"),
+            repository: StubChatProvider(conversations: [conversation("c1", others: ["peer-9"])]),
+            router: router
+        )
+        viewModel.viewDidLoad()
+        await settle()
+
+        viewModel.didTapIdentity()
+        #expect(router.routes == [.profile(ProfileID("peer-9"))])
+    }
+
+    @Test func identityTapIsANoOpWithoutASinglePeer() {
+        let router = SpyRouter()
+        let directory = ConversationDirectory()
+        // A group shape: two other members — no single profile to open.
+        directory.remember([conversation("c1", others: ["peer-1", "peer-2"])])
+        let viewModel = ConversationViewModel(
+            conversationID: ConversationID("c1"),
+            repository: StubChatProvider(),
+            directory: directory,
+            router: router
+        )
+        viewModel.viewDidLoad()
+
+        viewModel.didTapIdentity()
+        #expect(router.routes.isEmpty)
     }
 
     // MARK: - Thread

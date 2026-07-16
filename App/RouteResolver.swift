@@ -84,6 +84,18 @@ final class RouteResolver: Router {
                     nav?.pushViewController(thread, animated: true)
                 }
             }
+
+        case .newMessage:
+            // Interim: the contact-selection flow doesn't exist yet. This is
+            // its one landing site — swap the alert for the picker (which
+            // then emits `.messageUser`) without touching any emitter.
+            let alert = UIAlertController(
+                title: "New Message",
+                message: "Contact selection is on its way. Until then, open someone's profile and tap Message.",
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            navigator.activeNavigationController?.present(alert, animated: true)
         }
     }
 }

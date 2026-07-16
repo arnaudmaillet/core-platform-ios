@@ -16,12 +16,28 @@ public struct Conversation: Equatable, Sendable, Identifiable {
     public let title: String
     public let lastMessage: String
     public let lastActivityAt: Date?
+    /// The non-viewer member(s). Exactly one for a DM — the identity the
+    /// thread header shows and links to.
+    public let otherMemberIDs: [ProfileID]
 
-    public init(id: ConversationID, title: String, lastMessage: String, lastActivityAt: Date?) {
+    public init(
+        id: ConversationID,
+        title: String,
+        lastMessage: String,
+        lastActivityAt: Date?,
+        otherMemberIDs: [ProfileID] = []
+    ) {
         self.id = id
         self.title = title
         self.lastMessage = lastMessage
         self.lastActivityAt = lastActivityAt
+        self.otherMemberIDs = otherMemberIDs
+    }
+
+    /// The DM correspondent: the single other member. `nil` for group shapes,
+    /// where "the peer" is not a meaningful destination.
+    public var directPeerID: ProfileID? {
+        otherMemberIDs.count == 1 ? otherMemberIDs.first : nil
     }
 }
 
@@ -50,6 +66,15 @@ public protocol ChatProviding: Sendable {
     /// The direct-message conversation with `profileID`, reusing an existing
     /// 1:1 conversation or creating one.
     func directConversation(with profileID: ProfileID) async throws -> ConversationID
+}
+
+extension ChatProviding {
+    /// The thread's header context (title + peer). Default rides
+    /// `loadConversations`; conformances can override with a leaner query
+    /// once chat.v1 exposes a single-conversation lookup.
+    public func conversationSummary(for id: ConversationID) async throws -> Conversation? {
+        try await loadConversations().first { $0.id == id }
+    }
 }
 
 /// Reads/writes conversations via chat.v1, hydrating member names via
@@ -130,7 +155,8 @@ public actor ChatRepository: ChatProviding {
             id: id,
             title: title.isEmpty ? "Conversation" : title,
             lastMessage: latest?.body ?? "",
-            lastActivityAt: latest.map { Date(timeIntervalSince1970: TimeInterval($0.createdAtMs) / 1000) }
+            lastActivityAt: latest.map { Date(timeIntervalSince1970: TimeInterval($0.createdAtMs) / 1000) },
+            otherMemberIDs: otherIDs
         )
     }
 

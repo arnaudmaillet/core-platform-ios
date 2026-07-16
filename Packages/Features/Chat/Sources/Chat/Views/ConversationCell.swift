@@ -12,6 +12,7 @@ final class ConversationCell: UITableViewCell {
     private let titleLabel = UILabel()
     private let previewLabel = UILabel()
     private let timeLabel = UILabel()
+    private let mutedIcon = UIImageView(image: UIImage(systemName: "bell.slash.fill"))
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
@@ -26,6 +27,11 @@ final class ConversationCell: UITableViewCell {
         titleLabel.text = model.title
         previewLabel.text = model.preview.isEmpty ? "No messages yet" : model.preview
         timeLabel.text = model.timeText
+        mutedIcon.isHidden = !model.isMuted
+        // Pinned state reads as a band, not a badge: a subtle translucent
+        // fill separates the pinned block from the feed (Telegram idiom).
+        // System fill colors are translucent and adapt to dark mode.
+        backgroundColor = model.isPinned ? .quaternarySystemFill : nil
     }
 
     private func configure() {
@@ -53,9 +59,19 @@ final class ConversationCell: UITableViewCell {
         timeLabel.textColor = .secondaryLabel
         timeLabel.setContentHuggingPriority(.required, for: .horizontal)
 
-        let titleRow = UIStackView(arrangedSubviews: [titleLabel, timeLabel])
+        // Muted glyph (hidden by default), between title and time. Pinned
+        // state has no glyph — it tints the row background instead.
+        mutedIcon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .caption1)
+        mutedIcon.tintColor = .secondaryLabel
+        mutedIcon.contentMode = .scaleAspectFit
+        mutedIcon.isHidden = true
+        mutedIcon.setContentHuggingPriority(.required, for: .horizontal)
+        mutedIcon.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let titleRow = UIStackView(arrangedSubviews: [titleLabel, mutedIcon, timeLabel])
         titleRow.axis = .horizontal
-        titleRow.alignment = .firstBaseline
+        // Center, not firstBaseline: the glyph image views have no baseline.
+        titleRow.alignment = .center
         titleRow.spacing = Spacing.sm
 
         let textColumn = UIStackView(arrangedSubviews: [titleRow, previewLabel])

@@ -67,15 +67,38 @@ public final class MockChatService: @unchecked Sendable {
         let other = otherMember[conversationID] ?? viewer
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
         let minute: Int64 = 60_000
-        // (sender, body, minutesAgo)
-        let specs: [(String, String, Int64)] = [
-            (other, "Hey! Did you see the new build?", 60),
-            (viewer, "Yeah, shipping it today 🚀", 58),
-            (other, "Nice — ping me when it's live", 55)
-        ]
-        return specs.map { sender, body, minutesAgo in
+        // (sender, body, minutesAgo). conv-0 is the dense thread-screen seed:
+        // two day sections, same-sender runs (grouped bubbles), a long-wrap
+        // paragraph, and back-to-back turnarounds. conv-1 stays short.
+        let morning: Int64 = 25 * 60
+        let midday: Int64 = 24 * 60 + 30
+        let specs: [(String, String, Int64)] = conversationID == "conv-0"
+            ? [
+                (other, "Morning! Standup moved to 9:30 today", morning),
+                (other, "Room 4 this time", morning - 1),
+                (other, "And bring the tab bar demo if it's ready", morning - 2),
+                (viewer, "👍 on my way", morning - 4),
+                (viewer, "Demo's ready — pushed the branch last night", morning - 5),
+                (other, "Saw it. The thread screen rebuild is next, right? The list one is starting to feel very 2015.", midday),
+                (viewer, "Yep, Telegram-style bubbles, day chips, glass input bar — the works. Native UIKit only though, no custom layout engine.", midday - 10),
+                (other, "Bold claim 😄", midday - 11),
+                (viewer, "Watch me", midday - 15),
+                (other, "Hey! Did you see the new build?", 60),
+                (viewer, "Yeah, shipping it today 🚀", 58),
+                (viewer, "Just cleaning up the last QA notes", 57),
+                (other, "Nice — ping me when it's live", 55),
+                (other, "No rush, I'm in reviews all morning anyway", 54),
+                (viewer, "Will do", 12)
+            ]
+            : [
+                (other, "Hey! Did you see the new build?", 60),
+                (viewer, "Yeah, shipping it today 🚀", 58),
+                (other, "Nice — ping me when it's live", 55)
+            ]
+        return specs.enumerated().map { index, spec in
+            let (sender, body, minutesAgo) = spec
             var view = Chat_V1_MessageView()
-            view.messageID = "\(conversationID)-m\(minutesAgo)"
+            view.messageID = "\(conversationID)-m\(index)"
             view.senderID = sender
             view.body = body
             view.createdAtMs = nowMs - minutesAgo * minute
