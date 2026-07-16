@@ -159,8 +159,27 @@ final class AppCoordinator: Coordinator {
             if let index = arguments.firstIndex(of: "-open-conversation"), index + 1 < arguments.count {
                 container.router.route(to: .conversation(ConversationID(arguments[index + 1])))
             }
+            // `-open-conversation-settled <id>` fires the same route ~2s in —
+            // after the Messages list has loaded — reproducing the tap-a-row
+            // path (warm identity directory, header present during the push),
+            // where the immediate variant above is a cold deep link.
+            if let index = arguments.firstIndex(of: "-open-conversation-settled"), index + 1 < arguments.count {
+                let id = ConversationID(arguments[index + 1])
+                let router = container.router
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    router.route(to: .conversation(id))
+                }
+            }
             if let index = arguments.firstIndex(of: "-message-user"), index + 1 < arguments.count {
                 container.router.route(to: .messageUser(ProfileID(arguments[index + 1])))
+            }
+            // `-auto-pop` pops the active stack ~2.5s after launch — pairs with
+            // the `-open-*` args above to verify pop-side behavior (nav chrome,
+            // tab bar restoration) since taps can't be injected in-sim.
+            if arguments.contains("-auto-pop") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak tabCoordinator] in
+                    tabCoordinator?.activeNavigationController?.popViewController(animated: true)
+                }
             }
             #endif
         }

@@ -19,4 +19,7 @@ public enum AppRoute: Equatable, Sendable {
     case conversation(ConversationID)
     /// Open (find-or-create) a direct-message thread with a profile.
     case messageUser(ProfileID)
+    /// Compose a new message: the contact-selection flow. The inbox's compose
+    /// button emits this; the resolver owns what it presents.
+    case newMessage
 }

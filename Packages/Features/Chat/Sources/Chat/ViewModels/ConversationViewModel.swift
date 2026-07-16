@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNavigation
 import Foundation
 
 @MainActor
@@ -12,22 +13,36 @@ public final class ConversationViewModel {
     public var onPhaseChange: ((Phase) -> Void)?
     /// True while a message is being sent (disables the send control).
     public var onSendingChange: ((Bool) -> Void)?
+    /// Fires once the peer's name resolves; best-effort (no title on failure).
+    public var onTitleChange: ((String) -> Void)?
 
     private let conversationID: ConversationID
     private let repository: any ChatProviding
+    private let directory: ConversationDirectory?
+    private let router: (any Router)?
 
     private var messages: [ChatMessage] = []
     private var phase: Phase = .loading { didSet { onPhaseChange?(phase) } }
     private var isSending = false
     private var load: Task<Void, Never>?
+    /// The DM correspondent, once known — the header identity's destination.
+    private var peerProfileID: ProfileID?
 
-    public init(conversationID: ConversationID, repository: any ChatProviding) {
+    public init(
+        conversationID: ConversationID,
+        repository: any ChatProviding,
+        directory: ConversationDirectory? = nil,
+        router: (any Router)? = nil
+    ) {
         self.conversationID = conversationID
         self.repository = repository
+        self.directory = directory
+        self.router = router
     }
 
     public func viewDidLoad() {
         reload()
+        loadTitle()
     }
 
     public func refresh() {
@@ -70,6 +85,36 @@ public final class ConversationViewModel {
                 }
             }
             self.load = nil
+        }
+    }
+
+    /// Tapping the header identity opens the correspondent's profile —
+    /// routed, never navigated directly (chat stays Profile-agnostic). A
+    /// no-op until the peer resolves, or for group shapes with no single peer.
+    public func didTapIdentity() {
+        guard let peerProfileID else { return }
+        router?.route(to: .profile(peerProfileID))
+    }
+
+    private func loadTitle() {
+        // Cache hit binds SYNCHRONOUSLY inside the view's `viewDidLoad`, i.e.
+        // before the push transition's first frame — the list-tap path shows
+        // the header identity throughout the animation. Any async hop, even a
+        // cached one, resolves after the transition has started.
+        if let cached = directory?.summary(for: conversationID), !cached.title.isEmpty {
+            peerProfileID = cached.directPeerID
+            onTitleChange?(cached.title)
+            return
+        }
+        // Cold entry (deep link, push payload): fetch, then ease the identity
+        // in — the data genuinely doesn't exist yet.
+        Task { [weak self] in
+            guard let self else { return }
+            if let summary = try? await self.repository.conversationSummary(for: self.conversationID),
+               !summary.title.isEmpty {
+                self.peerProfileID = summary.directPeerID
+                self.onTitleChange?(summary.title)
+            }
         }
     }
 

@@ -8,13 +8,22 @@ public struct ConversationDisplayModel: Equatable, Sendable, Identifiable {
     public let preview: String
     public let timeText: String
     public let monogram: String
+    public let isPinned: Bool
+    public let isMuted: Bool
 
-    public init(conversation: Conversation, now: Date = Date()) {
+    public init(
+        conversation: Conversation,
+        now: Date = Date(),
+        isPinned: Bool = false,
+        isMuted: Bool = false
+    ) {
         id = conversation.id
         title = conversation.title
         preview = conversation.lastMessage
         timeText = conversation.lastActivityAt.map { Self.relativeShort(from: $0, to: now) } ?? ""
         monogram = Self.monogram(conversation.title)
+        self.isPinned = isPinned
+        self.isMuted = isMuted
     }
 
     static func monogram(_ title: String) -> String {
@@ -35,15 +44,20 @@ public struct ConversationDisplayModel: Equatable, Sendable, Identifiable {
     }
 }
 
-/// View-ready message bubble.
+/// View-ready message bubble. `senderID`/`sentAt` stay raw here: run grouping
+/// and time formatting are transcript concerns (see `ChatTranscript`).
 public struct MessageDisplayModel: Equatable, Sendable, Identifiable {
     public let id: String
+    public let senderID: ProfileID
     public let body: String
+    public let sentAt: Date
     public let isMine: Bool
 
     public init(message: ChatMessage) {
         id = message.id
+        senderID = message.senderID
         body = message.body
+        sentAt = message.createdAt
         isMine = message.isMine
     }
 }
