@@ -93,7 +93,10 @@ public final class ConversationViewModel {
     /// no-op until the peer resolves, or for group shapes with no single peer.
     public func didTapIdentity() {
         guard let peerProfileID else { return }
-        router?.route(to: .profile(peerProfileID))
+        // No identity stub: the thread knows the peer's display name but not
+        // their raw @handle, and the stub must not fabricate one (it becomes
+        // the profile screen's title). Same semantics as notification rows.
+        router?.route(to: .profile(peerProfileID, stub: nil))
     }
 
     private func loadTitle() {
