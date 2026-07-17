@@ -8,7 +8,7 @@ final class ConversationListViewController: UIViewController {
 
     private let tableView = UITableView(frame: .zero, style: .plain)
     private let refreshControl = UIRefreshControl()
-    private let spinner = UIActivityIndicatorView(style: .large)
+    private let skeletonView = ConversationListSkeletonView()
     private let statusLabel = UILabel()
 
     private var dataSource: UITableViewDiffableDataSource<Section, ConversationID>!
@@ -141,10 +141,12 @@ final class ConversationListViewController: UIViewController {
     }
 
     private func configureStatusViews() {
-        spinner.hidesWhenStopped = true
-        spinner.constrain(in: view) { parent in
-            spinner.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-            spinner.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
+        skeletonView.isHidden = true
+        skeletonView.constrain(in: view) { parent in
+            skeletonView.topAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.topAnchor)
+            skeletonView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+            skeletonView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
+            skeletonView.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
         }
         statusLabel.font = .preferredFont(forTextStyle: .body)
         statusLabel.adjustsFontForContentSizeCategory = true
@@ -162,14 +164,12 @@ final class ConversationListViewController: UIViewController {
     private func render(_ phase: ConversationListViewModel.Phase) {
         switch phase {
         case .loading:
-            if !refreshControl.isRefreshing { spinner.startAnimating() }
+            skeletonView.isHidden = false
             tableView.isHidden = true
             statusLabel.isHidden = true
         case .content(let models):
-            spinner.stopAnimating()
             refreshControl.endRefreshing()
             statusLabel.isHidden = true
-            tableView.isHidden = false
             var snapshot = NSDiffableDataSourceSnapshot<Section, ConversationID>()
             snapshot.appendSections([.main])
             snapshot.appendItems(models.map(\.id), toSection: .main)
@@ -180,18 +180,36 @@ final class ConversationListViewController: UIViewController {
             modelsByID = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
             dataSource.apply(snapshot, animatingDifferences: hasRenderedContent)
             hasRenderedContent = true
+            revealContent()
         case .empty:
-            spinner.stopAnimating()
             refreshControl.endRefreshing()
+            skeletonView.isHidden = true
             tableView.isHidden = true
             statusLabel.text = "No conversations yet."
             statusLabel.isHidden = false
         case .failed(let message):
-            spinner.stopAnimating()
             refreshControl.endRefreshing()
+            skeletonView.isHidden = true
             tableView.isHidden = true
             statusLabel.text = message
             statusLabel.isHidden = false
+        }
+    }
+
+    /// Swaps the skeleton for the populated table. The rows are applied
+    /// before this runs, so the cross-dissolve is hydration in place; the
+    /// dissolve only fires when actually leaving the skeleton on screen.
+    private func revealContent() {
+        guard !skeletonView.isHidden, view.window != nil else {
+            skeletonView.isHidden = true
+            tableView.isHidden = false
+            return
+        }
+        UIView.transition(
+            with: view, duration: 0.35, options: [.transitionCrossDissolve, .curveEaseInOut]
+        ) {
+            self.skeletonView.isHidden = true
+            self.tableView.isHidden = false
         }
     }
 }

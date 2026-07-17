@@ -10,11 +10,22 @@ public final class ConversationViewModel {
         case failed(message: String)
     }
 
+    /// Bubble context-menu actions the view can request. Copy is absent by
+    /// design: it completes in the view layer (pasteboard, no data plane).
+    public nonisolated enum MessageAction: Sendable {
+        case reply
+        case forward
+        case delete
+    }
+
     public var onPhaseChange: ((Phase) -> Void)?
     /// True while a message is being sent (disables the send control).
     public var onSendingChange: ((Bool) -> Void)?
     /// Fires once the peer's name resolves; best-effort (no title on failure).
     public var onTitleChange: ((String) -> Void)?
+    /// Transient user-facing notice `(title, message)` — the view presents it
+    /// modally (same honest-seam surface as the compose bar's media stub).
+    public var onActionNotice: ((String, String) -> Void)?
 
     private let conversationID: ConversationID
     private let repository: any ChatProviding
@@ -63,6 +74,25 @@ public final class ConversationViewModel {
                 try? await self.repository.markRead(self.conversationID, upTo: message.id)
             }
             self.setSending(false)
+        }
+    }
+
+    /// The context menu's action funnel. Every case is an honest stub today —
+    /// chat.v1's write plane is send + markRead, nothing else — kept as one
+    /// exhaustive switch so each branch picks up its repository call without
+    /// reshaping the view: swap the notice for the call, keep the signature.
+    public func perform(_ action: MessageAction, on messageID: String) {
+        switch action {
+        case .reply:
+            // Needs a reply-to reference on chat.v1 SendMessage.
+            onActionNotice?("Reply", "Replying to a specific message isn't available yet.")
+        case .forward:
+            // Needs a conversation picker and a cross-thread send.
+            onActionNotice?("Forward", "Forwarding messages isn't available yet.")
+        case .delete:
+            // Needs a chat.v1 DeleteMessage; a local-only removal would
+            // resurrect on the next refresh, so no optimistic fake here.
+            onActionNotice?("Delete", "Deleting messages isn't available yet.")
         }
     }
 

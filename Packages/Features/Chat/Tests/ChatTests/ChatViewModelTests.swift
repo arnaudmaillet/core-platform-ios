@@ -260,6 +260,25 @@ struct ChatViewModelTests {
 
     // MARK: - Thread
 
+    /// The context-menu seam contract while the write plane is send-only:
+    /// every action surfaces an honest notice instead of silently no-oping.
+    /// Delete once wired should FAIL this test — that's the reminder to
+    /// replace the notice with the repository call.
+    @Test func messageActionsSurfaceHonestNotices() {
+        let viewModel = ConversationViewModel(
+            conversationID: ConversationID("c1"),
+            repository: StubChatProvider()
+        )
+        var noticeTitles: [String] = []
+        viewModel.onActionNotice = { title, _ in noticeTitles.append(title) }
+
+        viewModel.perform(.reply, on: "m1")
+        viewModel.perform(.forward, on: "m1")
+        viewModel.perform(.delete, on: "m1")
+
+        #expect(noticeTitles == ["Reply", "Forward", "Delete"])
+    }
+
     @Test func threadLoadsMessagesAndMarksRead() async {
         let provider = StubChatProvider(messages: [message("m1", mine: false), message("m2", mine: true)])
         let viewModel = ConversationViewModel(conversationID: ConversationID("c1"), repository: provider)

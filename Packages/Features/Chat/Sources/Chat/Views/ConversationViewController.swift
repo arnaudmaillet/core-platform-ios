@@ -23,7 +23,7 @@ final class ConversationViewController: UIViewController {
     private let inputBar = ChatInputBar()
     private let identityView = ConversationIdentityView()
     private let refreshControl = UIRefreshControl()
-    private let spinner = UIActivityIndicatorView(style: .large)
+    private let skeletonView = TranscriptSkeletonView()
     private let statusLabel = UILabel()
 
     private var dataSource: UICollectionViewDiffableDataSource<TranscriptDay, String>!
@@ -62,9 +62,13 @@ final class ConversationViewController: UIViewController {
                 name: UIResponder.keyboardWillShowNotification, object: nil
             )
         }
+        configureSkeleton()
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
         viewModel.onSendingChange = { [weak self] sending in self?.inputBar.isSending = sending }
+        viewModel.onActionNotice = { [weak self] title, message in
+            self?.presentNotice(title: title, message: message)
+        }
         viewModel.onTitleChange = { [weak self] name in
             guard let self else { return }
             // `title` still carries the name (it feeds pushed screens' back
@@ -170,6 +174,8 @@ final class ConversationViewController: UIViewController {
         // interactive transcript, not a snapshot.
         collectionView.alwaysBounceVertical = true
         collectionView.keyboardDismissMode = .interactive
+        // Delegate exists for the bubble context menu; scrolling stays stock.
+        collectionView.delegate = self
         collectionView.pin(to: view)
 
         if mode == .full {
@@ -228,22 +234,39 @@ final class ConversationViewController: UIViewController {
         // Honest seam: chat.v1 SendMessage is text-only today. The affordance
         // ships per the design spec; the picker wires in with the media plane.
         inputBar.onAttachMedia = { [weak self] in
-            let alert = UIAlertController(
+            self?.presentNotice(
                 title: "Media Messages",
-                message: "Sending photos and videos isn't available yet.",
-                preferredStyle: .alert
+                message: "Sending photos and videos isn't available yet."
             )
-            alert.addAction(UIAlertAction(title: "OK", style: .default))
-            self?.present(alert, animated: true)
+        }
+    }
+
+    private func presentNotice(title: String, message: String) {
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+
+    /// The transcript skeleton sits where the transcript will: full width,
+    /// tail anchored just above the compose bar (or the safe area in a
+    /// preview, which has no bar) — the same clearance the live transcript
+    /// keeps. Its top rides the view edge so the pattern clips under the nav
+    /// bar like scrolled-away history.
+    private func configureSkeleton() {
+        skeletonView.isHidden = true
+        skeletonView.constrain(in: view) { parent in
+            skeletonView.topAnchor.constraint(equalTo: parent.topAnchor)
+            skeletonView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+            skeletonView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
+            mode == .full
+                ? skeletonView.bottomAnchor.constraint(equalTo: inputBar.topAnchor, constant: -Spacing.md)
+                : skeletonView.bottomAnchor.constraint(
+                    equalTo: parent.safeAreaLayoutGuide.bottomAnchor, constant: -Spacing.md
+                )
         }
     }
 
     private func configureStatusViews() {
-        spinner.hidesWhenStopped = true
-        spinner.constrain(in: view) { parent in
-            spinner.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-            spinner.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
-        }
         statusLabel.font = .preferredFont(forTextStyle: .body)
         statusLabel.adjustsFontForContentSizeCategory = true
         statusLabel.textColor = .secondaryLabel
@@ -262,22 +285,40 @@ final class ConversationViewController: UIViewController {
     private func render(_ phase: ConversationViewModel.Phase) {
         switch phase {
         case .loading:
-            if !refreshControl.isRefreshing { spinner.startAnimating() }
+            skeletonView.isHidden = false
             collectionView.isHidden = true
             statusLabel.isHidden = true
         case .content(let models):
-            spinner.stopAnimating()
             refreshControl.endRefreshing()
-            collectionView.isHidden = false
             statusLabel.text = "No messages yet. Say hi 👋"
             statusLabel.isHidden = !models.isEmpty
+            // Transcript first, reveal second: the snapshot (and its tail
+            // scroll) settles while the collection is still covered, so the
+            // dissolve uncovers finished rows in place.
             applyTranscript(for: models)
+            revealContent()
         case .failed(let message):
-            spinner.stopAnimating()
             refreshControl.endRefreshing()
+            skeletonView.isHidden = true
             collectionView.isHidden = true
             statusLabel.text = message
             statusLabel.isHidden = false
+        }
+    }
+
+    /// Swaps the skeleton for the populated transcript; dissolves only when
+    /// actually leaving a skeleton that is on screen.
+    private func revealContent() {
+        guard !skeletonView.isHidden, view.window != nil else {
+            skeletonView.isHidden = true
+            collectionView.isHidden = false
+            return
+        }
+        UIView.transition(
+            with: view, duration: 0.35, options: [.transitionCrossDissolve, .curveEaseInOut]
+        ) {
+            self.skeletonView.isHidden = true
+            self.collectionView.isHidden = false
         }
     }
 
@@ -342,5 +383,86 @@ final class ConversationViewController: UIViewController {
         DispatchQueue.main.async { [weak self] in
             self?.scrollToBottom(animated: true)
         }
+    }
+}
+
+// MARK: - Bubble context menu (haptic long-press)
+
+extension ConversationViewController: UICollectionViewDelegate {
+    /// The collection's native `UIContextMenuInteraction` seam, per item.
+    /// Gated three ways: never inside a peek (`.preview` already lives under
+    /// an active context interaction), one bubble at a time, and only when
+    /// the press lands on the bubble itself — the row is full-width, but its
+    /// empty flank is not a press target (Messages behavior).
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
+        point: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard mode == .full, indexPaths.count == 1, let indexPath = indexPaths.first,
+              let cell = collectionView.cellForItem(at: indexPath) as? MessageCell,
+              cell.bubbleContains(collectionView.convert(point, to: cell)),
+              let id = dataSource.itemIdentifier(for: indexPath),
+              let row = rowsByID[id]
+        else { return nil }
+        let configuration = UIContextMenuConfiguration(
+            identifier: id as NSString,
+            actionProvider: { [weak self] _ in self?.messageMenu(for: row) }
+        )
+        // Which SIDE of the bubble the menu lands on is the system's call
+        // (the arbiter picks the roomier side; no public placement API as of
+        // iOS 26 — audited UIContextMenuConfiguration/Interaction headers).
+        // What we CAN pin is the hierarchy: `.fixed` keeps Reply→…→Delete
+        // reading top-down in both placements, where `.automatic` may
+        // reorder relative to the press point.
+        configuration.preferredMenuElementOrder = .fixed
+        return configuration
+    }
+
+    /// The lift: hand the system the bubble-shaped targeted preview instead
+    /// of the default full-cell platter. The rest of the transcript blurs
+    /// behind it automatically.
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfiguration configuration: UIContextMenuConfiguration,
+        highlightPreviewForItemAt indexPath: IndexPath
+    ) -> UITargetedPreview? {
+        (collectionView.cellForItem(at: indexPath) as? MessageCell)?.bubblePreview()
+    }
+
+    /// Same shape on the way back down, so the settle animation lands the
+    /// bubble exactly into its row (nil lets the system cross-fade if the
+    /// cell scrolled out from under an open menu).
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfiguration configuration: UIContextMenuConfiguration,
+        dismissalPreviewForItemAt indexPath: IndexPath
+    ) -> UITargetedPreview? {
+        (collectionView.cellForItem(at: indexPath) as? MessageCell)?.bubblePreview()
+    }
+
+    /// Standard messaging actions. Copy is complete today (pasteboard, from
+    /// the row the menu was built for); the rest funnel through the view
+    /// model's `perform` seam. Destructive action sits in its own inline
+    /// section, per system menus.
+    private func messageMenu(for row: MessageRowModel) -> UIMenu {
+        let reply = UIAction(
+            title: "Reply",
+            image: UIImage(systemName: "arrowshape.turn.up.left")
+        ) { [weak self] _ in self?.viewModel.perform(.reply, on: row.id) }
+        let copy = UIAction(
+            title: "Copy",
+            image: UIImage(systemName: "doc.on.doc")
+        ) { _ in UIPasteboard.general.string = row.body }
+        let forward = UIAction(
+            title: "Forward",
+            image: UIImage(systemName: "arrowshape.turn.up.right")
+        ) { [weak self] _ in self?.viewModel.perform(.forward, on: row.id) }
+        let delete = UIAction(
+            title: "Delete",
+            image: UIImage(systemName: "trash"),
+            attributes: .destructive
+        ) { [weak self] _ in self?.viewModel.perform(.delete, on: row.id) }
+        return UIMenu(children: [reply, copy, forward, UIMenu(options: .displayInline, children: [delete])])
     }
 }
