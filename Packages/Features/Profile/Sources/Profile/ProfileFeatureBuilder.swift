@@ -9,11 +9,21 @@ import UIKit
 @MainActor
 public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     private let repository: any ProfileProviding
+    private let gallery: (any ProfileGalleryProviding)?
+    /// One store for every profile screen: the gallery filter is a GLOBAL
+    /// user preference, so all view models read and write the same place.
+    private let galleryPreferences = GalleryPreferences()
     private let imagePipeline: ImagePipeline
     private let router: (any Router)?
 
-    public init(repository: any ProfileProviding, imagePipeline: ImagePipeline, router: (any Router)? = nil) {
+    public init(
+        repository: any ProfileProviding,
+        gallery: (any ProfileGalleryProviding)? = nil,
+        imagePipeline: ImagePipeline,
+        router: (any Router)? = nil
+    ) {
         self.repository = repository
+        self.gallery = gallery
         self.imagePipeline = imagePipeline
         self.router = router
     }
@@ -21,7 +31,13 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     public func makeCurrentUserProfileViewController(onLogout: @escaping () -> Void) -> UIViewController {
         let repository = repository
         return ProfileViewController(
-            viewModel: ProfileViewModel(repository: repository, source: .currentUser),
+            viewModel: ProfileViewModel(
+                repository: repository,
+                gallery: gallery,
+                galleryPreferences: galleryPreferences,
+                source: .currentUser,
+                router: router
+            ),
             imagePipeline: imagePipeline,
             onLogout: onLogout,
             makeEditViewController: { onSaved in
@@ -34,7 +50,13 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
 
     public func makeProfileViewController(for profileID: ProfileID, identityStub: ProfileIdentityStub?) -> UIViewController {
         ProfileViewController(
-            viewModel: ProfileViewModel(repository: repository, source: .profile(profileID), router: router),
+            viewModel: ProfileViewModel(
+                repository: repository,
+                gallery: gallery,
+                galleryPreferences: galleryPreferences,
+                source: .profile(profileID),
+                router: router
+            ),
             imagePipeline: imagePipeline,
             onLogout: nil,
             identityStub: identityStub

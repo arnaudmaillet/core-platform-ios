@@ -35,6 +35,9 @@ final class MainTabCoordinator: NSObject, Coordinator {
     /// resolves against. Feed is absent: it contributes `feedActionTab` to the
     /// bar but owns no root stack.
     private var orderedTabs: [(AppTab, any TabCoordinator)] = []
+    /// One per tab stack: keeps the native edge-swipe pop working under the
+    /// feed's custom transition delegates (see `NativePopGestureEnabler`).
+    private var popGestureEnablers: [NativePopGestureEnabler] = []
 
     /// The Feed bar button. The provider must vend *something* — and the
     /// system calls it eagerly when `tabs` is assigned, not on first selection
@@ -93,6 +96,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
             tab.start()
             addChild(tab)
         }
+        popGestureEnablers = orderedTabs.map { NativePopGestureEnabler(taking: $0.1.navigationController) }
         // Feed rides the bar at its usual slot but is not in `orderedTabs`:
         // it has no root stack to select, only a push to trigger.
         var tabs = orderedTabs.map { $0.1.tab }

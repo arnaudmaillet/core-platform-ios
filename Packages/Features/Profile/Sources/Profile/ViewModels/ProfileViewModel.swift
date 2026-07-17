@@ -25,10 +25,44 @@ public final class ProfileViewModel {
         case following
     }
 
+    /// One horizontal page of the gallery pager.
+    public nonisolated enum GalleryPageState: Equatable, Sendable {
+        case loading
+        case content([GalleryPost])
+        /// The page's combination has nothing to show; `message` names it so
+        /// the blank grid reads intentional, not broken.
+        case empty(message: String)
+        case failed(message: String)
+    }
+
+    /// All three format pages at once — the pager renders every page
+    /// (neighbors are visible mid-swipe), so the view model always answers
+    /// for all of them. The source filter is a global modifier: it is
+    /// already applied to each page's content here.
+    public nonisolated struct GallerySnapshot: Equatable, Sendable {
+        public var activity: GalleryPageState
+        public var media: GalleryPageState
+        public var short: GalleryPageState
+
+        public func state(for format: GalleryFilter.Format) -> GalleryPageState {
+            switch format {
+            case .activity: activity
+            case .media: media
+            case .short: short
+            }
+        }
+    }
+
     public var onPhaseChange: ((Phase) -> Void)?
     public var onFollowButtonChange: ((FollowButton) -> Void)?
+    public var onGalleryChange: ((GallerySnapshot) -> Void)?
 
     private let repository: any ProfileProviding
+    private let gallery: (any ProfileGalleryProviding)?
+    /// The global gallery-filter preference. nil (tests, minimal setups)
+    /// means "session-local": the filter starts at the default and isn't
+    /// persisted.
+    private let galleryPreferences: GalleryPreferences?
     private let source: Source
     private let router: (any Router)?
 
@@ -48,14 +82,44 @@ public final class ProfileViewModel {
     private var load: Task<Void, Never>?
     private var relationshipLoad: Task<Void, Never>?
 
-    public init(repository: any ProfileProviding, source: Source = .currentUser, router: (any Router)? = nil) {
+    // MARK: Gallery state
+
+    public private(set) var galleryFilter = GalleryFilter()
+    /// The authored fetch (Posts + Reposts split it) and the tagged fetch,
+    /// cached so selector/kind changes recompute locally without round trips.
+    /// nil = in flight (page shows loading); a failure records instead.
+    private var authoredCache: [GalleryPost]?
+    private var taggedCache: [GalleryPost]?
+    private var authoredFailed = false
+    private var taggedFailed = false
+    private var galleryLoad: Task<Void, Never>?
+
+    public init(
+        repository: any ProfileProviding,
+        gallery: (any ProfileGalleryProviding)? = nil,
+        galleryPreferences: GalleryPreferences? = nil,
+        source: Source = .currentUser,
+        router: (any Router)? = nil
+    ) {
         self.repository = repository
+        self.gallery = gallery
+        self.galleryPreferences = galleryPreferences
         self.source = source
         self.router = router
+        // The gallery opens on the user's last GLOBAL choice, not a per-
+        // profile default — the tray, pager, and menu all read this filter
+        // as their initial truth.
+        if let stored = galleryPreferences?.filter {
+            galleryFilter = stored
+        }
     }
 
     /// Whether the "Message" action applies (another user's profile).
     public var canMessage: Bool { followButton == .follow || followButton == .following }
+
+    /// Whether this screen shows a gallery at all — drives the filter tray's
+    /// existence, not just its state.
+    public var hasGallery: Bool { gallery != nil }
 
     // MARK: - Inputs
 
@@ -101,6 +165,112 @@ public final class ProfileViewModel {
         router?.route(to: .messageUser(profile.id))
     }
 
+    // MARK: - Gallery
+
+    /// A grid tile tapped — open the post. Route-only, like Message.
+    public func galleryItemTapped(_ postID: PostID) {
+        router?.route(to: .post(postID))
+    }
+
+    /// Where the user is — set by a tab tap or a settled swipe. Pure state
+    /// (pages are always computed): the view pages to it, empty messages
+    /// name it, and the choice persists globally for the next profile.
+    public func setGalleryFormat(_ format: GalleryFilter.Format) {
+        galleryFilter.format = format
+        galleryPreferences?.filter = galleryFilter
+    }
+
+    /// The global source modifier: recomputes every page locally, without
+    /// touching the active format tab; persists globally like the format.
+    public func setGallerySource(_ source: GalleryFilter.Source) {
+        guard galleryFilter.source != source else { return }
+        galleryFilter.source = source
+        galleryPreferences?.filter = galleryFilter
+        renderGallery()
+    }
+
+    /// Fetches both corpora concurrently once the profile is known (the pager
+    /// shows neighbors mid-swipe, so tagged can't be lazy). Called from the
+    /// profile load path; `reset` makes pull-to-refresh refresh the grid too.
+    private func loadGallery(for profile: UserProfile, reset: Bool) {
+        guard let gallery else { return }
+        if reset {
+            galleryLoad?.cancel()
+            galleryLoad = nil
+            authoredCache = nil
+            taggedCache = nil
+            authoredFailed = false
+            taggedFailed = false
+        }
+        guard galleryLoad == nil else { return }
+        renderGallery() // all pages report loading
+        galleryLoad = Task { [weak self] in
+            async let authoredFetch = gallery.authoredPosts(for: profile.id)
+            async let taggedFetch = gallery.taggedPosts(for: profile.id, handle: profile.handle)
+
+            // The two fetches fail independently: one page family degrading
+            // must not blank the other.
+            let authored = try? await authoredFetch
+            let tagged = try? await taggedFetch
+            guard let self, !Task.isCancelled else { return }
+
+            self.authoredCache = authored
+            self.authoredFailed = authored == nil
+            self.taggedCache = tagged
+            self.taggedFailed = tagged == nil
+            self.renderGallery()
+            self.galleryLoad = nil
+        }
+    }
+
+    /// Recomputes the full three-page snapshot from the caches and the global
+    /// source modifier. Every data landing and source change funnels here.
+    private func renderGallery() {
+        guard gallery != nil else { return }
+
+        let source = galleryFilter.source
+        // Which fetches the active source depends on: All needs both, Tagged
+        // its own, Posts/Reposts the authored one. A page is loading/failed
+        // only when a fetch it actually reads is.
+        let readsAuthored = source != .tagged
+        let readsTagged = source == .all || source == .tagged
+        func page(_ format: GalleryFilter.Format) -> GalleryPageState {
+            if (readsAuthored && authoredFailed) || (readsTagged && taggedFailed) {
+                return .failed(message: "Couldn't load. Pull to retry.")
+            }
+            if (readsAuthored && authoredCache == nil) || (readsTagged && taggedCache == nil) {
+                return .loading
+            }
+            let filter = GalleryFilter(format: format, source: source)
+            let tiles = filter.tiles(authored: authoredCache ?? [], tagged: taggedCache ?? [])
+            return tiles.isEmpty
+                ? .empty(message: Self.emptyMessage(for: filter))
+                : .content(tiles)
+        }
+
+        onGalleryChange?(GallerySnapshot(
+            activity: page(.activity),
+            media: page(.media),
+            short: page(.short)
+        ))
+    }
+
+    /// Names the empty combination so the blank page reads as an answer.
+    nonisolated static func emptyMessage(for filter: GalleryFilter) -> String {
+        let format = switch filter.format {
+        case .activity: "activity"
+        case .media: "media"
+        case .short: "short posts"
+        }
+        let source = switch filter.source {
+        case .all: ""
+        case .posts: " in posts"
+        case .reposts: " in reposts"
+        case .tagged: " in tagged posts"
+        }
+        return "No \(format)\(source) yet."
+    }
+
     // MARK: - Loading
 
     private func reload() {
@@ -117,6 +287,9 @@ public final class ProfileViewModel {
                 self.profile = profile
                 self.phase = .content(ProfileDisplayModel(profile: profile))
                 self.loadRelationship(for: profile.id)
+                // Every (re)load refreshes the grid too: the caches reset so
+                // pull-to-refresh picks up new posts alongside the header.
+                self.loadGallery(for: profile, reset: true)
             } catch is CancellationError {
                 // Superseded by a newer load; leave the phase alone.
             } catch {

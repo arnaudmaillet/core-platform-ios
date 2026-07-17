@@ -145,6 +145,17 @@ final class AppCoordinator: Coordinator {
             if let index = arguments.firstIndex(of: "-open-profile"), index + 1 < arguments.count {
                 container.router.route(to: .profile(ProfileID(arguments[index + 1]), stub: nil))
             }
+            // `-open-profile-delayed <id>` fires the same route ~3s in — after
+            // `-select-tab 1` has pushed the feed — so a profile ABOVE the
+            // feed's custom nav delegate is reachable without driving a cell
+            // tap (the swipe-back-over-feed regression surface).
+            if let index = arguments.firstIndex(of: "-open-profile-delayed"), index + 1 < arguments.count {
+                let id = ProfileID(arguments[index + 1])
+                let router = container.router
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                    router.route(to: .profile(id, stub: nil))
+                }
+            }
             // `-open-profile-stubbed <id> <handle> <name>` fires the same route
             // WITH an identity stub — the feed-origin path — so the pre-seeded
             // navigation chrome is verifiable without driving a cell tap.

@@ -237,8 +237,18 @@ final class AppContainer {
         authSession: sessionManager
     )
 
+    /// The profile media grid's source: post listing/hydration plus the
+    /// search-backed "Tagged" corpus (post caption search — mock indexes it
+    /// exactly; fleet quality tracks the search index).
+    private lazy var profileGalleryRepository = ProfileGalleryRepository(
+        postClient: Post_V1_PostServiceClient(client: authenticatedRPCClient),
+        searchClient: Search_V1_SearchServiceClient(client: authenticatedRPCClient),
+        counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient)
+    )
+
     private(set) lazy var profileFeature: any ProfileFeatureBuilding = ProfileFeatureBuilder(
         repository: profileRepository,
+        gallery: profileGalleryRepository,
         imagePipeline: imagePipeline,
         router: routeResolver
     )

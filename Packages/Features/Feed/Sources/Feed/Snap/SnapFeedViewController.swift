@@ -446,6 +446,11 @@ final class SnapFeedViewController: UIViewController {
     /// bar; a cancelled swipe's completion restores alpha and keeps it.
     private func concealToolbar() {
         guard let nav = navigationController, !nav.isToolbarHidden else { return }
+        // Hand the bar over intact when the incoming screen is a toolbar
+        // owner too (the profile's filter tray): it adopts the shared
+        // instance and reconfigures it in its own viewWillAppear — fading it
+        // here would fight that presentation, the flash this rule replaces.
+        if successorUsesToolbar(on: nav) { return }
         guard let coordinator = transitionCoordinator else {
             // Instant paths (tab switch): no transition to ride.
             nav.setToolbarHidden(true, animated: false)
@@ -472,8 +477,21 @@ final class SnapFeedViewController: UIViewController {
     private func settleToolbarAfterDisappearance() {
         guard let nav = toolbarHost, !nav.isToolbarHidden,
               nav.topViewController !== self else { return }
+        // Same handover rule as concealToolbar: a successor that shows its
+        // own toolbar owns the bar now — settling it hidden would strand
+        // that screen's chrome.
+        if successorUsesToolbar(on: nav) { return }
         nav.setToolbarHidden(true, animated: false)
         nav.toolbar.alpha = 1
+    }
+
+    /// Whether the navigation stack's current top — the screen this feed is
+    /// disappearing underneath or popping back to — presents toolbar items of
+    /// its own. `topViewController` is already the successor by the time the
+    /// disappearance callbacks run.
+    private func successorUsesToolbar(on nav: UINavigationController) -> Bool {
+        guard let top = nav.topViewController, top !== self else { return false }
+        return top.toolbarItems?.isEmpty == false
     }
 
     /// One item == one full screen; a plain vertical layout, paged by

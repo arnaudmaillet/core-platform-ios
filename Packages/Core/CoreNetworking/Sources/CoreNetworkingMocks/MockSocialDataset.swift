@@ -23,6 +23,9 @@ public struct MockSocialDataset: Sendable {
         /// (url, width, height); nil for text-only posts.
         public let media: (url: String, width: Int, height: Int)?
         public let publishedAtMS: Int64
+        /// Non-empty = this post is a repost of `parentID` (post.v1 lineage:
+        /// a repost is the author's own post referencing its source).
+        public let parentID: String
     }
 
     /// The profile owned by the mock login account (MockAuthService.accountID).
@@ -72,19 +75,33 @@ public struct MockSocialDataset: Sendable {
         let newestMS: Int64 = 1_780_000_000_000 // fixed epoch so ordering is stable
         for index in 0..<postCount {
             let author = authors[index % authors.count]
-            let caption = captionBank[index % captionBank.count]
+            var caption = captionBank[index % captionBank.count]
+            // Every fourth post mentions another author by @handle — the
+            // corpus behind the profile gallery's "Tagged" category (search
+            // matches the handle in the caption). `+4` keeps mentioner ≠
+            // mentioned (4 ≢ 0 mod 8) and, being even, is solvable against
+            // the odd `index % 4 == 1` residue — every author gets mentions,
+            // and (via index % 3) in all three post kinds.
+            if index % 4 == 1 {
+                caption += " Spotted with @\(authors[(index + 4) % authors.count].handle)."
+            }
             // One of every three posts is video, one image, one text-only —
             // a mix that exercises all three snap-feed cell paths.
             let hasMedia = index % 3 != 2
             let isVideo = index % 3 == 0
             let mediaHost = isVideo ? "video" : "media"
             let shape = mediaShapes[index % mediaShapes.count]
+            // Every fifth post is a repost of the previous same-slot post.
+            // Per author that lands on one residue mod 40 → three reposts
+            // each, cycling all three kinds (40 ≡ 1 mod 3).
+            let isRepost = index % 5 == 4 && index >= 8
             records.append(PostRecord(
                 postID: String(format: "post-%04d", index),
                 authorProfileID: author.profileID,
                 caption: caption,
                 media: hasMedia ? ("mock://\(mediaHost)/\(index)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1) : nil,
-                publishedAtMS: newestMS - Int64(index) * 180_000 // 3 minutes apart, newest first
+                publishedAtMS: newestMS - Int64(index) * 180_000, // 3 minutes apart, newest first
+                parentID: isRepost ? String(format: "post-%04d", index - 8) : ""
             ))
         }
         posts = records

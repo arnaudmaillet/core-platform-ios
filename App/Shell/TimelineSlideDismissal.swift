@@ -204,7 +204,13 @@ extension TimelineSlideDismissal: UIGestureRecognizerDelegate {
         guard interaction == nil,
               let pan = gestureRecognizer as? UIPanGestureRecognizer,
               let feed = feedViewController, let view = feed.viewIfLoaded,
-              let nav = navigationController, nav.topViewController === feed
+              let nav = navigationController, nav.topViewController === feed,
+              // `topViewController` is already the feed while a pop ABOVE it is
+              // still animating (reachable since the native edge swipe works on
+              // pushed profiles/details): beginning here would call
+              // `popViewController` mid-transition — undefined, and it can
+              // strand the percent driver. Refuse; the next swipe retries.
+              nav.transitionCoordinator == nil
         else { return false }
         if let destination = feed as? any ZoomTransitionDestination,
            !destination.isReadyForInteractiveDismissal { return false }

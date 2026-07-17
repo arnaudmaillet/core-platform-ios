@@ -46,11 +46,14 @@ struct PostDetailCommentsTests {
     /// 50ms settle losing the race on a hosted runner and reddening
     /// build-test; then a 5s deadline losing the same race once the
     /// shortcut-wheel suite added main-actor UI tests to the parallel
-    /// process). The deadline is a CEILING, not a pace — success returns
-    /// immediately, so a fast run pays nothing. Returns either way; the
+    /// process; then 20s losing it again on 2026-07-17 runners — the SAME
+    /// test PASSED at 60.8s wall-clock on develop's green run, so a starved
+    /// pool can legitimately take a minute end to end). The deadline is a
+    /// CEILING, not a pace — success returns immediately, so a fast run pays
+    /// nothing (the whole suite is ~1s locally). Returns either way; the
     /// caller's asserts do the judging.
     private func settle(until condition: () -> Bool) async {
-        let deadline = ContinuousClock.now.advanced(by: .seconds(20))
+        let deadline = ContinuousClock.now.advanced(by: .seconds(120))
         while !condition(), ContinuousClock.now < deadline {
             await Task.yield()
             try? await Task.sleep(for: .milliseconds(20))
