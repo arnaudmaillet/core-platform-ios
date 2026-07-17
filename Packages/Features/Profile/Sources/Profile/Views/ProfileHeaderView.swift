@@ -149,6 +149,139 @@ final class ProfileHeaderView: UIView {
         }
     }
 
+    // MARK: - Redaction
+
+    private var isRedacted = false
+    private var redactionBones: [SkeletonBoneView] = []
+
+    /// Structural skeleton state: the redacted header IS the real header. The
+    /// same views, constraints, and fonts carry the layout — each awaiting
+    /// label holds a blank line of placeholder text so its metric height (and
+    /// everything derived from it: the identity column, the avatar span, the
+    /// banner's bottom threshold) resolves exactly where content will land —
+    /// while shimmer bones anchored to those very elements mask the missing
+    /// values. The glass tray and stat captions are chrome, not content, and
+    /// stay real. Reveal (`redacted: false`, called after `configure(with:)`
+    /// has swapped real text in under the invisible labels) trades only
+    /// alphas, so hydration cannot shift a single pixel of structure.
+    func setRedacted(_ redacted: Bool, animated: Bool = false) {
+        guard redacted != isRedacted else { return }
+        isRedacted = redacted
+
+        if redacted {
+            // Layout ballast: one blank line per single-line label, two for
+            // the bio's typical measure. The website row is reserved too —
+            // hiding it here and inserting it at reveal would push the whole
+            // gallery down mid-fade (most profiles carry a link; a linkless
+            // one collapses the row as a content change, not a reveal jump).
+            nameLabel.text = " "
+            handleLabel.text = " "
+            bioLabel.text = " \n "
+            bioLabel.isHidden = false
+            websiteButton.configuration?.title = " "
+            websiteButton.isHidden = false
+            installRedactionBones()
+            // Everything data-driven drops to alpha 0 in place — the badge
+            // included, so a verified profile fades it in with the name
+            // instead of popping it beside the finished text.
+            for view in [nameLabel, handleLabel, bioLabel, websiteButton, verifiedBadge] {
+                view.alpha = 0
+            }
+            for bone in redactionBones { bone.isHidden = false; bone.alpha = 1 }
+            for stat in [followersStat, followingStat, reactionsStat, viewsStat] {
+                stat.setRedacted(true)
+            }
+            bannerView.setRedacted(true)
+            return
+        }
+
+        // Alpha-only choreography: `configure(with:)` has already committed
+        // the real content (and any structural truth like a hidden website
+        // row) OUTSIDE this animation, so nothing here can move — the bones
+        // dissolve and the content materializes exactly where they were.
+        let reveal = {
+            for view in [
+                self.nameLabel, self.handleLabel, self.bioLabel,
+                self.websiteButton, self.verifiedBadge
+            ] {
+                view.alpha = 1
+            }
+            for bone in self.redactionBones { bone.alpha = 0 }
+            for stat in [self.followersStat, self.followingStat, self.reactionsStat, self.viewsStat] {
+                stat.setRedacted(false)
+            }
+            self.bannerView.setRedacted(false)
+        }
+        let finish = {
+            for bone in self.redactionBones { bone.isHidden = true }
+        }
+        guard animated else {
+            reveal()
+            finish()
+            return
+        }
+        UIView.animate(withDuration: 0.35, delay: 0, options: [.curveEaseInOut]) {
+            reveal()
+        } completion: { _ in
+            // Re-entered redaction mid-fade keeps its bones up.
+            guard !self.isRedacted else { return }
+            finish()
+        }
+    }
+
+    /// One-time overlay construction, anchored to the real elements so the
+    /// bones inherit their exact resolved positions.
+    private func installRedactionBones() {
+        guard redactionBones.isEmpty else { return }
+
+        // The avatar's own clipping rounds the bone; the ring border draws
+        // above it, staying crisp.
+        let avatarBone = SkeletonBoneView(rounding: .fixed(0))
+        avatarBone.pin(to: avatarView)
+
+        let nameBone = SkeletonBoneView()
+        nameBone.constrain(in: self) { _ in
+            nameBone.leadingAnchor.constraint(equalTo: nameLabel.leadingAnchor)
+            nameBone.centerYAnchor.constraint(equalTo: nameLabel.centerYAnchor)
+            nameBone.widthAnchor.constraint(equalToConstant: 148)
+            nameBone.heightAnchor.constraint(equalToConstant: 16)
+        }
+
+        let handleBone = SkeletonBoneView()
+        handleBone.constrain(in: self) { _ in
+            handleBone.leadingAnchor.constraint(equalTo: handleLabel.leadingAnchor)
+            handleBone.centerYAnchor.constraint(equalTo: handleLabel.centerYAnchor)
+            handleBone.widthAnchor.constraint(equalToConstant: 92)
+            handleBone.heightAnchor.constraint(equalToConstant: 12)
+        }
+
+        // Two caption-pitch bars inside the bio's two placeholder lines.
+        let bioFirst = SkeletonBoneView()
+        bioFirst.constrain(in: self) { _ in
+            bioFirst.leadingAnchor.constraint(equalTo: bioLabel.leadingAnchor)
+            bioFirst.trailingAnchor.constraint(equalTo: bioLabel.trailingAnchor)
+            bioFirst.topAnchor.constraint(equalTo: bioLabel.topAnchor, constant: 4)
+            bioFirst.heightAnchor.constraint(equalToConstant: 12)
+        }
+        let bioSecond = SkeletonBoneView()
+        bioSecond.constrain(in: self) { _ in
+            bioSecond.leadingAnchor.constraint(equalTo: bioLabel.leadingAnchor)
+            bioSecond.widthAnchor.constraint(equalTo: bioLabel.widthAnchor, multiplier: 0.55)
+            bioSecond.bottomAnchor.constraint(equalTo: bioLabel.bottomAnchor, constant: -4)
+            bioSecond.heightAnchor.constraint(equalToConstant: 12)
+        }
+
+        let websiteBone = SkeletonBoneView()
+        websiteBone.constrain(in: self) { _ in
+            websiteBone.leadingAnchor.constraint(equalTo: websiteButton.leadingAnchor)
+            websiteBone.centerYAnchor.constraint(equalTo: websiteButton.centerYAnchor)
+            websiteBone.widthAnchor.constraint(equalToConstant: 120)
+            websiteBone.heightAnchor.constraint(equalToConstant: 12)
+        }
+
+        redactionBones = [avatarBone, nameBone, handleBone, bioFirst, bioSecond, websiteBone]
+    }
+
     /// Shared chrome for the tray's glass text capsules: Liquid Glass pill
     /// with a semibold compact title.
     private static func styledCapsule(_ base: UIButton.Configuration) -> UIButton.Configuration {
@@ -187,8 +320,14 @@ final class ProfileHeaderView: UIView {
         let pipeline = imagePipeline
         avatarTask = Task { [weak self] in
             guard let image = try? await pipeline.image(for: url) else { return }
-            guard !Task.isCancelled, self?.currentAvatarURL == url else { return }
-            self?.avatarView.image = image
+            guard let self, !Task.isCancelled, self.currentAvatarURL == url else { return }
+            // Async arrival dissolves over the monogram instead of popping.
+            UIView.transition(
+                with: self.avatarView, duration: 0.25,
+                options: [.transitionCrossDissolve, .allowUserInteraction]
+            ) {
+                self.avatarView.image = image
+            }
         }
     }
 

@@ -29,10 +29,18 @@ final class ProfileGalleryGridView: UIView {
     private let imagePipeline: ImagePipeline
     private let style: Style
     private var posts: [GalleryPost] = []
+    /// While a fetch is in flight the page renders shimmering placeholder
+    /// cells through its own (real) layout, so the loading state already has
+    /// the shape the content will hydrate into. Read by the pager to keep its
+    /// height re-pin out of the hydration cross-fade.
+    private(set) var showsSkeleton = false
+
+    /// List pages show a column of placeholder cards; the mosaic shows one
+    /// full 8-brick pattern.
+    private var skeletonCount: Int { style == .grid ? 8 : 5 }
 
     private let collectionView: SelfSizingCollectionView
     private let statusLabel = UILabel()
-    private let spinner = UIActivityIndicatorView(style: .medium)
 
     /// The Media mosaic: a repeating 8-item pattern on a 3-column unit grid,
     /// mixing 1×1 squares with 1×2 portrait and 2×1 landscape blocks. Two
@@ -132,6 +140,12 @@ final class ProfileGalleryGridView: UIView {
         collectionView.backgroundColor = .clear
         collectionView.register(GalleryTileCell.self, forCellWithReuseIdentifier: GalleryTileCell.reuseID)
         collectionView.register(GalleryListRowCell.self, forCellWithReuseIdentifier: GalleryListRowCell.reuseID)
+        collectionView.register(
+            GallerySkeletonTileCell.self, forCellWithReuseIdentifier: GallerySkeletonTileCell.reuseID
+        )
+        collectionView.register(
+            GallerySkeletonListCell.self, forCellWithReuseIdentifier: GallerySkeletonListCell.reuseID
+        )
         collectionView.dataSource = self
         collectionView.delegate = self
         collectionView.pin(to: self)
@@ -147,15 +161,9 @@ final class ProfileGalleryGridView: UIView {
             statusLabel.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor)
         }
 
-        spinner.hidesWhenStopped = true
-        spinner.constrain(in: self) { parent in
-            spinner.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-            spinner.topAnchor.constraint(equalTo: parent.topAnchor, constant: 56)
-        }
-
-        // Statuses (loading / empty / failed) need visible height even though
-        // the collection view is empty then; the grid provides a floor and
-        // grows past it with content.
+        // Statuses (empty / failed) need visible height even though the
+        // collection view is empty then; the grid provides a floor and
+        // grows past it with content (skeletons included).
         let floor = heightAnchor.constraint(greaterThanOrEqualToConstant: 140)
         floor.priority = .defaultHigh
         floor.isActive = true
@@ -167,26 +175,42 @@ final class ProfileGalleryGridView: UIView {
     func render(_ state: ProfileViewModel.GalleryPageState) {
         switch state {
         case .loading:
-            spinner.startAnimating()
             statusLabel.isHidden = true
-            apply([])
+            apply([], skeleton: true)
         case .content(let posts):
-            spinner.stopAnimating()
             statusLabel.isHidden = true
-            apply(posts)
+            apply(posts, skeleton: false)
         case .empty(let message), .failed(let message):
-            spinner.stopAnimating()
             statusLabel.text = message
             statusLabel.isHidden = false
-            apply([])
+            apply([], skeleton: false)
         }
     }
 
-    private func apply(_ posts: [GalleryPost]) {
-        guard self.posts != posts else { return }
+    private func apply(_ posts: [GalleryPost], skeleton: Bool) {
+        guard self.posts != posts || showsSkeleton != skeleton else { return }
+        // Hydration retires the skeleton with a cross-dissolve: the shimmer
+        // hands off to content inside the same silhouette instead of popping.
+        let dissolving = showsSkeleton && !skeleton && !posts.isEmpty && window != nil
         self.posts = posts
-        collectionView.reloadData()
-        collectionView.invalidateIntrinsicContentSize()
+        showsSkeleton = skeleton
+        let reload = {
+            self.collectionView.reloadData()
+            self.collectionView.invalidateIntrinsicContentSize()
+        }
+        if dissolving {
+            // The block runs with implicit animations disabled (stock
+            // `UIView.transition` behavior, `.allowAnimatedContent` NOT set),
+            // so the relayout inside commits instantly and only the
+            // cross-fade itself is visible: a pure in-place dissolve.
+            UIView.transition(
+                with: collectionView, duration: 0.35,
+                options: [.transitionCrossDissolve, .allowUserInteraction, .curveEaseInOut],
+                animations: reload
+            )
+        } else {
+            reload()
+        }
     }
 }
 
@@ -194,10 +218,24 @@ final class ProfileGalleryGridView: UIView {
 
 extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
-        posts.count
+        showsSkeleton ? skeletonCount : posts.count
     }
 
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
+        if showsSkeleton {
+            switch style {
+            case .list:
+                let cell = collectionView.dequeueReusableCell(
+                    withReuseIdentifier: GallerySkeletonListCell.reuseID, for: indexPath
+                ) as! GallerySkeletonListCell
+                cell.configure(variant: indexPath.item)
+                return cell
+            case .grid:
+                return collectionView.dequeueReusableCell(
+                    withReuseIdentifier: GallerySkeletonTileCell.reuseID, for: indexPath
+                )
+            }
+        }
         let post = posts[indexPath.item]
         switch style {
         case .list:
@@ -216,6 +254,7 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        guard !showsSkeleton else { return }
         onItemTapped?(posts[indexPath.item])
     }
 }
@@ -270,7 +309,7 @@ private final class MetricLabel: UIView {
 /// One full-width row of the Activity/Short timelines: the caption with
 /// reading padding on a soft card, plus — when the post carries media — a
 /// rounded full-width preview under the text (play badge for videos), and a
-/// quiet metadata line closing the card: reactions, comments, views on the
+/// quiet metadata line closing the card: views, reactions, comments on the
 /// leading side, the post's compact age trailing. Short pages never have
 /// media, so their rows are text + metadata.
 private final class GalleryListRowCell: UICollectionViewCell {
@@ -332,7 +371,9 @@ private final class GalleryListRowCell: UICollectionViewCell {
 
         let spacer = UIView()
         spacer.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
-        let metaRow = UIStackView(arrangedSubviews: [reactions, comments, views, spacer, ageLabel])
+        // Views lead, reactions and comments follow — the same reach-first
+        // order as the media tiles' counter pair.
+        let metaRow = UIStackView(arrangedSubviews: [views, reactions, comments, spacer, ageLabel])
         metaRow.axis = .horizontal
         metaRow.alignment = .center
         metaRow.spacing = 14
@@ -385,7 +426,13 @@ private final class GalleryListRowCell: UICollectionViewCell {
         }
         loadTask = Task { [weak self] in
             guard let image = try? await imagePipeline.image(for: url), !Task.isCancelled else { return }
-            self?.mediaView.image = image
+            guard let self else { return }
+            UIView.transition(
+                with: self.mediaView, duration: 0.25,
+                options: [.transitionCrossDissolve, .allowUserInteraction]
+            ) {
+                self.mediaView.image = image
+            }
         }
     }
 }
@@ -467,7 +514,13 @@ private final class GalleryTileCell: UICollectionViewCell {
         }
         loadTask = Task { [weak self] in
             guard let image = try? await imagePipeline.image(for: url), !Task.isCancelled else { return }
-            self?.imageView.image = image
+            guard let self else { return }
+            UIView.transition(
+                with: self.imageView, duration: 0.25,
+                options: [.transitionCrossDissolve, .allowUserInteraction]
+            ) {
+                self.imageView.image = image
+            }
         }
     }
 }

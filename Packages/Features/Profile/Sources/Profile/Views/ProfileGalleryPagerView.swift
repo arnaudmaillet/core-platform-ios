@@ -88,10 +88,24 @@ final class ProfileGalleryPagerView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func render(_ snapshot: ProfileViewModel.GallerySnapshot) {
+        // A page leaving its skeleton dissolves in place; animating the
+        // height re-pin at the same time would slide everything under the
+        // cross-fade (the animated `layoutIfNeeded` also captures any other
+        // pending layout in the scroll view's subtree). Snap the height
+        // inside the dissolve instead — the fade masks it completely.
+        let dissolving = pages[activeIndex].showsSkeleton
         for (index, format) in Self.pageOrder.enumerated() {
             pages[index].render(snapshot.state(for: format))
         }
-        syncHeight(animated: window != nil)
+        // Pre-layout skeleton seed: without a width the fitted height can't
+        // be computed yet (`syncHeight` bails), and the first pushed frames
+        // would catch the pager at its floor, cropping the shimmer to a row
+        // and a half mid-screen. Park it at screen scale instead — the first
+        // sized pass converges to the real number, far below the fold.
+        if bounds.width == 0, pages[activeIndex].showsSkeleton {
+            pagerHeight.constant = 640
+        }
+        syncHeight(animated: window != nil && !dissolving)
     }
 
     /// Selector tap → smooth page. The settle callback is not re-fired (the

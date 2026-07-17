@@ -37,4 +37,35 @@ final class ProfileStatView: UIView {
     func setValue(_ text: String) {
         valueLabel.text = text
     }
+
+    // MARK: - Redaction
+
+    private var bone: SkeletonBoneView?
+
+    /// Skeleton state for the (data-driven) value only — the caption is
+    /// chrome and stays. A blank placeholder value holds the headline line's
+    /// height so the row cannot shift when the real count lands; the bone
+    /// rides the value label's own center. Alpha-only, so a reveal inside an
+    /// animation block cross-fades.
+    func setRedacted(_ redacted: Bool) {
+        if redacted, bone == nil {
+            let bone = SkeletonBoneView()
+            bone.constrain(in: self) { _ in
+                bone.centerXAnchor.constraint(equalTo: valueLabel.centerXAnchor)
+                bone.centerYAnchor.constraint(equalTo: valueLabel.centerYAnchor)
+                bone.widthAnchor.constraint(equalToConstant: 40)
+                bone.heightAnchor.constraint(equalToConstant: 14)
+            }
+            self.bone = bone
+        }
+        if redacted {
+            valueLabel.text = " "
+            valueLabel.alpha = 0
+            bone?.isHidden = false
+            bone?.alpha = 1
+        } else {
+            valueLabel.alpha = 1
+            bone?.alpha = 0
+        }
+    }
 }

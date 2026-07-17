@@ -1,3 +1,4 @@
+import DesignSystem
 import MediaCore
 import UIKit
 
@@ -69,9 +70,34 @@ final class ProfileBannerView: UIView {
         let pipeline = imagePipeline
         imageTask = Task { [weak self] in
             guard let image = try? await pipeline.image(for: url) else { return }
-            guard !Task.isCancelled, self?.currentImageURL == url else { return }
-            self?.imageView.image = image
+            guard let self, !Task.isCancelled, self.currentImageURL == url else { return }
+            // A full-bleed surface landing abruptly is the loudest pop on the
+            // screen; dissolve it over the neutral backdrop.
+            UIView.transition(
+                with: self.imageView, duration: 0.25,
+                options: [.transitionCrossDissolve, .allowUserInteraction]
+            ) {
+                self.imageView.image = image
+            }
         }
+    }
+
+    // MARK: - Redaction
+
+    private var bone: SkeletonBoneView?
+
+    /// Skeleton state: a shimmer sheet in the media slot, under the gradient
+    /// stack — the bottom fade mutes it into the page exactly as it does real
+    /// media, so the loading banner and the loaded one share every seam.
+    /// Alpha-only, so a reveal inside an animation block cross-fades.
+    func setRedacted(_ redacted: Bool) {
+        if redacted, bone == nil {
+            let bone = SkeletonBoneView(rounding: .fixed(0))
+            bone.pin(to: mediaContainer)
+            self.bone = bone
+        }
+        bone?.isHidden = false
+        bone?.alpha = redacted ? 1 : 0
     }
 
     override func layoutSubviews() {
