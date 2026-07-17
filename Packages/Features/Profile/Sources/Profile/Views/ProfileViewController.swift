@@ -57,8 +57,17 @@ final class ProfileViewController: UIViewController {
         }
     }
     private let refreshControl = UIRefreshControl()
-    private let spinner = UIActivityIndicatorView(style: .large)
     private let statusLabel = UILabel()
+    /// First-load guarantee: while the skeleton screen is up, the scroll
+    /// content must fill the viewport, so the gallery's shimmer rows reach
+    /// the screen bottom from the very first layout pass. The pager's own
+    /// fitted-height pin sits at `.defaultHigh` (750); this inequality
+    /// outranks it, and the pager is the only stretchable link in the
+    /// content chain — so it, not the header, absorbs the remainder. Without
+    /// this, the first frames of a push can catch the pager at its floor
+    /// (the fitted height converges only after the collection's first
+    /// real-width pass), cropping the skeleton to a row and a half.
+    private var skeletonViewportFill: NSLayoutConstraint?
     private var didSubordinatePagerToPop = false
 
     /// The own-profile overflow menu (Log Out); sits inside the action item.
@@ -437,11 +446,9 @@ final class ProfileViewController: UIViewController {
         // the header and exposing the background.
         headerView.anchorBanner(toViewportTop: frame.topAnchor)
 
-        spinner.hidesWhenStopped = true
-        spinner.constrain(in: view) { parent in
-            spinner.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-            spinner.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
-        }
+        let viewportFill = content.heightAnchor.constraint(greaterThanOrEqualTo: frame.heightAnchor)
+        viewportFill.priority = UILayoutPriority(800)
+        skeletonViewportFill = viewportFill
 
         statusLabel.font = .preferredFont(forTextStyle: .body)
         statusLabel.adjustsFontForContentSizeCategory = true
@@ -548,27 +555,45 @@ final class ProfileViewController: UIViewController {
     private func render(_ phase: ProfileViewModel.Phase) {
         switch phase {
         case .loading:
-            if !refreshControl.isRefreshing { spinner.startAnimating() }
-            scrollView.isHidden = true
+            // First load renders the REAL screen in skeleton state: the
+            // header redacts in place (same views, same constraints — see
+            // `ProfileHeaderView.setRedacted`), and the gallery pages shimmer
+            // through their own loading state until the view model's first
+            // snapshot arrives. Hydration is a pure cross-fade over the very
+            // frames the content will occupy — nothing can shift.
             statusLabel.isHidden = true
+            scrollView.isHidden = false
+            headerView.setRedacted(true)
+            if viewModel.hasGallery {
+                skeletonViewportFill?.isActive = true
+                galleryPager.render(ProfileViewModel.GallerySnapshot(
+                    activity: .loading, media: .loading, short: .loading
+                ))
+            }
 
         case .content(let model):
-            spinner.stopAnimating()
             refreshControl.endRefreshing()
             statusLabel.isHidden = true
             scrollView.isHidden = false
+            // Content owns its height again; the release rides the same
+            // layout pass as the (dissolve-masked) gallery height snap.
+            skeletonViewportFill?.isActive = false
             // Instagram-style: the @handle is the screen's title (the header
             // shows the bold display name). "Profile" only until first load.
             // Content usually lands mid-push; rebind inside the transition
             // so the bar text doesn't snap in after the animation settles.
             currentHandle = model.handle
             alongsideTransition { $0.applyNavigationState() }
+            // Content first — the labels adopt their text while still
+            // invisible under the bones — then the alpha-only reveal.
             headerView.configure(with: model)
+            headerView.setRedacted(false, animated: view.window != nil)
 
         case .failed(let message):
-            spinner.stopAnimating()
             refreshControl.endRefreshing()
             scrollView.isHidden = true
+            skeletonViewportFill?.isActive = false
+            headerView.setRedacted(false)
             statusLabel.text = message
             statusLabel.isHidden = false
         }
