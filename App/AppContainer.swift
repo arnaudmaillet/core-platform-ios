@@ -42,33 +42,17 @@ final class AppContainer {
     /// URLSession client pointed at the Envoy gateway.
     private lazy var rpcHTTPClient: any HTTPClientInterface = {
         switch environment {
-        case .mock: mockBFF
+        case .mock: mockBackend.bff
         case .localFleet: URLSessionHTTPClient()
         }
     }()
 
-    private let mockDataset = MockSocialDataset()
-    private lazy var mockCounterStore = MockCounterStore(dataset: mockDataset)
-    private let mockBlobStore = MockBlobStore()
-    private let mockPostStore = MockPostStore()
-    private(set) lazy var mockRealtimeServer = MockRealtimeServer()
+    /// The whole in-process backend (dataset + stores + fully registered
+    /// MockBFF), with network realism read from launch arguments
+    /// (`-mock-latency`, `-mock-fail`, `-mock-fail-code`, `-mock-fail-rate`).
+    private lazy var mockBackend = MockBackend(conditions: .fromLaunchArguments())
 
-    private lazy var mockBFF: MockBFF = {
-        let bff = MockBFF()
-        MockAuthService().register(on: bff)
-        MockSocialServices(dataset: mockDataset, postStore: mockPostStore).register(on: bff)
-        MockEngagementService(store: mockCounterStore).register(on: bff)
-        MockCounterService(store: mockCounterStore).register(on: bff)
-        MockMediaService(store: mockBlobStore).register(on: bff)
-        MockPostAuthoringService(store: mockPostStore).register(on: bff)
-        MockSearchService(dataset: mockDataset).register(on: bff)
-        MockNotificationService(dataset: mockDataset).register(on: bff)
-        MockCommentService(dataset: mockDataset).register(on: bff)
-        MockChatService(dataset: mockDataset).register(on: bff)
-        MockSocialGraphService(dataset: mockDataset).register(on: bff)
-        MockGeoDiscoveryService(dataset: mockDataset).register(on: bff)
-        return bff
-    }()
+    private(set) lazy var mockRealtimeServer = MockRealtimeServer()
 
     /// Bridge from the compose feature to the feed's optimistic insert.
     private let composedPostChannel = ComposedPostChannel()
@@ -157,8 +141,8 @@ final class AppContainer {
     /// visible on screen without a second user.
     func startMockRealtimeDemo() {
         guard demoTicker == nil else { return }
-        let posts = mockDataset.posts.prefix(6).map(\.postID)
-        let store = mockCounterStore
+        let posts = mockBackend.dataset.posts.prefix(6).map(\.postID)
+        let store = mockBackend.counterStore
         let server = mockRealtimeServer
         demoTicker = Task.detached {
             var index = 0
@@ -315,7 +299,7 @@ final class AppContainer {
             }
             let uploadTransport: any MediaUploadTransport = switch environment {
             case .mock:
-                MockMediaUploadTransport(store: mockBlobStore)
+                MockMediaUploadTransport(store: mockBackend.blobStore)
             case .localFleet:
                 // The media service presigns object-store URLs against the
                 // Docker-internal host (minio:9000), unreachable from the

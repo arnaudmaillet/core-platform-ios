@@ -18,8 +18,17 @@ public final class MockBFF: HTTPClientInterface, @unchecked Sendable {
     private let lock = NSLock()
     private var routes: [String: RawHandler] = [:]
     private var recorded: [RecordedRequest] = []
+    private var conditions: SimulatedConditions = .none
 
     public init() {}
+
+    /// Network realism: artificial latency and injected failures, applied to
+    /// every subsequent unary call. Safe to swap mid-flight (e.g. a test that
+    /// degrades the network between two requests).
+    public var simulatedConditions: SimulatedConditions {
+        get { lock.withLock { conditions } }
+        set { lock.withLock { conditions = newValue } }
+    }
 
     /// Every unary request received, in order — for asserting on paths and
     /// headers (e.g. that the auth interceptor attached the bearer token).
@@ -62,13 +71,22 @@ public final class MockBFF: HTTPClientInterface, @unchecked Sendable {
         onResponse: @escaping @Sendable (HTTPResponse) -> Void
     ) -> Cancelable {
         let path = request.url.path
-        let handler = lock.withLock {
+        let (handler, conditions) = lock.withLock {
             recorded.append(RecordedRequest(path: path, headers: request.headers))
-            return routes[path]
+            return (routes[path], self.conditions)
         }
 
         let response: HTTPResponse
-        if let handler {
+        if let failure = conditions.failure(matching: path) {
+            response = HTTPResponse(
+                code: failure.code,
+                headers: [:],
+                message: nil,
+                trailers: [:],
+                error: ConnectError(code: failure.code, message: failure.message),
+                tracingInfo: nil
+            )
+        } else if let handler {
             switch handler(request.message ?? Data()) {
             case .success(let body):
                 response = HTTPResponse(
@@ -100,8 +118,14 @@ public final class MockBFF: HTTPClientInterface, @unchecked Sendable {
             )
         }
 
-        // Deliver asynchronously like a real transport would.
-        DispatchQueue.global().async { onResponse(response) }
+        // Deliver asynchronously like a real transport would, after any
+        // simulated latency.
+        let delay = conditions.randomLatency()
+        if delay > 0 {
+            DispatchQueue.global().asyncAfter(deadline: .now() + delay) { onResponse(response) }
+        } else {
+            DispatchQueue.global().async { onResponse(response) }
+        }
         return Cancelable(cancel: {})
     }
 
