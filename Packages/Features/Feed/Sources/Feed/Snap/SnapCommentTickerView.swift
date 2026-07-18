@@ -140,6 +140,10 @@ final class SnapCommentTickerView: UIView {
 
     // MARK: Interaction state
 
+    /// A tap landed on the band (as opposed to a scrub drag) — the comments
+    /// engagement's entry point on posts whose stream is flowing.
+    var onTap: (() -> Void)?
+
     private let panRecognizer = UIPanGestureRecognizer()
     private var coastLink: CADisplayLink?
     private var coastReleaseVelocity: CGFloat = 0
@@ -195,14 +199,19 @@ final class SnapCommentTickerView: UIView {
         blurView.accessibilityIdentifier = "ticker-kinetic-backdrop"
         insertSubview(blurView, at: 0)
 
-        // Horizontal-only pan; taps still fall through to the cell's
-        // playback toggle (the band is neither a UIControl nor one of the
-        // chrome's interactionRoots, so the cell's arbitration ignores it).
-        // The delegate declares the band's priority over other pans (the
-        // timeline slide-to-pop, the pin grab) inside its own frame.
+        // Horizontal-only pan for the scrub. The delegate declares the
+        // band's priority over other pans (the timeline slide-to-pop, the
+        // pin grab) inside its own frame.
         panRecognizer.addTarget(self, action: #selector(handlePan(_:)))
         panRecognizer.delegate = self
         addGestureRecognizer(panRecognizer)
+        // A TAP (no drag) opens the comments surface — the band is a
+        // comments preview, so a tap means "show me the rest", not
+        // play/pause (the chrome lists the band in `interactionRoots` so
+        // the cell's arbitration yields). A tap recognizer fails the
+        // moment the touch moves, so it coexists with the scrub pan with
+        // no arbitration edges.
+        addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleTap)))
     }
 
     /// Horizontal intent only: vertical drags stay with the page scroller.
@@ -446,6 +455,10 @@ final class SnapCommentTickerView: UIView {
     }
 
     // MARK: - Manual scrub
+
+    @objc private func handleTap() {
+        onTap?()
+    }
 
     @objc private func handlePan(_ pan: UIPanGestureRecognizer) {
         switch pan.state {

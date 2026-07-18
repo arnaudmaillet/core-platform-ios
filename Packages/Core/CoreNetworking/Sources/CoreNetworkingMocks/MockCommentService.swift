@@ -4,7 +4,8 @@ import Foundation
 
 /// Fake of comment.v1.CommentService over the shared dataset. Seeds a couple of
 /// top-level comments per post (authored by dataset authors, so profile
-/// hydration resolves) and accepts CreateComment.
+/// hydration resolves; a few posts are deliberately dense or empty — see the
+/// seed sets below) and accepts CreateComment.
 public final class MockCommentService: @unchecked Sendable {
     private let dataset: MockSocialDataset
     private let store = Store()
@@ -42,6 +43,17 @@ public final class MockCommentService: @unchecked Sendable {
         "post-0004", "post-0007", // image pages (index % 3 == 1; post-0001 stays sparse)
         "post-0002", "post-0005", "post-0008", // text-only pages (index % 3 == 2)
     ]
+
+    /// Media posts seeded with NO comments at all (not even the sparse
+    /// pair): the snap feed's comments empty state ("No comments yet")
+    /// needs known-zero posts to render against. Adjacent and early —
+    /// post-0009 (video) then post-0010 (image) — so a few swipes verify
+    /// the pill over both media kinds back to back. Text-only pages render
+    /// the empty shell, so a zero-comment text post would prove nothing.
+    /// Comments composed via CreateComment still persist on these posts
+    /// (the store prepends to the seed), which also exercises the empty
+    /// state's exit once the composer exists.
+    private static let zeroCommentPostIDs: Set<String> = ["post-0009", "post-0010"]
 
     /// Micro-reaction bodies for the dense seed — the ticker is a reaction
     /// dump, so the bank is emoji runs and short slang, not sentences. The
@@ -90,6 +102,7 @@ public final class MockCommentService: @unchecked Sendable {
     ]
 
     private func seedComments(for postID: String) -> [Comment_V1_CommentView] {
+        guard !Self.zeroCommentPostIDs.contains(postID) else { return [] }
         let authors = dataset.authors
         guard authors.count >= 3 else { return [] }
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)

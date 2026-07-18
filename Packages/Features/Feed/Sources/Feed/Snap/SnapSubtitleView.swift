@@ -96,23 +96,28 @@ final class SnapSubtitleView: UIView {
     private let countBubble = UIVisualEffectView(effect: nil)
     private let countLabel = UILabel()
 
+    /// A tap landed anywhere in the zone (pill, count bubble, or the slack
+    /// between them) — the comments engagement's entry point on posts with
+    /// semantic cues. The zone's fixed two-line slot doubles as the thumb
+    /// target, comfortably larger than the pill alone; the chrome lists the
+    /// zone in `interactionRoots` so the cell's play/pause arbitration
+    /// yields, and a hidden zone (below the cue gate) receives no touches.
+    var onTap: (() -> Void)?
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         isHidden = true
-        isUserInteractionEnabled = false // taps fall through to play/pause
+        addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleTap)))
+        isAccessibilityElement = true
+        accessibilityTraits = .button
+        accessibilityLabel = "Comments"
         label.numberOfLines = 2
         label.lineBreakMode = .byTruncatingTail
         label.textAlignment = .left
+        // The pill IS the label's own layer (`SubtitlePillLabel` styles it),
+        // so a cue segment still touches exactly one layer — background and
+        // glyphs move as a unit.
         label.layer.opacity = 0
-        // The pill lives on the label's own layer so a segment still touches
-        // exactly one layer (background and glyphs move as a unit).
-        // Deliberately no `masksToBounds`: `backgroundColor` clips to the
-        // radius on its own, the text never reaches the corners (it's inset
-        // — see `SubtitlePillLabel`), and an unmasked layer keeps the fade
-        // a direct composite.
-        label.layer.backgroundColor = UIColor.black.withAlphaComponent(0.45).cgColor
-        label.layer.cornerRadius = 12 // fixed, so 1- and 2-line cues share one shape
-        label.layer.cornerCurve = .continuous
         // The count bubble: a rounded material chip that hugs its count.
         // Blur NEEDS `clipsToBounds` for the rounded shape (unlike the
         // pill's backgroundColor, an effect view's backdrop doesn't clip to
@@ -156,6 +161,10 @@ final class SnapSubtitleView: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    @objc private func handleTap() {
+        onTap?()
+    }
 
     /// Materializes the bubble's material on first window attach — see
     /// `countBubble`. Idempotent; the bubble is invisible pre-window
@@ -362,8 +371,26 @@ final class SnapSubtitleView: UIView {
 /// A label that bakes the pill's padding into its text rect (rather than
 /// wrapping the label in a padded container), so the pill and its glyphs
 /// stay one view on one layer — the shape the cue animation depends on.
-private final class SubtitlePillLabel: UILabel {
+///
+/// The pill's whole visual identity lives here (translucent background,
+/// fixed continuous-corner radius so 1- and 2-line text shares one shape):
+/// the subtitle zone's cue and the comments empty state render the same
+/// pill, and keeping the look in the label is what stops them forking.
+/// Deliberately no `masksToBounds`: `backgroundColor` clips to the radius
+/// on its own, the text never reaches the corners (it's inset), and an
+/// unmasked layer keeps the cue fade a direct composite.
+final class SubtitlePillLabel: UILabel {
     static let textInsets = UIEdgeInsets(top: 6, left: 12, bottom: 6, right: 12)
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        layer.backgroundColor = UIColor.black.withAlphaComponent(0.45).cgColor
+        layer.cornerRadius = 12
+        layer.cornerCurve = .continuous
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override func textRect(forBounds bounds: CGRect, limitedToNumberOfLines numberOfLines: Int) -> CGRect {
         let textBounds = super.textRect(

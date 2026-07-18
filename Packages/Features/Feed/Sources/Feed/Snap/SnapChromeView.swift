@@ -42,6 +42,15 @@ final class SnapChromeView: UIView {
     /// zone rides a page being dragged in.
     private let subtitleView = SnapSubtitleView()
 
+    /// The comments empty state: a static "No comments yet" pill occupying
+    /// the band's slot when the post is KNOWN to have zero comments — the
+    /// one case where every comment surface above legitimately gates itself
+    /// away and the zone would otherwise read as unexplained blank space.
+    /// Same content contract as the band and the zone (visible only via
+    /// `updateCommentStreams`, on a loaded stream), so the flight replica
+    /// never shows it.
+    private let commentEmptyState = SnapCommentEmptyStateView()
+
     /// The vertical shortcut wheel on the trailing edge: quick-react
     /// shortcuts (placeholder symbols today, favorite GIFs later), spanning
     /// the ticker's top up to the nav bar. Static content like the caption —
@@ -70,9 +79,16 @@ final class SnapChromeView: UIView {
     static let maxSettledTopMargin: CGFloat = 160
 
     /// Subtrees where a touch means "use the control", not "toggle playback" —
-    /// consumed by the cell's tap arbitration. The shortcut rail is the sole
-    /// interactive chrome since the engagement rail's removal.
-    var interactionRoots: [UIView] { [shortcutRail] }
+    /// consumed by the cell's tap arbitration: the shortcut rail, plus every
+    /// comments surface (the empty-state pill, the subtitle zone, the ticker
+    /// band — the engagement's entry points; hidden views receive no
+    /// touches, so each claims taps only while shown).
+    var interactionRoots: [UIView] { [shortcutRail, commentEmptyState, subtitleView, commentTicker] }
+
+    /// A comments surface was tapped (empty-state pill, subtitle zone, or
+    /// ticker band — one fan-in, one path) — the cell forwards this as a
+    /// comments-engagement request with its post identity attached.
+    var onCommentsTapped: (() -> Void)?
 
     private var representedID: PostID?
 
@@ -108,6 +124,16 @@ final class SnapChromeView: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// The chrome is an overlay CANVAS: only its subviews are touchable.
+    /// Bare-canvas hits fall through to whatever lies beneath — the media
+    /// (play/pause), or the engaged comments region (whose inner list must
+    /// scroll; a full-cell chrome above it would otherwise swallow every
+    /// drag and hand it to the pager, which is exactly the bug this fixed).
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        let hit = super.hitTest(point, with: event)
+        return hit === self ? nil : hit
+    }
 
     private func buildLayout() {
         scrimView.isUserInteractionEnabled = false
@@ -227,6 +253,23 @@ final class SnapChromeView: UIView {
             subtitleView.trailingAnchor.constraint(equalTo: shortcutRail.leadingAnchor, constant: -Spacing.md)
             subtitleView.bottomAnchor.constraint(equalTo: commentTicker.topAnchor, constant: -Spacing.sm)
         }
+
+        // The comments empty state sits in the BAND's slot (bottom on the
+        // caption's top, leading on the caption's text axis — where a
+        // zero-comment page's blank zone actually is), not the subtitle
+        // zone's: with no comments there is no band, and the pill hugging
+        // the caption reads as the comment container's own placeholder
+        // rather than a stray cue. Another overlay on the one-directional
+        // chain: it constrains onto the caption, nothing constrains onto
+        // it, so its presence can never move the stack.
+        commentEmptyState.constrain(in: self) { parent in
+            commentEmptyState.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor, constant: Spacing.lg)
+            commentEmptyState.trailingAnchor.constraint(lessThanOrEqualTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.lg)
+            commentEmptyState.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.sm)
+        }
+        commentEmptyState.onTap = { [weak self] in self?.onCommentsTapped?() }
+        subtitleView.onTap = { [weak self] in self?.onCommentsTapped?() }
+        commentTicker.onTap = { [weak self] in self?.onCommentsTapped?() }
     }
 
     /// The rail's reserved bottom strip is the glass square's height — a
@@ -295,11 +338,12 @@ final class SnapChromeView: UIView {
         hasMedia = model.mediaURL != nil
         scrimView.isHidden = !hasMedia
         caption = hasMedia ? model.caption : nil
-        captionLabel.isHidden = (caption?.isEmpty ?? true)
+        applyCaptionVisibility()
         if !hasMedia {
             commentTicker.setComments([])
             composeButton.isHidden = true
             subtitleView.setCues([])
+            commentEmptyState.setVisible(false)
         }
         // Static chrome, so it loads here (not via `updateCommentStreams`)
         // and the flight replica shows it too — the seeded payload keeps
@@ -311,6 +355,29 @@ final class SnapChromeView: UIView {
     /// attributed rendering (the font is baked into the string).
     private var caption: String? {
         didSet { renderCaption() }
+    }
+
+    /// True while the comments engagement's flying caption stands in for
+    /// this one — an INSTANT swap (no fade), so exactly one caption is ever
+    /// rendered; `chrome.alpha` continues to own the rest of the chrome.
+    private var isCaptionConcealed = false
+
+    /// Instantly conceals/reveals the caption, independent of the chrome's
+    /// alpha fade — the engaged caption's flight replaces it visually.
+    func setCaptionConcealed(_ concealed: Bool) {
+        isCaptionConcealed = concealed
+        applyCaptionVisibility()
+    }
+
+    /// Where the caption sits right now, in the chrome's coordinate space
+    /// (== the cell's: the chrome is pinned to the cell's content view) —
+    /// the flight's source. Nil when the post renders no caption.
+    var captionFlightSourceFrame: CGRect? {
+        (caption?.isEmpty ?? true) ? nil : captionLabel.frame
+    }
+
+    private func applyCaptionVisibility() {
+        captionLabel.isHidden = isCaptionConcealed || (caption?.isEmpty ?? true)
     }
 
     /// Whether the represented post carries media. Text-only posts show an
@@ -356,6 +423,12 @@ final class SnapChromeView: UIView {
         composeButton.isHidden = commentTicker.isHidden
         subtitleView.setCommentCount(streams.commentCount)
         subtitleView.setCues(streams.subtitles)
+        // KNOWN-zero only (`isLoaded` is the load/zero seam): an unloaded
+        // stream keeps the zone blank — the empty state must never flash
+        // while a fetch is in flight — and a sparse-but-nonzero post keeps
+        // its deliberate quiet (the surfaces' engagement gates, not an
+        // absence worth captioning).
+        commentEmptyState.setVisible(streams.isLoaded && streams.commentCount == 0)
     }
 
     /// Streams while the owning cell is on screen (visibility-scoped — a
@@ -363,6 +436,25 @@ final class SnapChromeView: UIView {
     /// `setTickerStreaming`).
     func setTickerActive(_ active: Bool) {
         commentTicker.setActive(active)
+    }
+
+    /// The comments engagement's chrome cut: fades the comment surfaces,
+    /// the scrim, and the "+" anchor — the pieces the engaged layout
+    /// replaces or orphans — while the SHORTCUT RAIL stays untouched (the
+    /// blueprint keeps the vertical action rail through both states; it
+    /// floats over the comments region, and its touches keep winning via
+    /// `interactionRoots` + the pager's rail veto). The caption is handled
+    /// separately (`setCaptionConcealed` — it flies, it doesn't fade).
+    /// Alpha, not isHidden, so a single animation block drives both
+    /// directions; alpha < 0.01 also removes the faded surfaces from
+    /// hit-testing, so the entry pill can't re-fire mid-engagement.
+    func setCommentsEngaged(_ engaged: Bool) {
+        let alpha: CGFloat = engaged ? 0 : 1
+        scrimView.alpha = alpha
+        commentTicker.alpha = alpha
+        subtitleView.alpha = alpha
+        commentEmptyState.alpha = alpha
+        composeButton.alpha = alpha
     }
 
     /// Cycles while the owning cell is on screen — the band's visibility
@@ -378,10 +470,14 @@ final class SnapChromeView: UIView {
     func reset() {
         representedID = nil
         caption = nil
+        isCaptionConcealed = false
+        applyCaptionVisibility()
+        onCommentsTapped = nil
         hasMedia = true
         commentTicker.reset()
         composeButton.isHidden = true
         subtitleView.reset()
+        commentEmptyState.setVisible(false)
         shortcutRail.reset()
     }
 }

@@ -37,11 +37,30 @@ struct SnapTapArbitrationTests {
         #expect(SnapFeedCell.isInteractiveTouch(nil, interactiveRoots: [rail], stopAt: contentView) == false)
     }
 
-    @Test func chromeDeclaresTheShortcutRail() {
+    @Test func chromeDeclaresItsInteractiveRoots() {
         // The chrome's real declaration: touches on the shortcut wheel use
-        // the wheel, never toggle playback.
+        // the wheel, and taps on any comments surface (empty-state pill,
+        // subtitle zone, ticker band) open the engagement — none of them
+        // toggles playback. Each surface is hidden unless its content gate
+        // admits it, and hidden views receive no touches, so play/pause
+        // keeps the whole page wherever no surface is showing.
         let chrome = SnapChromeView()
-        #expect(chrome.interactionRoots.count == 1)
-        #expect(chrome.interactionRoots.first is SnapShortcutRailView)
+        #expect(chrome.interactionRoots.count == 4)
+        #expect(chrome.interactionRoots.contains(where: { $0 is SnapShortcutRailView }))
+        #expect(chrome.interactionRoots.contains(where: { $0 is SnapCommentEmptyStateView }))
+        #expect(chrome.interactionRoots.contains(where: { $0 is SnapSubtitleView }))
+        #expect(chrome.interactionRoots.contains(where: { $0 is SnapCommentTickerView }))
+    }
+
+    @Test func touchesInsideCommentSurfacesAreInteractive() {
+        // A touch landing on a comment surface's descendant (a cue label, a
+        // conveying bubble) walks up to the surface root and is claimed —
+        // the whole zone is the thumb target, not just the glyphs.
+        let contentView = UIView()
+        let subtitle = SnapSubtitleView()
+        let inner = UILabel()
+        subtitle.addSubview(inner)
+        contentView.addSubview(subtitle)
+        #expect(SnapFeedCell.isInteractiveTouch(inner, interactiveRoots: [subtitle], stopAt: contentView) == true)
     }
 }

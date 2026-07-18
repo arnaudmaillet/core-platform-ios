@@ -310,7 +310,10 @@ final class PostDetailViewController: UIViewController {
     }
 
     private func renderComments(_ state: PostDetailViewModel.CommentsState) {
-        commentsHeaderLabel.isHidden = false
+        // Comments-only contexts already carry a "Comments" title (the nav
+        // bar when pushed, the panel header when sheeted) — the inline
+        // section header would duplicate it.
+        commentsHeaderLabel.isHidden = mode == .commentsOnly
         guard case .loaded(let models) = state else { return }
         commentsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         if models.isEmpty {
@@ -323,6 +326,32 @@ final class PostDetailViewController: UIViewController {
         } else {
             for model in models {
                 commentsStack.addArrangedSubview(CommentRowView(model: model))
+            }
+            cascadeCommentsInIfFirstLoad()
+        }
+    }
+
+    private var didCascadeComments = false
+
+    /// The first loaded render in comments-only mode rises in with a short
+    /// per-row stagger, so under the snap feed's comments panel the stream
+    /// reads as materializing beneath the media rather than arriving
+    /// pre-attached to the panel. One-shot: refreshes and composed-comment
+    /// re-renders swap content statically.
+    private func cascadeCommentsInIfFirstLoad() {
+        guard mode == .commentsOnly, !didCascadeComments, view.window != nil else { return }
+        didCascadeComments = true
+        view.layoutIfNeeded()
+        for (index, row) in commentsStack.arrangedSubviews.enumerated() {
+            row.alpha = 0
+            row.transform = CGAffineTransform(translationX: 0, y: 14)
+            UIView.animate(
+                withDuration: 0.3,
+                delay: 0.05 + Double(min(index, 10)) * 0.04,
+                options: [.curveEaseOut, .allowUserInteraction]
+            ) {
+                row.alpha = 1
+                row.transform = .identity
             }
         }
     }

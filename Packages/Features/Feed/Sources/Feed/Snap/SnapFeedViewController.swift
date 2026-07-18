@@ -58,10 +58,29 @@ final class SnapFeedViewController: UIViewController {
     /// released — a nonisolated deinit can't touch the VC's main-actor state.
     private let appObservers = NotificationObserverBag()
 
-    init(viewModel: FeedViewModel, imagePipeline: ImagePipeline, videoPlayback: VideoPlaybackController? = nil) {
+    /// Builds the comments panel's content (the comments-only detail) for a
+    /// post — injected by the feature builder so this VC needs none of the
+    /// detail's dependencies. Nil disables the comments engagement.
+    private let makeCommentsPanelContent: ((PostID) -> UIViewController)?
+    /// The post whose comments engagement is active, nil when disengaged.
+    /// Owns the paging veto: the pager is frozen while the mutated layout
+    /// (a per-cell state) is on screen.
+    private var commentsEngagedID: PostID?
+    /// The engaged comments UI — a child of THIS controller (thread data,
+    /// scroll position, and reply drafts must never live in a recycled
+    /// cell); the cell only hosts its view while engaged.
+    private var commentsContentVC: UIViewController?
+
+    init(
+        viewModel: FeedViewModel,
+        imagePipeline: ImagePipeline,
+        videoPlayback: VideoPlaybackController? = nil,
+        makeCommentsPanelContent: ((PostID) -> UIViewController)? = nil
+    ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
         self.videoPlayback = videoPlayback
+        self.makeCommentsPanelContent = makeCommentsPanelContent
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -145,6 +164,7 @@ final class SnapFeedViewController: UIViewController {
     private var didDebugPause = false
     private var didDebugScroll = false
     private var didDebugScrollDemo = false
+    private var didDebugCommentsDemo = false
     /// `-snap-start-paused`: pauses the active cell shortly after appearing so
     /// the pause glyph can be screenshotted (taps can't be injected in the sim).
     /// `-snap-auto-dismiss`: dismisses a presented (map-opened) feed shortly
@@ -186,6 +206,18 @@ final class SnapFeedViewController: UIViewController {
                 // which this VC doesn't observe (finger scrolls don't emit
                 // it); settle the active page manually like the jump arg.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { self.updateActiveItem() }
+            }
+        }
+        // `-snap-comments-demo`: opens the comments engagement on the active
+        // page ~2.5s after appear (after any `-snap-start-index` jump at
+        // 1.5s settles) — the mutated layout can be screenshotted without
+        // tap injection.
+        if !didDebugCommentsDemo, arguments.contains("-snap-comments-demo") {
+            didDebugCommentsDemo = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                guard let self, let index = self.lifecycle.activeIndex,
+                      self.orderedIDs.indices.contains(index) else { return }
+                self.presentComments(for: self.orderedIDs[index])
             }
         }
         guard !didDebugPause,
@@ -293,6 +325,10 @@ final class SnapFeedViewController: UIViewController {
                 // already-visited post gets its streams back immediately;
                 // async arrivals ride `onCommentStreamsChange` instead.
                 cell.updateCommentStreams(self.viewModel.commentStreams(for: id))
+                // The comments engagement's two verbs, cell → screen: the
+                // pill opens the panel, a strip tap while engaged closes it.
+                cell.onRequestComments = { [weak self] id in self?.presentComments(for: id) }
+                cell.onRequestCommentsClose = { [weak self] in self?.dismissComments() }
             }
             return cell
         }
@@ -580,6 +616,80 @@ final class SnapFeedViewController: UIViewController {
         cell.updateCommentStreams(streams)
     }
 
+    // MARK: - Comments engagement
+
+    /// The on-post comments mutation, fully in-cell: media docks into the
+    /// strip, the caption flies to its side, and the comments UI — a child
+    /// controller OWNED HERE, merely hosted by the cell — lifts into the
+    /// vacated region. One surface, one spring block, one motion profile
+    /// (the sheet and the custom presentation that preceded this each
+    /// split the screen into two motion systems). Playback is untouched:
+    /// nothing presents, so the cell never resigns.
+    private func presentComments(for id: PostID) {
+        guard commentsEngagedID == nil, commentsContentVC == nil,
+              let makeCommentsPanelContent,
+              let indexPath = dataSource.indexPath(for: id),
+              let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell else { return }
+
+        let content = makeCommentsPanelContent(id)
+        content.view.backgroundColor = .clear
+        content.overrideUserInterfaceStyle = .dark
+        commentsEngagedID = id
+        commentsContentVC = content
+        // Paging stays LIVE while engaged — arbitration is per-touch, the
+        // rail's mechanism: drags born inside the comments container are
+        // declined by the pager (the inner list scrolls), drags outside it
+        // (the docked media, the margins) page the feed, and a beginning
+        // page drag collapses the engagement (`scrollViewWillBeginDragging`).
+        // The toolbar floats above the cell; the comments region owns the
+        // bottom edge while engaged.
+        concealToolbar()
+        addChild(content)
+        cell.installComments(content.view)
+        content.didMove(toParent: self)
+        UIView.animate(
+            withDuration: SnapCommentsLayout.engageDuration, delay: 0,
+            usingSpringWithDamping: 1, initialSpringVelocity: 0
+        ) {
+            cell.setCommentsEngaged(true)
+            cell.contentView.layoutIfNeeded()
+        }
+    }
+
+    /// Reverse mutation (strip tap, entry-surface re-tap): the comments
+    /// region settles out, the media expands back, the chrome returns —
+    /// the child is reclaimed only after the spring completes.
+    private func dismissComments() {
+        guard commentsEngagedID != nil else { return }
+        UIView.animate(withDuration: SnapCommentsLayout.disengageDuration, delay: 0,
+                       usingSpringWithDamping: 1, initialSpringVelocity: 0) { [weak self] in
+            self?.engagedCell()?.setCommentsEngaged(false)
+        } completion: { [weak self] _ in
+            self?.finishCommentsDisengagement()
+        }
+    }
+
+    private func engagedCell() -> SnapFeedCell? {
+        guard let id = commentsEngagedID,
+              let indexPath = dataSource.indexPath(for: id) else { return nil }
+        return collectionView.cellForItem(at: indexPath) as? SnapFeedCell
+    }
+
+    private func finishCommentsDisengagement() {
+        // Belt and braces for non-animated/interrupted paths.
+        let cell = engagedCell()
+        cell?.setCommentsEngaged(false)
+        if let content = commentsContentVC {
+            content.willMove(toParent: nil)
+            content.view.removeFromSuperview()
+            content.removeFromParent()
+        }
+        cell?.clearComments()
+        commentsContentVC = nil
+        commentsEngagedID = nil
+        presentToolbar()
+    }
+
     // MARK: - Active-item lifecycle
 
     private func refreshVisibility() {
@@ -713,6 +823,16 @@ extension SnapFeedViewController: UICollectionViewDelegate {
     // A full-cell tap toggles play/pause (handled by the cell's own gesture),
     // not navigation — so there is no `didSelectItemAt` routing. Comments open
     // via the toolbar's more menu; the identity pill opens the profile.
+
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        // A page drag CAN begin while engaged (only drags outside the
+        // comments container reach the pager — see the collection view's
+        // per-touch arbitration): the page is leaving, so the engagement
+        // collapses in flight alongside the scroll.
+        if commentsEngagedID != nil {
+            dismissComments()
+        }
+    }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         updateActiveItem()
@@ -854,19 +974,22 @@ extension SnapFeedViewController: UICollectionViewDataSourcePrefetching {
 final class SnapFeedCollectionView: UICollectionView {
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         let location = gestureRecognizer.location(in: self)
-        if let hit = hitTest(location, with: nil), Self.belongsToShortcutRail(hit) {
+        if let hit = hitTest(location, with: nil), Self.claimsTouches(hit) {
             return false
         }
         return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }
 
-    /// Whether the hit view lives inside a shortcut rail — including its
-    /// fixed compose "+" (a chrome sibling above the rail, marked by its
-    /// class so a swipe born on it stays rail territory). Pure walk-up so
-    /// the routing rule is unit-testable.
-    static func belongsToShortcutRail(_ view: UIView) -> Bool {
+    /// Whether the hit view lives inside territory that owns its own
+    /// vertical/horizontal gestures, so NONE of the pager's recognizers may
+    /// begin there: the shortcut rail (including its fixed compose "+", a
+    /// chrome sibling above the rail), and the engaged comments container
+    /// (its inner list scrolls; drags outside it page the feed — the
+    /// engagement's arbitration rule). Pure walk-up so the routing rule is
+    /// unit-testable.
+    static func claimsTouches(_ view: UIView) -> Bool {
         sequence(first: view, next: { $0.superview }).contains {
-            $0 is SnapShortcutRailView || $0 is SnapRailComposeButton
+            $0 is SnapShortcutRailView || $0 is SnapRailComposeButton || $0 is SnapCommentsContainerView
         }
     }
 }

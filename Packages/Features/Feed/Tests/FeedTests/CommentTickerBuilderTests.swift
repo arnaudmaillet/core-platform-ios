@@ -179,5 +179,28 @@ struct FeedViewModelStreamsTests {
         #expect(streams.reactions.isEmpty)
         #expect(streams.subtitles.isEmpty)
         #expect(streams.commentCount == 3)
+        #expect(streams.isLoaded)
+    }
+
+    /// A post the backend answers with NO comments at all loads as
+    /// KNOWN-zero: `isLoaded` is what separates it from the pre-load
+    /// `.empty` sentinel (otherwise value-identical), and it is the seam
+    /// the chrome's "No comments yet" empty state renders on — never
+    /// while a fetch is still in flight.
+    @Test func zeroCommentPostLoadsAsKnownZero() async {
+        let provider = FakeCommentsProvider(comments: [])
+        let viewModel = FeedViewModel(repository: StubFeedProvider(), commentsProvider: provider)
+        let id = PostID("post-0009")
+
+        #expect(FeedViewModel.CommentStreams.empty.isLoaded == false)
+        #expect(viewModel.commentStreams(for: id).isLoaded == false)
+
+        let (_, streams) = await awaitStreamsEmission(viewModel, activating: id)
+        #expect(streams.isLoaded)
+        #expect(streams.commentCount == 0)
+        #expect(streams.reactions.isEmpty)
+        #expect(streams.subtitles.isEmpty)
+        #expect(streams != .empty)
+        #expect(viewModel.commentStreams(for: id) == streams)
     }
 }
