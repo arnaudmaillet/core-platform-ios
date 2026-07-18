@@ -727,6 +727,12 @@ final class SnapFeedViewController: UIViewController {
         // so it occupies the toolbar's exact band while both coexist —
         // inside the one spring. Alpha < 0.01 also removes the invisible
         // toolbar from hit-testing, so its buttons can't be tapped blind.
+        // ABSOLUTE pager lock while engaged: no edge-bounce, no footer
+        // swipe, no gesture of any kind pages the feed — the only exits
+        // are the explicit tap triggers (✕, the docked media). With the
+        // pager's recognizers disabled there is nothing for a boundary
+        // rubber-band to leak into.
+        collectionView.isScrollEnabled = false
         addChild(content)
         cell.installComments(content.view)
         content.didMove(toParent: self)
@@ -767,6 +773,8 @@ final class SnapFeedViewController: UIViewController {
     /// spring. Nothing structural moves in either direction.
     private func dismissComments() {
         guard commentsEngagedID != nil else { return }
+        // The keyboard rides down with the collapse, not after it.
+        commentsContentVC?.view.endEditing(true)
         // The unified mirror: composer slides back offstage and the native
         // bar's pixels return, all inside the one spring with the media
         // expansion and chrome fade-in.
@@ -896,6 +904,7 @@ final class SnapFeedViewController: UIViewController {
         cell?.clearComments()
         commentsContentVC = nil
         commentsEngagedID = nil
+        collectionView.isScrollEnabled = true
         // Belt and braces: the floating bar was never structurally touched,
         // but its pixels must end exact regardless of how the flight
         // resolved — instant, no new fade at cleanup time.
@@ -1037,11 +1046,11 @@ extension SnapFeedViewController: UICollectionViewDelegate {
     // via the toolbar's more menu; the identity pill opens the profile.
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
-        // Reachable while engaged from exactly one territory: the composer
-        // band forwards its drags to the pager (`claimsTouches` declines
-        // there), so a swipe from the footer pages the feed — and the page
-        // that starts leaving takes the mutation down with it, never
-        // stranding a hosted comments view in a recycled cell.
+        // Unreachable while engaged (the pager is disabled; exits are
+        // tap-only) — kept as belt and braces: if any future path lets a
+        // page drag begin under an engaged cell, the mutation must ride
+        // down with the leaving page, never strand a hosted comments view
+        // in a recycled cell.
         if commentsEngagedID != nil {
             dismissComments()
         }
@@ -1196,21 +1205,15 @@ final class SnapFeedCollectionView: UICollectionView {
     /// Whether the hit view lives inside territory that owns its own
     /// vertical/horizontal gestures, so NONE of the pager's recognizers may
     /// begin there: the shortcut rail (including its fixed compose "+", a
-    /// chrome sibling above the rail), and the engaged comments container
-    /// (its inner list scrolls). The COMPOSER band is the deliberate
-    /// exception inside comments territory: drags born on the input bar
-    /// forward to the pager (swipe-to-page from the footer, which
-    /// collapses the engagement via `scrollViewWillBeginDragging`) — its
-    /// walk-up check runs FIRST because the bar is a container descendant.
-    /// Pure walk-up so the routing rule is unit-testable.
+    /// chrome sibling above the rail), and the engaged comments container —
+    /// the WHOLE container, composer included: while engaged the pager is
+    /// additionally disabled outright (tap-only exits), so no comments
+    /// territory may ever chain a drag up to it. Pure walk-up so the
+    /// routing rule is unit-testable.
     static func claimsTouches(_ view: UIView) -> Bool {
-        for current in sequence(first: view, next: { $0.superview }) {
-            if current is CommentsInputBar { return false }
-            if current is SnapShortcutRailView || current is SnapRailComposeButton
-                || current is SnapCommentsContainerView {
-                return true
-            }
+        sequence(first: view, next: { $0.superview }).contains {
+            $0 is SnapShortcutRailView || $0 is SnapRailComposeButton
+                || $0 is SnapCommentsContainerView
         }
-        return false
     }
 }

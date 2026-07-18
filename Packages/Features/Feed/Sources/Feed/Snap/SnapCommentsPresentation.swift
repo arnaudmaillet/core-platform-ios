@@ -83,6 +83,24 @@ enum SnapCommentsLayout {
         topInset + stripTopPadding + mediaSlotHeight + stripBottomPadding
     }
 
+    /// The floating Liquid Glass CARD that carries the strip: it wraps the
+    /// media slot (and the caption beside it) with `stripCardPadding` on
+    /// every side, inset from the screen edges — a distinct floating
+    /// surface over the full-height stream, not a wall-to-wall band.
+    static let stripCardCornerRadius: CGFloat = 16
+    static let stripCardPadding: CGFloat = Spacing.sm
+
+    static func stripCardFrame(in bounds: CGRect, topInset: CGFloat) -> CGRect {
+        let slot = mediaSlotFrame(in: bounds, topInset: topInset)
+        let inset = slot.minX - stripCardPadding
+        return CGRect(
+            x: inset,
+            y: slot.minY - stripCardPadding,
+            width: bounds.width - inset * 2,
+            height: slot.height + stripCardPadding * 2
+        )
+    }
+
     /// The comments region's height: everything below the strip, down to
     /// the cell's bottom edge.
     static func commentsRegionHeight(containerHeight: CGFloat, topInset: CGFloat) -> CGFloat {

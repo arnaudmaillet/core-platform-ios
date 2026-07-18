@@ -464,6 +464,11 @@ final class SnapChromeView: UIView {
         subtitleView.alpha = alpha
         commentEmptyState.alpha = alpha
         composeButton.alpha = alpha
+        // The rail stays VISIBLE through the engagement but goes touch-
+        // inert: its column overlaps the risen composer when the keyboard
+        // is up (the trailing ✕ lands exactly under the rail's strip), and
+        // an interactive rail above the container would eat those taps.
+        shortcutRail.isUserInteractionEnabled = !engaged
     }
 
     /// Cycles while the owning cell is on screen — the band's visibility

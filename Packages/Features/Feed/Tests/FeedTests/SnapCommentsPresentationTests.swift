@@ -153,6 +153,10 @@ struct SnapCommentsPresentationTests {
         let ticker = try #require(chrome.subviews.compactMap { $0 as? SnapCommentTickerView }.first)
         let subtitle = try #require(chrome.subviews.compactMap { $0 as? SnapSubtitleView }.first)
         #expect(rail.alpha == 1)
+        // Visible but touch-inert: an interactive rail above the container
+        // would eat the composer's trailing ✕ when the keyboard lifts it
+        // into the rail's column.
+        #expect(rail.isUserInteractionEnabled == false)
         #expect(ticker.alpha == 0)
         #expect(subtitle.alpha == 0)
 
@@ -162,6 +166,19 @@ struct SnapCommentsPresentationTests {
         #expect(media.layer.cornerRadius == 0)
         #expect(ticker.alpha == 1)
         #expect(subtitle.alpha == 1)
+        #expect(rail.isUserInteractionEnabled == true)
+    }
+
+    /// The glass card wraps the slot with uniform padding, inset from the
+    /// screen edges — a floating object, not a band.
+    @Test func stripCardWrapsTheSlot() {
+        let slot = SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset)
+        let card = SnapCommentsLayout.stripCardFrame(in: Self.container, topInset: Self.topInset)
+        #expect(card.minY == slot.minY - SnapCommentsLayout.stripCardPadding)
+        #expect(card.maxY == slot.maxY + SnapCommentsLayout.stripCardPadding)
+        #expect(card.minX == slot.minX - SnapCommentsLayout.stripCardPadding)
+        #expect(card.maxX == Self.container.width - card.minX)
+        #expect(card.maxY < SnapCommentsLayout.stripBottom(topInset: Self.topInset))
     }
 
     /// The layered engaged hierarchy: the comments host spans the FULL cell
@@ -184,15 +201,15 @@ struct SnapCommentsPresentationTests {
         #expect(container.frame.width == Self.container.width)
         #expect(container.alpha == 1)
 
-        // …under a strip-band backdrop…
+        // …under the floating glass card (rounded, hairline-stroked,
+        // wrapping the slot — not a wall-to-wall band)…
         let subviews = cell.contentView.subviews
         let backdrop = try #require(subviews.compactMap { $0 as? UIVisualEffectView }.first)
         #expect(backdrop.isHidden == false)
-        #expect(backdrop.frame == CGRect(
-            x: 0, y: 0,
-            width: Self.container.width,
-            height: SnapCommentsLayout.stripBottom(topInset: Self.topInset)
+        #expect(backdrop.frame == SnapCommentsLayout.stripCardFrame(
+            in: Self.container, topInset: Self.topInset
         ))
+        #expect(backdrop.layer.cornerRadius == SnapCommentsLayout.stripCardCornerRadius)
 
         // …under the media (z-lifted above stream and backdrop).
         let media = try #require(subviews.compactMap { $0 as? UIImageView }.first)

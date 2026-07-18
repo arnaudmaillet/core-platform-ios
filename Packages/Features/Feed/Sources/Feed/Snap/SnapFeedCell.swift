@@ -132,10 +132,18 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         commentsContainer.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(commentsContainer)
 
-        // The frosted strip header, above the stream and below the media:
-        // the visual separator that makes the under-glide read as depth
-        // instead of collision.
+        // The strip's Liquid Glass CARD, above the stream and below the
+        // media: a floating rounded surface (not a wall-to-wall band) with
+        // a hairline stroke, so the under-gliding comments read as passing
+        // BEHIND a distinct object. Blur clipping needs `clipsToBounds`
+        // (an effect view's backdrop ignores the layer radius on its own —
+        // the count bubble's doctrine).
         stripBackdrop.isHidden = true
+        stripBackdrop.clipsToBounds = true
+        stripBackdrop.layer.cornerRadius = SnapCommentsLayout.stripCardCornerRadius
+        stripBackdrop.layer.cornerCurve = .continuous
+        stripBackdrop.layer.borderWidth = 0.5
+        stripBackdrop.layer.borderColor = UIColor.white.withAlphaComponent(0.15).cgColor
         stripBackdrop.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(stripBackdrop)
 
@@ -186,16 +194,17 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             commentsContainer.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
         ]
         NSLayoutConstraint.activate(commentsContainerConstraints)
-        // The frosted header covers screen-top to the strip's boundary.
+        // The glass card floats around the strip's content.
+        let card = SnapCommentsLayout.stripCardFrame(
+            in: contentView.bounds, topInset: frozenInsets.top
+        )
         stripBackdrop.isHidden = false
         NSLayoutConstraint.deactivate(stripBackdropConstraints)
         stripBackdropConstraints = [
-            stripBackdrop.topAnchor.constraint(equalTo: contentView.topAnchor),
-            stripBackdrop.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            stripBackdrop.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            stripBackdrop.heightAnchor.constraint(
-                equalToConstant: SnapCommentsLayout.stripBottom(topInset: frozenInsets.top)
-            ),
+            stripBackdrop.topAnchor.constraint(equalTo: contentView.topAnchor, constant: card.minY),
+            stripBackdrop.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: card.minX),
+            stripBackdrop.widthAnchor.constraint(equalToConstant: card.width),
+            stripBackdrop.heightAnchor.constraint(equalToConstant: card.height),
         ]
         NSLayoutConstraint.activate(stripBackdropConstraints)
         // The docked media rides ABOVE the stream and the frosted header

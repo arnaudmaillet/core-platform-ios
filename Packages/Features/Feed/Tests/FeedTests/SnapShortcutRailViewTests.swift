@@ -188,11 +188,10 @@ struct SnapShortcutRailViewTests {
         // The fixed compose "+" is rail territory too (chrome sibling, so
         // the walk-up can't find the rail — its class is the marker).
         #expect(SnapFeedCollectionView.claimsTouches(SnapRailComposeButton()) == true)
-        // The comments container is the engagement's scroll territory: its
-        // descendants (the inner list, rows) scroll; the pager declines
-        // them — EXCEPT the composer band, which forwards its drags to the
-        // pager (swipe-to-page from the footer) even though it descends
-        // from the container.
+        // The comments container is the engagement's scroll territory — the
+        // WHOLE container, composer included: while engaged the pager is
+        // additionally disabled outright (tap-only exits), so nothing in
+        // comments territory may chain a drag up to it.
         let comments = SnapCommentsContainerView()
         let innerRow = UIView()
         comments.addSubview(innerRow)
@@ -202,8 +201,8 @@ struct SnapShortcutRailViewTests {
         inputBar.addSubview(insideInput)
         #expect(SnapFeedCollectionView.claimsTouches(comments) == true)
         #expect(SnapFeedCollectionView.claimsTouches(innerRow) == true)
-        #expect(SnapFeedCollectionView.claimsTouches(inputBar) == false)
-        #expect(SnapFeedCollectionView.claimsTouches(insideInput) == false)
+        #expect(SnapFeedCollectionView.claimsTouches(inputBar) == true)
+        #expect(SnapFeedCollectionView.claimsTouches(insideInput) == true)
         let caption = UILabel()
         #expect(SnapFeedCollectionView.claimsTouches(caption) == false)
     }
