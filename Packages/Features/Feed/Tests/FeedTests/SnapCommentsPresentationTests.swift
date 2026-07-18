@@ -313,6 +313,21 @@ struct SnapCommentsPresentationTests {
         #expect(hit.map { SnapFeedCollectionView.claimsTouches($0) } == true)
     }
 
+    /// The swipe exit's finger-connection curve: odd-symmetric, near-1:1
+    /// at small drags, saturating toward ±40 — the bar rides the finger
+    /// but never leaves its band.
+    @Test func swipeNudgeIsDampedAndSaturating() {
+        #expect(CommentsInputBar.nudgeOffset(for: 0) == 0)
+        #expect(CommentsInputBar.nudgeOffset(for: -20) == -CommentsInputBar.nudgeOffset(for: 20))
+        // Near-linear early…
+        let small = CommentsInputBar.nudgeOffset(for: 20)
+        #expect(small > 8 && small < 20)
+        // …saturating late, monotonically, under the cap.
+        let large = CommentsInputBar.nudgeOffset(for: 400)
+        #expect(large > CommentsInputBar.nudgeOffset(for: 100))
+        #expect(large < 40)
+    }
+
     // MARK: - Entry point
 
     /// Every comments surface is an engagement entry point — the empty-state

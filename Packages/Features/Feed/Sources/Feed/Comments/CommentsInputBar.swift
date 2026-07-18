@@ -164,17 +164,48 @@ final class CommentsInputBar: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// The nudge's damped, saturating displacement: near-1:1 for the first
+    /// few points, asymptotic to ±40 — the bar feels physically attached
+    /// to the finger without ever leaving its band. Pure, for tests.
+    static func nudgeOffset(for translation: CGFloat) -> CGFloat {
+        40 * CGFloat(tanh(Double(translation) / 80))
+    }
+
     @objc private func handleSwipe(_ pan: UIPanGestureRecognizer) {
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-gesture-log") {
-            print("GESTURELOG: bar pan state=\(pan.state.rawValue) dy=\(pan.translation(in: self).y) vy=\(pan.velocity(in: self).y) wired=\(onSwipeExit != nil)")
-        }
-        #endif
-        guard pan.state == .ended, onSwipeExit != nil else { return }
+        guard onSwipeExit != nil else { return } // pushed screen: no exit, no nudge
         let dy = pan.translation(in: self).y
-        let vy = pan.velocity(in: self).y
-        guard abs(dy) > 50 || abs(vy) > 300 else { return }
-        onSwipeExit?((dy + vy) < 0 ? 1 : -1)
+        switch pan.state {
+        case .changed:
+            // Finger-connected: the bar rides the drag (damped) instead of
+            // waiting inert for the release — the physical half of the
+            // swipe exit; the page change itself stays programmatic and
+            // fires only on commit.
+            transform = CGAffineTransform(translationX: 0, y: Self.nudgeOffset(for: dy))
+        case .ended:
+            let vy = pan.velocity(in: self).y
+            settleNudge()
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-gesture-log") {
+                print("GESTURELOG: bar pan ended dy=\(dy) vy=\(vy)")
+            }
+            #endif
+            if abs(dy) > 50 || abs(vy) > 300 {
+                onSwipeExit?((dy + vy) < 0 ? 1 : -1)
+            }
+        case .cancelled, .failed:
+            settleNudge()
+        default:
+            break
+        }
+    }
+
+    /// Springs the nudge home — on commit the collapse takes over the
+    /// screen while the bar quietly re-seats beneath it.
+    private func settleNudge() {
+        UIView.animate(withDuration: 0.3, delay: 0,
+                       usingSpringWithDamping: 0.8, initialSpringVelocity: 0) {
+            self.transform = .identity
+        }
     }
 
     #if DEBUG
