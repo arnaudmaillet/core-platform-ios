@@ -673,6 +673,18 @@ final class SnapFeedViewController: UIViewController {
             cell.setCommentsEngaged(true)
             cell.contentView.layoutIfNeeded()
             self?.setToolbarPixelsFaded(true)
+        } completion: { [weak self] _ in
+            // The Liquid Glass platters keep their glass shells even at
+            // item-content alpha 0, and they render OUTSIDE the toolbar's
+            // view tree (even `toolbar.isHidden` leaves them standing —
+            // frame-verified). The platter's owner is its ITEM: hiding the
+            // items at the fade's end is what extinguishes the shells.
+            // Guarded on the MODEL alpha: a return spring started before
+            // this completion fired has already set it back to 1, and a
+            // stale hide must not fight it.
+            guard let self, let toolbar = self.toolbarHost?.toolbar, toolbar.alpha == 0 else { return }
+            toolbar.isHidden = true
+            for item in self.toolbarItems ?? [] { item.isHidden = true }
         }
     }
 
@@ -696,11 +708,26 @@ final class SnapFeedViewController: UIViewController {
     /// item's custom view — on iOS 26 the Liquid Glass item platters render
     /// in system containers that do not inherit the bar's alpha, so the
     /// bar-level fade alone leaves the pills opaque (observed in frame
-    /// captures). Nothing structural: hierarchy, layout, and safe area are
-    /// untouched in both directions.
+    /// captures). Interaction rides the fade: a faded toolbar must forward
+    /// every touch to the composer occupying its band. Nothing here moves
+    /// the navigation controller's bar layout — `toolbar.isHidden` (the
+    /// VIEW property, flipped only at spring boundaries where alpha is
+    /// already 0, to extinguish the platters' residual glass containers)
+    /// does not participate in safe-area layout; only `isToolbarHidden`
+    /// does, and that is never touched.
     private func setToolbarPixelsFaded(_ faded: Bool) {
+        guard let toolbar = toolbarHost?.toolbar else { return }
+        if !faded {
+            // Instant, but alpha is still 0 — nothing pops. Un-hiding the
+            // ITEMS resurrects their glass platters (which live OUTSIDE the
+            // toolbar's view tree — even `toolbar.isHidden` can't touch
+            // them; frame-verified) so they can ride the fade back in.
+            toolbar.isHidden = false
+            for item in toolbarItems ?? [] { item.isHidden = false }
+        }
+        toolbar.isUserInteractionEnabled = !faded
         let alpha: CGFloat = faded ? 0 : 1
-        toolbarHost?.toolbar.alpha = alpha
+        toolbar.alpha = alpha
         for item in toolbarItems ?? [] {
             item.customView?.alpha = alpha
         }
