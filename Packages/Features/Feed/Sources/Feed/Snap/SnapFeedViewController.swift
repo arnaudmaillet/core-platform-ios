@@ -70,10 +70,6 @@ final class SnapFeedViewController: UIViewController {
     /// scroll position, and reply drafts must never live in a recycled
     /// cell); the cell only hosts its view while engaged.
     private var commentsContentVC: UIViewController?
-    /// Invalidates the footer handoff's staged phases across fast
-    /// engage/dismiss toggles — a delayed phase must never run for a
-    /// handoff a newer transition already owns.
-    private var commentsFooterGeneration = 0
 
     init(
         viewModel: FeedViewModel,
@@ -672,22 +668,21 @@ final class SnapFeedViewController: UIViewController {
             trailing: cell.commentsRailExclusionWidth,
             bottomInset: view.window?.safeAreaInsets.bottom ?? 0
         )
+        // ONE unified motion profile: the footer handoff rides the SAME
+        // spring as the media morph, caption flight, blur, and chrome
+        // fades — the composer starts offstage (alpha 0, slight downward
+        // offset) and physically slides into place while the native bar's
+        // pixels fade, which is what keeps the in-flight blend from
+        // reading as a double-exposure.
+        detail?.setComposerEntranceState(offstage: true)
         UIView.animate(
             withDuration: SnapCommentsLayout.engageDuration, delay: 0,
             usingSpringWithDamping: 1, initialSpringVelocity: 0
-        ) {
+        ) { [weak self] in
             cell.setCommentsEngaged(true)
             cell.contentView.layoutIfNeeded()
-        }
-        // ASYMMETRIC footer handoff — a sequential exchange, never a muddy
-        // double-exposure at shared half-alpha: the native bar exits SHARP
-        // in the first ~30% of the spring; the composer enters only after
-        // that exit completes.
-        commentsFooterGeneration += 1
-        let generation = commentsFooterGeneration
-        detail?.setComposerAlpha(0)
-        UIView.animate(withDuration: SnapCommentsLayout.engageDuration * 0.3) { [weak self] in
             self?.setToolbarPixelsFaded(true)
+            detail?.setComposerEntranceState(offstage: false)
         } completion: { [weak self] _ in
             // The Liquid Glass platters keep their glass shells even at
             // item-content alpha 0, and they render OUTSIDE the toolbar's
@@ -700,12 +695,6 @@ final class SnapFeedViewController: UIViewController {
             toolbar.isHidden = true
             for item in self.toolbarItems ?? [] { item.isHidden = true }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + SnapCommentsLayout.engageDuration * 0.35) { [weak self] in
-            guard let self, self.commentsFooterGeneration == generation else { return }
-            UIView.animate(withDuration: SnapCommentsLayout.engageDuration * 0.65) {
-                detail?.setComposerAlpha(1)
-            }
-        }
     }
 
     /// Reverse mutation (strip tap, entry-surface re-tap): the comments
@@ -715,27 +704,17 @@ final class SnapFeedViewController: UIViewController {
     /// spring. Nothing structural moves in either direction.
     private func dismissComments() {
         guard commentsEngagedID != nil else { return }
+        // The unified mirror: composer slides back offstage and the native
+        // bar's pixels return, all inside the one spring with the media
+        // expansion and chrome fade-in.
+        let detail = commentsContentVC as? PostDetailViewController
         UIView.animate(withDuration: SnapCommentsLayout.disengageDuration, delay: 0,
                        usingSpringWithDamping: 1, initialSpringVelocity: 0) { [weak self] in
             self?.engagedCell()?.setCommentsEngaged(false)
+            self?.setToolbarPixelsFaded(false)
+            detail?.setComposerEntranceState(offstage: true)
         } completion: { [weak self] _ in
             self?.finishCommentsDisengagement()
-        }
-        // The handoff's mirror: composer exits SHARP first, then the native
-        // bar (items resurrected at that instant, while the band is empty —
-        // the shells reappear over black, not over a half-faded composer)
-        // fades its content back in.
-        commentsFooterGeneration += 1
-        let generation = commentsFooterGeneration
-        let detail = commentsContentVC as? PostDetailViewController
-        UIView.animate(withDuration: SnapCommentsLayout.disengageDuration * 0.3) {
-            detail?.setComposerAlpha(0)
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + SnapCommentsLayout.disengageDuration * 0.35) { [weak self] in
-            guard let self, self.commentsFooterGeneration == generation else { return }
-            UIView.animate(withDuration: SnapCommentsLayout.disengageDuration * 0.65) {
-                self.setToolbarPixelsFaded(false)
-            }
         }
     }
 

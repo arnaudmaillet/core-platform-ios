@@ -36,9 +36,15 @@ enum SnapCommentsLayout {
 
     /// The engaged-state spring, shared by every leg of the one animation —
     /// and symmetric: the return runs the same envelope, with the footer
-    /// crossfade riding inside it in both directions.
+    /// crossfade riding inside it in both directions. ONE rhythm: media
+    /// morph, caption flight, blur, chrome fades, and both footer alphas
+    /// all breathe in this single block.
     static let engageDuration: TimeInterval = 0.45
     static let disengageDuration: TimeInterval = 0.45
+    /// The composer's entrance micro-translation: it slides up into place
+    /// as it fades, so the footer crossfade reads as an arrival, not a
+    /// ghosting double-exposure.
+    static let composerEntranceOffset: CGFloat = 15
 
     /// Where the media docks, in cell coordinates: a 1:1 square tile.
     static func mediaSlotFrame(in bounds: CGRect, topInset: CGFloat) -> CGRect {

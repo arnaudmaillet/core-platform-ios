@@ -236,11 +236,17 @@ final class PostDetailViewController: UIViewController {
     /// action rail's exclusive column (zero overlap). The composer
     /// deliberately stays full-width: the rail's territory ends well above
     /// the footer.
-    /// The composer's own fade channel — the engaged footer handoff is
-    /// ASYMMETRIC (native bar out sharply, composer in after), so the
-    /// composer cannot ride the host container's linear fade alone.
-    func setComposerAlpha(_ alpha: CGFloat) {
-        composeBar.alpha = alpha
+    /// The composer's entrance state for the engaged footer handoff:
+    /// offstage = invisible with a slight downward offset, so the unified
+    /// spring doesn't just ghost it in — it physically slides into place
+    /// (alpha + micro-translation together are what keep the crossfade
+    /// against the fading native bar from reading as a double-exposure).
+    /// Set offstage BEFORE the spring; animate to onstage INSIDE it.
+    func setComposerEntranceState(offstage: Bool) {
+        composeBar.alpha = offstage ? 0 : 1
+        composeBar.transform = offstage
+            ? CGAffineTransform(translationX: 0, y: SnapCommentsLayout.composerEntranceOffset)
+            : .identity
     }
 
     func setEngagedInsets(top: CGFloat, trailing: CGFloat, bottomInset: CGFloat) {
