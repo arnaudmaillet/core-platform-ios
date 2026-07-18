@@ -153,10 +153,10 @@ struct SnapCommentsPresentationTests {
         let ticker = try #require(chrome.subviews.compactMap { $0 as? SnapCommentTickerView }.first)
         let subtitle = try #require(chrome.subviews.compactMap { $0 as? SnapSubtitleView }.first)
         #expect(rail.alpha == 1)
-        // Visible but touch-inert: an interactive rail above the container
-        // would eat the composer's trailing ✕ when the keyboard lifts it
-        // into the rail's column.
-        #expect(rail.isUserInteractionEnabled == false)
+        // Fully interactive through the engagement — the keyboard-up
+        // overlap with the composer's ✕ is arbitrated in the cell's
+        // hitTest, not by disabling the rail.
+        #expect(rail.isUserInteractionEnabled == true)
         #expect(ticker.alpha == 0)
         #expect(subtitle.alpha == 0)
 
@@ -166,7 +166,48 @@ struct SnapCommentsPresentationTests {
         #expect(media.layer.cornerRadius == 0)
         #expect(ticker.alpha == 1)
         #expect(subtitle.alpha == 1)
-        #expect(rail.isUserInteractionEnabled == true)
+    }
+
+    /// The keyboard-up collision rule: wherever the rail and the engaged
+    /// composer physically overlap, the composer wins the touch; the rail
+    /// keeps everything else. Exercised through the cell's real hitTest
+    /// with a composer positioned inside the rail's column.
+    @Test func engagedComposerOutranksTheRailWhereTheyOverlap() throws {
+        let cell = SnapFeedCell(frame: Self.container)
+        cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
+        let chrome = try #require(cell.contentView.subviews.compactMap { $0 as? SnapChromeView }.first)
+        chrome.configure(with: FeedItemDisplayModel(
+            id: PostID("post-0004"),
+            authorID: ProfileID("profile-1"),
+            authorName: "Ana",
+            metaText: "@ana · 3m",
+            avatarURL: nil,
+            caption: "caption",
+            mediaURL: URL(string: "mock://media/4"),
+            mediaKind: .image,
+            thumbnailURL: nil,
+            audioText: nil
+        ))
+        cell.layoutIfNeeded()
+        let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
+        // Host a composer whose frame overlaps the rail's column (the
+        // keyboard-up geometry), plus a probe point in the rail clear of it.
+        let hosted = UIView()
+        cell.installComments(hosted)
+        cell.setCommentsEngaged(true)
+        cell.contentView.layoutIfNeeded()
+        let bar = CommentsInputBar()
+        let overlap = CGPoint(x: rail.frame.midX, y: rail.frame.midY)
+        let barOrigin = hosted.convert(CGPoint(x: overlap.x - 20, y: overlap.y - 20), from: cell)
+        bar.frame = CGRect(origin: barOrigin, size: CGSize(width: 120, height: 46))
+        hosted.addSubview(bar)
+
+        let overlapHit = try #require(cell.hitTest(overlap, with: nil))
+        #expect(sequence(first: overlapHit, next: { $0.superview }).contains { $0 is CommentsInputBar })
+        // Above the composer, the rail still owns its column.
+        let railPoint = CGPoint(x: rail.frame.midX, y: rail.frame.minY + 10)
+        let railHit = try #require(cell.hitTest(railPoint, with: nil))
+        #expect(sequence(first: railHit, next: { $0.superview }).contains { $0 is SnapShortcutRailView })
     }
 
     /// The glass card wraps the slot with uniform padding, inset from the

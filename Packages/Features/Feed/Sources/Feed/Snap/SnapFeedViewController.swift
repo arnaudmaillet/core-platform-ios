@@ -727,12 +727,6 @@ final class SnapFeedViewController: UIViewController {
         // so it occupies the toolbar's exact band while both coexist —
         // inside the one spring. Alpha < 0.01 also removes the invisible
         // toolbar from hit-testing, so its buttons can't be tapped blind.
-        // ABSOLUTE pager lock while engaged: no edge-bounce, no footer
-        // swipe, no gesture of any kind pages the feed — the only exits
-        // are the explicit tap triggers (✕, the docked media). With the
-        // pager's recognizers disabled there is nothing for a boundary
-        // rubber-band to leak into.
-        collectionView.isScrollEnabled = false
         addChild(content)
         cell.installComments(content.view)
         content.didMove(toParent: self)
@@ -745,6 +739,9 @@ final class SnapFeedViewController: UIViewController {
             bottomInset: view.window?.safeAreaInsets.bottom ?? 0
         )
         detail?.setEngagedCloseHandler { [weak self] in self?.dismissComments() }
+        detail?.setEngagedSwipeHandler { [weak self] direction in
+            self?.pageAwayFromComments(direction: direction)
+        }
         // ONE unified motion profile: the footer handoff rides the SAME
         // spring as the media morph, caption flight, blur, and chrome
         // fades — the composer starts offstage (alpha 0, slight downward
@@ -886,6 +883,28 @@ final class SnapFeedViewController: UIViewController {
 
     private static let footerFadeKey = "snap-comments-footer-fade"
 
+    /// The footer band's swipe exit: collapse and page in one motion. The
+    /// bar detects the gesture (its own vertical-intent pan — the pager
+    /// cannot wrest drags from the text-input stack) and the page change
+    /// runs programmatically, matching the swipe's direction; at the
+    /// feed's ends the swipe still collapses, it just doesn't page.
+    private func pageAwayFromComments(direction: Int) {
+        guard commentsEngagedID != nil else { return }
+        let current = lifecycle.activeIndex ?? 0
+        let target = current + direction
+        dismissComments()
+        guard orderedIDs.indices.contains(target) else { return }
+        collectionView.scrollToItem(
+            at: IndexPath(item: target, section: 0), at: .top, animated: true
+        )
+        // Animated scrollToItem ends in scrollViewDidEndScrollingAnimation,
+        // which this VC doesn't observe (finger scrolls don't emit it) —
+        // settle the active page manually, the scroll-demo's pattern.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            self?.updateActiveItem()
+        }
+    }
+
     private func engagedCell() -> SnapFeedCell? {
         guard let id = commentsEngagedID,
               let indexPath = dataSource.indexPath(for: id) else { return nil }
@@ -904,7 +923,6 @@ final class SnapFeedViewController: UIViewController {
         cell?.clearComments()
         commentsContentVC = nil
         commentsEngagedID = nil
-        collectionView.isScrollEnabled = true
         // Belt and braces: the floating bar was never structurally touched,
         // but its pixels must end exact regardless of how the flight
         // resolved — instant, no new fade at cleanup time.
@@ -1046,11 +1064,10 @@ extension SnapFeedViewController: UICollectionViewDelegate {
     // via the toolbar's more menu; the identity pill opens the profile.
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
-        // Unreachable while engaged (the pager is disabled; exits are
-        // tap-only) — kept as belt and braces: if any future path lets a
-        // page drag begin under an engaged cell, the mutation must ride
-        // down with the leaving page, never strand a hosted comments view
-        // in a recycled cell.
+        // Reachable while engaged from exactly one territory — the
+        // composer band, whose drags forward to the pager (the swipe
+        // exit): the page that starts leaving takes the mutation down with
+        // it, never stranding a hosted comments view in a recycled cell.
         if commentsEngagedID != nil {
             dismissComments()
         }
@@ -1202,18 +1219,39 @@ final class SnapFeedCollectionView: UICollectionView {
         return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }
 
+    /// The swipe exit's missing half: `UIScrollView` refuses BY DEFAULT to
+    /// cancel touches that began on a `UIControl` — and the composer band
+    /// is made of controls (the "+", the ✕/send), so a drag born there
+    /// could never be taken over by the pager even though the arbitration
+    /// allows it. Bar territory explicitly opts INTO cancellation: a
+    /// vertical drag on the input band becomes a page change; taps still
+    /// land as taps (cancellation only happens once the pan recognizes).
+    override func touchesShouldCancel(in view: UIView) -> Bool {
+        if sequence(first: view, next: { $0.superview }).contains(where: { $0 is CommentsInputBar }) {
+            return true
+        }
+        return super.touchesShouldCancel(in: view)
+    }
+
     /// Whether the hit view lives inside territory that owns its own
     /// vertical/horizontal gestures, so NONE of the pager's recognizers may
     /// begin there: the shortcut rail (including its fixed compose "+", a
-    /// chrome sibling above the rail), and the engaged comments container —
-    /// the WHOLE container, composer included: while engaged the pager is
-    /// additionally disabled outright (tap-only exits), so no comments
-    /// territory may ever chain a drag up to it. Pure walk-up so the
-    /// routing rule is unit-testable.
+    /// chrome sibling above the rail), and the engaged comments container
+    /// (the stream's drags belong to the list — its rubber-band absorbs
+    /// the edges, so no boundary bounce ever reaches the pager). The
+    /// COMPOSER band is the one deliberate opening: a drag born on the
+    /// input bar forwards to the pager (the swipe exit — paging away
+    /// collapses the engagement via `scrollViewWillBeginDragging`); its
+    /// walk-up check runs FIRST because the bar descends from the
+    /// container. Pure walk-up so the routing rule is unit-testable.
     static func claimsTouches(_ view: UIView) -> Bool {
-        sequence(first: view, next: { $0.superview }).contains {
-            $0 is SnapShortcutRailView || $0 is SnapRailComposeButton
-                || $0 is SnapCommentsContainerView
+        for current in sequence(first: view, next: { $0.superview }) {
+            if current is CommentsInputBar { return false }
+            if current is SnapShortcutRailView || current is SnapRailComposeButton
+                || current is SnapCommentsContainerView {
+                return true
+            }
         }
+        return false
     }
 }

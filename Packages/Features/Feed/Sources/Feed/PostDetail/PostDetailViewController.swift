@@ -37,6 +37,15 @@ final class PostDetailViewController: UIViewController {
     private var contentTrailingConstraint: NSLayoutConstraint?
     private var composeBottomDefault: NSLayoutConstraint?
     private var composeBottomEngaged: [NSLayoutConstraint] = []
+    private var scrollBottomDefault: NSLayoutConstraint?
+    private var scrollBottomEngaged: NSLayoutConstraint?
+    /// The engaged footer's legibility scrim: a soft gradient under the
+    /// glass composer so rows gliding behind it stay readable-through
+    /// (the glass blurs them; the scrim keeps the type contrast).
+    private let composerBackdrop = GradientView(
+        colors: [.clear, UIColor.black.withAlphaComponent(0.65)],
+        locations: [0, 1]
+    )
     private var imageTasks: [Task<Void, Never>] = []
 
     init(viewModel: PostDetailViewModel, imagePipeline: ImagePipeline, mode: PostDetailMode = .full) {
@@ -76,11 +85,16 @@ final class PostDetailViewController: UIViewController {
         scrollView.refreshControl = refreshControl
         configureComposeBar()
         // Scroll view fills above the compose bar, which tracks the keyboard.
+        // The default bottom stops at the compose bar; the engaged context
+        // swaps it for a full-bleed bottom (stored constraint) so the
+        // stream glides BEHIND the footer.
+        let scrollBottom = scrollView.bottomAnchor.constraint(equalTo: composeBar.topAnchor)
+        scrollBottomDefault = scrollBottom
         scrollView.constrain(in: view) { parent in
             scrollView.topAnchor.constraint(equalTo: parent.topAnchor)
             scrollView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
             scrollView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
-            scrollView.bottomAnchor.constraint(equalTo: composeBar.topAnchor)
+            scrollBottom
         }
 
         // Author row: avatar + name/handle, tappable → profile.
@@ -212,6 +226,11 @@ final class PostDetailViewController: UIViewController {
         // capsule field, no opaque bar, no separator — the glass carries
         // its own boundary against whatever is behind it.
         composeBar.onSend = { [weak self] text in self?.viewModel.submitComment(text) }
+        // The engaged footer scrim (hidden outside the engagement): below
+        // the bar, above the stream.
+        composerBackdrop.isHidden = true
+        composerBackdrop.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(composerBackdrop)
         view.addSubview(composeBar)
         composeBar.translatesAutoresizingMaskIntoConstraints = false
         // Tracks the keyboard; sits at the safe-area bottom when dismissed.
@@ -226,6 +245,10 @@ final class PostDetailViewController: UIViewController {
             composeBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Spacing.lg),
             composeBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Spacing.lg),
             bottom,
+            composerBackdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            composerBackdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            composerBackdrop.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            composerBackdrop.topAnchor.constraint(equalTo: composeBar.topAnchor, constant: -Spacing.lg),
         ])
     }
 
@@ -242,6 +265,12 @@ final class PostDetailViewController: UIViewController {
     /// the bar keeps a permanent send button.
     func setEngagedCloseHandler(_ handler: @escaping () -> Void) {
         composeBar.onClose = handler
+    }
+
+    /// Wires the composer's vertical swipe exit (+1 up / -1 down) — the
+    /// engaged context's page-away from the footer band.
+    func setEngagedSwipeHandler(_ handler: @escaping (Int) -> Void) {
+        composeBar.onSwipeExit = handler
     }
 
     /// The composer's entrance state for the engaged footer handoff:
@@ -268,6 +297,26 @@ final class PostDetailViewController: UIViewController {
         // A clean minimal stream: no indicator (engaged context only — the
         // pushed comments screen keeps its native affordance).
         scrollView.showsVerticalScrollIndicator = false
+        // TOTAL immersion: the stream spans the full height and glides
+        // BEHIND the footer too — the scroll's bottom swaps from the
+        // compose bar's top to the view's bottom, with a bottom inset so
+        // resting content still clears the footer band. The scrim keeps
+        // the bar legible over the moving rows.
+        scrollBottomDefault?.isActive = false
+        if scrollBottomEngaged == nil {
+            scrollBottomEngaged = scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        }
+        scrollBottomEngaged?.isActive = true
+        scrollView.contentInset.bottom = max(0, bottomInset) + 62
+        composerBackdrop.isHidden = false
+        // Z-ORDER, load-bearing: the scroll view is added AFTER the compose
+        // bar at build time (harmless while it ended at the bar's top), so
+        // at full height it would sit ABOVE the footer and swallow every
+        // touch in the band — taps, the ✕, the swipe pan (found via hit
+        // logging: bar frame contained the point, a CommentRowView won).
+        // The footer must cap the stack in the engaged context.
+        view.bringSubviewToFront(composerBackdrop)
+        view.bringSubviewToFront(composeBar)
         contentTrailingConstraint?.constant = -(Spacing.lg + max(0, trailing))
 
         // The composer OCCUPIES THE NATIVE FOOTER'S BAND: the feed keeps

@@ -601,6 +601,42 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 /// strip, the margins) the feed's paging takes the touch.
 final class SnapCommentsContainerView: UIView {}
 
+extension SnapFeedCell {
+    /// Keyboard-up hit arbitration: the risen composer's trailing ✕ lands
+    /// inside the action rail's column, and the rail — interactive chrome
+    /// layered ABOVE the comments container — would win those taps by
+    /// z-order alone. While engaged, wherever the RAIL would take a touch,
+    /// the container gets right of first refusal: if its own hit-test
+    /// resolves to the composer at that point, the composer wins. The rail
+    /// keeps every touch the composer doesn't physically overlap.
+    override public func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        let hit = super.hitTest(point, with: event)
+        #if DEBUG
+        if isCommentsEngaged, ProcessInfo.processInfo.arguments.contains("-gesture-log") {
+            let chain = hit.map {
+                sequence(first: $0, next: { $0.superview })
+                    .prefix(8).map { "\(type(of: $0))(\(Int($0.frame.minY)))" }
+                    .joined(separator: "<-")
+            } ?? "nil"
+            let bar = commentsContainer.subviews.first.map { child in
+                child.subviews.compactMap { $0 as? CommentsInputBar }.first
+                    .map { "barFrame=\($0.frame)" } ?? "no-bar-in-child"
+            } ?? "no-child"
+            print("GESTURELOG: cell hit at \(point) chain=\(chain) \(bar)")
+        }
+        #endif
+        guard isCommentsEngaged, let hit,
+              sequence(first: hit, next: { $0.superview }).contains(where: { $0 is SnapShortcutRailView })
+        else { return hit }
+        let containerPoint = convert(point, to: commentsContainer)
+        if let inner = commentsContainer.hitTest(containerPoint, with: event),
+           sequence(first: inner, next: { $0.superview }).contains(where: { $0 is CommentsInputBar }) {
+            return inner
+        }
+        return hit
+    }
+}
+
 // MARK: - Tap arbitration
 
 extension SnapFeedCell: UIGestureRecognizerDelegate {

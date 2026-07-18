@@ -20,6 +20,14 @@ final class CommentsInputBar: UIView {
     var onClose: (() -> Void)? {
         didSet { updateTrailingButtons(animated: false) }
     }
+    /// A decisive vertical swipe anywhere on the bar (field, buttons, gaps):
+    /// the engaged context's swipe exit. Direction is +1 for an upward
+    /// swipe (next post), -1 downward (previous). The bar OWNS this pan
+    /// because the feed pager cannot reliably wrest a drag from the
+    /// text-input stack (empirically: neither cancellation opt-in nor
+    /// arbitration passthrough gets the pager's pan going here) — so the
+    /// bar detects the gesture and the host pages programmatically.
+    var onSwipeExit: ((Int) -> Void)?
 
     /// Disables sending while a comment is in flight (spinner in the button).
     var isSending = false {
@@ -133,10 +141,50 @@ final class CommentsInputBar: UIView {
 
         updateTrailingButtons(animated: false)
         updateFieldHeight()
+
+        // Vertical-intent pan for the swipe exit (the rail's begin rule:
+        // vertical wins, horizontal/taps pass through untouched).
+        swipeRecognizer = UIPanGestureRecognizer(target: self, action: #selector(handleSwipe(_:)))
+        addGestureRecognizer(swipeRecognizer!)
+    }
+
+    private var swipeRecognizer: UIPanGestureRecognizer?
+
+    /// Vertical-intent gate for the swipe-exit pan only; every other
+    /// recognizer keeps UIKit's default answer.
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === swipeRecognizer,
+              let pan = gestureRecognizer as? UIPanGestureRecognizer else {
+            return super.gestureRecognizerShouldBegin(gestureRecognizer)
+        }
+        let velocity = pan.velocity(in: self)
+        return abs(velocity.y) > abs(velocity.x)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    @objc private func handleSwipe(_ pan: UIPanGestureRecognizer) {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-gesture-log") {
+            print("GESTURELOG: bar pan state=\(pan.state.rawValue) dy=\(pan.translation(in: self).y) vy=\(pan.velocity(in: self).y) wired=\(onSwipeExit != nil)")
+        }
+        #endif
+        guard pan.state == .ended, onSwipeExit != nil else { return }
+        let dy = pan.translation(in: self).y
+        let vy = pan.velocity(in: self).y
+        guard abs(dy) > 50 || abs(vy) > 300 else { return }
+        onSwipeExit?((dy + vy) < 0 ? 1 : -1)
+    }
+
+    #if DEBUG
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if ProcessInfo.processInfo.arguments.contains("-gesture-log"), let touch = touches.first {
+            print("GESTURELOG: bar touchesBegan at \(touch.location(in: self))")
+        }
+        super.touchesBegan(touches, with: event)
+    }
+    #endif
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
