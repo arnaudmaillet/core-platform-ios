@@ -184,7 +184,37 @@ final class SnapFeedViewController: UIViewController {
         let engagedLayoutAlive = engagedCell()?.isCommentsEngaged == true
             && commentsContentVC?.view.superview != nil
         if engagedLayoutAlive {
-            setNativeFooterOffstage(true, animated: false)
+            if let coordinator = transitionCoordinator {
+                // POP-RETURN SYMMETRY (the willAppear leg, riding an
+                // incoming transition): fade the bar offstage IN SYNC
+                // with the slide instead of snapping after it. Two
+                // attempts, because the floating-bar containers attach
+                // lazily: one at t0 (covers early-attached bars) and one
+                // inside the coordinator's flight (the containers
+                // typically materialize during the transition's first
+                // layout pass — the CA-owned fade is immune to the
+                // surrounding animation context by design, so starting
+                // it here keeps one monotonic curve). Re-running on an
+                // already-fading container just continues from its
+                // presentation value.
+                setNativeFooterOffstage(true)
+                coordinator.animate(alongsideTransition: { [weak self] _ in
+                    self?.setNativeFooterOffstage(true)
+                }, completion: { [weak self] context in
+                    // A cancelled interactive pop leaves the OTHER screen
+                    // on top — the shared bar is its, not ours; hand the
+                    // pixels back instantly. (The re-fired
+                    // viewWillDisappear's departure handoff also restores
+                    // — this is the belt to that brace.)
+                    guard context.isCancelled else { return }
+                    self?.setNativeFooterOffstage(false, animated: false)
+                })
+            } else {
+                // No transition (tab switch, cold restore): instant
+                // enforcement — also the didAppear backstop that lands
+                // when a transition's walks found nothing.
+                setNativeFooterOffstage(true, animated: false)
+            }
             // The departure handoff faded the composer out with the push;
             // returning re-seats it instantly (idempotent when it never
             // left). Also re-materializes the footer frost — its window
@@ -916,6 +946,12 @@ final class SnapFeedViewController: UIViewController {
         for container in targets {
             let layer = container.layer
             let from = (layer.presentation() ?? layer).opacity
+            // A fade already CONVERGING to this same target keeps flying:
+            // the instant path is a backstop, not a scissors — cutting a
+            // near-finished fade (the didAppear pass landing ~80% through
+            // the pop-return fade) is a visible early-finish snap.
+            let converging = layer.animation(forKey: Self.footerFadeKey) != nil
+                && layer.opacity == target
             // FULL Core Animation takeover — one property, ONE curve. The
             // model value commits with actions disabled and any competing
             // animation (including a UIKit-recorded implicit "opacity",
@@ -939,7 +975,7 @@ final class SnapFeedViewController: UIViewController {
                 // alpha channel reads as flicker, never as bounce.
                 fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 layer.add(fade, forKey: Self.footerFadeKey)
-            } else {
+            } else if !converging {
                 layer.removeAnimation(forKey: Self.footerFadeKey)
             }
             CATransaction.commit()
