@@ -150,8 +150,22 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         tap.delegate = self
         contentView.addGestureRecognizer(tap)
 
-        // The glass card's swipe exit (engaged only — see the begin gate).
+        // The glass card's swipe exit. TWO locks keep it strictly inside
+        // the engagement lifecycle — this recognizer paralyzed the whole
+        // feed when it had neither:
+        // 1. DISABLED at rest (`setCommentsEngaged` is the one switch):
+        //    a disabled pan cannot receive or claim touches, full stop —
+        //    the pager-lock doctrine, applied to our own gesture. Without
+        //    it the idle pan won every vertical drag from the pager (a
+        //    subview's recognizer outranks the ancestor scroll's pan).
+        // 2. DELEGATE-gated begin: the begin gate must live in the
+        //    delegate callback, not only the UIView override — UIKit
+        //    consults `gestureRecognizerShouldBegin` on the HIT-TESTED
+        //    view, and feed touches hit deep subviews (media, chrome),
+        //    so a cell-level override alone is unreliable as a gate.
         cardSwipeRecognizer.addTarget(self, action: #selector(handleCardSwipe))
+        cardSwipeRecognizer.delegate = self
+        cardSwipeRecognizer.isEnabled = false
         addGestureRecognizer(cardSwipeRecognizer)
 
         buildLayout()
@@ -350,6 +364,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func setCommentsEngaged(_ engaged: Bool) {
         guard engaged != isCommentsEngaged else { return }
         isCommentsEngaged = engaged
+        // The card's exit pan exists ONLY while engaged — the state seam
+        // is the recognizer's power switch, so no teardown path can
+        // strand an armed pan in the default feed.
+        cardSwipeRecognizer.isEnabled = engaged
         let bounds = contentView.bounds
         let slot = SnapCommentsLayout.mediaSlotFrame(in: bounds, topInset: frozenInsets.top)
 
@@ -848,6 +866,11 @@ extension SnapFeedCell {
 
 extension SnapFeedCell: UIGestureRecognizerDelegate {
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        // The card's exit pan takes every touch it's offered — its own
+        // begin-time gate (region + vertical intent + engagement) is the
+        // filter, and it must see touches born on the card's metric
+        // buttons too ("drag anywhere on the card").
+        if gestureRecognizer === cardSwipeRecognizer { return true }
         // While engaged, the COMMENTS ZONE is tap-inert for the background
         // gesture: a touch landing anywhere in the hosted stream (rows,
         // gaps, the composer's band) must never collapse the engagement —

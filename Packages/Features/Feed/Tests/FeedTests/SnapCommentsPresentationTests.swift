@@ -555,6 +555,30 @@ struct SnapCommentsPresentationTests {
         #expect(cell.cardSwipeRegionContains(CGPoint(x: card.midX, y: Self.container.height - 60)) == false)
     }
 
+    /// REGRESSION (feed paralysis): the card's exit pan is DISABLED for
+    /// the whole default-feed lifetime — an idle enabled pan on the cell
+    /// outranks the pager's own pan and eats every vertical drag, dead
+    /// feed. The engagement state is the recognizer's only power switch,
+    /// through every teardown path (disengage, reuse), and the begin gate
+    /// must be its DELEGATE (UIKit consults the hit-tested view's
+    /// `gestureRecognizerShouldBegin`, and feed touches hit deep
+    /// subviews — a cell-level override alone never runs for them).
+    @Test func cardSwipePanIsScopedToTheEngagementLifecycle() throws {
+        let cell = SnapFeedCell(frame: Self.container)
+        cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
+        cell.layoutIfNeeded()
+        let pan = try #require(cell.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
+        #expect(pan.isEnabled == false)
+        #expect(pan.delegate === cell)
+        cell.setCommentsEngaged(true)
+        #expect(pan.isEnabled == true)
+        cell.setCommentsEngaged(false)
+        #expect(pan.isEnabled == false)
+        cell.setCommentsEngaged(true)
+        cell.prepareForReuse()
+        #expect(pan.isEnabled == false)
+    }
+
     // MARK: - Entry point
 
     /// Every comments surface is an engagement entry point — the empty-state
