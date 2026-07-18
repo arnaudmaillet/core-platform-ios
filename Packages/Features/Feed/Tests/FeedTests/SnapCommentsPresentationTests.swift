@@ -246,10 +246,12 @@ struct SnapCommentsPresentationTests {
         #expect(SnapCommentsLayout.captionLineCapacity(columnHeight: 100, lineHeight: 0) == 1)
     }
 
-    /// The layered engaged hierarchy: the comments host spans the FULL cell
-    /// (content rides under the strip), the frosted backdrop covers exactly
-    /// screen-top → strip-bottom, and the media is z-lifted above both for
-    /// the engagement's lifetime; `clearComments` restores everything.
+    /// The layered engaged hierarchy: the comments host spans the FULL
+    /// cell (content rides under the strip), the wall-to-wall header
+    /// frost covers exactly screen-top → strip-bottom, the glass card
+    /// floats above the frost, and the media is z-lifted above all of it
+    /// for the engagement's lifetime — the sandwich is stream → frost →
+    /// card → media; `clearComments` restores everything.
     @Test func installedCommentsLayerBehindTheStrip() throws {
         let cell = SnapFeedCell(frame: Self.container)
         cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
@@ -266,22 +268,35 @@ struct SnapCommentsPresentationTests {
         #expect(container.frame.width == Self.container.width)
         #expect(container.alpha == 1)
 
+        // …under the header frost (wall-to-wall, top → the partition
+        // line, and hit-inert: the layer must never change the engaged
+        // touch surface)…
+        let subviews = cell.contentView.subviews
+        let effectViews = subviews.compactMap { $0 as? UIVisualEffectView }
+        let cardFrame = SnapCommentsLayout.stripCardFrame(in: Self.container, topInset: Self.topInset)
+        let frost = try #require(effectViews.first { $0.frame != cardFrame })
+        let backdrop = try #require(effectViews.first { $0.frame == cardFrame })
+        #expect(frost.isHidden == false)
+        #expect(frost.frame == CGRect(
+            x: 0, y: 0,
+            width: Self.container.width,
+            height: SnapCommentsLayout.stripBottom(topInset: Self.topInset)
+        ))
+        #expect(frost.isUserInteractionEnabled == false)
+
         // …under the floating glass card (rounded, hairline-stroked,
         // wrapping the slot — not a wall-to-wall band)…
-        let subviews = cell.contentView.subviews
-        let backdrop = try #require(subviews.compactMap { $0 as? UIVisualEffectView }.first)
         #expect(backdrop.isHidden == false)
-        #expect(backdrop.frame == SnapCommentsLayout.stripCardFrame(
-            in: Self.container, topInset: Self.topInset
-        ))
         #expect(backdrop.layer.cornerRadius == SnapCommentsLayout.stripCardCornerRadius)
 
-        // …under the media (z-lifted above stream and backdrop).
+        // …under the media (z-lifted above stream, frost, and card).
         let media = try #require(subviews.compactMap { $0 as? UIImageView }.first)
         let containerIndex = try #require(subviews.firstIndex(of: container))
+        let frostIndex = try #require(subviews.firstIndex(of: frost))
         let backdropIndex = try #require(subviews.firstIndex(of: backdrop))
         let mediaIndex = try #require(subviews.firstIndex(of: media))
-        #expect(containerIndex < backdropIndex)
+        #expect(containerIndex < frostIndex)
+        #expect(frostIndex < backdropIndex)
         #expect(backdropIndex < mediaIndex)
 
         cell.setCommentsEngaged(false)
@@ -289,6 +304,8 @@ struct SnapCommentsPresentationTests {
         #expect(hosted.superview == nil)
         #expect(container.isHidden == true)
         #expect(backdrop.isHidden == true)
+        #expect(frost.isHidden == true)
+        #expect(frost.effect == nil)
         // Resting z restored: media back at the bottom of the stack.
         #expect(cell.contentView.subviews.firstIndex(of: media) == 0)
     }
@@ -379,12 +396,12 @@ struct SnapCommentsPresentationTests {
     }
 
     private func engagedCard(of cell: SnapFeedCell) throws -> SnapEngagedPostCardView {
-        let backdrop = try #require(
-            cell.contentView.subviews.compactMap { $0 as? UIVisualEffectView }.first
-        )
-        return try #require(
-            backdrop.contentView.subviews.compactMap { $0 as? SnapEngagedPostCardView }.first
-        )
+        // Two effect views live in the engaged cell (header frost + glass
+        // card); the card is the one hosting the content view.
+        let cards = cell.contentView.subviews
+            .compactMap { $0 as? UIVisualEffectView }
+            .flatMap { $0.contentView.subviews.compactMap { $0 as? SnapEngagedPostCardView } }
+        return try #require(cards.first)
     }
 
     private func metricButton(_ label: String, in card: UIView) -> UIButton? {

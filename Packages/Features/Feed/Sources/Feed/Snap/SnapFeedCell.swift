@@ -72,6 +72,18 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// animates in/out via the `effect` property, the supported path.
     private let stripBackdrop = UIVisualEffectView(effect: nil)
     private var stripBackdropConstraints: [NSLayoutConstraint] = []
+    /// The header zone's wall-to-wall frost: screen top → the strip's
+    /// lower boundary, layered BETWEEN the stream (behind) and the glass
+    /// card (in front) — rows scrolled under the header dissolve into the
+    /// blur while the open viewport below stays crisp; the floating card
+    /// keeps its own stronger glass on top. HIT-INERT by construction
+    /// (`isUserInteractionEnabled = false`): the engaged touch surface —
+    /// card taps close, header-zone drags scroll the stream — must be
+    /// exactly what it was before this layer existed. Effect nil until
+    /// engagement IN A WINDOW (the headless-CI doctrine), animated via
+    /// the `effect` property inside the master spring, like the card's.
+    private let headerFrost = UIVisualEffectView(effect: nil)
+    private var headerFrostConstraints: [NSLayoutConstraint] = []
     /// The card's content: the post's music line and metrics/actions,
     /// stacked in the column beside the media hole (author identity stays
     /// in the nav pill — no duplication), living inside the backdrop's
@@ -143,6 +155,14 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         commentsContainer.isHidden = true
         commentsContainer.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(commentsContainer)
+
+        // The header frost sits directly above the stream and below the
+        // glass card (added next), completing the z-sandwich: stream →
+        // frost → card → media.
+        headerFrost.isHidden = true
+        headerFrost.isUserInteractionEnabled = false
+        headerFrost.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(headerFrost)
 
         // The strip's Liquid Glass CARD, above the stream and below the
         // media: a floating rounded surface (not a wall-to-wall band) with
@@ -221,6 +241,19 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             commentsContainer.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
         ]
         NSLayoutConstraint.activate(commentsContainerConstraints)
+        // The header zone's frost: wall-to-wall, screen top → the strip's
+        // lower boundary (the comments partition line).
+        headerFrost.isHidden = false
+        NSLayoutConstraint.deactivate(headerFrostConstraints)
+        headerFrostConstraints = [
+            headerFrost.topAnchor.constraint(equalTo: contentView.topAnchor),
+            headerFrost.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            headerFrost.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            headerFrost.heightAnchor.constraint(
+                equalToConstant: SnapCommentsLayout.stripBottom(topInset: frozenInsets.top)
+            ),
+        ]
+        NSLayoutConstraint.activate(headerFrostConstraints)
         // The glass card floats around the strip's content.
         let card = SnapCommentsLayout.stripCardFrame(
             in: contentView.bounds, topInset: frozenInsets.top
@@ -264,6 +297,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         stripBackdrop.effect = nil
         NSLayoutConstraint.deactivate(stripBackdropConstraints)
         stripBackdropConstraints = []
+        headerFrost.isHidden = true
+        headerFrost.effect = nil
+        NSLayoutConstraint.deactivate(headerFrostConstraints)
+        headerFrostConstraints = []
         // Restore the resting z-order: media at the bottom of the stack.
         contentView.sendSubviewToBack(videoRenderView)
         contentView.sendSubviewToBack(mediaView)
@@ -322,6 +359,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // headless CI test hosts must never pay.
             if window != nil, stripBackdrop.effect == nil {
                 stripBackdrop.effect = UIBlurEffect(style: .systemThinMaterialDark)
+            }
+            // The header frost materializes on the same beat and the same
+            // supported path — one material family across card and frame.
+            if window != nil, headerFrost.effect == nil {
+                headerFrost.effect = UIBlurEffect(style: .systemThinMaterialDark)
             }
             // The card's rows rise into place inside the same spring — the
             // composer-entrance recipe at card scale.
@@ -386,6 +428,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             chrome.setCommentsEngaged(false)
             commentsContainer.alpha = 0
             stripBackdrop.effect = nil // blur dissolves with the return spring
+            headerFrost.effect = nil
             // The card's rows sink back to the entrance pose — the reverse
             // leg of the same spring, and the ready state for the next
             // engagement.

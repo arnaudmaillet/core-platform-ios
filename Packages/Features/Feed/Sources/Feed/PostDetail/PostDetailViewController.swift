@@ -39,13 +39,16 @@ final class PostDetailViewController: UIViewController {
     private var composeBottomEngaged: [NSLayoutConstraint] = []
     private var scrollBottomDefault: NSLayoutConstraint?
     private var scrollBottomEngaged: NSLayoutConstraint?
-    /// The engaged footer's legibility scrim: a soft gradient under the
-    /// glass composer so rows gliding behind it stay readable-through
-    /// (the glass blurs them; the scrim keeps the type contrast).
-    private let composerBackdrop = GradientView(
-        colors: [.clear, UIColor.black.withAlphaComponent(0.65)],
-        locations: [0, 1]
-    )
+    /// The engaged footer's wall-to-wall frost (replaced the gradient
+    /// scrim): rows gliding under the input band stay visible but
+    /// dissolve into the blur — the bottom half of the frame the header
+    /// frost opens at the top, same material family. HIT-INERT
+    /// (`isUserInteractionEnabled = false`): the band must never eat the
+    /// bar's taps, the ✕, or the swipe pan. Effect nil until the engaged
+    /// entrance IN A WINDOW (headless-CI doctrine); it rides the master
+    /// spring via `setComposerEntranceState`, the one seam that already
+    /// runs inside that animation block in both directions.
+    private let composerBackdrop = UIVisualEffectView(effect: nil)
     private var imageTasks: [Task<Void, Never>] = []
 
     init(viewModel: PostDetailViewModel, imagePipeline: ImagePipeline, mode: PostDetailMode = .full) {
@@ -226,9 +229,10 @@ final class PostDetailViewController: UIViewController {
         // capsule field, no opaque bar, no separator — the glass carries
         // its own boundary against whatever is behind it.
         composeBar.onSend = { [weak self] text in self?.viewModel.submitComment(text) }
-        // The engaged footer scrim (hidden outside the engagement): below
+        // The engaged footer frost (hidden outside the engagement): below
         // the bar, above the stream.
         composerBackdrop.isHidden = true
+        composerBackdrop.isUserInteractionEnabled = false
         composerBackdrop.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(composerBackdrop)
         view.addSubview(composeBar)
@@ -284,6 +288,17 @@ final class PostDetailViewController: UIViewController {
         composeBar.transform = offstage
             ? CGAffineTransform(translationX: 0, y: SnapCommentsLayout.composerEntranceOffset)
             : .identity
+        // The footer frost rides the same seam — this method already runs
+        // inside the master spring in both directions, and the `effect`
+        // property is the one supported animatable path for blur. Window-
+        // guarded (real blurs contact the render server; headless CI test
+        // hosts must never pay), and gated on the engaged context (the
+        // backdrop stays hidden — and frost-free — on the pushed screen).
+        if offstage {
+            composerBackdrop.effect = nil
+        } else if view.window != nil, !composerBackdrop.isHidden, composerBackdrop.effect == nil {
+            composerBackdrop.effect = UIBlurEffect(style: .systemThinMaterialDark)
+        }
     }
 
     func setEngagedInsets(top: CGFloat, trailing: CGFloat, bottomInset: CGFloat) {
@@ -300,7 +315,7 @@ final class PostDetailViewController: UIViewController {
         // TOTAL immersion: the stream spans the full height and glides
         // BEHIND the footer too — the scroll's bottom swaps from the
         // compose bar's top to the view's bottom, with a bottom inset so
-        // resting content still clears the footer band. The scrim keeps
+        // resting content still clears the footer band. The frost keeps
         // the bar legible over the moving rows.
         scrollBottomDefault?.isActive = false
         if scrollBottomEngaged == nil {
