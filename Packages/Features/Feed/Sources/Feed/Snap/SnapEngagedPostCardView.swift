@@ -106,11 +106,13 @@ final class SnapEngagedPostCardView: UIView {
     /// configure — the card is populated long before an engagement, so
     /// engaging is pure choreography, never a data fetch.
     func configure(with model: FeedItemDisplayModel) {
-        // Video posts carry the derived attribution line; other kinds hide
-        // the row (identity lives in the nav pill — no fallback
-        // duplication).
-        musicRow.isHidden = model.audioText == nil
-        musicLabel.text = model.audioText
+        // KEEP-AND-STACK: the native toolbar stays onstage through the
+        // engagement and its attribution item ALREADY carries the audio
+        // line — the card renders no music row (the no-duplication rule,
+        // same as the author header's removal). The row's scaffolding is
+        // parked hidden pending the cleanup commit.
+        musicRow.isHidden = true
+        musicLabel.text = nil
         Self.setCount(model.likeCount > 0 ? Int(clamping: model.likeCount) : nil, on: likeButton)
         Self.setCount(nil, on: commentButton)
     }

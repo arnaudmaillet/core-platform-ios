@@ -184,42 +184,14 @@ final class SnapFeedViewController: UIViewController {
         let engagedLayoutAlive = engagedCell()?.isCommentsEngaged == true
             && commentsContentVC?.view.superview != nil
         if engagedLayoutAlive {
-            if let coordinator = transitionCoordinator {
-                // POP-RETURN SYMMETRY (the willAppear leg, riding an
-                // incoming transition): fade the bar offstage IN SYNC
-                // with the slide instead of snapping after it. Two
-                // attempts, because the floating-bar containers attach
-                // lazily: one at t0 (covers early-attached bars) and one
-                // inside the coordinator's flight (the containers
-                // typically materialize during the transition's first
-                // layout pass — the CA-owned fade is immune to the
-                // surrounding animation context by design, so starting
-                // it here keeps one monotonic curve). Re-running on an
-                // already-fading container just continues from its
-                // presentation value.
-                setNativeFooterOffstage(true)
-                coordinator.animate(alongsideTransition: { [weak self] _ in
-                    self?.setNativeFooterOffstage(true)
-                }, completion: { [weak self] context in
-                    // A cancelled interactive pop leaves the OTHER screen
-                    // on top — the shared bar is its, not ours; hand the
-                    // pixels back instantly. (The re-fired
-                    // viewWillDisappear's departure handoff also restores
-                    // — this is the belt to that brace.)
-                    guard context.isCancelled else { return }
-                    self?.setNativeFooterOffstage(false, animated: false)
-                })
-            } else {
-                // No transition (tab switch, cold restore): instant
-                // enforcement — also the didAppear backstop that lands
-                // when a transition's walks found nothing.
-                setNativeFooterOffstage(true, animated: false)
-            }
-            // The departure handoff faded the composer out with the push;
-            // returning re-seats it instantly (idempotent when it never
-            // left). Also re-materializes the footer frost — its window
-            // guard makes the willAppear call a no-op and the didAppear
-            // pass the one that lands.
+            // KEEP-AND-STACK: the native toolbar stays onstage through the
+            // engagement (the composer stacks ABOVE it, anchored past the
+            // toolbar-inflated safe area), so there is no footer state to
+            // re-arbitrate — transitions are the system's alone. Only the
+            // composer's pose needs re-seating (idempotent; also
+            // re-materializes the footer frost — its window guard makes
+            // the willAppear call a no-op and the didAppear pass the one
+            // that lands).
             (commentsContentVC as? PostDetailViewController)?
                 .setComposerEntranceState(offstage: false)
         } else {
@@ -352,13 +324,12 @@ final class SnapFeedViewController: UIViewController {
         // runs for every disappearance: it registers on the coordinator when
         // one exists (fade, restore-on-cancel) and hides instantly otherwise.
         concealToolbar()
-        // OUTBOUND HANDOFF: leaving the screen while comments are engaged
-        // (a profile push from the identity pill, a hero pop, a tab
-        // switch) must return the SHARED floating-bar container to the
-        // incoming screen — it is nav-level chrome, not ours to keep at
-        // opacity 0, and an inherited invisible/inert container is exactly
-        // the "harsh snap" (or dead toolbar) the next screen shows.
-        handOffFooterForDeparture()
+        // Leaving while engaged: the native bar never left (keep-and-stack),
+        // so there is no footer handoff — only the keyboard must not
+        // outlive the screen it was typing into.
+        if commentsEngagedID != nil {
+            commentsContentVC?.view.endEditing(true)
+        }
         // During any transition (a hero pop, a detail push) the active cell's
         // player must survive to here-and-beyond: the dismissal flight card
         // mirrors that very player, and a cancelled grab rewinds to a page
@@ -831,23 +802,23 @@ final class SnapFeedViewController: UIViewController {
         detail?.setEngagedInsets(
             top: SnapCommentsLayout.stripBottom(topInset: view.safeAreaInsets.top),
             trailing: cell.commentsRailExclusionWidth,
-            bottomInset: view.window?.safeAreaInsets.bottom ?? 0
+            // KEEP-AND-STACK: the composer's rest band clears the NATIVE
+            // TOOLBAR, not just the home indicator — the feed's own
+            // settled safe-area bottom is exactly that threshold (the bar
+            // is structurally present in both states, so this value is
+            // stable; same frozen-threshold doctrine as the chrome's top).
+            bottomInset: view.safeAreaInsets.bottom
         )
         detail?.setEngagedCloseHandler { [weak self] in self?.dismissComments() }
         detail?.setEngagedSwipeHandler { [weak self] direction in
             self?.pageAwayFromComments(direction: direction)
         }
-        // ONE unified motion profile: the footer handoff rides the SAME
-        // spring as the media morph, caption flight, blur, and chrome
-        // fades — the composer starts offstage (alpha 0, slight downward
-        // offset) and physically slides into place while the native bar's
-        // pixels fade, which is what keeps the in-flight blend from
-        // reading as a double-exposure.
+        // ONE unified motion profile: the composer starts offstage (alpha
+        // 0, slight downward offset) and physically slides into its
+        // STACKED seat — above the native toolbar, which stays exactly
+        // where it is (keep-and-stack: the bar is never faded, never
+        // touched; transitions remain the system's alone).
         detail?.setComposerEntranceState(offstage: true)
-        // The footer fade runs OUTSIDE the spring block: its opacity is
-        // Core Animation's alone (see setNativeFooterOffstage), started
-        // here so it shares the spring's t0 and duration.
-        setNativeFooterOffstage(true)
         UIView.animate(
             withDuration: SnapCommentsLayout.engageDuration, delay: 0,
             usingSpringWithDamping: 1, initialSpringVelocity: 0
@@ -860,18 +831,14 @@ final class SnapFeedViewController: UIViewController {
 
     /// Reverse mutation (strip tap, entry-surface re-tap): the comments
     /// region settles out, the media expands back, the chrome returns, and
-    /// the REAL toolbar's alpha fades in exactly as the composer fades out
-    /// — the mirror image of the engage leg, both halves in the same
-    /// spring. Nothing structural moves in either direction.
+    /// the composer slides back offstage — the mirror image of the engage
+    /// leg, all in the same spring. The native toolbar was onstage the
+    /// whole time; nothing structural moves in either direction.
     private func dismissComments() {
         guard commentsEngagedID != nil else { return }
         // The keyboard rides down with the collapse, not after it.
         commentsContentVC?.view.endEditing(true)
-        // The unified mirror: composer slides back offstage and the native
-        // bar's pixels return, all inside the one spring with the media
-        // expansion and chrome fade-in.
         let detail = commentsContentVC as? PostDetailViewController
-        setNativeFooterOffstage(false) // CA-owned fade, sharing the spring's clock
         UIView.animate(withDuration: SnapCommentsLayout.disengageDuration, delay: 0,
                        usingSpringWithDamping: 1, initialSpringVelocity: 0) { [weak self] in
             self?.engagedCell()?.setCommentsEngaged(false)
@@ -1025,10 +992,8 @@ final class SnapFeedViewController: UIViewController {
         commentsContentVC = nil
         commentsEngagedID = nil
         collectionView.isScrollEnabled = true
-        // Belt and braces: the floating bar was never structurally touched,
-        // but its pixels must end exact regardless of how the flight
-        // resolved — instant, no new fade at cleanup time.
-        setNativeFooterOffstage(false, animated: false)
+        // Keep-and-stack: the native bar was never touched — no pixel
+        // state to reconcile at cleanup time.
     }
 
     // MARK: - Active-item lifecycle

@@ -536,7 +536,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
         engagedCaptionLabel.text = model.caption
         engagedCard.configure(with: model)
-        engagedHasAudioLine = model.audioText != nil
+        // Keep-and-stack: the native bar's attribution owns the audio line;
+        // the card column reserves nothing for it (flag stays false — the
+        // caption keeps the space; scaffolding parked for the cleanup
+        // commit).
 
         let hasMedia = model.mediaURL != nil
         let isVideo = hasMedia && model.mediaKind == .video

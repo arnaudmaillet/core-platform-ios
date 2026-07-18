@@ -452,7 +452,10 @@ struct SnapCommentsPresentationTests {
             stack.append(contentsOf: view.subviews)
         }
         let texts = labels.compactMap(\.text)
-        #expect(texts.contains("Original audio · @ana"))
+        // Keep-and-stack: the native toolbar's attribution owns the audio
+        // line and the nav pill owns identity — the card renders NEITHER
+        // (zero duplication with visible screen chrome).
+        #expect(!texts.contains("Original audio · @ana"))
         #expect(!texts.contains("Ana"))
         #expect(!texts.contains("@ana · 3m"))
 
