@@ -514,4 +514,10 @@ final class GradientView: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Re-tunes the gradient's stop positions (the frost masks compute
+    /// theirs from the engaged geometry at install time).
+    func setLocations(_ locations: [NSNumber]) {
+        gradientLayer.locations = locations
+    }
 }

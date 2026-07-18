@@ -42,13 +42,20 @@ final class PostDetailViewController: UIViewController {
     /// The engaged footer's wall-to-wall frost (replaced the gradient
     /// scrim): rows gliding under the input band stay visible but
     /// dissolve into the blur — the bottom half of the frame the header
-    /// frost opens at the top, same material family. HIT-INERT
-    /// (`isUserInteractionEnabled = false`): the band must never eat the
-    /// bar's taps, the ✕, or the swipe pan. Effect nil until the engaged
-    /// entrance IN A WINDOW (headless-CI doctrine); it rides the master
-    /// spring via `setComposerEntranceState`, the one seam that already
-    /// runs inside that animation block in both directions.
-    private let composerBackdrop = UIVisualEffectView(effect: nil)
+    /// frost opens at the top, same material family. PROGRESSIVE: clear
+    /// at the band's top edge, solid from `footerFrostSolidFraction`
+    /// down to the window's bottom, so rows blend into the blur with no
+    /// geometric seam (the mask re-frames itself when the keyboard grows
+    /// the band). HIT-INERT (the frost type disables interaction): the
+    /// band must never eat the bar's taps, the ✕, or the swipe pan.
+    /// Effect nil until the engaged entrance IN A WINDOW (headless-CI
+    /// doctrine); it rides the master spring via
+    /// `setComposerEntranceState`, the one seam that already runs inside
+    /// that animation block in both directions.
+    private let composerBackdrop = ProgressiveFrostView(
+        maskColors: [.clear, .black, .black],
+        maskLocations: [0, NSNumber(value: Double(SnapCommentsLayout.footerFrostSolidFraction)), 1]
+    )
     private var imageTasks: [Task<Void, Never>] = []
 
     init(viewModel: PostDetailViewModel, imagePipeline: ImagePipeline, mode: PostDetailMode = .full) {
@@ -232,7 +239,6 @@ final class PostDetailViewController: UIViewController {
         // The engaged footer frost (hidden outside the engagement): below
         // the bar, above the stream.
         composerBackdrop.isHidden = true
-        composerBackdrop.isUserInteractionEnabled = false
         composerBackdrop.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(composerBackdrop)
         view.addSubview(composeBar)
@@ -252,7 +258,9 @@ final class PostDetailViewController: UIViewController {
             composerBackdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             composerBackdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             composerBackdrop.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            composerBackdrop.topAnchor.constraint(equalTo: composeBar.topAnchor, constant: -Spacing.lg),
+            composerBackdrop.topAnchor.constraint(
+                equalTo: composeBar.topAnchor, constant: -SnapCommentsLayout.footerFrostLead
+            ),
         ])
     }
 

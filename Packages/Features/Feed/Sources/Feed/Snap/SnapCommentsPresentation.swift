@@ -206,4 +206,61 @@ enum SnapCommentsLayout {
         let subhead = UIFont.preferredFont(forTextStyle: .subheadline).pointSize
         return subhead > 0 ? body / subhead : 1
     }
+
+    /// Where the header frost's dissolve BEGINS, as a fraction of the
+    /// band's height: solid through the nav zone (the screen chrome needs
+    /// full frost behind it), fading across the card zone, zero exactly at
+    /// the partition line — so a row scrolling up crosses from crisp into
+    /// a progressively deepening blur with no geometric seam. Clamped
+    /// under 1 so degenerate insets can't invert the ramp.
+    static func headerFrostSolidFraction(topInset: CGFloat) -> CGFloat {
+        let band = stripBottom(topInset: topInset)
+        guard band > 0 else { return 0 }
+        return min(0.9, max(0, topInset / band))
+    }
+
+    /// The footer frost's ramp: clear at the band's top edge, solid from
+    /// this fraction down to the window's bottom — the mirror of the
+    /// header's dissolve.
+    static let footerFrostSolidFraction: CGFloat = 0.45
+    /// How far above the composer's top the footer band begins — the
+    /// dissolve's runway. Taller than the old scrim's 16pt lead: a ramp
+    /// needs distance to read as a dissolve rather than an edge.
+    static let footerFrostLead: CGFloat = 64
+}
+
+/// A frosted band whose blur DISSOLVES along its length instead of ending
+/// on a hard geometric edge: a `UIVisualEffectView` alpha-masked by a
+/// vertical `CAGradientLayer`. The mask must be a VIEW assigned to `mask`
+/// (UIKit propagates it through the effect's internal backdrop layers;
+/// masking `layer` directly breaks effect rendering), and its frame is
+/// re-bound to the bounds every layout pass — the footer band resizes
+/// when the keyboard lifts the composer, and a stale mask would shear the
+/// ramp. Hit-inert like the hard-edged bands it replaces: the frost
+/// frames the stream, it never owns a touch.
+final class ProgressiveFrostView: UIVisualEffectView {
+    private let fadeMask: GradientView
+
+    /// `maskColors`/`maskLocations` describe the mask's OPACITY ramp
+    /// top→bottom: black = full frost, clear = no frost.
+    init(maskColors: [UIColor], maskLocations: [NSNumber]) {
+        fadeMask = GradientView(colors: maskColors, locations: maskLocations)
+        super.init(effect: nil)
+        isUserInteractionEnabled = false
+        mask = fadeMask
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Re-tunes the ramp's stops (the header band computes its solid
+    /// fraction from the frozen insets at install time).
+    func setFadeLocations(_ locations: [NSNumber]) {
+        fadeMask.setLocations(locations)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        fadeMask.frame = bounds
+    }
 }

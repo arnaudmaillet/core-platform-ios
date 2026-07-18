@@ -82,7 +82,14 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// exactly what it was before this layer existed. Effect nil until
     /// engagement IN A WINDOW (the headless-CI doctrine), animated via
     /// the `effect` property inside the master spring, like the card's.
-    private let headerFrost = UIVisualEffectView(effect: nil)
+    /// PROGRESSIVE: the band's gradient mask holds full frost through the
+    /// nav zone and dissolves to zero at the partition line (locations
+    /// re-tuned from the frozen insets at install) — rows scrolling up
+    /// blend from crisp into blur with no geometric seam.
+    private let headerFrost = ProgressiveFrostView(
+        maskColors: [.black, .black, .clear],
+        maskLocations: [0, 0.4, 1]
+    )
     private var headerFrostConstraints: [NSLayoutConstraint] = []
     /// The card's content: the post's music line and metrics/actions,
     /// stacked in the column beside the media hole (author identity stays
@@ -160,7 +167,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // glass card (added next), completing the z-sandwich: stream →
         // frost → card → media.
         headerFrost.isHidden = true
-        headerFrost.isUserInteractionEnabled = false
         headerFrost.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(headerFrost)
 
@@ -242,7 +248,14 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         ]
         NSLayoutConstraint.activate(commentsContainerConstraints)
         // The header zone's frost: wall-to-wall, screen top → the strip's
-        // lower boundary (the comments partition line).
+        // lower boundary (the comments partition line), dissolving from
+        // solid behind the nav zone to nothing at the partition — the
+        // ramp's start is the real inset boundary, not a guess.
+        headerFrost.setFadeLocations([
+            0,
+            NSNumber(value: Double(SnapCommentsLayout.headerFrostSolidFraction(topInset: frozenInsets.top))),
+            1,
+        ])
         headerFrost.isHidden = false
         NSLayoutConstraint.deactivate(headerFrostConstraints)
         headerFrostConstraints = [

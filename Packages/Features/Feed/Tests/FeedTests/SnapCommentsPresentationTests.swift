@@ -246,6 +246,23 @@ struct SnapCommentsPresentationTests {
         #expect(SnapCommentsLayout.captionLineCapacity(columnHeight: 100, lineHeight: 0) == 1)
     }
 
+    /// The frost ramps: the header's dissolve starts exactly at the nav
+    /// zone's boundary (the frozen top inset over the band's height),
+    /// never inverts on degenerate insets, and the footer's solid fraction
+    /// is a genuine mid-band stop — both ends of the frame dissolve, no
+    /// hard geometric edges.
+    @Test func frostRampsDeriveFromTheEngagedGeometry() {
+        let fraction = SnapCommentsLayout.headerFrostSolidFraction(topInset: Self.topInset)
+        let band = SnapCommentsLayout.stripBottom(topInset: Self.topInset)
+        #expect(abs(fraction - Self.topInset / band) < 0.001)
+        #expect(fraction > 0 && fraction < 1)
+        #expect(SnapCommentsLayout.headerFrostSolidFraction(topInset: 0) == 0)
+        #expect(SnapCommentsLayout.headerFrostSolidFraction(topInset: 100_000) <= 0.9)
+        #expect(SnapCommentsLayout.footerFrostSolidFraction > 0)
+        #expect(SnapCommentsLayout.footerFrostSolidFraction < 1)
+        #expect(SnapCommentsLayout.footerFrostLead > 0)
+    }
+
     /// The layered engaged hierarchy: the comments host spans the FULL
     /// cell (content rides under the strip), the wall-to-wall header
     /// frost covers exactly screen-top → strip-bottom, the glass card
@@ -283,6 +300,11 @@ struct SnapCommentsPresentationTests {
             height: SnapCommentsLayout.stripBottom(topInset: Self.topInset)
         ))
         #expect(frost.isUserInteractionEnabled == false)
+        // Progressive, not a hard-edged slab: the band wears its gradient
+        // mask, re-framed to the bounds by layout.
+        #expect(frost is ProgressiveFrostView)
+        let frostMask = try #require(frost.mask)
+        #expect(frostMask.frame == frost.bounds)
 
         // …under the floating glass card (rounded, hairline-stroked,
         // wrapping the slot — not a wall-to-wall band)…
