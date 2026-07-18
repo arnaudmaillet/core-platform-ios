@@ -228,18 +228,14 @@ struct SnapCommentsPresentationTests {
         #expect(card.maxY < SnapCommentsLayout.stripBottom(topInset: Self.topInset))
     }
 
-    /// The caption column's floor and line budget: the column stacks
-    /// bottom-up — actions always reserved, the music line only when the
-    /// post carries one — and the line cap is whole lines, floored, never
-    /// zero.
-    @Test func captionColumnReservesTheMusicLine() {
+    /// The caption column's floor and line budget: the actions row is the
+    /// only bottom reservation (the audio credit lives in the native
+    /// toolbar — keep-and-stack), and the line cap is whole lines,
+    /// floored, never zero.
+    @Test func captionColumnReservesTheActionsRow() {
         let slot = SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset)
-        let bare = SnapCommentsLayout.captionColumnMaxY(slotMaxY: slot.maxY, hasAudioLine: false)
-        let withMusic = SnapCommentsLayout.captionColumnMaxY(slotMaxY: slot.maxY, hasAudioLine: true)
-        let actionsReserved = SnapCommentsLayout.cardActionsHeight + Spacing.xs
-        #expect(bare == slot.maxY - actionsReserved)
-        #expect(withMusic == slot.maxY - actionsReserved
-            - SnapCommentsLayout.cardMusicLineHeight - Spacing.xs)
+        let floor = SnapCommentsLayout.captionColumnMaxY(slotMaxY: slot.maxY)
+        #expect(floor == slot.maxY - SnapCommentsLayout.cardActionsHeight - Spacing.xs)
         #expect(SnapCommentsLayout.captionLineCapacity(columnHeight: 100, lineHeight: 20) == 5)
         #expect(SnapCommentsLayout.captionLineCapacity(columnHeight: 99, lineHeight: 20) == 4)
         #expect(SnapCommentsLayout.captionLineCapacity(columnHeight: 5, lineHeight: 20) == 1)
@@ -435,12 +431,13 @@ struct SnapCommentsPresentationTests {
         return nil
     }
 
-    /// The card is the POST's column: music credits and the metrics row
-    /// render from the same display model that feeds the page — likes from
-    /// the hydration snapshot, comments from the loaded streams (blank
-    /// until loaded — the known-zero honesty seam), repost/save as
-    /// affordance seams. Author identity must NOT render here: the nav
-    /// pill already carries it (zero duplication by design).
+    /// The card is the POST's column: the metrics row renders from the
+    /// same display model that feeds the page — likes from the hydration
+    /// snapshot, comments from the loaded streams (blank until loaded —
+    /// the known-zero honesty seam), repost/save as affordance seams.
+    /// Screen chrome must NOT duplicate here (keep-and-stack): the nav
+    /// pill owns identity, the native toolbar's attribution owns the
+    /// audio line.
     @Test func engagedCardRendersTheFullPost() throws {
         let cell = makeConfiguredCell(audioText: "Original audio · @ana", likeCount: 1234)
         let card = try engagedCard(of: cell)
@@ -474,20 +471,10 @@ struct SnapCommentsPresentationTests {
         #expect(metricButton("Save", in: card) != nil)
     }
 
-    /// Posts without an audio line hide the music row entirely — identity
-    /// lives in the nav pill; no fallback duplication.
-    @Test func engagedCardHidesMusicRowWithoutAudio() throws {
+    /// Zero likes render no count — a bare heart, not a lying "0".
+    @Test func engagedCardHidesZeroCounts() throws {
         let cell = makeConfiguredCell(audioText: nil, likeCount: 0)
         let card = try engagedCard(of: cell)
-        var stack: [UIView] = [card]
-        var musicVisible = false
-        while let view = stack.popLast() {
-            if let label = view as? UILabel, label.text?.contains("audio") == true,
-               !label.isHidden { musicVisible = true }
-            stack.append(contentsOf: view.subviews)
-        }
-        #expect(musicVisible == false)
-        // Zero likes render no count — a bare heart, not a lying "0".
         let like = try #require(metricButton("Like", in: card))
         #expect(like.configuration?.attributedTitle == nil)
     }

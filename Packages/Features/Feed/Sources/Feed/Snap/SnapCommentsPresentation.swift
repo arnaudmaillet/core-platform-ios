@@ -56,11 +56,10 @@ enum SnapCommentsLayout {
 
     /// The metrics/actions row at the column's bottom: likes, comments,
     /// repost, save. Sized with the 88pt column: every point spent here
-    /// comes out of the caption's line budget.
+    /// comes out of the caption's line budget. (No music line: the native
+    /// toolbar stays onstage through the engagement — keep-and-stack —
+    /// and its attribution item owns the audio credit.)
     static let cardActionsHeight: CGFloat = 24
-    /// The music/attribution line's reserved height, directly above the
-    /// actions row (caption text must stop above both).
-    static let cardMusicLineHeight: CGFloat = 16
     /// The card content's entrance micro-translation — the rows rise into
     /// place as they fade in, the composer-entrance recipe at card scale.
     static let cardContentEntranceOffset: CGFloat = 12
@@ -78,15 +77,8 @@ enum SnapCommentsLayout {
     static let engageDuration: TimeInterval = 0.45
     static let disengageDuration: TimeInterval = 0.45
     /// The composer's entrance micro-translation: it slides up into place
-    /// as it fades, so the footer crossfade reads as an arrival, not a
-    /// ghosting double-exposure.
+    /// as it fades, arriving into its stacked seat above the native bar.
     static let composerEntranceOffset: CGFloat = 15
-    /// How far the native floating bar's container translates DOWN to carry
-    /// its Liquid Glass platters fully out of the viewport (bar band ≈90pt
-    /// tall above the home indicator; 160 clears it with margin). A pure
-    /// transform: platter glass cannot interpolate alpha and pops on
-    /// visibility flips, but every layer interpolates a translation.
-    static let nativeFooterExitOffset: CGFloat = 160
 
     /// Where the media docks, in cell coordinates: a 1:1 square tile on the
     /// card's left edge, uniformly padded.
@@ -140,13 +132,11 @@ enum SnapCommentsLayout {
         )
     }
 
-    /// The caption column's hard floor, in cell coordinates: the column
-    /// stacks bottom-up from the slot's bottom edge — actions row first,
-    /// then the music line when the post carries one — and the caption
-    /// stops above whatever is reserved.
-    static func captionColumnMaxY(slotMaxY: CGFloat, hasAudioLine: Bool) -> CGFloat {
+    /// The caption column's hard floor, in cell coordinates: the actions
+    /// row is the only reservation at the column's bottom; the caption
+    /// stops above it.
+    static func captionColumnMaxY(slotMaxY: CGFloat) -> CGFloat {
         slotMaxY - cardActionsHeight - Spacing.xs
-            - (hasAudioLine ? cardMusicLineHeight + Spacing.xs : 0)
     }
 
     /// How many whole caption lines the column can hold. A LINE cap, not a

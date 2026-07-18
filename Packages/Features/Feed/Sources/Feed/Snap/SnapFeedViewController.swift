@@ -341,47 +341,8 @@ final class SnapFeedViewController: UIViewController {
         refreshVisibility()
     }
 
-    /// The engaged footer's departure choreography. The native bar's
-    /// pixels restore through the SAME CA-owned fade as every other
-    /// footer move (explicit layer animation, monotonic, immune to the
-    /// transition's own animation recording), started at the transition's
-    /// t0 so the bar breathes back in WITH the push instead of snapping
-    /// after it; the composer fades down-and-out alongside — driven by an
-    /// explicit UIView animation over the coordinator's duration, NOT an
-    /// alongside block (which has cut to a single frame here before —
-    /// the flight-replica doctrine). Instant restoration when there is no
-    /// transition (tab switch). The engagement itself stays alive: the
-    /// return path (`syncEngagementAfterAppearance`) re-arbitrates the
-    /// band when the feed comes back.
-    private func handOffFooterForDeparture() {
-        guard commentsEngagedID != nil else { return }
-        // The keyboard must never outlive the screen it was typing into.
-        commentsContentVC?.view.endEditing(true)
-        let coordinator = transitionCoordinator
-        setNativeFooterOffstage(false, animated: coordinator != nil)
-        guard let coordinator,
-              let detail = commentsContentVC as? PostDetailViewController else { return }
-        UIView.animate(
-            withDuration: coordinator.transitionDuration, delay: 0,
-            options: [.curveEaseOut, .beginFromCurrentState]
-        ) {
-            detail.setComposerEntranceState(offstage: true)
-        }
-        coordinator.animate(alongsideTransition: nil) { [weak self] context in
-            guard context.isCancelled else { return }
-            // A cancelled departure (an aborted interactive pop) puts the
-            // band back the way the engagement owns it.
-            detail.setComposerEntranceState(offstage: false)
-            self?.setNativeFooterOffstage(true)
-        }
-    }
-
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        // The comments engagement fades the SHARED floating bar's
-        // container; leaving this screen mid-engagement must never strand
-        // it invisible for the next toolbar user.
-        setNativeFooterOffstage(false, animated: false)
         settleToolbarAfterDisappearance()
         isOnScreen = false
         refreshVisibility()
@@ -848,108 +809,6 @@ final class SnapFeedViewController: UIViewController {
         }
     }
 
-    /// The native footer's exit/return, iOS 26 ground truth (established
-    /// with `-dump-bars` instance-identity chains): toolbar items render in
-    /// a full-screen `FloatingBarContainerView` — a SwiftUI-backed floating
-    /// bar host that is a DIRECT CHILD of the navigation controller's view,
-    /// entirely outside `UIToolbar` (which isn't even installed in the
-    /// render tree) — while nav-bar items platter under `UINavigationBar`'s
-    /// own subtree. The container is therefore bottom-bar-exclusive, and it
-    /// is reached by walking up from OUR OWN item customViews (no private
-    /// class names). Platter glass cannot interpolate alpha and pops on
-    /// visibility flips, so the exit is a pure TRANSLATION: the whole
-    /// container rides down out of the viewport inside the master spring —
-    /// transforms interpolate on every layer, trigger no safe-area pass,
-    /// and carry hit-testing away with the pixels.
-    private func nativeFooterContainers() -> [UIView] {
-        guard let navView = toolbarHost?.view ?? navigationController?.view else { return [] }
-        var seen = Set<ObjectIdentifier>()
-        var containers: [UIView] = []
-        for item in toolbarItems ?? [] {
-            guard var view = item.customView, view.window != nil else { continue }
-            while let superview = view.superview, superview !== navView { view = superview }
-            guard view.superview === navView, seen.insert(ObjectIdentifier(view)).inserted else { continue }
-            containers.append(view)
-        }
-        return containers
-    }
-
-    /// The containers the CURRENT offstage state was applied to. The
-    /// restore path must target these, not a fresh walk: once the feed
-    /// disappears behind a push, the bar items detach from the window and
-    /// a fresh walk finds nothing — the restore silently no-ops and the
-    /// shared container is stranded invisible for every later bar user
-    /// (observed live: a disengaged feed with an empty footer band).
-    private var offstageFooterContainers: [UIView] = []
-
-    private func setNativeFooterOffstage(_ offstage: Bool, animated: Bool = true) {
-        // GROUP fade on the floating-bar container, driven by an EXPLICIT
-        // layer animation. Empirical ledger, all frame- or rest-state-
-        // verified on iOS 26: UIToolbar alpha/hidden touch nothing (wrong
-        // tree); item customView alpha fades content but not shells;
-        // item.isHidden extinguishes shells only as a hard pop; a TRANSFORM
-        // on this container animates but is stomped to identity by the
-        // hosting view's next internal layout pass; container alpha STICKS
-        // (survives SwiftUI's layout) but implicit UIView animation of it
-        // is unreliable — sometimes snapped, sometimes recorded as a second
-        // competing curve (the strobe). Explicit CABasicAnimation on
-        // layer.opacity, from the PRESENTATION value, so a mid-flight
-        // reversal picks up where the pixels actually are.
-        let target: Float = offstage ? 0 : 1
-        // Going offstage: freshly walked containers, cached for the
-        // restore. Coming back: the cached set UNION a fresh walk (the
-        // cache covers detached-from-window bars; the fresh walk covers a
-        // rebuilt bar), then the cache clears — restored is restored.
-        var targets = nativeFooterContainers()
-        if offstage {
-            offstageFooterContainers = targets
-        } else {
-            var seen = Set(targets.map(ObjectIdentifier.init))
-            for cached in offstageFooterContainers where seen.insert(ObjectIdentifier(cached)).inserted {
-                targets.append(cached)
-            }
-            offstageFooterContainers = []
-        }
-        for container in targets {
-            let layer = container.layer
-            let from = (layer.presentation() ?? layer).opacity
-            // A fade already CONVERGING to this same target keeps flying:
-            // the instant path is a backstop, not a scissors — cutting a
-            // near-finished fade (the didAppear pass landing ~80% through
-            // the pop-return fade) is a visible early-finish snap.
-            let converging = layer.animation(forKey: Self.footerFadeKey) != nil
-                && layer.opacity == target
-            // FULL Core Animation takeover — one property, ONE curve. The
-            // model value commits with actions disabled and any competing
-            // animation (including a UIKit-recorded implicit "opacity",
-            // which sampled against our explicit fade produced the strobe:
-            // two curves alternating per frame) is purged before the one
-            // explicit animation is installed. Called OUTSIDE the master
-            // spring block for the same reason: nothing about the footer's
-            // opacity may pass through UIKit's animation recording.
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            layer.removeAnimation(forKey: "opacity")
-            container.alpha = CGFloat(target)
-            container.isUserInteractionEnabled = !offstage
-            if animated {
-                let fade = CABasicAnimation(keyPath: "opacity")
-                fade.fromValue = from
-                fade.toValue = target
-                fade.duration = SnapCommentsLayout.engageDuration
-                // easeOut, deliberately NOT the spring's curve: opacity
-                // must move monotonically — oscillating physics on an
-                // alpha channel reads as flicker, never as bounce.
-                fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                layer.add(fade, forKey: Self.footerFadeKey)
-            } else if !converging {
-                layer.removeAnimation(forKey: Self.footerFadeKey)
-            }
-            CATransaction.commit()
-        }
-    }
-
-    private static let footerFadeKey = "snap-comments-footer-fade"
 
     /// The footer band's swipe exit: collapse and page in one motion. The
     /// bar detects the gesture (its own vertical-intent pan — the pager

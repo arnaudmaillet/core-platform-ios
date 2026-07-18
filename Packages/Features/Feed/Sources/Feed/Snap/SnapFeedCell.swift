@@ -105,9 +105,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// engagement spring. The media and the caption stay cell-level
     /// siblings above it — the media docks by transform, the caption flies.
     private let engagedCard = SnapEngagedPostCardView()
-    /// Whether the represented post renders the card's music line — the
-    /// caption column must stop above it (`captionColumnMaxY`).
-    private var engagedHasAudioLine = false
     /// Center-crop masks that square the docked media (one per render
     /// surface — a view can mask only one other view). Attached lazily at
     /// engage, animated full-bounds ↔ centered-square within the same
@@ -424,9 +421,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // top and the music line, in whole lines (a height-compressed
             // label center-clips; only the line cap truncates honestly).
             let columnTop = slot.minY + Spacing.xs
-            let columnMaxY = SnapCommentsLayout.captionColumnMaxY(
-                slotMaxY: slot.maxY, hasAudioLine: engagedHasAudioLine
-            )
+            let columnMaxY = SnapCommentsLayout.captionColumnMaxY(slotMaxY: slot.maxY)
             engagedCaptionLabel.numberOfLines = SnapCommentsLayout.captionLineCapacity(
                 columnHeight: columnMaxY - columnTop,
                 lineHeight: engagedCaptionLabel.font.lineHeight
@@ -536,10 +531,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
         engagedCaptionLabel.text = model.caption
         engagedCard.configure(with: model)
-        // Keep-and-stack: the native bar's attribution owns the audio line;
-        // the card column reserves nothing for it (flag stays false — the
-        // caption keeps the space; scaffolding parked for the cleanup
-        // commit).
 
         let hasMedia = model.mediaURL != nil
         let isVideo = hasMedia && model.mediaKind == .video
@@ -807,7 +798,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         engagedCaptionLabel.text = nil
         engagedCaptionLabel.transform = .identity
         engagedCard.reset()
-        engagedHasAudioLine = false
         stopKenBurns()
         setPauseGlyphVisible(false)
         videoPlayback?.stop(videoRenderView)

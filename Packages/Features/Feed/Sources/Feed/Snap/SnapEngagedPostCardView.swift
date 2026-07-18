@@ -7,31 +7,26 @@ import UIKit
 /// card constants are the shared geometry contract):
 ///
 ///   [ media hole │ caption column      ]
-///   [            │ ♫ music line        ]
 ///   [            │ ♥ 1.2k 💬 56 ⇄ 🔖   ]
 ///
-/// The right side is a single vertical column, bottom-anchored: actions row
-/// at the column's floor, music line directly above it (video posts only),
-/// caption filling the space that remains. Author identity deliberately
-/// does NOT render here — the nav pill (screen chrome) already carries it,
-/// and one identity on screen beats a duplicated header band.
+/// The right side is a single vertical column: the metrics/actions row at
+/// the column's floor, caption filling the space above it. The card
+/// deliberately duplicates NO visible screen chrome (keep-and-stack):
+/// author identity lives in the nav pill, the audio credit in the native
+/// toolbar's attribution item — both onstage through the engagement.
 ///
 /// This view owns NEITHER the media nor the caption: the media is the
 /// full-bleed render surface docking via transform (playback untouchable
 /// by construction), and the caption is the cell's flight label (it
-/// travels from the chrome's full-width home, stopping above the column's
-/// reserved rows via `captionColumnMaxY`). The card renders the pieces
-/// that have no feed-default counterpart in the cell (music attribution
-/// lives in the native toolbar, metrics nowhere) and therefore ENTER with
-/// the card rather than fly.
+/// travels from the chrome's full-width home, stopping above the actions
+/// row via `captionColumnMaxY`). The card renders the one piece with no
+/// feed-default counterpart — the metrics — which therefore ENTERS with
+/// the card rather than flying.
 ///
 /// Lives inside the strip backdrop's `contentView`, pinned edge-to-edge, so
 /// the glass card's frame authority (`stripCardFrame`) is the only geometry
 /// it needs — every interior offset is card-local.
 final class SnapEngagedPostCardView: UIView {
-    private let musicRow = UIStackView()
-    private let musicLabel = UILabel()
-
     /// Metrics with data render counts (likes from the hydration snapshot,
     /// comments from the loaded streams); repost/save are affordance-only
     /// seams — the BFF carries no counts for them yet, mirroring the
@@ -75,29 +70,6 @@ final class SnapEngagedPostCardView: UIView {
             actions.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -pad)
         }
 
-        // Music line: directly above the actions row. The caption (the
-        // cell's flight label, above this view) stops above both via
-        // `captionColumnMaxY`.
-        let musicIcon = UIImageView(image: UIImage(systemName: "music.note")?
-            .withConfiguration(UIImage.SymbolConfiguration(pointSize: 11, weight: .semibold)))
-        musicIcon.tintColor = UIColor.white.withAlphaComponent(0.75)
-        musicIcon.contentMode = .center
-        musicLabel.font = .preferredFont(forTextStyle: .caption2)
-        musicLabel.textColor = UIColor.white.withAlphaComponent(0.75)
-        musicLabel.lineBreakMode = .byTruncatingTail
-
-        musicRow.addArrangedSubview(musicIcon)
-        musicRow.addArrangedSubview(musicLabel)
-        musicRow.axis = .horizontal
-        musicRow.spacing = Spacing.xs
-        musicRow.alignment = .center
-        musicRow.isHidden = true
-        musicRow.constrain(in: self) { parent in
-            musicRow.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: columnLeading)
-            musicRow.trailingAnchor.constraint(lessThanOrEqualTo: parent.trailingAnchor, constant: -pad)
-            musicRow.heightAnchor.constraint(equalToConstant: SnapCommentsLayout.cardMusicLineHeight)
-            musicRow.bottomAnchor.constraint(equalTo: actions.topAnchor, constant: -Spacing.xs)
-        }
     }
 
     // MARK: - Content
@@ -106,13 +78,6 @@ final class SnapEngagedPostCardView: UIView {
     /// configure — the card is populated long before an engagement, so
     /// engaging is pure choreography, never a data fetch.
     func configure(with model: FeedItemDisplayModel) {
-        // KEEP-AND-STACK: the native toolbar stays onstage through the
-        // engagement and its attribution item ALREADY carries the audio
-        // line — the card renders no music row (the no-duplication rule,
-        // same as the author header's removal). The row's scaffolding is
-        // parked hidden pending the cleanup commit.
-        musicRow.isHidden = true
-        musicLabel.text = nil
         Self.setCount(model.likeCount > 0 ? Int(clamping: model.likeCount) : nil, on: likeButton)
         Self.setCount(nil, on: commentButton)
     }
@@ -126,8 +91,6 @@ final class SnapEngagedPostCardView: UIView {
 
     /// Cell reuse: drop content.
     func reset() {
-        musicLabel.text = nil
-        musicRow.isHidden = true
         Self.setCount(nil, on: likeButton)
         Self.setCount(nil, on: commentButton)
     }
