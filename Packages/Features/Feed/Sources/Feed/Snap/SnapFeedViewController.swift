@@ -185,6 +185,13 @@ final class SnapFeedViewController: UIViewController {
             && commentsContentVC?.view.superview != nil
         if engagedLayoutAlive {
             setNativeFooterOffstage(true, animated: false)
+            // The departure handoff faded the composer out with the push;
+            // returning re-seats it instantly (idempotent when it never
+            // left). Also re-materializes the footer frost — its window
+            // guard makes the willAppear call a no-op and the didAppear
+            // pass the one that lands.
+            (commentsContentVC as? PostDetailViewController)?
+                .setComposerEntranceState(offstage: false)
         } else {
             finishCommentsDisengagement()
         }
@@ -315,6 +322,13 @@ final class SnapFeedViewController: UIViewController {
         // runs for every disappearance: it registers on the coordinator when
         // one exists (fade, restore-on-cancel) and hides instantly otherwise.
         concealToolbar()
+        // OUTBOUND HANDOFF: leaving the screen while comments are engaged
+        // (a profile push from the identity pill, a hero pop, a tab
+        // switch) must return the SHARED floating-bar container to the
+        // incoming screen — it is nav-level chrome, not ours to keep at
+        // opacity 0, and an inherited invisible/inert container is exactly
+        // the "harsh snap" (or dead toolbar) the next screen shows.
+        handOffFooterForDeparture()
         // During any transition (a hero pop, a detail push) the active cell's
         // player must survive to here-and-beyond: the dismissal flight card
         // mirrors that very player, and a cancelled grab rewinds to a page
@@ -324,6 +338,41 @@ final class SnapFeedViewController: UIViewController {
         guard transitionCoordinator == nil else { return }
         isOnScreen = false
         refreshVisibility()
+    }
+
+    /// The engaged footer's departure choreography. The native bar's
+    /// pixels restore through the SAME CA-owned fade as every other
+    /// footer move (explicit layer animation, monotonic, immune to the
+    /// transition's own animation recording), started at the transition's
+    /// t0 so the bar breathes back in WITH the push instead of snapping
+    /// after it; the composer fades down-and-out alongside — driven by an
+    /// explicit UIView animation over the coordinator's duration, NOT an
+    /// alongside block (which has cut to a single frame here before —
+    /// the flight-replica doctrine). Instant restoration when there is no
+    /// transition (tab switch). The engagement itself stays alive: the
+    /// return path (`syncEngagementAfterAppearance`) re-arbitrates the
+    /// band when the feed comes back.
+    private func handOffFooterForDeparture() {
+        guard commentsEngagedID != nil else { return }
+        // The keyboard must never outlive the screen it was typing into.
+        commentsContentVC?.view.endEditing(true)
+        let coordinator = transitionCoordinator
+        setNativeFooterOffstage(false, animated: coordinator != nil)
+        guard let coordinator,
+              let detail = commentsContentVC as? PostDetailViewController else { return }
+        UIView.animate(
+            withDuration: coordinator.transitionDuration, delay: 0,
+            options: [.curveEaseOut, .beginFromCurrentState]
+        ) {
+            detail.setComposerEntranceState(offstage: true)
+        }
+        coordinator.animate(alongsideTransition: nil) { [weak self] context in
+            guard context.isCancelled else { return }
+            // A cancelled departure (an aborted interactive pop) puts the
+            // band back the way the engagement owns it.
+            detail.setComposerEntranceState(offstage: false)
+            self?.setNativeFooterOffstage(true)
+        }
     }
 
     override func viewDidDisappear(_ animated: Bool) {

@@ -145,14 +145,18 @@ final class AppCoordinator: Coordinator {
             if let index = arguments.firstIndex(of: "-open-profile"), index + 1 < arguments.count {
                 container.router.route(to: .profile(ProfileID(arguments[index + 1]), stub: nil))
             }
-            // `-open-profile-delayed <id>` fires the same route ~3s in — after
-            // `-select-tab 1` has pushed the feed — so a profile ABOVE the
-            // feed's custom nav delegate is reachable without driving a cell
-            // tap (the swipe-back-over-feed regression surface).
+            // `-open-profile-delayed <id> [seconds]` fires the same route
+            // after a delay (default ~3s — after `-select-tab 1` has pushed
+            // the feed), so a profile ABOVE the feed's custom nav delegate
+            // is reachable without driving a cell tap (the swipe-back-over-
+            // feed regression surface). The optional seconds lets the route
+            // land after slower setups — e.g. `-snap-comments-demo`'s
+            // engagement, for the engaged-outbound-push handoff surface.
             if let index = arguments.firstIndex(of: "-open-profile-delayed"), index + 1 < arguments.count {
                 let id = ProfileID(arguments[index + 1])
+                let delay = (index + 2 < arguments.count ? Double(arguments[index + 2]) : nil) ?? 3.0
                 let router = container.router
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                     router.route(to: .profile(id, stub: nil))
                 }
             }
