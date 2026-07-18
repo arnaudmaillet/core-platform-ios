@@ -29,14 +29,18 @@ import UIKit
 enum SnapCommentsLayout {
     /// The docked media's side: the slot is a perfect 1:1 SQUARE, compact
     /// (thumbnail-sized — the strip is an index card, not a viewer; the
-    /// engaged screen belongs to the comments). The media still shrinks as
+    /// engaged screen belongs to the comments). 88, not the original 128:
+    /// the tile sets the whole card's height, and the column beside it
+    /// (caption / music / actions) reads balanced at this size where 128
+    /// left a dead gap under short captions. The media still shrinks as
     /// a uniform scale (no distortion) — squareness comes from an animated
     /// center-crop mask (`mediaCropFrame`), so the docked tile re-crops the
     /// full-bleed content rather than squashing it.
-    static let mediaSlotHeight: CGFloat = 128
+    static let mediaSlotHeight: CGFloat = 88
     /// The docked media's visual corner radius (compensated for the
-    /// transform's scale when applied to the full-size layer).
-    static let mediaCornerRadius: CGFloat = 16
+    /// transform's scale when applied to the full-size layer) —
+    /// proportioned to the 88pt tile.
+    static let mediaCornerRadius: CGFloat = 12
     static let stripTopPadding: CGFloat = Spacing.sm
     static let stripBottomPadding: CGFloat = Spacing.md
 
@@ -51,11 +55,12 @@ enum SnapCommentsLayout {
     // partition — stays a pure function of the constants.
 
     /// The metrics/actions row at the column's bottom: likes, comments,
-    /// repost, save.
-    static let cardActionsHeight: CGFloat = 28
+    /// repost, save. Sized with the 88pt column: every point spent here
+    /// comes out of the caption's line budget.
+    static let cardActionsHeight: CGFloat = 24
     /// The music/attribution line's reserved height, directly above the
     /// actions row (caption text must stop above both).
-    static let cardMusicLineHeight: CGFloat = 18
+    static let cardMusicLineHeight: CGFloat = 16
     /// The card content's entrance micro-translation — the rows rise into
     /// place as they fade in, the composer-entrance recipe at card scale.
     static let cardContentEntranceOffset: CGFloat = 12
