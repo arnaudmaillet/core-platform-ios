@@ -70,6 +70,12 @@ final class SnapFeedViewController: UIViewController {
     /// scroll position, and reply drafts must never live in a recycled
     /// cell); the cell only hosts its view while engaged.
     private var commentsContentVC: UIViewController?
+    /// The toolbar's snapshot, kept alive for the WHOLE engagement: it is
+    /// the outgoing half of the engage crossfade AND the incoming half of
+    /// the return one — the structural toolbar stays concealed until the
+    /// return spring settles (safe-area shifts must never happen
+    /// mid-animation), so its pixels travel by ghost in both directions.
+    private var commentsToolbarGhost: UIView?
 
     init(
         viewModel: FeedViewModel,
@@ -650,23 +656,24 @@ final class SnapFeedViewController: UIViewController {
         // under: an in-place swap of the bottom band's content with zero
         // layout churn. The snapshot is screen chrome, so it lives on this
         // view, not the cell.
-        let toolbarGhost = makeToolbarGhost()
+        commentsToolbarGhost = makeToolbarGhost()
         concealToolbar()
         addChild(content)
         cell.installComments(content.view)
         content.didMove(toParent: self)
-        // The engaged rows end where the rail's exclusive column begins.
-        (content as? PostDetailViewController)?
-            .setContentTrailingInset(cell.commentsRailExclusionWidth)
+        // The stream rests below the frosted strip (full-height scroll,
+        // inset content) and its rows end where the rail's column begins.
+        (content as? PostDetailViewController)?.setEngagedInsets(
+            top: SnapCommentsLayout.stripBottom(topInset: view.safeAreaInsets.top),
+            trailing: cell.commentsRailExclusionWidth
+        )
         UIView.animate(
             withDuration: SnapCommentsLayout.engageDuration, delay: 0,
             usingSpringWithDamping: 1, initialSpringVelocity: 0
-        ) {
+        ) { [weak self] in
             cell.setCommentsEngaged(true)
             cell.contentView.layoutIfNeeded()
-            toolbarGhost?.alpha = 0
-        } completion: { _ in
-            toolbarGhost?.removeFromSuperview()
+            self?.commentsToolbarGhost?.alpha = 0
         }
     }
 
@@ -684,13 +691,18 @@ final class SnapFeedViewController: UIViewController {
     }
 
     /// Reverse mutation (strip tap, entry-surface re-tap): the comments
-    /// region settles out, the media expands back, the chrome returns —
-    /// the child is reclaimed only after the spring completes.
+    /// region settles out, the media expands back, the chrome returns, and
+    /// the footer crossfade runs SIMULTANEOUSLY inside the same spring —
+    /// the toolbar's ghost fades in exactly as the composer fades out, the
+    /// mirror image of the engage leg. The child is reclaimed (and the
+    /// real toolbar swapped in for its ghost, pixel-identical) only after
+    /// the spring completes.
     private func dismissComments() {
         guard commentsEngagedID != nil else { return }
         UIView.animate(withDuration: SnapCommentsLayout.disengageDuration, delay: 0,
                        usingSpringWithDamping: 1, initialSpringVelocity: 0) { [weak self] in
             self?.engagedCell()?.setCommentsEngaged(false)
+            self?.commentsToolbarGhost?.alpha = 1
         } completion: { [weak self] _ in
             self?.finishCommentsDisengagement()
         }
@@ -714,14 +726,15 @@ final class SnapFeedViewController: UIViewController {
         cell?.clearComments()
         commentsContentVC = nil
         commentsEngagedID = nil
-        // The footer's return half: present structurally (safe area settles
-        // in one pass, after the disengage spring — never during), then
-        // fade the pixels in.
+        // The footer's structural return, AFTER the spring: the ghost has
+        // already faded the pixels in, so presenting the real toolbar and
+        // dropping the ghost is a same-frame swap of identical content —
+        // and the safe-area shift lands when nothing on screen depends on
+        // it anymore.
         presentToolbar()
-        if let toolbar = toolbarHost?.toolbar ?? navigationController?.toolbar {
-            toolbar.alpha = 0
-            UIView.animate(withDuration: 0.18) { toolbar.alpha = 1 }
-        }
+        toolbarHost?.toolbar.alpha = 1
+        commentsToolbarGhost?.removeFromSuperview()
+        commentsToolbarGhost = nil
     }
 
     // MARK: - Active-item lifecycle

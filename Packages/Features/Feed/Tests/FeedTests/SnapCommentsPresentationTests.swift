@@ -164,9 +164,11 @@ struct SnapCommentsPresentationTests {
         #expect(subtitle.alpha == 1)
     }
 
-    /// The comments host: `installComments` opens the region below the
-    /// strip (partition-exact) and `clearComments` reclaims it.
-    @Test func installedCommentsFillTheRegionBelowTheStrip() throws {
+    /// The layered engaged hierarchy: the comments host spans the FULL cell
+    /// (content rides under the strip), the frosted backdrop covers exactly
+    /// screen-top → strip-bottom, and the media is z-lifted above both for
+    /// the engagement's lifetime; `clearComments` restores everything.
+    @Test func installedCommentsLayerBehindTheStrip() throws {
         let cell = SnapFeedCell(frame: Self.container)
         cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
         cell.layoutIfNeeded()
@@ -175,17 +177,38 @@ struct SnapCommentsPresentationTests {
         cell.setCommentsEngaged(true)
         cell.contentView.layoutIfNeeded()
 
+        // Full-height stream…
         let container = try #require(hosted.superview)
-        #expect(container.frame.minY == SnapCommentsLayout.stripBottom(topInset: Self.topInset))
+        #expect(container.frame.minY == 0)
         #expect(container.frame.maxY == Self.container.height)
         #expect(container.frame.width == Self.container.width)
         #expect(container.alpha == 1)
-        #expect(container.isHidden == false)
+
+        // …under a strip-band backdrop…
+        let subviews = cell.contentView.subviews
+        let backdrop = try #require(subviews.compactMap { $0 as? UIVisualEffectView }.first)
+        #expect(backdrop.isHidden == false)
+        #expect(backdrop.frame == CGRect(
+            x: 0, y: 0,
+            width: Self.container.width,
+            height: SnapCommentsLayout.stripBottom(topInset: Self.topInset)
+        ))
+
+        // …under the media (z-lifted above stream and backdrop).
+        let media = try #require(subviews.compactMap { $0 as? UIImageView }.first)
+        let containerIndex = try #require(subviews.firstIndex(of: container))
+        let backdropIndex = try #require(subviews.firstIndex(of: backdrop))
+        let mediaIndex = try #require(subviews.firstIndex(of: media))
+        #expect(containerIndex < backdropIndex)
+        #expect(backdropIndex < mediaIndex)
 
         cell.setCommentsEngaged(false)
         cell.clearComments()
         #expect(hosted.superview == nil)
         #expect(container.isHidden == true)
+        #expect(backdrop.isHidden == true)
+        // Resting z restored: media back at the bottom of the stack.
+        #expect(cell.contentView.subviews.firstIndex(of: media) == 0)
     }
 
     /// Reuse must never leak the mutated layout into the next post.

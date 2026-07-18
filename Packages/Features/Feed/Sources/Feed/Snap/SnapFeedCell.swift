@@ -65,6 +65,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// below the chrome (the action rail floats over it).
     private let commentsContainer = SnapCommentsContainerView()
     private var commentsContainerConstraints: [NSLayoutConstraint] = []
+    /// The frosted header behind the docked strip: comments glide under it
+    /// at full height, the blur keeps the strip legible. Effect nil until
+    /// engagement IN A WINDOW (creating a real `UIBlurEffect` contacts the
+    /// render server — the headless-CI stall doctrine), and the blur
+    /// animates in/out via the `effect` property, the supported path.
+    private let stripBackdrop = UIVisualEffectView(effect: nil)
+    private var stripBackdropConstraints: [NSLayoutConstraint] = []
     /// Center-crop masks that square the docked media (one per render
     /// surface — a view can mask only one other view). Attached lazily at
     /// engage, animated full-bounds ↔ centered-square within the same
@@ -116,13 +123,21 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // The comments region sits between the media (which vacates it when
         // docked) and the chrome (whose rail floats over it). Constraints
         // are minted at install (they depend on the frozen insets).
-        // No internal header: the mutation itself says "comments" — the
-        // hosted list runs flush from the strip's boundary down to the
-        // compose footer.
+        // The comments stream: FULL cell height, layered BEHIND the docked
+        // strip — its content rests below the strip via scroll inset and
+        // glides underneath it when scrolled. No internal header: the
+        // mutation itself says "comments".
         commentsContainer.backgroundColor = .black
         commentsContainer.isHidden = true
         commentsContainer.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(commentsContainer)
+
+        // The frosted strip header, above the stream and below the media:
+        // the visual separator that makes the under-glide read as depth
+        // instead of collision.
+        stripBackdrop.isHidden = true
+        stripBackdrop.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(stripBackdrop)
 
         chrome.pin(to: contentView)
 
@@ -161,20 +176,35 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // hold dead-still while the old footer and the composer swap.
         commentsContainer.alpha = 0
         NSLayoutConstraint.deactivate(commentsContainerConstraints)
+        // FULL height: the stream spans the whole cell and slides under the
+        // strip (the hosted scroll view rests its content below the strip
+        // via inset — `setEngagedInsets` on the child).
         commentsContainerConstraints = [
-            commentsContainer.topAnchor.constraint(
-                equalTo: contentView.topAnchor,
-                constant: SnapCommentsLayout.stripBottom(topInset: frozenInsets.top)
-            ),
+            commentsContainer.topAnchor.constraint(equalTo: contentView.topAnchor),
             commentsContainer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             commentsContainer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             commentsContainer.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
         ]
         NSLayoutConstraint.activate(commentsContainerConstraints)
+        // The frosted header covers screen-top to the strip's boundary.
+        stripBackdrop.isHidden = false
+        NSLayoutConstraint.deactivate(stripBackdropConstraints)
+        stripBackdropConstraints = [
+            stripBackdrop.topAnchor.constraint(equalTo: contentView.topAnchor),
+            stripBackdrop.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            stripBackdrop.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            stripBackdrop.heightAnchor.constraint(
+                equalToConstant: SnapCommentsLayout.stripBottom(topInset: frozenInsets.top)
+            ),
+        ]
+        NSLayoutConstraint.activate(stripBackdropConstraints)
+        // The docked media rides ABOVE the stream and the frosted header
+        // for the engagement's lifetime (restored on `clearComments`) —
+        // that's the layering that makes comments glide underneath it.
+        contentView.insertSubview(mediaView, aboveSubview: stripBackdrop)
+        contentView.insertSubview(videoRenderView, aboveSubview: mediaView)
         view.translatesAutoresizingMaskIntoConstraints = false
         commentsContainer.addSubview(view)
-        // Flush host: list from the strip boundary, composer (the hosted
-        // view's own bottom bar, keyboard-anchored) as the screen footer.
         view.pin(to: commentsContainer)
         contentView.layoutIfNeeded()
     }
@@ -194,6 +224,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         commentsContainer.transform = .identity
         NSLayoutConstraint.deactivate(commentsContainerConstraints)
         commentsContainerConstraints = []
+        stripBackdrop.isHidden = true
+        stripBackdrop.effect = nil
+        NSLayoutConstraint.deactivate(stripBackdropConstraints)
+        stripBackdropConstraints = []
+        // Restore the resting z-order: media at the bottom of the stack.
+        contentView.sendSubviewToBack(videoRenderView)
+        contentView.sendSubviewToBack(mediaView)
         mediaView.mask = nil
         videoRenderView.mask = nil
     }
@@ -243,6 +280,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             }
             chrome.setCommentsEngaged(true)
             commentsContainer.alpha = 1
+            // The frosted header materializes via the EFFECT property (the
+            // supported animatable path — alpha on an effect view is not).
+            // Window-guarded: real blurs contact the render server, which
+            // headless CI test hosts must never pay.
+            if window != nil, stripBackdrop.effect == nil {
+                stripBackdrop.effect = UIBlurEffect(style: .systemThinMaterialDark)
+            }
             engagedCaptionLabel.isHidden = false
             NSLayoutConstraint.deactivate(engagedCaptionConstraints)
             engagedCaptionConstraints = [
@@ -289,6 +333,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             }
             chrome.setCommentsEngaged(false)
             commentsContainer.alpha = 0
+            stripBackdrop.effect = nil // blur dissolves with the return spring
             // Reverse flight: the chrome caption returns with the chrome's
             // fade-in while this label flies back onto its frame, fading —
             // a cross-dissolve in motion, no completion hooks to sequence.

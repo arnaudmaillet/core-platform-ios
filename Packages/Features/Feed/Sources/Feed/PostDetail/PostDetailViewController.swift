@@ -220,13 +220,22 @@ final class PostDetailViewController: UIViewController {
         ])
     }
 
-    /// Reserves trailing width inside the scrolling content — the snap
-    /// feed's engaged layout hands the trailing column to the action rail,
-    /// and the comment rows must end where it begins (zero overlap). The
-    /// composer deliberately stays full-width: the rail's territory ends
-    /// well above the footer.
-    func setContentTrailingInset(_ inset: CGFloat) {
-        contentTrailingConstraint?.constant = -(Spacing.lg + max(0, inset))
+    /// Shapes the scrolling content for the snap feed's engaged layout:
+    /// `top` is the frosted media strip's height — the scroll view itself
+    /// spans the full cell (comments glide UNDER the strip), so the content
+    /// rests below it via inset, not via frame; `trailing` reserves the
+    /// action rail's exclusive column (zero overlap). The composer
+    /// deliberately stays full-width: the rail's territory ends well above
+    /// the footer.
+    func setEngagedInsets(top: CGFloat, trailing: CGFloat) {
+        // The strip inset is the ONLY top authority in the engaged context:
+        // the full-cell scroll view would otherwise also inherit the safe
+        // area's automatic adjustment and double-inset the resting position.
+        scrollView.contentInsetAdjustmentBehavior = .never
+        scrollView.contentInset.top = max(0, top)
+        scrollView.verticalScrollIndicatorInsets.top = max(0, top)
+        scrollView.contentOffset = CGPoint(x: 0, y: -max(0, top))
+        contentTrailingConstraint?.constant = -(Spacing.lg + max(0, trailing))
     }
 
     // MARK: - Render

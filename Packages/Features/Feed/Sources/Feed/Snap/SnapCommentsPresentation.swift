@@ -34,9 +34,11 @@ enum SnapCommentsLayout {
     static let stripTopPadding: CGFloat = Spacing.sm
     static let stripBottomPadding: CGFloat = Spacing.md
 
-    /// The engaged-state spring, shared by every leg of the one animation.
+    /// The engaged-state spring, shared by every leg of the one animation —
+    /// and symmetric: the return runs the same envelope, with the footer
+    /// crossfade riding inside it in both directions.
     static let engageDuration: TimeInterval = 0.45
-    static let disengageDuration: TimeInterval = 0.38
+    static let disengageDuration: TimeInterval = 0.45
 
     /// Where the media docks, in cell coordinates: a 1:1 square tile.
     static func mediaSlotFrame(in bounds: CGRect, topInset: CGFloat) -> CGRect {
