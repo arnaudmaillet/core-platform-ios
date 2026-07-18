@@ -36,13 +36,15 @@ final class SnapFeedViewController: UIViewController {
     /// The share bubble's bookmark action; a property because its glyph
     /// (bookmark / bookmark.fill) follows the active page's saved state.
     private let bookmarkButton = SnapNavControls.makeToolbarActionButton(systemName: "bookmark")
-    /// The engaged toolbar's leading item: the comments sort selector,
-    /// swapped in for the attribution while comments are engaged.
+    /// The engaged toolbar's trailing item: the comments sort selector,
+    /// occupying the action territory while comments are engaged (the
+    /// bookmark/share/more cluster yields — those live in the engaged
+    /// card; the audio attribution stays anchored on the left).
     private let commentSortButton = SnapCommentSortButton()
     /// The two faces of the one living toolbar (keep-and-stack): built
     /// once, swapped via `setToolbarItems(_:animated:)` on the engagement
-    /// seams — trailing items shared between both, so only the leading
-    /// platter morphs.
+    /// seams — the leading attribution shared between both, so only the
+    /// trailing platters morph.
     private var defaultToolbarItems: [UIBarButtonItem] = []
     private var engagedToolbarItems: [UIBarButtonItem] = []
     /// Session-local optimistic bookmark state: the BFF exposes no save/
@@ -507,26 +509,27 @@ final class SnapFeedViewController: UIViewController {
             }
         ])
 
-        // TWO item sets over one living bar (keep-and-stack): the default
-        // feed leads with the media attribution; the comments engagement
-        // swaps that leading slot for the sort selector via
-        // `setToolbarItems(_:animated:)` — the system's own platter morph,
-        // the same choreography a push uses. The TRAILING items are the
-        // SAME instances in both arrays, so their bubbles hold perfectly
-        // still while only the leading platter crossfades.
-        let trailing: [UIBarButtonItem] = [
+        // TWO item sets over one living bar (keep-and-stack): the audio
+        // attribution ANCHORS the leading slot in both — the same item
+        // instance in both arrays, so its platter never moves — while the
+        // TRAILING territory swaps via `setToolbarItems(_:animated:)`
+        // (the system's own platter morph, the same choreography a push
+        // uses): bookmark/share/more for the feed, the comments sort
+        // selector alone while engaged (bookmark and the post metrics
+        // already live in the engaged card — the band carries no
+        // duplicates).
+        let leading: [UIBarButtonItem] = [
+            UIBarButtonItem(customView: mediaAttributionView),
+            .flexibleSpace(),
+        ]
+        defaultToolbarItems = leading + [
             UIBarButtonItem(customView: shareCluster),
             .fixedSpace(Spacing.sm),
             UIBarButtonItem(customView: more),
         ]
-        defaultToolbarItems = [
-            UIBarButtonItem(customView: mediaAttributionView),
-            .flexibleSpace(),
-        ] + trailing
-        engagedToolbarItems = [
+        engagedToolbarItems = leading + [
             UIBarButtonItem(customView: commentSortButton),
-            .flexibleSpace(),
-        ] + trailing
+        ]
         toolbarItems = defaultToolbarItems
     }
 
@@ -803,10 +806,11 @@ final class SnapFeedViewController: UIViewController {
         // where it is (keep-and-stack: the bar is never faded, never
         // touched; transitions remain the system's alone).
         detail?.setComposerEntranceState(offstage: true)
-        // The living bar changes CONTEXT, not presence: the attribution
-        // yields its leading slot to the comments sort selector through
-        // the system's own item morph, on the spring's beat. Sort is
-        // engagement-scoped — every fresh engagement starts at Recent.
+        // The living bar changes CONTEXT, not presence: the trailing
+        // action cluster yields its territory to the comments sort
+        // selector through the system's own item morph, on the spring's
+        // beat — the audio attribution stays anchored on the left. Sort
+        // is engagement-scoped — every fresh engagement starts at Recent.
         commentSortButton.reset()
         setToolbarItems(engagedToolbarItems, animated: true)
         UIView.animate(
@@ -829,7 +833,7 @@ final class SnapFeedViewController: UIViewController {
         // The keyboard rides down with the collapse, not after it.
         commentsContentVC?.view.endEditing(true)
         let detail = commentsContentVC as? PostDetailViewController
-        // The mirror morph: the attribution takes its leading slot back.
+        // The mirror morph: the action cluster takes its territory back.
         setToolbarItems(defaultToolbarItems, animated: true)
         UIView.animate(withDuration: SnapCommentsLayout.disengageDuration, delay: 0,
                        usingSpringWithDamping: 1, initialSpringVelocity: 0) { [weak self] in

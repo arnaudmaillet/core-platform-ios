@@ -1,10 +1,12 @@
 import DesignSystem
 import UIKit
 
-/// The engaged toolbar's leading item: a sort selector for the comments
-/// stream, swapped in for the media attribution while comments are engaged
-/// (keep-and-stack: the bar stays onstage, so its ITEMS are the context
-/// surface — `setToolbarItems(_:animated:)` is the system's own morph).
+/// The engaged toolbar's trailing item: a sort selector for the comments
+/// stream, taking the bookmark/share cluster's territory while comments
+/// are engaged — the audio attribution stays anchored on the left, and
+/// the yielded actions live in the engaged card (keep-and-stack: the bar
+/// stays onstage, so its ITEMS are the context surface —
+/// `setToolbarItems(_:animated:)` is the system's own morph).
 ///
 /// A bar item custom view on the established contracts: 36pt tall (the
 /// bar-bubble invariant — every bubble on the feed's bars renders 36pt so
