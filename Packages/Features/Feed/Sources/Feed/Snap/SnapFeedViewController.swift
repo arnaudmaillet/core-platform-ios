@@ -36,6 +36,15 @@ final class SnapFeedViewController: UIViewController {
     /// The share bubble's bookmark action; a property because its glyph
     /// (bookmark / bookmark.fill) follows the active page's saved state.
     private let bookmarkButton = SnapNavControls.makeToolbarActionButton(systemName: "bookmark")
+    /// The engaged toolbar's leading item: the comments sort selector,
+    /// swapped in for the attribution while comments are engaged.
+    private let commentSortButton = SnapCommentSortButton()
+    /// The two faces of the one living toolbar (keep-and-stack): built
+    /// once, swapped via `setToolbarItems(_:animated:)` on the engagement
+    /// seams — trailing items shared between both, so only the leading
+    /// platter morphs.
+    private var defaultToolbarItems: [UIBarButtonItem] = []
+    private var engagedToolbarItems: [UIBarButtonItem] = []
     /// Session-local optimistic bookmark state: the BFF exposes no save/
     /// bookmark API yet (dev/BACKEND_GAPS.md), so the toggle lives here until
     /// a real seam exists on `FeedViewModel` — swap this set for it.
@@ -498,13 +507,27 @@ final class SnapFeedViewController: UIViewController {
             }
         ])
 
-        toolbarItems = [
-            UIBarButtonItem(customView: mediaAttributionView),
-            .flexibleSpace(),
+        // TWO item sets over one living bar (keep-and-stack): the default
+        // feed leads with the media attribution; the comments engagement
+        // swaps that leading slot for the sort selector via
+        // `setToolbarItems(_:animated:)` — the system's own platter morph,
+        // the same choreography a push uses. The TRAILING items are the
+        // SAME instances in both arrays, so their bubbles hold perfectly
+        // still while only the leading platter crossfades.
+        let trailing: [UIBarButtonItem] = [
             UIBarButtonItem(customView: shareCluster),
             .fixedSpace(Spacing.sm),
             UIBarButtonItem(customView: more),
         ]
+        defaultToolbarItems = [
+            UIBarButtonItem(customView: mediaAttributionView),
+            .flexibleSpace(),
+        ] + trailing
+        engagedToolbarItems = [
+            UIBarButtonItem(customView: commentSortButton),
+            .flexibleSpace(),
+        ] + trailing
+        toolbarItems = defaultToolbarItems
     }
 
     /// Optimistic local toggle (no backend seam yet — see the set's comment);
@@ -780,6 +803,12 @@ final class SnapFeedViewController: UIViewController {
         // where it is (keep-and-stack: the bar is never faded, never
         // touched; transitions remain the system's alone).
         detail?.setComposerEntranceState(offstage: true)
+        // The living bar changes CONTEXT, not presence: the attribution
+        // yields its leading slot to the comments sort selector through
+        // the system's own item morph, on the spring's beat. Sort is
+        // engagement-scoped — every fresh engagement starts at Recent.
+        commentSortButton.reset()
+        setToolbarItems(engagedToolbarItems, animated: true)
         UIView.animate(
             withDuration: SnapCommentsLayout.engageDuration, delay: 0,
             usingSpringWithDamping: 1, initialSpringVelocity: 0
@@ -800,6 +829,8 @@ final class SnapFeedViewController: UIViewController {
         // The keyboard rides down with the collapse, not after it.
         commentsContentVC?.view.endEditing(true)
         let detail = commentsContentVC as? PostDetailViewController
+        // The mirror morph: the attribution takes its leading slot back.
+        setToolbarItems(defaultToolbarItems, animated: true)
         UIView.animate(withDuration: SnapCommentsLayout.disengageDuration, delay: 0,
                        usingSpringWithDamping: 1, initialSpringVelocity: 0) { [weak self] in
             self?.engagedCell()?.setCommentsEngaged(false)
@@ -851,8 +882,15 @@ final class SnapFeedViewController: UIViewController {
         commentsContentVC = nil
         commentsEngagedID = nil
         collectionView.isScrollEnabled = true
-        // Keep-and-stack: the native bar was never touched — no pixel
-        // state to reconcile at cleanup time.
+        // The bar's pixels were never touched (keep-and-stack), but its
+        // ITEMS are engagement context — settle them for the paths that
+        // never ran the animated mirror (orphaned teardown, instant
+        // cleanup). Identity-compare first: after a normal dismiss the
+        // swap already landed, and re-setting identical items would only
+        // churn the bar's layout.
+        if toolbarItems ?? [] != defaultToolbarItems, !defaultToolbarItems.isEmpty {
+            setToolbarItems(defaultToolbarItems, animated: false)
+        }
     }
 
     // MARK: - Active-item lifecycle

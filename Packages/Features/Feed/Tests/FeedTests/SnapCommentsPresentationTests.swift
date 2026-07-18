@@ -569,6 +569,31 @@ struct SnapCommentsPresentationTests {
         #expect(pan.isEnabled == false)
     }
 
+    /// The engaged toolbar's sort selector: single-selection menu with a
+    /// checkmark following the chosen order, title mirroring it, the seam
+    /// firing only on genuine changes, and reset returning to the
+    /// engagement-scoped default.
+    @Test func commentSortButtonKeepsHonestSelectionState() throws {
+        let button = SnapCommentSortButton()
+        #expect(button.order == .recent)
+        let titles = (button.menu?.children ?? []).compactMap { ($0 as? UIAction)?.title }
+        #expect(titles == SnapCommentSortButton.Order.allCases.map(\.rawValue))
+
+        var changes: [SnapCommentSortButton.Order] = []
+        button.onOrderChange = { changes.append($0) }
+        button.select(.trending)
+        #expect(button.order == .trending)
+        // Menu rebuilt around the new state: exactly one checkmark, on it.
+        let checked = (button.menu?.children ?? [])
+            .compactMap { $0 as? UIAction }.filter { $0.state == .on }
+        #expect(checked.map(\.title) == ["Trending"])
+        // Re-selection is not a change; reset restores the default silently.
+        button.select(.trending)
+        button.reset()
+        #expect(button.order == .recent)
+        #expect(changes == [.trending])
+    }
+
     // MARK: - Entry point
 
     /// Every comments surface is an engagement entry point — the empty-state
