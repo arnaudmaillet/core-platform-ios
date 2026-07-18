@@ -117,12 +117,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// Remembers a visible pause glyph across an engagement (the glyph is
     /// centered on the full page and would float mid-strip while docked).
     private var pauseGlyphSuppressedByEngagement = false
-    /// The docked tile's interactive exit pan — the composer bar's
-    /// finger-connected swipe, mirrored onto the strip's media block.
-    /// Attached to the CELL (not the content view) so the cell's own
-    /// `gestureRecognizerShouldBegin` override is its begin-time gate,
-    /// exactly the bar's mechanism.
-    private let mediaSwipeRecognizer = UIPanGestureRecognizer()
+    /// The glass card's interactive exit pan — the composer bar's
+    /// finger-connected swipe, mirrored onto the ENTIRE top floating
+    /// card (media tile, caption column, music line, metrics row: one
+    /// object, one gesture). Attached to the CELL (not the content view)
+    /// so the cell's own `gestureRecognizerShouldBegin` override is its
+    /// begin-time gate, exactly the bar's mechanism.
+    private let cardSwipeRecognizer = UIPanGestureRecognizer()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -149,9 +150,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         tap.delegate = self
         contentView.addGestureRecognizer(tap)
 
-        // The docked tile's swipe exit (engaged only — see the begin gate).
-        mediaSwipeRecognizer.addTarget(self, action: #selector(handleMediaSwipe))
-        addGestureRecognizer(mediaSwipeRecognizer)
+        // The glass card's swipe exit (engaged only — see the begin gate).
+        cardSwipeRecognizer.addTarget(self, action: #selector(handleCardSwipe))
+        addGestureRecognizer(cardSwipeRecognizer)
 
         buildLayout()
     }
@@ -323,6 +324,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         commentsContainerConstraints = []
         stripBackdrop.isHidden = true
         stripBackdrop.effect = nil
+        // A nudge interrupted by disengagement must not leak into the
+        // next engagement's card position.
+        stripBackdrop.transform = .identity
         NSLayoutConstraint.deactivate(stripBackdropConstraints)
         stripBackdropConstraints = []
         headerFrost.isHidden = true
@@ -620,37 +624,42 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     // MARK: - Play/pause toggle
 
-    /// Begin-time gate for the tile's swipe exit, the composer bar's
+    /// Begin-time gate for the card's swipe exit, the composer bar's
     /// mechanism verbatim: engaged only, vertical intent only (the
-    /// dominant velocity axis at begin time), and born inside the docked
-    /// tile's territory (slightly expanded for thumb forgiveness). Scoped
-    /// to the media pan — every other recognizer keeps UIKit's default.
+    /// dominant velocity axis at begin time), and born anywhere inside
+    /// the floating glass card's territory (slightly expanded for thumb
+    /// forgiveness). Scoped to the card pan — every other recognizer
+    /// keeps UIKit's default.
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        guard gestureRecognizer === mediaSwipeRecognizer else {
+        guard gestureRecognizer === cardSwipeRecognizer else {
             return super.gestureRecognizerShouldBegin(gestureRecognizer)
         }
         guard isCommentsEngaged else { return false }
-        let velocity = mediaSwipeRecognizer.velocity(in: self)
+        let velocity = cardSwipeRecognizer.velocity(in: self)
         guard abs(velocity.y) > abs(velocity.x) else { return false }
-        return mediaSwipeRegionContains(mediaSwipeRecognizer.location(in: contentView))
+        return cardSwipeRegionContains(cardSwipeRecognizer.location(in: contentView))
     }
 
-    /// The tile's swipe territory: the docked slot, with a thumb-sized
-    /// margin. Internal (not private) so the boundary is unit-testable.
-    func mediaSwipeRegionContains(_ point: CGPoint) -> Bool {
-        SnapCommentsLayout.mediaSlotFrame(in: contentView.bounds, topInset: frozenInsets.top)
+    /// The swipe's territory: the ENTIRE floating glass card — media,
+    /// caption, music line, metrics — with a thumb-sized margin. The
+    /// stream below the partition and the nav zone above the card stay
+    /// out. Internal (not private) so the boundary is unit-testable.
+    func cardSwipeRegionContains(_ point: CGPoint) -> Bool {
+        SnapCommentsLayout.stripCardFrame(in: contentView.bounds, topInset: frozenInsets.top)
             .insetBy(dx: -Spacing.sm, dy: -Spacing.sm)
             .contains(point)
     }
 
-    /// The tile rides the finger through the same damped, saturating
-    /// curve as the composer bar (`CommentsInputBar.nudgeOffset` — one
-    /// curve, one feel), composed ON TOP of the dock transform the
-    /// engagement owns; release either commits the page-away (the bar's
-    /// thresholds verbatim) or springs the tile home. The settle runs
-    /// before the commit fires, so a triggered dismissal's own transform
-    /// animation supersedes it — the bar's ordering doctrine.
-    @objc private func handleMediaSwipe(_ pan: UIPanGestureRecognizer) {
+    /// The WHOLE card assembly rides the finger as one body — glass
+    /// backdrop (carrying the column content), docked media, and the
+    /// caption label — through the same damped, saturating curve as the
+    /// composer bar (`CommentsInputBar.nudgeOffset` — one curve, one
+    /// feel). The media's nudge composes ON TOP of the dock transform
+    /// the engagement owns; release either commits the page-away (the
+    /// bar's thresholds verbatim) or springs everything home. The settle
+    /// runs before the commit fires, so a triggered dismissal's own
+    /// transform animation supersedes it — the bar's ordering doctrine.
+    @objc private func handleCardSwipe(_ pan: UIPanGestureRecognizer) {
         guard isCommentsEngaged else { return }
         let bounds = contentView.bounds
         let dock = SnapCommentsLayout.mediaTransform(
@@ -660,28 +669,32 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         let dy = pan.translation(in: self).y
         switch pan.state {
         case .changed:
-            let nudged = dock.concatenating(
-                CGAffineTransform(translationX: 0, y: CommentsInputBar.nudgeOffset(for: dy))
+            let nudge = CGAffineTransform(
+                translationX: 0, y: CommentsInputBar.nudgeOffset(for: dy)
             )
-            mediaView.transform = nudged
-            videoRenderView.transform = nudged
+            mediaView.transform = dock.concatenating(nudge)
+            videoRenderView.transform = dock.concatenating(nudge)
+            stripBackdrop.transform = nudge
+            engagedCaptionLabel.transform = nudge
         case .ended:
             let vy = pan.velocity(in: self).y
-            settleMediaNudge(to: dock)
+            settleCardNudge(to: dock)
             if abs(dy) > 50 || abs(vy) > 300 {
                 onRequestCommentsPageAway?((dy + vy) < 0 ? 1 : -1)
             }
         case .cancelled, .failed:
-            settleMediaNudge(to: dock)
+            settleCardNudge(to: dock)
         default:
             break
         }
     }
 
-    private func settleMediaNudge(to dock: CGAffineTransform) {
+    private func settleCardNudge(to dock: CGAffineTransform) {
         UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.8, initialSpringVelocity: 0) {
             self.mediaView.transform = dock
             self.videoRenderView.transform = dock
+            self.stripBackdrop.transform = .identity
+            self.engagedCaptionLabel.transform = .identity
         }
     }
 

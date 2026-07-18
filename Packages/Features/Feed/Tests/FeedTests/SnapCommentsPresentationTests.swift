@@ -534,21 +534,25 @@ struct SnapCommentsPresentationTests {
         #expect(SnapFeedCell.isCommentsStreamTouch(media, stopAt: cell.contentView) == false)
     }
 
-    /// The docked tile's swipe territory: the exit pan begins inside the
-    /// slot (with its thumb margin) and nowhere else — mid-stream drags
-    /// belong to the comments list, footer drags to the composer bar.
-    @Test func mediaSwipeRegionIsTheDockedTile() {
+    /// The card swipe's territory: the exit pan begins anywhere inside
+    /// the floating glass card — media tile, caption column, metrics row
+    /// — and nowhere else: the nav zone above the card, the mid-stream,
+    /// and the footer band (the composer bar owns its own exit) stay out.
+    @Test func cardSwipeRegionIsTheWholeGlassCard() {
         let cell = SnapFeedCell(frame: Self.container)
         cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
         cell.layoutIfNeeded()
         let slot = SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset)
-        #expect(cell.mediaSwipeRegionContains(CGPoint(x: slot.midX, y: slot.midY)))
-        #expect(cell.mediaSwipeRegionContains(CGPoint(x: slot.maxX + Spacing.sm - 1, y: slot.midY)))
-        // The caption column, the stream, and the footer band are not
-        // tile territory.
-        #expect(cell.mediaSwipeRegionContains(CGPoint(x: slot.maxX + 60, y: slot.midY)) == false)
-        #expect(cell.mediaSwipeRegionContains(CGPoint(x: slot.midX, y: Self.container.midY)) == false)
-        #expect(cell.mediaSwipeRegionContains(CGPoint(x: slot.midX, y: Self.container.height - 60)) == false)
+        let card = SnapCommentsLayout.stripCardFrame(in: Self.container, topInset: Self.topInset)
+        // The media tile…
+        #expect(cell.cardSwipeRegionContains(CGPoint(x: slot.midX, y: slot.midY)))
+        // …the caption/metrics column, out to the card's far edge…
+        #expect(cell.cardSwipeRegionContains(CGPoint(x: card.maxX - 20, y: card.midY)))
+        #expect(cell.cardSwipeRegionContains(CGPoint(x: card.midX, y: card.maxY - 4)))
+        // …but not the nav zone above, the stream below, or the footer.
+        #expect(cell.cardSwipeRegionContains(CGPoint(x: card.midX, y: Self.topInset / 2)) == false)
+        #expect(cell.cardSwipeRegionContains(CGPoint(x: card.midX, y: Self.container.midY)) == false)
+        #expect(cell.cardSwipeRegionContains(CGPoint(x: card.midX, y: Self.container.height - 60)) == false)
     }
 
     // MARK: - Entry point
