@@ -236,6 +236,14 @@ final class PostDetailViewController: UIViewController {
     /// action rail's exclusive column (zero overlap). The composer
     /// deliberately stays full-width: the rail's territory ends well above
     /// the footer.
+    /// Wires the composer's close affordance (the engaged context's exit in
+    /// the send slot while the field is empty). Also the switch that turns
+    /// the close/send toggle ON — unwired (the pushed comments screen),
+    /// the bar keeps a permanent send button.
+    func setEngagedCloseHandler(_ handler: @escaping () -> Void) {
+        composeBar.onClose = handler
+    }
+
     /// The composer's entrance state for the engaged footer handoff:
     /// offstage = invisible with a slight downward offset, so the unified
     /// spring doesn't just ghost it in — it physically slides into place

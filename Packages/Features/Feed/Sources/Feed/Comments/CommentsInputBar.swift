@@ -11,12 +11,21 @@ import UIKit
 final class CommentsInputBar: UIView {
     /// Fired with trimmed, non-empty text; the field clears itself first.
     var onSend: ((String) -> Void)?
+    /// Fired by the media (+) button; media composition is the host's affair
+    /// (the chat bar's contract, verbatim).
+    var onAttachMedia: (() -> Void)?
+    /// Fired by the close button (shown in the send slot while the field is
+    /// empty). Wiring this ENABLES the close/send toggle — hosts that leave
+    /// it nil (the pushed comments screen) keep a permanent send button.
+    var onClose: (() -> Void)? {
+        didSet { updateTrailingButtons(animated: false) }
+    }
 
     /// Disables sending while a comment is in flight (spinner in the button).
     var isSending = false {
         didSet {
             sendButton.configuration?.showsActivityIndicator = isSending
-            updateSendButton()
+            updateTrailingButtons(animated: false)
         }
     }
 
@@ -30,7 +39,12 @@ final class CommentsInputBar: UIView {
     private let field = UIVisualEffectView(effect: nil)
     private let textView = UITextView()
     private let placeholderLabel = UILabel()
+    private let mediaButton = UIButton(configuration: .glass())
     private let sendButton = UIButton(configuration: .prominentGlass())
+    /// The send slot's resting occupant while the field is empty (and a
+    /// close handler is wired): tapping it collapses the engagement. Send
+    /// and close share one slot and crossfade as typing starts/stops.
+    private let closeButton = UIButton(configuration: .glass())
     private var fieldHeight: NSLayoutConstraint!
 
     override init(frame: CGRect) {
@@ -63,6 +77,13 @@ final class CommentsInputBar: UIView {
         field.clipsToBounds = true
         field.cornerConfiguration = .capsule(maximumRadius: Metrics.controlSize / 2)
 
+        mediaButton.configuration?.image = UIImage(
+            systemName: "plus",
+            withConfiguration: UIImage.SymbolConfiguration(weight: .semibold)
+        )
+        mediaButton.configuration?.cornerStyle = .capsule
+        mediaButton.addAction(UIAction { [weak self] _ in self?.onAttachMedia?() }, for: .primaryActionTriggered)
+
         sendButton.configuration?.image = UIImage(
             systemName: "arrow.up",
             withConfiguration: UIImage.SymbolConfiguration(weight: .semibold)
@@ -70,16 +91,33 @@ final class CommentsInputBar: UIView {
         sendButton.configuration?.cornerStyle = .capsule
         sendButton.addAction(UIAction { [weak self] _ in self?.sendTapped() }, for: .primaryActionTriggered)
 
+        closeButton.configuration?.image = UIImage(
+            systemName: "xmark",
+            withConfiguration: UIImage.SymbolConfiguration(weight: .semibold)
+        )
+        closeButton.configuration?.cornerStyle = .capsule
+        closeButton.accessibilityLabel = "Close comments"
+        closeButton.addAction(UIAction { [weak self] _ in self?.onClose?() }, for: .primaryActionTriggered)
+
+        addSubview(mediaButton)
         addSubview(field)
         addSubview(sendButton)
+        addSubview(closeButton)
+        mediaButton.translatesAutoresizingMaskIntoConstraints = false
         field.translatesAutoresizingMaskIntoConstraints = false
         sendButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
         fieldHeight = field.heightAnchor.constraint(equalToConstant: Metrics.controlSize)
-        // Bottom-baseline anchoring: the field grows upward, the send
-        // button holds its station; the field owns all flexible width.
+        // Bottom-baseline anchoring: the field grows upward, the round
+        // controls hold their stations; the field owns all flexible width.
+        // Send and close OVERLAY the same trailing slot (they crossfade).
         NSLayoutConstraint.activate([
             fieldHeight,
-            field.leadingAnchor.constraint(equalTo: leadingAnchor),
+            mediaButton.leadingAnchor.constraint(equalTo: leadingAnchor),
+            mediaButton.bottomAnchor.constraint(equalTo: bottomAnchor),
+            mediaButton.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
+            mediaButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
+            field.leadingAnchor.constraint(equalTo: mediaButton.trailingAnchor, constant: Spacing.sm),
             field.topAnchor.constraint(equalTo: topAnchor),
             field.bottomAnchor.constraint(equalTo: bottomAnchor),
             sendButton.leadingAnchor.constraint(equalTo: field.trailingAnchor, constant: Spacing.sm),
@@ -87,9 +125,13 @@ final class CommentsInputBar: UIView {
             sendButton.bottomAnchor.constraint(equalTo: bottomAnchor),
             sendButton.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
             sendButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
+            closeButton.centerXAnchor.constraint(equalTo: sendButton.centerXAnchor),
+            closeButton.centerYAnchor.constraint(equalTo: sendButton.centerYAnchor),
+            closeButton.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
+            closeButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
         ])
 
-        updateSendButton()
+        updateTrailingButtons(animated: false)
         updateFieldHeight()
     }
 
@@ -116,9 +158,24 @@ final class CommentsInputBar: UIView {
         onSend?(text)
     }
 
-    private func updateSendButton() {
+    /// The trailing slot's toggle: CLOSE while the field is empty (and a
+    /// close handler is wired), SEND once typing starts or a submission is
+    /// in flight — swapped as a short crossfade, never a pop.
+    private func updateTrailingButtons(animated: Bool) {
         let hasText = !textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         sendButton.isEnabled = hasText && !isSending
+        let showsSend = onClose == nil || hasText || isSending
+        let apply = {
+            self.sendButton.alpha = showsSend ? 1 : 0
+            self.closeButton.alpha = showsSend ? 0 : 1
+        }
+        sendButton.isUserInteractionEnabled = showsSend
+        closeButton.isUserInteractionEnabled = !showsSend
+        if animated {
+            UIView.animate(withDuration: 0.15, animations: apply)
+        } else {
+            apply()
+        }
     }
 
     /// Grows the field with its content up to `maxLines`, then hands the
@@ -142,7 +199,7 @@ final class CommentsInputBar: UIView {
 extension CommentsInputBar: UITextViewDelegate {
     func textViewDidChange(_ textView: UITextView) {
         placeholderLabel.isHidden = textView.hasText
-        updateSendButton()
+        updateTrailingButtons(animated: true)
         updateFieldHeight()
     }
 }
