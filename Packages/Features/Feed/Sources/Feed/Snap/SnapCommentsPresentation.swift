@@ -6,7 +6,10 @@ import UIKit
 ///
 ///   NORMAL:  full-bleed media under the overlay chrome.
 ///   ENGAGED: [nav identity pill]                  — screen chrome, untouched
-///            [docked media | caption]             — the STRIP
+///            [author header row        ]          ┐
+///            [docked media | caption   ]          │ the CARD — the post
+///            [              music line ]          │ itself, reformatted
+///            [likes · comments · repost · save]   ┘
 ///            [comments container → cell bottom]   — cell-owned, child view
 ///
 /// ONE surface, one motion profile: every element of the mutation lives in
@@ -34,6 +37,39 @@ enum SnapCommentsLayout {
     static let stripTopPadding: CGFloat = Spacing.sm
     static let stripBottomPadding: CGFloat = Spacing.md
 
+    // MARK: The card's interior bands
+    //
+    // The engaged card is the POST, reformatted — not a caption summary. It
+    // stacks three bands around the media row: the author header above, the
+    // music/attribution line inside the caption column, and the metrics/
+    // actions row below. All heights are fixed constants so the card's
+    // total height — and with it `stripBottom`, the comments partition —
+    // stays a pure function of the top inset.
+
+    /// The author header band: a 28pt avatar with name/meta beside it.
+    static let cardHeaderHeight: CGFloat = 32
+    /// The header's avatar diameter (smaller than the bars' 32 — the card
+    /// is an index card, not a bar surface).
+    static let cardAvatarDiameter: CGFloat = 28
+    /// The metrics/actions band: likes, comments, repost, save.
+    static let cardActionsHeight: CGFloat = 32
+    /// Vertical breathing between the card's bands.
+    static let cardRowSpacing: CGFloat = Spacing.sm
+    /// The music/attribution line's reserved height at the caption column's
+    /// bottom (caption text must stop above it).
+    static let cardMusicLineHeight: CGFloat = 18
+    /// The card content's entrance micro-translation — the rows rise into
+    /// place as they fade in, the composer-entrance recipe at card scale.
+    static let cardContentEntranceOffset: CGFloat = 12
+
+    /// The card's fixed height: padding + header + media row + actions +
+    /// padding, with `cardRowSpacing` between bands.
+    static var cardHeight: CGFloat {
+        stripCardPadding + cardHeaderHeight + cardRowSpacing
+            + mediaSlotHeight + cardRowSpacing
+            + cardActionsHeight + stripCardPadding
+    }
+
     /// The engaged-state spring, shared by every leg of the one animation —
     /// and symmetric: the return runs the same envelope, with the footer
     /// crossfade riding inside it in both directions. ONE rhythm: media
@@ -52,12 +88,14 @@ enum SnapCommentsLayout {
     /// visibility flips, but every layer interpolates a translation.
     static let nativeFooterExitOffset: CGFloat = 160
 
-    /// Where the media docks, in cell coordinates: a 1:1 square tile.
+    /// Where the media docks, in cell coordinates: a 1:1 square tile on the
+    /// card's second band, below the author header.
     static func mediaSlotFrame(in bounds: CGRect, topInset: CGFloat) -> CGRect {
         guard bounds.height > 0 else { return .zero }
+        let card = stripCardFrame(in: bounds, topInset: topInset)
         return CGRect(
             x: Spacing.lg,
-            y: topInset + stripTopPadding,
+            y: card.minY + stripCardPadding + cardHeaderHeight + cardRowSpacing,
             width: mediaSlotHeight,
             height: mediaSlotHeight
         )
@@ -80,25 +118,43 @@ enum SnapCommentsLayout {
 
     /// The strip's lower boundary — the comments region's upper one.
     static func stripBottom(topInset: CGFloat) -> CGFloat {
-        topInset + stripTopPadding + mediaSlotHeight + stripBottomPadding
+        topInset + stripTopPadding + cardHeight + stripBottomPadding
     }
 
-    /// The floating Liquid Glass CARD that carries the strip: it wraps the
-    /// media slot (and the caption beside it) with `stripCardPadding` on
-    /// every side, inset from the screen edges — a distinct floating
-    /// surface over the full-height stream, not a wall-to-wall band.
+    /// The floating Liquid Glass CARD that carries the strip: the full
+    /// post reformatted (header / media+caption / actions), wrapped with
+    /// `stripCardPadding` and inset from the screen edges — a distinct
+    /// floating surface over the full-height stream, not a wall-to-wall
+    /// band. The PRIMARY rect of the engaged geometry: the media slot and
+    /// the strip's lower boundary both derive from it.
     static let stripCardCornerRadius: CGFloat = 16
     static let stripCardPadding: CGFloat = Spacing.sm
 
     static func stripCardFrame(in bounds: CGRect, topInset: CGFloat) -> CGRect {
-        let slot = mediaSlotFrame(in: bounds, topInset: topInset)
-        let inset = slot.minX - stripCardPadding
+        let inset = Spacing.lg - stripCardPadding
         return CGRect(
             x: inset,
-            y: slot.minY - stripCardPadding,
+            y: topInset + stripTopPadding,
             width: bounds.width - inset * 2,
-            height: slot.height + stripCardPadding * 2
+            height: cardHeight
         )
+    }
+
+    /// The caption column's hard floor, in cell coordinates: text stops at
+    /// the media row's bottom — minus the music line's reservation when the
+    /// post carries one (the line sits at the column's bottom edge).
+    static func captionColumnMaxY(slotMaxY: CGFloat, hasAudioLine: Bool) -> CGFloat {
+        slotMaxY - (hasAudioLine ? cardMusicLineHeight + Spacing.xs : 0)
+    }
+
+    /// How many whole caption lines the column can hold. A LINE cap, not a
+    /// height clamp: a height-compressed `UILabel` vertically centers and
+    /// clips both edges — only `numberOfLines` yields whole lines with an
+    /// honest trailing ellipsis. Never below one (a caption always shows
+    /// its first line, whatever Dynamic Type does to the ratio).
+    static func captionLineCapacity(columnHeight: CGFloat, lineHeight: CGFloat) -> Int {
+        guard lineHeight > 0 else { return 1 }
+        return max(1, Int((columnHeight / lineHeight).rounded(.down)))
     }
 
     /// The comments region's height: everything below the strip, down to

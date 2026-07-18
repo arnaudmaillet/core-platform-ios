@@ -72,6 +72,17 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// animates in/out via the `effect` property, the supported path.
     private let stripBackdrop = UIVisualEffectView(effect: nil)
     private var stripBackdropConstraints: [NSLayoutConstraint] = []
+    /// The card's content: the post's full identity suite (author header,
+    /// music line, metrics/actions), living inside the backdrop's content
+    /// view so the glass frame is its only geometry authority. Populated at
+    /// `configure` (engaging is choreography, never a fetch); rests
+    /// offstage (alpha 0, slight downward offset) and rises with the one
+    /// engagement spring. The media and the caption stay cell-level
+    /// siblings above it — the media docks by transform, the caption flies.
+    private let engagedCard = SnapEngagedPostCardView()
+    /// Whether the represented post renders the card's music line — the
+    /// caption column must stop above it (`captionColumnMaxY`).
+    private var engagedHasAudioLine = false
     /// Center-crop masks that square the docked media (one per render
     /// surface — a view can mask only one other view). Attached lazily at
     /// engage, animated full-bounds ↔ centered-square within the same
@@ -147,6 +158,18 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         stripBackdrop.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(stripBackdrop)
 
+        // The card content rides the backdrop, resting offstage: the
+        // disengage pose IS the entrance pose (alpha 0, a small downward
+        // offset), so engage/disengage are symmetric legs of one spring
+        // with no per-engagement preparation.
+        engagedCard.alpha = 0
+        engagedCard.transform = CGAffineTransform(
+            translationX: 0, y: SnapCommentsLayout.cardContentEntranceOffset
+        )
+        engagedCard.translatesAutoresizingMaskIntoConstraints = false
+        stripBackdrop.contentView.addSubview(engagedCard)
+        engagedCard.pin(to: stripBackdrop.contentView)
+
         chrome.pin(to: contentView)
 
         // Centred pause glyph (added last so it sits above the media/chrome).
@@ -161,9 +184,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         engagedCaptionLabel.font = UIFont.preferredFont(forTextStyle: .subheadline)
         engagedCaptionLabel.adjustsFontForContentSizeCategory = true
         engagedCaptionLabel.textColor = .white
-        // A strict two-line index-card blurb beside the compact tile; the
-        // ellipsis is the truth-teller for longer captions.
-        engagedCaptionLabel.numberOfLines = 2
+        // The FULL caption, sized to the column: the line cap is computed
+        // per engagement from the column's height (`captionLineCapacity`),
+        // so the caption uses everything between the media row's top and
+        // the music line; the ellipsis stays the truth-teller only when
+        // the column genuinely overflows.
+        engagedCaptionLabel.numberOfLines = 0
         engagedCaptionLabel.lineBreakMode = .byTruncatingTail
         engagedCaptionLabel.alpha = 0
         engagedCaptionLabel.isHidden = true
@@ -296,12 +322,28 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             if window != nil, stripBackdrop.effect == nil {
                 stripBackdrop.effect = UIBlurEffect(style: .systemThinMaterialDark)
             }
+            // The card's rows rise into place inside the same spring — the
+            // composer-entrance recipe at card scale.
+            engagedCard.alpha = 1
+            engagedCard.transform = .identity
             engagedCaptionLabel.isHidden = false
+            // The column's line budget: everything between the media row's
+            // top and the music line, in whole lines (a height-compressed
+            // label center-clips; only the line cap truncates honestly).
+            let columnTop = slot.minY + Spacing.xs
+            let columnMaxY = SnapCommentsLayout.captionColumnMaxY(
+                slotMaxY: slot.maxY, hasAudioLine: engagedHasAudioLine
+            )
+            engagedCaptionLabel.numberOfLines = SnapCommentsLayout.captionLineCapacity(
+                columnHeight: columnMaxY - columnTop,
+                lineHeight: engagedCaptionLabel.font.lineHeight
+            )
             NSLayoutConstraint.deactivate(engagedCaptionConstraints)
             engagedCaptionConstraints = [
                 engagedCaptionLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: slot.maxX + Spacing.md),
-                engagedCaptionLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: slot.minY + Spacing.xs),
+                engagedCaptionLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: columnTop),
                 engagedCaptionLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Spacing.lg),
+                engagedCaptionLabel.bottomAnchor.constraint(lessThanOrEqualTo: contentView.topAnchor, constant: columnMaxY),
             ]
             NSLayoutConstraint.activate(engagedCaptionConstraints)
             // The caption FLIES: the chrome's copy vanishes instantly (never
@@ -343,6 +385,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             chrome.setCommentsEngaged(false)
             commentsContainer.alpha = 0
             stripBackdrop.effect = nil // blur dissolves with the return spring
+            // The card's rows sink back to the entrance pose — the reverse
+            // leg of the same spring, and the ready state for the next
+            // engagement.
+            engagedCard.alpha = 0
+            engagedCard.transform = CGAffineTransform(
+                translationX: 0, y: SnapCommentsLayout.cardContentEntranceOffset
+            )
             // Reverse flight: the chrome caption returns with the chrome's
             // fade-in while this label flies back onto its frame, fading —
             // a cross-dissolve in motion, no completion hooks to sequence.
@@ -392,6 +441,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             self.onRequestComments?(id)
         }
         engagedCaptionLabel.text = model.caption
+        engagedCard.configure(with: model, pipeline: pipeline)
+        engagedHasAudioLine = model.audioText != nil
 
         let hasMedia = model.mediaURL != nil
         let isVideo = hasMedia && model.mediaKind == .video
@@ -441,6 +492,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// place.
     func updateCommentStreams(_ streams: FeedViewModel.CommentStreams) {
         chrome.updateCommentStreams(streams)
+        // The engaged card's comment metric rides the same seam (and the
+        // same known-zero honesty flag) as the chrome's surfaces.
+        engagedCard.setCommentCount(streams.commentCount, isLoaded: streams.isLoaded)
     }
 
     /// Visibility-scoped comment-surface control, driven by the view
@@ -580,6 +634,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         onRequestCommentsClose = nil
         engagedCaptionLabel.text = nil
         engagedCaptionLabel.transform = .identity
+        engagedCard.reset()
+        engagedHasAudioLine = false
         stopKenBurns()
         setPauseGlyphVisible(false)
         videoPlayback?.stop(videoRenderView)

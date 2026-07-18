@@ -1,5 +1,6 @@
 import CoreModels
 import DesignSystem
+import MediaCore
 import Testing
 import UIKit
 @testable import Feed
@@ -16,13 +17,16 @@ struct SnapCommentsPresentationTests {
 
     // MARK: - Layout authority
 
-    /// The docked slot is a perfect 1:1 square tile.
+    /// The docked slot is a perfect 1:1 square tile, on the card's second
+    /// band — below the author header.
     @Test func mediaSlotIsSquare() {
         let slot = SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset)
         #expect(slot.width == slot.height)
         #expect(slot.height == SnapCommentsLayout.mediaSlotHeight)
         #expect(slot.minX == Spacing.lg)
-        #expect(slot.minY == Self.topInset + SnapCommentsLayout.stripTopPadding)
+        #expect(slot.minY == Self.topInset + SnapCommentsLayout.stripTopPadding
+            + SnapCommentsLayout.stripCardPadding + SnapCommentsLayout.cardHeaderHeight
+            + SnapCommentsLayout.cardRowSpacing)
     }
 
     /// Squareness comes from a CENTERED CROP, never a squash: the crop is
@@ -210,16 +214,35 @@ struct SnapCommentsPresentationTests {
         #expect(sequence(first: railHit, next: { $0.superview }).contains { $0 is SnapShortcutRailView })
     }
 
-    /// The glass card wraps the slot with uniform padding, inset from the
-    /// screen edges — a floating object, not a band.
+    /// The glass card stacks its three bands around the slot — header
+    /// above, actions below, uniform padding at the extremes — inset from
+    /// the screen edges: a floating object, not a band.
     @Test func stripCardWrapsTheSlot() {
         let slot = SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset)
         let card = SnapCommentsLayout.stripCardFrame(in: Self.container, topInset: Self.topInset)
-        #expect(card.minY == slot.minY - SnapCommentsLayout.stripCardPadding)
-        #expect(card.maxY == slot.maxY + SnapCommentsLayout.stripCardPadding)
+        #expect(card.minY == slot.minY - SnapCommentsLayout.stripCardPadding
+            - SnapCommentsLayout.cardHeaderHeight - SnapCommentsLayout.cardRowSpacing)
+        #expect(card.maxY == slot.maxY + SnapCommentsLayout.cardRowSpacing
+            + SnapCommentsLayout.cardActionsHeight + SnapCommentsLayout.stripCardPadding)
         #expect(card.minX == slot.minX - SnapCommentsLayout.stripCardPadding)
         #expect(card.maxX == Self.container.width - card.minX)
+        #expect(card.height == SnapCommentsLayout.cardHeight)
         #expect(card.maxY < SnapCommentsLayout.stripBottom(topInset: Self.topInset))
+    }
+
+    /// The caption column's floor and line budget: the music line steals
+    /// its reservation only when the post carries one, and the line cap is
+    /// whole lines, floored, never zero.
+    @Test func captionColumnReservesTheMusicLine() {
+        let slot = SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset)
+        let bare = SnapCommentsLayout.captionColumnMaxY(slotMaxY: slot.maxY, hasAudioLine: false)
+        let withMusic = SnapCommentsLayout.captionColumnMaxY(slotMaxY: slot.maxY, hasAudioLine: true)
+        #expect(bare == slot.maxY)
+        #expect(withMusic == slot.maxY - SnapCommentsLayout.cardMusicLineHeight - Spacing.xs)
+        #expect(SnapCommentsLayout.captionLineCapacity(columnHeight: 100, lineHeight: 20) == 5)
+        #expect(SnapCommentsLayout.captionLineCapacity(columnHeight: 99, lineHeight: 20) == 4)
+        #expect(SnapCommentsLayout.captionLineCapacity(columnHeight: 5, lineHeight: 20) == 1)
+        #expect(SnapCommentsLayout.captionLineCapacity(columnHeight: 100, lineHeight: 0) == 1)
     }
 
     /// The layered engaged hierarchy: the comments host spans the FULL cell
@@ -326,6 +349,119 @@ struct SnapCommentsPresentationTests {
         let large = CommentsInputBar.nudgeOffset(for: 400)
         #expect(large > CommentsInputBar.nudgeOffset(for: 100))
         #expect(large < 40)
+    }
+
+    // MARK: - Engaged card content
+
+    private func makeConfiguredCell(audioText: String?, likeCount: Int64) -> SnapFeedCell {
+        let cell = SnapFeedCell(frame: Self.container)
+        cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
+        cell.configure(
+            with: FeedItemDisplayModel(
+                id: PostID("post-0004"),
+                authorID: ProfileID("profile-1"),
+                authorName: "Ana",
+                metaText: "@ana · 3m",
+                avatarURL: nil,
+                caption: "caption",
+                mediaURL: URL(string: "mock://media/4"),
+                mediaKind: audioText == nil ? .image : .video,
+                thumbnailURL: nil,
+                audioText: audioText,
+                likeCount: likeCount
+            ),
+            pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            videoPlayback: nil
+        )
+        cell.layoutIfNeeded()
+        return cell
+    }
+
+    private func engagedCard(of cell: SnapFeedCell) throws -> SnapEngagedPostCardView {
+        let backdrop = try #require(
+            cell.contentView.subviews.compactMap { $0 as? UIVisualEffectView }.first
+        )
+        return try #require(
+            backdrop.contentView.subviews.compactMap { $0 as? SnapEngagedPostCardView }.first
+        )
+    }
+
+    private func metricButton(_ label: String, in card: UIView) -> UIButton? {
+        var stack: [UIView] = [card]
+        while let view = stack.popLast() {
+            if let button = view as? UIButton, button.accessibilityLabel == label { return button }
+            stack.append(contentsOf: view.subviews)
+        }
+        return nil
+    }
+
+    /// The card is the POST: author header, music credits, and the metrics
+    /// row all render from the same display model that feeds the page —
+    /// likes from the hydration snapshot, comments from the loaded streams
+    /// (blank until loaded — the known-zero honesty seam), repost/save as
+    /// affordance seams.
+    @Test func engagedCardRendersTheFullPost() throws {
+        let cell = makeConfiguredCell(audioText: "Original audio · @ana", likeCount: 1234)
+        let card = try engagedCard(of: cell)
+
+        var labels: [UILabel] = []
+        var stack: [UIView] = [card]
+        while let view = stack.popLast() {
+            if let label = view as? UILabel { labels.append(label) }
+            stack.append(contentsOf: view.subviews)
+        }
+        let texts = labels.compactMap(\.text)
+        #expect(texts.contains("Ana"))
+        #expect(texts.contains("@ana · 3m"))
+        #expect(texts.contains("Original audio · @ana"))
+
+        let like = try #require(metricButton("Like", in: card))
+        #expect(like.configuration?.attributedTitle.map { String($0.characters) } == "1.2k")
+        // Comments blank until the streams load…
+        let comments = try #require(metricButton("Comments", in: card))
+        #expect(comments.configuration?.attributedTitle == nil)
+        // …then follow the same seam as the chrome's surfaces.
+        cell.updateCommentStreams(FeedViewModel.CommentStreams(
+            reactions: [], subtitles: [], commentCount: 56, isLoaded: true
+        ))
+        #expect(comments.configuration?.attributedTitle.map { String($0.characters) } == "56")
+        // The affordance-only seams exist without counts.
+        #expect(metricButton("Repost", in: card) != nil)
+        #expect(metricButton("Save", in: card) != nil)
+    }
+
+    /// Posts without an audio line hide the music row entirely — the
+    /// header's meta already carries identity; no fallback duplication.
+    @Test func engagedCardHidesMusicRowWithoutAudio() throws {
+        let cell = makeConfiguredCell(audioText: nil, likeCount: 0)
+        let card = try engagedCard(of: cell)
+        var stack: [UIView] = [card]
+        var musicVisible = false
+        while let view = stack.popLast() {
+            if let label = view as? UILabel, label.text?.contains("audio") == true,
+               !label.isHidden { musicVisible = true }
+            stack.append(contentsOf: view.subviews)
+        }
+        #expect(musicVisible == false)
+        // Zero likes render no count — a bare heart, not a lying "0".
+        let like = try #require(metricButton("Like", in: card))
+        #expect(like.configuration?.attributedTitle == nil)
+    }
+
+    /// The card content's choreography: offstage at rest (alpha 0, the
+    /// entrance offset), risen while engaged, and back to the entrance
+    /// pose on disengage — symmetric legs of the one spring.
+    @Test func engagedCardRisesAndSinksWithTheSpring() throws {
+        let cell = makeConfiguredCell(audioText: nil, likeCount: 0)
+        let card = try engagedCard(of: cell)
+        #expect(card.alpha == 0)
+        #expect(card.transform.ty == SnapCommentsLayout.cardContentEntranceOffset)
+        cell.setCommentsEngaged(true)
+        #expect(card.alpha == 1)
+        #expect(card.transform == .identity)
+        cell.setCommentsEngaged(false)
+        #expect(card.alpha == 0)
+        #expect(card.transform.ty == SnapCommentsLayout.cardContentEntranceOffset)
     }
 
     // MARK: - Entry point
