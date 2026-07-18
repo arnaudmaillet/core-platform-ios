@@ -6,11 +6,14 @@ import UIKit
 ///
 ///   NORMAL:  full-bleed media under the overlay chrome.
 ///   ENGAGED: [nav identity pill]                  — screen chrome, untouched
-///            [author header row        ]          ┐
-///            [docked media | caption   ]          │ the CARD — the post
-///            [              music line ]          │ itself, reformatted
-///            [likes · comments · repost · save]   ┘
+///            [media │ caption          ]          ┐ the CARD — the post
+///            [      │ ♫ music line     ]          │ reformatted: media
+///            [      │ ♥ 💬 ⇄ save      ]          ┘ left, one column right
 ///            [comments container → cell bottom]   — cell-owned, child view
+///
+/// (Author identity deliberately does NOT appear in the card: the nav
+/// pill — screen chrome — already carries it, and fading the pill means
+/// fighting its glass platter. One identity, zero duplication.)
 ///
 /// ONE surface, one motion profile: every element of the mutation lives in
 /// the cell's own hierarchy and animates in a single spring block (the
@@ -37,37 +40,29 @@ enum SnapCommentsLayout {
     static let stripTopPadding: CGFloat = Spacing.sm
     static let stripBottomPadding: CGFloat = Spacing.md
 
-    // MARK: The card's interior bands
+    // MARK: The card's interior
     //
-    // The engaged card is the POST, reformatted — not a caption summary. It
-    // stacks three bands around the media row: the author header above, the
-    // music/attribution line inside the caption column, and the metrics/
-    // actions row below. All heights are fixed constants so the card's
-    // total height — and with it `stripBottom`, the comments partition —
-    // stays a pure function of the top inset.
+    // The engaged card is the POST, reformatted — not a caption summary,
+    // and not a stack of bands: ONE horizontal split. The media square
+    // owns the left edge; a single vertical column beside it hosts the
+    // caption, the music/attribution line, and the metrics/actions row,
+    // bottom-anchored in that order. The card is exactly one media row
+    // tall, so its height — and with it `stripBottom`, the comments
+    // partition — stays a pure function of the constants.
 
-    /// The author header band: a 28pt avatar with name/meta beside it.
-    static let cardHeaderHeight: CGFloat = 32
-    /// The header's avatar diameter (smaller than the bars' 32 — the card
-    /// is an index card, not a bar surface).
-    static let cardAvatarDiameter: CGFloat = 28
-    /// The metrics/actions band: likes, comments, repost, save.
-    static let cardActionsHeight: CGFloat = 32
-    /// Vertical breathing between the card's bands.
-    static let cardRowSpacing: CGFloat = Spacing.sm
-    /// The music/attribution line's reserved height at the caption column's
-    /// bottom (caption text must stop above it).
+    /// The metrics/actions row at the column's bottom: likes, comments,
+    /// repost, save.
+    static let cardActionsHeight: CGFloat = 28
+    /// The music/attribution line's reserved height, directly above the
+    /// actions row (caption text must stop above both).
     static let cardMusicLineHeight: CGFloat = 18
     /// The card content's entrance micro-translation — the rows rise into
     /// place as they fade in, the composer-entrance recipe at card scale.
     static let cardContentEntranceOffset: CGFloat = 12
 
-    /// The card's fixed height: padding + header + media row + actions +
-    /// padding, with `cardRowSpacing` between bands.
+    /// The card's fixed height: the media square with uniform padding.
     static var cardHeight: CGFloat {
-        stripCardPadding + cardHeaderHeight + cardRowSpacing
-            + mediaSlotHeight + cardRowSpacing
-            + cardActionsHeight + stripCardPadding
+        stripCardPadding + mediaSlotHeight + stripCardPadding
     }
 
     /// The engaged-state spring, shared by every leg of the one animation —
@@ -89,13 +84,13 @@ enum SnapCommentsLayout {
     static let nativeFooterExitOffset: CGFloat = 160
 
     /// Where the media docks, in cell coordinates: a 1:1 square tile on the
-    /// card's second band, below the author header.
+    /// card's left edge, uniformly padded.
     static func mediaSlotFrame(in bounds: CGRect, topInset: CGFloat) -> CGRect {
         guard bounds.height > 0 else { return .zero }
         let card = stripCardFrame(in: bounds, topInset: topInset)
         return CGRect(
             x: Spacing.lg,
-            y: card.minY + stripCardPadding + cardHeaderHeight + cardRowSpacing,
+            y: card.minY + stripCardPadding,
             width: mediaSlotHeight,
             height: mediaSlotHeight
         )
@@ -140,11 +135,13 @@ enum SnapCommentsLayout {
         )
     }
 
-    /// The caption column's hard floor, in cell coordinates: text stops at
-    /// the media row's bottom — minus the music line's reservation when the
-    /// post carries one (the line sits at the column's bottom edge).
+    /// The caption column's hard floor, in cell coordinates: the column
+    /// stacks bottom-up from the slot's bottom edge — actions row first,
+    /// then the music line when the post carries one — and the caption
+    /// stops above whatever is reserved.
     static func captionColumnMaxY(slotMaxY: CGFloat, hasAudioLine: Bool) -> CGFloat {
-        slotMaxY - (hasAudioLine ? cardMusicLineHeight + Spacing.xs : 0)
+        slotMaxY - cardActionsHeight - Spacing.xs
+            - (hasAudioLine ? cardMusicLineHeight + Spacing.xs : 0)
     }
 
     /// How many whole caption lines the column can hold. A LINE cap, not a

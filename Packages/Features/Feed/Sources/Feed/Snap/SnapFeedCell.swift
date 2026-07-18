@@ -72,9 +72,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// animates in/out via the `effect` property, the supported path.
     private let stripBackdrop = UIVisualEffectView(effect: nil)
     private var stripBackdropConstraints: [NSLayoutConstraint] = []
-    /// The card's content: the post's full identity suite (author header,
-    /// music line, metrics/actions), living inside the backdrop's content
-    /// view so the glass frame is its only geometry authority. Populated at
+    /// The card's content: the post's music line and metrics/actions,
+    /// stacked in the column beside the media hole (author identity stays
+    /// in the nav pill — no duplication), living inside the backdrop's
+    /// content view so the glass frame is its only geometry authority. Populated at
     /// `configure` (engaging is choreography, never a fetch); rests
     /// offstage (alpha 0, slight downward offset) and rises with the one
     /// engagement spring. The media and the caption stay cell-level
@@ -441,7 +442,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             self.onRequestComments?(id)
         }
         engagedCaptionLabel.text = model.caption
-        engagedCard.configure(with: model, pipeline: pipeline)
+        engagedCard.configure(with: model)
         engagedHasAudioLine = model.audioText != nil
 
         let hasMedia = model.mediaURL != nil

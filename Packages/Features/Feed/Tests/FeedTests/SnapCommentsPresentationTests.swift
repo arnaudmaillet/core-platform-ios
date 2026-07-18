@@ -25,8 +25,7 @@ struct SnapCommentsPresentationTests {
         #expect(slot.height == SnapCommentsLayout.mediaSlotHeight)
         #expect(slot.minX == Spacing.lg)
         #expect(slot.minY == Self.topInset + SnapCommentsLayout.stripTopPadding
-            + SnapCommentsLayout.stripCardPadding + SnapCommentsLayout.cardHeaderHeight
-            + SnapCommentsLayout.cardRowSpacing)
+            + SnapCommentsLayout.stripCardPadding)
     }
 
     /// Squareness comes from a CENTERED CROP, never a squash: the crop is
@@ -214,31 +213,33 @@ struct SnapCommentsPresentationTests {
         #expect(sequence(first: railHit, next: { $0.superview }).contains { $0 is SnapShortcutRailView })
     }
 
-    /// The glass card stacks its three bands around the slot — header
-    /// above, actions below, uniform padding at the extremes — inset from
-    /// the screen edges: a floating object, not a band.
+    /// The glass card is exactly one media row tall — the slot wrapped
+    /// with uniform padding, inset from the screen edges: a floating
+    /// object, not a band. The column's rows live INSIDE the slot's
+    /// vertical extent, so they add no height.
     @Test func stripCardWrapsTheSlot() {
         let slot = SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset)
         let card = SnapCommentsLayout.stripCardFrame(in: Self.container, topInset: Self.topInset)
-        #expect(card.minY == slot.minY - SnapCommentsLayout.stripCardPadding
-            - SnapCommentsLayout.cardHeaderHeight - SnapCommentsLayout.cardRowSpacing)
-        #expect(card.maxY == slot.maxY + SnapCommentsLayout.cardRowSpacing
-            + SnapCommentsLayout.cardActionsHeight + SnapCommentsLayout.stripCardPadding)
+        #expect(card.minY == slot.minY - SnapCommentsLayout.stripCardPadding)
+        #expect(card.maxY == slot.maxY + SnapCommentsLayout.stripCardPadding)
         #expect(card.minX == slot.minX - SnapCommentsLayout.stripCardPadding)
         #expect(card.maxX == Self.container.width - card.minX)
         #expect(card.height == SnapCommentsLayout.cardHeight)
         #expect(card.maxY < SnapCommentsLayout.stripBottom(topInset: Self.topInset))
     }
 
-    /// The caption column's floor and line budget: the music line steals
-    /// its reservation only when the post carries one, and the line cap is
-    /// whole lines, floored, never zero.
+    /// The caption column's floor and line budget: the column stacks
+    /// bottom-up — actions always reserved, the music line only when the
+    /// post carries one — and the line cap is whole lines, floored, never
+    /// zero.
     @Test func captionColumnReservesTheMusicLine() {
         let slot = SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset)
         let bare = SnapCommentsLayout.captionColumnMaxY(slotMaxY: slot.maxY, hasAudioLine: false)
         let withMusic = SnapCommentsLayout.captionColumnMaxY(slotMaxY: slot.maxY, hasAudioLine: true)
-        #expect(bare == slot.maxY)
-        #expect(withMusic == slot.maxY - SnapCommentsLayout.cardMusicLineHeight - Spacing.xs)
+        let actionsReserved = SnapCommentsLayout.cardActionsHeight + Spacing.xs
+        #expect(bare == slot.maxY - actionsReserved)
+        #expect(withMusic == slot.maxY - actionsReserved
+            - SnapCommentsLayout.cardMusicLineHeight - Spacing.xs)
         #expect(SnapCommentsLayout.captionLineCapacity(columnHeight: 100, lineHeight: 20) == 5)
         #expect(SnapCommentsLayout.captionLineCapacity(columnHeight: 99, lineHeight: 20) == 4)
         #expect(SnapCommentsLayout.captionLineCapacity(columnHeight: 5, lineHeight: 20) == 1)
@@ -395,11 +396,12 @@ struct SnapCommentsPresentationTests {
         return nil
     }
 
-    /// The card is the POST: author header, music credits, and the metrics
-    /// row all render from the same display model that feeds the page —
-    /// likes from the hydration snapshot, comments from the loaded streams
-    /// (blank until loaded — the known-zero honesty seam), repost/save as
-    /// affordance seams.
+    /// The card is the POST's column: music credits and the metrics row
+    /// render from the same display model that feeds the page — likes from
+    /// the hydration snapshot, comments from the loaded streams (blank
+    /// until loaded — the known-zero honesty seam), repost/save as
+    /// affordance seams. Author identity must NOT render here: the nav
+    /// pill already carries it (zero duplication by design).
     @Test func engagedCardRendersTheFullPost() throws {
         let cell = makeConfiguredCell(audioText: "Original audio · @ana", likeCount: 1234)
         let card = try engagedCard(of: cell)
@@ -411,9 +413,9 @@ struct SnapCommentsPresentationTests {
             stack.append(contentsOf: view.subviews)
         }
         let texts = labels.compactMap(\.text)
-        #expect(texts.contains("Ana"))
-        #expect(texts.contains("@ana · 3m"))
         #expect(texts.contains("Original audio · @ana"))
+        #expect(!texts.contains("Ana"))
+        #expect(!texts.contains("@ana · 3m"))
 
         let like = try #require(metricButton("Like", in: card))
         #expect(like.configuration?.attributedTitle.map { String($0.characters) } == "1.2k")
@@ -430,8 +432,8 @@ struct SnapCommentsPresentationTests {
         #expect(metricButton("Save", in: card) != nil)
     }
 
-    /// Posts without an audio line hide the music row entirely — the
-    /// header's meta already carries identity; no fallback duplication.
+    /// Posts without an audio line hide the music row entirely — identity
+    /// lives in the nav pill; no fallback duplication.
     @Test func engagedCardHidesMusicRowWithoutAudio() throws {
         let cell = makeConfiguredCell(audioText: nil, likeCount: 0)
         let card = try engagedCard(of: cell)
