@@ -49,10 +49,26 @@ final class CommentsInputBar: UIView {
     private let placeholderLabel = UILabel()
     private let mediaButton = UIButton(configuration: .glass())
     private let sendButton = UIButton(configuration: .prominentGlass())
-    /// The send slot's resting occupant while the field is empty (and a
-    /// close handler is wired): tapping it collapses the engagement. Send
-    /// and close share one slot and crossfade as typing starts/stops.
+    /// The trailing slot's UTILITY face (send's overlay partner): a
+    /// keyboard-state morphing control. Keyboard closed → the close ✕
+    /// (collapses the engagement); keyboard open with an empty field →
+    /// the dismiss-keyboard chevron (retires the keyboard, engagement
+    /// untouched). Send takes the slot only while there is text to send
+    /// (or a submission in flight).
     private let closeButton = UIButton(configuration: .glass())
+    /// Whether the keyboard is up — the third axis of the trailing
+    /// toggle, driven by the keyboardWillShow/Hide notifications (the
+    /// engaged bar is the screen's only text input, so the global signal
+    /// is unambiguous). Internal setter for tests: the state machine is
+    /// unit-tested without driving a real keyboard.
+    private(set) var isKeyboardOpen = false
+    /// Which glyph the utility button currently wears (avoids re-running
+    /// the crossfade transition on every unrelated update).
+    private var utilityShowsKeyboardDismiss = false
+    /// Removes the keyboard observers on release — a nonisolated deinit
+    /// cannot touch main-actor state, so the tokens live in a bag whose
+    /// own deinit does the unregistering (the VC-side pattern).
+    private let keyboardObservers = NotificationObserverTokenBag()
     private var fieldHeight: NSLayoutConstraint!
 
     override init(frame: CGRect) {
@@ -97,6 +113,7 @@ final class CommentsInputBar: UIView {
             withConfiguration: UIImage.SymbolConfiguration(weight: .semibold)
         )
         sendButton.configuration?.cornerStyle = .capsule
+        sendButton.accessibilityLabel = "Send comment"
         sendButton.addAction(UIAction { [weak self] _ in self?.sendTapped() }, for: .primaryActionTriggered)
 
         closeButton.configuration?.image = UIImage(
@@ -105,7 +122,22 @@ final class CommentsInputBar: UIView {
         )
         closeButton.configuration?.cornerStyle = .capsule
         closeButton.accessibilityLabel = "Close comments"
-        closeButton.addAction(UIAction { [weak self] _ in self?.onClose?() }, for: .primaryActionTriggered)
+        closeButton.addAction(UIAction { [weak self] _ in self?.utilityTapped() }, for: .primaryActionTriggered)
+
+        // The keyboard axis of the trailing toggle: the utility face
+        // morphs ✕ ↔ dismiss-keyboard as the keyboard comes and goes.
+        keyboardObservers.tokens = [
+            NotificationCenter.default.addObserver(
+                forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.setKeyboardOpen(true) }
+            },
+            NotificationCenter.default.addObserver(
+                forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.setKeyboardOpen(false) }
+            },
+        ]
 
         addSubview(mediaButton)
         addSubview(field)
@@ -237,19 +269,78 @@ final class CommentsInputBar: UIView {
         onSend?(text)
     }
 
-    /// The trailing slot's toggle: CLOSE while the field is empty (and a
-    /// close handler is wired), SEND once typing starts or a submission is
-    /// in flight — swapped as a short crossfade, never a pop.
+    /// The field's current draft. Internal for tests (the trailing state
+    /// machine is exercised without a real keyboard) and any future draft
+    /// restoration; routes through the delegate path so the toggle and
+    /// the field height stay honest.
+    var draftText: String {
+        get { textView.text ?? "" }
+        set {
+            textView.text = newValue
+            textViewDidChange(textView)
+        }
+    }
+
+    /// The utility face's tap: with the keyboard up it ONLY retires the
+    /// keyboard (the engagement stays); with it down, it collapses the
+    /// engagement. One slot, one thumb position, state-appropriate intent.
+    private func utilityTapped() {
+        if isKeyboardOpen {
+            textView.resignFirstResponder()
+        } else {
+            onClose?()
+        }
+    }
+
+    /// The keyboard seam behind the notification observers. Internal (not
+    /// private) so the three-state trailing machine is unit-testable
+    /// without driving a real keyboard.
+    func setKeyboardOpen(_ open: Bool) {
+        guard open != isKeyboardOpen else { return }
+        isKeyboardOpen = open
+        updateTrailingButtons(animated: true)
+    }
+
+    /// The trailing slot's three-state toggle (when a close handler is
+    /// wired — the pushed screen keeps its permanent send):
+    ///   keyboard CLOSED            → ✕ (collapse the engagement)
+    ///   keyboard OPEN, field empty → dismiss-keyboard chevron
+    ///   keyboard OPEN, has text    → send (also while a send is in flight)
+    /// Swapped as short crossfades — the slot swap animates alpha, the
+    /// utility face's glyph swap is its own cross-dissolve — never a pop.
     private func updateTrailingButtons(animated: Bool) {
         let hasText = !textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         sendButton.isEnabled = hasText && !isSending
-        let showsSend = onClose == nil || hasText || isSending
+        let showsSend = onClose == nil || isSending || (hasText && isKeyboardOpen)
         let apply = {
             self.sendButton.alpha = showsSend ? 1 : 0
             self.closeButton.alpha = showsSend ? 0 : 1
         }
         sendButton.isUserInteractionEnabled = showsSend
         closeButton.isUserInteractionEnabled = !showsSend
+
+        let wantsKeyboardDismiss = isKeyboardOpen && onClose != nil
+        if wantsKeyboardDismiss != utilityShowsKeyboardDismiss {
+            utilityShowsKeyboardDismiss = wantsKeyboardDismiss
+            let swapGlyph = {
+                self.closeButton.configuration?.image = UIImage(
+                    systemName: wantsKeyboardDismiss ? "keyboard.chevron.compact.down" : "xmark",
+                    withConfiguration: UIImage.SymbolConfiguration(weight: .semibold)
+                )
+                self.closeButton.accessibilityLabel =
+                    wantsKeyboardDismiss ? "Dismiss keyboard" : "Close comments"
+            }
+            if animated {
+                UIView.transition(
+                    with: closeButton, duration: 0.15,
+                    options: [.transitionCrossDissolve, .allowUserInteraction],
+                    animations: swapGlyph
+                )
+            } else {
+                swapGlyph()
+            }
+        }
+
         if animated {
             UIView.animate(withDuration: 0.15, animations: apply)
         } else {
@@ -280,5 +371,16 @@ extension CommentsInputBar: UITextViewDelegate {
         placeholderLabel.isHidden = textView.hasText
         updateTrailingButtons(animated: true)
         updateFieldHeight()
+    }
+}
+
+/// Holds notification tokens and unregisters them on its own deallocation
+/// (when the owning bar is released). `@unchecked Sendable` so its `deinit`
+/// may run off the main actor; `removeObserver` is itself thread-safe, and
+/// the tokens are only mutated on the main actor at setup time.
+private final class NotificationObserverTokenBag: @unchecked Sendable {
+    var tokens: [NSObjectProtocol] = []
+    deinit {
+        for token in tokens { NotificationCenter.default.removeObserver(token) }
     }
 }

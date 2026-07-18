@@ -594,6 +594,55 @@ struct SnapCommentsPresentationTests {
         #expect(changes == [.trending])
     }
 
+    /// The composer's trailing three-state machine (engaged bar — a close
+    /// handler is wired): keyboard closed → ✕ closes the engagement;
+    /// keyboard open + empty → the dismiss-keyboard face; keyboard open +
+    /// text → send. The pushed screen (no close handler) keeps its
+    /// permanent send regardless of the keyboard.
+    @Test func composerTrailingSlotFollowsKeyboardAndText() throws {
+        let bar = CommentsInputBar()
+        bar.onClose = {}
+        func button(_ label: String) -> UIButton? {
+            bar.subviews.compactMap { $0 as? UIButton }.first { $0.accessibilityLabel == label }
+        }
+        let send = try #require(button("Send comment"))
+
+        // Keyboard closed, empty: the close ✕.
+        #expect(button("Close comments") != nil)
+        #expect(send.alpha == 0)
+
+        // Keyboard closed, text drafted: STILL the ✕ (send needs the
+        // keyboard; a parked draft keeps the close affordance).
+        bar.draftText = "draft"
+        #expect(button("Close comments") != nil)
+        #expect(send.alpha == 0)
+
+        // Keyboard opens over the draft: send takes the slot.
+        bar.setKeyboardOpen(true)
+        #expect(send.alpha == 1)
+        #expect(send.isEnabled)
+
+        // Text cleared with the keyboard up: the dismiss-keyboard face —
+        // tapping must retire the keyboard, never the engagement.
+        bar.draftText = ""
+        #expect(button("Dismiss keyboard") != nil)
+        #expect(button("Close comments") == nil)
+        #expect(send.alpha == 0)
+
+        // Keyboard retires: back to the ✕.
+        bar.setKeyboardOpen(false)
+        #expect(button("Close comments") != nil)
+
+        // Pushed screen (no close handler): permanent send, no utility.
+        let pushed = CommentsInputBar()
+        let pushedSend = try #require(
+            pushed.subviews.compactMap { $0 as? UIButton }.first { $0.accessibilityLabel == "Send comment" }
+        )
+        #expect(pushedSend.alpha == 1)
+        pushed.setKeyboardOpen(true)
+        #expect(pushedSend.alpha == 1)
+    }
+
     // MARK: - Entry point
 
     /// Every comments surface is an engagement entry point — the empty-state
