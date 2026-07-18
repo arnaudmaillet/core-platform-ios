@@ -157,8 +157,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// rest of the mutation.
     func installComments(_ view: UIView) {
         commentsContainer.isHidden = false
+        // Pure crossfade, no translation: the bottom band's geometry must
+        // hold dead-still while the old footer and the composer swap.
         commentsContainer.alpha = 0
-        commentsContainer.transform = CGAffineTransform(translationX: 0, y: 24)
         NSLayoutConstraint.deactivate(commentsContainerConstraints)
         commentsContainerConstraints = [
             commentsContainer.topAnchor.constraint(
@@ -176,6 +177,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // view's own bottom bar, keyboard-anchored) as the screen footer.
         view.pin(to: commentsContainer)
         contentView.layoutIfNeeded()
+    }
+
+    /// The trailing width the engaged comment rows must leave clear so the
+    /// action rail's column is exclusively its own (zero overlap). Read
+    /// after layout: the rail's leading edge is the boundary.
+    var commentsRailExclusionWidth: CGFloat {
+        chrome.railExclusionWidth
     }
 
     /// Reclaims the region after disengagement settles (the VC removes the
@@ -235,7 +243,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             }
             chrome.setCommentsEngaged(true)
             commentsContainer.alpha = 1
-            commentsContainer.transform = .identity
             engagedCaptionLabel.isHidden = false
             NSLayoutConstraint.deactivate(engagedCaptionConstraints)
             engagedCaptionConstraints = [
@@ -282,7 +289,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             }
             chrome.setCommentsEngaged(false)
             commentsContainer.alpha = 0
-            commentsContainer.transform = CGAffineTransform(translationX: 0, y: 16)
             // Reverse flight: the chrome caption returns with the chrome's
             // fade-in while this label flies back onto its frame, fading —
             // a cross-dissolve in motion, no completion hooks to sequence.

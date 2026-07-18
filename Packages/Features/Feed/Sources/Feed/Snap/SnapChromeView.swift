@@ -438,6 +438,15 @@ final class SnapChromeView: UIView {
         commentTicker.setActive(active)
     }
 
+    /// How much trailing width the engaged comments content must reserve
+    /// for the rail's exclusive column: from the rail's leading edge to the
+    /// chrome's trailing edge, plus a breathing gap. Zero when the rail is
+    /// hidden (text-only pages).
+    var railExclusionWidth: CGFloat {
+        guard !shortcutRail.isHidden, shortcutRail.frame.width > 0 else { return 0 }
+        return max(0, bounds.width - shortcutRail.frame.minX) + Spacing.sm
+    }
+
     /// The comments engagement's chrome cut: fades the comment surfaces,
     /// the scrim, and the "+" anchor — the pieces the engaged layout
     /// replaces or orphans — while the SHORTCUT RAIL stays untouched (the

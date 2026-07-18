@@ -31,12 +31,10 @@ final class PostDetailViewController: UIViewController {
 
     private let commentsHeaderLabel = UILabel()
     private let commentsStack = UIStackView()
-    private let composeBar = UIView()
-    private let composeField = UITextField()
-    private let sendButton = UIButton(configuration: .plain())
-    private let composeSpinner = UIActivityIndicatorView(style: .medium)
+    private let composeBar = CommentsInputBar()
 
     private var mediaAspectConstraint: NSLayoutConstraint?
+    private var contentTrailingConstraint: NSLayoutConstraint?
     private var imageTasks: [Task<Void, Never>] = []
 
     init(viewModel: PostDetailViewModel, imagePipeline: ImagePipeline, mode: PostDetailMode = .full) {
@@ -169,10 +167,15 @@ final class PostDetailViewController: UIViewController {
 
         let content = scrollView.contentLayoutGuide
         let frame = scrollView.frameLayoutGuide
+        // The trailing edge is a stored constraint: the snap feed's engaged
+        // layout widens it to keep comment rows clear of the action rail
+        // (`setContentTrailingInset`).
+        let trailing = contentStack.trailingAnchor.constraint(equalTo: frame.trailingAnchor, constant: -Spacing.lg)
+        contentTrailingConstraint = trailing
         contentStack.constrain(in: scrollView) { _ in
             contentStack.topAnchor.constraint(equalTo: content.topAnchor, constant: Spacing.lg)
             contentStack.leadingAnchor.constraint(equalTo: frame.leadingAnchor, constant: Spacing.lg)
-            contentStack.trailingAnchor.constraint(equalTo: frame.trailingAnchor, constant: -Spacing.lg)
+            trailing
             contentStack.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -Spacing.lg)
         }
         NSLayoutConstraint.activate([
@@ -203,56 +206,27 @@ final class PostDetailViewController: UIViewController {
     }
 
     private func configureComposeBar() {
-        composeBar.backgroundColor = .systemBackground
-
-        composeField.placeholder = "Add a comment…"
-        composeField.borderStyle = .roundedRect
-        composeField.returnKeyType = .send
-        composeField.delegate = self
-        composeField.font = .preferredFont(forTextStyle: .body)
-        composeField.adjustsFontForContentSizeCategory = true
-
-        var sendConfig = UIButton.Configuration.plain()
-        sendConfig.image = UIImage(systemName: "arrow.up.circle.fill")
-        sendConfig.contentInsets = .zero
-        sendButton.configuration = sendConfig
-        sendButton.addAction(UIAction { [weak self] _ in self?.sendComment() }, for: .primaryActionTriggered)
-        sendButton.setContentHuggingPriority(.required, for: .horizontal)
-
-        composeSpinner.hidesWhenStopped = true
-
-        let row = UIStackView(arrangedSubviews: [composeField, sendButton, composeSpinner])
-        row.axis = .horizontal
-        row.alignment = .center
-        row.spacing = Spacing.sm
-        row.pin(to: composeBar, insets: NSDirectionalEdgeInsets(
-            top: Spacing.sm, leading: Spacing.lg, bottom: Spacing.sm, trailing: Spacing.lg
-        ))
-
-        let separator = UIView()
-        separator.backgroundColor = .separator
-
+        // The Liquid Glass composer (Private Messages' recipe): a floating
+        // capsule field, no opaque bar, no separator — the glass carries
+        // its own boundary against whatever is behind it.
+        composeBar.onSend = { [weak self] text in self?.viewModel.submitComment(text) }
         view.addSubview(composeBar)
         composeBar.translatesAutoresizingMaskIntoConstraints = false
-        separator.translatesAutoresizingMaskIntoConstraints = false
-        composeBar.addSubview(separator)
         NSLayoutConstraint.activate([
-            composeBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            composeBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            composeBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Spacing.lg),
+            composeBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Spacing.lg),
             // Tracks the keyboard; sits at the safe-area bottom when dismissed.
-            composeBar.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
-            separator.topAnchor.constraint(equalTo: composeBar.topAnchor),
-            separator.leadingAnchor.constraint(equalTo: composeBar.leadingAnchor),
-            separator.trailingAnchor.constraint(equalTo: composeBar.trailingAnchor),
-            separator.heightAnchor.constraint(equalToConstant: 0.5)
+            composeBar.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor, constant: -Spacing.sm),
         ])
     }
 
-    private func sendComment() {
-        let text = composeField.text ?? ""
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        composeField.text = ""
-        viewModel.submitComment(text)
+    /// Reserves trailing width inside the scrolling content — the snap
+    /// feed's engaged layout hands the trailing column to the action rail,
+    /// and the comment rows must end where it begins (zero overlap). The
+    /// composer deliberately stays full-width: the rail's territory ends
+    /// well above the footer.
+    func setContentTrailingInset(_ inset: CGFloat) {
+        contentTrailingConstraint?.constant = -(Spacing.lg + max(0, inset))
     }
 
     // MARK: - Render
@@ -357,9 +331,7 @@ final class PostDetailViewController: UIViewController {
     }
 
     private func renderComposing(_ composing: Bool) {
-        composeField.isEnabled = !composing
-        sendButton.isHidden = composing
-        if composing { composeSpinner.startAnimating() } else { composeSpinner.stopAnimating() }
+        composeBar.isSending = composing
     }
 
     // MARK: - Images
@@ -384,9 +356,3 @@ final class PostDetailViewController: UIViewController {
     }
 }
 
-extension PostDetailViewController: UITextFieldDelegate {
-    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
-        sendComment()
-        return false
-    }
-}

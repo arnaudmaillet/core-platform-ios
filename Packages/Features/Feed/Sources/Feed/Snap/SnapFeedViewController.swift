@@ -641,19 +641,46 @@ final class SnapFeedViewController: UIViewController {
         // declined by the pager (the inner list scrolls), drags outside it
         // (the docked media, the margins) page the feed, and a beginning
         // page drag collapses the engagement (`scrollViewWillBeginDragging`).
-        // The toolbar floats above the cell; the comments region owns the
-        // bottom edge while engaged.
+        //
+        // FOOTER CROSSFADE, dead-still geometry: the toolbar must be
+        // structurally concealed BEFORE the spring (so the safe area — and
+        // with it the composer's keyboard-guide resting position — settles
+        // once, at t0, never mid-animation), but its pixels leave via a
+        // SNAPSHOT that fades out in the same spring the composer fades in
+        // under: an in-place swap of the bottom band's content with zero
+        // layout churn. The snapshot is screen chrome, so it lives on this
+        // view, not the cell.
+        let toolbarGhost = makeToolbarGhost()
         concealToolbar()
         addChild(content)
         cell.installComments(content.view)
         content.didMove(toParent: self)
+        // The engaged rows end where the rail's exclusive column begins.
+        (content as? PostDetailViewController)?
+            .setContentTrailingInset(cell.commentsRailExclusionWidth)
         UIView.animate(
             withDuration: SnapCommentsLayout.engageDuration, delay: 0,
             usingSpringWithDamping: 1, initialSpringVelocity: 0
         ) {
             cell.setCommentsEngaged(true)
             cell.contentView.layoutIfNeeded()
+            toolbarGhost?.alpha = 0
+        } completion: { _ in
+            toolbarGhost?.removeFromSuperview()
         }
+    }
+
+    /// A static snapshot of the toolbar band, overlaid at its exact frame —
+    /// the outgoing half of the footer crossfade. Nil when there is no
+    /// toolbar to ghost (already hidden, not yet in a window).
+    private func makeToolbarGhost() -> UIView? {
+        guard let toolbar = toolbarHost?.toolbar ?? navigationController?.toolbar,
+              !toolbar.isHidden, toolbar.window != nil,
+              let ghost = toolbar.snapshotView(afterScreenUpdates: false) else { return nil }
+        ghost.frame = view.convert(toolbar.bounds, from: toolbar)
+        ghost.isUserInteractionEnabled = false
+        view.addSubview(ghost)
+        return ghost
     }
 
     /// Reverse mutation (strip tap, entry-surface re-tap): the comments
@@ -687,7 +714,14 @@ final class SnapFeedViewController: UIViewController {
         cell?.clearComments()
         commentsContentVC = nil
         commentsEngagedID = nil
+        // The footer's return half: present structurally (safe area settles
+        // in one pass, after the disengage spring — never during), then
+        // fade the pixels in.
         presentToolbar()
+        if let toolbar = toolbarHost?.toolbar ?? navigationController?.toolbar {
+            toolbar.alpha = 0
+            UIView.animate(withDuration: 0.18) { toolbar.alpha = 1 }
+        }
     }
 
     // MARK: - Active-item lifecycle
