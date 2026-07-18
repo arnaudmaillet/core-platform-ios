@@ -410,6 +410,9 @@ final class SnapFeedViewController: UIViewController {
                 // pill opens the panel, a strip tap while engaged closes it.
                 cell.onRequestComments = { [weak self] id in self?.presentComments(for: id) }
                 cell.onRequestCommentsClose = { [weak self] in self?.dismissComments() }
+                cell.onRequestCommentsPageAway = { [weak self] direction in
+                    self?.pageAwayFromComments(direction: direction)
+                }
             }
             return cell
         }

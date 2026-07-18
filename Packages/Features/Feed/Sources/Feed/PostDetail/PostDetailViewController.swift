@@ -86,11 +86,22 @@ final class PostDetailViewController: UIViewController {
         viewModel.viewDidLoad()
     }
 
+    @objc private func handleStreamTap() {
+        view.endEditing(true)
+    }
+
     // MARK: - Setup
 
     private func configureViews() {
         scrollView.alwaysBounceVertical = true
         scrollView.keyboardDismissMode = .interactive
+        // A bare tap on the stream retires the keyboard (the drag path
+        // above already does; taps should match). Non-cancelling, so row
+        // interactions and the cell-side arbitration see every touch
+        // unchanged — and a no-op when nothing is editing.
+        let keyboardDismissTap = UITapGestureRecognizer(target: self, action: #selector(handleStreamTap))
+        keyboardDismissTap.cancelsTouchesInView = false
+        scrollView.addGestureRecognizer(keyboardDismissTap)
         refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
         scrollView.refreshControl = refreshControl
         configureComposeBar()

@@ -43,6 +43,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// While engaged, a tap on the strip (the docked media / the page
     /// background) asks to expand back — the owning VC dismisses the panel.
     var onRequestCommentsClose: (() -> Void)?
+    /// While engaged, a committed vertical swipe on the docked media tile
+    /// asks to page away (+1 next / -1 previous) — the strip-side mirror
+    /// of the composer bar's swipe exit, wired to the same programmatic
+    /// page-away path.
+    var onRequestCommentsPageAway: ((Int) -> Void)?
     /// Whether the cell is in the comments-engaged layout (media docked in
     /// the strip's slot, chrome faded out, caption re-homed beside the
     /// media). Pure layout state: playback is deliberately untouched.
@@ -112,6 +117,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// Remembers a visible pause glyph across an engagement (the glyph is
     /// centered on the full page and would float mid-strip while docked).
     private var pauseGlyphSuppressedByEngagement = false
+    /// The docked tile's interactive exit pan — the composer bar's
+    /// finger-connected swipe, mirrored onto the strip's media block.
+    /// Attached to the CELL (not the content view) so the cell's own
+    /// `gestureRecognizerShouldBegin` override is its begin-time gate,
+    /// exactly the bar's mechanism.
+    private let mediaSwipeRecognizer = UIPanGestureRecognizer()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -137,6 +148,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleBackgroundTap))
         tap.delegate = self
         contentView.addGestureRecognizer(tap)
+
+        // The docked tile's swipe exit (engaged only — see the begin gate).
+        mediaSwipeRecognizer.addTarget(self, action: #selector(handleMediaSwipe))
+        addGestureRecognizer(mediaSwipeRecognizer)
 
         buildLayout()
     }
@@ -605,6 +620,71 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     // MARK: - Play/pause toggle
 
+    /// Begin-time gate for the tile's swipe exit, the composer bar's
+    /// mechanism verbatim: engaged only, vertical intent only (the
+    /// dominant velocity axis at begin time), and born inside the docked
+    /// tile's territory (slightly expanded for thumb forgiveness). Scoped
+    /// to the media pan — every other recognizer keeps UIKit's default.
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === mediaSwipeRecognizer else {
+            return super.gestureRecognizerShouldBegin(gestureRecognizer)
+        }
+        guard isCommentsEngaged else { return false }
+        let velocity = mediaSwipeRecognizer.velocity(in: self)
+        guard abs(velocity.y) > abs(velocity.x) else { return false }
+        return mediaSwipeRegionContains(mediaSwipeRecognizer.location(in: contentView))
+    }
+
+    /// The tile's swipe territory: the docked slot, with a thumb-sized
+    /// margin. Internal (not private) so the boundary is unit-testable.
+    func mediaSwipeRegionContains(_ point: CGPoint) -> Bool {
+        SnapCommentsLayout.mediaSlotFrame(in: contentView.bounds, topInset: frozenInsets.top)
+            .insetBy(dx: -Spacing.sm, dy: -Spacing.sm)
+            .contains(point)
+    }
+
+    /// The tile rides the finger through the same damped, saturating
+    /// curve as the composer bar (`CommentsInputBar.nudgeOffset` — one
+    /// curve, one feel), composed ON TOP of the dock transform the
+    /// engagement owns; release either commits the page-away (the bar's
+    /// thresholds verbatim) or springs the tile home. The settle runs
+    /// before the commit fires, so a triggered dismissal's own transform
+    /// animation supersedes it — the bar's ordering doctrine.
+    @objc private func handleMediaSwipe(_ pan: UIPanGestureRecognizer) {
+        guard isCommentsEngaged else { return }
+        let bounds = contentView.bounds
+        let dock = SnapCommentsLayout.mediaTransform(
+            bounds: bounds,
+            slot: SnapCommentsLayout.mediaSlotFrame(in: bounds, topInset: frozenInsets.top)
+        )
+        let dy = pan.translation(in: self).y
+        switch pan.state {
+        case .changed:
+            let nudged = dock.concatenating(
+                CGAffineTransform(translationX: 0, y: CommentsInputBar.nudgeOffset(for: dy))
+            )
+            mediaView.transform = nudged
+            videoRenderView.transform = nudged
+        case .ended:
+            let vy = pan.velocity(in: self).y
+            settleMediaNudge(to: dock)
+            if abs(dy) > 50 || abs(vy) > 300 {
+                onRequestCommentsPageAway?((dy + vy) < 0 ? 1 : -1)
+            }
+        case .cancelled, .failed:
+            settleMediaNudge(to: dock)
+        default:
+            break
+        }
+    }
+
+    private func settleMediaNudge(to dock: CGAffineTransform) {
+        UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.8, initialSpringVelocity: 0) {
+            self.mediaView.transform = dock
+            self.videoRenderView.transform = dock
+        }
+    }
+
     @objc private func handleBackgroundTap() {
         // While engaged, the strip is the only cell territory the panel
         // doesn't cover — a tap there means "expand back", not play/pause.
@@ -689,6 +769,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         clearComments()
         onRequestComments = nil
         onRequestCommentsClose = nil
+        onRequestCommentsPageAway = nil
         engagedCaptionLabel.text = nil
         engagedCaptionLabel.transform = .identity
         engagedCard.reset()
@@ -754,7 +835,32 @@ extension SnapFeedCell {
 
 extension SnapFeedCell: UIGestureRecognizerDelegate {
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        !Self.isInteractiveTouch(touch.view, interactiveRoots: chrome.interactionRoots, stopAt: contentView)
+        // While engaged, the COMMENTS ZONE is tap-inert for the background
+        // gesture: a touch landing anywhere in the hosted stream (rows,
+        // gaps, the composer's band) must never collapse the engagement —
+        // the explicit exits are the ✕, the strip zone, and the swipe
+        // gestures. (The stream's own interactions — scrolling, row
+        // controls, the composer — are untouched: declining the CELL's
+        // tap takes nothing from views that own their touches.)
+        if isCommentsEngaged,
+           Self.isCommentsStreamTouch(touch.view, stopAt: contentView) {
+            return false
+        }
+        return !Self.isInteractiveTouch(touch.view, interactiveRoots: chrome.interactionRoots, stopAt: contentView)
+    }
+
+    /// True when the touched view lives inside the engaged comments
+    /// container — the zone where a tap means "interact with the stream",
+    /// never "close the layout". Pure + static so the boundary is
+    /// unit-testable, like `isInteractiveTouch`.
+    static func isCommentsStreamTouch(_ touched: UIView?, stopAt: UIView) -> Bool {
+        var view = touched
+        while let current = view {
+            if current is SnapCommentsContainerView { return true }
+            if current === stopAt { break }
+            view = current.superview
+        }
+        return false
     }
 
     /// True when the touched view is (or descends from) an interactive control —

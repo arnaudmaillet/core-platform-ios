@@ -505,6 +505,52 @@ struct SnapCommentsPresentationTests {
         #expect(card.transform.ty == SnapCommentsLayout.cardContentEntranceOffset)
     }
 
+    /// The engaged tap boundary: a touch anywhere inside the hosted
+    /// comments container — rows, gaps, the composer's band — is a STREAM
+    /// touch and must never fire the background tap (which closes the
+    /// engagement); touches on the strip's layers stay eligible. The
+    /// boundary is the pure walk the delegate uses.
+    @Test func streamTouchesNeverCollapseTheEngagement() throws {
+        let cell = SnapFeedCell(frame: Self.container)
+        cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
+        cell.layoutIfNeeded()
+        let hosted = UIView()
+        cell.installComments(hosted)
+        cell.setCommentsEngaged(true)
+        cell.contentView.layoutIfNeeded()
+        let row = UIView()
+        hosted.addSubview(row)
+
+        #expect(SnapFeedCell.isCommentsStreamTouch(row, stopAt: cell.contentView))
+        #expect(SnapFeedCell.isCommentsStreamTouch(hosted, stopAt: cell.contentView))
+        // The strip's layers (the glass card and the docked media) remain
+        // close-eligible…
+        let card = try #require(
+            cell.contentView.subviews.compactMap { $0 as? UIVisualEffectView }
+                .first { $0.frame == SnapCommentsLayout.stripCardFrame(in: Self.container, topInset: Self.topInset) }
+        )
+        #expect(SnapFeedCell.isCommentsStreamTouch(card, stopAt: cell.contentView) == false)
+        let media = try #require(cell.contentView.subviews.compactMap { $0 as? UIImageView }.first)
+        #expect(SnapFeedCell.isCommentsStreamTouch(media, stopAt: cell.contentView) == false)
+    }
+
+    /// The docked tile's swipe territory: the exit pan begins inside the
+    /// slot (with its thumb margin) and nowhere else — mid-stream drags
+    /// belong to the comments list, footer drags to the composer bar.
+    @Test func mediaSwipeRegionIsTheDockedTile() {
+        let cell = SnapFeedCell(frame: Self.container)
+        cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
+        cell.layoutIfNeeded()
+        let slot = SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset)
+        #expect(cell.mediaSwipeRegionContains(CGPoint(x: slot.midX, y: slot.midY)))
+        #expect(cell.mediaSwipeRegionContains(CGPoint(x: slot.maxX + Spacing.sm - 1, y: slot.midY)))
+        // The caption column, the stream, and the footer band are not
+        // tile territory.
+        #expect(cell.mediaSwipeRegionContains(CGPoint(x: slot.maxX + 60, y: slot.midY)) == false)
+        #expect(cell.mediaSwipeRegionContains(CGPoint(x: slot.midX, y: Self.container.midY)) == false)
+        #expect(cell.mediaSwipeRegionContains(CGPoint(x: slot.midX, y: Self.container.height - 60)) == false)
+    }
+
     // MARK: - Entry point
 
     /// Every comments surface is an engagement entry point — the empty-state
