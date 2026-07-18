@@ -45,6 +45,12 @@ enum SnapCommentsLayout {
     /// as it fades, so the footer crossfade reads as an arrival, not a
     /// ghosting double-exposure.
     static let composerEntranceOffset: CGFloat = 15
+    /// How far the native floating bar's container translates DOWN to carry
+    /// its Liquid Glass platters fully out of the viewport (bar band ≈90pt
+    /// tall above the home indicator; 160 clears it with margin). A pure
+    /// transform: platter glass cannot interpolate alpha and pops on
+    /// visibility flips, but every layer interpolates a translation.
+    static let nativeFooterExitOffset: CGFloat = 160
 
     /// Where the media docks, in cell coordinates: a 1:1 square tile.
     static func mediaSlotFrame(in bounds: CGRect, topInset: CGFloat) -> CGRect {

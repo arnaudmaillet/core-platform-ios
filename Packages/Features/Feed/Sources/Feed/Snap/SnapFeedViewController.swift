@@ -220,6 +220,15 @@ final class SnapFeedViewController: UIViewController {
                 self.presentComments(for: self.orderedIDs[index])
             }
         }
+        // `-dump-bars`: prints the navigation view hierarchy (class, frame,
+        // alpha, hidden) plus each toolbar item's superview chain ~5s after
+        // appear — the tool that pins down WHERE iOS 26 hosts the Liquid
+        // Glass item platters (they are not in the toolbar's subtree).
+        if arguments.contains("-dump-bars") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+                self?.dumpBarHierarchy()
+            }
+        }
         guard !didDebugPause,
               ProcessInfo.processInfo.arguments.contains("-snap-start-paused") else { return }
         didDebugPause = true
@@ -229,6 +238,35 @@ final class SnapFeedViewController: UIViewController {
             else { return }
             cell.togglePlayback()
         }
+    }
+    #endif
+
+    #if DEBUG
+    private func dumpBarHierarchy() {
+        guard let nav = navigationController else { return }
+        func walk(_ view: UIView, _ depth: Int) {
+            let f = view.frame
+            print("BARDUMP:\(String(repeating: "  ", count: depth))\(type(of: view)) "
+                + "frame=(\(Int(f.minX)),\(Int(f.minY)),\(Int(f.width)),\(Int(f.height))) "
+                + "alpha=\(String(format: "%.2f", view.alpha))\(view.isHidden ? " HIDDEN" : "")")
+            view.subviews.forEach { walk($0, depth + 1) }
+        }
+        walk(nav.view, 0)
+        func chainDescription(from view: UIView?) -> String {
+            var chain: [String] = []
+            var current: UIView? = view
+            while let view = current {
+                let id = String(UInt(bitPattern: ObjectIdentifier(view).hashValue) % 0xFFFF, radix: 16)
+                chain.append("\(type(of: view))#\(id)")
+                current = view.superview
+            }
+            return chain.joined(separator: " -> ")
+        }
+        for (index, item) in (toolbarItems ?? []).enumerated() where item.customView != nil {
+            print("BARDUMP:CHAIN toolbarItem[\(index)]: " + chainDescription(from: item.customView))
+        }
+        print("BARDUMP:CHAIN navTrailing: " + chainDescription(from: navigationItem.rightBarButtonItem?.customView))
+        print("BARDUMP:CHAIN navLeading: " + chainDescription(from: navigationItem.leftBarButtonItem?.customView))
     }
     #endif
 
@@ -251,10 +289,10 @@ final class SnapFeedViewController: UIViewController {
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        // The comments engagement drives the SHARED toolbar's pixels;
-        // leaving this screen mid-engagement must never strand them
-        // invisible for the next toolbar user.
-        setToolbarPixelsFaded(false)
+        // The comments engagement translates the SHARED floating bar's
+        // container; leaving this screen mid-engagement must never strand
+        // it offscreen for the next toolbar user.
+        setNativeFooterOffstage(false)
         settleToolbarAfterDisappearance()
         isOnScreen = false
         refreshVisibility()
@@ -681,19 +719,8 @@ final class SnapFeedViewController: UIViewController {
         ) { [weak self] in
             cell.setCommentsEngaged(true)
             cell.contentView.layoutIfNeeded()
-            self?.setToolbarPixelsFaded(true)
+            self?.setNativeFooterOffstage(true)
             detail?.setComposerEntranceState(offstage: false)
-        } completion: { [weak self] _ in
-            // The Liquid Glass platters keep their glass shells even at
-            // item-content alpha 0, and they render OUTSIDE the toolbar's
-            // view tree (even `toolbar.isHidden` leaves them standing —
-            // frame-verified). The platter's owner is its ITEM: hiding the
-            // items at the fade's end is what extinguishes the shells.
-            // Guarded on the MODEL alpha: a return started before this
-            // completion fired has already set it back to 1.
-            guard let self, let toolbar = self.toolbarHost?.toolbar, toolbar.alpha == 0 else { return }
-            toolbar.isHidden = true
-            for item in self.toolbarItems ?? [] { item.isHidden = true }
         }
     }
 
@@ -711,39 +738,65 @@ final class SnapFeedViewController: UIViewController {
         UIView.animate(withDuration: SnapCommentsLayout.disengageDuration, delay: 0,
                        usingSpringWithDamping: 1, initialSpringVelocity: 0) { [weak self] in
             self?.engagedCell()?.setCommentsEngaged(false)
-            self?.setToolbarPixelsFaded(false)
+            self?.setNativeFooterOffstage(false)
             detail?.setComposerEntranceState(offstage: true)
         } completion: { [weak self] _ in
             self?.finishCommentsDisengagement()
         }
     }
 
-    /// The footer's pixel-level fade: the toolbar's OWN alpha plus every
-    /// item's custom view — on iOS 26 the Liquid Glass item platters render
-    /// in system containers that do not inherit the bar's alpha, so the
-    /// bar-level fade alone leaves the pills opaque (observed in frame
-    /// captures). Interaction rides the fade: a faded toolbar must forward
-    /// every touch to the composer occupying its band. Nothing here moves
-    /// the navigation controller's bar layout — `toolbar.isHidden` (the
-    /// VIEW property, flipped only at spring boundaries where alpha is
-    /// already 0, to extinguish the platters' residual glass containers)
-    /// does not participate in safe-area layout; only `isToolbarHidden`
-    /// does, and that is never touched.
-    private func setToolbarPixelsFaded(_ faded: Bool) {
-        guard let toolbar = toolbarHost?.toolbar else { return }
-        if !faded {
-            // Instant, but alpha is still 0 — nothing pops. Un-hiding the
-            // ITEMS resurrects their glass platters (which live OUTSIDE the
-            // toolbar's view tree — even `toolbar.isHidden` can't touch
-            // them; frame-verified) so they can ride the fade back in.
-            toolbar.isHidden = false
-            for item in toolbarItems ?? [] { item.isHidden = false }
-        }
-        toolbar.isUserInteractionEnabled = !faded
-        let alpha: CGFloat = faded ? 0 : 1
-        toolbar.alpha = alpha
+    /// The native footer's exit/return, iOS 26 ground truth (established
+    /// with `-dump-bars` instance-identity chains): toolbar items render in
+    /// a full-screen `FloatingBarContainerView` — a SwiftUI-backed floating
+    /// bar host that is a DIRECT CHILD of the navigation controller's view,
+    /// entirely outside `UIToolbar` (which isn't even installed in the
+    /// render tree) — while nav-bar items platter under `UINavigationBar`'s
+    /// own subtree. The container is therefore bottom-bar-exclusive, and it
+    /// is reached by walking up from OUR OWN item customViews (no private
+    /// class names). Platter glass cannot interpolate alpha and pops on
+    /// visibility flips, so the exit is a pure TRANSLATION: the whole
+    /// container rides down out of the viewport inside the master spring —
+    /// transforms interpolate on every layer, trigger no safe-area pass,
+    /// and carry hit-testing away with the pixels.
+    private func nativeFooterContainers() -> [UIView] {
+        guard let navView = toolbarHost?.view ?? navigationController?.view else { return [] }
+        var seen = Set<ObjectIdentifier>()
+        var containers: [UIView] = []
         for item in toolbarItems ?? [] {
-            item.customView?.alpha = alpha
+            guard var view = item.customView, view.window != nil else { continue }
+            while let superview = view.superview, superview !== navView { view = superview }
+            guard view.superview === navView, seen.insert(ObjectIdentifier(view)).inserted else { continue }
+            containers.append(view)
+        }
+        return containers
+    }
+
+    private func setNativeFooterOffstage(_ offstage: Bool) {
+        // GROUP fade on the floating-bar container, driven by an EXPLICIT
+        // layer animation. Empirical ledger, all frame- or rest-state-
+        // verified on iOS 26: UIToolbar alpha/hidden touch nothing (wrong
+        // tree); item customView alpha fades content but not shells;
+        // item.isHidden extinguishes shells only as a hard pop; a TRANSFORM
+        // on this container animates but is stomped to identity by the
+        // hosting view's next internal layout pass; container alpha STICKS
+        // (survives SwiftUI's layout) but implicit UIView animation of it
+        // is DENIED — the value snaps in one frame even inside an animate
+        // block. Explicit CABasicAnimation on layer.opacity bypasses the
+        // hosting view's action filtering: the model value is SwiftUI-safe
+        // and the interpolation is ours. From the PRESENTATION value, so a
+        // mid-flight reversal picks up where the pixels actually are.
+        let target: Float = offstage ? 0 : 1
+        for container in nativeFooterContainers() {
+            let layer = container.layer
+            let from = (layer.presentation() ?? layer).opacity
+            container.alpha = CGFloat(target)
+            container.isUserInteractionEnabled = !offstage
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.fromValue = from
+            fade.toValue = target
+            fade.duration = SnapCommentsLayout.engageDuration
+            fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            layer.add(fade, forKey: "snap-comments-footer-fade")
         }
     }
 
@@ -766,9 +819,10 @@ final class SnapFeedViewController: UIViewController {
         commentsContentVC = nil
         commentsEngagedID = nil
         collectionView.isScrollEnabled = true
-        // Belt and braces: the toolbar was never structurally touched, but
-        // its pixels must end exact regardless of how the phases resolved.
-        setToolbarPixelsFaded(false)
+        // Belt and braces: the floating bar was never structurally touched,
+        // but its container must end at identity regardless of how the
+        // spring resolved.
+        setNativeFooterOffstage(false)
     }
 
     // MARK: - Active-item lifecycle
