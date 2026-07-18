@@ -289,10 +289,10 @@ final class SnapFeedViewController: UIViewController {
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        // The comments engagement translates the SHARED floating bar's
+        // The comments engagement fades the SHARED floating bar's
         // container; leaving this screen mid-engagement must never strand
-        // it offscreen for the next toolbar user.
-        setNativeFooterOffstage(false)
+        // it invisible for the next toolbar user.
+        setNativeFooterOffstage(false, animated: false)
         settleToolbarAfterDisappearance()
         isOnScreen = false
         refreshVisibility()
@@ -713,13 +713,16 @@ final class SnapFeedViewController: UIViewController {
         // pixels fade, which is what keeps the in-flight blend from
         // reading as a double-exposure.
         detail?.setComposerEntranceState(offstage: true)
+        // The footer fade runs OUTSIDE the spring block: its opacity is
+        // Core Animation's alone (see setNativeFooterOffstage), started
+        // here so it shares the spring's t0 and duration.
+        setNativeFooterOffstage(true)
         UIView.animate(
             withDuration: SnapCommentsLayout.engageDuration, delay: 0,
             usingSpringWithDamping: 1, initialSpringVelocity: 0
-        ) { [weak self] in
+        ) {
             cell.setCommentsEngaged(true)
             cell.contentView.layoutIfNeeded()
-            self?.setNativeFooterOffstage(true)
             detail?.setComposerEntranceState(offstage: false)
         }
     }
@@ -735,10 +738,10 @@ final class SnapFeedViewController: UIViewController {
         // bar's pixels return, all inside the one spring with the media
         // expansion and chrome fade-in.
         let detail = commentsContentVC as? PostDetailViewController
+        setNativeFooterOffstage(false) // CA-owned fade, sharing the spring's clock
         UIView.animate(withDuration: SnapCommentsLayout.disengageDuration, delay: 0,
                        usingSpringWithDamping: 1, initialSpringVelocity: 0) { [weak self] in
             self?.engagedCell()?.setCommentsEngaged(false)
-            self?.setNativeFooterOffstage(false)
             detail?.setComposerEntranceState(offstage: true)
         } completion: { [weak self] _ in
             self?.finishCommentsDisengagement()
@@ -771,7 +774,7 @@ final class SnapFeedViewController: UIViewController {
         return containers
     }
 
-    private func setNativeFooterOffstage(_ offstage: Bool) {
+    private func setNativeFooterOffstage(_ offstage: Bool, animated: Bool = true) {
         // GROUP fade on the floating-bar container, driven by an EXPLICIT
         // layer animation. Empirical ledger, all frame- or rest-state-
         // verified on iOS 26: UIToolbar alpha/hidden touch nothing (wrong
@@ -780,25 +783,45 @@ final class SnapFeedViewController: UIViewController {
         // on this container animates but is stomped to identity by the
         // hosting view's next internal layout pass; container alpha STICKS
         // (survives SwiftUI's layout) but implicit UIView animation of it
-        // is DENIED — the value snaps in one frame even inside an animate
-        // block. Explicit CABasicAnimation on layer.opacity bypasses the
-        // hosting view's action filtering: the model value is SwiftUI-safe
-        // and the interpolation is ours. From the PRESENTATION value, so a
-        // mid-flight reversal picks up where the pixels actually are.
+        // is unreliable — sometimes snapped, sometimes recorded as a second
+        // competing curve (the strobe). Explicit CABasicAnimation on
+        // layer.opacity, from the PRESENTATION value, so a mid-flight
+        // reversal picks up where the pixels actually are.
         let target: Float = offstage ? 0 : 1
         for container in nativeFooterContainers() {
             let layer = container.layer
             let from = (layer.presentation() ?? layer).opacity
+            // FULL Core Animation takeover — one property, ONE curve. The
+            // model value commits with actions disabled and any competing
+            // animation (including a UIKit-recorded implicit "opacity",
+            // which sampled against our explicit fade produced the strobe:
+            // two curves alternating per frame) is purged before the one
+            // explicit animation is installed. Called OUTSIDE the master
+            // spring block for the same reason: nothing about the footer's
+            // opacity may pass through UIKit's animation recording.
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            layer.removeAnimation(forKey: "opacity")
             container.alpha = CGFloat(target)
             container.isUserInteractionEnabled = !offstage
-            let fade = CABasicAnimation(keyPath: "opacity")
-            fade.fromValue = from
-            fade.toValue = target
-            fade.duration = SnapCommentsLayout.engageDuration
-            fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            layer.add(fade, forKey: "snap-comments-footer-fade")
+            if animated {
+                let fade = CABasicAnimation(keyPath: "opacity")
+                fade.fromValue = from
+                fade.toValue = target
+                fade.duration = SnapCommentsLayout.engageDuration
+                // easeOut, deliberately NOT the spring's curve: opacity
+                // must move monotonically — oscillating physics on an
+                // alpha channel reads as flicker, never as bounce.
+                fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                layer.add(fade, forKey: Self.footerFadeKey)
+            } else {
+                layer.removeAnimation(forKey: Self.footerFadeKey)
+            }
+            CATransaction.commit()
         }
     }
+
+    private static let footerFadeKey = "snap-comments-footer-fade"
 
     private func engagedCell() -> SnapFeedCell? {
         guard let id = commentsEngagedID,
@@ -820,9 +843,9 @@ final class SnapFeedViewController: UIViewController {
         commentsEngagedID = nil
         collectionView.isScrollEnabled = true
         // Belt and braces: the floating bar was never structurally touched,
-        // but its container must end at identity regardless of how the
-        // spring resolved.
-        setNativeFooterOffstage(false)
+        // but its pixels must end exact regardless of how the flight
+        // resolved — instant, no new fade at cleanup time.
+        setNativeFooterOffstage(false, animated: false)
     }
 
     // MARK: - Active-item lifecycle
