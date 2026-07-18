@@ -70,6 +70,10 @@ final class SnapFeedViewController: UIViewController {
     /// scroll position, and reply drafts must never live in a recycled
     /// cell); the cell only hosts its view while engaged.
     private var commentsContentVC: UIViewController?
+    /// Invalidates the footer handoff's staged phases across fast
+    /// engage/dismiss toggles — a delayed phase must never run for a
+    /// handoff a newer transition already owns.
+    private var commentsFooterGeneration = 0
 
     init(
         viewModel: FeedViewModel,
@@ -640,12 +644,6 @@ final class SnapFeedViewController: UIViewController {
         content.overrideUserInterfaceStyle = .dark
         commentsEngagedID = id
         commentsContentVC = content
-        // Paging stays LIVE while engaged — arbitration is per-touch, the
-        // rail's mechanism: drags born inside the comments container are
-        // declined by the pager (the inner list scrolls), drags outside it
-        // (the docked media, the margins) page the feed, and a beginning
-        // page drag collapses the engagement (`scrollViewWillBeginDragging`).
-        //
         // FOOTER CROSSFADE, zero layout churn BY CONSTRUCTION: the native
         // toolbar is NEVER structurally concealed — it stays fully present
         // in the hierarchy for the whole engagement, so the safe area
@@ -656,12 +654,20 @@ final class SnapFeedViewController: UIViewController {
         // so it occupies the toolbar's exact band while both coexist —
         // inside the one spring. Alpha < 0.01 also removes the invisible
         // toolbar from hit-testing, so its buttons can't be tapped blind.
+        // The pager is fully LOCKED while engaged: the only exits are the
+        // tap triggers (docked media, entry-surface re-tap). This is also
+        // what makes the inner stream's boundary behavior airtight — with
+        // the pager's recognizers disabled there is no gesture to leak
+        // into when the list hits its edges; the rubber-band absorbs
+        // everything.
+        collectionView.isScrollEnabled = false
         addChild(content)
         cell.installComments(content.view)
         content.didMove(toParent: self)
+        let detail = content as? PostDetailViewController
         // The stream rests below the frosted strip (full-height scroll,
         // inset content) and its rows end where the rail's column begins.
-        (content as? PostDetailViewController)?.setEngagedInsets(
+        detail?.setEngagedInsets(
             top: SnapCommentsLayout.stripBottom(topInset: view.safeAreaInsets.top),
             trailing: cell.commentsRailExclusionWidth,
             bottomInset: view.window?.safeAreaInsets.bottom ?? 0
@@ -669,9 +675,18 @@ final class SnapFeedViewController: UIViewController {
         UIView.animate(
             withDuration: SnapCommentsLayout.engageDuration, delay: 0,
             usingSpringWithDamping: 1, initialSpringVelocity: 0
-        ) { [weak self] in
+        ) {
             cell.setCommentsEngaged(true)
             cell.contentView.layoutIfNeeded()
+        }
+        // ASYMMETRIC footer handoff — a sequential exchange, never a muddy
+        // double-exposure at shared half-alpha: the native bar exits SHARP
+        // in the first ~30% of the spring; the composer enters only after
+        // that exit completes.
+        commentsFooterGeneration += 1
+        let generation = commentsFooterGeneration
+        detail?.setComposerAlpha(0)
+        UIView.animate(withDuration: SnapCommentsLayout.engageDuration * 0.3) { [weak self] in
             self?.setToolbarPixelsFaded(true)
         } completion: { [weak self] _ in
             // The Liquid Glass platters keep their glass shells even at
@@ -679,12 +694,17 @@ final class SnapFeedViewController: UIViewController {
             // view tree (even `toolbar.isHidden` leaves them standing —
             // frame-verified). The platter's owner is its ITEM: hiding the
             // items at the fade's end is what extinguishes the shells.
-            // Guarded on the MODEL alpha: a return spring started before
-            // this completion fired has already set it back to 1, and a
-            // stale hide must not fight it.
+            // Guarded on the MODEL alpha: a return started before this
+            // completion fired has already set it back to 1.
             guard let self, let toolbar = self.toolbarHost?.toolbar, toolbar.alpha == 0 else { return }
             toolbar.isHidden = true
             for item in self.toolbarItems ?? [] { item.isHidden = true }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + SnapCommentsLayout.engageDuration * 0.35) { [weak self] in
+            guard let self, self.commentsFooterGeneration == generation else { return }
+            UIView.animate(withDuration: SnapCommentsLayout.engageDuration * 0.65) {
+                detail?.setComposerAlpha(1)
+            }
         }
     }
 
@@ -698,9 +718,24 @@ final class SnapFeedViewController: UIViewController {
         UIView.animate(withDuration: SnapCommentsLayout.disengageDuration, delay: 0,
                        usingSpringWithDamping: 1, initialSpringVelocity: 0) { [weak self] in
             self?.engagedCell()?.setCommentsEngaged(false)
-            self?.setToolbarPixelsFaded(false)
         } completion: { [weak self] _ in
             self?.finishCommentsDisengagement()
+        }
+        // The handoff's mirror: composer exits SHARP first, then the native
+        // bar (items resurrected at that instant, while the band is empty —
+        // the shells reappear over black, not over a half-faded composer)
+        // fades its content back in.
+        commentsFooterGeneration += 1
+        let generation = commentsFooterGeneration
+        let detail = commentsContentVC as? PostDetailViewController
+        UIView.animate(withDuration: SnapCommentsLayout.disengageDuration * 0.3) {
+            detail?.setComposerAlpha(0)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + SnapCommentsLayout.disengageDuration * 0.35) { [weak self] in
+            guard let self, self.commentsFooterGeneration == generation else { return }
+            UIView.animate(withDuration: SnapCommentsLayout.disengageDuration * 0.65) {
+                self.setToolbarPixelsFaded(false)
+            }
         }
     }
 
@@ -751,8 +786,9 @@ final class SnapFeedViewController: UIViewController {
         cell?.clearComments()
         commentsContentVC = nil
         commentsEngagedID = nil
+        collectionView.isScrollEnabled = true
         // Belt and braces: the toolbar was never structurally touched, but
-        // its pixels must end exact regardless of how the spring resolved.
+        // its pixels must end exact regardless of how the phases resolved.
         setToolbarPixelsFaded(false)
     }
 
@@ -891,10 +927,11 @@ extension SnapFeedViewController: UICollectionViewDelegate {
     // via the toolbar's more menu; the identity pill opens the profile.
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
-        // A page drag CAN begin while engaged (only drags outside the
-        // comments container reach the pager — see the collection view's
-        // per-touch arbitration): the page is leaving, so the engagement
-        // collapses in flight alongside the scroll.
+        // The pager is DISABLED while engaged (tap-only exits), so this
+        // cannot fire mid-engagement — kept as a belt-and-braces collapse
+        // in case any future path re-enables scrolling under an engaged
+        // cell: a page that starts leaving must take the mutation down
+        // with it, never strand a hosted comments view in a recycled cell.
         if commentsEngagedID != nil {
             dismissComments()
         }

@@ -236,6 +236,13 @@ final class PostDetailViewController: UIViewController {
     /// action rail's exclusive column (zero overlap). The composer
     /// deliberately stays full-width: the rail's territory ends well above
     /// the footer.
+    /// The composer's own fade channel — the engaged footer handoff is
+    /// ASYMMETRIC (native bar out sharply, composer in after), so the
+    /// composer cannot ride the host container's linear fade alone.
+    func setComposerAlpha(_ alpha: CGFloat) {
+        composeBar.alpha = alpha
+    }
+
     func setEngagedInsets(top: CGFloat, trailing: CGFloat, bottomInset: CGFloat) {
         // The strip inset is the ONLY top authority in the engaged context:
         // the full-cell scroll view would otherwise also inherit the safe
@@ -244,6 +251,9 @@ final class PostDetailViewController: UIViewController {
         scrollView.contentInset.top = max(0, top)
         scrollView.verticalScrollIndicatorInsets.top = max(0, top)
         scrollView.contentOffset = CGPoint(x: 0, y: -max(0, top))
+        // A clean minimal stream: no indicator (engaged context only — the
+        // pushed comments screen keeps its native affordance).
+        scrollView.showsVerticalScrollIndicator = false
         contentTrailingConstraint?.constant = -(Spacing.lg + max(0, trailing))
 
         // The composer OCCUPIES THE NATIVE FOOTER'S BAND: the feed keeps
