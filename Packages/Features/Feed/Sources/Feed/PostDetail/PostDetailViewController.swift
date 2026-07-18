@@ -35,6 +35,8 @@ final class PostDetailViewController: UIViewController {
 
     private var mediaAspectConstraint: NSLayoutConstraint?
     private var contentTrailingConstraint: NSLayoutConstraint?
+    private var composeBottomDefault: NSLayoutConstraint?
+    private var composeBottomEngaged: [NSLayoutConstraint] = []
     private var imageTasks: [Task<Void, Never>] = []
 
     init(viewModel: PostDetailViewModel, imagePipeline: ImagePipeline, mode: PostDetailMode = .full) {
@@ -212,11 +214,18 @@ final class PostDetailViewController: UIViewController {
         composeBar.onSend = { [weak self] text in self?.viewModel.submitComment(text) }
         view.addSubview(composeBar)
         composeBar.translatesAutoresizingMaskIntoConstraints = false
+        // Tracks the keyboard; sits at the safe-area bottom when dismissed.
+        // Stored: the engaged context replaces it (`setEngagedInsets`) —
+        // there the composer must occupy the NATIVE FOOTER'S band, which
+        // the safe area deliberately still contains.
+        let bottom = composeBar.bottomAnchor.constraint(
+            equalTo: view.keyboardLayoutGuide.topAnchor, constant: -Spacing.sm
+        )
+        composeBottomDefault = bottom
         NSLayoutConstraint.activate([
             composeBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Spacing.lg),
             composeBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Spacing.lg),
-            // Tracks the keyboard; sits at the safe-area bottom when dismissed.
-            composeBar.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor, constant: -Spacing.sm),
+            bottom,
         ])
     }
 
@@ -227,7 +236,7 @@ final class PostDetailViewController: UIViewController {
     /// action rail's exclusive column (zero overlap). The composer
     /// deliberately stays full-width: the rail's territory ends well above
     /// the footer.
-    func setEngagedInsets(top: CGFloat, trailing: CGFloat) {
+    func setEngagedInsets(top: CGFloat, trailing: CGFloat, bottomInset: CGFloat) {
         // The strip inset is the ONLY top authority in the engaged context:
         // the full-cell scroll view would otherwise also inherit the safe
         // area's automatic adjustment and double-inset the resting position.
@@ -236,6 +245,26 @@ final class PostDetailViewController: UIViewController {
         scrollView.verticalScrollIndicatorInsets.top = max(0, top)
         scrollView.contentOffset = CGPoint(x: 0, y: -max(0, top))
         contentTrailingConstraint?.constant = -(Spacing.lg + max(0, trailing))
+
+        // The composer OCCUPIES THE NATIVE FOOTER'S BAND: the feed keeps
+        // its toolbar structurally present for the whole engagement (the
+        // safe area must never move — that's the zero-churn contract), so
+        // the resting position anchors to the WINDOW's home-indicator
+        // inset (`bottomInset`, toolbar-independent) instead of the safe
+        // area. The keyboard keeps priority through the inequality: when
+        // it rises, the required constraint lifts the bar above it.
+        view.keyboardLayoutGuide.usesBottomSafeArea = false
+        composeBottomDefault?.isActive = false
+        NSLayoutConstraint.deactivate(composeBottomEngaged)
+        let keyboard = composeBar.bottomAnchor.constraint(
+            lessThanOrEqualTo: view.keyboardLayoutGuide.topAnchor, constant: -Spacing.sm
+        )
+        let rest = composeBar.bottomAnchor.constraint(
+            equalTo: view.bottomAnchor, constant: -(max(0, bottomInset) + Spacing.sm)
+        )
+        rest.priority = .defaultHigh
+        composeBottomEngaged = [keyboard, rest]
+        NSLayoutConstraint.activate(composeBottomEngaged)
     }
 
     // MARK: - Render

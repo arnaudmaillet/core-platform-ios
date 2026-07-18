@@ -70,12 +70,6 @@ final class SnapFeedViewController: UIViewController {
     /// scroll position, and reply drafts must never live in a recycled
     /// cell); the cell only hosts its view while engaged.
     private var commentsContentVC: UIViewController?
-    /// The toolbar's snapshot, kept alive for the WHOLE engagement: it is
-    /// the outgoing half of the engage crossfade AND the incoming half of
-    /// the return one — the structural toolbar stays concealed until the
-    /// return spring settles (safe-area shifts must never happen
-    /// mid-animation), so its pixels travel by ghost in both directions.
-    private var commentsToolbarGhost: UIView?
 
     init(
         viewModel: FeedViewModel,
@@ -257,6 +251,10 @@ final class SnapFeedViewController: UIViewController {
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
+        // The comments engagement drives the SHARED toolbar's pixels;
+        // leaving this screen mid-engagement must never strand them
+        // invisible for the next toolbar user.
+        setToolbarPixelsFaded(false)
         settleToolbarAfterDisappearance()
         isOnScreen = false
         refreshVisibility()
@@ -648,16 +646,16 @@ final class SnapFeedViewController: UIViewController {
         // (the docked media, the margins) page the feed, and a beginning
         // page drag collapses the engagement (`scrollViewWillBeginDragging`).
         //
-        // FOOTER CROSSFADE, dead-still geometry: the toolbar must be
-        // structurally concealed BEFORE the spring (so the safe area — and
-        // with it the composer's keyboard-guide resting position — settles
-        // once, at t0, never mid-animation), but its pixels leave via a
-        // SNAPSHOT that fades out in the same spring the composer fades in
-        // under: an in-place swap of the bottom band's content with zero
-        // layout churn. The snapshot is screen chrome, so it lives on this
-        // view, not the cell.
-        commentsToolbarGhost = makeToolbarGhost()
-        concealToolbar()
+        // FOOTER CROSSFADE, zero layout churn BY CONSTRUCTION: the native
+        // toolbar is NEVER structurally concealed — it stays fully present
+        // in the hierarchy for the whole engagement, so the safe area
+        // cannot move at any point (structural hide/show was the root
+        // cause of every footer jump: it forces an immediate safe-area
+        // layout pass). Its PIXELS crossfade against the composer — which
+        // anchors to the window's home-indicator inset, not the safe area,
+        // so it occupies the toolbar's exact band while both coexist —
+        // inside the one spring. Alpha < 0.01 also removes the invisible
+        // toolbar from hit-testing, so its buttons can't be tapped blind.
         addChild(content)
         cell.installComments(content.view)
         content.didMove(toParent: self)
@@ -665,7 +663,8 @@ final class SnapFeedViewController: UIViewController {
         // inset content) and its rows end where the rail's column begins.
         (content as? PostDetailViewController)?.setEngagedInsets(
             top: SnapCommentsLayout.stripBottom(topInset: view.safeAreaInsets.top),
-            trailing: cell.commentsRailExclusionWidth
+            trailing: cell.commentsRailExclusionWidth,
+            bottomInset: view.window?.safeAreaInsets.bottom ?? 0
         )
         UIView.animate(
             withDuration: SnapCommentsLayout.engageDuration, delay: 0,
@@ -673,38 +672,37 @@ final class SnapFeedViewController: UIViewController {
         ) { [weak self] in
             cell.setCommentsEngaged(true)
             cell.contentView.layoutIfNeeded()
-            self?.commentsToolbarGhost?.alpha = 0
+            self?.setToolbarPixelsFaded(true)
         }
-    }
-
-    /// A static snapshot of the toolbar band, overlaid at its exact frame —
-    /// the outgoing half of the footer crossfade. Nil when there is no
-    /// toolbar to ghost (already hidden, not yet in a window).
-    private func makeToolbarGhost() -> UIView? {
-        guard let toolbar = toolbarHost?.toolbar ?? navigationController?.toolbar,
-              !toolbar.isHidden, toolbar.window != nil,
-              let ghost = toolbar.snapshotView(afterScreenUpdates: false) else { return nil }
-        ghost.frame = view.convert(toolbar.bounds, from: toolbar)
-        ghost.isUserInteractionEnabled = false
-        view.addSubview(ghost)
-        return ghost
     }
 
     /// Reverse mutation (strip tap, entry-surface re-tap): the comments
     /// region settles out, the media expands back, the chrome returns, and
-    /// the footer crossfade runs SIMULTANEOUSLY inside the same spring —
-    /// the toolbar's ghost fades in exactly as the composer fades out, the
-    /// mirror image of the engage leg. The child is reclaimed (and the
-    /// real toolbar swapped in for its ghost, pixel-identical) only after
-    /// the spring completes.
+    /// the REAL toolbar's alpha fades in exactly as the composer fades out
+    /// — the mirror image of the engage leg, both halves in the same
+    /// spring. Nothing structural moves in either direction.
     private func dismissComments() {
         guard commentsEngagedID != nil else { return }
         UIView.animate(withDuration: SnapCommentsLayout.disengageDuration, delay: 0,
                        usingSpringWithDamping: 1, initialSpringVelocity: 0) { [weak self] in
             self?.engagedCell()?.setCommentsEngaged(false)
-            self?.commentsToolbarGhost?.alpha = 1
+            self?.setToolbarPixelsFaded(false)
         } completion: { [weak self] _ in
             self?.finishCommentsDisengagement()
+        }
+    }
+
+    /// The footer's pixel-level fade: the toolbar's OWN alpha plus every
+    /// item's custom view — on iOS 26 the Liquid Glass item platters render
+    /// in system containers that do not inherit the bar's alpha, so the
+    /// bar-level fade alone leaves the pills opaque (observed in frame
+    /// captures). Nothing structural: hierarchy, layout, and safe area are
+    /// untouched in both directions.
+    private func setToolbarPixelsFaded(_ faded: Bool) {
+        let alpha: CGFloat = faded ? 0 : 1
+        toolbarHost?.toolbar.alpha = alpha
+        for item in toolbarItems ?? [] {
+            item.customView?.alpha = alpha
         }
     }
 
@@ -726,15 +724,9 @@ final class SnapFeedViewController: UIViewController {
         cell?.clearComments()
         commentsContentVC = nil
         commentsEngagedID = nil
-        // The footer's structural return, AFTER the spring: the ghost has
-        // already faded the pixels in, so presenting the real toolbar and
-        // dropping the ghost is a same-frame swap of identical content —
-        // and the safe-area shift lands when nothing on screen depends on
-        // it anymore.
-        presentToolbar()
-        toolbarHost?.toolbar.alpha = 1
-        commentsToolbarGhost?.removeFromSuperview()
-        commentsToolbarGhost = nil
+        // Belt and braces: the toolbar was never structurally touched, but
+        // its pixels must end exact regardless of how the spring resolved.
+        setToolbarPixelsFaded(false)
     }
 
     // MARK: - Active-item lifecycle
