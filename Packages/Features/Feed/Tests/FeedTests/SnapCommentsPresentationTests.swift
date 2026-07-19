@@ -698,8 +698,9 @@ struct SnapCommentsPresentationTests {
         let textInfoFrame = SnapCommentsLayout.infoCardFrame(in: Self.container, topInset: Self.topInset, hasMedia: false)
         let caption = try engagedCaptionFrame(in: cell)
         #expect(abs(caption.minX - (textInfoFrame.minX + SnapPostInfoCardView.contentInset)) < 0.5)
-        // …and floats centered on the card's own band axis.
-        #expect(abs(caption.midY - (textInfoFrame.minY + SnapPostInfoCardView.captionBandCenterY)) < 0.5)
+        // …and TOP-PINS to the card's top inset (no centering — the text
+        // starts flush at the top, no artificial gap above).
+        #expect(abs(caption.minY - (textInfoFrame.minY + SnapPostInfoCardView.contentInset)) < 0.5)
         // No exit pan — the resting state is permanent.
         let pan = try #require(cell.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
         #expect(pan.isEnabled == false)
@@ -725,7 +726,7 @@ struct SnapCommentsPresentationTests {
         let mediaInfoFrame = SnapCommentsLayout.infoCardFrame(in: Self.container, topInset: Self.topInset, hasMedia: true)
         let mediaCaption = try engagedCaptionFrame(in: mediaCell)
         #expect(abs(mediaCaption.minX - (mediaInfoFrame.minX + SnapPostInfoCardView.contentInset)) < 0.5)
-        #expect(abs(mediaCaption.midY - (mediaInfoFrame.minY + SnapPostInfoCardView.captionBandCenterY)) < 0.5)
+        #expect(abs(mediaCaption.minY - (mediaInfoFrame.minY + SnapPostInfoCardView.contentInset)) < 0.5)
     }
 
     /// `SnapMediaCardView` is HIT-TRANSPARENT: it hosts the surfaces
@@ -829,8 +830,12 @@ struct SnapCommentsPresentationTests {
         #expect(abs(side - countersFrame.maxX - inset) < 0.5)
         // Bottom: counters sit one inset from the bottom border.
         #expect(abs(height - countersFrame.maxY - inset) < 0.5)
-        // Top: the caption never rises above one inset from the top.
-        #expect(captionFrame.minY >= inset - 0.5)
+        // Top: the caption TOP-PINS exactly one inset from the top — no
+        // centering, no artificial gap above the text.
+        #expect(abs(captionFrame.minY - inset) < 0.5)
+        // The counters clear the caption by the tight interior gap (never
+        // overlap, never a loose centered float).
+        #expect(countersFrame.minY >= captionFrame.maxY + SnapPostInfoCardView.captionActionsGap - 0.5)
     }
 
     /// The engaged toolbar's sort selector: single-selection menu with a
