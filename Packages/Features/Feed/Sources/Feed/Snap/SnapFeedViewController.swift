@@ -205,6 +205,11 @@ final class SnapFeedViewController: UIViewController {
             // that lands).
             (commentsContentVC as? PostDetailViewController)?
                 .setComposerEntranceState(offstage: false)
+            // The docked media's geometry gets re-asserted AFTER a forced
+            // layout pass: anything that disturbed the tile while the
+            // feed was covered (the Ken Burns stop once stranded it as a
+            // frozen center crop) snaps back onto the card's slot.
+            engagedCell()?.reassertEngagedGeometry()
         } else {
             finishCommentsDisengagement()
         }

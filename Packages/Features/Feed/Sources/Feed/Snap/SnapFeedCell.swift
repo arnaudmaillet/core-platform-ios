@@ -750,7 +750,50 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     private func stopKenBurns() {
         mediaView.layer.removeAllAnimations()
-        UIView.performWithoutAnimation { self.mediaView.transform = .identity }
+        // The engagement OWNS the media transform while docked: stopping
+        // the drift settles onto the CURRENT state's resting transform,
+        // never a blind identity. The blind reset stranded the docked
+        // tile as a frozen full-bleed center crop after an outbound push
+        // (didResignActive fires with the engagement alive), and the
+        // return could not heal it — startKenBurns rightly declines to
+        // restart while engaged.
+        let resting: CGAffineTransform
+        if isCommentsEngaged {
+            let bounds = contentView.bounds
+            resting = SnapCommentsLayout.mediaTransform(
+                bounds: bounds,
+                slot: SnapCommentsLayout.mediaSlotFrame(in: bounds, topInset: frozenInsets.top)
+            )
+        } else {
+            resting = .identity
+        }
+        UIView.performWithoutAnimation { self.mediaView.transform = resting }
+    }
+
+    /// Re-asserts the engaged dock geometry after the screen re-appears
+    /// from an outbound push — the belt to `stopKenBurns`' brace, covering
+    /// any path that disturbed the docked media while the feed was
+    /// covered. The synchronous layout pass runs FIRST: the slot math
+    /// must read settled coordinates, not a mid-transition hierarchy.
+    /// Idempotent — re-applying the dock to an already-docked tile is a
+    /// no-op.
+    func reassertEngagedGeometry() {
+        guard isCommentsEngaged else { return }
+        contentView.layoutIfNeeded()
+        let bounds = contentView.bounds
+        let slot = SnapCommentsLayout.mediaSlotFrame(in: bounds, topInset: frozenInsets.top)
+        let transform = SnapCommentsLayout.mediaTransform(bounds: bounds, slot: slot)
+        let crop = SnapCommentsLayout.mediaCropFrame(in: bounds)
+        let scale = slot.width / max(min(bounds.width, bounds.height), 1)
+        UIView.performWithoutAnimation {
+            for (view, mask) in [(mediaView, mediaCropMask), (videoRenderView, videoCropMask)] {
+                view.transform = transform
+                if view.mask != nil {
+                    mask.frame = crop
+                    mask.layer.cornerRadius = SnapCommentsLayout.mediaCornerRadius / scale
+                }
+            }
+        }
     }
 
     override func prepareForReuse() {
@@ -811,8 +854,30 @@ extension SnapFeedCell {
             print("GESTURELOG: cell hit at \(point) chain=\(chain) \(bar)")
         }
         #endif
-        guard isCommentsEngaged, let hit,
-              sequence(first: hit, next: { $0.superview }).contains(where: { $0 is SnapShortcutRailView })
+        guard isCommentsEngaged, let hit else { return hit }
+        // DOCKED-MEDIA HIT CLIP: the crop mask trims PIXELS, not
+        // hit-testing — the docked render surface's frame is the full-
+        // bleed rect under the uniform scale (88×191 on portrait cells),
+        // extending ~65pt above and below the visible square tile. The
+        // z-lifted surface would eat stream touches in that invisible
+        // band (an avatar tap on the first comment row dismissed the
+        // whole engagement — the background tap read it as a strip tap).
+        // Touches on the media OUTSIDE the slot belong to whatever is
+        // beneath; only image-inert cells escaped by accident
+        // (UIImageView doesn't hit-test; the video surface does).
+        if hit === videoRenderView || hit === mediaView {
+            let slot = SnapCommentsLayout.mediaSlotFrame(
+                in: contentView.bounds, topInset: frozenInsets.top
+            )
+            if !slot.contains(convert(point, to: contentView)) {
+                let containerPoint = convert(point, to: commentsContainer)
+                if let beneath = commentsContainer.hitTest(containerPoint, with: event) {
+                    return beneath
+                }
+            }
+            return hit
+        }
+        guard sequence(first: hit, next: { $0.superview }).contains(where: { $0 is SnapShortcutRailView })
         else { return hit }
         let containerPoint = convert(point, to: commentsContainer)
         if let inner = commentsContainer.hitTest(containerPoint, with: event),

@@ -2,6 +2,7 @@ import CoreContracts
 import CoreModels
 import DesignSystem
 import MediaCore
+import MediaPlayback
 import Testing
 import UIKit
 @testable import Feed
@@ -279,6 +280,89 @@ struct SnapCommentsPresentationTests {
         #expect(frost.effect == nil)
         // Resting z restored: media back at the bottom of the stack.
         #expect(cell.contentView.subviews.firstIndex(of: media) == 0)
+    }
+
+    /// REGRESSION (stranded center tile): an outbound push while engaged
+    /// fires the lifecycle resign, whose Ken Burns stop once reset the
+    /// media transform to identity — the docked tile became a frozen
+    /// full-bleed center crop, and the return couldn't heal it (the drift
+    /// rightly never restarts while engaged). The stop must settle onto
+    /// the ENGAGED resting transform, and the appearance sync's re-assert
+    /// must restore the dock even from a deliberately corrupted state.
+    @Test func outboundResignKeepsTheDockedMediaTransform() throws {
+        let cell = makeEngagedCell()
+        let slot = SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset)
+        let dock = SnapCommentsLayout.mediaTransform(bounds: Self.container, slot: slot)
+        let media = try #require(cell.contentView.subviews.compactMap { $0 as? UIImageView }.first)
+        #expect(media.transform == dock)
+
+        // The outbound push's lifecycle: activate, then resign (image
+        // cells run the Ken Burns stop on this path).
+        cell.willBecomeActive()
+        cell.didResignActive()
+        #expect(media.transform == dock)
+
+        // The belt: even a corrupted transform snaps back to the slot on
+        // the appearance re-assert; disengaged cells are untouched.
+        media.transform = .identity
+        cell.reassertEngagedGeometry()
+        #expect(media.transform == dock)
+        cell.setCommentsEngaged(false)
+        cell.reassertEngagedGeometry()
+        #expect(media.transform == .identity)
+    }
+
+    /// REGRESSION (phantom tile band): the docked video surface's FRAME
+    /// is the full-bleed rect under the dock's uniform scale — taller
+    /// than the visible square (the mask crops pixels, not hit-testing) —
+    /// and, z-lifted, it ate stream touches ~65pt above/below the tile
+    /// (an avatar tap on the first row dismissed the engagement). Hits on
+    /// the media OUTSIDE the slot must route to the stream beneath; hits
+    /// ON the tile stay the close target.
+    @Test func dockedMediaHitAreaIsClippedToTheVisibleTile() throws {
+        let cell = SnapFeedCell(frame: Self.container)
+        cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
+        cell.configure(
+            with: FeedItemDisplayModel(
+                id: PostID("post-0000"),
+                authorID: ProfileID("profile-1"),
+                authorName: "Ava",
+                metaText: "@ava · 3m",
+                avatarURL: nil,
+                caption: "caption",
+                mediaURL: URL(string: "mock://media/0.mp4"),
+                mediaKind: .video,
+                thumbnailURL: nil,
+                audioText: "Original audio · @ava"
+            ),
+            pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            videoPlayback: nil
+        )
+        cell.layoutIfNeeded()
+        let hosted = UIView()
+        cell.installComments(hosted)
+        cell.setCommentsEngaged(true)
+        cell.contentView.layoutIfNeeded()
+
+        let slot = SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset)
+        let video = try #require(
+            cell.contentView.subviews.first { $0 is VideoRenderView }
+        )
+        // The phantom band exists (the premise): the frame is taller than
+        // the visible square.
+        #expect(video.frame.height > slot.height + 50)
+
+        // A point in the band BELOW the slot (the first comment row's
+        // territory) routes to the hosted stream, not the media.
+        let bandPoint = CGPoint(x: slot.midX, y: slot.maxY + 40)
+        #expect(video.frame.contains(bandPoint))
+        let bandHit = try #require(cell.hitTest(bandPoint, with: nil))
+        #expect(sequence(first: bandHit, next: { $0.superview }).contains { $0 === hosted })
+
+        // A point ON the visible tile keeps hitting the media — the
+        // docked tile stays the tap-to-close target.
+        let tileHit = try #require(cell.hitTest(CGPoint(x: slot.midX, y: slot.midY), with: nil))
+        #expect(tileHit === video)
     }
 
     /// Reuse must never leak the mutated layout into the next post.
