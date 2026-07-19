@@ -69,18 +69,30 @@ struct CommentsRepositoryTests {
         let repository = makeRepository()
 
         let comments = try await repository.loadComments(for: PostID("post-0006"))
-        #expect(comments.count == 24) // 18 reactions + 6 semantic seeds
+        // 18 reactions + 6 semantic seeds + 3 level-2 replies (threaded
+        // in place under their parents by the repository).
+        #expect(comments.count == 27)
+        // The replies sit directly under their parents, marked as level 2.
+        let replies = comments.filter { $0.parentID != nil }
+        #expect(replies.count == 3)
+        for reply in replies {
+            let parentIndex = try #require(comments.firstIndex { $0.id == reply.parentID })
+            let replyIndex = try #require(comments.firstIndex { $0.id == reply.id })
+            #expect(replyIndex > parentIndex)
+        }
 
         let queue = CommentTickerBuilder().build(comments, postID: PostID("post-0006"))
-        // 24 − 3 disqualified reaction-bank bodies − 6 semantic seeds.
-        #expect(queue.count == comments.count - 9)
+        // 27 − 3 disqualified reaction-bank bodies − 6 semantic seeds − 2
+        // semantic replies (the reaction reply "fr fr 🔥" joins the band).
+        #expect(queue.count == comments.count - 11)
         #expect(queue.count >= CommentTickerBuilder.minTickerCount)
         #expect(queue.allSatisfy { $0.text.count <= CommentTickerBuilder.maxCharacterCount })
         #expect(queue.allSatisfy { !$0.text.contains(where: \.isNewline) })
 
         let cues = SubtitleCommentBuilder().build(comments, postID: PostID("post-0006"))
-        // 6 semantic seeds + the 2 semantic bodies in the reaction bank.
-        #expect(cues.count == 8)
+        // 6 semantic seeds + the 2 semantic bodies in the reaction bank +
+        // the 2 sentence-shaped replies.
+        #expect(cues.count == 10)
         #expect(cues.count >= SubtitleCommentBuilder.minCueCount)
         #expect(Set(cues.map(\.id)).isDisjoint(with: queue.map(\.id))) // one comment, one surface
         #expect(cues.allSatisfy { !$0.text.contains(where: \.isNewline) })

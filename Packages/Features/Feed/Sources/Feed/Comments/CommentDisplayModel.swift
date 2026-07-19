@@ -7,11 +7,15 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
     public let metaText: String
     public let body: String
     public let monogram: String
+    /// Level-2 marker: replies render with the standard reply indentation
+    /// (the stream carries exactly two depths — comment.v1's contract).
+    public let isReply: Bool
 
     public init(entry: CommentEntry, now: Date = Date()) {
         id = entry.id
         authorName = entry.authorName
         body = entry.body
+        isReply = entry.parentID != nil
         monogram = Self.monogram(entry.authorName)
         let time = Self.relativeShort(from: entry.createdAt, to: now)
         metaText = entry.authorHandle.isEmpty ? time : "@\(entry.authorHandle) · \(time)"

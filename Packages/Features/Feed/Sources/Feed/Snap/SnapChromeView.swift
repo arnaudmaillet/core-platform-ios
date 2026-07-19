@@ -357,27 +357,8 @@ final class SnapChromeView: UIView {
         didSet { renderCaption() }
     }
 
-    /// True while the comments engagement's flying caption stands in for
-    /// this one — an INSTANT swap (no fade), so exactly one caption is ever
-    /// rendered; `chrome.alpha` continues to own the rest of the chrome.
-    private var isCaptionConcealed = false
-
-    /// Instantly conceals/reveals the caption, independent of the chrome's
-    /// alpha fade — the engaged caption's flight replaces it visually.
-    func setCaptionConcealed(_ concealed: Bool) {
-        isCaptionConcealed = concealed
-        applyCaptionVisibility()
-    }
-
-    /// Where the caption sits right now, in the chrome's coordinate space
-    /// (== the cell's: the chrome is pinned to the cell's content view) —
-    /// the flight's source. Nil when the post renders no caption.
-    var captionFlightSourceFrame: CGRect? {
-        (caption?.isEmpty ?? true) ? nil : captionLabel.frame
-    }
-
     private func applyCaptionVisibility() {
-        captionLabel.isHidden = isCaptionConcealed || (caption?.isEmpty ?? true)
+        captionLabel.isHidden = caption?.isEmpty ?? true
     }
 
     /// Whether the represented post carries media. Text-only posts show an
@@ -452,13 +433,15 @@ final class SnapChromeView: UIView {
     /// replaces or orphans — while the SHORTCUT RAIL stays untouched (the
     /// blueprint keeps the vertical action rail through both states; it
     /// floats over the comments region, and its touches keep winning via
-    /// `interactionRoots` + the pager's rail veto). The caption is handled
-    /// separately (`setCaptionConcealed` — it flies, it doesn't fade).
-    /// Alpha, not isHidden, so a single animation block drives both
-    /// directions; alpha < 0.01 also removes the faded surfaces from
-    /// hit-testing, so the entry pill can't re-fire mid-engagement.
+    /// `interactionRoots` + the pager's rail veto). The caption fades with
+    /// the rest — a synchronous in-place cross-fade against the engaged
+    /// caption's own fade, no geometric flight. Alpha, not isHidden, so a
+    /// single animation block drives both directions; alpha < 0.01 also
+    /// removes the faded surfaces from hit-testing, so the entry pill
+    /// can't re-fire mid-engagement.
     func setCommentsEngaged(_ engaged: Bool) {
         let alpha: CGFloat = engaged ? 0 : 1
+        captionLabel.alpha = alpha
         scrimView.alpha = alpha
         commentTicker.alpha = alpha
         subtitleView.alpha = alpha
@@ -483,7 +466,6 @@ final class SnapChromeView: UIView {
     func reset() {
         representedID = nil
         caption = nil
-        isCaptionConcealed = false
         applyCaptionVisibility()
         onCommentsTapped = nil
         hasMedia = true

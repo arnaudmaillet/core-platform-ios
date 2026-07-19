@@ -171,32 +171,6 @@ enum SnapCommentsLayout {
         ).scaledBy(x: scale, y: scale)
     }
 
-    /// The caption's flight transform: maps a label SETTLED at `finalFrame`
-    /// (its engaged, slot-side home) back onto `sourceFrame`'s top-left (the
-    /// chrome caption's full-width home), scaled up by the type ratio — so
-    /// animating this to `.identity` reads as the caption physically
-    /// traveling and re-setting into the strip, not teleporting. Top-left
-    /// anchored (about the default center anchor, compensated): text hangs
-    /// from its first glyph, so that corner is the one the eye tracks.
-    /// True glyph reflow can't be interpolated — the label wears its
-    /// destination wrap for the whole flight; motion carries the swap.
-    static func captionFlightTransform(
-        finalFrame: CGRect, sourceFrame: CGRect, scale: CGFloat
-    ) -> CGAffineTransform {
-        let dx = sourceFrame.minX - (finalFrame.midX - finalFrame.width * scale / 2)
-        let dy = sourceFrame.minY - (finalFrame.midY - finalFrame.height * scale / 2)
-        return CGAffineTransform(translationX: dx, y: dy).scaledBy(x: scale, y: scale)
-    }
-
-    /// The flight's type-scale: the chrome caption's body tier over the
-    /// engaged caption's subheadline tier, resolved at the current Dynamic
-    /// Type size.
-    static func captionFlightScale() -> CGFloat {
-        let body = UIFont.preferredFont(forTextStyle: .body).pointSize
-        let subhead = UIFont.preferredFont(forTextStyle: .subheadline).pointSize
-        return subhead > 0 ? body / subhead : 1
-    }
-
     /// Where the header frost's dissolve BEGINS, as a fraction of the
     /// band's height: solid through the nav zone (the screen chrome needs
     /// full frost behind it), fading across the card zone, zero exactly at

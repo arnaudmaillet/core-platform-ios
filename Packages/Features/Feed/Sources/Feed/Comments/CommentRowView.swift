@@ -6,7 +6,14 @@ import UIKit
 final class CommentRowView: UIView {
     private enum Metrics {
         static let avatarSize: CGFloat = 32
+        /// The level-2 indentation: replies step in by one avatar column
+        /// (avatar + its gap), the standard thread offset — a reply's
+        /// avatar starts where its parent's text does.
+        static let replyIndent: CGFloat = avatarSize + 8
     }
+
+    /// Exposed for layout tests: the leading inset a reply row applies.
+    static var replyIndent: CGFloat { Metrics.replyIndent }
 
     private let avatarView = UIView()
     private let monogramLabel = UILabel()
@@ -15,7 +22,7 @@ final class CommentRowView: UIView {
 
     init(model: CommentDisplayModel) {
         super.init(frame: .zero)
-        configure()
+        configure(indented: model.isReply)
         headerLabel.text = "\(model.authorName)  \(model.metaText)"
         bodyLabel.text = model.body
         monogramLabel.text = model.monogram
@@ -24,7 +31,7 @@ final class CommentRowView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    private func configure() {
+    private func configure(indented: Bool) {
         avatarView.backgroundColor = .tertiarySystemFill
         avatarView.layer.cornerRadius = Metrics.avatarSize / 2
         avatarView.clipsToBounds = true
@@ -51,9 +58,19 @@ final class CommentRowView: UIView {
         row.axis = .horizontal
         row.alignment = .top
         row.spacing = Spacing.sm
-        row.pin(to: self)
+        // Level-2 rows step in by the reply indent; level-1 rows fill the
+        // width. The indent is the row's ONLY depth cue — same avatar,
+        // same type — which is exactly the standard thread grammar.
+        addSubview(row)
+        row.translatesAutoresizingMaskIntoConstraints = false
 
         NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(
+                equalTo: leadingAnchor, constant: indented ? Metrics.replyIndent : 0
+            ),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor),
+            row.topAnchor.constraint(equalTo: topAnchor),
+            row.bottomAnchor.constraint(equalTo: bottomAnchor),
             avatarView.widthAnchor.constraint(equalToConstant: Metrics.avatarSize),
             avatarView.heightAnchor.constraint(equalToConstant: Metrics.avatarSize)
         ])

@@ -434,30 +434,15 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
                 engagedCaptionLabel.bottomAnchor.constraint(lessThanOrEqualTo: contentView.topAnchor, constant: columnMaxY),
             ]
             NSLayoutConstraint.activate(engagedCaptionConstraints)
-            // The caption FLIES: the chrome's copy vanishes instantly (never
-            // two captions on screen) and this label starts the animation
-            // pre-transformed onto the old caption's frame at the old type
-            // scale — settled without animation so the subsequent identity
-            // assignment (inside the caller's animation block) is the flight
-            // itself. When the post has no caption, it simply fades in with
-            // the strip.
-            let source = chrome.captionFlightSourceFrame
-            chrome.setCaptionConcealed(true)
+            // The caption CROSS-FADES in place: the chrome's copy fades out
+            // with the rest of the chrome cut (its alpha rides
+            // `chrome.setCommentsEngaged`) while this label fades in at its
+            // engaged home — settled without animation first, so the only
+            // animated property is opacity, never geometry.
             UIView.performWithoutAnimation {
-                engagedCaptionLabel.transform = .identity // clear any stale flight
+                engagedCaptionLabel.alpha = 0
                 contentView.layoutIfNeeded()
-                if let source {
-                    engagedCaptionLabel.alpha = 1
-                    engagedCaptionLabel.transform = SnapCommentsLayout.captionFlightTransform(
-                        finalFrame: engagedCaptionLabel.frame,
-                        sourceFrame: source,
-                        scale: SnapCommentsLayout.captionFlightScale()
-                    )
-                } else {
-                    engagedCaptionLabel.alpha = 0
-                }
             }
-            engagedCaptionLabel.transform = .identity
             engagedCaptionLabel.alpha = 1
         } else {
             for (view, mask) in [(mediaView, mediaCropMask), (videoRenderView, videoCropMask)] {
@@ -481,25 +466,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             engagedCard.transform = CGAffineTransform(
                 translationX: 0, y: SnapCommentsLayout.cardContentEntranceOffset
             )
-            // Reverse flight: the chrome caption returns with the chrome's
-            // fade-in while this label flies back onto its frame, fading —
-            // a cross-dissolve in motion, no completion hooks to sequence.
-            chrome.setCaptionConcealed(false)
-            if let source = chrome.captionFlightSourceFrame {
-                // The label's UNtransformed frame, from center/bounds — valid
-                // even if a cancelled flight left a transform in place.
-                let settled = CGRect(
-                    x: engagedCaptionLabel.center.x - engagedCaptionLabel.bounds.width / 2,
-                    y: engagedCaptionLabel.center.y - engagedCaptionLabel.bounds.height / 2,
-                    width: engagedCaptionLabel.bounds.width,
-                    height: engagedCaptionLabel.bounds.height
-                )
-                engagedCaptionLabel.transform = SnapCommentsLayout.captionFlightTransform(
-                    finalFrame: settled,
-                    sourceFrame: source,
-                    scale: SnapCommentsLayout.captionFlightScale()
-                )
-            }
+            // The mirror fade: the chrome caption fades back in with the
+            // chrome cut while this label fades out in place.
             engagedCaptionLabel.alpha = 0
             NSLayoutConstraint.deactivate(engagedCaptionConstraints)
             engagedCaptionConstraints = []

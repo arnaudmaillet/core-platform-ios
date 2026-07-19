@@ -5,7 +5,8 @@ import Foundation
 /// Fake of comment.v1.CommentService over the shared dataset. Seeds a couple of
 /// top-level comments per post (authored by dataset authors, so profile
 /// hydration resolves; a few posts are deliberately dense or empty — see the
-/// seed sets below) and accepts CreateComment.
+/// seed sets below), level-2 replies on the dense posts (ListReplies), and
+/// accepts CreateComment (parentID included, persisted at the right level).
 public final class MockCommentService: @unchecked Sendable {
     private let dataset: MockSocialDataset
     private let store = Store()
@@ -18,6 +19,15 @@ public final class MockCommentService: @unchecked Sendable {
         bff.register(path: "/comment.v1.CommentService/ListTopLevel") { [self] (request: Comment_V1_ListTopLevelRequest) in
             var response = Comment_V1_ListCommentsResponse()
             response.comments = store.comments(for: request.postID, seed: seedComments(for: request.postID))
+            return .success(response)
+        }
+        bff.register(path: "/comment.v1.CommentService/ListReplies") { [self] (request: Comment_V1_ListRepliesRequest) in
+            var response = Comment_V1_ListCommentsResponse()
+            response.comments = store.replies(
+                for: request.commentID,
+                postID: request.postID,
+                seed: seedReplies(for: request.postID)[request.commentID] ?? []
+            )
             return .success(response)
         }
         bff.register(path: "/comment.v1.CommentService/CreateComment") { [self] (request: Comment_V1_CreateCommentRequest) in
@@ -101,6 +111,43 @@ public final class MockCommentService: @unchecked Sendable {
         "Feels like a memory I never actually had, somehow.",
     ]
 
+    /// Level-2 seeds for the dense posts: a couple of replies under the
+    /// first semantic comment and one under the first reaction, so the
+    /// stream's 2-level rendering (indented reply rows directly under
+    /// their parents) is verifiable on every dense page. Sparse posts
+    /// carry none — post-0001's two-comment seed is pinned by repository
+    /// tests and stays byte-identical.
+    private func seedReplies(for postID: String) -> [String: [Comment_V1_CommentView]] {
+        guard Self.denselySeededPostIDs.contains(postID) else { return [:] }
+        let authors = dataset.authors
+        guard authors.count >= 5 else { return [:] }
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        let offset = Int(postID.suffix(4)) ?? 0
+        func reply(_ parent: String, _ position: Int, _ body: String, ageMs: Int64) -> Comment_V1_CommentView {
+            var view = makeComment(
+                id: "\(parent)-r\(position)",
+                postID: postID,
+                author: authors[(offset + position + 5) % authors.count].profileID,
+                body: body,
+                ageMs: 0
+            )
+            view.parentID = parent
+            view.createdAtMs = nowMs - ageMs
+            return view
+        }
+        let semParent = "\(postID)-sem-0"
+        let denseParent = "\(postID)-dense-0"
+        return [
+            semParent: [
+                reply(semParent, 0, "So true, the framing carries it.", ageMs: 6 * 60_000),
+                reply(semParent, 1, "came here to say exactly this", ageMs: 4 * 60_000),
+            ],
+            denseParent: [
+                reply(denseParent, 0, "fr fr 🔥", ageMs: 2 * 60_000),
+            ],
+        ]
+    }
+
     private func seedComments(for postID: String) -> [Comment_V1_CommentView] {
         guard !Self.zeroCommentPostIDs.contains(postID) else { return [] }
         let authors = dataset.authors
@@ -165,7 +212,13 @@ public final class MockCommentService: @unchecked Sendable {
         private var created: [String: [Comment_V1_CommentView]] = [:]
 
         func comments(for postID: String, seed: [Comment_V1_CommentView]) -> [Comment_V1_CommentView] {
-            lock.withLock { (created[postID] ?? []) + seed }
+            // Top-level only, faithfully: created replies surface through
+            // ListReplies, never in the top-level page.
+            lock.withLock { (created[postID] ?? []).filter { $0.parentID.isEmpty } + seed }
+        }
+
+        func replies(for commentID: String, postID: String, seed: [Comment_V1_CommentView]) -> [Comment_V1_CommentView] {
+            lock.withLock { (created[postID] ?? []).filter { $0.parentID == commentID } + seed }
         }
 
         func append(_ request: Comment_V1_CreateCommentRequest) -> (commentID: String, postID: String) {
@@ -174,6 +227,7 @@ public final class MockCommentService: @unchecked Sendable {
                 view.commentID = request.commentID
                 view.postID = request.postID
                 view.authorID = request.authorID
+                view.parentID = request.parentID
                 view.body = request.body
                 view.createdAtMs = Int64(Date().timeIntervalSince1970 * 1000)
                 created[request.postID, default: []].insert(view, at: 0)

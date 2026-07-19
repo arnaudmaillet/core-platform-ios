@@ -510,25 +510,28 @@ final class SnapFeedViewController: UIViewController {
         ])
 
         // TWO item sets over one living bar (keep-and-stack): the audio
-        // attribution ANCHORS the leading slot in both — the same item
-        // instance in both arrays, so its platter never moves — while the
-        // TRAILING territory swaps via `setToolbarItems(_:animated:)`
-        // (the system's own platter morph, the same choreography a push
-        // uses): bookmark/share/more for the feed, the comments sort
-        // selector alone while engaged (bookmark and the post metrics
-        // already live in the engaged card — the band carries no
-        // duplicates).
+        // attribution ANCHORS the leading slot and the more (…) bubble
+        // ANCHORS the far right in BOTH — the same item instances in both
+        // arrays, so their platters never move — while the territory
+        // between swaps via `setToolbarItems(_:animated:)` (the system's
+        // own platter morph, the same choreography a push uses): the
+        // bookmark/share cluster for the feed, the comments sort selector
+        // while engaged (bookmark and the post metrics already live in
+        // the engaged card — the band carries no duplicates).
         let leading: [UIBarButtonItem] = [
             UIBarButtonItem(customView: mediaAttributionView),
             .flexibleSpace(),
         ]
+        let moreItem = UIBarButtonItem(customView: more)
         defaultToolbarItems = leading + [
             UIBarButtonItem(customView: shareCluster),
             .fixedSpace(Spacing.sm),
-            UIBarButtonItem(customView: more),
+            moreItem,
         ]
         engagedToolbarItems = leading + [
             UIBarButtonItem(customView: commentSortButton),
+            .fixedSpace(Spacing.sm),
+            moreItem,
         ]
         toolbarItems = defaultToolbarItems
     }

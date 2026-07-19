@@ -1,3 +1,4 @@
+import CoreContracts
 import CoreModels
 import DesignSystem
 import MediaCore
@@ -70,54 +71,6 @@ struct SnapCommentsPresentationTests {
         let crop = SnapCommentsLayout.mediaCropFrame(in: Self.container)
         let scale = view.frame.width / Self.container.width
         #expect(abs(crop.height * scale - slot.height) < 0.5)
-    }
-
-    /// The caption's flight start: a view settled at its engaged home,
-    /// wearing the flight transform, sits top-left aligned on the chrome
-    /// caption's frame at the enlarged type scale — so animating to
-    /// `.identity` is a genuine travel, not a teleport.
-    @Test func captionFlightTransformMapsOntoSource() {
-        let final = CGRect(x: 122, y: 119, width: 264, height: 96)
-        let source = CGRect(x: 16, y: 700, width: 370, height: 44)
-        let scale: CGFloat = 17.0 / 15.0
-        let view = UIView(frame: final)
-        view.transform = SnapCommentsLayout.captionFlightTransform(
-            finalFrame: final, sourceFrame: source, scale: scale
-        )
-        #expect(abs(view.frame.minX - source.minX) < 0.5)
-        #expect(abs(view.frame.minY - source.minY) < 0.5)
-        #expect(abs(view.frame.width - final.width * scale) < 0.5)
-        #expect(abs(view.frame.height - final.height * scale) < 0.5)
-    }
-
-    /// The conceal seam: the chrome caption vanishes instantly for the
-    /// flight and returns on demand — independent of `chrome.alpha`, and
-    /// never resurrecting a caption the post doesn't have.
-    @Test func captionConcealSwapsInstantly() throws {
-        let chrome = SnapChromeView(frame: Self.container)
-        chrome.configure(with: FeedItemDisplayModel(
-            id: PostID("post-1"),
-            authorID: ProfileID("profile-1"),
-            authorName: "Ana",
-            metaText: "@ana · 3m",
-            avatarURL: nil,
-            caption: "caption",
-            mediaURL: URL(string: "mock://media/1"),
-            mediaKind: .image,
-            thumbnailURL: nil,
-            audioText: nil
-        ))
-        let caption = try #require(
-            chrome.subviews.compactMap { $0 as? UILabel }.first { $0.attributedText?.string == "caption" }
-        )
-        #expect(caption.isHidden == false)
-        #expect(chrome.captionFlightSourceFrame != nil)
-        chrome.setCaptionConcealed(true)
-        #expect(caption.isHidden == true)
-        // The flight source survives concealment (the reverse flight needs it).
-        #expect(chrome.captionFlightSourceFrame != nil)
-        chrome.setCaptionConcealed(false)
-        #expect(caption.isHidden == false)
     }
 
     @Test func degenerateBoundsAreSafe() {
@@ -641,6 +594,55 @@ struct SnapCommentsPresentationTests {
         #expect(pushedSend.alpha == 1)
         pushed.setKeyboardOpen(true)
         #expect(pushedSend.alpha == 1)
+    }
+
+    /// The 2-level thread order: each top-level comment immediately
+    /// followed by its replies oldest-first; orphaned replies (parent not
+    /// in the page) are dropped, never stranded at the wrong depth.
+    @Test func commentThreadingInterleavesRepliesUnderParents() {
+        func view(_ id: String, parent: String = "", age: Int64 = 0) -> Comment_V1_CommentView {
+            var v = Comment_V1_CommentView()
+            v.commentID = id
+            v.parentID = parent
+            v.createdAtMs = age
+            return v
+        }
+        let thread = CommentsRepository.threaded(
+            topLevel: [view("a"), view("b"), view("c")],
+            repliesByParent: [
+                "a": [view("a-r1", parent: "a", age: 200), view("a-r0", parent: "a", age: 100)],
+                "c": [view("c-r0", parent: "c", age: 50)],
+                "ghost": [view("ghost-r0", parent: "ghost")],
+            ]
+        )
+        #expect(thread.map(\.commentID) == ["a", "a-r0", "a-r1", "b", "c", "c-r0"])
+    }
+
+    /// A reply's display model carries the level-2 marker, and its row
+    /// steps in by the standard reply indent while a parent row fills the
+    /// width — the indent is the depth cue.
+    @Test func replyRowsIndentByOneAvatarColumn() throws {
+        let parentEntry = CommentEntry(
+            id: "c0", authorID: ProfileID("p1"), authorName: "Ana Reyes",
+            authorHandle: "ana", body: "parent", createdAt: Date()
+        )
+        let replyEntry = CommentEntry(
+            id: "c0-r0", authorID: ProfileID("p2"), authorName: "Bo Chen",
+            authorHandle: "bo", body: "reply", createdAt: Date(), parentID: "c0"
+        )
+        let parentModel = CommentDisplayModel(entry: parentEntry)
+        let replyModel = CommentDisplayModel(entry: replyEntry)
+        #expect(parentModel.isReply == false)
+        #expect(replyModel.isReply == true)
+
+        func settledRow(_ model: CommentDisplayModel) throws -> CGRect {
+            let row = CommentRowView(model: model)
+            row.frame = CGRect(x: 0, y: 0, width: 320, height: 80)
+            row.layoutIfNeeded()
+            return try #require(row.subviews.first { $0 is UIStackView }).frame
+        }
+        #expect(try settledRow(parentModel).minX == 0)
+        #expect(try settledRow(replyModel).minX == CommentRowView.replyIndent)
     }
 
     // MARK: - Entry point
