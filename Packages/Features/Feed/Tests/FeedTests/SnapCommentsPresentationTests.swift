@@ -278,10 +278,7 @@ struct SnapCommentsPresentationTests {
         // line, and hit-inert: the layer must never change the engaged
         // touch surface)…
         let subviews = cell.contentView.subviews
-        let effectViews = subviews.compactMap { $0 as? UIVisualEffectView }
-        let cardFrame = SnapCommentsLayout.stripCardFrame(in: Self.container, topInset: Self.topInset)
-        let frost = try #require(effectViews.first { $0.frame != cardFrame })
-        let backdrop = try #require(effectViews.first { $0.frame == cardFrame })
+        let frost = try #require(subviews.compactMap { $0 as? ProgressiveFrostView }.first)
         #expect(frost.isHidden == false)
         #expect(frost.frame == CGRect(
             x: 0, y: 0,
@@ -289,32 +286,36 @@ struct SnapCommentsPresentationTests {
             height: SnapCommentsLayout.stripBottom(topInset: Self.topInset)
         ))
         #expect(frost.isUserInteractionEnabled == false)
-        // Progressive, not a hard-edged slab: the band wears its gradient
-        // mask, re-framed to the bounds by layout.
-        #expect(frost is ProgressiveFrostView)
         let frostMask = try #require(frost.mask)
         #expect(frostMask.frame == frost.bounds)
 
-        // …under the floating glass card (rounded, hairline-stroked,
-        // wrapping the slot — not a wall-to-wall band)…
-        #expect(backdrop.isHidden == false)
-        #expect(backdrop.layer.cornerRadius == SnapCommentsLayout.stripCardCornerRadius)
+        // …under the info card, which draws its OWN glass (a distinct
+        // rounded, hairline-stroked surface) at the info card frame…
+        let info = try #require(subviews.compactMap { $0 as? SnapPostInfoCardView }.first)
+        #expect(info.isHidden == false)
+        #expect(info.frame == SnapCommentsLayout.infoCardFrame(
+            in: Self.container, topInset: Self.topInset, hasMedia: true
+        ))
+        let infoGlass = try #require(info.subviews.compactMap { $0 as? SnapGlassCardView }.first)
+        #expect(infoGlass.layer.cornerRadius == SnapCommentsLayout.stripCardCornerRadius)
 
-        // …under the media card (z-lifted above stream, frost, and card).
+        // …with the media card (carrying its own glass) z-lifted above the
+        // stream and frost. Both cards sit above the frost; the media tile
+        // floats over everything.
         let media = try #require(subviews.compactMap { $0 as? SnapMediaCardView }.first)
         let containerIndex = try #require(subviews.firstIndex(of: container))
         let frostIndex = try #require(subviews.firstIndex(of: frost))
-        let backdropIndex = try #require(subviews.firstIndex(of: backdrop))
+        let infoIndex = try #require(subviews.firstIndex(of: info))
         let mediaIndex = try #require(subviews.firstIndex(of: media))
         #expect(containerIndex < frostIndex)
-        #expect(frostIndex < backdropIndex)
-        #expect(backdropIndex < mediaIndex)
+        #expect(frostIndex < infoIndex)
+        #expect(frostIndex < mediaIndex)
 
         cell.setCommentsEngaged(false)
         cell.clearComments()
         #expect(hosted.superview == nil)
         #expect(container.isHidden == true)
-        #expect(backdrop.isHidden == true)
+        #expect(info.isHidden == true)
         #expect(frost.isHidden == true)
         #expect(frost.effect == nil)
         // Resting z restored: media back at the bottom of the stack.
@@ -488,12 +489,9 @@ struct SnapCommentsPresentationTests {
     }
 
     private func infoCard(of cell: SnapFeedCell) throws -> SnapPostInfoCardView {
-        // Two effect views live in the engaged cell (header frost + glass
-        // card); the info card is the one hosting the glass card's content.
-        let cards = cell.contentView.subviews
-            .compactMap { $0 as? UIVisualEffectView }
-            .flatMap { $0.contentView.subviews.compactMap { $0 as? SnapPostInfoCardView } }
-        return try #require(cards.first)
+        // The info card is now a direct cell subview drawing its OWN glass
+        // (no shared backdrop wraps it).
+        try #require(cell.contentView.subviews.compactMap { $0 as? SnapPostInfoCardView }.first)
     }
 
     /// The media component — the render surfaces now live inside it, not as
@@ -574,20 +572,21 @@ struct SnapCommentsPresentationTests {
         #expect(like.configuration?.attributedTitle == nil)
     }
 
-    /// The card content's choreography: offstage at rest (alpha 0, the
-    /// entrance offset), risen while engaged, and back to the entrance
-    /// pose on disengage — symmetric legs of the one spring.
+    /// The info card's CONTENT choreography: offstage at rest (alpha 0, the
+    /// entrance offset), risen while engaged, and back on disengage — the
+    /// glass frame itself never moves (only its content rises), so the fade
+    /// rides the content, not the blur.
     @Test func engagedCardRisesAndSinksWithTheSpring() throws {
         let cell = makeConfiguredCell(audioText: nil, likeCount: 0)
         let card = try infoCard(of: cell)
-        #expect(card.alpha == 0)
-        #expect(card.transform.ty == SnapCommentsLayout.cardContentEntranceOffset)
+        #expect(card.contentAlpha == 0)
+        #expect(card.contentEntranceOffset == SnapCommentsLayout.cardContentEntranceOffset)
         cell.setCommentsEngaged(true)
-        #expect(card.alpha == 1)
-        #expect(card.transform == .identity)
+        #expect(card.contentAlpha == 1)
+        #expect(card.contentEntranceOffset == 0)
         cell.setCommentsEngaged(false)
-        #expect(card.alpha == 0)
-        #expect(card.transform.ty == SnapCommentsLayout.cardContentEntranceOffset)
+        #expect(card.contentAlpha == 0)
+        #expect(card.contentEntranceOffset == SnapCommentsLayout.cardContentEntranceOffset)
     }
 
     /// The engaged tap boundary: a touch anywhere inside the hosted
@@ -609,12 +608,9 @@ struct SnapCommentsPresentationTests {
 
         #expect(SnapFeedCell.isCommentsStreamTouch(row, stopAt: cell.contentView))
         #expect(SnapFeedCell.isCommentsStreamTouch(hosted, stopAt: cell.contentView))
-        // The strip's layers (the glass card and the docked media) remain
-        // close-eligible…
-        let card = try #require(
-            cell.contentView.subviews.compactMap { $0 as? UIVisualEffectView }
-                .first { $0.frame == SnapCommentsLayout.stripCardFrame(in: Self.container, topInset: Self.topInset) }
-        )
+        // The strip's layers (the info glass card and the docked media)
+        // remain close-eligible…
+        let card = try infoCard(of: cell)
         #expect(SnapFeedCell.isCommentsStreamTouch(card, stopAt: cell.contentView) == false)
         let media = try mediaCard(of: cell).imageView
         #expect(SnapFeedCell.isCommentsStreamTouch(media, stopAt: cell.contentView) == false)
@@ -684,15 +680,20 @@ struct SnapCommentsPresentationTests {
         cell.setCommentsEngaged(true)
         cell.contentView.layoutIfNeeded()
 
-        // The full card sandwich, at the media layout's exact frames.
-        let effectViews = cell.contentView.subviews.compactMap { $0 as? UIVisualEffectView }
-        let cardFrame = SnapCommentsLayout.stripCardFrame(in: Self.container, topInset: Self.topInset)
-        let backdrop = try #require(effectViews.first { $0.frame == cardFrame })
-        #expect(backdrop.isHidden == false)
-        let frost = try #require(effectViews.first { $0.frame != cardFrame })
+        // Text posts show ONE standalone glass card, full width (the media
+        // card is omitted): the info card spans the whole strip, drawing
+        // its own glass, under the wall-to-wall frost.
+        let info = try infoCard(of: cell)
+        #expect(info.isHidden == false)
+        #expect(info.frame == SnapCommentsLayout.stripCardFrame(in: Self.container, topInset: Self.topInset))
+        #expect(info.subviews.compactMap { $0 as? SnapGlassCardView }.first != nil)
+        // No media card glass is shown on a text page.
+        #expect(cell.contentView.subviews.compactMap { $0 as? SnapMediaCardView }.first?
+            .subviews.contains { $0 is SnapGlassCardView && !$0.isHidden } == false)
+        let frost = try #require(cell.contentView.subviews.compactMap { $0 as? ProgressiveFrostView }.first)
         #expect(frost.frame.height == SnapCommentsLayout.stripBottom(topInset: Self.topInset))
-        // The caption claims the collapsed hole: leading at the slot's
-        // own left edge (the card's inner padding line), full card width.
+        // The caption claims the full-width card: leading at the card's
+        // inner padding line (which is the slot's own left edge).
         let slot = SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset)
         let caption = try engagedCaptionFrame(in: cell)
         #expect(abs(caption.minX - slot.minX) < 0.5)
@@ -716,8 +717,12 @@ struct SnapCommentsPresentationTests {
         #expect(SnapFeedCollectionView.claimsTouches(mediaHosted))
         let mediaPan = try #require(mediaCell.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
         #expect(mediaPan.isEnabled == true)
+        // On a media post the caption lives in the SEPARATE info card, so
+        // it starts at that card's own inner padding (its frame sits past
+        // the media card + the gap).
+        let mediaInfoFrame = SnapCommentsLayout.infoCardFrame(in: Self.container, topInset: Self.topInset, hasMedia: true)
         let mediaCaption = try engagedCaptionFrame(in: mediaCell)
-        #expect(abs(mediaCaption.minX - (slot.maxX + Spacing.md)) < 0.5)
+        #expect(abs(mediaCaption.minX - (mediaInfoFrame.minX + SnapCommentsLayout.stripCardPadding)) < 0.5)
         #expect(abs(mediaCaption.midY - SnapCommentsLayout.captionBandCenterY(topInset: Self.topInset)) < 0.5)
     }
 
@@ -741,26 +746,54 @@ struct SnapCommentsPresentationTests {
         #expect(card.hitTest(CGPoint(x: 195, y: 400), with: nil) == nil)
     }
 
-    /// `SnapPostInfoCardView`'s one composition input: media posts inset
-    /// the caption past the media slot; text posts (which omit the media
-    /// card) claim the card's left inner edge. The counters never move.
-    @Test func infoCardCaptionInsetFollowsMediaPresence() {
-        #expect(SnapPostInfoCardView.captionLeading(hasMedia: true)
-            == SnapCommentsLayout.stripCardPadding + SnapCommentsLayout.mediaSlotHeight + Spacing.md)
-        #expect(SnapPostInfoCardView.captionLeading(hasMedia: false)
-            == SnapCommentsLayout.stripCardPadding)
+    /// TWO independent glass cards on media posts: the media card (a square
+    /// wrapping the slot at the strip's left) and the info card (from just
+    /// past it, plus the gap, to the strip's right edge) — with a clear
+    /// physical gap between them, tiling the strip with no overlap. On text
+    /// posts the info card is the WHOLE strip (the media card is omitted).
+    @Test func mediaAndInfoAreTwoSeparateCardsWithAGap() {
+        let media = SnapCommentsLayout.mediaCardFrame(in: Self.container, topInset: Self.topInset)
+        let slot = SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset)
+        // The media card is a square wrapping the slot by the card padding.
+        #expect(media.width == media.height)
+        #expect(media.width == slot.width + 2 * SnapCommentsLayout.stripCardPadding)
+        #expect(abs(media.midX - slot.midX) < 0.5 && abs(media.midY - slot.midY) < 0.5)
+
+        let info = SnapCommentsLayout.infoCardFrame(in: Self.container, topInset: Self.topInset, hasMedia: true)
+        // A real gap sits between them — two distinct floating cards.
+        #expect(info.minX == media.maxX + SnapCommentsLayout.cardGap)
+        #expect(info.minX > media.maxX)
+        // …and together they span the strip (media left edge → info right).
+        let strip = SnapCommentsLayout.stripCardFrame(in: Self.container, topInset: Self.topInset)
+        #expect(media.minX == strip.minX)
+        #expect(abs(info.maxX - strip.maxX) < 0.5)
+        #expect(media.minY == strip.minY && info.minY == strip.minY)
+        #expect(media.height == strip.height && info.height == strip.height)
+
+        // Text: the info card IS the whole strip; no media card beside it.
+        let textInfo = SnapCommentsLayout.infoCardFrame(in: Self.container, topInset: Self.topInset, hasMedia: false)
+        #expect(textInfo == strip)
     }
 
     /// The counter cluster is RIGHT-ALIGNED on every post type — one
     /// posture, no format branch: it hugs the card's trailing inner edge
     /// and grows leftward as counts appear.
-    @Test func cardCountersAreAlwaysRightAligned() {
+    @Test func cardCountersAreAlwaysRightAligned() throws {
         let width: CGFloat = 374
         let pad = SnapCommentsLayout.stripCardPadding
         let card = SnapPostInfoCardView(frame: CGRect(x: 0, y: 0, width: width, height: 104))
         card.layoutIfNeeded()
-        let actions = card.subviews.compactMap { $0 as? UIStackView }[0]
-        #expect(actions.frame.maxX == width - pad)
+        // The counters stack is now nested inside the card's own glass.
+        var stack: [UIView] = [card]
+        var actions: UIStackView?
+        while let view = stack.popLast() {
+            if let s = view as? UIStackView { actions = s; break }
+            stack.append(contentsOf: view.subviews)
+        }
+        let row = try #require(actions)
+        // In the card's own coordinate space (the glass fills it).
+        let maxX = row.superview?.convert(row.frame, to: card).maxX ?? row.frame.maxX
+        #expect(abs(maxX - (width - pad)) < 0.5)
     }
 
     /// The caption axis is the midpoint of the caption's own band

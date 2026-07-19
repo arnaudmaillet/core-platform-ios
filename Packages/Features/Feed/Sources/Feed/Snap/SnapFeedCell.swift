@@ -68,13 +68,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// below the chrome (the action rail floats over it).
     private let commentsContainer = SnapCommentsContainerView()
     private var commentsContainerConstraints: [NSLayoutConstraint] = []
-    /// The frosted header behind the docked strip: comments glide under it
-    /// at full height, the blur keeps the strip legible. Effect nil until
-    /// engagement IN A WINDOW (creating a real `UIBlurEffect` contacts the
-    /// render server — the headless-CI stall doctrine), and the blur
-    /// animates in/out via the `effect` property, the supported path.
-    private let stripBackdrop = UIVisualEffectView(effect: nil)
-    private var stripBackdropConstraints: [NSLayoutConstraint] = []
     /// The header zone's wall-to-wall frost: screen top → the strip's
     /// lower boundary, layered BETWEEN the stream (behind) and the glass
     /// card (in front) — rows scrolled under the header dissolve into the
@@ -94,14 +87,15 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         maskLocations: [0, 0.4, 1]
     )
     private var headerFrostConstraints: [NSLayoutConstraint] = []
-    /// The post-info component: caption + right-aligned counters, a
-    /// standalone self-balancing card living inside the backdrop's content
-    /// view so the glass frame is its only geometry authority. Populated at
-    /// `configure` (engaging is choreography, never a fetch); rests offstage
-    /// (alpha 0, slight downward offset) and rises with the one engagement
-    /// spring, carrying its caption with it. Composed BESIDE the media card
-    /// on media posts, standalone (full width) on text posts.
+    /// The post-info component: caption + right-aligned counters, its OWN
+    /// floating glass card. Populated at `configure` (engaging is
+    /// choreography, never a fetch); its content rests offstage (alpha 0,
+    /// slight downward offset) and rises with the one engagement spring,
+    /// carrying its caption. Positioned BESIDE the media card on media posts
+    /// (`infoCardFrame(hasMedia: true)`), or standalone full-width on text
+    /// posts — a distinct glass surface either way.
     private let infoCard = SnapPostInfoCardView()
+    private var infoCardConstraints: [NSLayoutConstraint] = []
     /// Remembers a visible pause glyph across an engagement (the glyph is
     /// centered on the full page and would float mid-strip while docked).
     private var pauseGlyphSuppressedByEngagement = false
@@ -179,40 +173,22 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         contentView.addSubview(commentsContainer)
 
         // The header frost sits directly above the stream and below the
-        // glass card (added next), completing the z-sandwich: stream →
-        // frost → card → media.
+        // two glass cards (added next), completing the z-sandwich: stream →
+        // frost → cards → docked media.
         headerFrost.isHidden = true
         headerFrost.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(headerFrost)
 
-        // The strip's Liquid Glass CARD, above the stream and below the
-        // media: a floating rounded surface (not a wall-to-wall band) with
-        // a hairline stroke, so the under-gliding comments read as passing
-        // BEHIND a distinct object. Blur clipping needs `clipsToBounds`
-        // (an effect view's backdrop ignores the layer radius on its own —
-        // the count bubble's doctrine).
-        stripBackdrop.isHidden = true
-        stripBackdrop.clipsToBounds = true
-        stripBackdrop.layer.cornerRadius = SnapCommentsLayout.stripCardCornerRadius
-        stripBackdrop.layer.cornerCurve = .continuous
-        stripBackdrop.layer.borderWidth = 0.5
-        stripBackdrop.layer.borderColor = UIColor.white.withAlphaComponent(0.15).cgColor
-        stripBackdrop.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(stripBackdrop)
-
-        // The info card rides the backdrop, resting offstage: the disengage
-        // pose IS the entrance pose (alpha 0, a small downward offset), so
-        // engage/disengage are symmetric legs of one spring with no
-        // per-engagement preparation. Its caption rides with it (the card
-        // owns its own internal layout — caption centered, counters
-        // right-aligned — so the cell mints no caption constraints).
-        infoCard.alpha = 0
-        infoCard.transform = CGAffineTransform(
-            translationX: 0, y: SnapCommentsLayout.cardContentEntranceOffset
-        )
+        // The post-info glass card — its OWN floating surface (the media
+        // card is a SEPARATE component with its own glass). Hidden and
+        // unpositioned at rest; the feed positions it at `infoCardFrame`
+        // per post (beside the media card, or standalone full-width) at
+        // install. Its content rests offstage so engage/disengage are
+        // symmetric legs of one spring with no per-engagement preparation.
+        infoCard.isHidden = true
+        infoCard.setContentEntrance(offstage: true)
         infoCard.translatesAutoresizingMaskIntoConstraints = false
-        stripBackdrop.contentView.addSubview(infoCard)
-        infoCard.pin(to: stripBackdrop.contentView)
+        contentView.addSubview(infoCard)
 
         chrome.pin(to: contentView)
 
@@ -266,29 +242,28 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             ),
         ]
         NSLayoutConstraint.activate(headerFrostConstraints)
-        // The glass card floats around the strip's content — for EVERY
-        // format: a text-only page raises the identical card with its
-        // media slot simply left empty (the glass shows through), keeping
-        // the caption/actions column on the same typography anchors as
-        // the media layouts.
-        let card = SnapCommentsLayout.stripCardFrame(
-            in: contentView.bounds, topInset: frozenInsets.top
+        // The post-info glass card, positioned per post: beside the media
+        // card (`hasMedia: true`) or standalone full-width (text). Its own
+        // distinct floating surface — the media card carries the OTHER one.
+        let infoFrame = SnapCommentsLayout.infoCardFrame(
+            in: contentView.bounds, topInset: frozenInsets.top, hasMedia: mediaURL != nil
         )
-        stripBackdrop.isHidden = false
-        NSLayoutConstraint.deactivate(stripBackdropConstraints)
-        stripBackdropConstraints = [
-            stripBackdrop.topAnchor.constraint(equalTo: contentView.topAnchor, constant: card.minY),
-            stripBackdrop.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: card.minX),
-            stripBackdrop.widthAnchor.constraint(equalToConstant: card.width),
-            stripBackdrop.heightAnchor.constraint(equalToConstant: card.height),
+        infoCard.isHidden = false
+        NSLayoutConstraint.deactivate(infoCardConstraints)
+        infoCardConstraints = [
+            infoCard.topAnchor.constraint(equalTo: contentView.topAnchor, constant: infoFrame.minY),
+            infoCard.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: infoFrame.minX),
+            infoCard.widthAnchor.constraint(equalToConstant: infoFrame.width),
+            infoCard.heightAnchor.constraint(equalToConstant: infoFrame.height),
         ]
-        NSLayoutConstraint.activate(stripBackdropConstraints)
+        NSLayoutConstraint.activate(infoCardConstraints)
         // The docked media card rides ABOVE the stream and the frosted
         // header for the engagement's lifetime (restored on
         // `clearComments`) — that's the layering that makes comments glide
-        // underneath it. (Hidden surfaces on a text page make this a no-op
-        // visually.)
-        contentView.insertSubview(mediaCard, aboveSubview: stripBackdrop)
+        // underneath it. It carries its OWN glass. (Hidden surfaces on a
+        // text page make this a no-op visually — text posts show only the
+        // info card.)
+        contentView.insertSubview(mediaCard, aboveSubview: headerFrost)
         view.translatesAutoresizingMaskIntoConstraints = false
         commentsContainer.addSubview(view)
         view.pin(to: commentsContainer)
@@ -310,13 +285,14 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         commentsContainer.transform = .identity
         NSLayoutConstraint.deactivate(commentsContainerConstraints)
         commentsContainerConstraints = []
-        stripBackdrop.isHidden = true
-        stripBackdrop.effect = nil
+        infoCard.isHidden = true
+        infoCard.setGlassActive(false)
         // A nudge interrupted by disengagement must not leak into the
         // next engagement's card position.
-        stripBackdrop.transform = .identity
-        NSLayoutConstraint.deactivate(stripBackdropConstraints)
-        stripBackdropConstraints = []
+        infoCard.transform = .identity
+        NSLayoutConstraint.deactivate(infoCardConstraints)
+        infoCardConstraints = []
+        mediaCard.hideGlass()
         headerFrost.isHidden = true
         headerFrost.effect = nil
         NSLayoutConstraint.deactivate(headerFrostConstraints)
@@ -354,42 +330,43 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
                 pauseGlyph.isHidden = true
             }
             // The media card docks its surfaces into the slot (transform +
-            // animated crop mask) — a visual no-op for text posts, whose
-            // surfaces are hidden. Called inside the master spring block.
+            // animated crop mask) and raises its OWN glass card around the
+            // tile — a visual no-op for text posts, whose surfaces are
+            // hidden and whose media card is never positioned. Inside the
+            // master spring block.
             mediaCard.dock(slot: slot, in: bounds)
+            if mediaURL != nil {
+                mediaCard.showGlass(at: SnapCommentsLayout.mediaCardFrame(in: bounds, topInset: frozenInsets.top))
+            }
             chrome.setCommentsEngaged(true)
             commentsContainer.alpha = 1
-            // The frosted header materializes via the EFFECT property (the
-            // supported animatable path — alpha on an effect view is not).
-            // Window-guarded: real blurs contact the render server, which
-            // headless CI test hosts must never pay.
-            if window != nil, stripBackdrop.effect == nil {
-                stripBackdrop.effect = UIBlurEffect(style: .systemThinMaterialDark)
-            }
+            // Each card materializes its OWN glass via the EFFECT property
+            // (the supported animatable path — alpha on an effect view is
+            // not); window-guarded inside the component (real blurs contact
+            // the render server, which headless CI hosts must never pay).
+            infoCard.setGlassActive(true)
             // The header frost materializes on the same beat and the same
-            // supported path — one material family across card and frame.
+            // supported path — one material family across cards and frame.
             if window != nil, headerFrost.effect == nil {
                 headerFrost.effect = UIBlurEffect(style: .systemThinMaterialDark)
             }
-            // The info card rises into place inside the same spring — one
-            // fade for the caption AND the counters (it owns their internal
-            // balance); the chrome's caption copy fades out on the same
-            // beat (`chrome.setCommentsEngaged`), the cross-fade.
-            infoCard.alpha = 1
-            infoCard.transform = .identity
+            // The info card's content rises into place inside the same
+            // spring — one fade for the caption AND the counters (it owns
+            // their internal balance); the chrome's caption copy fades out
+            // on the same beat (`chrome.setCommentsEngaged`), the cross-fade.
+            infoCard.setContentEntrance(offstage: false)
         } else {
             mediaCard.undock(in: bounds)
+            mediaCard.hideGlass()
             chrome.setCommentsEngaged(false)
             commentsContainer.alpha = 0
-            stripBackdrop.effect = nil // blur dissolves with the return spring
+            infoCard.setGlassActive(false) // blur dissolves with the return spring
             headerFrost.effect = nil
-            // The info card sinks back to the entrance pose — the reverse
-            // leg of the same spring, and the ready state for the next
-            // engagement; the chrome caption fades back in as it fades out.
-            infoCard.alpha = 0
-            infoCard.transform = CGAffineTransform(
-                translationX: 0, y: SnapCommentsLayout.cardContentEntranceOffset
-            )
+            // The info card's content sinks back to the entrance pose — the
+            // reverse leg of the same spring, and the ready state for the
+            // next engagement; the chrome caption fades back in as it fades
+            // out.
+            infoCard.setContentEntrance(offstage: true)
             if pauseGlyphSuppressedByEngagement {
                 pauseGlyphSuppressedByEngagement = false
                 pauseGlyph.isHidden = false
@@ -419,10 +396,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         let hasMedia = model.mediaURL != nil
         infoCard.setCaption(model.caption)
         infoCard.configure(with: model)
-        // The one composition input: media posts inset the info caption
-        // past the media card; text posts omit the media card, so the info
-        // caption claims the full card width.
-        infoCard.setHasMedia(hasMedia)
+        // Composition is POSITIONAL now (the info card's frame is set at
+        // install per `hasMedia`), so the info card itself is format-
+        // agnostic — its caption always starts at its own inner padding.
 
         // The media card selects its surface for the kind and clears any
         // prior frame; a text post's surface simply never receives content.
@@ -571,9 +547,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
                 translationX: 0, y: CommentsInputBar.nudgeOffset(for: dy)
             )
             mediaCard.applyDockNudge(dock: dock, nudge: nudge)
-            // The glass card (carrying the info card + its caption) rides
-            // the same nudge as one body.
-            stripBackdrop.transform = nudge
+            mediaCard.setGlassNudge(nudge)
+            // Both glass cards ride the same nudge as one body.
+            infoCard.transform = nudge
         case .ended:
             let vy = pan.velocity(in: self).y
             settleCardNudge(to: dock)
@@ -590,7 +566,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     private func settleCardNudge(to dock: CGAffineTransform) {
         UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.8, initialSpringVelocity: 0) {
             self.mediaCard.settleDock(to: dock)
-            self.stripBackdrop.transform = .identity
+            self.mediaCard.setGlassNudge(.identity)
+            self.infoCard.transform = .identity
         }
     }
 

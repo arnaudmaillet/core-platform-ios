@@ -3,24 +3,24 @@ import DesignSystem
 import UIKit
 
 /// The post-info component of the engaged card: the caption text and the
-/// interaction counters, encapsulated as one standalone piece that manages
-/// its own internal padding and vertical balance. It fills the glass card's
-/// interior and lays out:
+/// interaction counters, drawing its OWN independent Liquid Glass card
+/// (`SnapGlassCardView`) and managing its own internal padding and vertical
+/// balance. It lays out, inside its glass:
 ///
-///   [ (media inset) caption, centered in its band ]
-///   [ …                        ♥ 1.2k 💬 56 ⇄ 🔖 ]  ← RIGHT-aligned
+///   [ caption, centered in its band ]
+///   [ …            ♥ 1.2k 💬 56 ⇄ 🔖 ]  ← RIGHT-aligned
 ///
 /// The counters are right-aligned on EVERY post type (the unified rule).
 /// The caption centers in the band above them via an internal layout guide,
 /// so equal breathing sits above and below the text whatever the line count
-/// — no injected margin, no format branch beyond the one leading inset.
+/// — no injected margin, no format branch, no media inset (the media is a
+/// SEPARATE glass card beside this one).
 ///
-/// The single composition input is `setHasMedia`: with media the caption
-/// starts past the media slot (the `SnapMediaCardView` sits there); text
-/// posts omit that component, so the caption claims the card's left inner
-/// edge and stretches across the full width. Author identity lives in the
-/// nav pill and the audio credit in the toolbar attribution — neither is
-/// duplicated here (keep-and-stack).
+/// Composition is POSITIONAL: the feed sets this card's frame at
+/// `infoCardFrame` — beside the media card on media posts, standalone
+/// full-width on text posts. The component itself is format-agnostic.
+/// Author identity lives in the nav pill and the audio credit in the
+/// toolbar attribution — neither is duplicated here (keep-and-stack).
 final class SnapPostInfoCardView: UIView {
     private let captionLabel = UILabel()
     /// Metrics with data render counts (likes from the hydration snapshot,
@@ -38,18 +38,14 @@ final class SnapPostInfoCardView: UIView {
     private let saveButton = SnapPostInfoCardView.makeMetricButton(
         symbol: "bookmark", accessibilityLabel: "Save"
     )
-    /// The caption's leading — its constant is the media-slot seam
-    /// (`setHasMedia`): past the slot with media, the card's inner padding
-    /// without.
-    private var captionLeadingConstraint: NSLayoutConstraint?
-
-    /// The caption's leading inset, card-local: past the media slot with
-    /// media, the card's own inner padding without (the media component is
-    /// omitted, so the caption claims the hole).
-    static func captionLeading(hasMedia: Bool) -> CGFloat {
-        let pad = SnapCommentsLayout.stripCardPadding
-        return hasMedia ? pad + SnapCommentsLayout.mediaSlotHeight + Spacing.md : pad
-    }
+    /// This component's OWN floating glass card, filling it — so the info
+    /// renders as a distinct glass surface, independent of the media card
+    /// beside it (or standalone full-width on text posts).
+    private let glass = SnapGlassCardView()
+    /// The caption + counters, hosted inside the glass and moved as one for
+    /// the entrance (alpha + rise) — SEPARATE from the glass, whose blur
+    /// materializes via `effect`, never alpha.
+    private let content = UIView()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -61,6 +57,13 @@ final class SnapPostInfoCardView: UIView {
 
     private func buildLayout() {
         let pad = SnapCommentsLayout.stripCardPadding
+
+        glass.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(glass)
+        glass.pin(to: self)
+        content.translatesAutoresizingMaskIntoConstraints = false
+        glass.contentView.addSubview(content)
+        content.pin(to: glass.contentView)
 
         captionLabel.font = UIFont.preferredFont(forTextStyle: .subheadline)
         captionLabel.adjustsFontForContentSizeCategory = true
@@ -74,7 +77,7 @@ final class SnapPostInfoCardView: UIView {
             lineHeight: captionLabel.font.lineHeight
         )
         captionLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(captionLabel)
+        content.addSubview(captionLabel)
 
         // Counters: the column's floor, RIGHT-ALIGNED on every post type.
         let actions = UIStackView(arrangedSubviews: [likeButton, commentButton, repostButton, saveButton])
@@ -82,37 +85,56 @@ final class SnapPostInfoCardView: UIView {
         actions.spacing = Spacing.lg
         actions.alignment = .center
         actions.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(actions)
+        content.addSubview(actions)
 
         // The caption's band: from the card's top inner padding down to the
         // counters row. The caption CENTERS in it (equal breathing above
         // and below), clamped so a tall caption never crosses either edge.
+        // The caption always starts at the card's inner padding — the media
+        // (when present) is a SEPARATE card, not a hole in this one.
         let band = UILayoutGuide()
-        addLayoutGuide(band)
+        content.addLayoutGuide(band)
 
-        let leading = captionLabel.leadingAnchor.constraint(
-            equalTo: leadingAnchor, constant: SnapPostInfoCardView.captionLeading(hasMedia: true)
-        )
-        captionLeadingConstraint = leading
         let centerY = captionLabel.centerYAnchor.constraint(equalTo: band.centerYAnchor)
         centerY.priority = UILayoutPriority(999) // yields to the band clamps on a tall caption
 
         NSLayoutConstraint.activate([
-            actions.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -pad),
-            actions.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: pad),
+            actions.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -pad),
+            actions.leadingAnchor.constraint(greaterThanOrEqualTo: content.leadingAnchor, constant: pad),
             actions.heightAnchor.constraint(equalToConstant: SnapCommentsLayout.cardActionsHeight),
-            actions.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -pad),
+            actions.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -pad),
 
-            band.topAnchor.constraint(equalTo: topAnchor, constant: pad + Spacing.xs),
+            band.topAnchor.constraint(equalTo: content.topAnchor, constant: pad + Spacing.xs),
             band.bottomAnchor.constraint(equalTo: actions.topAnchor, constant: -Spacing.xs),
 
-            leading,
-            captionLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -pad),
+            captionLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: pad),
+            captionLabel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -pad),
             centerY,
             captionLabel.topAnchor.constraint(greaterThanOrEqualTo: band.topAnchor),
             captionLabel.bottomAnchor.constraint(lessThanOrEqualTo: band.bottomAnchor),
         ])
     }
+
+    // MARK: - Glass + entrance
+
+    /// Materializes (or dissolves) this card's glass — window-guarded, via
+    /// the effect property. Call inside the engagement's animation block.
+    func setGlassActive(_ active: Bool) { glass.setGlassActive(active) }
+
+    /// The content's entrance pose: offstage = invisible with a slight
+    /// downward offset (the disengage/rest pose), onstage = risen into
+    /// place. The glass frame itself never moves — only its content.
+    func setContentEntrance(offstage: Bool) {
+        content.alpha = offstage ? 0 : 1
+        content.transform = offstage
+            ? CGAffineTransform(translationX: 0, y: SnapCommentsLayout.cardContentEntranceOffset)
+            : .identity
+    }
+
+    /// The content's current entrance state (the glass frame never moves) —
+    /// read-only, for the choreography test.
+    var contentAlpha: CGFloat { content.alpha }
+    var contentEntranceOffset: CGFloat { content.transform.ty }
 
     // MARK: - Content
 
@@ -131,13 +153,6 @@ final class SnapPostInfoCardView: UIView {
     /// while unknown (the `isLoaded` seam — no lying "0" mid-fetch).
     func setCommentCount(_ count: Int, isLoaded: Bool) {
         Self.setCount(isLoaded ? count : nil, on: commentButton)
-    }
-
-    /// The one composition seam: media posts inset the caption past the
-    /// media component; text posts (which omit it) claim the full width.
-    func setHasMedia(_ hasMedia: Bool) {
-        captionLeadingConstraint?.constant = Self.captionLeading(hasMedia: hasMedia)
-        setNeedsLayout()
     }
 
     /// Cell reuse: drop content.

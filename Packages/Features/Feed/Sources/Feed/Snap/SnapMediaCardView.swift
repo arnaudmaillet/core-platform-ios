@@ -34,9 +34,18 @@ final class SnapMediaCardView: UIView {
     private var surfaces: [(view: UIView, mask: UIView)] {
         [(imageView, imageCropMask), (renderView, videoCropMask)]
     }
+    /// This component's OWN floating glass card, drawn behind the docked
+    /// tile at the media card frame — so the media renders as a distinct
+    /// glass surface, independent of the info card beside it. Hidden while
+    /// the media is full-bleed (default feed); shown while docked.
+    private let glass = SnapGlassCardView()
 
     init() {
         super.init(frame: .zero)
+        // The glass sits BEHIND the surfaces (a fixed-frame subview, not
+        // full-bleed): the docked tile floats over its own glass card.
+        glass.isHidden = true
+        addSubview(glass)
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
         imageView.pin(to: self)
@@ -155,6 +164,28 @@ final class SnapMediaCardView: UIView {
     func clearMasks() {
         imageView.mask = nil
         renderView.mask = nil
+    }
+
+    // MARK: - Glass card
+
+    /// Shows this component's own glass card at `cardFrame` (the media card
+    /// rect) — the docked tile floats over it. Call inside the engagement's
+    /// animation block; the effect materializes window-guarded.
+    func showGlass(at cardFrame: CGRect) {
+        glass.isHidden = false
+        glass.frame = cardFrame
+        glass.setGlassActive(true)
+    }
+
+    /// Hides the glass on disengage (the media expands back to full-bleed).
+    func hideGlass() {
+        glass.setGlassActive(false)
+        glass.isHidden = true
+    }
+
+    /// Nudges the glass with the swipe (the tile rides it as one body).
+    func setGlassNudge(_ nudge: CGAffineTransform) {
+        glass.transform = nudge
     }
 
     // MARK: - Ken Burns drift

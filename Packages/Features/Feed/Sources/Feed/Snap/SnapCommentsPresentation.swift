@@ -163,6 +163,31 @@ enum SnapCommentsLayout {
         )
     }
 
+    /// The physical gap between the two floating glass cards (media | info)
+    /// on a media post — the clear space that reads them as two distinct
+    /// objects rather than one panel.
+    static let cardGap: CGFloat = Spacing.sm
+
+    /// The MEDIA glass card: a square wrapping the docked slot with the
+    /// card's inner padding — the LEFT card on media posts (the media tile
+    /// floats inside it). A pure square at the strip's left edge.
+    static func mediaCardFrame(in bounds: CGRect, topInset: CGFloat) -> CGRect {
+        mediaSlotFrame(in: bounds, topInset: topInset)
+            .insetBy(dx: -stripCardPadding, dy: -stripCardPadding)
+    }
+
+    /// The POST-INFO glass card: the RIGHT card on media posts — from just
+    /// past the media card (plus the gap) to the strip's right edge — or
+    /// the standalone FULL-WIDTH card on text posts (which omit the media
+    /// card). Its own independent floating surface either way.
+    static func infoCardFrame(in bounds: CGRect, topInset: CGFloat, hasMedia: Bool) -> CGRect {
+        let full = stripCardFrame(in: bounds, topInset: topInset)
+        guard hasMedia else { return full }
+        let media = mediaCardFrame(in: bounds, topInset: topInset)
+        let x = media.maxX + cardGap
+        return CGRect(x: x, y: full.minY, width: full.maxX - x, height: full.height)
+    }
+
     /// The caption column's hard floor, in cell coordinates: the actions
     /// row is the only reservation at the column's bottom; the caption
     /// stops above it.
