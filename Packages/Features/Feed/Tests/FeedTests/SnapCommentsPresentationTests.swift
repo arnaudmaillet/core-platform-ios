@@ -647,13 +647,13 @@ struct SnapCommentsPresentationTests {
         #expect(pan.isEnabled == false)
     }
 
-    /// The text-lead resting variant: a text-only page's engagement docks
-    /// nothing (no media, no card, no engaged caption — the hosted stream
-    /// leads with the post's own caption + counters), never arms the card
-    /// exit pan, shrinks the frost band to the text-lead boundary, and
-    /// re-admits the pager's edge chaining through the container flag —
-    /// the resting interface must never dead-end the feed.
-    @Test func textOnlyEngagementIsTheTextLeadRestingVariant() throws {
+    /// A text-only page's engagement is PIXEL-PARITY with the media
+    /// layouts': the identical floating glass card at the identical frame
+    /// (its media slot simply empty — hidden surfaces make the dock a
+    /// visual no-op), the identical frost band, the armed card exit pan,
+    /// and the identical dead-end lock (the container claims every touch,
+    /// exactly like a media engagement — no chaining, no special case).
+    @Test func textOnlyEngagementMatchesTheMediaLayoutExactly() throws {
         let cell = SnapFeedCell(frame: Self.container)
         cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
         configurePost(cell, media: false)
@@ -663,33 +663,31 @@ struct SnapCommentsPresentationTests {
         cell.setCommentsEngaged(true)
         cell.contentView.layoutIfNeeded()
 
-        // No dock: both render surfaces hold identity.
-        let media = try #require(cell.contentView.subviews.compactMap { $0 as? UIImageView }.first)
-        #expect(media.transform == .identity)
-        // No floating glass card: the only effect view is the header
-        // frost, and its band ends at the text-lead boundary, not the
-        // strip's.
+        // The full card sandwich, at the media layout's exact frames.
         let effectViews = cell.contentView.subviews.compactMap { $0 as? UIVisualEffectView }
-        let visible = effectViews.filter { !$0.isHidden }
-        #expect(visible.count == 1)
-        let frost = try #require(visible.first)
-        #expect(frost.frame.height == SnapCommentsLayout.textLeadTopInset(topInset: Self.topInset))
-        // No armed exit pan (nothing to exit to).
+        let cardFrame = SnapCommentsLayout.stripCardFrame(in: Self.container, topInset: Self.topInset)
+        let backdrop = try #require(effectViews.first { $0.frame == cardFrame })
+        #expect(backdrop.isHidden == false)
+        let frost = try #require(effectViews.first { $0.frame != cardFrame })
+        #expect(frost.frame.height == SnapCommentsLayout.stripBottom(topInset: Self.topInset))
+        // The engaged caption sits on the media layout's typography
+        // anchors (the column right of the — here empty — slot).
+        let slot = SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset)
+        let caption = try #require(
+            cell.contentView.subviews.compactMap { $0 as? UILabel }
+                .first { $0.text == "caption" && !$0.isHidden }
+        )
+        #expect(abs(caption.frame.minX - (slot.maxX + Spacing.md)) < 0.5)
+        // The exit pan is armed — same explicit exits as media.
         let pan = try #require(cell.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
-        #expect(pan.isEnabled == false)
-        // The container re-admits the pager: `claimsTouches` lets drags
-        // born on the stream reach the feed's paging (edge chaining).
-        let container = try #require(hosted.superview as? SnapCommentsContainerView)
-        #expect(container.allowsPagerChaining)
-        #expect(SnapFeedCollectionView.claimsTouches(hosted) == false)
-        // A media page's container keeps the modal veto.
+        #expect(pan.isEnabled == true)
+        // And the TOTAL dead-end lock: the container claims every touch,
+        // text page or media page alike.
+        #expect(SnapFeedCollectionView.claimsTouches(hosted))
         let mediaCell = makeEngagedCell()
         let mediaHosted = UIView()
         mediaCell.installComments(mediaHosted)
         #expect(SnapFeedCollectionView.claimsTouches(mediaHosted))
-        // Teardown restores the modal default.
-        cell.clearComments()
-        #expect(container.allowsPagerChaining == false)
     }
 
     /// The engaged toolbar's sort selector: single-selection menu with a

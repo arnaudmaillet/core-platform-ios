@@ -2,7 +2,6 @@ import MediaCore
 import CoreModels
 import CoreNavigation
 import DesignSystem
-import FeedInterface
 import MediaPlayback
 import UIKit
 
@@ -70,21 +69,14 @@ final class SnapFeedViewController: UIViewController {
     /// released — a nonisolated deinit can't touch the VC's main-actor state.
     private let appObservers = NotificationObserverBag()
 
-    /// Builds the comments panel's content (the hosted detail, in the mode
-    /// the feed picks per post: `.commentsOnly` for media pages,
-    /// `.textLead` for text-only pages) — injected by the feature builder
-    /// so this VC needs none of the detail's dependencies. Nil disables
-    /// the comments engagement.
-    private let makeCommentsPanelContent: ((PostID, PostDetailMode) -> UIViewController)?
+    /// Builds the comments panel's content (the comments-only detail) for a
+    /// post — injected by the feature builder so this VC needs none of the
+    /// detail's dependencies. Nil disables the comments engagement.
+    private let makeCommentsPanelContent: ((PostID) -> UIViewController)?
     /// The post whose comments engagement is active, nil when disengaged.
     /// Owns the paging veto: the pager is frozen while the mutated layout
     /// (a per-cell state) is on screen.
     private var commentsEngagedID: PostID?
-    /// Whether the active engagement is a text-lead RESTING interface —
-    /// auto-presented on page settle, torn down on page resign, never
-    /// modal: the pager stays enabled (edge chaining pages the feed) and
-    /// there is no close affordance.
-    private var commentsEngagementIsResting = false
     /// The engaged comments UI — a child of THIS controller (thread data,
     /// scroll position, and reply drafts must never live in a recycled
     /// cell); the cell only hosts its view while engaged.
@@ -94,7 +86,7 @@ final class SnapFeedViewController: UIViewController {
         viewModel: FeedViewModel,
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController? = nil,
-        makeCommentsPanelContent: ((PostID, PostDetailMode) -> UIViewController)? = nil
+        makeCommentsPanelContent: ((PostID) -> UIViewController)? = nil
     ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
@@ -797,17 +789,10 @@ final class SnapFeedViewController: UIViewController {
               let cell = host ?? (collectionView.cellForItem(at: indexPath) as? SnapFeedCell)
         else { return }
 
-        // The variant fork, decided by the post itself: media pages get
-        // the modal comments-only engagement (docked card, locked pager,
-        // explicit exits); text-only pages get the TEXT-LEAD resting
-        // interface (the stream leads with caption + counters, the pager
-        // keeps paging via edge chaining, nothing to close).
-        let isTextLead = modelsByID[id]?.mediaURL == nil
-        let content = makeCommentsPanelContent(id, isTextLead ? .textLead : .commentsOnly)
+        let content = makeCommentsPanelContent(id)
         content.view.backgroundColor = .clear
         content.overrideUserInterfaceStyle = .dark
         commentsEngagedID = id
-        commentsEngagementIsResting = isTextLead
         commentsContentVC = content
         // FOOTER CROSSFADE, zero layout churn BY CONSTRUCTION: the native
         // toolbar is NEVER structurally concealed — it stays fully present
@@ -831,24 +816,15 @@ final class SnapFeedViewController: UIViewController {
         // need the pager, and the footer's swipe exit is the bar's OWN
         // pan driving a PROGRAMMATIC scrollToItem — which works on a
         // scroll-disabled pager.
-        // The dead-end lock is the MODAL engagement's rule only: text-lead
-        // pages keep the pager enabled — their comments stream chains to
-        // the pager at its edges (the container's marker flag re-admits
-        // it), which is what keeps the feed pageable from a resting
-        // interface that has no exit affordance.
-        collectionView.isScrollEnabled = isTextLead
+        collectionView.isScrollEnabled = false
         addChild(content)
         cell.installComments(content.view)
         content.didMove(toParent: self)
         let detail = content as? PostDetailViewController
         // The stream rests below the frosted strip (full-height scroll,
         // inset content) and its rows end where the rail's column begins.
-        // Text-lead pages have no strip: their stream starts just below
-        // the top chrome, and no rail exists to exclude.
         detail?.setEngagedInsets(
-            top: isTextLead
-                ? SnapCommentsLayout.textLeadTopInset(topInset: view.safeAreaInsets.top)
-                : SnapCommentsLayout.stripBottom(topInset: view.safeAreaInsets.top),
+            top: SnapCommentsLayout.stripBottom(topInset: view.safeAreaInsets.top),
             trailing: cell.commentsRailExclusionWidth,
             // KEEP-AND-STACK: the composer's rest band clears the NATIVE
             // TOOLBAR, not just the home indicator — the feed's own
@@ -857,12 +833,7 @@ final class SnapFeedViewController: UIViewController {
             // stable; same frozen-threshold doctrine as the chrome's top).
             bottomInset: view.safeAreaInsets.bottom
         )
-        if !isTextLead {
-            // Resting interfaces have nothing to close — the composer's
-            // trailing slot stays a permanent send (the pushed screen's
-            // posture); media engagements wire the ✕.
-            detail?.setEngagedCloseHandler { [weak self] in self?.dismissComments() }
-        }
+        detail?.setEngagedCloseHandler { [weak self] in self?.dismissComments() }
         detail?.setEngagedSwipeHandler { [weak self] direction in
             self?.pageAwayFromComments(direction: direction)
         }
@@ -925,11 +896,6 @@ final class SnapFeedViewController: UIViewController {
         guard commentsEngagedID != nil else { return }
         let current = lifecycle.activeIndex ?? 0
         let target = current + direction
-        // A RESTING interface at the feed's end stays put: dismissing it
-        // would strand the page on its empty shell (there is no default
-        // layout to return to). Modal engagements still collapse — the
-        // no-page swipe is a plain exit there.
-        if commentsEngagementIsResting, !orderedIDs.indices.contains(target) { return }
         dismissComments()
         guard orderedIDs.indices.contains(target) else { return }
         collectionView.scrollToItem(
@@ -963,7 +929,6 @@ final class SnapFeedViewController: UIViewController {
         cell?.clearComments()
         commentsContentVC = nil
         commentsEngagedID = nil
-        commentsEngagementIsResting = false
         collectionView.isScrollEnabled = true
         // The bar's pixels were never touched (keep-and-stack), but its
         // ITEMS are engagement context — settle them for the paths that
@@ -995,10 +960,9 @@ final class SnapFeedViewController: UIViewController {
         if let resign = transition.resign {
             lifecycleCell(at: resign)?.didResignActive()
             // An engagement is PAGE-SCOPED: the engaged page resigning
-            // (text-lead pages page away via edge chaining; a modal
-            // engagement here is an interrupted-teardown belt) retires it
-            // instantly — the pager has already moved on, there is no
-            // spring left to run.
+            // retires it instantly (a belt for interrupted teardowns —
+            // the animated dismiss normally lands before any page change,
+            // since the pager is locked for the engagement's lifetime).
             if let engaged = commentsEngagedID, orderedIDs.indices.contains(resign),
                engaged == orderedIDs[resign] {
                 finishCommentsDisengagement()
@@ -1016,12 +980,13 @@ final class SnapFeedViewController: UIViewController {
                 let id = orderedIDs[activate]
                 viewModel.pageDidBecomeActive(id)
                 // Text-only pages REST in the comments layout: settling on
-                // one presents the text-lead engagement as the page's own
-                // interface — no entry surface, no user gesture, the
-                // format itself is the trigger. Model presence REQUIRED —
-                // a not-yet-hydrated page must read as "unknown", never
-                // as "text-only" (willDisplay's net retries with the
-                // model in hand).
+                // one presents the STANDARD comments engagement (identical
+                // card, identical dead-end lock — the media slot is simply
+                // empty) as the page's own interface — no entry surface,
+                // no user gesture, the format itself is the trigger.
+                // Model presence REQUIRED — a not-yet-hydrated page must
+                // read as "unknown", never as "text-only" (willDisplay's
+                // net retries with the model in hand).
                 if let model = modelsByID[id], model.mediaURL == nil {
                     presentComments(for: id)
                 }
@@ -1098,7 +1063,7 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         updateActiveItem()
         if lifecycle.activeIndex == indexPath.item {
             (cell as? SnapCellLifecycle)?.willBecomeActive()
-            // The same net catches the text-lead resting interface: the
+            // The same net catches the text page's resting engagement: the
             // activation-time engage (`apply`) needs the CELL, which a
             // start-index landing realizes only here — without this, a
             // feed opened directly onto a text page would sit on its
@@ -1330,13 +1295,8 @@ final class SnapFeedCollectionView: UICollectionView {
     static func claimsTouches(_ view: UIView) -> Bool {
         for current in sequence(first: view, next: { $0.superview }) {
             if current is CommentsInputBar { return false }
-            if let container = current as? SnapCommentsContainerView {
-                // Text-lead containers re-admit the pager: their stream
-                // is the page's resting interface, and UIKit's native
-                // edge chaining is what keeps the feed pageable from it.
-                return !container.allowsPagerChaining
-            }
-            if current is SnapShortcutRailView || current is SnapRailComposeButton {
+            if current is SnapShortcutRailView || current is SnapRailComposeButton
+                || current is SnapCommentsContainerView {
                 return true
             }
         }

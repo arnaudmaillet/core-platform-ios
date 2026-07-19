@@ -244,17 +244,6 @@ final class PostDetailViewController: UIViewController {
         postSectionStack.axis = .vertical
         postSectionStack.spacing = Spacing.md
         postSectionStack.setCustomSpacing(Spacing.lg, after: likeRow)
-        if mode == .textLead {
-            // The text-lead slimming, decided once at build: the stream
-            // leads with caption + interaction counters ONLY. No author
-            // row (the feed's identity pill carries the author), no media
-            // slot (text posts have none — `configure` would hide it
-            // anyway, this just makes the contract explicit), no
-            // timestamp (the resting page isn't a detail record).
-            authorRow.isHidden = true
-            mediaView.isHidden = true
-            timestampLabel.isHidden = true
-        }
         postSectionStack.translatesAutoresizingMaskIntoConstraints = false
         postSectionHost.addSubview(postSectionStack)
         NSLayoutConstraint.activate([
@@ -444,11 +433,9 @@ final class PostDetailViewController: UIViewController {
         switch phase {
         case .loading:
             statusLabel.isHidden = true
-            if mode != .full {
+            if mode == .commentsOnly {
                 // The skeleton stream IS the loading state (the messages
-                // doctrine) — no spinner, no hidden surface. Both hosted
-                // variants (comments-only and text-lead) load this way;
-                // only the pushed full screen spinners over a hidden list.
+                // doctrine) — no spinner, no hidden surface.
                 spinner.stopAnimating()
                 collectionView.isHidden = false
                 if !hasAppliedStream { applyStream(animated: false) }
@@ -503,11 +490,10 @@ final class PostDetailViewController: UIViewController {
     }
 
     private func renderComments(_ state: PostDetailViewModel.CommentsState) {
-        // Only the pushed full screen shows the inline "Comments" title:
-        // comments-only contexts already carry one (nav bar / panel
-        // header), and the text-lead stream runs caption→comments with no
-        // seam worth captioning.
-        commentsHeaderLabel.isHidden = mode != .full
+        // Comments-only contexts already carry a "Comments" title (the nav
+        // bar when pushed, the panel header when sheeted) — the inline
+        // section header would duplicate it.
+        commentsHeaderLabel.isHidden = mode == .commentsOnly
         guard case .loaded(let models) = state else { return }
         latestComments = models
         streamModels = Dictionary(models.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -613,11 +599,7 @@ final class PostDetailViewController: UIViewController {
 
     private func streamItems() -> [StreamItem] {
         var items: [StreamItem] = []
-        // Full mode leads with the whole post section; text-lead leads with
-        // its slimmed variant (caption + counters — the section's other
-        // rows are hidden at build time). Comments-only never lists it —
-        // the engaged card on the cell carries the post's identity there.
-        if mode != .commentsOnly { items.append(.postSection) }
+        if mode == .full { items.append(.postSection) }
         guard commentsLoaded else {
             // The initial fetch renders as a skeleton stream (the
             // messages screens' doctrine — shimmering placeholder rows,
