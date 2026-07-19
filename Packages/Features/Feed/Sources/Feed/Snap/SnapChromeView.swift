@@ -154,10 +154,13 @@ final class SnapChromeView: UIView {
         // safe area, so when the navigation controller's toolbar is visible
         // the caption sits above it automatically — live cell and flight
         // replica alike (`setFixedInsets` captures the toolbar-inflated
-        // insets).
+        // insets). The bottom gap is one token up from the sides (xl vs
+        // lg): the caption is the stack's last line before the toolbar
+        // band, and the seam between page content and bar chrome carries
+        // the harmonized rhythm's largest breath.
         captionLabel.constrain(in: self) { parent in
             captionLabel.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor, constant: Spacing.lg)
-            captionLabel.bottomAnchor.constraint(equalTo: parent.layoutMarginsGuide.bottomAnchor, constant: -Spacing.lg)
+            captionLabel.bottomAnchor.constraint(equalTo: parent.layoutMarginsGuide.bottomAnchor, constant: -Spacing.xl)
             captionLabel.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.lg)
         }
 
@@ -190,7 +193,10 @@ final class SnapChromeView: UIView {
         commentTicker.constrain(in: self) { parent in
             commentTicker.leadingAnchor.constraint(equalTo: leadingAnchor)
             commentTicker.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md - 0.5)
-            commentTicker.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.sm)
+            // md, not sm: the band and the caption are separate CONTAINERS
+            // in the bottom stack — inter-container seams breathe at md in
+            // the harmonized rhythm (sm stays the WITHIN-container gap).
+            commentTicker.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.md)
         }
 
         // The shortcut rail owns the trailing column, layered OVER the
@@ -253,7 +259,9 @@ final class SnapChromeView: UIView {
         subtitleView.constrain(in: self) { parent in
             subtitleView.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor, constant: Spacing.lg)
             subtitleView.trailingAnchor.constraint(equalTo: shortcutRail.leadingAnchor, constant: -Spacing.md)
-            subtitleView.bottomAnchor.constraint(equalTo: commentTicker.topAnchor, constant: -Spacing.sm)
+            // md: same inter-container seam as band→caption — the three
+            // stacked containers share one breathing rhythm.
+            subtitleView.bottomAnchor.constraint(equalTo: commentTicker.topAnchor, constant: -Spacing.md)
         }
 
         // The comments empty state sits in the BAND's slot (bottom on the
@@ -267,7 +275,9 @@ final class SnapChromeView: UIView {
         commentEmptyState.constrain(in: self) { parent in
             commentEmptyState.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor, constant: Spacing.lg)
             commentEmptyState.trailingAnchor.constraint(lessThanOrEqualTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.lg)
-            commentEmptyState.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.sm)
+            // md: it stands in the band's seat, so it keeps the band's
+            // harmonized seam against the caption.
+            commentEmptyState.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.md)
         }
         commentEmptyState.onTap = { [weak self] in self?.onCommentsTapped?() }
         subtitleView.onTap = { [weak self] in self?.onCommentsTapped?() }
