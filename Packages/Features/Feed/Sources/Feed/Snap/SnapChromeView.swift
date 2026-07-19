@@ -453,6 +453,18 @@ final class SnapChromeView: UIView {
         // the rail only where the two physically overlap).
     }
 
+    /// The keyboard-session yield: while the engaged composer rises into
+    /// the rail's column, the rail CONCEDES the band visually (alpha —
+    /// which also removes it from hit-testing below 0.01). zPosition
+    /// cannot express this: the rail and the composer live in different
+    /// subtrees, and Core Animation only reorders SIBLINGS by zPosition —
+    /// the input bar structurally cannot outrank chrome from inside the
+    /// comments container, so the chrome steps back instead. Driven by
+    /// the feed VC's keyboard observers, inside its own animation block.
+    func setRailConcealed(_ concealed: Bool) {
+        shortcutRail.alpha = concealed ? 0 : 1
+    }
+
     /// Cycles while the owning cell is on screen — the band's visibility
     /// seam (plus the settle backstop for foregrounding), NOT playback's
     /// settle scope: the persistent pill is static content between

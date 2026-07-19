@@ -693,6 +693,30 @@ final class SnapFeedViewController: UIViewController {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.setForeground(true) }
         })
+        // The keyboard-session rail yield: the engaged composer rises into
+        // the rail's column, and the rail concedes the band while typing —
+        // zPosition cannot lift the bar over chrome across subtrees (CA
+        // reorders siblings only), so the chrome steps back instead. Alpha
+        // also retires the rail from hit-testing, so the risen bar owns
+        // its whole band. Engagement-gated in the cell; restored on hide
+        // and at disengage teardown.
+        appObservers.add(center.addObserver(
+            forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.setEngagedRailConcealed(true) }
+        })
+        appObservers.add(center.addObserver(
+            forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.setEngagedRailConcealed(false) }
+        })
+    }
+
+    private func setEngagedRailConcealed(_ concealed: Bool) {
+        guard commentsEngagedID != nil || !concealed else { return }
+        UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseOut, .beginFromCurrentState]) {
+            self.engagedCell()?.setRailConcealed(concealed)
+        }
     }
 
     private func setForeground(_ foreground: Bool) {
@@ -889,6 +913,8 @@ final class SnapFeedViewController: UIViewController {
     private func finishCommentsDisengagement() {
         // Belt and braces for non-animated/interrupted paths.
         let cell = engagedCell()
+        // A keyboard-session rail yield must never outlive the engagement.
+        cell?.setRailConcealed(false)
         cell?.setCommentsEngaged(false)
         if let content = commentsContentVC {
             content.willMove(toParent: nil)

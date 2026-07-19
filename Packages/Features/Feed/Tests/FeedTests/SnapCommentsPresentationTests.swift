@@ -837,6 +837,42 @@ struct SnapCommentsPresentationTests {
         #expect(placeholder() == "Add a comment…")
     }
 
+    /// The keyboard-session rail yield: engaged cells concede the rail
+    /// (alpha 0 — also retiring it from hit-testing) while the composer
+    /// owns its risen band; resting cells never yield, and the restore
+    /// side is unconditional so no teardown path can strand a hidden rail.
+    @Test func keyboardRailYieldIsEngagementScoped() throws {
+        let cell = SnapFeedCell(frame: Self.container)
+        cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
+        cell.layoutIfNeeded()
+        let chrome = try #require(cell.contentView.subviews.compactMap { $0 as? SnapChromeView }.first)
+        let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
+
+        cell.setRailConcealed(true) // disengaged: refused
+        #expect(rail.alpha == 1)
+
+        cell.setCommentsEngaged(true)
+        cell.setRailConcealed(true)
+        #expect(rail.alpha == 0)
+        cell.setRailConcealed(false)
+        #expect(rail.alpha == 1)
+    }
+
+    /// The comments skeleton row is the messages doctrine transplanted:
+    /// three shimmer bones (avatar, header, body) on the real row's
+    /// geometry.
+    @Test func commentSkeletonRowBuildsThreeBones() {
+        let row = CommentSkeletonRowView(index: 0)
+        var bones = 0
+        var stack: [UIView] = [row]
+        while let view = stack.popLast() {
+            if view is SkeletonBoneView { bones += 1 }
+            stack.append(contentsOf: view.subviews)
+        }
+        #expect(bones == 3)
+        #expect(row.isUserInteractionEnabled == false)
+    }
+
     // MARK: - Entry point
 
     /// Every comments surface is an engagement entry point — the empty-state

@@ -9,6 +9,7 @@ private enum StreamSection: Hashable { case main }
 private enum StreamItem: Hashable {
     case postSection
     case emptyState
+    case skeletonPlaceholder(Int)
     case comment(String)
     case seam(CommentThreadToggleRow.Kind, parentID: String)
 }
@@ -431,9 +432,17 @@ final class PostDetailViewController: UIViewController {
     private func render(_ phase: PostDetailViewModel.Phase) {
         switch phase {
         case .loading:
-            if !refreshControl.isRefreshing { spinner.startAnimating() }
-            collectionView.isHidden = true
             statusLabel.isHidden = true
+            if mode == .commentsOnly {
+                // The skeleton stream IS the loading state (the messages
+                // doctrine) — no spinner, no hidden surface.
+                spinner.stopAnimating()
+                collectionView.isHidden = false
+                if !hasAppliedStream { applyStream(animated: false) }
+            } else {
+                if !refreshControl.isRefreshing { spinner.startAnimating() }
+                collectionView.isHidden = true
+            }
         case .content(let model):
             spinner.stopAnimating()
             refreshControl.endRefreshing()
@@ -542,6 +551,18 @@ final class PostDetailViewController: UIViewController {
                 seam.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -Spacing.lg),
             ])
         }
+        let skeletonCell = UICollectionView.CellRegistration<UICollectionViewCell, Int> { cell, _, index in
+            cell.contentView.subviews.forEach { $0.removeFromSuperview() }
+            let row = CommentSkeletonRowView(index: index)
+            row.translatesAutoresizingMaskIntoConstraints = false
+            cell.contentView.addSubview(row)
+            NSLayoutConstraint.activate([
+                row.topAnchor.constraint(equalTo: cell.contentView.topAnchor),
+                row.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor),
+                row.trailingAnchor.constraint(equalTo: cell.contentView.trailingAnchor),
+                row.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -Spacing.lg),
+            ])
+        }
         let emptyCell = UICollectionView.CellRegistration<UICollectionViewCell, StreamItem> { cell, _, _ in
             cell.contentView.subviews.forEach { $0.removeFromSuperview() }
             let empty = UILabel()
@@ -566,6 +587,8 @@ final class PostDetailViewController: UIViewController {
                 return collectionView.dequeueConfiguredReusableCell(using: postCell, for: indexPath, item: item)
             case .emptyState:
                 return collectionView.dequeueConfiguredReusableCell(using: emptyCell, for: indexPath, item: item)
+            case .skeletonPlaceholder(let index):
+                return collectionView.dequeueConfiguredReusableCell(using: skeletonCell, for: indexPath, item: index)
             case .comment(let id):
                 return collectionView.dequeueConfiguredReusableCell(using: commentCell, for: indexPath, item: id)
             case .seam:
@@ -577,7 +600,14 @@ final class PostDetailViewController: UIViewController {
     private func streamItems() -> [StreamItem] {
         var items: [StreamItem] = []
         if mode == .full { items.append(.postSection) }
-        guard commentsLoaded else { return items }
+        guard commentsLoaded else {
+            // The initial fetch renders as a skeleton stream (the
+            // messages screens' doctrine — shimmering placeholder rows,
+            // never a spinner); hydration cross-dissolves into the same
+            // row geometry via the diffable apply.
+            items.append(contentsOf: (0..<5).map(StreamItem.skeletonPlaceholder))
+            return items
+        }
         guard !latestComments.isEmpty else {
             items.append(.emptyState)
             return items

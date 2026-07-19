@@ -271,3 +271,57 @@ final class CommentThreadToggleRow: UIView {
 
     @objc private func tapped() { onTap?() }
 }
+
+/// The comments stream's first-load skeleton row, assembled from the design
+/// system's `SkeletonBoneView` — the MESSAGES screens' exact doctrine (one
+/// window-coherent shimmer band, shared phase across every bone; see
+/// `ChatSkeletons`): placeholder geometry reuses the real row's layout
+/// constants (avatar size, indent, header/body stack recipe), and bone
+/// widths cycle organic fractions so the stack reads as content hydrating,
+/// not a repeated stamp.
+final class CommentSkeletonRowView: UIView {
+    private enum Metrics {
+        static let headerHeight: CGFloat = 11
+        static let bodyHeight: CGFloat = 13
+        static let headerFractions: [CGFloat] = [0.38, 0.52, 0.33, 0.45]
+        static let bodyFractions: [CGFloat] = [0.86, 0.58, 0.72, 0.94]
+    }
+
+    init(index: Int) {
+        super.init(frame: .zero)
+        isUserInteractionEnabled = false
+
+        let avatar = SkeletonBoneView(rounding: .capsule)
+        let header = SkeletonBoneView(rounding: .capsule)
+        let body = SkeletonBoneView(rounding: .capsule)
+
+        let textColumn = UIStackView(arrangedSubviews: [header, body])
+        textColumn.axis = .vertical
+        textColumn.spacing = 6
+        textColumn.alignment = .leading
+
+        let row = UIStackView(arrangedSubviews: [avatar, textColumn])
+        row.alignment = .top
+        row.spacing = Spacing.sm
+        addSubview(row)
+        row.translatesAutoresizingMaskIntoConstraints = false
+
+        let headerFraction = Metrics.headerFractions[index % Metrics.headerFractions.count]
+        let bodyFraction = Metrics.bodyFractions[index % Metrics.bodyFractions.count]
+        NSLayoutConstraint.activate([
+            row.topAnchor.constraint(equalTo: topAnchor),
+            row.leadingAnchor.constraint(equalTo: leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor),
+            row.bottomAnchor.constraint(equalTo: bottomAnchor),
+            avatar.widthAnchor.constraint(equalToConstant: 32),
+            avatar.heightAnchor.constraint(equalToConstant: 32),
+            header.heightAnchor.constraint(equalToConstant: Metrics.headerHeight),
+            header.widthAnchor.constraint(equalTo: textColumn.widthAnchor, multiplier: headerFraction),
+            body.heightAnchor.constraint(equalToConstant: Metrics.bodyHeight),
+            body.widthAnchor.constraint(equalTo: textColumn.widthAnchor, multiplier: bodyFraction),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+}

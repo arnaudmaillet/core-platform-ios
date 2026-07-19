@@ -770,6 +770,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         UIView.performWithoutAnimation { self.mediaView.transform = resting }
     }
 
+    /// Keyboard-session rail yield (engaged only — the rail must never
+    /// vanish from a resting page): see `SnapChromeView.setRailConcealed`.
+    func setRailConcealed(_ concealed: Bool) {
+        guard !concealed || isCommentsEngaged else { return }
+        chrome.setRailConcealed(concealed)
+    }
+
     /// Re-asserts the engaged dock geometry after the screen re-appears
     /// from an outbound push — the belt to `stopKenBurns`' brace, covering
     /// any path that disturbed the docked media while the feed was
