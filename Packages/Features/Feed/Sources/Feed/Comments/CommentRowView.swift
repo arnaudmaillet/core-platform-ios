@@ -118,6 +118,11 @@ final class CommentRowView: UIView {
 
         likeButton.configuration?.imagePadding = 3
         likeButton.configuration?.contentInsets = .zero
+        // COUNT LEFT OF HEART: the button is trailing-anchored, so with
+        // the glyph at the trailing edge the control grows LEFTWARD as
+        // the counter appears or gains digits — the heart never shifts
+        // off its anchor.
+        likeButton.configuration?.imagePlacement = .trailing
         likeButton.accessibilityLabel = "Like comment"
         likeButton.addAction(UIAction { [weak self] _ in self?.onLikeTap?() }, for: .primaryActionTriggered)
         setLiked(false, count: 0)

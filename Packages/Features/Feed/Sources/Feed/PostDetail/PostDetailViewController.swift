@@ -481,60 +481,141 @@ final class PostDetailViewController: UIViewController {
         for item in CommentThreadPresentation.items(from: latestComments, expanded: expandedReplyParents) {
             switch item {
             case .comment(let model):
-                let row = CommentRowView(model: model)
-                row.onAvatarTap = { [weak self] in
-                    self?.viewModel.didTapCommentAuthor(commentID: model.id)
-                }
-                row.onReplyTap = { [weak self] in self?.enterReplyState(for: model) }
-                row.onShare = { [weak self] in self?.presentCommentShare(model) }
-                // Moderation seams: the menu is the honest affordance; the
-                // block/report mutations wait on a moderation backend (the
-                // repost/save posture).
-                row.onBlock = nil
-                row.onReport = nil
-                let liked = likedCommentIDs.contains(model.id)
-                row.setLiked(liked, count: liked ? 1 : 0)
-                row.onLikeTap = { [weak self, weak row] in
-                    guard let self else { return }
-                    let nowLiked = !self.likedCommentIDs.contains(model.id)
-                    if nowLiked {
-                        self.likedCommentIDs.insert(model.id)
-                    } else {
-                        self.likedCommentIDs.remove(model.id)
-                    }
-                    row?.setLiked(nowLiked, count: nowLiked ? 1 : 0)
-                }
-                commentsStack.addArrangedSubview(row)
+                commentsStack.addArrangedSubview(makeCommentRow(model))
             case .viewMoreReplies(let parentID, let hiddenCount):
-                let seam = CommentThreadToggleRow(kind: .expand(hidden: hiddenCount), parentID: parentID)
-                seam.onTap = { [weak self] in
-                    self?.expandedReplyParents.insert(parentID)
-                    self?.rebuildCommentRows()
-                }
-                commentsStack.addArrangedSubview(seam)
+                commentsStack.addArrangedSubview(
+                    makeSeamRow(kind: .expand(hidden: hiddenCount), parentID: parentID)
+                )
             case .collapseReplies(let parentID):
-                let seam = CommentThreadToggleRow(kind: .collapse, parentID: parentID)
-                seam.onTap = { [weak self] in self?.collapseThread(parentID) }
-                commentsStack.addArrangedSubview(seam)
+                commentsStack.addArrangedSubview(
+                    makeSeamRow(kind: .collapse, parentID: parentID)
+                )
             }
         }
         cascadeCommentsInIfFirstLoad()
     }
 
-    /// The fold's inverse: collapse the thread back to its threshold and
-    /// keep the user's place — after the re-render, the surviving
-    /// "view more" seam for that thread is scrolled back into the
-    /// viewport if the collapse pulled it out (a no-op when it is
-    /// already visible).
+    private func makeCommentRow(_ model: CommentDisplayModel) -> CommentRowView {
+        let row = CommentRowView(model: model)
+        row.onAvatarTap = { [weak self] in
+            self?.viewModel.didTapCommentAuthor(commentID: model.id)
+        }
+        row.onReplyTap = { [weak self] in self?.enterReplyState(for: model) }
+        row.onShare = { [weak self] in self?.presentCommentShare(model) }
+        // Moderation seams: the menu is the honest affordance; the
+        // block/report mutations wait on a moderation backend (the
+        // repost/save posture).
+        row.onBlock = nil
+        row.onReport = nil
+        let liked = likedCommentIDs.contains(model.id)
+        row.setLiked(liked, count: liked ? 1 : 0)
+        row.onLikeTap = { [weak self, weak row] in
+            guard let self else { return }
+            let nowLiked = !self.likedCommentIDs.contains(model.id)
+            if nowLiked {
+                self.likedCommentIDs.insert(model.id)
+            } else {
+                self.likedCommentIDs.remove(model.id)
+            }
+            row?.setLiked(nowLiked, count: nowLiked ? 1 : 0)
+        }
+        return row
+    }
+
+    private func makeSeamRow(kind: CommentThreadToggleRow.Kind, parentID: String) -> CommentThreadToggleRow {
+        let seam = CommentThreadToggleRow(kind: kind, parentID: parentID)
+        switch kind {
+        case .expand:
+            seam.onTap = { [weak self] in self?.expandThread(parentID) }
+        case .collapse:
+            seam.onTap = { [weak self] in self?.collapseThread(parentID) }
+        }
+        return seam
+    }
+
+    /// The thread's over-threshold replies — the block the fold shows and
+    /// hides.
+    private func hiddenReplies(for parentID: String) -> [CommentDisplayModel] {
+        Array(
+            latestComments.filter { $0.parentID == parentID }
+                .dropFirst(CommentThreadPresentation.visibleRepliesThreshold)
+        )
+    }
+
+    private func threadSeam(for parentID: String) -> CommentThreadToggleRow? {
+        commentsStack.arrangedSubviews
+            .compactMap { $0 as? CommentThreadToggleRow }
+            .first { $0.parentID == parentID }
+    }
+
+    /// The fold opening as an accordion: the hidden replies (and the
+    /// collapse seam) slide in through the stack's isHidden animation —
+    /// the UIStackView equivalent of a table's animated row insertion —
+    /// while the old view-more seam folds away in the same motion.
+    private func expandThread(_ parentID: String) {
+        expandedReplyParents.insert(parentID)
+        guard let seam = threadSeam(for: parentID),
+              let seamIndex = commentsStack.arrangedSubviews.firstIndex(of: seam) else {
+            rebuildCommentRows()
+            return
+        }
+        var incoming: [UIView] = hiddenReplies(for: parentID).map(makeCommentRow)
+        incoming.append(makeSeamRow(kind: .collapse, parentID: parentID))
+        for (offset, view) in incoming.enumerated() {
+            view.isHidden = true
+            view.alpha = 0
+            commentsStack.insertArrangedSubview(view, at: seamIndex + offset)
+        }
+        UIView.animate(withDuration: 0.3, delay: 0, options: [.curveEaseInOut]) {
+            seam.isHidden = true
+            seam.alpha = 0
+            for view in incoming {
+                view.isHidden = false
+                view.alpha = 1
+            }
+            self.scrollView.layoutIfNeeded()
+        } completion: { _ in
+            seam.removeFromSuperview()
+        }
+    }
+
+    /// The fold's inverse, same accordion in reverse: the over-threshold
+    /// rows and the collapse seam slide shut while the view-more seam
+    /// grows back in their place — then the surviving seam is scrolled
+    /// back into the viewport if the fold pulled it out (keep-place).
     private func collapseThread(_ parentID: String) {
         expandedReplyParents.remove(parentID)
-        rebuildCommentRows()
-        scrollView.layoutIfNeeded()
-        guard let seam = commentsStack.arrangedSubviews
-            .compactMap({ $0 as? CommentThreadToggleRow })
-            .first(where: { $0.parentID == parentID }) else { return }
-        let target = scrollView.convert(seam.bounds, from: seam).insetBy(dx: 0, dy: -60)
-        scrollView.scrollRectToVisible(target, animated: true)
+        guard let seam = threadSeam(for: parentID),
+              let seamIndex = commentsStack.arrangedSubviews.firstIndex(of: seam) else {
+            rebuildCommentRows()
+            return
+        }
+        let hiddenCount = hiddenReplies(for: parentID).count
+        let start = max(0, seamIndex - hiddenCount)
+        let folding = Array(commentsStack.arrangedSubviews[start..<seamIndex])
+        let newSeam = makeSeamRow(kind: .expand(hidden: hiddenCount), parentID: parentID)
+        newSeam.isHidden = true
+        newSeam.alpha = 0
+        commentsStack.insertArrangedSubview(newSeam, at: start)
+        UIView.animate(withDuration: 0.3, delay: 0, options: [.curveEaseInOut]) {
+            for view in folding {
+                view.isHidden = true
+                view.alpha = 0
+            }
+            seam.isHidden = true
+            seam.alpha = 0
+            newSeam.isHidden = false
+            newSeam.alpha = 1
+            self.scrollView.layoutIfNeeded()
+        } completion: { [weak self] _ in
+            guard let self else { return }
+            folding.forEach { $0.removeFromSuperview() }
+            seam.removeFromSuperview()
+            self.scrollView.layoutIfNeeded()
+            let target = self.scrollView.convert(newSeam.bounds, from: newSeam)
+                .insetBy(dx: 0, dy: -60)
+            self.scrollView.scrollRectToVisible(target, animated: true)
+        }
     }
 
     /// Row tapped: the composer arms its reply state — placeholder names
