@@ -81,6 +81,17 @@ final class SnapFeedViewController: UIViewController {
     /// scroll position, and reply drafts must never live in a recycled
     /// cell); the cell only hosts its view while engaged.
     private var commentsContentVC: UIViewController?
+    /// Whether the active engagement is a text page's RESTING interface —
+    /// PRE-RENDERED on visibility (as the cell scrolls in, fully formed,
+    /// no reveal spring), then LOCKED at settle. The two phases are split
+    /// so the interface slides in complete while the incoming scroll is
+    /// never aborted (the pager lock can only land once the page has
+    /// settled — disabling it mid-drag would freeze the user's scroll).
+    private var commentsEngagementIsResting = false
+    /// Whether the resting engagement's settle-time lock (pager freeze +
+    /// engaged toolbar context) has been applied — set when the page
+    /// activates, so a pre-render that never settles never locks.
+    private var restingLockApplied = false
 
     init(
         viewModel: FeedViewModel,
@@ -777,16 +788,15 @@ final class SnapFeedViewController: UIViewController {
     /// vacated region. One surface, one spring block, one motion profile
     /// (the sheet and the custom presentation that preceded this each
     /// split the screen into two motion systems). Playback is untouched:
-    /// nothing presents, so the cell never resigns.
-    /// `host` short-circuits the visible-cell lookup for callers that
-    /// already hold the cell — `willDisplay`'s activation net runs BEFORE
-    /// the cell joins `cellForItem`'s visible set, and the text-lead
-    /// auto-engage must not be lost to that window.
-    private func presentComments(for id: PostID, host: SnapFeedCell? = nil) {
+    /// nothing presents, so the cell never resigns. This is the MODAL
+    /// path (user taps a comment surface on a media post) — the animated
+    /// reveal, the pager lock, and the toolbar swap all fire together;
+    /// text pages take the pre-rendered resting path instead.
+    private func presentComments(for id: PostID) {
         guard commentsEngagedID == nil, commentsContentVC == nil,
               let makeCommentsPanelContent,
               let indexPath = dataSource.indexPath(for: id),
-              let cell = host ?? (collectionView.cellForItem(at: indexPath) as? SnapFeedCell)
+              let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell
         else { return }
 
         let content = makeCommentsPanelContent(id)
@@ -872,6 +882,68 @@ final class SnapFeedViewController: UIViewController {
         }
     }
 
+    /// The TEXT page's resting engagement, PHASE 1 (visual pre-render):
+    /// mounts the whole interface — glass card, collapsed slot, frost,
+    /// hosted stream, composer onstage — INSTANTLY and on VISIBILITY (the
+    /// cell's `willDisplay`, as it scrolls in), so a text page enters the
+    /// viewport 100% pre-assembled with zero reveal animation. Two things
+    /// the modal `presentComments` does are DEFERRED to settle (phase 2,
+    /// `lockRestingEngagement`): the pager freeze (disabling it here would
+    /// abort the very scroll bringing the cell in) and the engaged toolbar
+    /// swap (nav chrome follows the SETTLED page, not a half-scrolled one).
+    /// Idempotent by the slot guard; media pages never take this path.
+    private func presentRestingComments(for id: PostID, host cell: SnapFeedCell) {
+        guard commentsEngagedID == nil, commentsContentVC == nil,
+              let makeCommentsPanelContent else { return }
+
+        let content = makeCommentsPanelContent(id)
+        content.view.backgroundColor = .clear
+        content.overrideUserInterfaceStyle = .dark
+        commentsEngagedID = id
+        commentsContentVC = content
+        commentsEngagementIsResting = true
+        restingLockApplied = false
+
+        addChild(content)
+        cell.installComments(content.view)
+        content.didMove(toParent: self)
+        let detail = content as? PostDetailViewController
+        detail?.setEngagedInsets(
+            top: SnapCommentsLayout.stripBottom(topInset: view.safeAreaInsets.top),
+            trailing: cell.commentsRailExclusionWidth,
+            bottomInset: view.safeAreaInsets.bottom
+        )
+        // No close handler — a resting page is undismissable; the swipe
+        // handler pages the feed (the only way off a text post).
+        detail?.setEngagedSwipeHandler { [weak self] direction in
+            self?.pageAwayFromComments(direction: direction)
+        }
+        // INSTANT: composer already onstage, cell engaged synchronously —
+        // no spring, no offstage→onstage slide. The interface simply IS,
+        // frame one, so scrolling it into view reveals it already formed.
+        detail?.setComposerEntranceState(offstage: false)
+        cell.setCommentsEngaged(true)
+        cell.contentView.layoutIfNeeded()
+    }
+
+    /// The TEXT page's resting engagement, PHASE 2 (settle lock): once the
+    /// page has locked into place, freeze the pager (the dead-end doctrine
+    /// — over-scroll never chains to a page change) and swap in the
+    /// engaged toolbar context. Deferred out of the pre-render so neither
+    /// touches the still-in-flight scroll. Runs once per engagement.
+    private func lockRestingEngagement() {
+        guard commentsEngagementIsResting, !restingLockApplied,
+              commentsEngagedID != nil else { return }
+        restingLockApplied = true
+        collectionView.isScrollEnabled = false
+        let detail = commentsContentVC as? PostDetailViewController
+        commentSortButton.reset()
+        commentSortButton.onOrderChange = { [weak detail] order in
+            detail?.setCommentSortOrder(order)
+        }
+        setToolbarItems(engagedToolbarItems, animated: true)
+    }
+
     /// Reverse mutation (strip tap, entry-surface re-tap): the comments
     /// region settles out, the media expands back, the chrome returns, and
     /// the composer slides back offstage — the mirror image of the engage
@@ -938,6 +1010,11 @@ final class SnapFeedViewController: UIViewController {
     }
 
     private func finishCommentsDisengagement() {
+        // Idempotent: teardown reaches here from several paths (animated
+        // dismiss completion, resign leg, didEndDisplaying belt), and a
+        // resting pre-render can be torn down by more than one — a second
+        // call must be a clean no-op.
+        guard commentsEngagedID != nil else { return }
         // Belt and braces for non-animated/interrupted paths.
         let cell = engagedCell()
         // A keyboard-session rail yield must never outlive the engagement.
@@ -951,6 +1028,8 @@ final class SnapFeedViewController: UIViewController {
         cell?.clearComments()
         commentsContentVC = nil
         commentsEngagedID = nil
+        commentsEngagementIsResting = false
+        restingLockApplied = false
         collectionView.isScrollEnabled = true
         // The bar's pixels were never touched (keep-and-stack), but its
         // ITEMS are engagement context — settle them for the paths that
@@ -1001,16 +1080,23 @@ final class SnapFeedViewController: UIViewController {
             if orderedIDs.indices.contains(activate) {
                 let id = orderedIDs[activate]
                 viewModel.pageDidBecomeActive(id)
-                // Text-only pages REST in the comments layout: settling on
-                // one presents the STANDARD comments engagement (identical
-                // card, identical dead-end lock — the media slot is simply
-                // empty) as the page's own interface — no entry surface,
-                // no user gesture, the format itself is the trigger.
-                // Model presence REQUIRED — a not-yet-hydrated page must
-                // read as "unknown", never as "text-only" (willDisplay's
-                // net retries with the model in hand).
+                // Text-only pages REST in the comments layout — the format
+                // itself is the trigger, no user gesture. The VISUAL
+                // interface was already pre-rendered on visibility (as the
+                // cell scrolled in); settling only applies phase 2, the
+                // pager lock + toolbar context. The pre-render here is a
+                // BELT for the start-index landing, where a cell can be
+                // active before its `willDisplay` pre-render ran. Model
+                // presence REQUIRED — a not-yet-hydrated page reads as
+                // "unknown", never "text-only".
                 if let model = modelsByID[id], model.mediaURL == nil {
-                    presentComments(for: id)
+                    if commentsEngagedID == nil,
+                       let cell = collectionView.cellForItem(at: IndexPath(item: activate, section: 0)) as? SnapFeedCell {
+                        presentRestingComments(for: id, host: cell)
+                    }
+                    if commentsEngagedID == id, commentsEngagementIsResting {
+                        lockRestingEngagement()
+                    }
                 }
             }
         }
@@ -1085,19 +1171,20 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         updateActiveItem()
         if lifecycle.activeIndex == indexPath.item {
             (cell as? SnapCellLifecycle)?.willBecomeActive()
-            // The same net catches the text page's resting engagement: the
-            // activation-time engage (`apply`) needs the CELL, which a
-            // start-index landing realizes only here — without this, a
-            // feed opened directly onto a text page would sit on its
-            // empty shell. `presentComments` self-guards re-entry.
-            if orderedIDs.indices.contains(indexPath.item) {
-                let id = orderedIDs[indexPath.item]
-                // Model presence is REQUIRED (a missing model must read as
-                // "unknown", never as "text-only").
-                if let model = modelsByID[id], model.mediaURL == nil,
-                   commentsEngagedID == nil {
-                    presentComments(for: id, host: cell as? SnapFeedCell)
-                }
+        }
+        // A text page's resting interface PRE-RENDERS on visibility (not
+        // the settle-quantized active seam): the instant its cell begins
+        // displaying — while it is still scrolling in — its full engaged
+        // layout is mounted, so it slides into the viewport already
+        // formed instead of popping in at rest. This is the same
+        // visibility doctrine the ticker/subtitle surfaces below follow;
+        // the pager lock alone waits for settle (`lockRestingEngagement`).
+        // Slot-guarded (one engagement at a time), model presence REQUIRED
+        // (a missing model reads as "unknown", never "text-only").
+        if let snapCell = cell as? SnapFeedCell, orderedIDs.indices.contains(indexPath.item) {
+            let id = orderedIDs[indexPath.item]
+            if let model = modelsByID[id], model.mediaURL == nil, commentsEngagedID == nil {
+                presentRestingComments(for: id, host: snapCell)
             }
         }
         // Re-pull the cached streams BEFORE raising the visibility gate: a
@@ -1127,6 +1214,19 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // The resign above no-ops for a cell that was displayed but never
         // became active (a swiped-past page); its ticker must still stop.
         (cell as? SnapFeedCell)?.setTickerStreaming(false)
+        // Free the resting engagement's slot when its pre-rendered cell
+        // leaves WITHOUT settling — a text page scrolled in (pre-rendered
+        // on visibility) then scrolled back out never activates, so the
+        // `apply` resign leg never fires for it; without this the slot
+        // stays stuck on an off-screen cell and the next text page can't
+        // pre-render. Never tears down the SETTLED engaged page (it stays
+        // put until a real page change).
+        if let engagedID = commentsEngagedID, commentsEngagementIsResting,
+           orderedIDs.indices.contains(indexPath.item),
+           orderedIDs[indexPath.item] == engagedID,
+           lifecycle.activeIndex != indexPath.item {
+            finishCommentsDisengagement()
+        }
     }
 
     // A full-cell tap toggles play/pause (handled by the cell's own gesture),
