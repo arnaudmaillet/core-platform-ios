@@ -287,6 +287,12 @@ final class CommentSkeletonRowView: UIView {
         static let bodyFractions: [CGFloat] = [0.86, 0.58, 0.72, 0.94]
     }
 
+    /// The trailing band the real row's like control (count + ♥) occupies.
+    /// Skeletons only mimic ORGANIC content — avatar, name/time, body —
+    /// so this band stays empty: no bone ever shimmers where the
+    /// structural heart will stand.
+    static let likeColumnReservation: CGFloat = 28
+
     init(index: Int) {
         super.init(frame: .zero)
         isUserInteractionEnabled = false
@@ -311,7 +317,7 @@ final class CommentSkeletonRowView: UIView {
         NSLayoutConstraint.activate([
             row.topAnchor.constraint(equalTo: topAnchor),
             row.leadingAnchor.constraint(equalTo: leadingAnchor),
-            row.trailingAnchor.constraint(equalTo: trailingAnchor),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.likeColumnReservation),
             row.bottomAnchor.constraint(equalTo: bottomAnchor),
             avatar.widthAnchor.constraint(equalToConstant: 32),
             avatar.heightAnchor.constraint(equalToConstant: 32),

@@ -604,8 +604,11 @@ final class PostDetailViewController: UIViewController {
             // The initial fetch renders as a skeleton stream (the
             // messages screens' doctrine — shimmering placeholder rows,
             // never a spinner); hydration cross-dissolves into the same
-            // row geometry via the diffable apply.
-            items.append(contentsOf: (0..<5).map(StreamItem.skeletonPlaceholder))
+            // row geometry via the diffable apply. Ten rows overshoot
+            // every device height so the shimmer runs the full viewport
+            // down to the input bar — the list clips the excess, and a
+            // short block that dies mid-screen never reads as loading.
+            items.append(contentsOf: (0..<10).map(StreamItem.skeletonPlaceholder))
             return items
         }
         guard !latestComments.isEmpty else {

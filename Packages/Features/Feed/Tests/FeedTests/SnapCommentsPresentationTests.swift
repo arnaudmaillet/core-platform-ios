@@ -860,17 +860,27 @@ struct SnapCommentsPresentationTests {
 
     /// The comments skeleton row is the messages doctrine transplanted:
     /// three shimmer bones (avatar, header, body) on the real row's
-    /// geometry.
-    @Test func commentSkeletonRowBuildsThreeBones() {
-        let row = CommentSkeletonRowView(index: 0)
-        var bones = 0
+    /// geometry — and ONLY the organic content shimmers: the trailing
+    /// band where the real row's like control stands is reserved empty,
+    /// so no bone (not even the widest body pill) crosses into it.
+    @Test func commentSkeletonRowMimicsOrganicContentOnly() {
+        let row = CommentSkeletonRowView(index: 3) // widest body fraction (0.94)
+        var bones: [UIView] = []
         var stack: [UIView] = [row]
         while let view = stack.popLast() {
-            if view is SkeletonBoneView { bones += 1 }
+            if view is SkeletonBoneView { bones.append(view) }
             stack.append(contentsOf: view.subviews)
         }
-        #expect(bones == 3)
+        #expect(bones.count == 3)
         #expect(row.isUserInteractionEnabled == false)
+
+        row.frame = CGRect(x: 0, y: 0, width: 320, height: 44)
+        row.layoutIfNeeded()
+        let clearBandStart = 320 - CommentSkeletonRowView.likeColumnReservation
+        for bone in bones {
+            let boneMaxX = row.convert(bone.bounds, from: bone).maxX
+            #expect(boneMaxX <= clearBandStart)
+        }
     }
 
     // MARK: - Entry point
