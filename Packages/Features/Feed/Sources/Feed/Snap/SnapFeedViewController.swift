@@ -833,7 +833,14 @@ final class SnapFeedViewController: UIViewController {
             // stable; same frozen-threshold doctrine as the chrome's top).
             bottomInset: view.safeAreaInsets.bottom
         )
-        detail?.setEngagedCloseHandler { [weak self] in self?.dismissComments() }
+        if modelsByID[id]?.mediaURL != nil {
+            // Media pages wire the ✕ (and with it the composer's
+            // close/send toggle). TEXT-ONLY pages don't: their engagement
+            // is the permanent resting state — nothing to dismiss to —
+            // so the trailing slot stays a permanent send and the only
+            // way off the post is paging.
+            detail?.setEngagedCloseHandler { [weak self] in self?.dismissComments() }
+        }
         detail?.setEngagedSwipeHandler { [weak self] direction in
             self?.pageAwayFromComments(direction: direction)
         }
@@ -871,7 +878,13 @@ final class SnapFeedViewController: UIViewController {
     /// leg, all in the same spring. The native toolbar was onstage the
     /// whole time; nothing structural moves in either direction.
     private func dismissComments() {
-        guard commentsEngagedID != nil else { return }
+        guard let engagedID = commentsEngagedID else { return }
+        // BELT: a text-only post's engagement is undismissable (the
+        // permanent resting state — collapsing it would strand the page
+        // on its empty shell). No UI path should reach here for text
+        // (the ✕ is unwired, the card gestures unarmed, the strip tap
+        // gated), but any future caller meets the same wall.
+        if modelsByID[engagedID]?.mediaURL == nil { return }
         // The keyboard rides down with the collapse, not after it.
         commentsContentVC?.view.endEditing(true)
         let detail = commentsContentVC as? PostDetailViewController
@@ -893,11 +906,20 @@ final class SnapFeedViewController: UIViewController {
     /// runs programmatically, matching the swipe's direction; at the
     /// feed's ends the swipe still collapses, it just doesn't page.
     private func pageAwayFromComments(direction: Int) {
-        guard commentsEngagedID != nil else { return }
+        guard let engagedID = commentsEngagedID else { return }
         let current = lifecycle.activeIndex ?? 0
         let target = current + direction
-        dismissComments()
-        guard orderedIDs.indices.contains(target) else { return }
+        if modelsByID[engagedID]?.mediaURL == nil {
+            // TEXT-ONLY: the engagement is the page's face — it RIDES the
+            // leaving page instead of collapsing first (there is no
+            // default layout to collapse to), and the resign leg tears it
+            // down instantly once the pager settles. At the feed's ends
+            // the swipe is a no-op: the post stays exactly as it is.
+            guard orderedIDs.indices.contains(target) else { return }
+        } else {
+            dismissComments()
+            guard orderedIDs.indices.contains(target) else { return }
+        }
         collectionView.scrollToItem(
             at: IndexPath(item: target, section: 0), at: .top, animated: true
         )

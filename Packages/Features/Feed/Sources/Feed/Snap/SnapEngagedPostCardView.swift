@@ -43,6 +43,18 @@ final class SnapEngagedPostCardView: UIView {
     private let saveButton = SnapEngagedPostCardView.makeMetricButton(
         symbol: "bookmark", accessibilityLabel: "Save"
     )
+    /// The column's leading constraint — its constant is the media-slot
+    /// seam (`setMediaSlotCollapsed`).
+    private var columnLeadingConstraint: NSLayoutConstraint?
+
+    /// The column's leading edge, card-local: past the media hole, with
+    /// the same breathing the caption flight uses (`slot.maxX + md`) —
+    /// or, with the slot collapsed (text-only posts), the card's own
+    /// inner padding: no media exists, so the column claims the hole.
+    static func columnLeading(slotCollapsed: Bool) -> CGFloat {
+        let pad = SnapCommentsLayout.stripCardPadding
+        return slotCollapsed ? pad : pad + SnapCommentsLayout.mediaSlotHeight + Spacing.md
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -54,22 +66,32 @@ final class SnapEngagedPostCardView: UIView {
 
     private func buildLayout() {
         let pad = SnapCommentsLayout.stripCardPadding
-        // The column's leading edge, card-local: past the media hole, with
-        // the same breathing the caption flight uses (`slot.maxX + md`).
-        let columnLeading = pad + SnapCommentsLayout.mediaSlotHeight + Spacing.md
 
         // Actions row: the column's floor.
         let actions = UIStackView(arrangedSubviews: [likeButton, commentButton, repostButton, saveButton])
         actions.axis = .horizontal
         actions.spacing = Spacing.lg
         actions.alignment = .center
+        let leading = actions.leadingAnchor.constraint(
+            equalTo: leadingAnchor, constant: Self.columnLeading(slotCollapsed: false)
+        )
+        columnLeadingConstraint = leading
         actions.constrain(in: self) { parent in
-            actions.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: columnLeading)
+            leading
             actions.trailingAnchor.constraint(lessThanOrEqualTo: parent.trailingAnchor, constant: -pad)
             actions.heightAnchor.constraint(equalToConstant: SnapCommentsLayout.cardActionsHeight)
             actions.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -pad)
         }
 
+    }
+
+    /// TEXT-ONLY posts collapse the media hole: the column (and the cell's
+    /// caption, which mirrors this leading) stretches to the card's left
+    /// inner edge — no ghost space where media would have docked. Set at
+    /// cell configure, per post, before any engagement runs.
+    func setMediaSlotCollapsed(_ collapsed: Bool) {
+        columnLeadingConstraint?.constant = Self.columnLeading(slotCollapsed: collapsed)
+        setNeedsLayout()
     }
 
     // MARK: - Content

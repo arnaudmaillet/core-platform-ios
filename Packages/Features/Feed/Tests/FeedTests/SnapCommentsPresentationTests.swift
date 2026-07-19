@@ -647,13 +647,15 @@ struct SnapCommentsPresentationTests {
         #expect(pan.isEnabled == false)
     }
 
-    /// A text-only page's engagement is PIXEL-PARITY with the media
-    /// layouts': the identical floating glass card at the identical frame
-    /// (its media slot simply empty — hidden surfaces make the dock a
-    /// visual no-op), the identical frost band, the armed card exit pan,
-    /// and the identical dead-end lock (the container claims every touch,
-    /// exactly like a media engagement — no chaining, no special case).
-    @Test func textOnlyEngagementMatchesTheMediaLayoutExactly() throws {
+    /// A text-only page's engagement is the media layout's card with the
+    /// media hole COLLAPSED and the exits LOCKED: identical glass card at
+    /// the identical frame and identical frost band, but the caption (and
+    /// the card column with it) stretches to the slot's own left edge —
+    /// no ghost space — and the card exit pan never arms (the engagement
+    /// is the page's PERMANENT resting state; paging is the only way
+    /// off). The dead-end lock is identical to media's: the container
+    /// claims every touch.
+    @Test func textOnlyEngagementCollapsesTheSlotAndLocksTheExits() throws {
         let cell = SnapFeedCell(frame: Self.container)
         cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
         configurePost(cell, media: false)
@@ -670,24 +672,48 @@ struct SnapCommentsPresentationTests {
         #expect(backdrop.isHidden == false)
         let frost = try #require(effectViews.first { $0.frame != cardFrame })
         #expect(frost.frame.height == SnapCommentsLayout.stripBottom(topInset: Self.topInset))
-        // The engaged caption sits on the media layout's typography
-        // anchors (the column right of the — here empty — slot).
+        // The caption claims the collapsed hole: leading at the slot's
+        // own left edge (the card's inner padding line), full card width.
         let slot = SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset)
         let caption = try #require(
             cell.contentView.subviews.compactMap { $0 as? UILabel }
                 .first { $0.text == "caption" && !$0.isHidden }
         )
-        #expect(abs(caption.frame.minX - (slot.maxX + Spacing.md)) < 0.5)
-        // The exit pan is armed — same explicit exits as media.
+        #expect(abs(caption.frame.minX - slot.minX) < 0.5)
+        // No exit pan — the resting state is permanent.
         let pan = try #require(cell.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
-        #expect(pan.isEnabled == true)
-        // And the TOTAL dead-end lock: the container claims every touch,
-        // text page or media page alike.
+        #expect(pan.isEnabled == false)
+        // The dead-end lock is identical to media's.
         #expect(SnapFeedCollectionView.claimsTouches(hosted))
+        // A MEDIA page keeps the media anchors and the armed exits.
         let mediaCell = makeEngagedCell()
         let mediaHosted = UIView()
         mediaCell.installComments(mediaHosted)
         #expect(SnapFeedCollectionView.claimsTouches(mediaHosted))
+        let mediaPan = try #require(mediaCell.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
+        #expect(mediaPan.isEnabled == true)
+    }
+
+    /// The card column's leading is the media-slot seam: past the hole
+    /// normally, at the card's inner padding when the slot is collapsed
+    /// (text-only posts) — the caption and actions stretch to the card's
+    /// left edge with no ghost space.
+    @Test func cardColumnCollapsesWithTheMediaSlot() {
+        #expect(SnapEngagedPostCardView.columnLeading(slotCollapsed: false)
+            == SnapCommentsLayout.stripCardPadding + SnapCommentsLayout.mediaSlotHeight + Spacing.md)
+        #expect(SnapEngagedPostCardView.columnLeading(slotCollapsed: true)
+            == SnapCommentsLayout.stripCardPadding)
+
+        let card = SnapEngagedPostCardView(frame: CGRect(x: 0, y: 0, width: 374, height: 104))
+        card.layoutIfNeeded()
+        let actions = card.subviews.compactMap { $0 as? UIStackView }[0]
+        #expect(actions.frame.minX == SnapEngagedPostCardView.columnLeading(slotCollapsed: false))
+        card.setMediaSlotCollapsed(true)
+        card.layoutIfNeeded()
+        #expect(actions.frame.minX == SnapEngagedPostCardView.columnLeading(slotCollapsed: true))
+        card.setMediaSlotCollapsed(false)
+        card.layoutIfNeeded()
+        #expect(actions.frame.minX == SnapEngagedPostCardView.columnLeading(slotCollapsed: false))
     }
 
     /// The engaged toolbar's sort selector: single-selection menu with a

@@ -368,8 +368,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         isCommentsEngaged = engaged
         // The card's exit pan exists ONLY while engaged — the state seam
         // is the recognizer's power switch, so no teardown path can
-        // strand an armed pan in the default feed.
-        cardSwipeRecognizer.isEnabled = engaged
+        // strand an armed pan in the default feed. TEXT-ONLY posts never
+        // arm it at all: their engagement is the PERMANENT resting state
+        // (no dismissal — paging is the only way off the post).
+        cardSwipeRecognizer.isEnabled = engaged && mediaURL != nil
         let bounds = contentView.bounds
         let slot = SnapCommentsLayout.mediaSlotFrame(in: bounds, topInset: frozenInsets.top)
 
@@ -432,8 +434,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
                 lineHeight: engagedCaptionLabel.font.lineHeight
             )
             NSLayoutConstraint.deactivate(engagedCaptionConstraints)
+            // The caption's leading mirrors the card column's: past the
+            // media hole normally, at the slot's own left edge when the
+            // post is text-only (the hole is collapsed — the caption
+            // claims the full card width).
+            let captionLeading = mediaURL == nil ? slot.minX : slot.maxX + Spacing.md
             engagedCaptionConstraints = [
-                engagedCaptionLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: slot.maxX + Spacing.md),
+                engagedCaptionLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: captionLeading),
                 engagedCaptionLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: columnTop),
                 engagedCaptionLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Spacing.lg),
                 engagedCaptionLabel.bottomAnchor.constraint(lessThanOrEqualTo: contentView.topAnchor, constant: columnMaxY),
@@ -504,6 +511,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
         engagedCaptionLabel.text = model.caption
         engagedCard.configure(with: model)
+        // Text-only posts collapse the card's media hole: the column
+        // stretches to the card's left inner edge (the cell's engaged
+        // caption mirrors the same leading at engage time).
+        engagedCard.setMediaSlotCollapsed(model.mediaURL == nil)
 
         let hasMedia = model.mediaURL != nil
         let isVideo = hasMedia && model.mediaKind == .video
@@ -686,8 +697,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     @objc private func handleBackgroundTap() {
         // While engaged, the strip is the only cell territory the panel
         // doesn't cover — a tap there means "expand back", not play/pause.
+        // Unless the post is TEXT-ONLY: its engagement is the permanent
+        // resting state, and no tap may collapse it onto the empty shell.
         if isCommentsEngaged {
-            onRequestCommentsClose?()
+            if mediaURL != nil { onRequestCommentsClose?() }
             return
         }
         togglePlayback()
