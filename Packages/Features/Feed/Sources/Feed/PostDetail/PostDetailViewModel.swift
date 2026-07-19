@@ -2,6 +2,12 @@ import CoreModels
 import CoreNavigation
 import Foundation
 
+/// The comments stream's sort orders (the engaged toolbar's selector).
+public enum CommentSortOrder: Sendable, Equatable {
+    case recent
+    case trending
+}
+
 @MainActor
 public final class PostDetailViewModel {
     public nonisolated enum Phase: Equatable, Sendable {
@@ -35,6 +41,14 @@ public final class PostDetailViewModel {
     private let now: @Sendable () -> Date
 
     private var comments: [CommentEntry] = []
+    /// The stream's sort order — Recent is the repository's chronology,
+    /// Trending reorders THREADS by engagement (see `sortedForDisplay`).
+    private var commentSort: CommentSortOrder = .recent
+    /// Session-local optimistic comment likes (comment.v1 exposes no like
+    /// API yet — dev/BACKEND_GAPS.md; swap for the real seam). Living in
+    /// the VIEW MODEL, likes are part of the data pipeline: Trending
+    /// weighs them, and every consumer reads one truth.
+    private var likedComments: Set<String> = []
     private var isComposing = false
 
     private var phase: Phase = .loading {
@@ -194,7 +208,70 @@ public final class PostDetailViewModel {
 
     private func emitComments() {
         let now = now()
-        onCommentsChange?(.loaded(comments.map { CommentDisplayModel(entry: $0, now: now) }))
+        let ordered = Self.sortedForDisplay(comments, order: commentSort, liked: likedComments)
+        onCommentsChange?(.loaded(ordered.map { CommentDisplayModel(entry: $0, now: now) }))
+    }
+
+    // MARK: - Comment sorting & likes
+
+    /// Reorders the stream and re-emits — the engaged toolbar's sort
+    /// selector lands here.
+    public func setCommentSort(_ order: CommentSortOrder) {
+        guard order != commentSort else { return }
+        commentSort = order
+        emitComments()
+    }
+
+    /// Toggles the viewer's like on a comment and returns the new state.
+    /// Deliberately does NOT re-emit: the row updates in place, and a
+    /// Trending re-rank lands on the next sort change or reload — rows
+    /// must never jump out from under the finger that just liked them.
+    public func toggleCommentLike(commentID: String) -> Bool {
+        if likedComments.remove(commentID) != nil {
+            return false
+        }
+        likedComments.insert(commentID)
+        return true
+    }
+
+    public func isCommentLiked(_ commentID: String) -> Bool {
+        likedComments.contains(commentID)
+    }
+
+    /// The display order, thread-aware: replies always stay under their
+    /// parents in chronological order — sorting moves whole THREADS.
+    /// Recent keeps the repository's chronology. Trending ranks threads
+    /// by the engagement signals comment.v1 carries today — reply count
+    /// plus the session's likes anywhere in the thread — highest first
+    /// (stable: ties keep chronology); real like counts slot into the
+    /// score when the contract grows them. Pure and static, for tests.
+    static func sortedForDisplay(
+        _ entries: [CommentEntry],
+        order: CommentSortOrder,
+        liked: Set<String>
+    ) -> [CommentEntry] {
+        guard order == .trending else { return entries }
+        var threads: [(parent: CommentEntry, replies: [CommentEntry])] = []
+        for entry in entries {
+            if entry.parentID == nil {
+                threads.append((entry, []))
+            } else if !threads.isEmpty {
+                threads[threads.count - 1].replies.append(entry)
+            }
+        }
+        func score(_ thread: (parent: CommentEntry, replies: [CommentEntry])) -> Int {
+            thread.replies.count
+                + (liked.contains(thread.parent.id) ? 1 : 0)
+                + thread.replies.filter { liked.contains($0.id) }.count
+        }
+        return threads
+            .enumerated()
+            .sorted { lhs, rhs in
+                let l = score(lhs.element)
+                let r = score(rhs.element)
+                return l == r ? lhs.offset < rhs.offset : l > r
+            }
+            .flatMap { [$0.element.parent] + $0.element.replies }
     }
 
     private func setComposing(_ composing: Bool) {

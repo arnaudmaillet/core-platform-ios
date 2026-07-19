@@ -213,7 +213,7 @@ extension CommentRowView: UIContextMenuInteractionDelegate {
 /// collapsed, "Hide replies ∧" while expanded — one row, two faces, the
 /// inverse actions of the same fold.
 final class CommentThreadToggleRow: UIView {
-    enum Kind: Equatable {
+    enum Kind: Hashable {
         case expand(hidden: Int)
         case collapse
     }

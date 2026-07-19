@@ -3,6 +3,16 @@ import DesignSystem
 import FeedInterface
 import UIKit
 
+/// The stream's diffable identity space. Content is looked up at cell-
+/// configure time (`streamModels`); identity is what animates.
+private enum StreamSection: Hashable { case main }
+private enum StreamItem: Hashable {
+    case postSection
+    case emptyState
+    case comment(String)
+    case seam(CommentThreadToggleRow.Kind, parentID: String)
+}
+
 final class PostDetailViewController: UIViewController {
     private enum Metrics {
         static let avatarSize: CGFloat = 44
@@ -12,11 +22,47 @@ final class PostDetailViewController: UIViewController {
     private let imagePipeline: ImagePipeline
     private let mode: PostDetailMode
 
-    private let scrollView = UIScrollView()
+    /// The stream surface: a compositional-list collection view driven by
+    /// a diffable data source — thread folds and sort re-ranks land as
+    /// NATIVE animated snapshot applies (insertions, deletions, moves),
+    /// never manual view surgery. Still a UIScrollView underneath, so the
+    /// engaged inset/keyboard machinery operates on it unchanged.
+    private lazy var collectionView: UICollectionView = {
+        let layout = UICollectionViewCompositionalLayout { [weak self] _, environment in
+            var config = UICollectionLayoutListConfiguration(appearance: .plain)
+            config.showsSeparators = false
+            config.backgroundColor = .clear
+            let section = NSCollectionLayoutSection.list(using: config, layoutEnvironment: environment)
+            // The trailing inset carries the engaged rail exclusion — the
+            // stream's rows end where the action rail's column begins.
+            section.contentInsets = NSDirectionalEdgeInsets(
+                top: Spacing.lg,
+                leading: Spacing.lg,
+                bottom: Spacing.lg,
+                trailing: Spacing.lg + (self?.railExclusion ?? 0)
+            )
+            return section
+        }
+        let view = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        view.backgroundColor = .clear
+        view.allowsSelection = false
+        return view
+    }()
+    private var streamDataSource: UICollectionViewDiffableDataSource<StreamSection, StreamItem>!
+    /// The engaged rail exclusion, read by the layout's section provider.
+    private var railExclusion: CGFloat = 0
+    /// Snapshot bookkeeping: the first apply lands without animation (a
+    /// cold load has nothing to animate FROM); everything after — folds,
+    /// sorts, submissions — animates natively.
+    private var hasAppliedStream = false
+    private var commentsLoaded = false
+    private var streamModels: [String: CommentDisplayModel] = [:]
+    /// The full-mode post section (header/media/engagement), built once
+    /// and hosted by the stream's leading cell.
+    private let postSectionHost = UIView()
     private let refreshControl = UIRefreshControl()
     private let spinner = UIActivityIndicatorView(style: .large)
     private let statusLabel = UILabel()
-    private let contentStack = UIStackView()
 
     private let avatarView = UIView()
     private let avatarImageView = UIImageView()
@@ -30,11 +76,9 @@ final class PostDetailViewController: UIViewController {
     private let likeCountLabel = UILabel()
 
     private let commentsHeaderLabel = UILabel()
-    private let commentsStack = UIStackView()
     private let composeBar = CommentsInputBar()
 
     private var mediaAspectConstraint: NSLayoutConstraint?
-    private var contentTrailingConstraint: NSLayoutConstraint?
     private var composeBottomDefault: NSLayoutConstraint?
     private var composeBottomEngaged: [NSLayoutConstraint] = []
     private var scrollBottomDefault: NSLayoutConstraint?
@@ -67,10 +111,6 @@ final class PostDetailViewController: UIViewController {
     /// binds to its top-level parent — comment.v1's two-depth contract)
     /// plus the tapped author's name for the placeholder.
     private var replyTarget: (parentID: String, name: String)?
-    /// Session-local optimistic comment likes — the bookmark posture:
-    /// comment.v1 exposes no like API yet (dev/BACKEND_GAPS.md), so the
-    /// toggle lives here until a real seam exists; swap this set for it.
-    private var likedCommentIDs: Set<String> = []
 
     init(viewModel: PostDetailViewModel, imagePipeline: ImagePipeline, mode: PostDetailMode = .full) {
         self.viewModel = viewModel
@@ -107,28 +147,29 @@ final class PostDetailViewController: UIViewController {
     // MARK: - Setup
 
     private func configureViews() {
-        scrollView.alwaysBounceVertical = true
-        scrollView.keyboardDismissMode = .interactive
+        collectionView.alwaysBounceVertical = true
+        collectionView.keyboardDismissMode = .interactive
         // A bare tap on the stream retires the keyboard (the drag path
         // above already does; taps should match). Non-cancelling, so row
         // interactions and the cell-side arbitration see every touch
         // unchanged — and a no-op when nothing is editing.
         let keyboardDismissTap = UITapGestureRecognizer(target: self, action: #selector(handleStreamTap))
         keyboardDismissTap.cancelsTouchesInView = false
-        scrollView.addGestureRecognizer(keyboardDismissTap)
+        collectionView.addGestureRecognizer(keyboardDismissTap)
         refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
-        scrollView.refreshControl = refreshControl
+        collectionView.refreshControl = refreshControl
+        configureStreamDataSource()
         configureComposeBar()
         // Scroll view fills above the compose bar, which tracks the keyboard.
         // The default bottom stops at the compose bar; the engaged context
         // swaps it for a full-bleed bottom (stored constraint) so the
         // stream glides BEHIND the footer.
-        let scrollBottom = scrollView.bottomAnchor.constraint(equalTo: composeBar.topAnchor)
+        let scrollBottom = collectionView.bottomAnchor.constraint(equalTo: composeBar.topAnchor)
         scrollBottomDefault = scrollBottom
-        scrollView.constrain(in: view) { parent in
-            scrollView.topAnchor.constraint(equalTo: parent.topAnchor)
-            scrollView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
-            scrollView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
+        collectionView.constrain(in: view) { parent in
+            collectionView.topAnchor.constraint(equalTo: parent.topAnchor)
+            collectionView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+            collectionView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
             scrollBottom
         }
 
@@ -193,42 +234,24 @@ final class PostDetailViewController: UIViewController {
         commentsHeaderLabel.textColor = .label
         commentsHeaderLabel.isHidden = true
 
-        commentsStack.axis = .vertical
-        commentsStack.spacing = Spacing.lg
-
-        contentStack.axis = .vertical
-        contentStack.alignment = .fill
-        contentStack.spacing = Spacing.md
-        // The post section (header/media/engagement) is grouped so comments-only
-        // mode can hide it as a unit — `configure()` later toggles the inner
-        // views' `isHidden`, which is moot under a hidden parent.
-        let postSectionStack = UIStackView(arrangedSubviews: [authorRow, captionLabel, mediaView, timestampLabel, likeRow])
+        // The post section (header/media/engagement + the inline comments
+        // title), built once into the retained host — the stream's leading
+        // cell adopts it in full mode; comments-only never lists the item.
+        let postSectionStack = UIStackView(
+            arrangedSubviews: [authorRow, captionLabel, mediaView, timestampLabel, likeRow, commentsHeaderLabel]
+        )
         postSectionStack.axis = .vertical
         postSectionStack.spacing = Spacing.md
-        contentStack.addArrangedSubview(postSectionStack)
-        contentStack.addArrangedSubview(commentsHeaderLabel)
-        contentStack.addArrangedSubview(commentsStack)
-        contentStack.setCustomSpacing(Spacing.lg, after: postSectionStack)
+        postSectionStack.setCustomSpacing(Spacing.lg, after: likeRow)
+        postSectionStack.translatesAutoresizingMaskIntoConstraints = false
+        postSectionHost.addSubview(postSectionStack)
+        NSLayoutConstraint.activate([
+            postSectionStack.topAnchor.constraint(equalTo: postSectionHost.topAnchor),
+            postSectionStack.leadingAnchor.constraint(equalTo: postSectionHost.leadingAnchor),
+            postSectionStack.trailingAnchor.constraint(equalTo: postSectionHost.trailingAnchor),
+            postSectionStack.bottomAnchor.constraint(equalTo: postSectionHost.bottomAnchor, constant: -Spacing.sm),
+        ])
 
-        // Comments-only (from the snap feed, where the post is already on-screen):
-        // drop the post header/media/engagement, keep comments + the compose bar.
-        if mode == .commentsOnly {
-            postSectionStack.isHidden = true
-        }
-
-        let content = scrollView.contentLayoutGuide
-        let frame = scrollView.frameLayoutGuide
-        // The trailing edge is a stored constraint: the snap feed's engaged
-        // layout widens it to keep comment rows clear of the action rail
-        // (`setContentTrailingInset`).
-        let trailing = contentStack.trailingAnchor.constraint(equalTo: frame.trailingAnchor, constant: -Spacing.lg)
-        contentTrailingConstraint = trailing
-        contentStack.constrain(in: scrollView) { _ in
-            contentStack.topAnchor.constraint(equalTo: content.topAnchor, constant: Spacing.lg)
-            contentStack.leadingAnchor.constraint(equalTo: frame.leadingAnchor, constant: Spacing.lg)
-            trailing
-            contentStack.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -Spacing.lg)
-        }
         NSLayoutConstraint.activate([
             avatarView.widthAnchor.constraint(equalToConstant: Metrics.avatarSize),
             avatarView.heightAnchor.constraint(equalToConstant: Metrics.avatarSize)
@@ -350,13 +373,13 @@ final class PostDetailViewController: UIViewController {
         // The strip inset is the ONLY top authority in the engaged context:
         // the full-cell scroll view would otherwise also inherit the safe
         // area's automatic adjustment and double-inset the resting position.
-        scrollView.contentInsetAdjustmentBehavior = .never
-        scrollView.contentInset.top = max(0, top)
-        scrollView.verticalScrollIndicatorInsets.top = max(0, top)
-        scrollView.contentOffset = CGPoint(x: 0, y: -max(0, top))
+        collectionView.contentInsetAdjustmentBehavior = .never
+        collectionView.contentInset.top = max(0, top)
+        collectionView.verticalScrollIndicatorInsets.top = max(0, top)
+        collectionView.contentOffset = CGPoint(x: 0, y: -max(0, top))
         // A clean minimal stream: no indicator (engaged context only — the
         // pushed comments screen keeps its native affordance).
-        scrollView.showsVerticalScrollIndicator = false
+        collectionView.showsVerticalScrollIndicator = false
         // TOTAL immersion: the stream spans the full height and glides
         // BEHIND the footer too — the scroll's bottom swaps from the
         // compose bar's top to the view's bottom, with a bottom inset so
@@ -364,10 +387,10 @@ final class PostDetailViewController: UIViewController {
         // the bar legible over the moving rows.
         scrollBottomDefault?.isActive = false
         if scrollBottomEngaged == nil {
-            scrollBottomEngaged = scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            scrollBottomEngaged = collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         }
         scrollBottomEngaged?.isActive = true
-        scrollView.contentInset.bottom = max(0, bottomInset) + 62
+        collectionView.contentInset.bottom = max(0, bottomInset) + 62
         composerBackdrop.isHidden = false
         // Z-ORDER, load-bearing: the scroll view is added AFTER the compose
         // bar at build time (harmless while it ended at the bar's top), so
@@ -377,7 +400,10 @@ final class PostDetailViewController: UIViewController {
         // The footer must cap the stack in the engaged context.
         view.bringSubviewToFront(composerBackdrop)
         view.bringSubviewToFront(composeBar)
-        contentTrailingConstraint?.constant = -(Spacing.lg + max(0, trailing))
+        // The rail exclusion feeds the list layout's section insets — the
+        // stream's rows end where the action rail's column begins.
+        railExclusion = max(0, trailing)
+        collectionView.collectionViewLayout.invalidateLayout()
 
         // The composer OCCUPIES THE NATIVE FOOTER'S BAND: the feed keeps
         // its toolbar structurally present for the whole engagement (the
@@ -406,18 +432,18 @@ final class PostDetailViewController: UIViewController {
         switch phase {
         case .loading:
             if !refreshControl.isRefreshing { spinner.startAnimating() }
-            scrollView.isHidden = true
+            collectionView.isHidden = true
             statusLabel.isHidden = true
         case .content(let model):
             spinner.stopAnimating()
             refreshControl.endRefreshing()
             statusLabel.isHidden = true
-            scrollView.isHidden = false
+            collectionView.isHidden = false
             configure(model)
         case .failed(let message):
             spinner.stopAnimating()
             refreshControl.endRefreshing()
-            scrollView.isHidden = true
+            collectionView.isHidden = true
             statusLabel.text = message
             statusLabel.isHidden = false
         }
@@ -461,38 +487,154 @@ final class PostDetailViewController: UIViewController {
         commentsHeaderLabel.isHidden = mode == .commentsOnly
         guard case .loaded(let models) = state else { return }
         latestComments = models
-        rebuildCommentRows()
+        streamModels = Dictionary(models.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        commentsLoaded = true
+        // The first apply lands cold (nothing to animate FROM); reloads,
+        // sort re-ranks, and submissions animate as native diffs — moves,
+        // insertions, deletions, all UIKit's own.
+        applyStream(animated: hasAppliedStream)
     }
 
-    /// Renders the threaded stream through the truncation authority:
-    /// collapsed threads cap their replies and stand a "view more" row in
-    /// for the remainder; expansion re-renders from the cached models.
-    private func rebuildCommentRows() {
-        commentsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        if latestComments.isEmpty {
+    // MARK: - Stream data source
+
+    private func configureStreamDataSource() {
+        let postCell = UICollectionView.CellRegistration<UICollectionViewCell, StreamItem> {
+            [weak self] cell, _, _ in
+            guard let self else { return }
+            cell.contentView.subviews.forEach { $0.removeFromSuperview() }
+            self.postSectionHost.removeFromSuperview()
+            self.postSectionHost.translatesAutoresizingMaskIntoConstraints = false
+            cell.contentView.addSubview(self.postSectionHost)
+            NSLayoutConstraint.activate([
+                self.postSectionHost.topAnchor.constraint(equalTo: cell.contentView.topAnchor),
+                self.postSectionHost.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor),
+                self.postSectionHost.trailingAnchor.constraint(equalTo: cell.contentView.trailingAnchor),
+                self.postSectionHost.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor),
+            ])
+        }
+        let commentCell = UICollectionView.CellRegistration<UICollectionViewCell, String> {
+            [weak self] cell, _, commentID in
+            guard let self else { return }
+            cell.contentView.subviews.forEach { $0.removeFromSuperview() }
+            guard let model = self.streamModels[commentID] else { return }
+            let row = self.makeCommentRow(model)
+            row.translatesAutoresizingMaskIntoConstraints = false
+            cell.contentView.addSubview(row)
+            NSLayoutConstraint.activate([
+                row.topAnchor.constraint(equalTo: cell.contentView.topAnchor),
+                row.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor),
+                row.trailingAnchor.constraint(equalTo: cell.contentView.trailingAnchor),
+                // The old stack's inter-row breathing, as cell padding.
+                row.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -Spacing.lg),
+            ])
+        }
+        let seamCell = UICollectionView.CellRegistration<UICollectionViewCell, StreamItem> {
+            [weak self] cell, _, item in
+            guard let self, case .seam(let kind, let parentID) = item else { return }
+            cell.contentView.subviews.forEach { $0.removeFromSuperview() }
+            let seam = self.makeSeamRow(kind: kind, parentID: parentID)
+            seam.translatesAutoresizingMaskIntoConstraints = false
+            cell.contentView.addSubview(seam)
+            NSLayoutConstraint.activate([
+                seam.topAnchor.constraint(equalTo: cell.contentView.topAnchor),
+                seam.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor),
+                seam.trailingAnchor.constraint(equalTo: cell.contentView.trailingAnchor),
+                seam.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -Spacing.lg),
+            ])
+        }
+        let emptyCell = UICollectionView.CellRegistration<UICollectionViewCell, StreamItem> { cell, _, _ in
+            cell.contentView.subviews.forEach { $0.removeFromSuperview() }
             let empty = UILabel()
             empty.text = "No comments yet. Be the first."
             empty.font = .preferredFont(forTextStyle: .subheadline)
             empty.adjustsFontForContentSizeCategory = true
             empty.textColor = .secondaryLabel
-            commentsStack.addArrangedSubview(empty)
-            return
+            empty.translatesAutoresizingMaskIntoConstraints = false
+            cell.contentView.addSubview(empty)
+            NSLayoutConstraint.activate([
+                empty.topAnchor.constraint(equalTo: cell.contentView.topAnchor),
+                empty.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor),
+                empty.trailingAnchor.constraint(lessThanOrEqualTo: cell.contentView.trailingAnchor),
+                empty.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor),
+            ])
+        }
+        streamDataSource = UICollectionViewDiffableDataSource<StreamSection, StreamItem>(
+            collectionView: collectionView
+        ) { collectionView, indexPath, item in
+            switch item {
+            case .postSection:
+                return collectionView.dequeueConfiguredReusableCell(using: postCell, for: indexPath, item: item)
+            case .emptyState:
+                return collectionView.dequeueConfiguredReusableCell(using: emptyCell, for: indexPath, item: item)
+            case .comment(let id):
+                return collectionView.dequeueConfiguredReusableCell(using: commentCell, for: indexPath, item: id)
+            case .seam:
+                return collectionView.dequeueConfiguredReusableCell(using: seamCell, for: indexPath, item: item)
+            }
+        }
+    }
+
+    private func streamItems() -> [StreamItem] {
+        var items: [StreamItem] = []
+        if mode == .full { items.append(.postSection) }
+        guard commentsLoaded else { return items }
+        guard !latestComments.isEmpty else {
+            items.append(.emptyState)
+            return items
         }
         for item in CommentThreadPresentation.items(from: latestComments, expanded: expandedReplyParents) {
             switch item {
             case .comment(let model):
-                commentsStack.addArrangedSubview(makeCommentRow(model))
+                items.append(.comment(model.id))
             case .viewMoreReplies(let parentID, let hiddenCount):
-                commentsStack.addArrangedSubview(
-                    makeSeamRow(kind: .expand(hidden: hiddenCount), parentID: parentID)
-                )
+                items.append(.seam(.expand(hidden: hiddenCount), parentID: parentID))
             case .collapseReplies(let parentID):
-                commentsStack.addArrangedSubview(
-                    makeSeamRow(kind: .collapse, parentID: parentID)
+                items.append(.seam(.collapse, parentID: parentID))
+            }
+        }
+        return items
+    }
+
+    private func applyStream(animated: Bool, completion: (() -> Void)? = nil) {
+        var snapshot = NSDiffableDataSourceSnapshot<StreamSection, StreamItem>()
+        snapshot.appendSections([.main])
+        snapshot.appendItems(streamItems())
+        hasAppliedStream = true
+        streamDataSource.apply(snapshot, animatingDifferences: animated) { completion?() }
+    }
+
+    /// The engaged toolbar's sort selector lands here — the view model
+    /// re-ranks the data and the diffable apply animates the moves.
+    func setCommentSortOrder(_ order: SnapCommentSortButton.Order) {
+        viewModel.setCommentSort(order == .trending ? .trending : .recent)
+    }
+
+    /// The fold opening: one snapshot apply — UIKit animates the row
+    /// insertions natively.
+    private func expandThread(_ parentID: String) {
+        expandedReplyParents.insert(parentID)
+        applyStream(animated: true)
+    }
+
+    /// The fold's inverse: the deletions animate natively, then the
+    /// surviving view-more seam is scrolled back into the viewport if the
+    /// fold pulled it out (keep-place).
+    private func collapseThread(_ parentID: String) {
+        expandedReplyParents.remove(parentID)
+        applyStream(animated: true) { [weak self] in
+            guard let self else { return }
+            let items = self.streamDataSource.snapshot().itemIdentifiers
+            guard let index = items.firstIndex(where: { item in
+                if case .seam(_, let id) = item { return id == parentID }
+                return false
+            }) else { return }
+            let indexPath = IndexPath(item: index, section: 0)
+            if let attributes = self.collectionView.layoutAttributesForItem(at: indexPath) {
+                self.collectionView.scrollRectToVisible(
+                    attributes.frame.insetBy(dx: 0, dy: -60), animated: true
                 )
             }
         }
-        cascadeCommentsInIfFirstLoad()
     }
 
     private func makeCommentRow(_ model: CommentDisplayModel) -> CommentRowView {
@@ -507,16 +649,14 @@ final class PostDetailViewController: UIViewController {
         // repost/save posture).
         row.onBlock = nil
         row.onReport = nil
-        let liked = likedCommentIDs.contains(model.id)
+        // Like truth lives in the VIEW MODEL (Trending weighs it); the
+        // row updates in place — re-ranking waits for the next sort or
+        // reload, never yanking the row from under the finger.
+        let liked = viewModel.isCommentLiked(model.id)
         row.setLiked(liked, count: liked ? 1 : 0)
         row.onLikeTap = { [weak self, weak row] in
             guard let self else { return }
-            let nowLiked = !self.likedCommentIDs.contains(model.id)
-            if nowLiked {
-                self.likedCommentIDs.insert(model.id)
-            } else {
-                self.likedCommentIDs.remove(model.id)
-            }
+            let nowLiked = self.viewModel.toggleCommentLike(commentID: model.id)
             row?.setLiked(nowLiked, count: nowLiked ? 1 : 0)
         }
         return row
@@ -531,91 +671,6 @@ final class PostDetailViewController: UIViewController {
             seam.onTap = { [weak self] in self?.collapseThread(parentID) }
         }
         return seam
-    }
-
-    /// The thread's over-threshold replies — the block the fold shows and
-    /// hides.
-    private func hiddenReplies(for parentID: String) -> [CommentDisplayModel] {
-        Array(
-            latestComments.filter { $0.parentID == parentID }
-                .dropFirst(CommentThreadPresentation.visibleRepliesThreshold)
-        )
-    }
-
-    private func threadSeam(for parentID: String) -> CommentThreadToggleRow? {
-        commentsStack.arrangedSubviews
-            .compactMap { $0 as? CommentThreadToggleRow }
-            .first { $0.parentID == parentID }
-    }
-
-    /// The fold opening as an accordion: the hidden replies (and the
-    /// collapse seam) slide in through the stack's isHidden animation —
-    /// the UIStackView equivalent of a table's animated row insertion —
-    /// while the old view-more seam folds away in the same motion.
-    private func expandThread(_ parentID: String) {
-        expandedReplyParents.insert(parentID)
-        guard let seam = threadSeam(for: parentID),
-              let seamIndex = commentsStack.arrangedSubviews.firstIndex(of: seam) else {
-            rebuildCommentRows()
-            return
-        }
-        var incoming: [UIView] = hiddenReplies(for: parentID).map(makeCommentRow)
-        incoming.append(makeSeamRow(kind: .collapse, parentID: parentID))
-        for (offset, view) in incoming.enumerated() {
-            view.isHidden = true
-            view.alpha = 0
-            commentsStack.insertArrangedSubview(view, at: seamIndex + offset)
-        }
-        UIView.animate(withDuration: 0.3, delay: 0, options: [.curveEaseInOut]) {
-            seam.isHidden = true
-            seam.alpha = 0
-            for view in incoming {
-                view.isHidden = false
-                view.alpha = 1
-            }
-            self.scrollView.layoutIfNeeded()
-        } completion: { _ in
-            seam.removeFromSuperview()
-        }
-    }
-
-    /// The fold's inverse, same accordion in reverse: the over-threshold
-    /// rows and the collapse seam slide shut while the view-more seam
-    /// grows back in their place — then the surviving seam is scrolled
-    /// back into the viewport if the fold pulled it out (keep-place).
-    private func collapseThread(_ parentID: String) {
-        expandedReplyParents.remove(parentID)
-        guard let seam = threadSeam(for: parentID),
-              let seamIndex = commentsStack.arrangedSubviews.firstIndex(of: seam) else {
-            rebuildCommentRows()
-            return
-        }
-        let hiddenCount = hiddenReplies(for: parentID).count
-        let start = max(0, seamIndex - hiddenCount)
-        let folding = Array(commentsStack.arrangedSubviews[start..<seamIndex])
-        let newSeam = makeSeamRow(kind: .expand(hidden: hiddenCount), parentID: parentID)
-        newSeam.isHidden = true
-        newSeam.alpha = 0
-        commentsStack.insertArrangedSubview(newSeam, at: start)
-        UIView.animate(withDuration: 0.3, delay: 0, options: [.curveEaseInOut]) {
-            for view in folding {
-                view.isHidden = true
-                view.alpha = 0
-            }
-            seam.isHidden = true
-            seam.alpha = 0
-            newSeam.isHidden = false
-            newSeam.alpha = 1
-            self.scrollView.layoutIfNeeded()
-        } completion: { [weak self] _ in
-            guard let self else { return }
-            folding.forEach { $0.removeFromSuperview() }
-            seam.removeFromSuperview()
-            self.scrollView.layoutIfNeeded()
-            let target = self.scrollView.convert(newSeam.bounds, from: newSeam)
-                .insetBy(dx: 0, dy: -60)
-            self.scrollView.scrollRectToVisible(target, animated: true)
-        }
     }
 
     /// Row tapped: the composer arms its reply state — placeholder names
@@ -641,29 +696,6 @@ final class PostDetailViewController: UIViewController {
     }
 
     private var didCascadeComments = false
-
-    /// The first loaded render in comments-only mode rises in with a short
-    /// per-row stagger, so under the snap feed's comments panel the stream
-    /// reads as materializing beneath the media rather than arriving
-    /// pre-attached to the panel. One-shot: refreshes and composed-comment
-    /// re-renders swap content statically.
-    private func cascadeCommentsInIfFirstLoad() {
-        guard mode == .commentsOnly, !didCascadeComments, view.window != nil else { return }
-        didCascadeComments = true
-        view.layoutIfNeeded()
-        for (index, row) in commentsStack.arrangedSubviews.enumerated() {
-            row.alpha = 0
-            row.transform = CGAffineTransform(translationX: 0, y: 14)
-            UIView.animate(
-                withDuration: 0.3,
-                delay: 0.05 + Double(min(index, 10)) * 0.04,
-                options: [.curveEaseOut, .allowUserInteraction]
-            ) {
-                row.alpha = 1
-                row.transform = .identity
-            }
-        }
-    }
 
     private func renderComposing(_ composing: Bool) {
         composeBar.isSending = composing

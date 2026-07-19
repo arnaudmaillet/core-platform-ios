@@ -153,6 +153,70 @@ struct PostDetailCommentsTests {
         #expect(models.first { $0.id == "new" }?.isReply == true)
     }
 
+    /// Trending is THREAD-ranked by the engagement comment.v1 carries
+    /// today — reply count plus session likes anywhere in the thread —
+    /// stable on ties; Recent restores the repository chronology. Replies
+    /// never leave their parents in either order.
+    @Test func trendingSortRanksThreadsByEngagement() {
+        func entry(_ id: String, parent: String? = nil) -> CommentEntry {
+            CommentEntry(
+                id: id, authorID: ProfileID("p"), authorName: "A", authorHandle: "a",
+                body: "b", createdAt: Date(timeIntervalSince1970: 0), parentID: parent
+            )
+        }
+        let entries = [
+            entry("a"),
+            entry("b"), entry("b-r0", parent: "b"), entry("b-r1", parent: "b"),
+            entry("c"),
+        ]
+        // Recent: untouched.
+        #expect(PostDetailViewModel.sortedForDisplay(entries, order: .recent, liked: []).map(\.id)
+            == ["a", "b", "b-r0", "b-r1", "c"])
+        // Trending: the 2-reply thread leads; a session like lifts "c"
+        // over the bare "a"; replies ride under their parents.
+        #expect(PostDetailViewModel.sortedForDisplay(entries, order: .trending, liked: ["c"]).map(\.id)
+            == ["b", "b-r0", "b-r1", "c", "a"])
+        // A liked reply counts toward ITS thread's score.
+        #expect(PostDetailViewModel.sortedForDisplay(entries, order: .trending, liked: ["b-r0"]).map(\.id).first == "b")
+    }
+
+    /// The sort selector re-ranks the LIVE stream: switching to Trending
+    /// re-emits with the popular thread first; back to Recent restores
+    /// chronology. Likes toggle through the view model (one truth) and
+    /// deliberately do not re-emit.
+    @Test func settingSortReordersTheStream() async {
+        let parent = comment("c1", "quiet top")
+        let popular = comment("c2", "popular top")
+        let reply = CommentEntry(
+            id: "c2-r0", authorID: ProfileID("p2"), authorName: "Bo", authorHandle: "bo",
+            body: "reply", createdAt: Date(timeIntervalSince1970: 10), parentID: "c2"
+        )
+        let provider = StubCommentsProvider([parent, popular, reply])
+        let viewModel = makeViewModel(provider)
+        var emitted: [[String]] = []
+        viewModel.onCommentsChange = { state in
+            if case .loaded(let models) = state { emitted.append(models.map(\.id)) }
+        }
+        viewModel.viewDidLoad()
+        await settle { !emitted.isEmpty }
+        #expect(emitted.last == ["c1", "c2", "c2-r0"])
+
+        let emitsBefore = emitted.count
+        #expect(viewModel.toggleCommentLike(commentID: "c1"))
+        #expect(viewModel.isCommentLiked("c1"))
+        #expect(emitted.count == emitsBefore) // likes never re-emit
+
+        viewModel.setCommentSort(.trending)
+        // c2's thread scores 1 (reply); c1 scores 1 (session like) — the
+        // tie keeps chronology, so c1 stays first; unlike and re-sort to
+        // see the reply-count lead.
+        #expect(emitted.last == ["c1", "c2", "c2-r0"])
+        _ = viewModel.toggleCommentLike(commentID: "c1") // unlike
+        viewModel.setCommentSort(.recent)
+        viewModel.setCommentSort(.trending)
+        #expect(emitted.last == ["c2", "c2-r0", "c1"])
+    }
+
     @Test func blankCommentIsIgnored() async {
         let provider = StubCommentsProvider([])
         let viewModel = makeViewModel(provider)

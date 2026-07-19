@@ -818,8 +818,13 @@ final class SnapFeedViewController: UIViewController {
         // action cluster yields its territory to the comments sort
         // selector through the system's own item morph, on the spring's
         // beat — the audio attribution stays anchored on the left. Sort
-        // is engagement-scoped — every fresh engagement starts at Recent.
+        // is engagement-scoped — every fresh engagement starts at Recent,
+        // and the selection drives the STREAM: the detail's view model
+        // re-ranks and the diffable snapshot animates the moves.
         commentSortButton.reset()
+        commentSortButton.onOrderChange = { [weak detail] order in
+            detail?.setCommentSortOrder(order)
+        }
         setToolbarItems(engagedToolbarItems, animated: true)
         UIView.animate(
             withDuration: SnapCommentsLayout.engageDuration, delay: 0,
