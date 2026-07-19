@@ -46,7 +46,7 @@ struct CommentsRepositoryTests {
     @Test func addingACommentReturnsTheCreatedEntry() async throws {
         let repository = makeRepository()
 
-        let created = try await repository.addComment("Great post!", to: PostID("post-0001"))
+        let created = try await repository.addComment("Great post!", to: PostID("post-0001"), parentID: nil)
 
         #expect(created.body == "Great post!")
         #expect(!created.authorName.isEmpty)
@@ -69,12 +69,13 @@ struct CommentsRepositoryTests {
         let repository = makeRepository()
 
         let comments = try await repository.loadComments(for: PostID("post-0006"))
-        // 18 reactions + 6 semantic seeds + 3 level-2 replies (threaded
-        // in place under their parents by the repository).
-        #expect(comments.count == 27)
+        // 18 reactions + 6 semantic seeds + 7 level-2 replies (a popular
+        // 6-reply thread + one single-reply thread, threaded in place
+        // under their parents by the repository).
+        #expect(comments.count == 31)
         // The replies sit directly under their parents, marked as level 2.
         let replies = comments.filter { $0.parentID != nil }
-        #expect(replies.count == 3)
+        #expect(replies.count == 7)
         for reply in replies {
             let parentIndex = try #require(comments.firstIndex { $0.id == reply.parentID })
             let replyIndex = try #require(comments.firstIndex { $0.id == reply.id })

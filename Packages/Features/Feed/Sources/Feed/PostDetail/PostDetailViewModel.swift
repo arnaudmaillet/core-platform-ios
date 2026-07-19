@@ -107,20 +107,48 @@ public final class PostDetailViewModel {
         router?.route(to: .profile(authorID, stub: authorStub))
     }
 
-    /// Posts a comment. Disables the composer while in flight; on success the
-    /// new comment is prepended. Empty/whitespace input is ignored.
-    public func submitComment(_ text: String) {
+    /// Posts a comment. Disables the composer while in flight; on success a
+    /// top-level comment is prepended, a reply (non-nil `parentID`) is
+    /// inserted at the END of its parent's reply block — the thread reads
+    /// downward, oldest reply first, matching the repository's order.
+    /// Empty/whitespace input is ignored.
+    public func submitComment(_ text: String, parentID: String? = nil) {
         let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let commentsProvider, !body.isEmpty, !isComposing else { return }
         setComposing(true)
         Task { [weak self] in
             guard let self else { return }
-            if let entry = try? await commentsProvider.addComment(body, to: self.postID) {
-                self.comments.insert(entry, at: 0)
+            if let entry = try? await commentsProvider.addComment(body, to: self.postID, parentID: parentID) {
+                self.insertSubmitted(entry)
                 self.emitComments()
             }
             self.setComposing(false)
         }
+    }
+
+    private func insertSubmitted(_ entry: CommentEntry) {
+        guard let parentID = entry.parentID,
+              let parentIndex = comments.firstIndex(where: { $0.id == parentID }) else {
+            comments.insert(entry, at: 0)
+            return
+        }
+        var insertAt = parentIndex + 1
+        while insertAt < comments.count, comments[insertAt].parentID == parentID {
+            insertAt += 1
+        }
+        comments.insert(entry, at: insertAt)
+    }
+
+    /// A comment row's avatar tapped — route to that author's profile,
+    /// pre-seeded with the identity the comment already carries (the same
+    /// cross-feature path `didTapAuthor` uses; the keep-and-stack outbound
+    /// lifecycle needs nothing special from us).
+    public func didTapCommentAuthor(commentID: String) {
+        guard let entry = comments.first(where: { $0.id == commentID }) else { return }
+        router?.route(to: .profile(
+            entry.authorID,
+            stub: ProfileIdentityStub(handle: entry.authorHandle, displayName: entry.authorName)
+        ))
     }
 
     // MARK: - Loading

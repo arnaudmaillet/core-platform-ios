@@ -19,16 +19,18 @@ private final class PostOnlyFeedProvider: FeedProviding, @unchecked Sendable {
 private actor StubCommentsProvider: CommentsProviding {
     private var comments: [CommentEntry]
     private(set) var addedBodies: [String] = []
+    private(set) var addedParentIDs: [String?] = []
 
     init(_ comments: [CommentEntry]) { self.comments = comments }
 
     func loadComments(for postID: PostID) async throws -> [CommentEntry] { comments }
 
-    func addComment(_ body: String, to postID: PostID) async throws -> CommentEntry {
+    func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry {
         addedBodies.append(body)
+        addedParentIDs.append(parentID)
         let entry = CommentEntry(
             id: "new", authorID: ProfileID("prof-me"), authorName: "Me", authorHandle: "me",
-            body: body, createdAt: Date(timeIntervalSince1970: 100)
+            body: body, createdAt: Date(timeIntervalSince1970: 100), parentID: parentID
         )
         comments.insert(entry, at: 0)
         return entry
@@ -115,6 +117,40 @@ struct PostDetailCommentsTests {
             return
         }
         #expect(models.map(\.id) == ["new", "c1"]) // prepended
+    }
+
+    /// A reply binds its parent's id through the provider and lands at the
+    /// END of that parent's reply block — the thread reads downward — while
+    /// its display model carries the level-2 marker.
+    @Test func submittingAReplyBindsTheParentAndJoinsItsThread() async {
+        let parent = comment("c1", "top")
+        let existingReply = CommentEntry(
+            id: "c1-r0", authorID: ProfileID("prof-2"), authorName: "Bo", authorHandle: "bo",
+            body: "first reply", createdAt: Date(timeIntervalSince1970: 10), parentID: "c1"
+        )
+        let provider = StubCommentsProvider([parent, existingReply, comment("c2", "second top")])
+        let viewModel = makeViewModel(provider)
+        var lastComments: PostDetailViewModel.CommentsState?
+        viewModel.onCommentsChange = { lastComments = $0 }
+        viewModel.viewDidLoad()
+        await settle {
+            if case .loaded = lastComments { return true } else { return false }
+        }
+
+        viewModel.submitComment("agreed!", parentID: "c1")
+        await settle {
+            if case .loaded(let models) = lastComments { return models.contains { $0.id == "new" } }
+            return false
+        }
+
+        #expect(await provider.addedParentIDs == ["c1"])
+        guard case .loaded(let models) = lastComments else {
+            Issue.record("expected loaded")
+            return
+        }
+        // Parent → its replies (existing first, the new one appended) → next top.
+        #expect(models.map(\.id) == ["c1", "c1-r0", "new", "c2"])
+        #expect(models.first { $0.id == "new" }?.isReply == true)
     }
 
     @Test func blankCommentIsIgnored() async {

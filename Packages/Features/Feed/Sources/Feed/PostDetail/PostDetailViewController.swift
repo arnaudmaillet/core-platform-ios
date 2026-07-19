@@ -57,6 +57,16 @@ final class PostDetailViewController: UIViewController {
         maskLocations: [0, NSNumber(value: Double(SnapCommentsLayout.footerFrostSolidFraction)), 1]
     )
     private var imageTasks: [Task<Void, Never>] = []
+    /// The threaded stream as last loaded — kept so expansion re-renders
+    /// without a refetch.
+    private var latestComments: [CommentDisplayModel] = []
+    /// Parents whose full reply pool is shown (the "view more" seam's
+    /// state). Per-screen, like scroll position.
+    private var expandedReplyParents: Set<String> = []
+    /// The armed reply target: the THREAD PARENT's id (replying to a reply
+    /// binds to its top-level parent — comment.v1's two-depth contract)
+    /// plus the tapped author's name for the placeholder.
+    private var replyTarget: (parentID: String, name: String)?
 
     init(viewModel: PostDetailViewModel, imagePipeline: ImagePipeline, mode: PostDetailMode = .full) {
         self.viewModel = viewModel
@@ -246,7 +256,19 @@ final class PostDetailViewController: UIViewController {
         // The Liquid Glass composer (Private Messages' recipe): a floating
         // capsule field, no opaque bar, no separator — the glass carries
         // its own boundary against whatever is behind it.
-        composeBar.onSend = { [weak self] text in self?.viewModel.submitComment(text) }
+        composeBar.onSend = { [weak self] text in
+            guard let self else { return }
+            // A sent reply must be visible where it lands: expand its
+            // thread before the reload-driven re-render.
+            if let target = self.replyTarget {
+                self.expandedReplyParents.insert(target.parentID)
+            }
+            self.viewModel.submitComment(text, parentID: self.replyTarget?.parentID)
+            self.clearReplyState()
+        }
+        // The reply state's natural exit: keyboard retired over an empty
+        // field — later compositions start top-level again.
+        composeBar.onIdleDismiss = { [weak self] in self?.clearReplyState() }
         // The engaged footer frost (hidden outside the engagement): below
         // the bar, above the stream.
         composerBackdrop.isHidden = true
@@ -434,20 +456,71 @@ final class PostDetailViewController: UIViewController {
         // section header would duplicate it.
         commentsHeaderLabel.isHidden = mode == .commentsOnly
         guard case .loaded(let models) = state else { return }
+        latestComments = models
+        rebuildCommentRows()
+    }
+
+    /// Renders the threaded stream through the truncation authority:
+    /// collapsed threads cap their replies and stand a "view more" row in
+    /// for the remainder; expansion re-renders from the cached models.
+    private func rebuildCommentRows() {
         commentsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        if models.isEmpty {
+        if latestComments.isEmpty {
             let empty = UILabel()
             empty.text = "No comments yet. Be the first."
             empty.font = .preferredFont(forTextStyle: .subheadline)
             empty.adjustsFontForContentSizeCategory = true
             empty.textColor = .secondaryLabel
             commentsStack.addArrangedSubview(empty)
-        } else {
-            for model in models {
-                commentsStack.addArrangedSubview(CommentRowView(model: model))
-            }
-            cascadeCommentsInIfFirstLoad()
+            return
         }
+        for item in CommentThreadPresentation.items(from: latestComments, expanded: expandedReplyParents) {
+            switch item {
+            case .comment(let model):
+                let row = CommentRowView(model: model)
+                row.onAvatarTap = { [weak self] in
+                    self?.viewModel.didTapCommentAuthor(commentID: model.id)
+                }
+                row.onReplyTap = { [weak self] in self?.enterReplyState(for: model) }
+                row.onShare = { [weak self] in self?.presentCommentShare(model) }
+                // Moderation seams: the menu is the honest affordance; the
+                // block/report mutations wait on a moderation backend (the
+                // repost/save posture).
+                row.onBlock = nil
+                row.onReport = nil
+                commentsStack.addArrangedSubview(row)
+            case .viewMoreReplies(let parentID, let hiddenCount):
+                let more = CommentViewMoreRow(hiddenCount: hiddenCount)
+                more.onTap = { [weak self] in
+                    self?.expandedReplyParents.insert(parentID)
+                    self?.rebuildCommentRows()
+                }
+                commentsStack.addArrangedSubview(more)
+            }
+        }
+        cascadeCommentsInIfFirstLoad()
+    }
+
+    /// Row tapped: the composer arms its reply state — placeholder names
+    /// the tapped author, the payload binds to the THREAD parent, and the
+    /// keyboard rises into the field.
+    private func enterReplyState(for model: CommentDisplayModel) {
+        replyTarget = (parentID: model.parentID ?? model.id, name: model.authorName)
+        composeBar.setReplyPlaceholder(name: model.authorName)
+        composeBar.focusComposer()
+    }
+
+    private func clearReplyState() {
+        replyTarget = nil
+        composeBar.setReplyPlaceholder(name: nil)
+    }
+
+    private func presentCommentShare(_ model: CommentDisplayModel) {
+        let sheet = UIActivityViewController(
+            activityItems: ["\(model.authorName): \(model.body)"],
+            applicationActivities: nil
+        )
+        present(sheet, animated: true)
     }
 
     private var didCascadeComments = false

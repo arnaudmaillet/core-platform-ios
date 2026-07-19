@@ -118,7 +118,7 @@ private final class FakeCommentsProvider: CommentsProviding, @unchecked Sendable
         }
     }
 
-    func addComment(_ body: String, to postID: PostID) async throws -> CommentEntry {
+    func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry {
         throw CommentsError.transport(message: "unused")
     }
 }

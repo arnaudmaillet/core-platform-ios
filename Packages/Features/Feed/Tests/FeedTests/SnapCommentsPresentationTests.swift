@@ -645,6 +645,73 @@ struct SnapCommentsPresentationTests {
         #expect(try settledRow(replyModel).minX == CommentRowView.replyIndent)
     }
 
+    /// The "view more replies" truncation seam: a collapsed popular thread
+    /// shows the threshold's worth of replies plus the seam row; expansion
+    /// shows the pool; small threads and the empty set never grow a seam.
+    @Test func threadPresentationTruncatesPopularThreads() {
+        func model(_ id: String, parent: String? = nil) -> CommentDisplayModel {
+            CommentDisplayModel(entry: CommentEntry(
+                id: id, authorID: ProfileID("p"), authorName: "Ana", authorHandle: "ana",
+                body: "b", createdAt: Date(timeIntervalSince1970: 0), parentID: parent
+            ))
+        }
+        let models = [
+            model("a"),
+            model("a-r0", parent: "a"), model("a-r1", parent: "a"),
+            model("a-r2", parent: "a"), model("a-r3", parent: "a"),
+            model("b"),
+            model("b-r0", parent: "b"),
+        ]
+
+        let collapsed = CommentThreadPresentation.items(from: models, expanded: [])
+        #expect(collapsed == [
+            .comment(models[0]), .comment(models[1]), .comment(models[2]),
+            .viewMoreReplies(parentID: "a", hiddenCount: 2),
+            .comment(models[5]), .comment(models[6]),
+        ])
+
+        let expanded = CommentThreadPresentation.items(from: models, expanded: ["a"])
+        #expect(expanded == models.map(CommentStreamItem.comment))
+    }
+
+    /// The composer's reply state: the placeholder names the target and
+    /// restores on clear; an idle keyboard dismissal (empty field) fires
+    /// the host's reset seam, a drafted one does not.
+    @Test func composerReplyStateSwapsPlaceholderAndResetsOnIdleDismiss() throws {
+        let bar = CommentsInputBar()
+        bar.onClose = {}
+        func placeholder() -> String? {
+            var stack: [UIView] = [bar]
+            while let view = stack.popLast() {
+                if let label = view as? UILabel, label.text?.hasPrefix("Reply to") == true || label.text == "Add a comment…" {
+                    return label.text
+                }
+                stack.append(contentsOf: view.subviews)
+            }
+            return nil
+        }
+
+        #expect(placeholder() == "Add a comment…")
+        bar.setReplyPlaceholder(name: "Ana Reyes")
+        #expect(placeholder() == "Reply to Ana Reyes…")
+
+        var resets = 0
+        bar.onIdleDismiss = { resets += 1 }
+        // Drafted dismissal keeps the reply state armed…
+        bar.setKeyboardOpen(true)
+        bar.draftText = "half a thought"
+        bar.setKeyboardOpen(false)
+        #expect(resets == 0)
+        // …an idle dismissal resets it.
+        bar.setKeyboardOpen(true)
+        bar.draftText = ""
+        bar.setKeyboardOpen(false)
+        #expect(resets == 1)
+
+        bar.setReplyPlaceholder(name: nil)
+        #expect(placeholder() == "Add a comment…")
+    }
+
     // MARK: - Entry point
 
     /// Every comments surface is an engagement entry point — the empty-state

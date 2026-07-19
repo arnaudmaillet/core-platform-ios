@@ -138,9 +138,17 @@ public final class MockCommentService: @unchecked Sendable {
         let semParent = "\(postID)-sem-0"
         let denseParent = "\(postID)-dense-0"
         return [
+            // A POPULAR thread: six replies, so the stream's "view more
+            // replies" truncation (threshold 2) has a real pool to expand.
+            // The two sentences land in the subtitle zone, the four short
+            // reactions in the ticker band — the partition stays exact.
             semParent: [
                 reply(semParent, 0, "So true, the framing carries it.", ageMs: 6 * 60_000),
                 reply(semParent, 1, "came here to say exactly this", ageMs: 4 * 60_000),
+                reply(semParent, 2, "this.", ageMs: 3 * 60_000),
+                reply(semParent, 3, "so real", ageMs: 2 * 60_000),
+                reply(semParent, 4, "💯💯", ageMs: 90_000),
+                reply(semParent, 5, "not wrong", ageMs: 60_000),
             ],
             denseParent: [
                 reply(denseParent, 0, "fr fr 🔥", ageMs: 2 * 60_000),

@@ -1,24 +1,32 @@
+import CoreModels
 import Foundation
 
 /// View-ready projection of a `CommentEntry`.
 public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
     public let id: String
+    public let authorID: ProfileID
     public let authorName: String
+    /// The relative time alone — the header shows ONLY the clean display
+    /// name beside it (the @handle identifier was removed for reading
+    /// comfort; the handle still travels on `CommentEntry` for routing
+    /// stubs).
     public let metaText: String
     public let body: String
     public let monogram: String
+    /// The thread parent's id for level-2 replies; nil at top level.
+    public let parentID: String?
     /// Level-2 marker: replies render with the standard reply indentation
     /// (the stream carries exactly two depths — comment.v1's contract).
-    public let isReply: Bool
+    public var isReply: Bool { parentID != nil }
 
     public init(entry: CommentEntry, now: Date = Date()) {
         id = entry.id
+        authorID = entry.authorID
         authorName = entry.authorName
         body = entry.body
-        isReply = entry.parentID != nil
+        parentID = entry.parentID
         monogram = Self.monogram(entry.authorName)
-        let time = Self.relativeShort(from: entry.createdAt, to: now)
-        metaText = entry.authorHandle.isEmpty ? time : "@\(entry.authorHandle) · \(time)"
+        metaText = Self.relativeShort(from: entry.createdAt, to: now)
     }
 
     private static func monogram(_ name: String) -> String {

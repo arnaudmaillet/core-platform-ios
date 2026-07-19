@@ -299,6 +299,28 @@ final class CommentsInputBar: UIView {
         guard open != isKeyboardOpen else { return }
         isKeyboardOpen = open
         updateTrailingButtons(animated: true)
+        // An idle dismissal (keyboard retired over an empty field) resets
+        // any armed reply state — the host clears its target so a later
+        // composition starts top-level, not silently bound to a thread.
+        if !open, textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            onIdleDismiss?()
+        }
+    }
+
+    /// Fired when the keyboard retires over an EMPTY field — the reply
+    /// state's natural exit (a draft in progress keeps its target).
+    var onIdleDismiss: (() -> Void)?
+
+    /// The reply state's face: a non-nil name switches the placeholder to
+    /// "Reply to NAME…"; nil restores the default prompt. Pure placeholder
+    /// — the reply payload (the thread parent's id) is the HOST's state.
+    func setReplyPlaceholder(name: String?) {
+        placeholderLabel.text = name.map { "Reply to \($0)…" } ?? "Add a comment…"
+    }
+
+    /// Raises the keyboard into the composer — the row-tap reply trigger.
+    func focusComposer() {
+        textView.becomeFirstResponder()
     }
 
     /// The trailing slot's three-state toggle (when a close handler is

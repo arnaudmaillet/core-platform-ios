@@ -46,8 +46,10 @@ public struct CommentEntry: Equatable, Sendable, Identifiable {
 /// view-model tests.
 public protocol CommentsProviding: Sendable {
     func loadComments(for postID: PostID) async throws -> [CommentEntry]
-    /// Posts a top-level comment as the viewer and returns the created entry.
-    func addComment(_ body: String, to postID: PostID) async throws -> CommentEntry
+    /// Posts a comment as the viewer and returns the created entry.
+    /// `parentID` nil posts top-level; non-nil posts a level-2 reply under
+    /// that top-level comment (comment.v1's two-depth contract).
+    func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry
 }
 
 /// Reads/writes top-level comments via comment.v1, hydrating author names via
@@ -120,13 +122,14 @@ public actor CommentsRepository: CommentsProviding {
         return thread.map(makeEntry)
     }
 
-    public func addComment(_ body: String, to postID: PostID) async throws -> CommentEntry {
+    public func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry {
         let viewer = try await resolveViewerProfileID()
 
         var request = Comment_V1_CreateCommentRequest()
         request.commentID = UUID().uuidString // client-supplied id for idempotency
         request.postID = postID.rawValue
         request.authorID = viewer.rawValue
+        request.parentID = parentID ?? ""
         request.body = body
         let response = await commentClient.createComment(request: request, headers: [:])
         switch response.result {
@@ -139,7 +142,8 @@ public actor CommentsRepository: CommentsProviding {
                 authorName: author.name,
                 authorHandle: author.handle,
                 body: body,
-                createdAt: Date()
+                createdAt: Date(),
+                parentID: parentID
             )
         case .failure(let error):
             throw CommentsError.transport(message: error.message ?? "code \(error.code)")
