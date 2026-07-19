@@ -693,12 +693,13 @@ struct SnapCommentsPresentationTests {
         let frost = try #require(cell.contentView.subviews.compactMap { $0 as? ProgressiveFrostView }.first)
         #expect(frost.frame.height == SnapCommentsLayout.stripBottom(topInset: Self.topInset))
         // The caption claims the full-width card: leading at the card's
-        // inner padding line (which is the slot's own left edge).
-        let slot = SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset)
+        // uniform inner inset from its own left edge (the standalone info
+        // card IS the strip on a text post).
+        let textInfoFrame = SnapCommentsLayout.infoCardFrame(in: Self.container, topInset: Self.topInset, hasMedia: false)
         let caption = try engagedCaptionFrame(in: cell)
-        #expect(abs(caption.minX - slot.minX) < 0.5)
-        // …and floats on the SHARED caption axis (same as every format).
-        #expect(abs(caption.midY - SnapCommentsLayout.captionBandCenterY(topInset: Self.topInset)) < 0.5)
+        #expect(abs(caption.minX - (textInfoFrame.minX + SnapPostInfoCardView.contentInset)) < 0.5)
+        // …and floats centered on the card's own band axis.
+        #expect(abs(caption.midY - (textInfoFrame.minY + SnapPostInfoCardView.captionBandCenterY)) < 0.5)
         // No exit pan — the resting state is permanent.
         let pan = try #require(cell.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
         #expect(pan.isEnabled == false)
@@ -718,12 +719,13 @@ struct SnapCommentsPresentationTests {
         let mediaPan = try #require(mediaCell.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
         #expect(mediaPan.isEnabled == true)
         // On a media post the caption lives in the SEPARATE info card, so
-        // it starts at that card's own inner padding (its frame sits past
-        // the media card + the gap).
+        // it starts at that card's own uniform inner inset (its frame sits
+        // past the media card + the gap) — the SAME inset as the text card,
+        // homogeneous on every format.
         let mediaInfoFrame = SnapCommentsLayout.infoCardFrame(in: Self.container, topInset: Self.topInset, hasMedia: true)
         let mediaCaption = try engagedCaptionFrame(in: mediaCell)
-        #expect(abs(mediaCaption.minX - (mediaInfoFrame.minX + SnapCommentsLayout.stripCardPadding)) < 0.5)
-        #expect(abs(mediaCaption.midY - SnapCommentsLayout.captionBandCenterY(topInset: Self.topInset)) < 0.5)
+        #expect(abs(mediaCaption.minX - (mediaInfoFrame.minX + SnapPostInfoCardView.contentInset)) < 0.5)
+        #expect(abs(mediaCaption.midY - (mediaInfoFrame.minY + SnapPostInfoCardView.captionBandCenterY)) < 0.5)
     }
 
     /// `SnapMediaCardView` is HIT-TRANSPARENT: it hosts the surfaces
@@ -780,7 +782,7 @@ struct SnapCommentsPresentationTests {
     /// and grows leftward as counts appear.
     @Test func cardCountersAreAlwaysRightAligned() throws {
         let width: CGFloat = 374
-        let pad = SnapCommentsLayout.stripCardPadding
+        let pad = SnapPostInfoCardView.contentInset
         let card = SnapPostInfoCardView(frame: CGRect(x: 0, y: 0, width: width, height: 104))
         card.layoutIfNeeded()
         // The counters stack is now nested inside the card's own glass.
@@ -796,15 +798,39 @@ struct SnapCommentsPresentationTests {
         #expect(abs(maxX - (width - pad)) < 0.5)
     }
 
-    /// The caption axis is the midpoint of the caption's own band
-    /// (`columnTop`…`columnMaxY`) — a pure function of the shared card
-    /// geometry, so equal breathing sits above and below the text on
-    /// every format with no injected margin.
-    @Test func captionAxisIsTheBandCenter() {
-        let slotMinY = Self.topInset + SnapCommentsLayout.stripTopPadding + SnapCommentsLayout.stripCardPadding
-        let columnTop = slotMinY + Spacing.xs
-        let columnMaxY = SnapCommentsLayout.captionColumnMaxY(slotMaxY: slotMinY + SnapCommentsLayout.mediaSlotHeight)
-        #expect(SnapCommentsLayout.captionBandCenterY(topInset: Self.topInset) == (columnTop + columnMaxY) / 2)
+    /// HOMOGENEOUS PADDING: the info card insets its content by the SAME
+    /// margin on all four edges — the caption's leading/trailing and the
+    /// counters' trailing/bottom all sit exactly `contentInset` from the
+    /// card's border, and the caption band's top uses that same inset (no
+    /// extra top offset). Measured on a laid-out card.
+    @Test func infoCardPaddingIsHomogeneousOnAllEdges() throws {
+        let inset = SnapPostInfoCardView.contentInset
+        let side: CGFloat = 300, height = SnapCommentsLayout.cardHeight
+        let card = SnapPostInfoCardView(frame: CGRect(x: 0, y: 0, width: side, height: height))
+        card.setCaption("A caption that comfortably fills a line or two of the band.")
+        card.layoutIfNeeded()
+
+        func frame(_ v: UIView) -> CGRect { v.superview?.convert(v.frame, to: card) ?? v.frame }
+        var labels: [UILabel] = [], stacks: [UIStackView] = []
+        var stack: [UIView] = [card]
+        while let view = stack.popLast() {
+            if let l = view as? UILabel { labels.append(l) }
+            if let s = view as? UIStackView { stacks.append(s) }
+            stack.append(contentsOf: view.subviews)
+        }
+        let caption = try #require(labels.first { !($0.text ?? "").isEmpty })
+        let counters = try #require(stacks.first)
+        let captionFrame = frame(caption), countersFrame = frame(counters)
+
+        // Leading: caption sits one inset from the left border.
+        #expect(abs(captionFrame.minX - inset) < 0.5)
+        // Trailing: caption AND counters sit one inset from the right.
+        #expect(abs(side - captionFrame.maxX - inset) < 0.5)
+        #expect(abs(side - countersFrame.maxX - inset) < 0.5)
+        // Bottom: counters sit one inset from the bottom border.
+        #expect(abs(height - countersFrame.maxY - inset) < 0.5)
+        // Top: the caption never rises above one inset from the top.
+        #expect(captionFrame.minY >= inset - 0.5)
     }
 
     /// The engaged toolbar's sort selector: single-selection menu with a

@@ -56,7 +56,13 @@ final class SnapPostInfoCardView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     private func buildLayout() {
-        let pad = SnapCommentsLayout.stripCardPadding
+        // ONE uniform inset on all four edges — the caption and the
+        // counters are insulated from the hairline border by the same
+        // margin top, bottom, leading, and trailing, so the card reads
+        // homogeneously balanced whether it's full-width (text) or
+        // side-by-side (media). The only interior spacing is the small gap
+        // between the caption band and the counters row.
+        let inset = Self.contentInset
 
         glass.translatesAutoresizingMaskIntoConstraints = false
         addSubview(glass)
@@ -87,11 +93,11 @@ final class SnapPostInfoCardView: UIView {
         actions.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(actions)
 
-        // The caption's band: from the card's top inner padding down to the
-        // counters row. The caption CENTERS in it (equal breathing above
-        // and below), clamped so a tall caption never crosses either edge.
-        // The caption always starts at the card's inner padding — the media
-        // (when present) is a SEPARATE card, not a hole in this one.
+        // The caption's band: from the card's top inset down to just above
+        // the counters row. The caption CENTERS in it (equal breathing
+        // above and below), clamped so a tall caption never crosses either
+        // edge. The band's top uses the SAME inset as every other edge —
+        // no extra top offset (that was the vertical imbalance).
         let band = UILayoutGuide()
         content.addLayoutGuide(band)
 
@@ -99,16 +105,16 @@ final class SnapPostInfoCardView: UIView {
         centerY.priority = UILayoutPriority(999) // yields to the band clamps on a tall caption
 
         NSLayoutConstraint.activate([
-            actions.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -pad),
-            actions.leadingAnchor.constraint(greaterThanOrEqualTo: content.leadingAnchor, constant: pad),
+            actions.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -inset),
+            actions.leadingAnchor.constraint(greaterThanOrEqualTo: content.leadingAnchor, constant: inset),
             actions.heightAnchor.constraint(equalToConstant: SnapCommentsLayout.cardActionsHeight),
-            actions.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -pad),
+            actions.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -inset),
 
-            band.topAnchor.constraint(equalTo: content.topAnchor, constant: pad + Spacing.xs),
-            band.bottomAnchor.constraint(equalTo: actions.topAnchor, constant: -Spacing.xs),
+            band.topAnchor.constraint(equalTo: content.topAnchor, constant: inset),
+            band.bottomAnchor.constraint(equalTo: actions.topAnchor, constant: -Self.captionActionsGap),
 
-            captionLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: pad),
-            captionLabel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -pad),
+            captionLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: inset),
+            captionLabel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -inset),
             centerY,
             captionLabel.topAnchor.constraint(greaterThanOrEqualTo: band.topAnchor),
             captionLabel.bottomAnchor.constraint(lessThanOrEqualTo: band.bottomAnchor),
@@ -164,14 +170,35 @@ final class SnapPostInfoCardView: UIView {
 
     // MARK: - Geometry
 
-    /// The caption band's height, card-local: the card interior minus the
-    /// counters row and the two `xs` breathing gaps — a pure function of
-    /// the shared card geometry.
+    /// The uniform inner margin on ALL FOUR edges — the single padding
+    /// authority for the card, so top, bottom, leading, and trailing are
+    /// homogeneous by construction. `md` (12pt) insulates the text and the
+    /// counters from the 16pt-radius hairline border with a premium,
+    /// balanced breath.
+    static let contentInset: CGFloat = Spacing.md
+    /// The one interior gap: between the caption band and the counters row
+    /// (an internal separation, not an edge margin).
+    static let captionActionsGap: CGFloat = Spacing.xs
+
+    /// The caption band's height, card-local: the card interior (minus the
+    /// two edge insets) minus the counters row and the one interior gap —
+    /// a pure function of the shared card geometry and the uniform inset.
     private static var captionBandHeight: CGFloat {
         SnapCommentsLayout.cardHeight
-            - 2 * SnapCommentsLayout.stripCardPadding
+            - 2 * contentInset
             - SnapCommentsLayout.cardActionsHeight
-            - 2 * Spacing.xs
+            - captionActionsGap
+    }
+
+    /// The caption band's vertical center, CARD-LOCAL — the axis the
+    /// caption centers on (equal breathing above and below within the
+    /// band, above the counters row). This card owns its own vertical
+    /// balance; add the card frame's `minY` for cell coordinates.
+    static var captionBandCenterY: CGFloat {
+        let bandTop = contentInset
+        let actionsTop = SnapCommentsLayout.cardHeight - contentInset - SnapCommentsLayout.cardActionsHeight
+        let bandBottom = actionsTop - captionActionsGap
+        return (bandTop + bandBottom) / 2
     }
 
     // MARK: - Metric buttons

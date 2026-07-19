@@ -69,22 +69,6 @@ enum SnapCommentsLayout {
         stripCardPadding + mediaSlotHeight + stripCardPadding
     }
 
-    /// The engaged caption's balanced vertical axis — shared by EVERY
-    /// post type (video, photo, text), so the caption reads centered in
-    /// its band whatever the format: the midpoint of the caption's own
-    /// permitted band (`columnTop`…`columnMaxY`), so equal breathing sits
-    /// above the text and below it (down to the counters row). A one- or
-    /// two-line caption both land balanced — no top-pinned label with the
-    /// dead space pooling. Screen-absolute (the cell's caption constrains
-    /// against the cell); a pure function of the shared card geometry, so
-    /// no format injects a custom margin.
-    static func captionBandCenterY(topInset: CGFloat) -> CGFloat {
-        let slotMinY = topInset + stripTopPadding + stripCardPadding
-        let columnTop = slotMinY + Spacing.xs
-        let columnMaxY = captionColumnMaxY(slotMaxY: slotMinY + mediaSlotHeight)
-        return (columnTop + columnMaxY) / 2
-    }
-
     /// The engaged-state spring, shared by every leg of the one animation —
     /// and symmetric: the return runs the same envelope, with the footer
     /// crossfade riding inside it in both directions. ONE rhythm: media
