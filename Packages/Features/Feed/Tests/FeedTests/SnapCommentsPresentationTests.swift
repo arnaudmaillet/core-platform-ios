@@ -82,9 +82,38 @@ struct SnapCommentsPresentationTests {
 
     // MARK: - Cell engagement
 
-    private func makeEngagedCell() -> SnapFeedCell {
+    /// Configures the cell as a PHOTO post (or a text-only page with
+    /// `media: false`): engagement variants key off the model's media, so
+    /// every engagement fixture must configure before engaging.
+    private func configurePost(_ cell: SnapFeedCell, media: Bool = true) {
+        cell.configure(
+            with: FeedItemDisplayModel(
+                id: PostID("post-0000"),
+                authorID: ProfileID("profile-1"),
+                authorName: "Ava",
+                metaText: "@ava · 3m",
+                avatarURL: nil,
+                caption: "caption",
+                mediaURL: media ? URL(string: "mock://media/0.jpg") : nil,
+                mediaKind: .image,
+                thumbnailURL: nil,
+                audioText: media ? "Original audio · @ava" : nil
+            ),
+            pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            videoPlayback: nil
+        )
+    }
+
+    /// The standard engaged fixture is a PHOTO post: the dock/crop/card
+    /// assertions run against the image surface, proving photo posts ride
+    /// the exact video-parity pipeline (the dock loop drives both render
+    /// surfaces with one transform — the video-side tests cover the other
+    /// face). `media: false` builds a TEXT-ONLY page, whose engagement is
+    /// the text-lead resting variant.
+    private func makeEngagedCell(media: Bool = true) -> SnapFeedCell {
         let cell = SnapFeedCell(frame: Self.container)
         cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
+        configurePost(cell, media: media)
         cell.layoutIfNeeded()
         cell.setCommentsEngaged(true)
         return cell
@@ -231,6 +260,7 @@ struct SnapCommentsPresentationTests {
     @Test func installedCommentsLayerBehindTheStrip() throws {
         let cell = SnapFeedCell(frame: Self.container)
         cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
+        configurePost(cell)
         cell.layoutIfNeeded()
         let hosted = UIView()
         cell.installComments(hosted)
@@ -549,6 +579,7 @@ struct SnapCommentsPresentationTests {
     @Test func streamTouchesNeverCollapseTheEngagement() throws {
         let cell = SnapFeedCell(frame: Self.container)
         cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
+        configurePost(cell)
         cell.layoutIfNeeded()
         let hosted = UIView()
         cell.installComments(hosted)
@@ -602,6 +633,7 @@ struct SnapCommentsPresentationTests {
     @Test func cardSwipePanIsScopedToTheEngagementLifecycle() throws {
         let cell = SnapFeedCell(frame: Self.container)
         cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
+        configurePost(cell)
         cell.layoutIfNeeded()
         let pan = try #require(cell.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
         #expect(pan.isEnabled == false)
@@ -613,6 +645,51 @@ struct SnapCommentsPresentationTests {
         cell.setCommentsEngaged(true)
         cell.prepareForReuse()
         #expect(pan.isEnabled == false)
+    }
+
+    /// The text-lead resting variant: a text-only page's engagement docks
+    /// nothing (no media, no card, no engaged caption — the hosted stream
+    /// leads with the post's own caption + counters), never arms the card
+    /// exit pan, shrinks the frost band to the text-lead boundary, and
+    /// re-admits the pager's edge chaining through the container flag —
+    /// the resting interface must never dead-end the feed.
+    @Test func textOnlyEngagementIsTheTextLeadRestingVariant() throws {
+        let cell = SnapFeedCell(frame: Self.container)
+        cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
+        configurePost(cell, media: false)
+        cell.layoutIfNeeded()
+        let hosted = UIView()
+        cell.installComments(hosted)
+        cell.setCommentsEngaged(true)
+        cell.contentView.layoutIfNeeded()
+
+        // No dock: both render surfaces hold identity.
+        let media = try #require(cell.contentView.subviews.compactMap { $0 as? UIImageView }.first)
+        #expect(media.transform == .identity)
+        // No floating glass card: the only effect view is the header
+        // frost, and its band ends at the text-lead boundary, not the
+        // strip's.
+        let effectViews = cell.contentView.subviews.compactMap { $0 as? UIVisualEffectView }
+        let visible = effectViews.filter { !$0.isHidden }
+        #expect(visible.count == 1)
+        let frost = try #require(visible.first)
+        #expect(frost.frame.height == SnapCommentsLayout.textLeadTopInset(topInset: Self.topInset))
+        // No armed exit pan (nothing to exit to).
+        let pan = try #require(cell.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
+        #expect(pan.isEnabled == false)
+        // The container re-admits the pager: `claimsTouches` lets drags
+        // born on the stream reach the feed's paging (edge chaining).
+        let container = try #require(hosted.superview as? SnapCommentsContainerView)
+        #expect(container.allowsPagerChaining)
+        #expect(SnapFeedCollectionView.claimsTouches(hosted) == false)
+        // A media page's container keeps the modal veto.
+        let mediaCell = makeEngagedCell()
+        let mediaHosted = UIView()
+        mediaCell.installComments(mediaHosted)
+        #expect(SnapFeedCollectionView.claimsTouches(mediaHosted))
+        // Teardown restores the modal default.
+        cell.clearComments()
+        #expect(container.allowsPagerChaining == false)
     }
 
     /// The engaged toolbar's sort selector: single-selection menu with a

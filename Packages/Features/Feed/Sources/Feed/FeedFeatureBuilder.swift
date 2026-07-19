@@ -83,9 +83,13 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             viewModel: viewModel,
             imagePipeline: imagePipeline,
             videoPlayback: videoPlayback,
-            // The comments panel embeds the same comments-only detail the
-            // `.comments` route pushes — one comments UI, two presentations.
-            makeCommentsPanelContent: { postID in
+            // The comments panel embeds the same detail the `.comments`
+            // route pushes — one comments UI, every presentation. The feed
+            // picks the mode per post: `.commentsOnly` for media pages
+            // (the engaged card carries the post), `.textLead` for
+            // text-only pages (the stream leads with caption + counters —
+            // the comments layout IS the resting interface there).
+            makeCommentsPanelContent: { postID, mode in
                 PostDetailViewController(
                     viewModel: PostDetailViewModel(
                         postID: postID,
@@ -95,7 +99,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                         router: router
                     ),
                     imagePipeline: imagePipeline,
-                    mode: .commentsOnly
+                    mode: mode
                 )
             }
         )

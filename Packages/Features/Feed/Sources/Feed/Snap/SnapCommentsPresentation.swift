@@ -80,6 +80,14 @@ enum SnapCommentsLayout {
     /// as it fades, arriving into its stacked seat above the native bar.
     static let composerEntranceOffset: CGFloat = 15
 
+    /// The text-lead stream's top boundary: text-only pages have no media
+    /// strip, so the comments region starts just below the top chrome
+    /// (identity pill) with one breath of clearance — the header frost
+    /// band shrinks to this same line.
+    static func textLeadTopInset(topInset: CGFloat) -> CGFloat {
+        topInset + Spacing.sm
+    }
+
     /// The skeleton density estimate: a DELIBERATE low-ball of the real
     /// skeleton row's height (~48pt with list insets), because the count
     /// is viewport ÷ estimate — the smaller the estimate, the MORE rows,
@@ -193,9 +201,15 @@ enum SnapCommentsLayout {
     /// a progressively deepening blur with no geometric seam. Clamped
     /// under 1 so degenerate insets can't invert the ramp.
     static func headerFrostSolidFraction(topInset: CGFloat) -> CGFloat {
-        let band = stripBottom(topInset: topInset)
-        guard band > 0 else { return 0 }
-        return min(0.9, max(0, topInset / band))
+        headerFrostSolidFraction(topInset: topInset, bandBottom: stripBottom(topInset: topInset))
+    }
+
+    /// The band-parameterized form: the text-lead variant's frost band ends
+    /// at `textLeadTopInset` (no strip exists), but the ramp math is the
+    /// same — solid through the nav zone, dissolving to the band's bottom.
+    static func headerFrostSolidFraction(topInset: CGFloat, bandBottom: CGFloat) -> CGFloat {
+        guard bandBottom > 0 else { return 0 }
+        return min(0.9, max(0, topInset / bandBottom))
     }
 
     /// The footer frost's ramp: clear at the band's top edge, solid from

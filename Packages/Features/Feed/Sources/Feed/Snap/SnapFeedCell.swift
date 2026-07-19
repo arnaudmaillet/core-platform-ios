@@ -30,6 +30,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     private var representedID: PostID?
     private var mediaURL: URL?
+    /// Text-only pages: no media exists, so the comments engagement takes
+    /// its TEXT-LEAD shape — no dock, no strip card, no engaged caption
+    /// (the hosted stream leads with the post's own caption + counters),
+    /// and the pager keeps its edge chaining (the resting interface must
+    /// never dead-end the feed).
+    private var isTextOnly: Bool { mediaURL == nil }
     private var mediaKind: MediaKind = .image
     private var videoPlayback: VideoPlaybackController?
     private var imageTasks: [Task<Void, Never>] = []
@@ -263,6 +269,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // Pure crossfade, no translation: the bottom band's geometry must
         // hold dead-still while the old footer and the composer swap.
         commentsContainer.alpha = 0
+        // Text-lead pages re-admit the pager's edge chaining (the marker
+        // flag `claimsTouches` consults); media pages keep the modal veto.
+        commentsContainer.allowsPagerChaining = isTextOnly
         NSLayoutConstraint.deactivate(commentsContainerConstraints)
         // FULL height: the stream spans the whole cell and slides under the
         // strip (the hosted scroll view rests its content below the strip
@@ -274,13 +283,20 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             commentsContainer.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
         ]
         NSLayoutConstraint.activate(commentsContainerConstraints)
-        // The header zone's frost: wall-to-wall, screen top → the strip's
-        // lower boundary (the comments partition line), dissolving from
-        // solid behind the nav zone to nothing at the partition — the
-        // ramp's start is the real inset boundary, not a guess.
+        // The header zone's frost: wall-to-wall, screen top → the comments
+        // partition line, dissolving from solid behind the nav zone to
+        // nothing at the partition — the ramp's start is the real inset
+        // boundary, not a guess. TEXT-LEAD pages have no strip, so their
+        // band ends at the text-lead boundary instead (just below the top
+        // chrome) — same ramp math against the shorter band.
+        let bandBottom = isTextOnly
+            ? SnapCommentsLayout.textLeadTopInset(topInset: frozenInsets.top)
+            : SnapCommentsLayout.stripBottom(topInset: frozenInsets.top)
         headerFrost.setFadeLocations([
             0,
-            NSNumber(value: Double(SnapCommentsLayout.headerFrostSolidFraction(topInset: frozenInsets.top))),
+            NSNumber(value: Double(SnapCommentsLayout.headerFrostSolidFraction(
+                topInset: frozenInsets.top, bandBottom: bandBottom
+            ))),
             1,
         ])
         headerFrost.isHidden = false
@@ -289,29 +305,31 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             headerFrost.topAnchor.constraint(equalTo: contentView.topAnchor),
             headerFrost.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             headerFrost.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            headerFrost.heightAnchor.constraint(
-                equalToConstant: SnapCommentsLayout.stripBottom(topInset: frozenInsets.top)
-            ),
+            headerFrost.heightAnchor.constraint(equalToConstant: bandBottom),
         ]
         NSLayoutConstraint.activate(headerFrostConstraints)
-        // The glass card floats around the strip's content.
-        let card = SnapCommentsLayout.stripCardFrame(
-            in: contentView.bounds, topInset: frozenInsets.top
-        )
-        stripBackdrop.isHidden = false
-        NSLayoutConstraint.deactivate(stripBackdropConstraints)
-        stripBackdropConstraints = [
-            stripBackdrop.topAnchor.constraint(equalTo: contentView.topAnchor, constant: card.minY),
-            stripBackdrop.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: card.minX),
-            stripBackdrop.widthAnchor.constraint(equalToConstant: card.width),
-            stripBackdrop.heightAnchor.constraint(equalToConstant: card.height),
-        ]
-        NSLayoutConstraint.activate(stripBackdropConstraints)
-        // The docked media rides ABOVE the stream and the frosted header
-        // for the engagement's lifetime (restored on `clearComments`) —
-        // that's the layering that makes comments glide underneath it.
-        contentView.insertSubview(mediaView, aboveSubview: stripBackdrop)
-        contentView.insertSubview(videoRenderView, aboveSubview: mediaView)
+        if !isTextOnly {
+            // The glass card floats around the strip's content — media
+            // pages only; the text-lead stream leads with the post's own
+            // caption row, no floating card exists.
+            let card = SnapCommentsLayout.stripCardFrame(
+                in: contentView.bounds, topInset: frozenInsets.top
+            )
+            stripBackdrop.isHidden = false
+            NSLayoutConstraint.deactivate(stripBackdropConstraints)
+            stripBackdropConstraints = [
+                stripBackdrop.topAnchor.constraint(equalTo: contentView.topAnchor, constant: card.minY),
+                stripBackdrop.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: card.minX),
+                stripBackdrop.widthAnchor.constraint(equalToConstant: card.width),
+                stripBackdrop.heightAnchor.constraint(equalToConstant: card.height),
+            ]
+            NSLayoutConstraint.activate(stripBackdropConstraints)
+            // The docked media rides ABOVE the stream and the frosted header
+            // for the engagement's lifetime (restored on `clearComments`) —
+            // that's the layering that makes comments glide underneath it.
+            contentView.insertSubview(mediaView, aboveSubview: stripBackdrop)
+            contentView.insertSubview(videoRenderView, aboveSubview: mediaView)
+        }
         view.translatesAutoresizingMaskIntoConstraints = false
         commentsContainer.addSubview(view)
         view.pin(to: commentsContainer)
@@ -331,6 +349,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         commentsContainer.subviews.forEach { $0.removeFromSuperview() }
         commentsContainer.isHidden = true
         commentsContainer.transform = .identity
+        commentsContainer.allowsPagerChaining = false
         NSLayoutConstraint.deactivate(commentsContainerConstraints)
         commentsContainerConstraints = []
         stripBackdrop.isHidden = true
@@ -363,12 +382,23 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         isCommentsEngaged = engaged
         // The card's exit pan exists ONLY while engaged — the state seam
         // is the recognizer's power switch, so no teardown path can
-        // strand an armed pan in the default feed.
-        cardSwipeRecognizer.isEnabled = engaged
+        // strand an armed pan in the default feed. Text-lead pages never
+        // arm it: there is no card to swipe and no engagement to exit.
+        cardSwipeRecognizer.isEnabled = engaged && !isTextOnly
         let bounds = contentView.bounds
         let slot = SnapCommentsLayout.mediaSlotFrame(in: bounds, topInset: frozenInsets.top)
 
-        if engaged {
+        if engaged, isTextOnly {
+            // The text-lead engage: no media to dock, no card to raise —
+            // the chrome cut and the container lift are the whole
+            // mutation (the header frost still materializes below, and
+            // the hosted stream carries the caption + counters lead).
+            chrome.setCommentsEngaged(true)
+            commentsContainer.alpha = 1
+            if window != nil, headerFrost.effect == nil {
+                headerFrost.effect = UIBlurEffect(style: .systemThinMaterialDark)
+            }
+        } else if engaged {
             // The Ken Burns drift owns the same transform; it yields for the
             // engagement and resumes on disengage (below).
             stopKenBurns()
@@ -785,7 +815,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// Idempotent — re-applying the dock to an already-docked tile is a
     /// no-op.
     func reassertEngagedGeometry() {
-        guard isCommentsEngaged else { return }
+        guard isCommentsEngaged, !isTextOnly else { return }
         contentView.layoutIfNeeded()
         let bounds = contentView.bounds
         let slot = SnapCommentsLayout.mediaSlotFrame(in: bounds, topInset: frozenInsets.top)
@@ -831,11 +861,22 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 }
 
 /// Marker class for the engaged comments region — the pager's per-touch
-/// arbitration (`SnapFeedCollectionView.gestureRecognizerShouldBegin`)
-/// declines drags born inside it, exactly the shortcut rail's mechanism:
-/// inside the container the inner comments list scrolls; outside it (the
-/// strip, the margins) the feed's paging takes the touch.
-final class SnapCommentsContainerView: UIView {}
+/// arbitration (`SnapFeedCell` hosts it, the feed VC's `claimsTouches`
+/// consults it) declines drags born inside it, exactly the shortcut
+/// rail's mechanism: inside the container the inner comments list
+/// scrolls; outside it (the strip, the margins) the feed's paging takes
+/// the touch.
+final class SnapCommentsContainerView: UIView {
+    /// TEXT-LEAD pages opt back INTO UIKit's native nested-scroll
+    /// chaining: their comments layout is the RESTING interface — there
+    /// is no modal engagement to protect and no exit affordance to reach,
+    /// so the feed must keep paging from the stream itself (scroll to an
+    /// edge, keep dragging, the pager takes the excess). Media pages
+    /// stay `false`: their engagement is modal, and the total-dead-end
+    /// doctrine (disabled pager + this veto) is what makes their exits
+    /// explicit.
+    var allowsPagerChaining = false
+}
 
 extension SnapFeedCell {
     /// Keyboard-up hit arbitration: the risen composer's trailing ✕ lands
