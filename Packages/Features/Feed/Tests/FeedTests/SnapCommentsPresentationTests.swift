@@ -680,6 +680,8 @@ struct SnapCommentsPresentationTests {
                 .first { $0.text == "caption" && !$0.isHidden }
         )
         #expect(abs(caption.frame.minX - slot.minX) < 0.5)
+        // …and floats on the harmonized center axis of its band.
+        #expect(abs(caption.frame.midY - SnapCommentsLayout.collapsedCaptionCenterY(topInset: Self.topInset)) < 0.5)
         // No exit pan — the resting state is permanent.
         let pan = try #require(cell.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
         #expect(pan.isEnabled == false)
@@ -694,26 +696,35 @@ struct SnapCommentsPresentationTests {
         #expect(mediaPan.isEnabled == true)
     }
 
-    /// The card column's leading is the media-slot seam: past the hole
-    /// normally, at the card's inner padding when the slot is collapsed
-    /// (text-only posts) — the caption and actions stretch to the card's
-    /// left edge with no ghost space.
-    @Test func cardColumnCollapsesWithTheMediaSlot() {
-        #expect(SnapEngagedPostCardView.columnLeading(slotCollapsed: false)
-            == SnapCommentsLayout.stripCardPadding + SnapCommentsLayout.mediaSlotHeight + Spacing.md)
-        #expect(SnapEngagedPostCardView.columnLeading(slotCollapsed: true)
-            == SnapCommentsLayout.stripCardPadding)
-
-        let card = SnapEngagedPostCardView(frame: CGRect(x: 0, y: 0, width: 374, height: 104))
+    /// The counter cluster's two postures, toggled by the media-slot seam:
+    /// with media it STARTS the column past the hole (leading-pinned);
+    /// collapsed (text-only) it hugs the card's RIGHT inner edge
+    /// (trailing-pinned) — the caption owns the left axis, the counters
+    /// balance it from the right. Round-trips cleanly.
+    @Test func cardCountersRightAlignWhenTheSlotCollapses() {
+        let width: CGFloat = 374
+        let pad = SnapCommentsLayout.stripCardPadding
+        let card = SnapEngagedPostCardView(frame: CGRect(x: 0, y: 0, width: width, height: 104))
         card.layoutIfNeeded()
         let actions = card.subviews.compactMap { $0 as? UIStackView }[0]
-        #expect(actions.frame.minX == SnapEngagedPostCardView.columnLeading(slotCollapsed: false))
+        #expect(actions.frame.minX == SnapEngagedPostCardView.columnLeading)
         card.setMediaSlotCollapsed(true)
         card.layoutIfNeeded()
-        #expect(actions.frame.minX == SnapEngagedPostCardView.columnLeading(slotCollapsed: true))
+        #expect(actions.frame.maxX == width - pad)
         card.setMediaSlotCollapsed(false)
         card.layoutIfNeeded()
-        #expect(actions.frame.minX == SnapEngagedPostCardView.columnLeading(slotCollapsed: false))
+        #expect(actions.frame.minX == SnapEngagedPostCardView.columnLeading)
+    }
+
+    /// The collapsed caption axis: centered in the band between the card's
+    /// top and the counters row — equal breathing above the text and
+    /// between text and counters, whatever the line count.
+    @Test func collapsedCaptionAxisIsTheBandsCenter() {
+        let cardTop = Self.topInset + SnapCommentsLayout.stripTopPadding
+        let actionsTop = cardTop + SnapCommentsLayout.cardHeight
+            - SnapCommentsLayout.stripCardPadding - SnapCommentsLayout.cardActionsHeight
+        #expect(SnapCommentsLayout.collapsedCaptionCenterY(topInset: Self.topInset)
+            == (cardTop + actionsTop) / 2)
     }
 
     /// The engaged toolbar's sort selector: single-selection menu with a

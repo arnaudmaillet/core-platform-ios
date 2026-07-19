@@ -43,17 +43,19 @@ final class SnapEngagedPostCardView: UIView {
     private let saveButton = SnapEngagedPostCardView.makeMetricButton(
         symbol: "bookmark", accessibilityLabel: "Save"
     )
-    /// The column's leading constraint — its constant is the media-slot
-    /// seam (`setMediaSlotCollapsed`).
-    private var columnLeadingConstraint: NSLayoutConstraint?
+    /// The two horizontal postures, toggled by the media-slot seam: with
+    /// media, the counters START the column past the media hole (leading
+    /// pinned); with the slot collapsed (text-only), the cluster hugs the
+    /// card's RIGHT inner edge instead (trailing pinned) — the caption
+    /// owns the left axis, the counters balance it from the right.
+    private var mediaLeadingPin: NSLayoutConstraint?
+    private var collapsedTrailingPin: NSLayoutConstraint?
 
-    /// The column's leading edge, card-local: past the media hole, with
-    /// the same breathing the caption flight uses (`slot.maxX + md`) —
-    /// or, with the slot collapsed (text-only posts), the card's own
-    /// inner padding: no media exists, so the column claims the hole.
-    static func columnLeading(slotCollapsed: Bool) -> CGFloat {
-        let pad = SnapCommentsLayout.stripCardPadding
-        return slotCollapsed ? pad : pad + SnapCommentsLayout.mediaSlotHeight + Spacing.md
+    /// The column's leading edge with media, card-local: past the media
+    /// hole, with the same breathing the caption flight uses
+    /// (`slot.maxX + md`).
+    static var columnLeading: CGFloat {
+        SnapCommentsLayout.stripCardPadding + SnapCommentsLayout.mediaSlotHeight + Spacing.md
     }
 
     override init(frame: CGRect) {
@@ -72,12 +74,19 @@ final class SnapEngagedPostCardView: UIView {
         actions.axis = .horizontal
         actions.spacing = Spacing.lg
         actions.alignment = .center
-        let leading = actions.leadingAnchor.constraint(
-            equalTo: leadingAnchor, constant: Self.columnLeading(slotCollapsed: false)
+        let leadingPin = actions.leadingAnchor.constraint(
+            equalTo: leadingAnchor, constant: Self.columnLeading
         )
-        columnLeadingConstraint = leading
+        mediaLeadingPin = leadingPin
+        let trailingPin = actions.trailingAnchor.constraint(
+            equalTo: trailingAnchor, constant: -pad
+        )
+        collapsedTrailingPin = trailingPin // activated by the collapse seam
         actions.constrain(in: self) { parent in
-            leading
+            leadingPin
+            // Both postures share the outer guards: the cluster may never
+            // leave the card's inner padding on either side.
+            actions.leadingAnchor.constraint(greaterThanOrEqualTo: parent.leadingAnchor, constant: pad)
             actions.trailingAnchor.constraint(lessThanOrEqualTo: parent.trailingAnchor, constant: -pad)
             actions.heightAnchor.constraint(equalToConstant: SnapCommentsLayout.cardActionsHeight)
             actions.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -pad)
@@ -85,12 +94,15 @@ final class SnapEngagedPostCardView: UIView {
 
     }
 
-    /// TEXT-ONLY posts collapse the media hole: the column (and the cell's
-    /// caption, which mirrors this leading) stretches to the card's left
-    /// inner edge — no ghost space where media would have docked. Set at
-    /// cell configure, per post, before any engagement runs.
+    /// TEXT-ONLY posts collapse the media hole and flip the counter
+    /// cluster's anchor: the caption (cell-side) stretches from the card's
+    /// left inner edge while the counters right-align to the card's
+    /// trailing inner edge — a balanced, two-poled composition instead of
+    /// everything crowding the left. Set at cell configure, per post,
+    /// before any engagement runs.
     func setMediaSlotCollapsed(_ collapsed: Bool) {
-        columnLeadingConstraint?.constant = Self.columnLeading(slotCollapsed: collapsed)
+        mediaLeadingPin?.isActive = !collapsed
+        collapsedTrailingPin?.isActive = collapsed
         setNeedsLayout()
     }
 

@@ -434,17 +434,35 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
                 lineHeight: engagedCaptionLabel.font.lineHeight
             )
             NSLayoutConstraint.deactivate(engagedCaptionConstraints)
-            // The caption's leading mirrors the card column's: past the
-            // media hole normally, at the slot's own left edge when the
-            // post is text-only (the hole is collapsed — the caption
-            // claims the full card width).
-            let captionLeading = mediaURL == nil ? slot.minX : slot.maxX + Spacing.md
-            engagedCaptionConstraints = [
-                engagedCaptionLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: captionLeading),
-                engagedCaptionLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: columnTop),
-                engagedCaptionLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Spacing.lg),
-                engagedCaptionLabel.bottomAnchor.constraint(lessThanOrEqualTo: contentView.topAnchor, constant: columnMaxY),
-            ]
+            if mediaURL == nil {
+                // COLLAPSED (text-only): the caption claims the full card
+                // width from the slot's own left edge, and floats CENTERED
+                // in the band above the counters — balanced breathing
+                // above and below the text (the layout authority's
+                // harmonized axis), never a top-pinned label with the
+                // dead space pooling mid-card.
+                // The center axis is a 999: the REQUIRED floor cap (never
+                // into the counters row) must win over centering when a
+                // caption runs tall — the text nudges up, never overlaps.
+                let centerAxis = engagedCaptionLabel.centerYAnchor.constraint(
+                    equalTo: contentView.topAnchor,
+                    constant: SnapCommentsLayout.collapsedCaptionCenterY(topInset: frozenInsets.top)
+                )
+                centerAxis.priority = UILayoutPriority(999)
+                engagedCaptionConstraints = [
+                    engagedCaptionLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: slot.minX),
+                    centerAxis,
+                    engagedCaptionLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Spacing.lg),
+                    engagedCaptionLabel.bottomAnchor.constraint(lessThanOrEqualTo: contentView.topAnchor, constant: columnMaxY),
+                ]
+            } else {
+                engagedCaptionConstraints = [
+                    engagedCaptionLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: slot.maxX + Spacing.md),
+                    engagedCaptionLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: columnTop),
+                    engagedCaptionLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Spacing.lg),
+                    engagedCaptionLabel.bottomAnchor.constraint(lessThanOrEqualTo: contentView.topAnchor, constant: columnMaxY),
+                ]
+            }
             NSLayoutConstraint.activate(engagedCaptionConstraints)
             // The caption CROSS-FADES in place: the chrome's copy fades out
             // with the rest of the chrome cut (its alpha rides
