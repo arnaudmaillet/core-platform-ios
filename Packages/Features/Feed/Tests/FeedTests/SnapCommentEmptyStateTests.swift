@@ -109,7 +109,9 @@ struct SnapCommentEmptyStateTests {
         ))
         chrome.layoutIfNeeded()
         #expect(caption.frame == captionFrameBefore)
-        #expect(prompt.frame.maxY == captionFrameBefore.minY - Spacing.sm)
+        // md — the harmonized inter-container seam (it stands in the
+        // band's seat, so it keeps the band's gap against the caption).
+        #expect(prompt.frame.maxY == captionFrameBefore.minY - Spacing.md)
         #expect(prompt.frame.minX == caption.frame.minX)
         #expect(prompt.frame.height > 0)
     }

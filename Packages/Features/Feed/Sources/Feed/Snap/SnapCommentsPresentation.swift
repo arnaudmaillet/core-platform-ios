@@ -80,6 +80,21 @@ enum SnapCommentsLayout {
     /// as it fades, arriving into its stacked seat above the native bar.
     static let composerEntranceOffset: CGFloat = 15
 
+    /// The skeleton density estimate: a DELIBERATE low-ball of the real
+    /// skeleton row's height (~48pt with list insets), because the count
+    /// is viewport ÷ estimate — the smaller the estimate, the MORE rows,
+    /// and over-provisioning is free (the list clips the excess) while
+    /// under-provisioning strands blank space above the input bar.
+    static let skeletonRowEstimate: CGFloat = 44
+    /// How many shimmer rows the first-load snapshot injects: enough to
+    /// cover the whole viewport on ANY form factor — SE, Pro Max, iPad —
+    /// with zero hardcoded gaps. The fallback covers the pre-layout call
+    /// (bounds not yet set): generous enough for every iPhone.
+    static func skeletonPlaceholderCount(viewportHeight: CGFloat) -> Int {
+        guard viewportHeight > 0 else { return 24 }
+        return Int(ceil(viewportHeight / skeletonRowEstimate))
+    }
+
     /// Where the media docks, in cell coordinates: a 1:1 square tile on the
     /// card's left edge, uniformly padded.
     static func mediaSlotFrame(in bounds: CGRect, topInset: CGFloat) -> CGRect {

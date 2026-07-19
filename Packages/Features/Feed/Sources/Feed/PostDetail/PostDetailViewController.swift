@@ -604,11 +604,16 @@ final class PostDetailViewController: UIViewController {
             // The initial fetch renders as a skeleton stream (the
             // messages screens' doctrine — shimmering placeholder rows,
             // never a spinner); hydration cross-dissolves into the same
-            // row geometry via the diffable apply. Ten rows overshoot
-            // every device height so the shimmer runs the full viewport
-            // down to the input bar — the list clips the excess, and a
-            // short block that dies mid-screen never reads as loading.
-            items.append(contentsOf: (0..<10).map(StreamItem.skeletonPlaceholder))
+            // row geometry via the diffable apply. The count is VIEWPORT
+            // MATH, not a constant: enough rows to cover this device's
+            // height down to the input bar (the list clips the excess),
+            // so no form factor — SE, Pro Max, iPad — strands blank
+            // space under a too-short shimmer block.
+            let viewport = collectionView.bounds.height > 0
+                ? collectionView.bounds.height
+                : view.bounds.height
+            let count = SnapCommentsLayout.skeletonPlaceholderCount(viewportHeight: viewport)
+            items.append(contentsOf: (0..<count).map(StreamItem.skeletonPlaceholder))
             return items
         }
         guard !latestComments.isEmpty else {

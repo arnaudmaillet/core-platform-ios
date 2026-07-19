@@ -79,11 +79,13 @@ final class SnapChromeView: UIView {
     static let maxSettledTopMargin: CGFloat = 160
 
     /// Subtrees where a touch means "use the control", not "toggle playback" —
-    /// consumed by the cell's tap arbitration: the shortcut rail, plus every
-    /// comments surface (the empty-state pill, the subtitle zone, the ticker
-    /// band — the engagement's entry points; hidden views receive no
-    /// touches, so each claims taps only while shown).
-    var interactionRoots: [UIView] { [shortcutRail, commentEmptyState, subtitleView, commentTicker] }
+    /// consumed by the cell's tap arbitration: the shortcut rail and its
+    /// "+" anchor (rail territory in both engagement states — the pager's
+    /// swipe veto already treats it so), plus every comments surface (the
+    /// empty-state pill, the subtitle zone, the ticker band — the
+    /// engagement's entry points; hidden views receive no touches, so each
+    /// claims taps only while shown).
+    var interactionRoots: [UIView] { [shortcutRail, composeButton, commentEmptyState, subtitleView, commentTicker] }
 
     /// A comments surface was tapped (empty-state pill, subtitle zone, or
     /// ticker band — one fan-in, one path) — the cell forwards this as a
@@ -152,10 +154,13 @@ final class SnapChromeView: UIView {
         // safe area, so when the navigation controller's toolbar is visible
         // the caption sits above it automatically — live cell and flight
         // replica alike (`setFixedInsets` captures the toolbar-inflated
-        // insets).
+        // insets). The bottom gap is one token up from the sides (xl vs
+        // lg): the caption is the stack's last line before the toolbar
+        // band, and the seam between page content and bar chrome carries
+        // the harmonized rhythm's largest breath.
         captionLabel.constrain(in: self) { parent in
             captionLabel.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor, constant: Spacing.lg)
-            captionLabel.bottomAnchor.constraint(equalTo: parent.layoutMarginsGuide.bottomAnchor, constant: -Spacing.lg)
+            captionLabel.bottomAnchor.constraint(equalTo: parent.layoutMarginsGuide.bottomAnchor, constant: -Spacing.xl)
             captionLabel.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.lg)
         }
 
@@ -188,7 +193,10 @@ final class SnapChromeView: UIView {
         commentTicker.constrain(in: self) { parent in
             commentTicker.leadingAnchor.constraint(equalTo: leadingAnchor)
             commentTicker.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md - 0.5)
-            commentTicker.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.sm)
+            // md, not sm: the band and the caption are separate CONTAINERS
+            // in the bottom stack — inter-container seams breathe at md in
+            // the harmonized rhythm (sm stays the WITHIN-container gap).
+            commentTicker.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.md)
         }
 
         // The shortcut rail owns the trailing column, layered OVER the
@@ -251,7 +259,9 @@ final class SnapChromeView: UIView {
         subtitleView.constrain(in: self) { parent in
             subtitleView.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor, constant: Spacing.lg)
             subtitleView.trailingAnchor.constraint(equalTo: shortcutRail.leadingAnchor, constant: -Spacing.md)
-            subtitleView.bottomAnchor.constraint(equalTo: commentTicker.topAnchor, constant: -Spacing.sm)
+            // md: same inter-container seam as band→caption — the three
+            // stacked containers share one breathing rhythm.
+            subtitleView.bottomAnchor.constraint(equalTo: commentTicker.topAnchor, constant: -Spacing.md)
         }
 
         // The comments empty state sits in the BAND's slot (bottom on the
@@ -265,7 +275,9 @@ final class SnapChromeView: UIView {
         commentEmptyState.constrain(in: self) { parent in
             commentEmptyState.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor, constant: Spacing.lg)
             commentEmptyState.trailingAnchor.constraint(lessThanOrEqualTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.lg)
-            commentEmptyState.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.sm)
+            // md: it stands in the band's seat, so it keeps the band's
+            // harmonized seam against the caption.
+            commentEmptyState.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.md)
         }
         commentEmptyState.onTap = { [weak self] in self?.onCommentsTapped?() }
         subtitleView.onTap = { [weak self] in self?.onCommentsTapped?() }
@@ -428,17 +440,20 @@ final class SnapChromeView: UIView {
         return max(0, bounds.width - shortcutRail.frame.minX) + Spacing.sm
     }
 
-    /// The comments engagement's chrome cut: fades the comment surfaces,
-    /// the scrim, and the "+" anchor — the pieces the engaged layout
-    /// replaces or orphans — while the SHORTCUT RAIL stays untouched (the
-    /// blueprint keeps the vertical action rail through both states; it
-    /// floats over the comments region, and its touches keep winning via
-    /// `interactionRoots` + the pager's rail veto). The caption fades with
-    /// the rest — a synchronous in-place cross-fade against the engaged
-    /// caption's own fade, no geometric flight. Alpha, not isHidden, so a
-    /// single animation block drives both directions; alpha < 0.01 also
-    /// removes the faded surfaces from hit-testing, so the entry pill
-    /// can't re-fire mid-engagement.
+    /// The comments engagement's chrome cut: fades the comment surfaces
+    /// and the scrim — the pieces the engaged layout replaces or orphans —
+    /// while the SHORTCUT RAIL and its "+" anchor stay untouched (the
+    /// blueprint keeps the whole vertical action column through both
+    /// states; it floats over the comments region, and its touches keep
+    /// winning via `interactionRoots` + the pager's rail veto). The "+"
+    /// holds its native seat below the rail for visual continuity — it is
+    /// RAIL territory, not ticker content, even though its frame borrows
+    /// the ticker band's edges. The caption fades with the rest — a
+    /// synchronous in-place cross-fade against the engaged caption's own
+    /// fade, no geometric flight. Alpha, not isHidden, so a single
+    /// animation block drives both directions; alpha < 0.01 also removes
+    /// the faded surfaces from hit-testing, so the entry pill can't
+    /// re-fire mid-engagement.
     func setCommentsEngaged(_ engaged: Bool) {
         let alpha: CGFloat = engaged ? 0 : 1
         captionLabel.alpha = alpha
@@ -446,11 +461,11 @@ final class SnapChromeView: UIView {
         commentTicker.alpha = alpha
         subtitleView.alpha = alpha
         commentEmptyState.alpha = alpha
-        composeButton.alpha = alpha
-        // The rail stays fully INTERACTIVE through the engagement; the
-        // keyboard-up overlap with the composer's trailing ✕ is arbitrated
-        // at the cell level (`SnapFeedCell.hitTest`: the composer outranks
-        // the rail only where the two physically overlap).
+        // The rail (and its "+") stays fully INTERACTIVE through the
+        // engagement; the keyboard-up overlap with the composer's trailing
+        // ✕ is arbitrated at the cell level (`SnapFeedCell.hitTest`: the
+        // composer outranks the rail only where the two physically
+        // overlap).
     }
 
     /// The keyboard-session yield: while the engaged composer rises into

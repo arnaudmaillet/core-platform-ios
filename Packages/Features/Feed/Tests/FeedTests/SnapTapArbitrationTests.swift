@@ -38,15 +38,18 @@ struct SnapTapArbitrationTests {
     }
 
     @Test func chromeDeclaresItsInteractiveRoots() {
-        // The chrome's real declaration: touches on the shortcut wheel use
-        // the wheel, and taps on any comments surface (empty-state pill,
-        // subtitle zone, ticker band) open the engagement — none of them
-        // toggles playback. Each surface is hidden unless its content gate
-        // admits it, and hidden views receive no touches, so play/pause
-        // keeps the whole page wherever no surface is showing.
+        // The chrome's real declaration: touches on the shortcut wheel (or
+        // its fixed "+" anchor — rail territory, present in BOTH engagement
+        // states) use the wheel, and taps on any comments surface
+        // (empty-state pill, subtitle zone, ticker band) open the
+        // engagement — none of them toggles playback. Each surface is
+        // hidden unless its content gate admits it, and hidden views
+        // receive no touches, so play/pause keeps the whole page wherever
+        // no surface is showing.
         let chrome = SnapChromeView()
-        #expect(chrome.interactionRoots.count == 4)
+        #expect(chrome.interactionRoots.count == 5)
         #expect(chrome.interactionRoots.contains(where: { $0 is SnapShortcutRailView }))
+        #expect(chrome.interactionRoots.contains(where: { $0 is SnapRailComposeButton }))
         #expect(chrome.interactionRoots.contains(where: { $0 is SnapCommentEmptyStateView }))
         #expect(chrome.interactionRoots.contains(where: { $0 is SnapSubtitleView }))
         #expect(chrome.interactionRoots.contains(where: { $0 is SnapCommentTickerView }))
