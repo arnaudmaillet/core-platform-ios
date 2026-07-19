@@ -79,11 +79,13 @@ final class SnapChromeView: UIView {
     static let maxSettledTopMargin: CGFloat = 160
 
     /// Subtrees where a touch means "use the control", not "toggle playback" —
-    /// consumed by the cell's tap arbitration: the shortcut rail, plus every
-    /// comments surface (the empty-state pill, the subtitle zone, the ticker
-    /// band — the engagement's entry points; hidden views receive no
-    /// touches, so each claims taps only while shown).
-    var interactionRoots: [UIView] { [shortcutRail, commentEmptyState, subtitleView, commentTicker] }
+    /// consumed by the cell's tap arbitration: the shortcut rail and its
+    /// "+" anchor (rail territory in both engagement states — the pager's
+    /// swipe veto already treats it so), plus every comments surface (the
+    /// empty-state pill, the subtitle zone, the ticker band — the
+    /// engagement's entry points; hidden views receive no touches, so each
+    /// claims taps only while shown).
+    var interactionRoots: [UIView] { [shortcutRail, composeButton, commentEmptyState, subtitleView, commentTicker] }
 
     /// A comments surface was tapped (empty-state pill, subtitle zone, or
     /// ticker band — one fan-in, one path) — the cell forwards this as a
@@ -428,17 +430,20 @@ final class SnapChromeView: UIView {
         return max(0, bounds.width - shortcutRail.frame.minX) + Spacing.sm
     }
 
-    /// The comments engagement's chrome cut: fades the comment surfaces,
-    /// the scrim, and the "+" anchor — the pieces the engaged layout
-    /// replaces or orphans — while the SHORTCUT RAIL stays untouched (the
-    /// blueprint keeps the vertical action rail through both states; it
-    /// floats over the comments region, and its touches keep winning via
-    /// `interactionRoots` + the pager's rail veto). The caption fades with
-    /// the rest — a synchronous in-place cross-fade against the engaged
-    /// caption's own fade, no geometric flight. Alpha, not isHidden, so a
-    /// single animation block drives both directions; alpha < 0.01 also
-    /// removes the faded surfaces from hit-testing, so the entry pill
-    /// can't re-fire mid-engagement.
+    /// The comments engagement's chrome cut: fades the comment surfaces
+    /// and the scrim — the pieces the engaged layout replaces or orphans —
+    /// while the SHORTCUT RAIL and its "+" anchor stay untouched (the
+    /// blueprint keeps the whole vertical action column through both
+    /// states; it floats over the comments region, and its touches keep
+    /// winning via `interactionRoots` + the pager's rail veto). The "+"
+    /// holds its native seat below the rail for visual continuity — it is
+    /// RAIL territory, not ticker content, even though its frame borrows
+    /// the ticker band's edges. The caption fades with the rest — a
+    /// synchronous in-place cross-fade against the engaged caption's own
+    /// fade, no geometric flight. Alpha, not isHidden, so a single
+    /// animation block drives both directions; alpha < 0.01 also removes
+    /// the faded surfaces from hit-testing, so the entry pill can't
+    /// re-fire mid-engagement.
     func setCommentsEngaged(_ engaged: Bool) {
         let alpha: CGFloat = engaged ? 0 : 1
         captionLabel.alpha = alpha
@@ -446,11 +451,11 @@ final class SnapChromeView: UIView {
         commentTicker.alpha = alpha
         subtitleView.alpha = alpha
         commentEmptyState.alpha = alpha
-        composeButton.alpha = alpha
-        // The rail stays fully INTERACTIVE through the engagement; the
-        // keyboard-up overlap with the composer's trailing ✕ is arbitrated
-        // at the cell level (`SnapFeedCell.hitTest`: the composer outranks
-        // the rail only where the two physically overlap).
+        // The rail (and its "+") stays fully INTERACTIVE through the
+        // engagement; the keyboard-up overlap with the composer's trailing
+        // ✕ is arbitrated at the cell level (`SnapFeedCell.hitTest`: the
+        // composer outranks the rail only where the two physically
+        // overlap).
     }
 
     /// The keyboard-session yield: while the engaged composer rises into
