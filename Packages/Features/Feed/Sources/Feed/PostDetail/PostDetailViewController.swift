@@ -67,6 +67,10 @@ final class PostDetailViewController: UIViewController {
     /// binds to its top-level parent — comment.v1's two-depth contract)
     /// plus the tapped author's name for the placeholder.
     private var replyTarget: (parentID: String, name: String)?
+    /// Session-local optimistic comment likes — the bookmark posture:
+    /// comment.v1 exposes no like API yet (dev/BACKEND_GAPS.md), so the
+    /// toggle lives here until a real seam exists; swap this set for it.
+    private var likedCommentIDs: Set<String> = []
 
     init(viewModel: PostDetailViewModel, imagePipeline: ImagePipeline, mode: PostDetailMode = .full) {
         self.viewModel = viewModel
@@ -488,17 +492,49 @@ final class PostDetailViewController: UIViewController {
                 // repost/save posture).
                 row.onBlock = nil
                 row.onReport = nil
+                let liked = likedCommentIDs.contains(model.id)
+                row.setLiked(liked, count: liked ? 1 : 0)
+                row.onLikeTap = { [weak self, weak row] in
+                    guard let self else { return }
+                    let nowLiked = !self.likedCommentIDs.contains(model.id)
+                    if nowLiked {
+                        self.likedCommentIDs.insert(model.id)
+                    } else {
+                        self.likedCommentIDs.remove(model.id)
+                    }
+                    row?.setLiked(nowLiked, count: nowLiked ? 1 : 0)
+                }
                 commentsStack.addArrangedSubview(row)
             case .viewMoreReplies(let parentID, let hiddenCount):
-                let more = CommentViewMoreRow(hiddenCount: hiddenCount)
-                more.onTap = { [weak self] in
+                let seam = CommentThreadToggleRow(kind: .expand(hidden: hiddenCount), parentID: parentID)
+                seam.onTap = { [weak self] in
                     self?.expandedReplyParents.insert(parentID)
                     self?.rebuildCommentRows()
                 }
-                commentsStack.addArrangedSubview(more)
+                commentsStack.addArrangedSubview(seam)
+            case .collapseReplies(let parentID):
+                let seam = CommentThreadToggleRow(kind: .collapse, parentID: parentID)
+                seam.onTap = { [weak self] in self?.collapseThread(parentID) }
+                commentsStack.addArrangedSubview(seam)
             }
         }
         cascadeCommentsInIfFirstLoad()
+    }
+
+    /// The fold's inverse: collapse the thread back to its threshold and
+    /// keep the user's place — after the re-render, the surviving
+    /// "view more" seam for that thread is scrolled back into the
+    /// viewport if the collapse pulled it out (a no-op when it is
+    /// already visible).
+    private func collapseThread(_ parentID: String) {
+        expandedReplyParents.remove(parentID)
+        rebuildCommentRows()
+        scrollView.layoutIfNeeded()
+        guard let seam = commentsStack.arrangedSubviews
+            .compactMap({ $0 as? CommentThreadToggleRow })
+            .first(where: { $0.parentID == parentID }) else { return }
+        let target = scrollView.convert(seam.bounds, from: seam).insetBy(dx: 0, dy: -60)
+        scrollView.scrollRectToVisible(target, animated: true)
     }
 
     /// Row tapped: the composer arms its reply state — placeholder names

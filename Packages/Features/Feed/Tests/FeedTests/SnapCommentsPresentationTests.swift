@@ -729,9 +729,11 @@ struct SnapCommentsPresentationTests {
         #expect(try settledRow(replyModel).minX == CommentRowView.replyIndent)
     }
 
-    /// The "view more replies" truncation seam: a collapsed popular thread
-    /// shows the threshold's worth of replies plus the seam row; expansion
-    /// shows the pool; small threads and the empty set never grow a seam.
+    /// The fold's two faces: a collapsed popular thread shows the
+    /// threshold's worth of replies plus the view-more seam; expansion
+    /// shows the pool WITH the collapse seam at the block's bottom; small
+    /// threads never grow either seam — and removing the parent from the
+    /// expanded set folds the thread back exactly.
     @Test func threadPresentationTruncatesPopularThreads() {
         func model(_ id: String, parent: String? = nil) -> CommentDisplayModel {
             CommentDisplayModel(entry: CommentEntry(
@@ -755,7 +757,46 @@ struct SnapCommentsPresentationTests {
         ])
 
         let expanded = CommentThreadPresentation.items(from: models, expanded: ["a"])
-        #expect(expanded == models.map(CommentStreamItem.comment))
+        #expect(expanded == [
+            .comment(models[0]), .comment(models[1]), .comment(models[2]),
+            .comment(models[3]), .comment(models[4]),
+            .collapseReplies(parentID: "a"),
+            .comment(models[5]), .comment(models[6]),
+        ])
+
+        // The fold is a pure function of the set: removing the parent
+        // restores the collapsed shape byte-identically.
+        #expect(CommentThreadPresentation.items(from: models, expanded: []) == collapsed)
+    }
+
+    /// The header's like control: far-right on the name/time axis, count
+    /// shown only when real, filled state on demand — session-local
+    /// optimistic (no comment-like API yet).
+    @Test func commentRowLikeControlRendersState() throws {
+        let model = CommentDisplayModel(entry: CommentEntry(
+            id: "c1", authorID: ProfileID("p1"), authorName: "Ana Reyes",
+            authorHandle: "ana", body: "body", createdAt: Date()
+        ))
+        let row = CommentRowView(model: model)
+        var stack: [UIView] = [row]
+        var like: UIButton?
+        while let view = stack.popLast() {
+            if let button = view as? UIButton, button.accessibilityLabel == "Like comment" { like = button }
+            stack.append(contentsOf: view.subviews)
+        }
+        let button = try #require(like)
+        #expect(button.configuration?.attributedTitle == nil) // bare heart at zero
+        row.setLiked(true, count: 1)
+        #expect(button.configuration?.attributedTitle.map { String($0.characters) } == "1")
+        row.setLiked(false, count: 0)
+        #expect(button.configuration?.attributedTitle == nil)
+
+        // Right-aligned on the header axis: after layout, the control's
+        // trailing sits at the row's trailing edge.
+        row.frame = CGRect(x: 0, y: 0, width: 320, height: 80)
+        row.layoutIfNeeded()
+        let frameInRow = button.superview!.convert(button.frame, to: row)
+        #expect(abs(frameInRow.maxX - 320) < 1)
     }
 
     /// The composer's reply state: the placeholder names the target and

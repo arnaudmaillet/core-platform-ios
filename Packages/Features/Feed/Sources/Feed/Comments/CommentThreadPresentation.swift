@@ -7,6 +7,10 @@ enum CommentStreamItem: Equatable {
     /// "View N more replies…" row at reply depth; tapping expands that
     /// parent's full reply pool.
     case viewMoreReplies(parentID: String, hiddenCount: Int)
+    /// The fold's inverse face, closing an EXPANDED popular thread: a
+    /// "Hide replies" row at the bottom of the reply block. Only threads
+    /// that exceed the threshold ever grow either seam.
+    case collapseReplies(parentID: String)
 }
 
 /// The stream's truncation authority — pure, so the pagination seam is
@@ -35,8 +39,11 @@ enum CommentThreadPresentation {
                 replies.append(models[index])
                 index += 1
             }
-            if replies.count <= visibleRepliesThreshold || expanded.contains(model.id) {
+            if replies.count <= visibleRepliesThreshold {
                 items.append(contentsOf: replies.map(CommentStreamItem.comment))
+            } else if expanded.contains(model.id) {
+                items.append(contentsOf: replies.map(CommentStreamItem.comment))
+                items.append(.collapseReplies(parentID: model.id))
             } else {
                 items.append(contentsOf: replies.prefix(visibleRepliesThreshold).map(CommentStreamItem.comment))
                 items.append(.viewMoreReplies(
