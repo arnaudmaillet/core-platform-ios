@@ -883,6 +883,29 @@ struct SnapCommentsPresentationTests {
         }
     }
 
+    /// The skeleton snapshot's density is viewport math, never a fixed
+    /// integer: count = ceil(viewport / estimate), with the estimate a
+    /// deliberate low-ball of the real row height so every form factor
+    /// over-provisions (the list clips the excess) and none strands
+    /// blank space above the input bar.
+    @Test func skeletonDensityScalesWithTheViewport() {
+        let se = SnapCommentsLayout.skeletonPlaceholderCount(viewportHeight: 667)
+        let proMax = SnapCommentsLayout.skeletonPlaceholderCount(viewportHeight: 932)
+        let pad = SnapCommentsLayout.skeletonPlaceholderCount(viewportHeight: 1366)
+
+        // Coverage: estimate × count ≥ viewport on every device.
+        #expect(CGFloat(se) * SnapCommentsLayout.skeletonRowEstimate >= 667)
+        #expect(CGFloat(proMax) * SnapCommentsLayout.skeletonRowEstimate >= 932)
+        #expect(CGFloat(pad) * SnapCommentsLayout.skeletonRowEstimate >= 1366)
+        // Monotonic: taller viewports never get fewer rows.
+        #expect(se <= proMax && proMax <= pad)
+        // The estimate stays a low-ball of the measured row (~48pt) — the
+        // direction that makes the division OVER-provision.
+        #expect(SnapCommentsLayout.skeletonRowEstimate <= 48)
+        // Pre-layout fallback (zero bounds) still blankets every iPhone.
+        #expect(SnapCommentsLayout.skeletonPlaceholderCount(viewportHeight: 0) >= proMax)
+    }
+
     // MARK: - Entry point
 
     /// Every comments surface is an engagement entry point — the empty-state
