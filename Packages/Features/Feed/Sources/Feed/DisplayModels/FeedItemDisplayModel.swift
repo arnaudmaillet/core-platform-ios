@@ -31,6 +31,36 @@ public struct FeedItemDisplayModel: Identifiable, Sendable {
     /// track title/artist once the post proto carries audio. Nil for
     /// non-video posts (the toolbar falls back to `metaText`).
     let audioText: String?
+    /// The like count at hydration time (the feed entry's snapshot; live
+    /// updates supersede it via the realtime plane). Rendered by the
+    /// engaged card's metrics row.
+    let likeCount: Int64
+
+    init(
+        id: PostID,
+        authorID: ProfileID,
+        authorName: String,
+        metaText: String,
+        avatarURL: URL?,
+        caption: String?,
+        mediaURL: URL?,
+        mediaKind: MediaKind,
+        thumbnailURL: URL?,
+        audioText: String?,
+        likeCount: Int64 = 0
+    ) {
+        self.id = id
+        self.authorID = authorID
+        self.authorName = authorName
+        self.metaText = metaText
+        self.avatarURL = avatarURL
+        self.caption = caption
+        self.mediaURL = mediaURL
+        self.mediaKind = mediaKind
+        self.thumbnailURL = thumbnailURL
+        self.audioText = audioText
+        self.likeCount = likeCount
+    }
 }
 
 /// Builds display models from hydrated feed entries. Pure, deterministic, and
@@ -57,7 +87,8 @@ public struct FeedDisplayModelBuilder: Sendable {
             mediaKind: mediaKind,
             thumbnailURL: attachment?.thumbnailURL,
             audioText: (attachment != nil && mediaKind == .video)
-                ? "Original audio · @\(entry.author.handle)" : nil
+                ? "Original audio · @\(entry.author.handle)" : nil,
+            likeCount: entry.likeCount
         )
     }
 

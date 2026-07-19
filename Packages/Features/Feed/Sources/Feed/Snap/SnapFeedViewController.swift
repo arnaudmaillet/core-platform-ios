@@ -36,6 +36,17 @@ final class SnapFeedViewController: UIViewController {
     /// The share bubble's bookmark action; a property because its glyph
     /// (bookmark / bookmark.fill) follows the active page's saved state.
     private let bookmarkButton = SnapNavControls.makeToolbarActionButton(systemName: "bookmark")
+    /// The engaged toolbar's trailing item: the comments sort selector,
+    /// occupying the action territory while comments are engaged (the
+    /// bookmark/share/more cluster yields — those live in the engaged
+    /// card; the audio attribution stays anchored on the left).
+    private let commentSortButton = SnapCommentSortButton()
+    /// The two faces of the one living toolbar (keep-and-stack): built
+    /// once, swapped via `setToolbarItems(_:animated:)` on the engagement
+    /// seams — the leading attribution shared between both, so only the
+    /// trailing platters morph.
+    private var defaultToolbarItems: [UIBarButtonItem] = []
+    private var engagedToolbarItems: [UIBarButtonItem] = []
     /// Session-local optimistic bookmark state: the BFF exposes no save/
     /// bookmark API yet (dev/BACKEND_GAPS.md), so the toggle lives here until
     /// a real seam exists on `FeedViewModel` — swap this set for it.
@@ -58,10 +69,29 @@ final class SnapFeedViewController: UIViewController {
     /// released — a nonisolated deinit can't touch the VC's main-actor state.
     private let appObservers = NotificationObserverBag()
 
-    init(viewModel: FeedViewModel, imagePipeline: ImagePipeline, videoPlayback: VideoPlaybackController? = nil) {
+    /// Builds the comments panel's content (the comments-only detail) for a
+    /// post — injected by the feature builder so this VC needs none of the
+    /// detail's dependencies. Nil disables the comments engagement.
+    private let makeCommentsPanelContent: ((PostID) -> UIViewController)?
+    /// The post whose comments engagement is active, nil when disengaged.
+    /// Owns the paging veto: the pager is frozen while the mutated layout
+    /// (a per-cell state) is on screen.
+    private var commentsEngagedID: PostID?
+    /// The engaged comments UI — a child of THIS controller (thread data,
+    /// scroll position, and reply drafts must never live in a recycled
+    /// cell); the cell only hosts its view while engaged.
+    private var commentsContentVC: UIViewController?
+
+    init(
+        viewModel: FeedViewModel,
+        imagePipeline: ImagePipeline,
+        videoPlayback: VideoPlaybackController? = nil,
+        makeCommentsPanelContent: ((PostID) -> UIViewController)? = nil
+    ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
         self.videoPlayback = videoPlayback
+        self.makeCommentsPanelContent = makeCommentsPanelContent
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -137,14 +167,69 @@ final class SnapFeedViewController: UIViewController {
             navigationItem.leftBarButtonItem = UIBarButtonItem(customView: back)
         }
         presentToolbar()
+        // Returning from a pushed screen with engagement state:
+        // `presentToolbar` just re-lit the shared bar, so the engagement's
+        // claim on the footer band must be re-arbitrated — enforce or
+        // finish, never assume (see syncEngagementAfterAppearance).
+        // Mirrored in viewDidAppear: during willAppear the floating-bar
+        // containers may not have re-attached to the window yet.
+        syncEngagementAfterAppearance()
         isOnScreen = true
         refreshVisibility()
+    }
+
+    /// Reconciles VC-side engagement state with cell-side reality after
+    /// this screen re-appears. Two legitimate outcomes:
+    /// - The engaged layout SURVIVED (cell still on screen, still engaged,
+    ///   child view still hosted): re-enforce the footer offstage
+    ///   instantly, because `presentToolbar` re-lit the shared bar over
+    ///   the composer.
+    /// - The engaged cell was RECYCLED while the feed was covered (a
+    ///   transition's offset clamp, a reload): `prepareForReuse` already
+    ///   tore down the cell half, leaving the VC half orphaned — blindly
+    ///   enforcing offstage here is exactly the "invisible footer on a
+    ///   disengaged feed" bug. Finish the disengagement instead: state
+    ///   cleared, child reclaimed, footer restored.
+    private func syncEngagementAfterAppearance() {
+        guard commentsEngagedID != nil else { return }
+        let engagedLayoutAlive = engagedCell()?.isCommentsEngaged == true
+            && commentsContentVC?.view.superview != nil
+        if engagedLayoutAlive {
+            // KEEP-AND-STACK: the native toolbar stays onstage through the
+            // engagement (the composer stacks ABOVE it, anchored past the
+            // toolbar-inflated safe area), so there is no footer state to
+            // re-arbitrate — transitions are the system's alone. Only the
+            // composer's pose needs re-seating (idempotent; also
+            // re-materializes the footer frost — its window guard makes
+            // the willAppear call a no-op and the didAppear pass the one
+            // that lands).
+            (commentsContentVC as? PostDetailViewController)?
+                .setComposerEntranceState(offstage: false)
+            // The docked media's geometry gets re-asserted AFTER a forced
+            // layout pass: anything that disturbed the tile while the
+            // feed was covered (the Ken Burns stop once stranded it as a
+            // frozen center crop) snaps back onto the card's slot.
+            engagedCell()?.reassertEngagedGeometry()
+        } else {
+            finishCommentsDisengagement()
+        }
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // The willAppear reconciliation's landing half — by now the bar's
+        // containers are in the window and the walk-up reaches them.
+        syncEngagementAfterAppearance()
+        #if DEBUG
+        runDebugAppearanceHooks()
+        #endif
     }
 
     #if DEBUG
     private var didDebugPause = false
     private var didDebugScroll = false
     private var didDebugScrollDemo = false
+    private var didDebugCommentsDemo = false
     /// `-snap-start-paused`: pauses the active cell shortly after appearing so
     /// the pause glyph can be screenshotted (taps can't be injected in the sim).
     /// `-snap-auto-dismiss`: dismisses a presented (map-opened) feed shortly
@@ -152,8 +237,7 @@ final class SnapFeedViewController: UIViewController {
     /// `-snap-start-index N`: snaps to page N shortly after appearing (mock:
     /// every index%3==2 is text-only) — deterministic access to a given page
     /// kind without scroll injection.
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
+    private func runDebugAppearanceHooks() {
         if ProcessInfo.processInfo.arguments.contains("-snap-auto-dismiss"), isClosable {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
                 self?.closeFeed()
@@ -188,6 +272,27 @@ final class SnapFeedViewController: UIViewController {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { self.updateActiveItem() }
             }
         }
+        // `-snap-comments-demo`: opens the comments engagement on the active
+        // page ~2.5s after appear (after any `-snap-start-index` jump at
+        // 1.5s settles) — the mutated layout can be screenshotted without
+        // tap injection.
+        if !didDebugCommentsDemo, arguments.contains("-snap-comments-demo") {
+            didDebugCommentsDemo = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                guard let self, let index = self.lifecycle.activeIndex,
+                      self.orderedIDs.indices.contains(index) else { return }
+                self.presentComments(for: self.orderedIDs[index])
+            }
+        }
+        // `-dump-bars`: prints the navigation view hierarchy (class, frame,
+        // alpha, hidden) plus each toolbar item's superview chain ~5s after
+        // appear — the tool that pins down WHERE iOS 26 hosts the Liquid
+        // Glass item platters (they are not in the toolbar's subtree).
+        if arguments.contains("-dump-bars") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+                self?.dumpBarHierarchy()
+            }
+        }
         guard !didDebugPause,
               ProcessInfo.processInfo.arguments.contains("-snap-start-paused") else { return }
         didDebugPause = true
@@ -200,12 +305,47 @@ final class SnapFeedViewController: UIViewController {
     }
     #endif
 
+    #if DEBUG
+    private func dumpBarHierarchy() {
+        guard let nav = navigationController else { return }
+        func walk(_ view: UIView, _ depth: Int) {
+            let f = view.frame
+            print("BARDUMP:\(String(repeating: "  ", count: depth))\(type(of: view)) "
+                + "frame=(\(Int(f.minX)),\(Int(f.minY)),\(Int(f.width)),\(Int(f.height))) "
+                + "alpha=\(String(format: "%.2f", view.alpha))\(view.isHidden ? " HIDDEN" : "")")
+            view.subviews.forEach { walk($0, depth + 1) }
+        }
+        walk(nav.view, 0)
+        func chainDescription(from view: UIView?) -> String {
+            var chain: [String] = []
+            var current: UIView? = view
+            while let view = current {
+                let id = String(UInt(bitPattern: ObjectIdentifier(view).hashValue) % 0xFFFF, radix: 16)
+                chain.append("\(type(of: view))#\(id)")
+                current = view.superview
+            }
+            return chain.joined(separator: " -> ")
+        }
+        for (index, item) in (toolbarItems ?? []).enumerated() where item.customView != nil {
+            print("BARDUMP:CHAIN toolbarItem[\(index)]: " + chainDescription(from: item.customView))
+        }
+        print("BARDUMP:CHAIN navTrailing: " + chainDescription(from: navigationItem.rightBarButtonItem?.customView))
+        print("BARDUMP:CHAIN navLeading: " + chainDescription(from: navigationItem.leftBarButtonItem?.customView))
+    }
+    #endif
+
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         // Unlike the visibility bookkeeping below, the toolbar choreography
         // runs for every disappearance: it registers on the coordinator when
         // one exists (fade, restore-on-cancel) and hides instantly otherwise.
         concealToolbar()
+        // Leaving while engaged: the native bar never left (keep-and-stack),
+        // so there is no footer handoff — only the keyboard must not
+        // outlive the screen it was typing into.
+        if commentsEngagedID != nil {
+            commentsContentVC?.view.endEditing(true)
+        }
         // During any transition (a hero pop, a detail push) the active cell's
         // player must survive to here-and-beyond: the dismissal flight card
         // mirrors that very player, and a cancelled grab rewinds to a page
@@ -293,6 +433,13 @@ final class SnapFeedViewController: UIViewController {
                 // already-visited post gets its streams back immediately;
                 // async arrivals ride `onCommentStreamsChange` instead.
                 cell.updateCommentStreams(self.viewModel.commentStreams(for: id))
+                // The comments engagement's two verbs, cell → screen: the
+                // pill opens the panel, a strip tap while engaged closes it.
+                cell.onRequestComments = { [weak self] id in self?.presentComments(for: id) }
+                cell.onRequestCommentsClose = { [weak self] in self?.dismissComments() }
+                cell.onRequestCommentsPageAway = { [weak self] direction in
+                    self?.pageAwayFromComments(direction: direction)
+                }
             }
             return cell
         }
@@ -367,13 +514,31 @@ final class SnapFeedViewController: UIViewController {
             }
         ])
 
-        toolbarItems = [
+        // TWO item sets over one living bar (keep-and-stack): the audio
+        // attribution ANCHORS the leading slot and the more (…) bubble
+        // ANCHORS the far right in BOTH — the same item instances in both
+        // arrays, so their platters never move — while the territory
+        // between swaps via `setToolbarItems(_:animated:)` (the system's
+        // own platter morph, the same choreography a push uses): the
+        // bookmark/share cluster for the feed, the comments sort selector
+        // while engaged (bookmark and the post metrics already live in
+        // the engaged card — the band carries no duplicates).
+        let leading: [UIBarButtonItem] = [
             UIBarButtonItem(customView: mediaAttributionView),
             .flexibleSpace(),
+        ]
+        let moreItem = UIBarButtonItem(customView: more)
+        defaultToolbarItems = leading + [
             UIBarButtonItem(customView: shareCluster),
             .fixedSpace(Spacing.sm),
-            UIBarButtonItem(customView: more),
+            moreItem,
         ]
+        engagedToolbarItems = leading + [
+            UIBarButtonItem(customView: commentSortButton),
+            .fixedSpace(Spacing.sm),
+            moreItem,
+        ]
+        toolbarItems = defaultToolbarItems
     }
 
     /// Optimistic local toggle (no backend seam yet — see the set's comment);
@@ -528,6 +693,30 @@ final class SnapFeedViewController: UIViewController {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.setForeground(true) }
         })
+        // The keyboard-session rail yield: the engaged composer rises into
+        // the rail's column, and the rail concedes the band while typing —
+        // zPosition cannot lift the bar over chrome across subtrees (CA
+        // reorders siblings only), so the chrome steps back instead. Alpha
+        // also retires the rail from hit-testing, so the risen bar owns
+        // its whole band. Engagement-gated in the cell; restored on hide
+        // and at disengage teardown.
+        appObservers.add(center.addObserver(
+            forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.setEngagedRailConcealed(true) }
+        })
+        appObservers.add(center.addObserver(
+            forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.setEngagedRailConcealed(false) }
+        })
+    }
+
+    private func setEngagedRailConcealed(_ concealed: Bool) {
+        guard commentsEngagedID != nil || !concealed else { return }
+        UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseOut, .beginFromCurrentState]) {
+            self.engagedCell()?.setRailConcealed(concealed)
+        }
     }
 
     private func setForeground(_ foreground: Bool) {
@@ -578,6 +767,173 @@ final class SnapFeedViewController: UIViewController {
         guard let indexPath = dataSource.indexPath(for: id),
               let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell else { return }
         cell.updateCommentStreams(streams)
+    }
+
+    // MARK: - Comments engagement
+
+    /// The on-post comments mutation, fully in-cell: media docks into the
+    /// strip, the caption flies to its side, and the comments UI — a child
+    /// controller OWNED HERE, merely hosted by the cell — lifts into the
+    /// vacated region. One surface, one spring block, one motion profile
+    /// (the sheet and the custom presentation that preceded this each
+    /// split the screen into two motion systems). Playback is untouched:
+    /// nothing presents, so the cell never resigns.
+    private func presentComments(for id: PostID) {
+        guard commentsEngagedID == nil, commentsContentVC == nil,
+              let makeCommentsPanelContent,
+              let indexPath = dataSource.indexPath(for: id),
+              let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell else { return }
+
+        let content = makeCommentsPanelContent(id)
+        content.view.backgroundColor = .clear
+        content.overrideUserInterfaceStyle = .dark
+        commentsEngagedID = id
+        commentsContentVC = content
+        // FOOTER CROSSFADE, zero layout churn BY CONSTRUCTION: the native
+        // toolbar is NEVER structurally concealed — it stays fully present
+        // in the hierarchy for the whole engagement, so the safe area
+        // cannot move at any point (structural hide/show was the root
+        // cause of every footer jump: it forces an immediate safe-area
+        // layout pass). Its PIXELS crossfade against the composer — which
+        // anchors to the window's home-indicator inset, not the safe area,
+        // so it occupies the toolbar's exact band while both coexist —
+        // inside the one spring. Alpha < 0.01 also removes the invisible
+        // toolbar from hit-testing, so its buttons can't be tapped blind.
+        // TOTAL DEAD-END for vertical scrolling: the pager is disabled for
+        // the engagement's whole lifetime. This is the structural answer
+        // to UIKit's nested-scroll chaining — outer and inner scroll pans
+        // recognize simultaneously by design, and boundary excess hands
+        // off to the outer the moment the inner pins to an edge; no
+        // begin-time veto can prevent a handoff on a pan that already
+        // began. A disabled pan cannot receive the handoff, full stop.
+        // The inner list keeps its rubber-band (alwaysBounceVertical), and
+        // the exits all survive the lock: taps (✕, docked media) don't
+        // need the pager, and the footer's swipe exit is the bar's OWN
+        // pan driving a PROGRAMMATIC scrollToItem — which works on a
+        // scroll-disabled pager.
+        collectionView.isScrollEnabled = false
+        addChild(content)
+        cell.installComments(content.view)
+        content.didMove(toParent: self)
+        let detail = content as? PostDetailViewController
+        // The stream rests below the frosted strip (full-height scroll,
+        // inset content) and its rows end where the rail's column begins.
+        detail?.setEngagedInsets(
+            top: SnapCommentsLayout.stripBottom(topInset: view.safeAreaInsets.top),
+            trailing: cell.commentsRailExclusionWidth,
+            // KEEP-AND-STACK: the composer's rest band clears the NATIVE
+            // TOOLBAR, not just the home indicator — the feed's own
+            // settled safe-area bottom is exactly that threshold (the bar
+            // is structurally present in both states, so this value is
+            // stable; same frozen-threshold doctrine as the chrome's top).
+            bottomInset: view.safeAreaInsets.bottom
+        )
+        detail?.setEngagedCloseHandler { [weak self] in self?.dismissComments() }
+        detail?.setEngagedSwipeHandler { [weak self] direction in
+            self?.pageAwayFromComments(direction: direction)
+        }
+        // ONE unified motion profile: the composer starts offstage (alpha
+        // 0, slight downward offset) and physically slides into its
+        // STACKED seat — above the native toolbar, which stays exactly
+        // where it is (keep-and-stack: the bar is never faded, never
+        // touched; transitions remain the system's alone).
+        detail?.setComposerEntranceState(offstage: true)
+        // The living bar changes CONTEXT, not presence: the trailing
+        // action cluster yields its territory to the comments sort
+        // selector through the system's own item morph, on the spring's
+        // beat — the audio attribution stays anchored on the left. Sort
+        // is engagement-scoped — every fresh engagement starts at Recent,
+        // and the selection drives the STREAM: the detail's view model
+        // re-ranks and the diffable snapshot animates the moves.
+        commentSortButton.reset()
+        commentSortButton.onOrderChange = { [weak detail] order in
+            detail?.setCommentSortOrder(order)
+        }
+        setToolbarItems(engagedToolbarItems, animated: true)
+        UIView.animate(
+            withDuration: SnapCommentsLayout.engageDuration, delay: 0,
+            usingSpringWithDamping: 1, initialSpringVelocity: 0
+        ) {
+            cell.setCommentsEngaged(true)
+            cell.contentView.layoutIfNeeded()
+            detail?.setComposerEntranceState(offstage: false)
+        }
+    }
+
+    /// Reverse mutation (strip tap, entry-surface re-tap): the comments
+    /// region settles out, the media expands back, the chrome returns, and
+    /// the composer slides back offstage — the mirror image of the engage
+    /// leg, all in the same spring. The native toolbar was onstage the
+    /// whole time; nothing structural moves in either direction.
+    private func dismissComments() {
+        guard commentsEngagedID != nil else { return }
+        // The keyboard rides down with the collapse, not after it.
+        commentsContentVC?.view.endEditing(true)
+        let detail = commentsContentVC as? PostDetailViewController
+        // The mirror morph: the action cluster takes its territory back.
+        setToolbarItems(defaultToolbarItems, animated: true)
+        UIView.animate(withDuration: SnapCommentsLayout.disengageDuration, delay: 0,
+                       usingSpringWithDamping: 1, initialSpringVelocity: 0) { [weak self] in
+            self?.engagedCell()?.setCommentsEngaged(false)
+            detail?.setComposerEntranceState(offstage: true)
+        } completion: { [weak self] _ in
+            self?.finishCommentsDisengagement()
+        }
+    }
+
+
+    /// The footer band's swipe exit: collapse and page in one motion. The
+    /// bar detects the gesture (its own vertical-intent pan — the pager
+    /// cannot wrest drags from the text-input stack) and the page change
+    /// runs programmatically, matching the swipe's direction; at the
+    /// feed's ends the swipe still collapses, it just doesn't page.
+    private func pageAwayFromComments(direction: Int) {
+        guard commentsEngagedID != nil else { return }
+        let current = lifecycle.activeIndex ?? 0
+        let target = current + direction
+        dismissComments()
+        guard orderedIDs.indices.contains(target) else { return }
+        collectionView.scrollToItem(
+            at: IndexPath(item: target, section: 0), at: .top, animated: true
+        )
+        // Animated scrollToItem ends in scrollViewDidEndScrollingAnimation,
+        // which this VC doesn't observe (finger scrolls don't emit it) —
+        // settle the active page manually, the scroll-demo's pattern.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            self?.updateActiveItem()
+        }
+    }
+
+    private func engagedCell() -> SnapFeedCell? {
+        guard let id = commentsEngagedID,
+              let indexPath = dataSource.indexPath(for: id) else { return nil }
+        return collectionView.cellForItem(at: indexPath) as? SnapFeedCell
+    }
+
+    private func finishCommentsDisengagement() {
+        // Belt and braces for non-animated/interrupted paths.
+        let cell = engagedCell()
+        // A keyboard-session rail yield must never outlive the engagement.
+        cell?.setRailConcealed(false)
+        cell?.setCommentsEngaged(false)
+        if let content = commentsContentVC {
+            content.willMove(toParent: nil)
+            content.view.removeFromSuperview()
+            content.removeFromParent()
+        }
+        cell?.clearComments()
+        commentsContentVC = nil
+        commentsEngagedID = nil
+        collectionView.isScrollEnabled = true
+        // The bar's pixels were never touched (keep-and-stack), but its
+        // ITEMS are engagement context — settle them for the paths that
+        // never ran the animated mirror (orphaned teardown, instant
+        // cleanup). Identity-compare first: after a normal dismiss the
+        // swap already landed, and re-setting identical items would only
+        // churn the bar's layout.
+        if toolbarItems ?? [] != defaultToolbarItems, !defaultToolbarItems.isEmpty {
+            setToolbarItems(defaultToolbarItems, animated: false)
+        }
     }
 
     // MARK: - Active-item lifecycle
@@ -713,6 +1069,18 @@ extension SnapFeedViewController: UICollectionViewDelegate {
     // A full-cell tap toggles play/pause (handled by the cell's own gesture),
     // not navigation — so there is no `didSelectItemAt` routing. Comments open
     // via the toolbar's more menu; the identity pill opens the profile.
+
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        // Unreachable while engaged (the pager is disabled — the total
+        // dead-end doctrine; the swipe exit is bar-owned and pages
+        // programmatically). Kept as belt and braces: if any future path
+        // lets a page drag begin under an engaged cell, the mutation must
+        // ride down with the leaving page, never strand a hosted comments
+        // view in a recycled cell.
+        if commentsEngagedID != nil {
+            dismissComments()
+        }
+    }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         updateActiveItem()
@@ -854,19 +1222,43 @@ extension SnapFeedViewController: UICollectionViewDataSourcePrefetching {
 final class SnapFeedCollectionView: UICollectionView {
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         let location = gestureRecognizer.location(in: self)
-        if let hit = hitTest(location, with: nil), Self.belongsToShortcutRail(hit) {
+        if let hit = hitTest(location, with: nil), Self.claimsTouches(hit) {
             return false
         }
         return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }
 
-    /// Whether the hit view lives inside a shortcut rail — including its
-    /// fixed compose "+" (a chrome sibling above the rail, marked by its
-    /// class so a swipe born on it stays rail territory). Pure walk-up so
-    /// the routing rule is unit-testable.
-    static func belongsToShortcutRail(_ view: UIView) -> Bool {
-        sequence(first: view, next: { $0.superview }).contains {
-            $0 is SnapShortcutRailView || $0 is SnapRailComposeButton
+    /// The swipe exit's missing half: `UIScrollView` refuses BY DEFAULT to
+    /// cancel touches that began on a `UIControl` — and the composer band
+    /// is made of controls (the "+", the ✕/send), so a drag born there
+    /// could never be taken over by the pager even though the arbitration
+    /// allows it. Bar territory explicitly opts INTO cancellation: a
+    /// vertical drag on the input band becomes a page change; taps still
+    /// land as taps (cancellation only happens once the pan recognizes).
+    override func touchesShouldCancel(in view: UIView) -> Bool {
+        if sequence(first: view, next: { $0.superview }).contains(where: { $0 is CommentsInputBar }) {
+            return true
         }
+        return super.touchesShouldCancel(in: view)
+    }
+
+    /// Whether the hit view lives inside territory that owns its own
+    /// vertical/horizontal gestures, so NONE of the pager's recognizers may
+    /// begin there: the shortcut rail (including its fixed compose "+", a
+    /// chrome sibling above the rail), and the engaged comments container.
+    /// While engaged this is DEFENSE IN DEPTH under the primary rule (the
+    /// pager is disabled outright — the total dead-end doctrine); the
+    /// composer-band exception is retained but inert, since the bar's own
+    /// pan drives the swipe exit programmatically. Pure walk-up so the
+    /// routing rule is unit-testable.
+    static func claimsTouches(_ view: UIView) -> Bool {
+        for current in sequence(first: view, next: { $0.superview }) {
+            if current is CommentsInputBar { return false }
+            if current is SnapShortcutRailView || current is SnapRailComposeButton
+                || current is SnapCommentsContainerView {
+                return true
+            }
+        }
+        return false
     }
 }

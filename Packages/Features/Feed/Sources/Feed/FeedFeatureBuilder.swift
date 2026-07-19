@@ -74,10 +74,30 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// posts, plus the live channels only an open-ended timeline consumes).
     /// Add screen configuration here, never in one caller.
     private func makeSnapFeed(viewModel: FeedViewModel) -> UIViewController {
-        SnapFeedViewController(
+        let repository = repository
+        let engagementProvider = engagementProvider
+        let commentsProvider = commentsProvider
+        let router = router
+        let imagePipeline = imagePipeline
+        return SnapFeedViewController(
             viewModel: viewModel,
             imagePipeline: imagePipeline,
-            videoPlayback: videoPlayback
+            videoPlayback: videoPlayback,
+            // The comments panel embeds the same comments-only detail the
+            // `.comments` route pushes — one comments UI, two presentations.
+            makeCommentsPanelContent: { postID in
+                PostDetailViewController(
+                    viewModel: PostDetailViewModel(
+                        postID: postID,
+                        repository: repository,
+                        engagementProvider: engagementProvider,
+                        commentsProvider: commentsProvider,
+                        router: router
+                    ),
+                    imagePipeline: imagePipeline,
+                    mode: .commentsOnly
+                )
+            }
         )
     }
 

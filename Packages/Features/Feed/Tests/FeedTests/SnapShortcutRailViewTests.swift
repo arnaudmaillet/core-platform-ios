@@ -175,20 +175,36 @@ struct SnapShortcutRailViewTests {
     }
 
     @Test func pagerDeclinesTouchesBornInTheRail() {
-        // The geometric divorce: anything hit-tested inside the rail (a
-        // bubble, a gap between bubbles, the rail itself) belongs to the
-        // rail — the feed's recognizers must decline it. Anything else
-        // (media, caption, chrome) is the pager's.
+        // The geometric divorce: anything hit-tested inside touch-owning
+        // territory (a rail bubble, a gap between bubbles, the rail itself,
+        // the engaged comments container's rows) claims the touch — the
+        // feed's recognizers must decline it. Anything else (media,
+        // caption, chrome) is the pager's.
         let rail = makeRail()
         let bubble = UIButton()
         rail.addSubview(bubble)
-        #expect(SnapFeedCollectionView.belongsToShortcutRail(rail) == true)
-        #expect(SnapFeedCollectionView.belongsToShortcutRail(bubble) == true)
+        #expect(SnapFeedCollectionView.claimsTouches(rail) == true)
+        #expect(SnapFeedCollectionView.claimsTouches(bubble) == true)
         // The fixed compose "+" is rail territory too (chrome sibling, so
         // the walk-up can't find the rail — its class is the marker).
-        #expect(SnapFeedCollectionView.belongsToShortcutRail(SnapRailComposeButton()) == true)
+        #expect(SnapFeedCollectionView.claimsTouches(SnapRailComposeButton()) == true)
+        // The comments container is the engagement's scroll territory: the
+        // list's drags stay inner (edge bounces rubber-band, never page) —
+        // EXCEPT the composer band, which forwards its drags to the pager
+        // (the swipe exit) even though it descends from the container.
+        let comments = SnapCommentsContainerView()
+        let innerRow = UIView()
+        comments.addSubview(innerRow)
+        let inputBar = CommentsInputBar()
+        comments.addSubview(inputBar)
+        let insideInput = UIView()
+        inputBar.addSubview(insideInput)
+        #expect(SnapFeedCollectionView.claimsTouches(comments) == true)
+        #expect(SnapFeedCollectionView.claimsTouches(innerRow) == true)
+        #expect(SnapFeedCollectionView.claimsTouches(inputBar) == false)
+        #expect(SnapFeedCollectionView.claimsTouches(insideInput) == false)
         let caption = UILabel()
-        #expect(SnapFeedCollectionView.belongsToShortcutRail(caption) == false)
+        #expect(SnapFeedCollectionView.claimsTouches(caption) == false)
     }
 
     @Test func placeholderPayloadIsDeterministicPerPost() {

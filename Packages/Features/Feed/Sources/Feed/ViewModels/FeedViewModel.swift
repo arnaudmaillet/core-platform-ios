@@ -50,13 +50,22 @@ public final class FeedViewModel {
         /// Total top-level comments on the post — every loaded entry, before
         /// either surface's filters. Feeds the subtitle zone's count bubble.
         public let commentCount: Int
+        /// True once a comments fetch actually completed for the post. This
+        /// is the seam that separates "nothing known yet" (the pre-load
+        /// default, where every surface stays blank) from "known to have
+        /// zero comments" (where the chrome renders the comments empty
+        /// state) — the two are otherwise indistinguishable, and the empty
+        /// state must never flash while a load is still in flight. `.empty`
+        /// is the only unloaded value by construction.
+        public let isLoaded: Bool
 
-        public static let empty = CommentStreams(reactions: [], subtitles: [], commentCount: 0)
+        public static let empty = CommentStreams(reactions: [], subtitles: [], commentCount: 0, isLoaded: false)
 
-        public init(reactions: [TickerCommentModel], subtitles: [SubtitleCue], commentCount: Int) {
+        public init(reactions: [TickerCommentModel], subtitles: [SubtitleCue], commentCount: Int, isLoaded: Bool = true) {
             self.reactions = reactions
             self.subtitles = subtitles
             self.commentCount = commentCount
+            self.isLoaded = isLoaded
         }
     }
 

@@ -18,14 +18,27 @@ public struct CommentEntry: Equatable, Sendable, Identifiable {
     public let authorHandle: String
     public let body: String
     public let createdAt: Date
+    /// The parent comment's id when this entry is a level-2 reply
+    /// (comment.v1 carries exactly two levels: top-level and replies).
+    /// Nil for top-level comments.
+    public let parentID: String?
 
-    public init(id: String, authorID: ProfileID, authorName: String, authorHandle: String, body: String, createdAt: Date) {
+    public init(
+        id: String,
+        authorID: ProfileID,
+        authorName: String,
+        authorHandle: String,
+        body: String,
+        createdAt: Date,
+        parentID: String? = nil
+    ) {
         self.id = id
         self.authorID = authorID
         self.authorName = authorName
         self.authorHandle = authorHandle
         self.body = body
         self.createdAt = createdAt
+        self.parentID = parentID
     }
 }
 
@@ -33,8 +46,10 @@ public struct CommentEntry: Equatable, Sendable, Identifiable {
 /// view-model tests.
 public protocol CommentsProviding: Sendable {
     func loadComments(for postID: PostID) async throws -> [CommentEntry]
-    /// Posts a top-level comment as the viewer and returns the created entry.
-    func addComment(_ body: String, to postID: PostID) async throws -> CommentEntry
+    /// Posts a comment as the viewer and returns the created entry.
+    /// `parentID` nil posts top-level; non-nil posts a level-2 reply under
+    /// that top-level comment (comment.v1's two-depth contract).
+    func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry
 }
 
 /// Reads/writes top-level comments via comment.v1, hydrating author names via
@@ -73,17 +88,48 @@ public actor CommentsRepository: CommentsProviding {
         case .failure(let error): throw CommentsError.transport(message: error.message ?? "code \(error.code)")
         }
 
-        await hydrateAuthors(for: views.map { ProfileID($0.authorID) })
-        return views.map(makeEntry)
+        // Level 2: fan out ListReplies per top-level comment, concurrently.
+        // Replies are an enhancement — a failed (or unimplemented) replies
+        // fetch yields an empty set for that parent, never a sunk thread.
+        let client = commentClient
+        let postIDValue = postID.rawValue
+        let limit = pageSize
+        let repliesByParent: [String: [Comment_V1_CommentView]] = await withTaskGroup(
+            of: (String, [Comment_V1_CommentView]).self
+        ) { group in
+            for top in views {
+                group.addTask {
+                    var request = Comment_V1_ListRepliesRequest()
+                    request.postID = postIDValue
+                    request.commentID = top.commentID
+                    request.limit = limit
+                    let response = await client.listReplies(request: request, headers: [:])
+                    switch response.result {
+                    case .success(let body): return (top.commentID, body.comments)
+                    case .failure: return (top.commentID, [])
+                    }
+                }
+            }
+            var result: [String: [Comment_V1_CommentView]] = [:]
+            for await (parent, replies) in group where !replies.isEmpty {
+                result[parent] = replies
+            }
+            return result
+        }
+
+        let thread = Self.threaded(topLevel: views, repliesByParent: repliesByParent)
+        await hydrateAuthors(for: thread.map { ProfileID($0.authorID) })
+        return thread.map(makeEntry)
     }
 
-    public func addComment(_ body: String, to postID: PostID) async throws -> CommentEntry {
+    public func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry {
         let viewer = try await resolveViewerProfileID()
 
         var request = Comment_V1_CreateCommentRequest()
         request.commentID = UUID().uuidString // client-supplied id for idempotency
         request.postID = postID.rawValue
         request.authorID = viewer.rawValue
+        request.parentID = parentID ?? ""
         request.body = body
         let response = await commentClient.createComment(request: request, headers: [:])
         switch response.result {
@@ -96,7 +142,8 @@ public actor CommentsRepository: CommentsProviding {
                 authorName: author.name,
                 authorHandle: author.handle,
                 body: body,
-                createdAt: Date()
+                createdAt: Date(),
+                parentID: parentID
             )
         case .failure(let error):
             throw CommentsError.transport(message: error.message ?? "code \(error.code)")
@@ -137,8 +184,25 @@ public actor CommentsRepository: CommentsProviding {
             authorName: author.name,
             authorHandle: author.handle,
             body: view.body,
-            createdAt: Date(timeIntervalSince1970: TimeInterval(view.createdAtMs) / 1000)
+            createdAt: Date(timeIntervalSince1970: TimeInterval(view.createdAtMs) / 1000),
+            parentID: view.parentID.isEmpty ? nil : view.parentID
         )
+    }
+
+    /// The 2-level thread order the stream renders: each top-level comment
+    /// in its listed order, immediately followed by its replies oldest-
+    /// first (a conversation reads downward). Replies whose parent never
+    /// arrived (a truncated top-level page) are dropped rather than
+    /// stranded at the wrong depth. Pure and static — the threading
+    /// contract is unit-tested without a network.
+    static func threaded(
+        topLevel: [Comment_V1_CommentView],
+        repliesByParent: [String: [Comment_V1_CommentView]]
+    ) -> [Comment_V1_CommentView] {
+        topLevel.flatMap { top in
+            [top] + (repliesByParent[top.commentID] ?? [])
+                .sorted { $0.createdAtMs < $1.createdAtMs }
+        }
     }
 
     private func resolveViewerProfileID() async throws -> ProfileID {

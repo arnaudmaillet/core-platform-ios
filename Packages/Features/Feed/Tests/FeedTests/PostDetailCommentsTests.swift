@@ -19,16 +19,18 @@ private final class PostOnlyFeedProvider: FeedProviding, @unchecked Sendable {
 private actor StubCommentsProvider: CommentsProviding {
     private var comments: [CommentEntry]
     private(set) var addedBodies: [String] = []
+    private(set) var addedParentIDs: [String?] = []
 
     init(_ comments: [CommentEntry]) { self.comments = comments }
 
     func loadComments(for postID: PostID) async throws -> [CommentEntry] { comments }
 
-    func addComment(_ body: String, to postID: PostID) async throws -> CommentEntry {
+    func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry {
         addedBodies.append(body)
+        addedParentIDs.append(parentID)
         let entry = CommentEntry(
             id: "new", authorID: ProfileID("prof-me"), authorName: "Me", authorHandle: "me",
-            body: body, createdAt: Date(timeIntervalSince1970: 100)
+            body: body, createdAt: Date(timeIntervalSince1970: 100), parentID: parentID
         )
         comments.insert(entry, at: 0)
         return entry
@@ -115,6 +117,104 @@ struct PostDetailCommentsTests {
             return
         }
         #expect(models.map(\.id) == ["new", "c1"]) // prepended
+    }
+
+    /// A reply binds its parent's id through the provider and lands at the
+    /// END of that parent's reply block — the thread reads downward — while
+    /// its display model carries the level-2 marker.
+    @Test func submittingAReplyBindsTheParentAndJoinsItsThread() async {
+        let parent = comment("c1", "top")
+        let existingReply = CommentEntry(
+            id: "c1-r0", authorID: ProfileID("prof-2"), authorName: "Bo", authorHandle: "bo",
+            body: "first reply", createdAt: Date(timeIntervalSince1970: 10), parentID: "c1"
+        )
+        let provider = StubCommentsProvider([parent, existingReply, comment("c2", "second top")])
+        let viewModel = makeViewModel(provider)
+        var lastComments: PostDetailViewModel.CommentsState?
+        viewModel.onCommentsChange = { lastComments = $0 }
+        viewModel.viewDidLoad()
+        await settle {
+            if case .loaded = lastComments { return true } else { return false }
+        }
+
+        viewModel.submitComment("agreed!", parentID: "c1")
+        await settle {
+            if case .loaded(let models) = lastComments { return models.contains { $0.id == "new" } }
+            return false
+        }
+
+        #expect(await provider.addedParentIDs == ["c1"])
+        guard case .loaded(let models) = lastComments else {
+            Issue.record("expected loaded")
+            return
+        }
+        // Parent → its replies (existing first, the new one appended) → next top.
+        #expect(models.map(\.id) == ["c1", "c1-r0", "new", "c2"])
+        #expect(models.first { $0.id == "new" }?.isReply == true)
+    }
+
+    /// Trending is THREAD-ranked by the engagement comment.v1 carries
+    /// today — reply count plus session likes anywhere in the thread —
+    /// stable on ties; Recent restores the repository chronology. Replies
+    /// never leave their parents in either order.
+    @Test func trendingSortRanksThreadsByEngagement() {
+        func entry(_ id: String, parent: String? = nil) -> CommentEntry {
+            CommentEntry(
+                id: id, authorID: ProfileID("p"), authorName: "A", authorHandle: "a",
+                body: "b", createdAt: Date(timeIntervalSince1970: 0), parentID: parent
+            )
+        }
+        let entries = [
+            entry("a"),
+            entry("b"), entry("b-r0", parent: "b"), entry("b-r1", parent: "b"),
+            entry("c"),
+        ]
+        // Recent: untouched.
+        #expect(PostDetailViewModel.sortedForDisplay(entries, order: .recent, liked: []).map(\.id)
+            == ["a", "b", "b-r0", "b-r1", "c"])
+        // Trending: the 2-reply thread leads; a session like lifts "c"
+        // over the bare "a"; replies ride under their parents.
+        #expect(PostDetailViewModel.sortedForDisplay(entries, order: .trending, liked: ["c"]).map(\.id)
+            == ["b", "b-r0", "b-r1", "c", "a"])
+        // A liked reply counts toward ITS thread's score.
+        #expect(PostDetailViewModel.sortedForDisplay(entries, order: .trending, liked: ["b-r0"]).map(\.id).first == "b")
+    }
+
+    /// The sort selector re-ranks the LIVE stream: switching to Trending
+    /// re-emits with the popular thread first; back to Recent restores
+    /// chronology. Likes toggle through the view model (one truth) and
+    /// deliberately do not re-emit.
+    @Test func settingSortReordersTheStream() async {
+        let parent = comment("c1", "quiet top")
+        let popular = comment("c2", "popular top")
+        let reply = CommentEntry(
+            id: "c2-r0", authorID: ProfileID("p2"), authorName: "Bo", authorHandle: "bo",
+            body: "reply", createdAt: Date(timeIntervalSince1970: 10), parentID: "c2"
+        )
+        let provider = StubCommentsProvider([parent, popular, reply])
+        let viewModel = makeViewModel(provider)
+        var emitted: [[String]] = []
+        viewModel.onCommentsChange = { state in
+            if case .loaded(let models) = state { emitted.append(models.map(\.id)) }
+        }
+        viewModel.viewDidLoad()
+        await settle { !emitted.isEmpty }
+        #expect(emitted.last == ["c1", "c2", "c2-r0"])
+
+        let emitsBefore = emitted.count
+        #expect(viewModel.toggleCommentLike(commentID: "c1"))
+        #expect(viewModel.isCommentLiked("c1"))
+        #expect(emitted.count == emitsBefore) // likes never re-emit
+
+        viewModel.setCommentSort(.trending)
+        // c2's thread scores 1 (reply); c1 scores 1 (session like) — the
+        // tie keeps chronology, so c1 stays first; unlike and re-sort to
+        // see the reply-count lead.
+        #expect(emitted.last == ["c1", "c2", "c2-r0"])
+        _ = viewModel.toggleCommentLike(commentID: "c1") // unlike
+        viewModel.setCommentSort(.recent)
+        viewModel.setCommentSort(.trending)
+        #expect(emitted.last == ["c2", "c2-r0", "c1"])
     }
 
     @Test func blankCommentIsIgnored() async {
