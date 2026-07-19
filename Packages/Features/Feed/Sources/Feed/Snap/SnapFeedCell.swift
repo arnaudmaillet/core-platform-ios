@@ -434,35 +434,30 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
                 lineHeight: engagedCaptionLabel.font.lineHeight
             )
             NSLayoutConstraint.deactivate(engagedCaptionConstraints)
-            if mediaURL == nil {
-                // COLLAPSED (text-only): the caption claims the full card
-                // width from the slot's own left edge, and floats CENTERED
-                // in the band above the counters — balanced breathing
-                // above and below the text (the layout authority's
-                // harmonized axis), never a top-pinned label with the
-                // dead space pooling mid-card.
-                // The center axis is a 999: the REQUIRED floor cap (never
-                // into the counters row) must win over centering when a
-                // caption runs tall — the text nudges up, never overlaps.
-                let centerAxis = engagedCaptionLabel.centerYAnchor.constraint(
-                    equalTo: contentView.topAnchor,
-                    constant: SnapCommentsLayout.collapsedCaptionCenterY(topInset: frozenInsets.top)
-                )
-                centerAxis.priority = UILayoutPriority(999)
-                engagedCaptionConstraints = [
-                    engagedCaptionLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: slot.minX),
-                    centerAxis,
-                    engagedCaptionLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Spacing.lg),
-                    engagedCaptionLabel.bottomAnchor.constraint(lessThanOrEqualTo: contentView.topAnchor, constant: columnMaxY),
-                ]
-            } else {
-                engagedCaptionConstraints = [
-                    engagedCaptionLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: slot.maxX + Spacing.md),
-                    engagedCaptionLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: columnTop),
-                    engagedCaptionLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Spacing.lg),
-                    engagedCaptionLabel.bottomAnchor.constraint(lessThanOrEqualTo: contentView.topAnchor, constant: columnMaxY),
-                ]
-            }
+            // ONE caption path for every post type. The single format
+            // difference is the LEADING: the media slot collapses to zero
+            // width on a text post, so the caption claims the card's left
+            // inner edge (`slot.minX`); with media it begins past the
+            // docked square (`slot.maxX + md`). Everything else is shared
+            // — the balanced vertical axis (`captionBandCenterY`, centered
+            // in the caption band on every format), the trailing, and the
+            // band clamps. The center axis is a 999 so the required clamps
+            // (never above the card top, never into the counters row) win
+            // over centering on a tall caption — it nudges within the
+            // band, never overflows.
+            let captionLeading = mediaURL == nil ? slot.minX : slot.maxX + Spacing.md
+            let centerAxis = engagedCaptionLabel.centerYAnchor.constraint(
+                equalTo: contentView.topAnchor,
+                constant: SnapCommentsLayout.captionBandCenterY(topInset: frozenInsets.top)
+            )
+            centerAxis.priority = UILayoutPriority(999)
+            engagedCaptionConstraints = [
+                engagedCaptionLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: captionLeading),
+                engagedCaptionLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Spacing.lg),
+                centerAxis,
+                engagedCaptionLabel.topAnchor.constraint(greaterThanOrEqualTo: contentView.topAnchor, constant: columnTop),
+                engagedCaptionLabel.bottomAnchor.constraint(lessThanOrEqualTo: contentView.topAnchor, constant: columnMaxY),
+            ]
             NSLayoutConstraint.activate(engagedCaptionConstraints)
             // The caption CROSS-FADES in place: the chrome's copy fades out
             // with the rest of the chrome cut (its alpha rides
@@ -529,10 +524,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
         engagedCaptionLabel.text = model.caption
         engagedCard.configure(with: model)
-        // Text-only posts collapse the card's media hole: the column
-        // stretches to the card's left inner edge (the cell's engaged
-        // caption mirrors the same leading at engage time).
-        engagedCard.setMediaSlotCollapsed(model.mediaURL == nil)
 
         let hasMedia = model.mediaURL != nil
         let isVideo = hasMedia && model.mediaKind == .video

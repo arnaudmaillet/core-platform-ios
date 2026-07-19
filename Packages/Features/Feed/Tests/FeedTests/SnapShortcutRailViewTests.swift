@@ -460,7 +460,12 @@ struct SnapShortcutRailViewTests {
         #expect(chrome.insetsLayoutMarginsFromSafeArea == false)
     }
 
-    @Test func textOnlyPostsKeepTheEmptyShell() throws {
+    /// The reactions rail is FORMAT-AGNOSTIC chrome — it persists on a
+    /// text-only post exactly as on media (the shared action column the
+    /// engaged layout floats over). The media danmaku surfaces (ticker,
+    /// subtitle) still drop for text, but the rail stays and reserves its
+    /// trailing exclusion column.
+    @Test func textOnlyPostsKeepTheReactionsRail() throws {
         let chrome = SnapChromeView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         chrome.configure(with: FeedItemDisplayModel(
             id: PostID("post-2"),
@@ -474,7 +479,9 @@ struct SnapShortcutRailViewTests {
             thumbnailURL: nil,
             audioText: nil
         ))
+        chrome.layoutIfNeeded()
         let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
-        #expect(rail.isHidden == true)
+        #expect(rail.isHidden == false)
+        #expect(chrome.railExclusionWidth > 0)
     }
 }

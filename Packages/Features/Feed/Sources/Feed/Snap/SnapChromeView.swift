@@ -342,25 +342,29 @@ final class SnapChromeView: UIView {
     func configure(with model: FeedItemDisplayModel) {
         representedID = model.id
 
-        // Text-only posts render an EMPTY shell (product call, 2026-07-14):
-        // no caption, no scrim, no ticker — just the black page under the
-        // screen chrome (identity pill, toolbar attribution), until their
-        // dedicated layout arrives with the Phase 2/3 cell split. `hasMedia`
-        // therefore gates every piece of page content at once.
+        // Text-only posts drop the MEDIA comment surfaces — the danmaku
+        // ticker, the subtitle zone, the scrim over the (absent) media —
+        // since those overlay a full-bleed image the page doesn't have.
+        // But the ACTION COLUMN (reactions rail + "+") is format-agnostic
+        // chrome: it stays visible on every post type, exactly as the
+        // engaged layout floats over it identically on all of them.
         hasMedia = model.mediaURL != nil
         scrimView.isHidden = !hasMedia
         caption = hasMedia ? model.caption : nil
         applyCaptionVisibility()
         if !hasMedia {
             commentTicker.setComments([])
-            composeButton.isHidden = true
             subtitleView.setCues([])
             commentEmptyState.setVisible(false)
+            // The rail's "+" persists (media refines its visibility off
+            // the ticker in `updateCommentStreams`, which text skips).
+            composeButton.isHidden = false
         }
-        // Static chrome, so it loads here (not via `updateCommentStreams`)
-        // and the flight replica shows it too — the seeded payload keeps
-        // both instances identical. Empty shell for text-only posts.
-        shortcutRail.setSymbols(hasMedia ? SnapShortcutRailView.placeholderPayload(for: model.id) : [])
+        // The reactions rail is seeded for EVERY post — the shared action
+        // column. Static chrome, so it loads here (not via
+        // `updateCommentStreams`) and the flight replica shows it too; the
+        // seeded payload keeps both instances identical.
+        shortcutRail.setSymbols(SnapShortcutRailView.placeholderPayload(for: model.id))
     }
 
     /// The raw caption, kept so Dynamic Type changes can re-resolve the

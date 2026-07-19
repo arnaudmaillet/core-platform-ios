@@ -69,17 +69,20 @@ enum SnapCommentsLayout {
         stripCardPadding + mediaSlotHeight + stripCardPadding
     }
 
-    /// The COLLAPSED card's caption axis (text-only posts): with no media
-    /// square anchoring the column, the caption floats in the band between
-    /// the card's top edge and the counters row — CENTERED there, so one-
-    /// and two-line captions both read balanced (the breathing above the
-    /// text equals the breathing between text and counters), instead of a
-    /// top-pinned label with the dead space pooling in the middle.
-    /// Screen-absolute (the cell's caption constrains against the cell).
-    static func collapsedCaptionCenterY(topInset: CGFloat) -> CGFloat {
-        let cardTop = topInset + stripTopPadding
-        let actionsTop = cardTop + cardHeight - stripCardPadding - cardActionsHeight
-        return (cardTop + actionsTop) / 2
+    /// The engaged caption's balanced vertical axis — shared by EVERY
+    /// post type (video, photo, text), so the caption reads centered in
+    /// its band whatever the format: the midpoint of the caption's own
+    /// permitted band (`columnTop`…`columnMaxY`), so equal breathing sits
+    /// above the text and below it (down to the counters row). A one- or
+    /// two-line caption both land balanced — no top-pinned label with the
+    /// dead space pooling. Screen-absolute (the cell's caption constrains
+    /// against the cell); a pure function of the shared card geometry, so
+    /// no format injects a custom margin.
+    static func captionBandCenterY(topInset: CGFloat) -> CGFloat {
+        let slotMinY = topInset + stripTopPadding + stripCardPadding
+        let columnTop = slotMinY + Spacing.xs
+        let columnMaxY = captionColumnMaxY(slotMaxY: slotMinY + mediaSlotHeight)
+        return (columnTop + columnMaxY) / 2
     }
 
     /// The engaged-state spring, shared by every leg of the one animation —

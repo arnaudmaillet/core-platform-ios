@@ -680,51 +680,54 @@ struct SnapCommentsPresentationTests {
                 .first { $0.text == "caption" && !$0.isHidden }
         )
         #expect(abs(caption.frame.minX - slot.minX) < 0.5)
-        // …and floats on the harmonized center axis of its band.
-        #expect(abs(caption.frame.midY - SnapCommentsLayout.collapsedCaptionCenterY(topInset: Self.topInset)) < 0.5)
+        // …and floats on the SHARED caption axis (same as every format).
+        #expect(abs(caption.frame.midY - SnapCommentsLayout.captionBandCenterY(topInset: Self.topInset)) < 0.5)
         // No exit pan — the resting state is permanent.
         let pan = try #require(cell.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
         #expect(pan.isEnabled == false)
         // The dead-end lock is identical to media's.
         #expect(SnapFeedCollectionView.claimsTouches(hosted))
-        // A MEDIA page keeps the media anchors and the armed exits.
+        // The reactions rail is PRESENT on the text page — the shared
+        // action column reserves its trailing exclusion, exactly as media.
+        #expect(cell.commentsRailExclusionWidth > 0)
+        // A MEDIA page keeps the media caption leading (past the slot) and
+        // the armed exits — but shares the SAME caption axis and the SAME
+        // right-aligned counters.
         let mediaCell = makeEngagedCell()
         let mediaHosted = UIView()
         mediaCell.installComments(mediaHosted)
         #expect(SnapFeedCollectionView.claimsTouches(mediaHosted))
         let mediaPan = try #require(mediaCell.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
         #expect(mediaPan.isEnabled == true)
+        let mediaCaption = try #require(
+            mediaCell.contentView.subviews.compactMap { $0 as? UILabel }
+                .first { $0.text == "caption" && !$0.isHidden }
+        )
+        #expect(abs(mediaCaption.frame.minX - (slot.maxX + Spacing.md)) < 0.5)
+        #expect(abs(mediaCaption.frame.midY - SnapCommentsLayout.captionBandCenterY(topInset: Self.topInset)) < 0.5)
     }
 
-    /// The counter cluster's two postures, toggled by the media-slot seam:
-    /// with media it STARTS the column past the hole (leading-pinned);
-    /// collapsed (text-only) it hugs the card's RIGHT inner edge
-    /// (trailing-pinned) — the caption owns the left axis, the counters
-    /// balance it from the right. Round-trips cleanly.
-    @Test func cardCountersRightAlignWhenTheSlotCollapses() {
+    /// The counter cluster is RIGHT-ALIGNED on every post type — one
+    /// posture, no format branch: it hugs the card's trailing inner edge
+    /// and grows leftward as counts appear.
+    @Test func cardCountersAreAlwaysRightAligned() {
         let width: CGFloat = 374
         let pad = SnapCommentsLayout.stripCardPadding
         let card = SnapEngagedPostCardView(frame: CGRect(x: 0, y: 0, width: width, height: 104))
         card.layoutIfNeeded()
         let actions = card.subviews.compactMap { $0 as? UIStackView }[0]
-        #expect(actions.frame.minX == SnapEngagedPostCardView.columnLeading)
-        card.setMediaSlotCollapsed(true)
-        card.layoutIfNeeded()
         #expect(actions.frame.maxX == width - pad)
-        card.setMediaSlotCollapsed(false)
-        card.layoutIfNeeded()
-        #expect(actions.frame.minX == SnapEngagedPostCardView.columnLeading)
     }
 
-    /// The collapsed caption axis: centered in the band between the card's
-    /// top and the counters row — equal breathing above the text and
-    /// between text and counters, whatever the line count.
-    @Test func collapsedCaptionAxisIsTheBandsCenter() {
-        let cardTop = Self.topInset + SnapCommentsLayout.stripTopPadding
-        let actionsTop = cardTop + SnapCommentsLayout.cardHeight
-            - SnapCommentsLayout.stripCardPadding - SnapCommentsLayout.cardActionsHeight
-        #expect(SnapCommentsLayout.collapsedCaptionCenterY(topInset: Self.topInset)
-            == (cardTop + actionsTop) / 2)
+    /// The caption axis is the midpoint of the caption's own band
+    /// (`columnTop`…`columnMaxY`) — a pure function of the shared card
+    /// geometry, so equal breathing sits above and below the text on
+    /// every format with no injected margin.
+    @Test func captionAxisIsTheBandCenter() {
+        let slotMinY = Self.topInset + SnapCommentsLayout.stripTopPadding + SnapCommentsLayout.stripCardPadding
+        let columnTop = slotMinY + Spacing.xs
+        let columnMaxY = SnapCommentsLayout.captionColumnMaxY(slotMaxY: slotMinY + SnapCommentsLayout.mediaSlotHeight)
+        #expect(SnapCommentsLayout.captionBandCenterY(topInset: Self.topInset) == (columnTop + columnMaxY) / 2)
     }
 
     /// The engaged toolbar's sort selector: single-selection menu with a

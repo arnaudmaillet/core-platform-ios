@@ -43,20 +43,6 @@ final class SnapEngagedPostCardView: UIView {
     private let saveButton = SnapEngagedPostCardView.makeMetricButton(
         symbol: "bookmark", accessibilityLabel: "Save"
     )
-    /// The two horizontal postures, toggled by the media-slot seam: with
-    /// media, the counters START the column past the media hole (leading
-    /// pinned); with the slot collapsed (text-only), the cluster hugs the
-    /// card's RIGHT inner edge instead (trailing pinned) — the caption
-    /// owns the left axis, the counters balance it from the right.
-    private var mediaLeadingPin: NSLayoutConstraint?
-    private var collapsedTrailingPin: NSLayoutConstraint?
-
-    /// The column's leading edge with media, card-local: past the media
-    /// hole, with the same breathing the caption flight uses
-    /// (`slot.maxX + md`).
-    static var columnLeading: CGFloat {
-        SnapCommentsLayout.stripCardPadding + SnapCommentsLayout.mediaSlotHeight + Spacing.md
-    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -69,41 +55,21 @@ final class SnapEngagedPostCardView: UIView {
     private func buildLayout() {
         let pad = SnapCommentsLayout.stripCardPadding
 
-        // Actions row: the column's floor.
+        // Actions row: the column's floor, RIGHT-ALIGNED on every post
+        // type (video, photo, text). One posture, no format branch — the
+        // cluster always hugs the card's trailing inner edge and grows
+        // leftward as counts appear, the unified design-system rule.
         let actions = UIStackView(arrangedSubviews: [likeButton, commentButton, repostButton, saveButton])
         actions.axis = .horizontal
         actions.spacing = Spacing.lg
         actions.alignment = .center
-        let leadingPin = actions.leadingAnchor.constraint(
-            equalTo: leadingAnchor, constant: Self.columnLeading
-        )
-        mediaLeadingPin = leadingPin
-        let trailingPin = actions.trailingAnchor.constraint(
-            equalTo: trailingAnchor, constant: -pad
-        )
-        collapsedTrailingPin = trailingPin // activated by the collapse seam
         actions.constrain(in: self) { parent in
-            leadingPin
-            // Both postures share the outer guards: the cluster may never
-            // leave the card's inner padding on either side.
+            actions.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -pad)
+            // The cluster may never cross the card's left inner padding.
             actions.leadingAnchor.constraint(greaterThanOrEqualTo: parent.leadingAnchor, constant: pad)
-            actions.trailingAnchor.constraint(lessThanOrEqualTo: parent.trailingAnchor, constant: -pad)
             actions.heightAnchor.constraint(equalToConstant: SnapCommentsLayout.cardActionsHeight)
             actions.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -pad)
         }
-
-    }
-
-    /// TEXT-ONLY posts collapse the media hole and flip the counter
-    /// cluster's anchor: the caption (cell-side) stretches from the card's
-    /// left inner edge while the counters right-align to the card's
-    /// trailing inner edge — a balanced, two-poled composition instead of
-    /// everything crowding the left. Set at cell configure, per post,
-    /// before any engagement runs.
-    func setMediaSlotCollapsed(_ collapsed: Bool) {
-        mediaLeadingPin?.isActive = !collapsed
-        collapsedTrailingPin?.isActive = collapsed
-        setNeedsLayout()
     }
 
     // MARK: - Content
