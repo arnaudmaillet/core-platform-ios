@@ -94,19 +94,29 @@ final class SnapSubtitleView: UIView {
     /// cycle rather than the flicker-free pill pipeline (a separate layer, so
     /// it can't disturb it).
     private static let avatarDiameter: CGFloat = 28
+    /// The single leading anchor: a non-clipping wrapper the exact size of
+    /// the avatar. It — not the avatar or the text — is what centers on the
+    /// pill and what the text measures its leading gap from, so the layout
+    /// stays stable while the badge is free to bleed past the avatar's round
+    /// bounds (`clipsToBounds = false`).
+    private let avatarContainerView = UIView()
     private let avatarView = AvatarImageView()
     /// The pipeline avatars load through, and the in-flight load — cancelled
     /// on each handoff and on teardown so a slow fetch can't paint a stale
     /// author onto the current cue.
     private var imagePipeline: ImagePipeline?
     private var avatarTask: Task<Void, Never>?
-    /// The post's total comment count as a micro-badge floating on the
-    /// avatar's top-right corner — a subtle pill (dark, hairline-bordered)
-    /// carrying the engagement figure without stealing the leading slot or
-    /// disturbing the two-line text flow on the right. Like the avatar it
-    /// fades in ONCE with the first cue and stays clamped (its opacity is a
-    /// separate layer); it's inert through cue handoffs.
+    /// The post's total comment count as a micro-badge on the avatar's
+    /// BOTTOM-RIGHT corner — a subtle pill (dark, hairline-bordered)
+    /// deliberately offset down-and-right so it OVERFLOWS the avatar's round
+    /// bounds for the overlapping-chip look (the container doesn't clip it).
+    /// It carries the engagement figure without stealing the leading slot or
+    /// disturbing the text flow. Like the avatar it fades in ONCE with the
+    /// first cue and stays clamped (its own opacity layer); inert through
+    /// handoffs.
     private static let badgeHeight: CGFloat = 16
+    /// How far the badge bleeds past the avatar's bottom-right corner.
+    private static let badgeOverflow: CGFloat = 3
     private let countBadge = UIView()
     private let countLabel = UILabel()
 
@@ -155,41 +165,56 @@ final class SnapSubtitleView: UIView {
         countLabel.font = UIFont.preferredFont(forTextStyle: .caption2).withWeight(.semibold)
         countLabel.textColor = .white
         countLabel.textAlignment = .center
+        // The wrapper never clips, so the badge can bleed past the avatar's
+        // round bounds; it's the layout anchor, so its bounds stay the
+        // avatar's exact size.
+        avatarContainerView.clipsToBounds = false
+        avatarContainerView.accessibilityIdentifier = "subtitle-avatar-container"
 
-        // Horizontal flow: [avatar] [gap] [pill →]. The avatar CENTERS
-        // vertically on the pill and the pill TOP-pins, so the block grows
-        // DOWNWARD from a fixed top while the avatar holds the pill's middle
-        // whatever its line count — and because the pill's leading is the
-        // avatar's trailing, line two aligns with line one's leading edge,
-        // never wrapping under the circle. The badge floats on the avatar's
-        // top-right corner (flush at the corner, ON the avatar — not into the
-        // text gap). Every view is added BEFORE the constraints activate:
-        // they cross-reference each other (avatar.centerY → label.centerY,
-        // label.leading → avatar.trailing, badge → avatar), so none can be
-        // fully constrained until they share this ancestor.
-        avatarView.translatesAutoresizingMaskIntoConstraints = false
-        label.translatesAutoresizingMaskIntoConstraints = false
-        countBadge.translatesAutoresizingMaskIntoConstraints = false
-        countLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(avatarView)
+        // Horizontal flow: [avatar wrapper] [gap] [pill →]. The CONTAINER
+        // centers vertically on the pill and the pill TOP-pins, so the block
+        // grows DOWNWARD from a fixed top while the wrapper holds the pill's
+        // middle whatever its line count — and because the pill's leading is
+        // the CONTAINER'S trailing, the gap is stable regardless of the
+        // badge, and line two aligns with line one's leading edge, never
+        // wrapping under the circle. The avatar fills the wrapper (and clips
+        // itself round); the badge sits on the wrapper's bottom-right, offset
+        // OUT so it overflows for the overlapping-chip look. Every view is
+        // added BEFORE the constraints activate: they cross-reference each
+        // other (container.centerY → label.centerY, label.leading →
+        // container.trailing), so none can be fully constrained until they
+        // share this ancestor.
+        for view in [avatarContainerView, avatarView, label, countBadge, countLabel] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+        }
+        addSubview(avatarContainerView)
         addSubview(label)
-        addSubview(countBadge) // above the avatar
+        avatarContainerView.addSubview(avatarView)
+        avatarContainerView.addSubview(countBadge) // above the avatar, may overflow
         countBadge.addSubview(countLabel)
         NSLayoutConstraint.activate([
-            avatarView.widthAnchor.constraint(equalToConstant: Self.avatarDiameter),
-            avatarView.heightAnchor.constraint(equalToConstant: Self.avatarDiameter),
-            avatarView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            avatarView.centerYAnchor.constraint(equalTo: label.centerYAnchor),
-            label.leadingAnchor.constraint(equalTo: avatarView.trailingAnchor, constant: Spacing.sm),
+            // The wrapper: fixed avatar-sized box, leading, centered on the pill.
+            avatarContainerView.widthAnchor.constraint(equalToConstant: Self.avatarDiameter),
+            avatarContainerView.heightAnchor.constraint(equalToConstant: Self.avatarDiameter),
+            avatarContainerView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            avatarContainerView.centerYAnchor.constraint(equalTo: label.centerYAnchor),
+            // The avatar fills the wrapper.
+            avatarView.leadingAnchor.constraint(equalTo: avatarContainerView.leadingAnchor),
+            avatarView.trailingAnchor.constraint(equalTo: avatarContainerView.trailingAnchor),
+            avatarView.topAnchor.constraint(equalTo: avatarContainerView.topAnchor),
+            avatarView.bottomAnchor.constraint(equalTo: avatarContainerView.bottomAnchor),
+            // The text measures its leading gap from the WRAPPER's edge.
+            label.leadingAnchor.constraint(equalTo: avatarContainerView.trailingAnchor, constant: Spacing.sm),
             label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
             label.topAnchor.constraint(equalTo: topAnchor),
 
             // Badge: capsule of fixed height, min-width == height (a circle
-            // for one digit), hugging its count with small side padding.
+            // for one digit), hugging its count with small side padding, and
+            // bled OUT past the wrapper's bottom-right corner.
             countBadge.heightAnchor.constraint(equalToConstant: Self.badgeHeight),
             countBadge.widthAnchor.constraint(greaterThanOrEqualTo: countBadge.heightAnchor),
-            countBadge.trailingAnchor.constraint(equalTo: avatarView.trailingAnchor),
-            countBadge.topAnchor.constraint(equalTo: avatarView.topAnchor),
+            countBadge.trailingAnchor.constraint(equalTo: avatarContainerView.trailingAnchor, constant: Self.badgeOverflow),
+            countBadge.bottomAnchor.constraint(equalTo: avatarContainerView.bottomAnchor, constant: Self.badgeOverflow),
             countLabel.leadingAnchor.constraint(equalTo: countBadge.leadingAnchor, constant: 3),
             countLabel.trailingAnchor.constraint(equalTo: countBadge.trailingAnchor, constant: -3),
             countLabel.centerYAnchor.constraint(equalTo: countBadge.centerYAnchor),
