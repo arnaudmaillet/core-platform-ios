@@ -91,20 +91,28 @@ struct SnapChromeCaptionTests {
         #expect(SnapChromeView.composedCaption(caption, timestamp: timestamp, width: 0).string == caption)
     }
 
-    /// The timestamp reads as SECONDARY: dimmed to distinguish it from the
-    /// caption body, on every case.
-    @Test func timestampRendersDimmerThanTheCaption() throws {
-        let composed = SnapChromeView.composedCaption("Golden hour.", timestamp: timestamp, width: width)
-        let tsRange = (composed.string as NSString).range(of: timestamp)
-        let tsColor = try #require(
-            composed.attribute(.foregroundColor, at: tsRange.location, effectiveRange: nil) as? UIColor
-        )
-        let capColor = try #require(
-            composed.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor
-        )
-        var tsAlpha: CGFloat = 0, capAlpha: CGFloat = 0
-        tsColor.getWhite(nil, alpha: &tsAlpha)
-        capColor.getWhite(nil, alpha: &capAlpha)
-        #expect(tsAlpha < capAlpha)
+    /// The timestamp reads as SECONDARY metadata: both DIMMER and in a
+    /// SMALLER font register than the caption body, on every case.
+    @Test func timestampRendersDimmerAndSmallerThanTheCaption() throws {
+        for caption in ["Golden hour.", // Case A
+                        "Rebuilt the whole deploy pipeline over a slow rainy weekend.", // Case B
+                        "Weekend build log: rebuilt the pipeline end to end, found two race conditions that only reproduce on cold caches, and learned more about backpressure than I ever wanted to."] { // Case C
+            let composed = SnapChromeView.composedCaption(caption, timestamp: timestamp, width: width)
+            // The timestamp glyphs live at the tail — probe the last character.
+            let tsIndex = composed.length - 1
+            let tsColor = try #require(
+                composed.attribute(.foregroundColor, at: tsIndex, effectiveRange: nil) as? UIColor
+            )
+            let tsFont = try #require(composed.attribute(.font, at: tsIndex, effectiveRange: nil) as? UIFont)
+            let capColor = try #require(
+                composed.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor
+            )
+            let capFont = try #require(composed.attribute(.font, at: 0, effectiveRange: nil) as? UIFont)
+            var tsAlpha: CGFloat = 0, capAlpha: CGFloat = 0
+            tsColor.getWhite(nil, alpha: &tsAlpha)
+            capColor.getWhite(nil, alpha: &capAlpha)
+            #expect(tsAlpha < capAlpha)               // dimmer
+            #expect(tsFont.pointSize < capFont.pointSize) // smaller register
+        }
     }
 }

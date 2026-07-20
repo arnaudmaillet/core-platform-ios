@@ -415,17 +415,23 @@ final class SnapChromeView: UIView {
     }
 
     /// The caption typography — the shared attributes for the caption glyphs
-    /// and, dimmed, the appended timestamp. The text shadow lives here (an
-    /// `NSShadow` drawn WITH the glyphs) rather than as a `CALayer` shadow: a
-    /// layer shadow on a full-width label has no `shadowPath` and costs an
-    /// offscreen pass every scrolled frame.
+    /// (`.body`) and, for `secondary`, the appended timestamp: a SMALLER
+    /// `.footnote` register, dimmed, so it reads as clean secondary metadata
+    /// distinctly lighter than the body text (the same footnote register the
+    /// engaged info card uses for the post age). Baked per-run so
+    /// `boundingRect` measures each font's true footprint — the two-line
+    /// truncation therefore accounts for the smaller timestamp automatically.
+    /// The text shadow lives here (an `NSShadow` drawn WITH the glyphs)
+    /// rather than as a `CALayer` shadow: a layer shadow on a full-width
+    /// label has no `shadowPath` and costs an offscreen pass every scrolled
+    /// frame.
     private static func captionAttributes(secondary: Bool) -> [NSAttributedString.Key: Any] {
         let shadow = NSShadow()
         shadow.shadowColor = UIColor.black.withAlphaComponent(0.5)
         shadow.shadowBlurRadius = 3
         shadow.shadowOffset = .zero
         return [
-            .font: UIFont.preferredFont(forTextStyle: .body),
+            .font: UIFont.preferredFont(forTextStyle: secondary ? .footnote : .body),
             .foregroundColor: secondary ? UIColor.white.withAlphaComponent(0.6) : UIColor.white,
             .shadow: shadow,
         ]
