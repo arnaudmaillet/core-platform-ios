@@ -237,8 +237,9 @@ final class SnapPostInfoCardView: UIView {
 
     /// The width the caption wants on a single line, plus the two insets —
     /// the card's content-driven upper reach before the cell's region clamp
-    /// forces it to wrap.
-    private var captionPreferredWidth: CGFloat {
+    /// forces it to wrap. Internal: the cell also uses it to decide whether
+    /// the caption is single-line (→ the compact card height).
+    var captionPreferredWidth: CGFloat {
         guard let text = captionLabel.text, !text.isEmpty, let font = captionLabel.font else {
             return 2 * Self.contentInset
         }
@@ -246,17 +247,25 @@ final class SnapPostInfoCardView: UIView {
         return 2 * Self.contentInset + ceil(width)
     }
 
+    /// Caps the caption at the state's line count — ONE line on a compact
+    /// (single-line) card, the full band's capacity otherwise. The card
+    /// height (cell-set) matches, so the caption fills it with no slack.
+    func setCompact(_ compact: Bool) {
+        captionLabel.numberOfLines = compact ? 1 : SnapCommentsLayout.captionLineCapacity(
+            columnHeight: Self.captionBandHeight, lineHeight: captionLabel.font.lineHeight
+        )
+    }
+
     // MARK: - Geometry
 
-    /// The uniform inner margin on ALL FOUR edges — the single padding
-    /// authority for the card, so top, bottom, leading, and trailing are
-    /// homogeneous by construction. `md` (12pt) insulates the text and the
-    /// counters from the 16pt-radius hairline border with a premium,
-    /// balanced breath.
-    static let contentInset: CGFloat = Spacing.md
+    /// The uniform inner margin on ALL FOUR edges — homogeneous top, bottom,
+    /// leading, trailing. Sourced from `SnapCommentsLayout` so the compact
+    /// card height (which the strip geometry derives) and this interior use
+    /// the identical value.
+    static var contentInset: CGFloat { SnapCommentsLayout.cardContentInset }
     /// The one interior gap: between the caption band and the counters row
-    /// (an internal separation, not an edge margin).
-    static let captionActionsGap: CGFloat = Spacing.xs
+    /// (an internal separation, not an edge margin). Shared with the layout.
+    static var captionActionsGap: CGFloat { SnapCommentsLayout.captionActionsGap }
 
     /// The caption's available height, card-local: the card interior
     /// (minus the two edge insets) minus the counters row and the one

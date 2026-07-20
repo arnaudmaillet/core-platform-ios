@@ -841,7 +841,7 @@ final class SnapFeedViewController: UIViewController {
         // The stream rests below the frosted strip (full-height scroll,
         // inset content) and its rows end where the rail's column begins.
         detail?.setEngagedInsets(
-            top: SnapCommentsLayout.stripBottom(topInset: view.safeAreaInsets.top),
+            top: cell.engagedCommentsTopInset(safeAreaTop: view.safeAreaInsets.top),
             trailing: cell.commentsRailExclusionWidth,
             // KEEP-AND-STACK: the composer's rest band clears the NATIVE
             // TOOLBAR, not just the home indicator — the feed's own
@@ -916,7 +916,7 @@ final class SnapFeedViewController: UIViewController {
         content.didMove(toParent: self)
         let detail = content as? PostDetailViewController
         detail?.setEngagedInsets(
-            top: SnapCommentsLayout.stripBottom(topInset: view.safeAreaInsets.top),
+            top: cell.engagedCommentsTopInset(safeAreaTop: view.safeAreaInsets.top),
             trailing: cell.commentsRailExclusionWidth,
             bottomInset: view.safeAreaInsets.bottom
         )

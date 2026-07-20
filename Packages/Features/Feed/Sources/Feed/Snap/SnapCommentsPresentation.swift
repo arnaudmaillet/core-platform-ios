@@ -64,9 +64,40 @@ enum SnapCommentsLayout {
     /// place as they fade in, the composer-entrance recipe at card scale.
     static let cardContentEntranceOffset: CGFloat = 12
 
-    /// The card's fixed height: the media square with uniform padding.
+    /// The card's FULL height: the 88pt media square with uniform padding
+    /// (a two-line caption's home).
     static var cardHeight: CGFloat {
         stripCardPadding + mediaSlotHeight + stripCardPadding
+    }
+
+    /// The info card's inner content margins — shared with
+    /// `SnapPostInfoCardView` so the compact height and the card's own
+    /// interior agree exactly.
+    static let cardContentInset: CGFloat = Spacing.md
+    static let captionActionsGap: CGFloat = Spacing.xs
+    /// The caption's line height, the compact-height unit (one caption line).
+    static var captionLineHeight: CGFloat {
+        UIFont.preferredFont(forTextStyle: .subheadline).lineHeight
+    }
+
+    /// The COMPACT card height — a single-line caption with no slack: the
+    /// two content insets, one caption line, the caption→counters gap, and
+    /// the counters row. The media square shrinks in step (see
+    /// `mediaSlotHeight(compact:)`), so the two cards stay a matched pair.
+    static var compactCardHeight: CGFloat {
+        2 * cardContentInset + ceil(captionLineHeight) + captionActionsGap + cardActionsHeight
+    }
+
+    /// The card height for the caption's line count: compact (one line) or
+    /// full (two). Every strip dimension derives from this.
+    static func cardHeight(compact: Bool) -> CGFloat {
+        compact ? compactCardHeight : cardHeight
+    }
+
+    /// The docked media square's side for the state: the card height minus
+    /// its two paddings, so the tile matches the (compact or full) card.
+    static func mediaSlotHeight(compact: Bool) -> CGFloat {
+        cardHeight(compact: compact) - 2 * stripCardPadding
     }
 
     /// The engaged-state spring, shared by every leg of the one animation —
@@ -97,14 +128,15 @@ enum SnapCommentsLayout {
 
     /// Where the media docks, in cell coordinates: a 1:1 square tile on the
     /// card's left edge, uniformly padded.
-    static func mediaSlotFrame(in bounds: CGRect, topInset: CGFloat) -> CGRect {
+    static func mediaSlotFrame(in bounds: CGRect, topInset: CGFloat, compact: Bool = false) -> CGRect {
         guard bounds.height > 0 else { return .zero }
-        let card = stripCardFrame(in: bounds, topInset: topInset)
+        let card = stripCardFrame(in: bounds, topInset: topInset, compact: compact)
+        let side = mediaSlotHeight(compact: compact)
         return CGRect(
             x: Spacing.lg,
             y: card.minY + stripCardPadding,
-            width: mediaSlotHeight,
-            height: mediaSlotHeight
+            width: side,
+            height: side
         )
     }
 
@@ -123,9 +155,11 @@ enum SnapCommentsLayout {
         )
     }
 
-    /// The strip's lower boundary — the comments region's upper one.
-    static func stripBottom(topInset: CGFloat) -> CGFloat {
-        topInset + stripTopPadding + cardHeight + stripBottomPadding
+    /// The strip's lower boundary — the comments region's upper one. Rises
+    /// on a compact (single-line) card, so the comments sit snug beneath the
+    /// shorter strip rather than under a fixed-height gap.
+    static func stripBottom(topInset: CGFloat, compact: Bool = false) -> CGFloat {
+        topInset + stripTopPadding + cardHeight(compact: compact) + stripBottomPadding
     }
 
     /// The floating Liquid Glass CARD that carries the strip: the full
@@ -137,13 +171,13 @@ enum SnapCommentsLayout {
     static let stripCardCornerRadius: CGFloat = 16
     static let stripCardPadding: CGFloat = Spacing.sm
 
-    static func stripCardFrame(in bounds: CGRect, topInset: CGFloat) -> CGRect {
+    static func stripCardFrame(in bounds: CGRect, topInset: CGFloat, compact: Bool = false) -> CGRect {
         let inset = Spacing.lg - stripCardPadding
         return CGRect(
             x: inset,
             y: topInset + stripTopPadding,
             width: bounds.width - inset * 2,
-            height: cardHeight
+            height: cardHeight(compact: compact)
         )
     }
 
@@ -155,8 +189,8 @@ enum SnapCommentsLayout {
     /// The MEDIA glass card: a square wrapping the docked slot with the
     /// card's inner padding — the LEFT card on media posts (the media tile
     /// floats inside it). A pure square at the strip's left edge.
-    static func mediaCardFrame(in bounds: CGRect, topInset: CGFloat) -> CGRect {
-        mediaSlotFrame(in: bounds, topInset: topInset)
+    static func mediaCardFrame(in bounds: CGRect, topInset: CGFloat, compact: Bool = false) -> CGRect {
+        mediaSlotFrame(in: bounds, topInset: topInset, compact: compact)
             .insetBy(dx: -stripCardPadding, dy: -stripCardPadding)
     }
 
@@ -164,10 +198,10 @@ enum SnapCommentsLayout {
     /// past the media card (plus the gap) to the strip's right edge — or
     /// the standalone FULL-WIDTH card on text posts (which omit the media
     /// card). Its own independent floating surface either way.
-    static func infoCardFrame(in bounds: CGRect, topInset: CGFloat, hasMedia: Bool) -> CGRect {
-        let full = stripCardFrame(in: bounds, topInset: topInset)
+    static func infoCardFrame(in bounds: CGRect, topInset: CGFloat, hasMedia: Bool, compact: Bool = false) -> CGRect {
+        let full = stripCardFrame(in: bounds, topInset: topInset, compact: compact)
         guard hasMedia else { return full }
-        let media = mediaCardFrame(in: bounds, topInset: topInset)
+        let media = mediaCardFrame(in: bounds, topInset: topInset, compact: compact)
         let x = media.maxX + cardGap
         return CGRect(x: x, y: full.minY, width: full.maxX - x, height: full.height)
     }
@@ -191,8 +225,8 @@ enum SnapCommentsLayout {
 
     /// The comments region's height: everything below the strip, down to
     /// the cell's bottom edge.
-    static func commentsRegionHeight(containerHeight: CGFloat, topInset: CGFloat) -> CGFloat {
-        max(0, containerHeight - stripBottom(topInset: topInset))
+    static func commentsRegionHeight(containerHeight: CGFloat, topInset: CGFloat, compact: Bool = false) -> CGFloat {
+        max(0, containerHeight - stripBottom(topInset: topInset, compact: compact))
     }
 
     /// The transform that carries the full-bleed media view into `slot`.

@@ -282,10 +282,12 @@ struct SnapCommentsPresentationTests {
         let subviews = cell.contentView.subviews
         let frost = try #require(subviews.compactMap { $0 as? ProgressiveFrostView }.first)
         #expect(frost.isHidden == false)
+        // The "caption" fixture is a single line, so the cards (and the
+        // frost band above them) take the COMPACT height.
         #expect(frost.frame == CGRect(
             x: 0, y: 0,
             width: Self.container.width,
-            height: SnapCommentsLayout.stripBottom(topInset: Self.topInset)
+            height: SnapCommentsLayout.stripBottom(topInset: Self.topInset, compact: true)
         ))
         #expect(frost.isUserInteractionEnabled == false)
         let frostMask = try #require(frost.mask)
@@ -297,7 +299,7 @@ struct SnapCommentsPresentationTests {
         // the media-adjacent region and no wider than that region.
         let info = try #require(subviews.compactMap { $0 as? SnapPostInfoCardView }.first)
         #expect(info.isHidden == false)
-        let mediaRegion = SnapCommentsLayout.infoCardFrame(in: Self.container, topInset: Self.topInset, hasMedia: true)
+        let mediaRegion = SnapCommentsLayout.infoCardFrame(in: Self.container, topInset: Self.topInset, hasMedia: true, compact: true)
         #expect(abs(info.frame.minX - mediaRegion.minX) < 0.5)
         #expect(info.frame.minY == mediaRegion.minY)
         #expect(info.frame.height == mediaRegion.height)
@@ -391,15 +393,19 @@ struct SnapCommentsPresentationTests {
         cell.setCommentsEngaged(true)
         cell.contentView.layoutIfNeeded()
 
-        let slot = SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset)
+        // Single-line "caption" → the docked tile is the COMPACT square.
+        let slot = SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset, compact: true)
         let video = try mediaCard(of: cell).renderView
         // The phantom band exists (the premise): the frame is taller than
         // the visible square.
         #expect(video.frame.height > slot.height + 50)
 
         // A point in the band BELOW the slot (the first comment row's
-        // territory) routes to the hosted stream, not the media.
-        let bandPoint = CGPoint(x: slot.midX, y: slot.maxY + 40)
+        // territory) routes to the hosted stream, not the media. It sits
+        // squarely in the lower phantom band — below the visible tile, above
+        // the render frame's true bottom (the band shrinks with the compact
+        // tile, so a fixed offset would overshoot it).
+        let bandPoint = CGPoint(x: slot.midX, y: (slot.maxY + video.frame.maxY) / 2)
         #expect(video.frame.contains(bandPoint))
         let bandHit = try #require(cell.hitTest(bandPoint, with: nil))
         #expect(sequence(first: bandHit, next: { $0.superview }).contains { $0 === hosted })
@@ -691,7 +697,8 @@ struct SnapCommentsPresentationTests {
         // (hugs the short "caption") and, being narrower than the full
         // strip, it CENTERS horizontally within the strip — no stretching
         // into empty space.
-        let strip = SnapCommentsLayout.stripCardFrame(in: Self.container, topInset: Self.topInset)
+        // Single-line "caption" → the standalone card takes the COMPACT height.
+        let strip = SnapCommentsLayout.stripCardFrame(in: Self.container, topInset: Self.topInset, compact: true)
         let info = try infoCard(of: cell)
         #expect(info.isHidden == false)
         #expect(info.frame.width < strip.width)                 // hugged narrow
@@ -703,7 +710,7 @@ struct SnapCommentsPresentationTests {
         #expect(cell.contentView.subviews.compactMap { $0 as? SnapMediaCardView }.first?
             .subviews.contains { $0 is SnapGlassCardView && !$0.isHidden } == false)
         let frost = try #require(cell.contentView.subviews.compactMap { $0 as? ProgressiveFrostView }.first)
-        #expect(frost.frame.height == SnapCommentsLayout.stripBottom(topInset: Self.topInset))
+        #expect(frost.frame.height == SnapCommentsLayout.stripBottom(topInset: Self.topInset, compact: true))
         // The caption sits at the (centered) card's own uniform inner inset.
         let caption = try engagedCaptionFrame(in: cell)
         #expect(abs(caption.minX - (info.frame.minX + SnapPostInfoCardView.contentInset)) < 0.5)
@@ -734,7 +741,7 @@ struct SnapCommentsPresentationTests {
         // it starts at that card's own uniform inner inset (its frame sits
         // past the media card + the gap) — the SAME inset as the text card,
         // homogeneous on every format.
-        let mediaInfoFrame = SnapCommentsLayout.infoCardFrame(in: Self.container, topInset: Self.topInset, hasMedia: true)
+        let mediaInfoFrame = SnapCommentsLayout.infoCardFrame(in: Self.container, topInset: Self.topInset, hasMedia: true, compact: true)
         let mediaCaption = try engagedCaptionFrame(in: mediaCell)
         #expect(abs(mediaCaption.minX - (mediaInfoFrame.minX + SnapPostInfoCardView.contentInset)) < 0.5)
         #expect(abs(mediaCaption.minY - (mediaInfoFrame.minY + SnapPostInfoCardView.contentInset)) < 0.5)
@@ -836,6 +843,62 @@ struct SnapCommentsPresentationTests {
         // The floor genuinely reserves the bottom row (date + md gap +
         // counters + the two edge insets) — comfortably past the bare gap.
         #expect(floor > 2 * SnapPostInfoCardView.contentInset + Spacing.md)
+    }
+
+    /// A single-line caption shrinks the strip to the COMPACT height — one
+    /// caption line with no two-line slack — and both floating glass cards
+    /// (the media square and the info card) shrink IN STEP, staying a
+    /// height-matched pair. A caption that wraps to two lines keeps the full
+    /// height. The height-match is by construction: both card frames derive
+    /// from `cardHeight(compact:)`, so they can never drift apart.
+    @Test func singleLineCaptionCompactsBothCardsAsAMatchedPair() throws {
+        // Pure geometry: the compact strip is shorter than the full one, and
+        // the two card frames share the SAME height in either state.
+        #expect(SnapCommentsLayout.compactCardHeight < SnapCommentsLayout.cardHeight)
+        for compact in [false, true] {
+            let mediaCard = SnapCommentsLayout.mediaCardFrame(
+                in: Self.container, topInset: Self.topInset, compact: compact)
+            let infoCard = SnapCommentsLayout.infoCardFrame(
+                in: Self.container, topInset: Self.topInset, hasMedia: true, compact: compact)
+            #expect(mediaCard.height == SnapCommentsLayout.cardHeight(compact: compact))
+            #expect(abs(mediaCard.height - infoCard.height) < 0.5) // matched pair
+            #expect(mediaCard.minY == infoCard.minY)               // and top-aligned
+        }
+
+        // The caption's LINE COUNT drives the decision on a real cell: a
+        // single-line caption lands the info card at the compact height…
+        let short = SnapFeedCell(frame: Self.container)
+        short.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
+        configurePost(short) // "caption" — one line
+        short.layoutIfNeeded()
+        short.installComments(UIView())
+        short.setCommentsEngaged(true)
+        short.contentView.layoutIfNeeded()
+        let shortInfo = try infoCard(of: short)
+        #expect(abs(shortInfo.frame.height - SnapCommentsLayout.compactCardHeight) < 0.5)
+
+        // …and a caption long enough to wrap beside the media keeps the FULL
+        // (two-line) height.
+        let tall = SnapFeedCell(frame: Self.container)
+        tall.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
+        tall.configure(
+            with: FeedItemDisplayModel(
+                id: PostID("post-0000"), authorID: ProfileID("profile-1"),
+                authorName: "Ava", metaText: "@ava · 3m", avatarURL: nil,
+                caption: "A considerably longer caption that clearly wraps onto a second line beside the docked media square",
+                mediaURL: URL(string: "mock://media/0.jpg"), mediaKind: .image,
+                thumbnailURL: nil, audioText: "Original audio · @ava",
+                likeCount: 0, timestampText: "5 days"
+            ),
+            pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            videoPlayback: nil
+        )
+        tall.layoutIfNeeded()
+        tall.installComments(UIView())
+        tall.setCommentsEngaged(true)
+        tall.contentView.layoutIfNeeded()
+        let tallInfo = try infoCard(of: tall)
+        #expect(abs(tallInfo.frame.height - SnapCommentsLayout.cardHeight) < 0.5)
     }
 
     /// The timestamp is a dual-anchor row with the counters: leading-

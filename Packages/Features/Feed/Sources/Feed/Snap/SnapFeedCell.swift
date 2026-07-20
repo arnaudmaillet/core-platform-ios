@@ -34,6 +34,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     private var representedID: PostID?
     private var mediaURL: URL?
+    /// Whether THIS post's caption fits on a single line (so the strip runs
+    /// the COMPACT height — a shorter info card, a matching smaller media
+    /// square, and the comments snug beneath). Resolved at `installComments`
+    /// from the caption's single-line width vs the region, then the sole
+    /// input to every strip-geometry call for the engagement's lifetime.
+    private var isCompactCaption = false
     private var mediaKind: MediaKind = .image
     private var videoPlayback: VideoPlaybackController?
     private var imageTasks: [Task<Void, Never>] = []
@@ -228,6 +234,21 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // lower boundary (the comments partition line), dissolving from
         // solid behind the nav zone to nothing at the partition — the
         // ramp's start is the real inset boundary, not a guess.
+        // COMPACT DECISION (once per engagement): the caption is single-
+        // line when its natural width fits the info region — measured at
+        // the COMPACT region (a text post's full strip, or the media post's
+        // wider slot beside the SMALLER compact media square), so the choice
+        // is self-consistent (a caption that fits the compact region stays
+        // one line at the compact width). Every strip dimension below reads
+        // this one flag.
+        let stripWidth = SnapCommentsLayout.stripCardFrame(in: contentView.bounds, topInset: frozenInsets.top).width
+        let compactRegion = mediaURL != nil
+            ? stripWidth - SnapCommentsLayout.cardHeight(compact: true) - SnapCommentsLayout.cardGap
+            : stripWidth
+        isCompactCaption = infoCard.captionPreferredWidth <= compactRegion
+        infoCard.setCompact(isCompactCaption)
+        let compact = isCompactCaption
+
         headerFrost.setFadeLocations([
             0,
             NSNumber(value: Double(SnapCommentsLayout.headerFrostSolidFraction(topInset: frozenInsets.top))),
@@ -240,7 +261,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             headerFrost.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             headerFrost.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             headerFrost.heightAnchor.constraint(
-                equalToConstant: SnapCommentsLayout.stripBottom(topInset: frozenInsets.top)
+                equalToConstant: SnapCommentsLayout.stripBottom(topInset: frozenInsets.top, compact: compact)
             ),
         ]
         NSLayoutConstraint.activate(headerFrostConstraints)
@@ -256,7 +277,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // The card hugs its intrinsic width (required hugging) up to the
         // region cap, so the caption wraps only when it would overflow.
         let infoFrame = SnapCommentsLayout.infoCardFrame(
-            in: contentView.bounds, topInset: frozenInsets.top, hasMedia: mediaURL != nil
+            in: contentView.bounds, topInset: frozenInsets.top, hasMedia: mediaURL != nil, compact: compact
         )
         infoCard.isHidden = false
         infoCard.setContentHuggingPriority(.required, for: .horizontal)
@@ -300,6 +321,15 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// after layout: the rail's leading edge is the boundary.
     var commentsRailExclusionWidth: CGFloat {
         chrome.railExclusionWidth
+    }
+
+    /// The engaged stream's top inset — the frosted strip's bottom edge. A
+    /// single-line caption shrinks the cards, so this reads the cell's
+    /// settled compact state (valid after `installComments`); the VC threads
+    /// it into the hosted stream's `setEngagedInsets` so the rows start
+    /// flush against the shorter frost.
+    func engagedCommentsTopInset(safeAreaTop: CGFloat) -> CGFloat {
+        SnapCommentsLayout.stripBottom(topInset: safeAreaTop, compact: isCompactCaption)
     }
 
     /// Reclaims the region after disengagement settles (the VC removes the
@@ -346,7 +376,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // permanent resting interface too.
         cardSwipeRecognizer.isEnabled = engaged
         let bounds = contentView.bounds
-        let slot = SnapCommentsLayout.mediaSlotFrame(in: bounds, topInset: frozenInsets.top)
+        let slot = SnapCommentsLayout.mediaSlotFrame(in: bounds, topInset: frozenInsets.top, compact: isCompactCaption)
 
         if engaged {
             // The Ken Burns drift owns the same transform; it yields for the
@@ -363,7 +393,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // master spring block.
             mediaCard.dock(slot: slot, in: bounds)
             if mediaURL != nil {
-                mediaCard.showGlass(at: SnapCommentsLayout.mediaCardFrame(in: bounds, topInset: frozenInsets.top))
+                mediaCard.showGlass(at: SnapCommentsLayout.mediaCardFrame(in: bounds, topInset: frozenInsets.top, compact: isCompactCaption))
             }
             chrome.setCommentsEngaged(true)
             commentsContainer.alpha = 1
@@ -546,7 +576,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// stream below the partition and the nav zone above the card stay
     /// out. Internal (not private) so the boundary is unit-testable.
     func cardSwipeRegionContains(_ point: CGPoint) -> Bool {
-        SnapCommentsLayout.stripCardFrame(in: contentView.bounds, topInset: frozenInsets.top)
+        SnapCommentsLayout.stripCardFrame(in: contentView.bounds, topInset: frozenInsets.top, compact: isCompactCaption)
             .insetBy(dx: -Spacing.sm, dy: -Spacing.sm)
             .contains(point)
     }
@@ -657,7 +687,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             let bounds = contentView.bounds
             resting = SnapCommentsLayout.mediaTransform(
                 bounds: bounds,
-                slot: SnapCommentsLayout.mediaSlotFrame(in: bounds, topInset: frozenInsets.top)
+                slot: SnapCommentsLayout.mediaSlotFrame(in: bounds, topInset: frozenInsets.top, compact: isCompactCaption)
             )
         } else {
             resting = .identity
@@ -683,7 +713,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         guard isCommentsEngaged else { return }
         contentView.layoutIfNeeded()
         let bounds = contentView.bounds
-        let slot = SnapCommentsLayout.mediaSlotFrame(in: bounds, topInset: frozenInsets.top)
+        let slot = SnapCommentsLayout.mediaSlotFrame(in: bounds, topInset: frozenInsets.top, compact: isCompactCaption)
         mediaCard.reassertDock(slot: slot, in: bounds)
     }
 
@@ -757,7 +787,7 @@ extension SnapFeedCell {
         // (UIImageView doesn't hit-test; the video surface does).
         if mediaCard.containsSurface(hit) {
             let slot = SnapCommentsLayout.mediaSlotFrame(
-                in: contentView.bounds, topInset: frozenInsets.top
+                in: contentView.bounds, topInset: frozenInsets.top, compact: isCompactCaption
             )
             if !slot.contains(convert(point, to: contentView)) {
                 let containerPoint = convert(point, to: commentsContainer)
