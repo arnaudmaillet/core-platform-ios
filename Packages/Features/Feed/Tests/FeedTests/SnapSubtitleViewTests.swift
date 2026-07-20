@@ -141,11 +141,12 @@ struct SnapSubtitleViewTests {
         #expect(avatar(idle)?.layer.animation(forKey: "subtitle-avatar") == nil)
     }
 
-    /// The alignment contract: the avatar LEADS the row and TOP-aligns to
-    /// the pill's first line, with the pill flowing to its right — so a
-    /// two-line cue keeps line two beside the avatar column (aligned with
-    /// line one's leading edge, never wrapping under the circle).
-    @Test func avatarTopAlignsWithFirstLineAndTextFlowsBeside() {
+    /// The alignment contract: the avatar LEADS the row and CENTERS
+    /// vertically on the pill (same middle whether the cue is one line or
+    /// two), with the pill flowing to its right — so a two-line cue keeps
+    /// line two beside the avatar column (aligned with line one's leading
+    /// edge, never wrapping under the circle).
+    @Test func avatarCentersVerticallyAndTextFlowsBeside() {
         let view = makeView([cue("a")])
         let oneLine = SubtitleCue(id: "one", text: "Short cue.")
         let twoLine = SubtitleCue(
@@ -162,11 +163,40 @@ struct SnapSubtitleViewTests {
             #expect(pill != nil && circle != nil)
             if let pill, let circle {
                 #expect(circle.frame.minX == 0)                        // avatar leads the row
-                #expect(abs(circle.frame.minY - pill.frame.minY) < 0.5) // top-aligned to line one
+                #expect(abs(circle.frame.midY - pill.frame.midY) < 0.5) // vertically centered on the pill
                 #expect(pill.frame.minX > circle.frame.maxX)           // text flows to its right
             }
             view.setActive(false)
         }
+    }
+
+    /// The count badge floats on the avatar's TOP-RIGHT corner (its trailing
+    /// edge flush with the avatar's, its top at the avatar's top — ON the
+    /// avatar, clear of the text), carries the count, and rises with the
+    /// first cue. A zero count keeps it hidden.
+    @Test func countBadgeFloatsOnTheAvatarCorner() throws {
+        let view = makeView([cue("a"), cue("b"), cue("c")])
+        view.setCommentCount(24)
+        view.setActive(true)
+        view.layoutIfNeeded()
+
+        let circle = try #require(avatar(view))
+        let badge = try #require(view.subviews.first { $0.accessibilityIdentifier == "subtitle-count-badge" })
+        let count = badge.subviews.compactMap { $0 as? UILabel }.first
+        #expect(badge.isHidden == false)
+        #expect(count?.text == "24")
+        #expect(badge.layer.animation(forKey: "subtitle-badge") != nil) // rose with the cue
+        // Top-right corner of the avatar, ON it (never past the leading edge
+        // into the text): trailing flush, top flush, above the avatar's mid.
+        #expect(abs(badge.frame.maxX - circle.frame.maxX) < 0.5)
+        #expect(abs(badge.frame.minY - circle.frame.minY) < 0.5)
+        #expect(badge.frame.maxX <= circle.frame.maxX + 0.5)
+
+        // A zero count keeps the badge down.
+        let uncounted = makeView([cue("a"), cue("b"), cue("c")])
+        uncounted.setCommentCount(0)
+        uncounted.setActive(true)
+        #expect((uncounted.subviews.first { $0.accessibilityIdentifier == "subtitle-count-badge" })?.isHidden == true)
     }
 
     @Test func countTextFormatsCompactly() {

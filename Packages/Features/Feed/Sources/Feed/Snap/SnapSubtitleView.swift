@@ -85,13 +85,14 @@ final class SnapSubtitleView: UIView {
     /// there is nothing to double-buffer.
     private let label = SubtitlePillLabel()
     /// The author avatar leading the cue — a compact round image at the
-    /// zone's leading edge, TOP-aligned to the pill's first line so a
-    /// two-line cue flows beside it (line two aligns with line one's leading
-    /// edge, never wrapping under the circle). It fades in once with the
-    /// first cue (the old count bubble's entrance envelope) and stays
-    /// clamped visible; each hard-cut handoff swaps in the new author's
-    /// image, so it rides the cue cycle rather than the flicker-free pill
-    /// pipeline (a separate layer, so it can't disturb it).
+    /// zone's leading edge, CENTERED vertically on the pill so it holds the
+    /// same middle whether the cue is one line or two, while the text flows
+    /// to its right (line two aligns with line one's leading edge, never
+    /// wrapping under the circle). It fades in once with the first cue (the
+    /// old count bubble's entrance envelope) and stays clamped visible; each
+    /// hard-cut handoff swaps in the new author's image, so it rides the cue
+    /// cycle rather than the flicker-free pill pipeline (a separate layer, so
+    /// it can't disturb it).
     private static let avatarDiameter: CGFloat = 28
     private let avatarView = AvatarImageView()
     /// The pipeline avatars load through, and the in-flight load — cancelled
@@ -99,6 +100,15 @@ final class SnapSubtitleView: UIView {
     /// author onto the current cue.
     private var imagePipeline: ImagePipeline?
     private var avatarTask: Task<Void, Never>?
+    /// The post's total comment count as a micro-badge floating on the
+    /// avatar's top-right corner — a subtle pill (dark, hairline-bordered)
+    /// carrying the engagement figure without stealing the leading slot or
+    /// disturbing the two-line text flow on the right. Like the avatar it
+    /// fades in ONCE with the first cue and stays clamped (its opacity is a
+    /// separate layer); it's inert through cue handoffs.
+    private static let badgeHeight: CGFloat = 16
+    private let countBadge = UIView()
+    private let countLabel = UILabel()
 
     /// A tap landed anywhere in the zone (pill, count bubble, or the slack
     /// between them) — the comments engagement's entry point on posts with
@@ -129,29 +139,60 @@ final class SnapSubtitleView: UIView {
         avatarView.backgroundColor = UIColor.white.withAlphaComponent(0.15)
         avatarView.layer.opacity = 0
 
-        // Horizontal flow: [avatar] [gap] [pill →]. The avatar TOP-aligns to
-        // the pill's first line and the pill TOP-pins too, so the block
-        // grows DOWNWARD from a fixed top: a two-line cue keeps line one
-        // (and the avatar beside it) anchored while line two flows below —
-        // and because the pill's leading is the avatar's trailing, line two
-        // aligns with line one's leading edge, never wrapping under the
-        // circle. The avatar hugs its fixed box; the pill hugs its text and
-        // may reclaim all remaining width. Both views are added BEFORE the
-        // constraints activate — they cross-reference each other (avatar.top
-        // → label.top, label.leading → avatar.trailing), so neither can be
-        // fully constrained until both share this ancestor.
+        // The count badge: a subtle dark pill, hairline-bordered so it reads
+        // as a distinct chip floating over the avatar. Clipped to its own
+        // capsule; the label centers with a little horizontal breathing so a
+        // one-digit count is a neat circle and larger figures grow to a pill.
+        countBadge.backgroundColor = UIColor.black.withAlphaComponent(0.6)
+        countBadge.layer.cornerRadius = Self.badgeHeight / 2
+        countBadge.layer.cornerCurve = .continuous
+        countBadge.layer.borderWidth = 1
+        countBadge.layer.borderColor = UIColor.white.withAlphaComponent(0.3).cgColor
+        countBadge.clipsToBounds = true
+        countBadge.layer.opacity = 0
+        countBadge.isHidden = true
+        countBadge.accessibilityIdentifier = "subtitle-count-badge"
+        countLabel.font = UIFont.preferredFont(forTextStyle: .caption2).withWeight(.semibold)
+        countLabel.textColor = .white
+        countLabel.textAlignment = .center
+
+        // Horizontal flow: [avatar] [gap] [pill →]. The avatar CENTERS
+        // vertically on the pill and the pill TOP-pins, so the block grows
+        // DOWNWARD from a fixed top while the avatar holds the pill's middle
+        // whatever its line count — and because the pill's leading is the
+        // avatar's trailing, line two aligns with line one's leading edge,
+        // never wrapping under the circle. The badge floats on the avatar's
+        // top-right corner (flush at the corner, ON the avatar — not into the
+        // text gap). Every view is added BEFORE the constraints activate:
+        // they cross-reference each other (avatar.centerY → label.centerY,
+        // label.leading → avatar.trailing, badge → avatar), so none can be
+        // fully constrained until they share this ancestor.
         avatarView.translatesAutoresizingMaskIntoConstraints = false
         label.translatesAutoresizingMaskIntoConstraints = false
+        countBadge.translatesAutoresizingMaskIntoConstraints = false
+        countLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(avatarView)
         addSubview(label)
+        addSubview(countBadge) // above the avatar
+        countBadge.addSubview(countLabel)
         NSLayoutConstraint.activate([
             avatarView.widthAnchor.constraint(equalToConstant: Self.avatarDiameter),
             avatarView.heightAnchor.constraint(equalToConstant: Self.avatarDiameter),
             avatarView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            avatarView.topAnchor.constraint(equalTo: label.topAnchor),
+            avatarView.centerYAnchor.constraint(equalTo: label.centerYAnchor),
             label.leadingAnchor.constraint(equalTo: avatarView.trailingAnchor, constant: Spacing.sm),
             label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
             label.topAnchor.constraint(equalTo: topAnchor),
+
+            // Badge: capsule of fixed height, min-width == height (a circle
+            // for one digit), hugging its count with small side padding.
+            countBadge.heightAnchor.constraint(equalToConstant: Self.badgeHeight),
+            countBadge.widthAnchor.constraint(greaterThanOrEqualTo: countBadge.heightAnchor),
+            countBadge.trailingAnchor.constraint(equalTo: avatarView.trailingAnchor),
+            countBadge.topAnchor.constraint(equalTo: avatarView.topAnchor),
+            countLabel.leadingAnchor.constraint(equalTo: countBadge.leadingAnchor, constant: 3),
+            countLabel.trailingAnchor.constraint(equalTo: countBadge.trailingAnchor, constant: -3),
+            countLabel.centerYAnchor.constraint(equalTo: countBadge.centerYAnchor),
         ])
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: SnapSubtitleView, _) in
             self.invalidateIntrinsicContentSize()
@@ -200,10 +241,15 @@ final class SnapSubtitleView: UIView {
         imagePipeline = pipeline
     }
 
-    /// The zone's leading avatar now carries author identity, not a count;
-    /// the total figure lives on the engaged card's comment counter. Kept so
-    /// the `updateCommentStreams` call site stays uniform across surfaces.
-    func setCommentCount(_ count: Int) {}
+    /// Updates the count badge floating on the avatar's corner. Zero (or an
+    /// unloaded stream) hides it — the leading slot now carries the author
+    /// avatar, and the badge is engagement metadata riding along on top.
+    /// Rides the same update path as the cues (`updateCommentStreams`, never
+    /// `configure`), so the flight replica's badge stays empty and invisible.
+    func setCommentCount(_ count: Int) {
+        countLabel.text = count > 0 ? Self.countText(count) : nil
+        countBadge.isHidden = countLabel.text == nil
+    }
 
     /// Follows the owning page's visibility (the band's seam): a page
     /// dragged partway in is already showing its zone — see the class doc.
@@ -230,6 +276,8 @@ final class SnapSubtitleView: UIView {
         isActive = false
         isHidden = true
         avatarView.image = nil
+        countLabel.text = nil
+        countBadge.isHidden = true
     }
 
     private func startIfNeeded(fadingIn: Bool) {
@@ -247,6 +295,8 @@ final class SnapSubtitleView: UIView {
         label.layer.opacity = 0
         avatarView.layer.removeAllAnimations()
         avatarView.layer.opacity = 0
+        countBadge.layer.removeAllAnimations()
+        countBadge.layer.opacity = 0
     }
 
     private func presentNextCue(fadingIn: Bool) {
@@ -285,6 +335,14 @@ final class SnapSubtitleView: UIView {
         if avatarView.layer.animation(forKey: "subtitle-avatar") == nil {
             avatarView.layer.opacity = 0
             avatarView.layer.add(Self.bubbleEntrance(fadingIn: fadingIn), forKey: "subtitle-avatar")
+        }
+        // The count badge rises the same once-and-clamp way IF a count
+        // exists — inert through handoffs, hidden by backgrounding via its
+        // own model-at-0. (Same idempotent, key-guarded entrance the old
+        // count bubble used.)
+        if countLabel.text != nil, countBadge.layer.animation(forKey: "subtitle-badge") == nil {
+            countBadge.layer.opacity = 0
+            countBadge.layer.add(Self.bubbleEntrance(fadingIn: fadingIn), forKey: "subtitle-badge")
         }
         CATransaction.commit()
     }
