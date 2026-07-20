@@ -99,7 +99,7 @@ struct SnapCommentsPresentationTests {
                 thumbnailURL: nil,
                 audioText: media ? "Original audio · @ava" : nil,
                 likeCount: 0,
-                timestampText: "5d"
+                timestampText: "5 days"
             ),
             pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             videoPlayback: nil

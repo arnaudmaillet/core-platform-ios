@@ -30,15 +30,27 @@ struct FeedDisplayModelBuilderTests {
             [entry(caption: "x", publishedAt: Date(timeIntervalSince1970: 3600 - 180))],
             relativeTo: now
         )[0]
+        // The nav-pill meta line stays COMPACT ("3m").
         #expect(model.metaText == "@ava · 3m")
-        // The standalone timestamp (engaged info card) is the same compact
-        // relative form, without the handle.
-        #expect(model.timestampText == "3m")
     }
 
-    @Test func timestampTextUsesTheDayForm() {
-        let fiveDays = now.addingTimeInterval(-5 * 86_400)
-        let model = builder.build([entry(caption: "x", publishedAt: fiveDays)], relativeTo: now)[0]
-        #expect(model.timestampText == "5d")
+    /// The engaged info card's timestamp is the HUMAN-READABLE form — full
+    /// words, pluralized, with days rolling into weeks past 7 days. (The
+    /// formatter localizes; asserted against the test host's en_US.)
+    @Test func readableTimestampUsesFullWordsAndWeeks() {
+        func timestamp(_ interval: TimeInterval) -> String {
+            builder.build([entry(caption: "x", publishedAt: now.addingTimeInterval(-interval))], relativeTo: now)[0]
+                .timestampText
+        }
+        // Full words, correct pluralization…
+        #expect(timestamp(5 * 86_400) == "5 days")
+        #expect(timestamp(86_400) == "1 day")
+        #expect(timestamp(3_600) == "1 hour")
+        #expect(timestamp(5 * 60) == "5 minutes")
+        // …days roll into WEEKS past 7 days (52 days → 7 weeks, not "52 days")…
+        #expect(timestamp(52 * 86_400) == "7 weeks")
+        #expect(timestamp(7 * 86_400) == "1 week")
+        // …and the fresh edge stays "now".
+        #expect(timestamp(10) == "now")
     }
 }
