@@ -19,6 +19,24 @@ final class MapsTabCoordinator: TabCoordinator {
         identifier: AppTab.maps.rawValue
     ) { [navigationController] _ in navigationController }
 
+    /// The post-creation entry point: a top-left "+" that opens the compose
+    /// flow. Stateless (unlike the avatar, which carries image + unread state,
+    /// so the shell injects it) — the tap just fires the `.upload` route, which
+    /// the resolver presents as the compose sheet. Constructed here so the tap
+    /// is owned by the coordinator, not the map surface; the Maps package stays
+    /// navigation-agnostic. iOS 26 renders bar items in a glass bubble natively,
+    /// so no custom chrome is needed to match the header aesthetic.
+    private lazy var createPostButtonItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            image: UIImage(systemName: "plus"),
+            primaryAction: UIAction { [weak self] _ in
+                self?.container.router.route(to: .upload)
+            }
+        )
+        item.accessibilityLabel = "Create Post"
+        return item
+    }()
+
     init(container: AppContainer, profileButtonItem: UIBarButtonItem) {
         self.container = container
         self.profileButtonItem = profileButtonItem
@@ -31,6 +49,8 @@ final class MapsTabCoordinator: TabCoordinator {
         // other tab can show it and nothing needs conditional hiding. Injected
         // by the shell so the Maps package stays Profile-agnostic.
         mapViewController.navigationItem.rightBarButtonItem = profileButtonItem
+        // The post-creation "+" sits opposite the avatar, top-left.
+        mapViewController.navigationItem.leftBarButtonItem = createPostButtonItem
         navigationController.viewControllers = [mapViewController]
     }
 }
