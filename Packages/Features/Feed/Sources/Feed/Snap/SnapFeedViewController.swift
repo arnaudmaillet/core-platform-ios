@@ -1026,6 +1026,20 @@ final class SnapFeedViewController: UIViewController {
         let step = committed ? ((dy + vy * 0.2) < 0 ? 1 : -1) : 0
         let target = max(0, min(orderedIDs.count - 1, startIndex + step))
         let targetOffset = CGFloat(target) * page
+        // FOOTER MORPH, timed with the settle: if this drive commits to a
+        // page that will NOT re-engage into the sort toolbar — i.e. a media
+        // post (text posts auto-engage and keep the engaged items) — the
+        // engaged→default toolbar swap must animate HERE, concurrently with
+        // the page slide, exactly as `dismissComments` does. Otherwise the
+        // only teardown swap is `finishCommentsDisengagement`'s instant one,
+        // which snaps (visible only forward, Text→Media). Its identity-
+        // compare then no-ops once this animated swap has landed default.
+        let changesPage = step != 0 && target != startIndex
+        let targetReEngages = orderedIDs.indices.contains(target)
+            && modelsByID[orderedIDs[target]]?.mediaURL == nil
+        if changesPage && !targetReEngages {
+            setToolbarItems(defaultToolbarItems, animated: true)
+        }
         let distance = abs(collectionView.contentOffset.y - targetOffset)
         let springVelocity = distance > 0 ? min(3, abs(vy) / distance) : 0
         UIView.animate(
