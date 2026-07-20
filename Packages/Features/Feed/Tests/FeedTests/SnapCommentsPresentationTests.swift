@@ -703,9 +703,11 @@ struct SnapCommentsPresentationTests {
         // …and TOP-PINS to the card's top inset (no centering — the text
         // starts flush at the top, no artificial gap above).
         #expect(abs(caption.minY - (textInfoFrame.minY + SnapPostInfoCardView.contentInset)) < 0.5)
-        // No exit pan — the resting state is permanent.
+        // The card page-drive pan IS armed — a vertical swipe on the card
+        // drives the pager interactively (it pages, never dismisses), so a
+        // text post's resting interface arms it exactly like media.
         let pan = try #require(cell.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
-        #expect(pan.isEnabled == false)
+        #expect(pan.isEnabled == true)
         // The dead-end lock is identical to media's.
         #expect(SnapFeedCollectionView.claimsTouches(hosted))
         // The reactions rail is PRESENT on the text page — the shared
@@ -970,6 +972,45 @@ struct SnapCommentsPresentationTests {
         #expect(pushedSend.alpha == 1)
         pushed.setKeyboardOpen(true)
         #expect(pushedSend.alpha == 1)
+    }
+
+    /// TEXT-POST edge case: the bar has NO ✕ (permanent resting → `onClose`
+    /// nil) but IS a feed engagement (`onPageSwipe` wired). The keyboard-
+    /// dismiss face must still appear over an empty field with the keyboard
+    /// up — and swap to send the moment text is entered — matching the
+    /// media layout, unlike the pushed screen (which keeps permanent send).
+    @Test func textPostBarShowsKeyboardDismissWhenEmpty() throws {
+        let bar = CommentsInputBar()
+        bar.onPageSwipe = { _, _, _ in } // feed engagement, but no close (text)
+        let buttons = bar.subviews.compactMap { $0 as? UIButton }
+        let send = try #require(buttons.first { $0.accessibilityLabel == "Send comment" })
+        // The utility slot (label swaps xmark↔chevron; keyboard down here
+        // so it starts as the — hidden — ✕).
+        let utility = try #require(buttons.first { $0.accessibilityLabel == "Close comments" })
+
+        // Keyboard down: the permanent send shows; the utility is hidden
+        // (text has no ✕ to collapse to).
+        #expect(send.alpha == 1)
+        #expect(utility.alpha == 0)
+
+        // Keyboard up over an empty field: the dismiss-keyboard face — the
+        // fix (previously text forced send because it has no close handler).
+        bar.setKeyboardOpen(true)
+        #expect(utility.accessibilityLabel == "Dismiss keyboard")
+        #expect(utility.alpha == 1)
+        #expect(send.alpha == 0)
+
+        // Text entered: swaps back to send.
+        bar.draftText = "hi"
+        #expect(send.alpha == 1)
+        #expect(send.isEnabled)
+        #expect(utility.alpha == 0)
+
+        // Cleared again: back to the dismiss face.
+        bar.draftText = ""
+        #expect(utility.accessibilityLabel == "Dismiss keyboard")
+        #expect(utility.alpha == 1)
+        #expect(send.alpha == 0)
     }
 
     /// The 2-level thread order: each top-level comment immediately

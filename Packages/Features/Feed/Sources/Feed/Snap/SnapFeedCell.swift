@@ -314,12 +314,14 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func setCommentsEngaged(_ engaged: Bool) {
         guard engaged != isCommentsEngaged else { return }
         isCommentsEngaged = engaged
-        // The card's exit pan exists ONLY while engaged — the state seam
-        // is the recognizer's power switch, so no teardown path can
-        // strand an armed pan in the default feed. TEXT-ONLY posts never
-        // arm it at all: their engagement is the PERMANENT resting state
-        // (no dismissal — paging is the only way off the post).
-        cardSwipeRecognizer.isEnabled = engaged && mediaURL != nil
+        // The card's page-drive pan exists ONLY while engaged — the state
+        // seam is the recognizer's power switch, so no teardown path can
+        // strand an armed pan in the default feed. Armed on EVERY engaged
+        // post (media AND text): a vertical swipe on the card drives the
+        // pager interactively, exactly like the composer bar's — it pages,
+        // it never dismisses, so it's the right gesture on a text post's
+        // permanent resting interface too.
+        cardSwipeRecognizer.isEnabled = engaged
         let bounds = contentView.bounds
         let slot = SnapCommentsLayout.mediaSlotFrame(in: bounds, topInset: frozenInsets.top)
 

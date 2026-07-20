@@ -31,9 +31,13 @@ final class CommentsInputBar: UIView {
     /// passthrough starts the pager's own pan here) — so the bar detects it
     /// and the host drives `contentOffset` directly. `translation`/
     /// `velocity` are the pan's vertical components; up (negative) pages to
-    /// the next post. Wiring this ENABLES the drive; hosts that leave it nil
-    /// (the pushed comments screen) have no page-swipe.
-    var onPageSwipe: ((PageSwipePhase, _ translation: CGFloat, _ velocity: CGFloat) -> Void)?
+    /// the next post. Wiring this ENABLES the drive AND marks a feed
+    /// engagement (so a text post — which has no ✕ — still shows the
+    /// keyboard-dismiss face); hosts that leave it nil (the pushed comments
+    /// screen) have no page-swipe and keep a permanent send.
+    var onPageSwipe: ((PageSwipePhase, _ translation: CGFloat, _ velocity: CGFloat) -> Void)? {
+        didSet { updateTrailingButtons(animated: false) }
+    }
 
     /// Disables sending while a comment is in flight (spinner in the button).
     var isSending = false {
@@ -322,17 +326,32 @@ final class CommentsInputBar: UIView {
         textView.becomeFirstResponder()
     }
 
-    /// The trailing slot's three-state toggle (when a close handler is
-    /// wired — the pushed screen keeps its permanent send):
-    ///   keyboard CLOSED            → ✕ (collapse the engagement)
-    ///   keyboard OPEN, field empty → dismiss-keyboard chevron
+    /// The trailing slot's three-state toggle:
+    ///   keyboard OPEN, field empty → dismiss-keyboard chevron (ANY post)
     ///   keyboard OPEN, has text    → send (also while a send is in flight)
-    /// Swapped as short crossfades — the slot swap animates alpha, the
-    /// utility face's glyph swap is its own cross-dissolve — never a pop.
+    ///   keyboard CLOSED, empty     → ✕ (collapse) if closable, else send
+    /// The keyboard-dismiss face is DECOUPLED from the close handler: a
+    /// text-only post has no ✕ (permanent resting), but it still shows the
+    /// dismiss chevron over an empty field with the keyboard up — and swaps
+    /// back to send the moment text is entered. Swapped as short crossfades
+    /// — the slot swap animates alpha, the utility glyph its own
+    /// cross-dissolve — never a pop.
     private func updateTrailingButtons(animated: Bool) {
         let hasText = !textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         sendButton.isEnabled = hasText && !isSending
-        let showsSend = onClose == nil || isSending || (hasText && isKeyboardOpen)
+        // A feed engagement (media OR text) wires either the ✕ (media) or
+        // the page-swipe drive (both) — the pushed comments SCREEN wires
+        // neither and keeps a permanent send. The dismiss chevron belongs
+        // to feed engagements: it wins whenever the keyboard is up over an
+        // empty field, INCLUDING text posts (which have no ✕). Otherwise
+        // the ✕ shows only for closable (media) engagements with the
+        // keyboard down and empty; anything else is send.
+        let isFeedEngagement = onClose != nil || onPageSwipe != nil
+        let showsKeyboardDismiss = isFeedEngagement && isKeyboardOpen && !hasText
+        // The ✕ owns the slot whenever a closable (media) engagement has the
+        // keyboard DOWN — draft parked or not (send needs the keyboard up).
+        let showsClose = onClose != nil && !isKeyboardOpen
+        let showsSend = isSending || !(showsKeyboardDismiss || showsClose)
         let apply = {
             self.sendButton.alpha = showsSend ? 1 : 0
             self.closeButton.alpha = showsSend ? 0 : 1
@@ -340,7 +359,7 @@ final class CommentsInputBar: UIView {
         sendButton.isUserInteractionEnabled = showsSend
         closeButton.isUserInteractionEnabled = !showsSend
 
-        let wantsKeyboardDismiss = isKeyboardOpen && onClose != nil
+        let wantsKeyboardDismiss = showsKeyboardDismiss
         if wantsKeyboardDismiss != utilityShowsKeyboardDismiss {
             utilityShowsKeyboardDismiss = wantsKeyboardDismiss
             let swapGlyph = {
