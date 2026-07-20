@@ -434,7 +434,30 @@ final class SnapChromeView: UIView {
             .font: UIFont.preferredFont(forTextStyle: secondary ? .footnote : .body),
             .foregroundColor: secondary ? UIColor.white.withAlphaComponent(0.6) : UIColor.white,
             .shadow: shadow,
+            // GEOMETRY LOCK: every line takes the PRIMARY (body) line height —
+            // identical on every run — so a line holding only the smaller
+            // footnote timestamp (Case A's second line) still occupies a full
+            // body line. The caption block is therefore exactly two body
+            // lines tall whether the timestamp sits inline or drops below,
+            // and its bottom-pinned frame never shifts between states.
+            .paragraphStyle: captionParagraphStyle,
         ]
+    }
+
+    /// The shared paragraph style baked into every caption run. It pins the
+    /// line height to the body font's (min == max) so mixed-font lines can't
+    /// collapse, and keeps WORD WRAPPING — never a truncating mode — because
+    /// `boundingRect` refuses to wrap under `.byTruncating*` (it would report
+    /// one line for any width), and `composedCaption` already fits the text
+    /// to two lines by construction, so the label needs no truncation of its
+    /// own.
+    private static var captionParagraphStyle: NSParagraphStyle {
+        let bodyLineHeight = UIFont.preferredFont(forTextStyle: .body).lineHeight
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.minimumLineHeight = bodyLineHeight
+        paragraph.maximumLineHeight = bodyLineHeight
+        paragraph.lineBreakMode = .byWordWrapping
+        return paragraph
     }
 
     /// How many lines `string` occupies at `width` — the two-line contract's
@@ -442,9 +465,13 @@ final class SnapChromeView: UIView {
     /// can probe candidate renderings before committing one.
     static func captionLineCount(_ string: NSAttributedString, width: CGFloat) -> Int {
         guard width > 0, string.length > 0 else { return 0 }
+        // No `.usesFontLeading`: the caption's paragraph style already locks
+        // every line box to the body line height, so the measured height is a
+        // clean multiple of it — adding per-font leading would only reintroduce
+        // the mixed-font variance the lock exists to remove.
         let height = string.boundingRect(
             with: CGSize(width: width, height: .greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            options: [.usesLineFragmentOrigin],
             context: nil
         ).height
         let lineHeight = UIFont.preferredFont(forTextStyle: .body).lineHeight

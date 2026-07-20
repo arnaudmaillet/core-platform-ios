@@ -82,6 +82,41 @@ struct SnapChromeCaptionTests {
         }
     }
 
+    /// The GEOMETRY LOCK: the composed caption block is exactly two body
+    /// lines tall in EVERY case — the smaller timestamp on its own second
+    /// line (Case A) can't collapse the container below the height of a
+    /// two-line (Case B/C) caption. Measured height is identical across all
+    /// three and equals two primary-font line heights.
+    @Test func captionContainerHeightIsIdenticalAcrossCases() {
+        let bodyLineHeight = UIFont.preferredFont(forTextStyle: .body).lineHeight
+        let cases = [
+            "Golden hour.", // A — caption one line, timestamp drops below
+            "Rebuilt the whole deploy pipeline over a slow rainy weekend.", // B — inline
+            "Weekend build log: rebuilt the pipeline end to end, found two race conditions that only reproduce on cold caches, and learned more about backpressure than I ever wanted to.", // C — truncated
+        ]
+        let heights = cases.map { caption -> CGFloat in
+            let composed = SnapChromeView.composedCaption(caption, timestamp: timestamp, width: width)
+            return composed.boundingRect(
+                with: CGSize(width: width, height: .greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin],
+                context: nil
+            ).height
+        }
+        // Every case is two body lines tall — neither collapsed toward one
+        // (the Case A regression) nor grown to a third line (within half a
+        // line of exactly two, after boundingRect's constant trailing
+        // descent).
+        for height in heights {
+            #expect(height >= 2 * bodyLineHeight - 0.5)
+            #expect(height < 2.5 * bodyLineHeight)
+        }
+        // …and FLAWLESSLY IDENTICAL to each other — the geometry lock's whole
+        // point (every case ends on the footnote timestamp, so even the
+        // trailing artifact matches).
+        #expect(abs(heights[0] - heights[1]) < 0.5)
+        #expect(abs(heights[1] - heights[2]) < 0.5)
+    }
+
     /// No timestamp (or an unmeasured zero width) → the bare caption, so the
     /// label's own line cap and truncation apply unchanged.
     @Test func withoutATimestampTheCaptionIsUnchanged() {
