@@ -72,6 +72,18 @@ final class SnapChromeView: UIView {
     /// The rail's top edge as a cell-relative constant (see `buildLayout`).
     /// Optional: margins change during `init` before the layout exists.
     private var railTopConstraint: NSLayoutConstraint?
+    /// A zero-content region that RESERVES the caption's locked two-line box
+    /// on EVERY post — a real two-line media caption or an (empty) text-only
+    /// post alike. The ticker (and, riding it, the rail + "+") pins to this
+    /// guide's top rather than the caption label's, so the whole engagement
+    /// corner sits at ONE position agnostic of format: on text-only posts the
+    /// collapsed (empty) label no longer lets the "+" drop into the input
+    /// bar, and the geometry is pixel-identical to media posts by
+    /// construction (the guide's height is a pure font-derived constant).
+    private let captionFloorGuide = UILayoutGuide()
+    /// The floor guide's height constraint — its constant is the caption's
+    /// two-line box, refreshed on Dynamic Type changes alongside the caption.
+    private var captionFloorHeightConstraint: NSLayoutConstraint?
     /// Top margins beyond this are transition churn (safe-area insets
     /// re-propagating into a cell mid-flight), not a settled state — a real
     /// settled top (status bar + transparent nav bar) stays well under it
@@ -116,8 +128,11 @@ final class SnapChromeView: UIView {
         // The caption's font lives in its attributed string (see
         // `renderedCaption`), which `adjustsFontForContentSizeCategory`
         // cannot track — re-resolve on Dynamic Type changes so live and
-        // reused cells can never show two different caption sizes.
+        // reused cells can never show two different caption sizes. The floor
+        // guide's reserved height is font-derived too, so it re-resolves on
+        // the same beat.
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: SnapChromeView, _) in
+            self.captionFloorHeightConstraint?.constant = Self.captionFloorHeight
             self.renderCaption()
         }
 
@@ -164,6 +179,23 @@ final class SnapChromeView: UIView {
             captionLabel.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.lg)
         }
 
+        // The caption FLOOR: a zero-content region co-located with the
+        // caption label (same bottom, same horizontal margins) but with a
+        // FIXED two-line height, present on every format. The ticker/rail/"+"
+        // corner hangs off THIS guide's top, not the label's — so a text-only
+        // post's empty (collapsed) label can't let the corner sink into the
+        // input bar, and the corner's position is a pure font constant,
+        // pixel-identical whether the post is video, photo, or text.
+        addLayoutGuide(captionFloorGuide)
+        let floorHeight = captionFloorGuide.heightAnchor.constraint(equalToConstant: Self.captionFloorHeight)
+        captionFloorHeightConstraint = floorHeight
+        NSLayoutConstraint.activate([
+            captionFloorGuide.leadingAnchor.constraint(equalTo: captionLabel.leadingAnchor),
+            captionFloorGuide.trailingAnchor.constraint(equalTo: captionLabel.trailingAnchor),
+            captionFloorGuide.bottomAnchor.constraint(equalTo: captionLabel.bottomAnchor),
+            floorHeight,
+        ])
+
         // The comment ticker rides directly above the caption, full-width so
         // bubbles traverse the whole page. It is an overlay over the media:
         // its presence or absence never moves the caption, which keeps the
@@ -196,7 +228,11 @@ final class SnapChromeView: UIView {
             // md, not sm: the band and the caption are separate CONTAINERS
             // in the bottom stack — inter-container seams breathe at md in
             // the harmonized rhythm (sm stays the WITHIN-container gap).
-            commentTicker.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.md)
+            // Off the caption FLOOR (not the label): the fixed two-line
+            // reservation is what makes this corner format-agnostic — a
+            // collapsed text-only caption reserves the same box a two-line
+            // media caption fills, so the band never sinks toward the bar.
+            commentTicker.bottomAnchor.constraint(equalTo: captionFloorGuide.topAnchor, constant: -Spacing.md)
         }
 
         // The shortcut rail owns the trailing column, layered OVER the
@@ -458,6 +494,16 @@ final class SnapChromeView: UIView {
         paragraph.maximumLineHeight = bodyLineHeight
         paragraph.lineBreakMode = .byWordWrapping
         return paragraph
+    }
+
+    /// The caption's locked box height — exactly TWO primary (body) lines,
+    /// matching the composed caption's geometry lock. Reserved by
+    /// `captionFloorGuide` on every format so the engagement corner (ticker /
+    /// rail / "+") is anchored to a single font-derived constant, agnostic of
+    /// whether the caption is a real two-line media caption or a collapsed
+    /// text-only placeholder.
+    static var captionFloorHeight: CGFloat {
+        2 * UIFont.preferredFont(forTextStyle: .body).lineHeight
     }
 
     /// How many lines `string` occupies at `width` — the two-line contract's
