@@ -35,6 +35,11 @@ public struct FeedItemDisplayModel: Identifiable, Sendable {
     /// updates supersede it via the realtime plane). Rendered by the
     /// engaged card's metrics row.
     let likeCount: Int64
+    /// The post's age as a compact relative string ("now"/"3m"/"5h"/"5d"),
+    /// the design system's timestamp form (the nav pill and comment rows
+    /// use the same). Rendered leading on the engaged info card's actions
+    /// row. Empty only for models built outside the feed builder (tests).
+    let timestampText: String
 
     init(
         id: PostID,
@@ -47,7 +52,8 @@ public struct FeedItemDisplayModel: Identifiable, Sendable {
         mediaKind: MediaKind,
         thumbnailURL: URL?,
         audioText: String?,
-        likeCount: Int64 = 0
+        likeCount: Int64 = 0,
+        timestampText: String = ""
     ) {
         self.id = id
         self.authorID = authorID
@@ -60,6 +66,7 @@ public struct FeedItemDisplayModel: Identifiable, Sendable {
         self.thumbnailURL = thumbnailURL
         self.audioText = audioText
         self.likeCount = likeCount
+        self.timestampText = timestampText
     }
 }
 
@@ -88,10 +95,14 @@ public struct FeedDisplayModelBuilder: Sendable {
             thumbnailURL: attachment?.thumbnailURL,
             audioText: (attachment != nil && mediaKind == .video)
                 ? "Original audio · @\(entry.author.handle)" : nil,
-            likeCount: entry.likeCount
+            likeCount: entry.likeCount,
+            timestampText: Self.readableTimestamp(from: entry.post.publishedAt, to: now)
         )
     }
 
+    /// The COMPACT relative age ("now"/"3m"/"5h"/"5d") — the nav pill and
+    /// the comment rows' register. Kept terse: it rides inside the
+    /// "@handle · 3m" meta line where space is scarce.
     private static func relativeTime(from date: Date, to now: Date) -> String {
         let seconds = max(0, now.timeIntervalSince(date))
         switch seconds {
@@ -100,5 +111,28 @@ public struct FeedDisplayModelBuilder: Sendable {
         case ..<86_400: return "\(Int(seconds / 3600))h"
         default: return "\(Int(seconds / 86_400))d"
         }
+    }
+
+    /// The HUMAN-READABLE age for the engaged info card ("5 minutes",
+    /// "1 hour", "5 days", "7 weeks") — full words, pluralized and
+    /// localized by `DateComponentsFormatter`, with days rolling into
+    /// weeks past 7 days (52 days reads "7 weeks", never "52 days"). The
+    /// unit is chosen HERE (one explicit component) so the day→week
+    /// threshold is exact; the formatter only supplies the localized,
+    /// correctly-pluralized word.
+    static func readableTimestamp(from date: Date, to now: Date) -> String {
+        let seconds = Int(max(0, now.timeIntervalSince(date)))
+        if seconds < 60 { return "now" }
+        var components = DateComponents()
+        switch seconds {
+        case ..<3_600: components.minute = seconds / 60
+        case ..<86_400: components.hour = seconds / 3_600
+        case ..<604_800: components.day = seconds / 86_400        // 1–6 days
+        default: components.weekOfMonth = seconds / 604_800       // 7+ days → weeks
+        }
+        let formatter = DateComponentsFormatter()
+        formatter.unitsStyle = .full // "5 days", not "5d"
+        formatter.maximumUnitCount = 1
+        return formatter.string(from: components) ?? "now"
     }
 }

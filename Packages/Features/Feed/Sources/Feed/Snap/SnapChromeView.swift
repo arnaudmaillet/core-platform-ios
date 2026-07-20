@@ -1,5 +1,6 @@
 import CoreModels
 import DesignSystem
+import MediaCore
 import UIKit
 
 /// The snap *page's* UI chrome — the caption over the bottom scrim.
@@ -72,6 +73,18 @@ final class SnapChromeView: UIView {
     /// The rail's top edge as a cell-relative constant (see `buildLayout`).
     /// Optional: margins change during `init` before the layout exists.
     private var railTopConstraint: NSLayoutConstraint?
+    /// A zero-content region that RESERVES the caption's locked two-line box
+    /// on EVERY post — a real two-line media caption or an (empty) text-only
+    /// post alike. The ticker (and, riding it, the rail + "+") pins to this
+    /// guide's top rather than the caption label's, so the whole engagement
+    /// corner sits at ONE position agnostic of format: on text-only posts the
+    /// collapsed (empty) label no longer lets the "+" drop into the input
+    /// bar, and the geometry is pixel-identical to media posts by
+    /// construction (the guide's height is a pure font-derived constant).
+    private let captionFloorGuide = UILayoutGuide()
+    /// The floor guide's height constraint — its constant is the caption's
+    /// two-line box, refreshed on Dynamic Type changes alongside the caption.
+    private var captionFloorHeightConstraint: NSLayoutConstraint?
     /// Top margins beyond this are transition churn (safe-area insets
     /// re-propagating into a cell mid-flight), not a settled state — a real
     /// settled top (status bar + transparent nav bar) stays well under it
@@ -116,8 +129,11 @@ final class SnapChromeView: UIView {
         // The caption's font lives in its attributed string (see
         // `renderedCaption`), which `adjustsFontForContentSizeCategory`
         // cannot track — re-resolve on Dynamic Type changes so live and
-        // reused cells can never show two different caption sizes.
+        // reused cells can never show two different caption sizes. The floor
+        // guide's reserved height is font-derived too, so it re-resolves on
+        // the same beat.
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: SnapChromeView, _) in
+            self.captionFloorHeightConstraint?.constant = Self.captionFloorHeight
             self.renderCaption()
         }
 
@@ -164,6 +180,23 @@ final class SnapChromeView: UIView {
             captionLabel.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.lg)
         }
 
+        // The caption FLOOR: a zero-content region co-located with the
+        // caption label (same bottom, same horizontal margins) but with a
+        // FIXED two-line height, present on every format. The ticker/rail/"+"
+        // corner hangs off THIS guide's top, not the label's — so a text-only
+        // post's empty (collapsed) label can't let the corner sink into the
+        // input bar, and the corner's position is a pure font constant,
+        // pixel-identical whether the post is video, photo, or text.
+        addLayoutGuide(captionFloorGuide)
+        let floorHeight = captionFloorGuide.heightAnchor.constraint(equalToConstant: Self.captionFloorHeight)
+        captionFloorHeightConstraint = floorHeight
+        NSLayoutConstraint.activate([
+            captionFloorGuide.leadingAnchor.constraint(equalTo: captionLabel.leadingAnchor),
+            captionFloorGuide.trailingAnchor.constraint(equalTo: captionLabel.trailingAnchor),
+            captionFloorGuide.bottomAnchor.constraint(equalTo: captionLabel.bottomAnchor),
+            floorHeight,
+        ])
+
         // The comment ticker rides directly above the caption, full-width so
         // bubbles traverse the whole page. It is an overlay over the media:
         // its presence or absence never moves the caption, which keeps the
@@ -196,7 +229,11 @@ final class SnapChromeView: UIView {
             // md, not sm: the band and the caption are separate CONTAINERS
             // in the bottom stack — inter-container seams breathe at md in
             // the harmonized rhythm (sm stays the WITHIN-container gap).
-            commentTicker.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.md)
+            // Off the caption FLOOR (not the label): the fixed two-line
+            // reservation is what makes this corner format-agnostic — a
+            // collapsed text-only caption reserves the same box a two-line
+            // media caption fills, so the band never sinks toward the bar.
+            commentTicker.bottomAnchor.constraint(equalTo: captionFloorGuide.topAnchor, constant: -Spacing.md)
         }
 
         // The shortcut rail owns the trailing column, layered OVER the
@@ -300,6 +337,14 @@ final class SnapChromeView: UIView {
         super.layoutSubviews()
         shortcutRail.bottomReservedInset = commentTicker.bounds.height
 
+        // The caption's two-line/timestamp composition is width-dependent —
+        // re-resolve it once the label has a (new) real width. Guarded on the
+        // width so the re-render (which invalidates layout) converges in one
+        // extra pass instead of looping.
+        if captionLabel.bounds.width != lastRenderedCaptionWidth {
+            renderCaption()
+        }
+
         let top = layoutMargins.top
         guard top <= Self.maxSettledTopMargin, commentTicker.frame.maxY > 0 else { return }
         let base = top + Spacing.sm
@@ -342,25 +387,32 @@ final class SnapChromeView: UIView {
     func configure(with model: FeedItemDisplayModel) {
         representedID = model.id
 
-        // Text-only posts render an EMPTY shell (product call, 2026-07-14):
-        // no caption, no scrim, no ticker — just the black page under the
-        // screen chrome (identity pill, toolbar attribution), until their
-        // dedicated layout arrives with the Phase 2/3 cell split. `hasMedia`
-        // therefore gates every piece of page content at once.
+        // Text-only posts drop the MEDIA comment surfaces — the danmaku
+        // ticker, the subtitle zone, the scrim over the (absent) media —
+        // since those overlay a full-bleed image the page doesn't have.
+        // But the ACTION COLUMN (reactions rail + "+") is format-agnostic
+        // chrome: it stays visible on every post type, exactly as the
+        // engaged layout floats over it identically on all of them.
         hasMedia = model.mediaURL != nil
         scrimView.isHidden = !hasMedia
+        // Set the timestamp before the caption so the caption's didSet
+        // composes with both already in hand.
+        timestampText = hasMedia ? model.timestampText : nil
         caption = hasMedia ? model.caption : nil
         applyCaptionVisibility()
         if !hasMedia {
             commentTicker.setComments([])
-            composeButton.isHidden = true
             subtitleView.setCues([])
             commentEmptyState.setVisible(false)
+            // The rail's "+" persists (media refines its visibility off
+            // the ticker in `updateCommentStreams`, which text skips).
+            composeButton.isHidden = false
         }
-        // Static chrome, so it loads here (not via `updateCommentStreams`)
-        // and the flight replica shows it too — the seeded payload keeps
-        // both instances identical. Empty shell for text-only posts.
-        shortcutRail.setSymbols(hasMedia ? SnapShortcutRailView.placeholderPayload(for: model.id) : [])
+        // The reactions rail is seeded for EVERY post — the shared action
+        // column. Static chrome, so it loads here (not via
+        // `updateCommentStreams`) and the flight replica shows it too; the
+        // seeded payload keeps both instances identical.
+        shortcutRail.setSymbols(SnapShortcutRailView.placeholderPayload(for: model.id))
     }
 
     /// The raw caption, kept so Dynamic Type changes can re-resolve the
@@ -368,6 +420,20 @@ final class SnapChromeView: UIView {
     private var caption: String? {
         didSet { renderCaption() }
     }
+
+    /// The post's age ("7 weeks"), composed onto the caption under the
+    /// strict two-line contract (see `composedCaption`). Kept raw so Dynamic
+    /// Type and width changes can re-resolve the composed rendering.
+    private var timestampText: String? {
+        didSet { renderCaption() }
+    }
+
+    /// The label width the current caption rendering was composed for. The
+    /// two-line + timestamp layout is WIDTH-dependent (line counts and the
+    /// truncation point both move with it), so `layoutSubviews` re-renders
+    /// whenever the label's width changes — rotation, iPad, or the flight
+    /// replica's first real layout — and skips when it hasn't.
+    private var lastRenderedCaptionWidth: CGFloat = 0
 
     private func applyCaptionVisibility() {
         captionLabel.isHidden = caption?.isEmpty ?? true
@@ -379,25 +445,147 @@ final class SnapChromeView: UIView {
     private var hasMedia = true
 
     private func renderCaption() {
-        captionLabel.attributedText = caption.map(Self.renderedCaption)
+        lastRenderedCaptionWidth = captionLabel.bounds.width
+        captionLabel.attributedText = caption.map {
+            Self.composedCaption($0, timestamp: timestampText, width: captionLabel.bounds.width)
+        }
     }
 
-    /// The caption's attributed rendering — the single source of caption
-    /// typography for every post kind and both chrome instances (live cell
-    /// and flight replica); no caller may size it conditionally. The text
-    /// shadow lives here (an `NSShadow` drawn with the glyphs) rather than
-    /// as a `CALayer` shadow: a layer shadow on a full-width label has no
-    /// `shadowPath` and costs an offscreen pass every scrolled frame.
-    private static func renderedCaption(_ text: String) -> NSAttributedString {
+    /// The caption typography — the shared attributes for the caption glyphs
+    /// (`.body`) and, for `secondary`, the appended timestamp: a SMALLER
+    /// `.footnote` register, dimmed, so it reads as clean secondary metadata
+    /// distinctly lighter than the body text (the same footnote register the
+    /// engaged info card uses for the post age). Baked per-run so
+    /// `boundingRect` measures each font's true footprint — the two-line
+    /// truncation therefore accounts for the smaller timestamp automatically.
+    /// The text shadow lives here (an `NSShadow` drawn WITH the glyphs)
+    /// rather than as a `CALayer` shadow: a layer shadow on a full-width
+    /// label has no `shadowPath` and costs an offscreen pass every scrolled
+    /// frame.
+    private static func captionAttributes(secondary: Bool) -> [NSAttributedString.Key: Any] {
         let shadow = NSShadow()
         shadow.shadowColor = UIColor.black.withAlphaComponent(0.5)
         shadow.shadowBlurRadius = 3
         shadow.shadowOffset = .zero
-        return NSAttributedString(string: text, attributes: [
-            .font: UIFont.preferredFont(forTextStyle: .body),
-            .foregroundColor: UIColor.white,
+        return [
+            .font: UIFont.preferredFont(forTextStyle: secondary ? .footnote : .body),
+            .foregroundColor: secondary ? UIColor.white.withAlphaComponent(0.6) : UIColor.white,
             .shadow: shadow,
-        ])
+            // GEOMETRY LOCK: every line takes the PRIMARY (body) line height —
+            // identical on every run — so a line holding only the smaller
+            // footnote timestamp (Case A's second line) still occupies a full
+            // body line. The caption block is therefore exactly two body
+            // lines tall whether the timestamp sits inline or drops below,
+            // and its bottom-pinned frame never shifts between states.
+            .paragraphStyle: captionParagraphStyle,
+        ]
+    }
+
+    /// The shared paragraph style baked into every caption run. It pins the
+    /// line height to the body font's (min == max) so mixed-font lines can't
+    /// collapse, and keeps WORD WRAPPING — never a truncating mode — because
+    /// `boundingRect` refuses to wrap under `.byTruncating*` (it would report
+    /// one line for any width), and `composedCaption` already fits the text
+    /// to two lines by construction, so the label needs no truncation of its
+    /// own.
+    private static var captionParagraphStyle: NSParagraphStyle {
+        let bodyLineHeight = UIFont.preferredFont(forTextStyle: .body).lineHeight
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.minimumLineHeight = bodyLineHeight
+        paragraph.maximumLineHeight = bodyLineHeight
+        paragraph.lineBreakMode = .byWordWrapping
+        return paragraph
+    }
+
+    /// The caption's locked box height — exactly TWO primary (body) lines,
+    /// matching the composed caption's geometry lock. Reserved by
+    /// `captionFloorGuide` on every format so the engagement corner (ticker /
+    /// rail / "+") is anchored to a single font-derived constant, agnostic of
+    /// whether the caption is a real two-line media caption or a collapsed
+    /// text-only placeholder.
+    static var captionFloorHeight: CGFloat {
+        2 * UIFont.preferredFont(forTextStyle: .body).lineHeight
+    }
+
+    /// How many lines `string` occupies at `width` — the two-line contract's
+    /// yardstick. A pure measurement (no label state), so `composedCaption`
+    /// can probe candidate renderings before committing one.
+    static func captionLineCount(_ string: NSAttributedString, width: CGFloat) -> Int {
+        guard width > 0, string.length > 0 else { return 0 }
+        // No `.usesFontLeading`: the caption's paragraph style already locks
+        // every line box to the body line height, so the measured height is a
+        // clean multiple of it — adding per-font leading would only reintroduce
+        // the mixed-font variance the lock exists to remove.
+        let height = string.boundingRect(
+            with: CGSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin],
+            context: nil
+        ).height
+        let lineHeight = UIFont.preferredFont(forTextStyle: .body).lineHeight
+        return max(1, Int((height / lineHeight).rounded()))
+    }
+
+    /// The single source of caption typography for every media post and both
+    /// chrome instances (live cell + flight replica) — a PURE function of
+    /// (text, timestamp, width) so both resolve identically. It enforces a
+    /// strict two-line contract with the timestamp always visible:
+    ///
+    ///   • Case A — a single-line caption drops the timestamp onto its OWN
+    ///     second line (`caption\n7 weeks`).
+    ///   • Case B — a caption that fills two lines takes the timestamp inline
+    ///     at the end of line two (`…line two  7 weeks`).
+    ///   • Case C — a longer caption truncates early on line two so the
+    ///     ellipsis + timestamp always sit un-clipped at that line's end
+    ///     (`…cut off here…  7 weeks`).
+    ///
+    /// With no timestamp (or an unmeasured zero width) it returns the bare
+    /// caption — the label's own `numberOfLines`/truncation then applies.
+    static func composedCaption(_ caption: String, timestamp: String?, width: CGFloat) -> NSAttributedString {
+        let captionString = NSAttributedString(string: caption, attributes: captionAttributes(secondary: false))
+        guard let timestamp, !timestamp.isEmpty, width > 0 else { return captionString }
+
+        let timestampString = NSAttributedString(string: timestamp, attributes: captionAttributes(secondary: true))
+        let gap = NSAttributedString(string: "  ", attributes: captionAttributes(secondary: false))
+
+        // Case A: a single-line caption pushes the timestamp to its own line.
+        if captionLineCount(captionString, width: width) <= 1 {
+            let out = NSMutableAttributedString(attributedString: captionString)
+            out.append(NSAttributedString(string: "\n", attributes: captionAttributes(secondary: false)))
+            out.append(timestampString)
+            return out
+        }
+
+        // Case B: the whole caption plus an inline timestamp still fits two lines.
+        let inline = NSMutableAttributedString(attributedString: captionString)
+        inline.append(gap)
+        inline.append(timestampString)
+        if captionLineCount(inline, width: width) <= 2 { return inline }
+
+        // Case C: bisect for the longest caption prefix that keeps the
+        // ellipsis + timestamp inside two lines (prefix length grows the
+        // line count monotonically, so the largest fitting prefix is the
+        // truncation point).
+        let characters = Array(caption)
+        func candidate(prefixLength: Int) -> NSAttributedString {
+            let prefix = String(characters[0..<prefixLength])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let out = NSMutableAttributedString(
+                string: prefix + "… ", attributes: captionAttributes(secondary: false)
+            )
+            out.append(timestampString)
+            return out
+        }
+        var low = 0, high = characters.count, best = 0
+        while low <= high {
+            let mid = (low + high) / 2
+            if captionLineCount(candidate(prefixLength: mid), width: width) <= 2 {
+                best = mid
+                low = mid + 1
+            } else {
+                high = mid - 1
+            }
+        }
+        return candidate(prefixLength: best)
     }
 
     /// Replaces both comment surfaces' content (the ticker's wrap-around
@@ -429,6 +617,15 @@ final class SnapChromeView: UIView {
     /// `setTickerStreaming`).
     func setTickerActive(_ active: Bool) {
         commentTicker.setActive(active)
+    }
+
+    /// The image pipeline the comment surfaces load author avatars through —
+    /// forwarded to the ticker and the subtitle zone (both render an avatar
+    /// leading their comment content). Set at configure, before any stream
+    /// arrives via `updateCommentStreams`.
+    func setImagePipeline(_ pipeline: ImagePipeline) {
+        commentTicker.setImagePipeline(pipeline)
+        subtitleView.setImagePipeline(pipeline)
     }
 
     /// How much trailing width the engaged comments content must reserve

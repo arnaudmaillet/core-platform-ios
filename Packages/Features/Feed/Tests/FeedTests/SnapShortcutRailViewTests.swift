@@ -299,6 +299,42 @@ struct SnapShortcutRailViewTests {
         #expect(remainder < 0.34 || remainder > SnapShortcutRailView.step - 0.34)
     }
 
+    /// STRUCTURAL SYMMETRY: the reactions rail and its "+" sit at the EXACT
+    /// same coordinates whether the post carries media or is text-only. The
+    /// caption floor reserves the two-line box on every format, so the
+    /// engagement corner never depends on the caption's (collapsed, on text)
+    /// height — and the "+" is lifted clear of the caption box, never sinking
+    /// into the input bar below it.
+    @Test func railAndComposeAreFormatAgnostic() throws {
+        func corner(mediaURL: URL?) throws -> (rail: CGRect, compose: CGRect) {
+            let chrome = SnapChromeView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+            chrome.setFixedInsets(UIEdgeInsets(top: 103, left: 0, bottom: 34, right: 0))
+            chrome.configure(with: FeedItemDisplayModel(
+                id: PostID("post-1"), authorID: ProfileID("profile-1"),
+                authorName: "Ana", metaText: "@ana · 3m", avatarURL: nil,
+                caption: "A caption long enough to fill both of its lines beside the reserved floor.",
+                mediaURL: mediaURL, mediaKind: .image, thumbnailURL: nil, audioText: nil
+            ))
+            chrome.layoutIfNeeded()
+            let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
+            let compose = try #require(chrome.subviews.compactMap { $0 as? SnapRailComposeButton }.first)
+            return (rail.frame, compose.frame)
+        }
+        let media = try corner(mediaURL: URL(string: "mock://media/1"))
+        let text = try corner(mediaURL: nil)
+
+        // Pixel-identical rail + "+" across formats — one unified anchor.
+        #expect(media.rail == text.rail)
+        #expect(media.compose == text.compose)
+
+        // Collision guard: the "+" bottom clears the caption's reserved floor
+        // entirely (its box sits ABOVE the two-line caption region), so on a
+        // text-only post it can't overlap the input bar docked below.
+        let captionBoxTop = 844 - 34 - Spacing.xl - SnapChromeView.captionFloorHeight
+        #expect(media.compose.maxY <= captionBoxTop + 0.5)
+        #expect(text.compose.maxY <= captionBoxTop + 0.5)
+    }
+
     @Test func topExitInterpolationIsPureOnTheDetentGrid() {
         // A rail whose headroom IS grid-aligned (the chrome's invariant):
         // 132 resting + 16 fade + 288 headroom (= 6 detents) = 436.
@@ -460,7 +496,12 @@ struct SnapShortcutRailViewTests {
         #expect(chrome.insetsLayoutMarginsFromSafeArea == false)
     }
 
-    @Test func textOnlyPostsKeepTheEmptyShell() throws {
+    /// The reactions rail is FORMAT-AGNOSTIC chrome — it persists on a
+    /// text-only post exactly as on media (the shared action column the
+    /// engaged layout floats over). The media danmaku surfaces (ticker,
+    /// subtitle) still drop for text, but the rail stays and reserves its
+    /// trailing exclusion column.
+    @Test func textOnlyPostsKeepTheReactionsRail() throws {
         let chrome = SnapChromeView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         chrome.configure(with: FeedItemDisplayModel(
             id: PostID("post-2"),
@@ -474,7 +515,9 @@ struct SnapShortcutRailViewTests {
             thumbnailURL: nil,
             audioText: nil
         ))
+        chrome.layoutIfNeeded()
         let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
-        #expect(rail.isHidden == true)
+        #expect(rail.isHidden == false)
+        #expect(chrome.railExclusionWidth > 0)
     }
 }

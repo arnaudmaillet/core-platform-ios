@@ -12,11 +12,15 @@ public struct SubtitleCue: Equatable, Sendable, Identifiable {
     /// populate this and scheduling moves onto the player clock
     /// (`SnapSubtitleView` keeps rendering "the current cue" either way).
     public let at: TimeInterval?
+    /// The comment author's avatar, shown leading the cue pill. Optional — a
+    /// missing/unhydrated author renders the zone's placeholder circle.
+    public let avatarURL: URL?
 
-    public init(id: String, text: String, at: TimeInterval? = nil) {
+    public init(id: String, text: String, at: TimeInterval? = nil, avatarURL: URL? = nil) {
         self.id = id
         self.text = text
         self.at = at
+        self.avatarURL = avatarURL
     }
 }
 
@@ -63,7 +67,7 @@ public struct SubtitleCommentBuilder: Sendable {
                   !Self.isClaimedByTicker(body),
                   Self.isSemanticShaped(body),
                   seenBodies.insert(body.lowercased()).inserted else { continue }
-            cues.append(SubtitleCue(id: entry.id, text: body))
+            cues.append(SubtitleCue(id: entry.id, text: body, avatarURL: entry.authorAvatarURL))
         }
         guard cues.count >= Self.minCueCount else { return [] }
         // Delivery (recency) order, deliberately unshuffled: the band

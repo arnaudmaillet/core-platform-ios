@@ -7,7 +7,10 @@ public enum PostDetailMode: Sendable, Equatable {
     /// arriving at a post you can't already see (e.g. from a notification).
     case full
     /// Comments + compose bar only, no post header/media — used from the snap
-    /// feed, where the post is already full-screen.
+    /// feed, where the post is already full-screen. Text-only snap pages use
+    /// this mode too: their engagement is pixel-identical to the media
+    /// layouts' (the floating card simply has an empty media slot), so one
+    /// mode serves every hosted engagement.
     case commentsOnly
 }
 

@@ -85,7 +85,7 @@ struct SnapSubtitleViewTests {
 
         view.setActive(false)
         #expect(cueAnimation(view) == nil)
-        #expect(view.subviews.allSatisfy { $0.layer.opacity == 0 })
+        #expect(contentLayers(view).allSatisfy { $0.opacity == 0 })
     }
 
     @Test func reuseResetClearsContentAndAnimation() {
@@ -95,7 +95,7 @@ struct SnapSubtitleViewTests {
         view.reset()
         #expect(cueAnimation(view) == nil)
         #expect(view.isHidden)
-        #expect(view.subviews.allSatisfy { $0.layer.opacity == 0 })
+        #expect(contentLayers(view).allSatisfy { $0.opacity == 0 })
     }
 
     @Test func emptyCueListKeepsTheZoneHidden() {
@@ -105,16 +105,37 @@ struct SnapSubtitleViewTests {
         #expect(cueAnimation(view) == nil)
     }
 
-    // MARK: - Count bubble
+    // MARK: - Author avatar
 
-    private func bubble(_ view: SnapSubtitleView) -> UIVisualEffectView? {
-        view.subviews.compactMap { $0 as? UIVisualEffectView }.first
+    /// The non-clipping wrapper that leads the row and anchors the avatar +
+    /// badge.
+    private func avatarContainer(_ view: SnapSubtitleView) -> UIView? {
+        view.subviews.first { $0.accessibilityIdentifier == "subtitle-avatar-container" }
     }
 
-    /// The bubble's one-shot entrance matches the first cue's kind — fade
+    /// The leading avatar (an `AvatarImageView`, i.e. a `UIImageView`) —
+    /// nested inside the wrapper.
+    private func avatar(_ view: SnapSubtitleView) -> UIImageView? {
+        avatarContainer(view)?.subviews.compactMap { $0 as? UIImageView }.first
+    }
+
+    /// The count badge, nested inside the wrapper.
+    private func countBadge(_ view: SnapSubtitleView) -> UIView? {
+        avatarContainer(view)?.subviews.first { $0.accessibilityIdentifier == "subtitle-count-badge" }
+    }
+
+    /// The cue-cycle content whose opacity rides the fade — pill, avatar,
+    /// badge. The wrapper itself is a static layout anchor (opacity 1) and
+    /// is deliberately excluded.
+    private func contentLayers(_ view: SnapSubtitleView) -> [CALayer] {
+        [view.subviews.compactMap { $0 as? UILabel }.first, avatar(view), countBadge(view)]
+            .compactMap { $0?.layer }
+    }
+
+    /// The avatar's one-shot entrance matches the first cue's kind — fade
     /// envelope or immediate clamp — and either way ends AT 1 and fills
     /// forwards: its hold is the page's visible lifetime.
-    @Test func bubbleEntranceMatchesTheCueEntranceKind() {
+    @Test func avatarEntranceMatchesTheCueEntranceKind() {
         let fade = SnapSubtitleView.bubbleEntrance(fadingIn: true)
         #expect((fade.values as? [NSNumber])?.map(\.doubleValue) == [0, 0, 1])
         #expect(fade.fillMode == .forwards)
@@ -128,43 +149,85 @@ struct SnapSubtitleViewTests {
         #expect(!instant.isRemovedOnCompletion)
     }
 
-    @Test func activationRaisesTheBubbleOnlyWhenACountExists() {
-        let counted = makeView([cue("a"), cue("b"), cue("c")])
-        counted.setCommentCount(24)
-        counted.setActive(true)
-        #expect(bubble(counted)?.layer.animation(forKey: "subtitle-count") != nil)
+    /// The avatar carries author identity, so it rises whenever cues do —
+    /// with the first cue, no longer gated on a comment count. An idle
+    /// (never-activated) zone keeps it down.
+    @Test func activationRaisesTheAvatarWithTheFirstCue() {
+        let active = makeView([cue("a"), cue("b"), cue("c")])
+        active.setActive(true)
+        #expect(avatar(active)?.layer.animation(forKey: "subtitle-avatar") != nil)
 
-        let uncounted = makeView([cue("a"), cue("b"), cue("c")])
-        uncounted.setActive(true)
-        #expect(bubble(uncounted)?.layer.animation(forKey: "subtitle-count") == nil)
+        let idle = makeView([cue("a"), cue("b"), cue("c")])
+        #expect(avatar(idle)?.layer.animation(forKey: "subtitle-avatar") == nil)
     }
 
-    /// The vertical alignment invariant: bubble and pill share the zone's
-    /// bottom edge, so a two-line cue grows the pill upward while the
-    /// bubble holds its ground — never centered, never at the top.
-    @Test func bubbleBottomAlignsWithThePillAcrossLineWraps() {
+    /// The fixed-anchor contract: the avatar WRAPPER is a ROCK-SOLID anchor
+    /// at the zone's center — its frame is IDENTICAL whether the cue is one
+    /// line or two — while the pill is the dynamic element, centered on the
+    /// wrapper (so it expands symmetrically) and flowing off its trailing
+    /// edge (line two beside the avatar, never under it).
+    @Test func avatarBlockStaysFixedWhileTextCentersOnIt() throws {
         let view = makeView([cue("a")])
-        view.setCommentCount(24)
         let oneLine = SubtitleCue(id: "one", text: "Short cue.")
         let twoLine = SubtitleCue(
             id: "two",
             text: "A deliberately much longer semantic comment that has no chance of fitting on a single rendered line at this width."
         )
 
+        var containerFrames: [CGRect] = []
+        var badgeFrames: [CGRect] = []
         for probe in [oneLine, twoLine] {
+            view.setCommentCount(24)
             view.setCues([probe, cue("b"), cue("c")])
             view.setActive(true)
             view.layoutIfNeeded()
-            let pill = view.subviews.compactMap { $0 as? UILabel }.first
-            let chip = bubble(view)
-            #expect(pill != nil && chip != nil)
-            if let pill, let chip {
-                #expect(abs(pill.frame.maxY - chip.frame.maxY) < 0.5)
-                #expect(chip.frame.minX == 0) // bubble leads the row
-                #expect(pill.frame.minX > chip.frame.maxX) // pill flows after it
-            }
+            let pill = try #require(view.subviews.compactMap { $0 as? UILabel }.first)
+            let container = try #require(avatarContainer(view))
+            let badge = try #require(countBadge(view))
+            #expect(container.frame.minX == 0)                          // wrapper leads the row
+            #expect(abs(container.frame.midY - pill.frame.midY) < 0.5)  // pill centers on the wrapper
+            #expect(pill.frame.minX > container.frame.maxX)             // text flows off the wrapper's edge
+            // The avatar fills the wrapper exactly (its own round clip).
+            let circle = try #require(avatar(view))
+            #expect(circle.frame.size == container.bounds.size)
+            containerFrames.append(container.frame)
+            badgeFrames.append(view.convert(badge.frame, from: badge.superview))
             view.setActive(false)
         }
+
+        // The whole avatar block — wrapper AND its overflowing badge — sits
+        // at the EXACT same coordinates for a one-line and a two-line cue.
+        #expect(containerFrames[0] == containerFrames[1])
+        #expect(badgeFrames[0] == badgeFrames[1])
+    }
+
+    /// The count badge sits on the wrapper's BOTTOM-RIGHT corner and
+    /// deliberately OVERFLOWS it (offset down-and-right past the avatar's
+    /// bounds — the wrapper doesn't clip), carries the count, and rises with
+    /// the first cue. A zero count keeps it hidden.
+    @Test func countBadgeOverflowsTheAvatarBottomRight() throws {
+        let view = makeView([cue("a"), cue("b"), cue("c")])
+        view.setCommentCount(24)
+        view.setActive(true)
+        view.layoutIfNeeded()
+
+        let container = try #require(avatarContainer(view))
+        let badge = try #require(countBadge(view))
+        let count = badge.subviews.compactMap { $0 as? UILabel }.first
+        #expect(badge.isHidden == false)
+        #expect(count?.text == "24")
+        #expect(badge.layer.animation(forKey: "subtitle-badge") != nil) // rose with the cue
+        #expect(container.clipsToBounds == false)                       // so the badge can bleed out
+        // Bottom-right, bled PAST the avatar's bounds (in the wrapper's own
+        // coordinate space its bounds are the avatar box).
+        #expect(badge.frame.maxX > container.bounds.width)
+        #expect(badge.frame.maxY > container.bounds.height)
+
+        // A zero count keeps the badge down.
+        let uncounted = makeView([cue("a"), cue("b"), cue("c")])
+        uncounted.setCommentCount(0)
+        uncounted.setActive(true)
+        #expect(countBadge(uncounted)?.isHidden == true)
     }
 
     @Test func countTextFormatsCompactly() {

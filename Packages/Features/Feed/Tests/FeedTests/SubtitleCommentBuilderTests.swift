@@ -29,6 +29,23 @@ struct SubtitleCommentBuilderTests {
         #expect(dense.count == SubtitleCommentBuilder.minCueCount)
     }
 
+    /// The author's avatar rides from the comment entry into the cue, so the
+    /// subtitle zone can draw it leading the text.
+    @Test func carriesTheAuthorAvatarIntoTheCue() {
+        let url = URL(string: "mock://avatar/5?w=128&h=128")!
+        let entries = (0..<SubtitleCommentBuilder.minCueCount).map { index in
+            CommentEntry(
+                id: "s\(index)", authorID: ProfileID("p\(index)"), authorName: "Ava",
+                authorHandle: "ava", authorAvatarURL: url,
+                body: "This is a longer thought number \(index) worth reading.",
+                createdAt: Date(timeIntervalSince1970: 1000)
+            )
+        }
+        let cues = builder.build(entries, postID: PostID("post-1"))
+        #expect(!cues.isEmpty)
+        #expect(cues.allSatisfy { $0.avatarURL == url })
+    }
+
     /// One comment, one surface: anything the ticker admits never becomes a
     /// cue — including short slang the band takes via the word cap.
     @Test func tickerClaimedBodiesNeverBecomeCues() {

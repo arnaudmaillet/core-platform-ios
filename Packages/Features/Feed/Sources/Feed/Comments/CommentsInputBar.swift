@@ -20,14 +20,24 @@ final class CommentsInputBar: UIView {
     var onClose: (() -> Void)? {
         didSet { updateTrailingButtons(animated: false) }
     }
-    /// A decisive vertical swipe anywhere on the bar (field, buttons, gaps):
-    /// the engaged context's swipe exit. Direction is +1 for an upward
-    /// swipe (next post), -1 downward (previous). The bar OWNS this pan
-    /// because the feed pager cannot reliably wrest a drag from the
-    /// text-input stack (empirically: neither cancellation opt-in nor
-    /// arbitration passthrough gets the pager's pan going here) — so the
-    /// bar detects the gesture and the host pages programmatically.
-    var onSwipeExit: ((Int) -> Void)?
+    /// One phase of an interactive vertical page-swipe born on the bar.
+    enum PageSwipePhase { case began, changed, ended }
+    /// A vertical drag anywhere on the bar (field, buttons, gaps) drives the
+    /// feed pager INTERACTIVELY — the bar forwards the raw translation and
+    /// velocity, and the host offsets the parent scroll view in real time
+    /// (the finger-linked page drag), settling on release. The bar OWNS the
+    /// pan because the feed pager cannot wrest a drag from the text-input
+    /// stack (empirically: neither cancellation opt-in nor arbitration
+    /// passthrough starts the pager's own pan here) — so the bar detects it
+    /// and the host drives `contentOffset` directly. `translation`/
+    /// `velocity` are the pan's vertical components; up (negative) pages to
+    /// the next post. Wiring this ENABLES the drive AND marks a feed
+    /// engagement (so a text post — which has no ✕ — still shows the
+    /// keyboard-dismiss face); hosts that leave it nil (the pushed comments
+    /// screen) have no page-swipe and keep a permanent send.
+    var onPageSwipe: ((PageSwipePhase, _ translation: CGFloat, _ velocity: CGFloat) -> Void)? {
+        didSet { updateTrailingButtons(animated: false) }
+    }
 
     /// Disables sending while a comment is in flight (spinner in the button).
     var isSending = false {
@@ -204,39 +214,32 @@ final class CommentsInputBar: UIView {
     }
 
     @objc private func handleSwipe(_ pan: UIPanGestureRecognizer) {
-        guard onSwipeExit != nil else { return } // pushed screen: no exit, no nudge
+        // No drive on the pushed screen (no page-swipe), and NOT while the
+        // keyboard is up — a downward drag there is a keyboard dismissal,
+        // not a page change (the list's interactive dismiss handles that).
+        guard onPageSwipe != nil, !isKeyboardOpen else { return }
         let dy = pan.translation(in: self).y
+        let vy = pan.velocity(in: self).y
         switch pan.state {
+        case .began:
+            // The whole engaged layer (media card, comments, THIS bar — all
+            // in the leaving cell) rides the pager's contentOffset from
+            // here on; the bar no longer self-nudges (that would double the
+            // motion).
+            onPageSwipe?(.began, 0, 0)
         case .changed:
-            // Finger-connected: the bar rides the drag (damped) instead of
-            // waiting inert for the release — the physical half of the
-            // swipe exit; the page change itself stays programmatic and
-            // fires only on commit.
-            transform = CGAffineTransform(translationX: 0, y: Self.nudgeOffset(for: dy))
+            onPageSwipe?(.changed, dy, vy)
         case .ended:
-            let vy = pan.velocity(in: self).y
-            settleNudge()
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-gesture-log") {
-                print("GESTURELOG: bar pan ended dy=\(dy) vy=\(vy)")
+                print("GESTURELOG: bar page-swipe ended dy=\(dy) vy=\(vy)")
             }
             #endif
-            if abs(dy) > 50 || abs(vy) > 300 {
-                onSwipeExit?((dy + vy) < 0 ? 1 : -1)
-            }
+            onPageSwipe?(.ended, dy, vy)
         case .cancelled, .failed:
-            settleNudge()
+            onPageSwipe?(.ended, dy, vy) // release: the host settles back
         default:
             break
-        }
-    }
-
-    /// Springs the nudge home — on commit the collapse takes over the
-    /// screen while the bar quietly re-seats beneath it.
-    private func settleNudge() {
-        UIView.animate(withDuration: 0.3, delay: 0,
-                       usingSpringWithDamping: 0.8, initialSpringVelocity: 0) {
-            self.transform = .identity
         }
     }
 
@@ -323,17 +326,32 @@ final class CommentsInputBar: UIView {
         textView.becomeFirstResponder()
     }
 
-    /// The trailing slot's three-state toggle (when a close handler is
-    /// wired — the pushed screen keeps its permanent send):
-    ///   keyboard CLOSED            → ✕ (collapse the engagement)
-    ///   keyboard OPEN, field empty → dismiss-keyboard chevron
+    /// The trailing slot's three-state toggle:
+    ///   keyboard OPEN, field empty → dismiss-keyboard chevron (ANY post)
     ///   keyboard OPEN, has text    → send (also while a send is in flight)
-    /// Swapped as short crossfades — the slot swap animates alpha, the
-    /// utility face's glyph swap is its own cross-dissolve — never a pop.
+    ///   keyboard CLOSED, empty     → ✕ (collapse) if closable, else send
+    /// The keyboard-dismiss face is DECOUPLED from the close handler: a
+    /// text-only post has no ✕ (permanent resting), but it still shows the
+    /// dismiss chevron over an empty field with the keyboard up — and swaps
+    /// back to send the moment text is entered. Swapped as short crossfades
+    /// — the slot swap animates alpha, the utility glyph its own
+    /// cross-dissolve — never a pop.
     private func updateTrailingButtons(animated: Bool) {
         let hasText = !textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         sendButton.isEnabled = hasText && !isSending
-        let showsSend = onClose == nil || isSending || (hasText && isKeyboardOpen)
+        // A feed engagement (media OR text) wires either the ✕ (media) or
+        // the page-swipe drive (both) — the pushed comments SCREEN wires
+        // neither and keeps a permanent send. The dismiss chevron belongs
+        // to feed engagements: it wins whenever the keyboard is up over an
+        // empty field, INCLUDING text posts (which have no ✕). Otherwise
+        // the ✕ shows only for closable (media) engagements with the
+        // keyboard down and empty; anything else is send.
+        let isFeedEngagement = onClose != nil || onPageSwipe != nil
+        let showsKeyboardDismiss = isFeedEngagement && isKeyboardOpen && !hasText
+        // The ✕ owns the slot whenever a closable (media) engagement has the
+        // keyboard DOWN — draft parked or not (send needs the keyboard up).
+        let showsClose = onClose != nil && !isKeyboardOpen
+        let showsSend = isSending || !(showsKeyboardDismiss || showsClose)
         let apply = {
             self.sendButton.alpha = showsSend ? 1 : 0
             self.closeButton.alpha = showsSend ? 0 : 1
@@ -341,7 +359,7 @@ final class CommentsInputBar: UIView {
         sendButton.isUserInteractionEnabled = showsSend
         closeButton.isUserInteractionEnabled = !showsSend
 
-        let wantsKeyboardDismiss = isKeyboardOpen && onClose != nil
+        let wantsKeyboardDismiss = showsKeyboardDismiss
         if wantsKeyboardDismiss != utilityShowsKeyboardDismiss {
             utilityShowsKeyboardDismiss = wantsKeyboardDismiss
             let swapGlyph = {

@@ -85,6 +85,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             videoPlayback: videoPlayback,
             // The comments panel embeds the same comments-only detail the
             // `.comments` route pushes — one comments UI, two presentations.
+            // Text-only pages host the SAME panel (their engaged card
+            // carries the post, exactly like media pages).
             makeCommentsPanelContent: { postID in
                 PostDetailViewController(
                     viewModel: PostDetailViewModel(

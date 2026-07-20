@@ -1,3 +1,5 @@
+import DesignSystem
+import MediaCore
 import UIKit
 
 /// The danmaku band: `laneCount` lanes of naked micro-reaction text conveying
@@ -89,7 +91,7 @@ final class SnapCommentTickerView: UIView {
     /// the index is what makes bidirectional backfill well-defined. A class:
     /// flight bookkeeping mutates as ownership moves between CA and touch.
     private final class Bubble {
-        let label: TickerBubbleLabel
+        let view: TickerBubbleView
         let width: CGFloat
         let itemIndex: Int
         /// Where and when the current CA flight departed — the analytic
@@ -98,8 +100,8 @@ final class SnapCommentTickerView: UIView {
         var flightStartX: CGFloat = 0
         var flightStartTime: CFTimeInterval = 0
 
-        init(label: TickerBubbleLabel, width: CGFloat, itemIndex: Int) {
-            self.label = label
+        init(view: TickerBubbleView, width: CGFloat, itemIndex: Int) {
+            self.view = view
             self.width = width
             self.itemIndex = itemIndex
         }
@@ -133,10 +135,19 @@ final class SnapCommentTickerView: UIView {
     /// one must not touch a bubble a newer owner already controls.
     private var generation = 0
     private var spawnTimers: [Timer?] = Array(repeating: nil, count: SnapCommentTickerView.laneCount)
-    private var pool: [TickerBubbleLabel] = []
-    /// Measures widths without touching the pool — pre-fill and backfill must
-    /// know a bubble's width before deciding whether it is even on screen.
-    private let measuringBubble = TickerBubbleLabel()
+    private var pool: [TickerBubbleView] = []
+    /// Measures TEXT widths without touching the pool — pre-fill and backfill
+    /// must know a bubble's width before deciding whether it is even on
+    /// screen (the avatar column is a fixed addend, added in
+    /// `measuredBubbleWidth`).
+    private let measuringLabel: UILabel = {
+        let label = UILabel()
+        label.font = TickerBubbleView.font
+        return label
+    }()
+    /// The pipeline bubble avatars load through — set at configure (see
+    /// `SnapChromeView.setImagePipeline`), before any content arrives.
+    private var imagePipeline: ImagePipeline?
 
     // MARK: Interaction state
 
@@ -173,8 +184,14 @@ final class SnapCommentTickerView: UIView {
     private let animatorBag = KineticAnimatorBag()
 
     override init(frame: CGRect) {
-        bubbleHeight = ceil(UIFont.preferredFont(forTextStyle: .caption1).lineHeight)
-            + TickerBubbleLabel.textInsets.top + TickerBubbleLabel.textInsets.bottom
+        // The band height fits BOTH the caption line (+ insets) and the
+        // compact avatar, so a leading circle sits centered without growing
+        // the lane.
+        bubbleHeight = max(
+            TickerBubbleView.avatarDiameter,
+            ceil(UIFont.preferredFont(forTextStyle: .caption1).lineHeight)
+                + TickerBubbleView.textInsets.top + TickerBubbleView.textInsets.bottom
+        )
         super.init(frame: frame)
         isHidden = true
         // CLIPPED at the band's own edges: the trailing edge is no longer
@@ -241,6 +258,12 @@ final class SnapCommentTickerView: UIView {
     /// caption keeps its normal anchoring either way, since the band floats
     /// over the media and never pushes layout. Re-applying an identical queue
     /// is a no-op so cached re-deliveries don't restart a running stream.
+    /// The pipeline bubble avatars load through — set at configure, before
+    /// any content arrives (see `SnapChromeView.setImagePipeline`).
+    func setImagePipeline(_ pipeline: ImagePipeline) {
+        imagePipeline = pipeline
+    }
+
     func setComments(_ comments: [TickerCommentModel]) {
         guard comments != queue else { return }
         let wasEmpty = queue.isEmpty
@@ -317,8 +340,8 @@ final class SnapCommentTickerView: UIView {
         panRecognizer.isEnabled = true
         for lane in 0..<Self.laneCount {
             for bubble in laneBubbles[lane] {
-                bubble.label.layer.removeAllAnimations()
-                recycle(bubble.label)
+                bubble.view.layer.removeAllAnimations()
+                recycle(bubble.view)
             }
             laneBubbles[lane].removeAll()
         }
@@ -409,23 +432,24 @@ final class SnapCommentTickerView: UIView {
     private func materializeBubble(
         _ item: TickerCommentModel, atIndex itemIndex: Int, lane: Int, leftEdge: CGFloat, width: CGFloat
     ) -> Bubble {
-        let label = dequeueBubble()
-        label.text = item.text
-        label.frame = CGRect(
+        let view = dequeueBubble()
+        view.configure(text: item.text, avatarURL: item.avatarURL, pipeline: imagePipeline)
+        view.frame = CGRect(
             x: leftEdge,
             y: CGFloat(lane) * (bubbleHeight + Self.laneSpacing),
             width: width,
             height: bubbleHeight
         )
-        addSubview(label)
-        return Bubble(label: label, width: width, itemIndex: itemIndex)
+        view.layoutIfNeeded()
+        addSubview(view)
+        return Bubble(view: view, width: width, itemIndex: itemIndex)
     }
 
     /// Flies a bubble from wherever its model currently sits to the exit at
     /// the lane's constant speed — the single flight path, so pre-filled,
     /// entry-edge, and scrub-released bubbles cannot differ in velocity.
     private func animateToExit(_ bubble: Bubble, lane: Int) {
-        let layer = bubble.label.layer
+        let layer = bubble.view.layer
         let startX = layer.position.x
         let exitX = -bubble.width / 2
         guard startX > exitX else { return }
@@ -439,12 +463,12 @@ final class SnapCommentTickerView: UIView {
         flight.timingFunction = CAMediaTimingFunction(name: .linear)
 
         let flightGeneration = generation
-        let label = bubble.label
+        let view = bubble.view
         CATransaction.begin()
         CATransaction.setCompletionBlock { [weak self] in
             guard let self, flightGeneration == self.generation else { return }
-            self.laneBubbles[lane].removeAll { $0.label === label }
-            self.recycle(label)
+            self.laneBubbles[lane].removeAll { $0.view === view }
+            self.recycle(view)
         }
         // Model value rests at the exit before the animation is added, so if
         // the system strips animations the bubble sits off screen left rather
@@ -500,7 +524,7 @@ final class SnapCommentTickerView: UIView {
             CATransaction.setDisableActions(true)
             for lane in 0..<Self.laneCount {
                 for bubble in laneBubbles[lane] {
-                    let layer = bubble.label.layer
+                    let layer = bubble.view.layer
                     let frozenX = currentVisualCenterX(of: bubble, lane: lane)
                     layer.removeAnimation(forKey: "flight")
                     layer.position.x = frozenX
@@ -608,8 +632,8 @@ final class SnapCommentTickerView: UIView {
             // exit); `animateToExit` skips those — retire them here.
             var kept: [Bubble] = []
             for bubble in laneBubbles[lane] {
-                if bubble.label.layer.position.x <= -bubble.width / 2 {
-                    recycle(bubble.label)
+                if bubble.view.layer.position.x <= -bubble.width / 2 {
+                    recycle(bubble.view)
                 } else {
                     kept.append(bubble)
                 }
@@ -620,7 +644,7 @@ final class SnapCommentTickerView: UIView {
             }
             let speed = Self.laneSpeeds[lane]
             if let last = laneBubbles[lane].last {
-                let rightEdge = last.label.layer.position.x + last.width / 2
+                let rightEdge = last.view.layer.position.x + last.width / 2
                 armSpawn(lane: lane, after: TimeInterval(max(0, (rightEdge + Self.interItemGap - bandWidth) / speed)))
             } else {
                 armSpawn(lane: lane, after: 0)
@@ -639,7 +663,7 @@ final class SnapCommentTickerView: UIView {
         CATransaction.setDisableActions(true)
         for lane in 0..<Self.laneCount where !laneQueues[lane].isEmpty {
             for bubble in laneBubbles[lane] {
-                bubble.label.layer.position.x += laneDx[lane]
+                bubble.view.layer.position.x += laneDx[lane]
             }
             normalizeLaneEdges(lane, bandWidth: bandWidth)
         }
@@ -652,13 +676,13 @@ final class SnapCommentTickerView: UIView {
         // Retire beyond the margins. A right-edge retire "un-consumes" its
         // queue slot so the item reappears when scrubbed back.
         while let first = laneBubbles[lane].first,
-              first.label.layer.position.x + first.width / 2 < -Self.scrubMargin {
-            recycle(first.label)
+              first.view.layer.position.x + first.width / 2 < -Self.scrubMargin {
+            recycle(first.view)
             laneBubbles[lane].removeFirst()
         }
         while let last = laneBubbles[lane].last,
-              last.label.layer.position.x - last.width / 2 > bandWidth + Self.scrubMargin {
-            recycle(last.label)
+              last.view.layer.position.x - last.width / 2 > bandWidth + Self.scrubMargin {
+            recycle(last.view)
             laneBubbles[lane].removeLast()
             laneNextIndex[lane] = last.itemIndex
         }
@@ -674,7 +698,7 @@ final class SnapCommentTickerView: UIView {
 
         // Backfill right (scrubbing forward pulls future items in early).
         while let last = laneBubbles[lane].last {
-            let lastRight = last.label.layer.position.x + last.width / 2
+            let lastRight = last.view.layer.position.x + last.width / 2
             guard lastRight + Self.interItemGap < bandWidth + Self.scrubMargin else { break }
             let itemIndex = laneNextIndex[lane]
             let item = laneItem(lane, at: itemIndex)
@@ -687,7 +711,7 @@ final class SnapCommentTickerView: UIView {
 
         // Backfill left (scrubbing backward rewinds into already-shown items).
         while let first = laneBubbles[lane].first {
-            let firstLeft = first.label.layer.position.x - first.width / 2
+            let firstLeft = first.view.layer.position.x - first.width / 2
             guard firstLeft - Self.interItemGap > -Self.scrubMargin else { break }
             let itemIndex = wrapped(first.itemIndex - 1, count)
             let item = laneItem(lane, at: itemIndex)
@@ -773,7 +797,7 @@ final class SnapCommentTickerView: UIView {
     /// of an in-flight bubble must never be used — it rests at the exit by
     /// design.
     private func currentVisualCenterX(of bubble: Bubble, lane: Int) -> CGFloat {
-        let layer = bubble.label.layer
+        let layer = bubble.view.layer
         if let presented = layer.presentation() {
             return presented.position.x
         }
@@ -798,18 +822,23 @@ final class SnapCommentTickerView: UIView {
     }
 
     private func measuredBubbleWidth(for text: String, in bandWidth: CGFloat) -> CGFloat {
-        measuringBubble.text = text
-        let fitted = measuringBubble.sizeThatFits(CGSize(width: .greatestFiniteMagnitude, height: bubbleHeight))
-        return min(ceil(fitted.width), bandWidth * 0.9)
+        measuringLabel.text = text
+        let textWidth = measuringLabel.sizeThatFits(
+            CGSize(width: .greatestFiniteMagnitude, height: bubbleHeight)
+        ).width
+        // The avatar column (circle + gap) is a fixed leading addend; the
+        // text takes whatever remains up to the band cap.
+        let full = TickerBubbleView.avatarDiameter + TickerBubbleView.avatarGap + ceil(textWidth)
+        return min(full, bandWidth * 0.9)
     }
 
-    private func dequeueBubble() -> TickerBubbleLabel {
-        pool.popLast() ?? TickerBubbleLabel()
+    private func dequeueBubble() -> TickerBubbleView {
+        pool.popLast() ?? TickerBubbleView()
     }
 
-    private func recycle(_ bubble: TickerBubbleLabel) {
+    private func recycle(_ bubble: TickerBubbleView) {
         bubble.removeFromSuperview()
-        bubble.text = nil
+        bubble.prepareForReuse()
         // Steady state needs a handful per lane; a wide scrub can hold a few
         // more. Anything beyond is a transient and can be released.
         if pool.count < 24 { pool.append(bubble) }
@@ -895,33 +924,67 @@ private final class DisplayLinkProxy: NSObject {
     }
 }
 
-/// A pooled danmaku label: naked semibold caption text, no capsule, no
-/// border — legibility comes from the chrome's extended scrim, and
-/// deliberately NOT from `layer.shadow*` (a shadow on a moving layer forces
-/// an offscreen render pass per frame per bubble over the video).
-private final class TickerBubbleLabel: UILabel {
+/// A pooled danmaku bubble: a compact author avatar leading naked semibold
+/// caption text — a `[avatar] [text]` row. No capsule/border; legibility
+/// comes from the chrome's extended scrim, and deliberately NOT from
+/// `layer.shadow*` (a shadow on a moving layer forces an offscreen render
+/// pass per frame per bubble over the video). The whole bubble is ONE view
+/// whose layer the conveyor animates on `position.x`; the avatar and text
+/// ride it as a unit.
+private final class TickerBubbleView: UIView {
+    /// Sized to fit within the lane (the band height is derived from the
+    /// caption line + text insets, so a compact circle sits centered without
+    /// growing the band).
+    static let avatarDiameter: CGFloat = 20
+    static let avatarGap: CGFloat = 6
     static let textInsets = UIEdgeInsets(top: 3, left: 0, bottom: 3, right: 0)
+    static let font = UIFont.preferredFont(forTextStyle: .caption1).withWeight(.semibold)
+
+    private let avatarView = AvatarImageView()
+    private let label = UILabel()
+    private var avatarTask: Task<Void, Never>?
 
     init() {
         super.init(frame: .zero)
-        font = UIFont.preferredFont(forTextStyle: .caption1).withWeight(.semibold)
-        textColor = .white
-        lineBreakMode = .byTruncatingTail
         isUserInteractionEnabled = false
+        avatarView.backgroundColor = UIColor.white.withAlphaComponent(0.15)
+        addSubview(avatarView)
+        label.font = Self.font
+        label.textColor = .white
+        label.lineBreakMode = .byTruncatingTail
+        addSubview(label)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override func drawText(in rect: CGRect) {
-        super.drawText(in: rect.inset(by: Self.textInsets))
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let diameter = Self.avatarDiameter
+        avatarView.frame = CGRect(x: 0, y: (bounds.height - diameter) / 2, width: diameter, height: diameter)
+        let textX = diameter + Self.avatarGap
+        label.frame = CGRect(x: textX, y: 0, width: max(0, bounds.width - textX), height: bounds.height)
     }
 
-    override func sizeThatFits(_ size: CGSize) -> CGSize {
-        let fitted = super.sizeThatFits(size)
-        return CGSize(
-            width: fitted.width + Self.textInsets.left + Self.textInsets.right,
-            height: fitted.height + Self.textInsets.top + Self.textInsets.bottom
-        )
+    /// Sets the text and starts the avatar load (cancelling any prior). A
+    /// missing url/pipeline leaves the placeholder circle showing.
+    func configure(text: String, avatarURL: URL?, pipeline: ImagePipeline?) {
+        label.text = text
+        avatarTask?.cancel()
+        avatarView.image = nil
+        guard let avatarURL, let pipeline else { return }
+        avatarTask = Task { [weak self] in
+            guard let image = try? await pipeline.image(for: avatarURL) else { return }
+            guard !Task.isCancelled, let self else { return }
+            self.avatarView.image = image
+        }
+    }
+
+    /// Pool hygiene: cancel the in-flight avatar load and clear content.
+    func prepareForReuse() {
+        avatarTask?.cancel()
+        avatarTask = nil
+        avatarView.image = nil
+        label.text = nil
     }
 }

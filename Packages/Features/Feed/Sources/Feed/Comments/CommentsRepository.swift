@@ -16,6 +16,9 @@ public struct CommentEntry: Equatable, Sendable, Identifiable {
     public let authorID: ProfileID
     public let authorName: String
     public let authorHandle: String
+    /// The author's avatar, hydrated from profile.v1 alongside the name/handle.
+    /// Optional — an unresolved author (or one with no avatar) carries nil.
+    public let authorAvatarURL: URL?
     public let body: String
     public let createdAt: Date
     /// The parent comment's id when this entry is a level-2 reply
@@ -28,6 +31,7 @@ public struct CommentEntry: Equatable, Sendable, Identifiable {
         authorID: ProfileID,
         authorName: String,
         authorHandle: String,
+        authorAvatarURL: URL? = nil,
         body: String,
         createdAt: Date,
         parentID: String? = nil
@@ -36,6 +40,7 @@ public struct CommentEntry: Equatable, Sendable, Identifiable {
         self.authorID = authorID
         self.authorName = authorName
         self.authorHandle = authorHandle
+        self.authorAvatarURL = authorAvatarURL
         self.body = body
         self.createdAt = createdAt
         self.parentID = parentID
@@ -61,7 +66,7 @@ public actor CommentsRepository: CommentsProviding {
     private let pageSize: Int32
 
     private var viewerProfileID: ProfileID?
-    private var authorCache: [ProfileID: (name: String, handle: String)] = [:]
+    private var authorCache: [ProfileID: (name: String, handle: String, avatarURL: URL?)] = [:]
 
     public init(
         commentClient: any Comment_V1_CommentServiceClientInterface,
@@ -135,12 +140,13 @@ public actor CommentsRepository: CommentsProviding {
         switch response.result {
         case .success(let created):
             await hydrateAuthors(for: [viewer])
-            let author = authorCache[viewer] ?? (name: "You", handle: "")
+            let author = authorCache[viewer] ?? (name: "You", handle: "", avatarURL: nil)
             return CommentEntry(
                 id: created.commentID.isEmpty ? request.commentID : created.commentID,
                 authorID: viewer,
                 authorName: author.name,
                 authorHandle: author.handle,
+                authorAvatarURL: author.avatarURL,
                 body: body,
                 createdAt: Date(),
                 parentID: parentID
@@ -156,33 +162,34 @@ public actor CommentsRepository: CommentsProviding {
         let missing = Set(ids).filter { authorCache[$0] == nil && !$0.rawValue.isEmpty }
         guard !missing.isEmpty else { return }
         let client = profileClient
-        let fetched = await withTaskGroup(of: (ProfileID, String, String)?.self) { group in
+        let fetched = await withTaskGroup(of: (ProfileID, String, String, URL?)?.self) { group in
             for id in missing {
                 group.addTask {
                     var request = Profile_V1_GetProfileByIdRequest()
                     request.profileID = id.rawValue
                     let response = await client.getProfileByID(request: request, headers: [:])
                     guard let view = response.message else { return nil }
-                    return (id, view.displayName, view.handle)
+                    return (id, view.displayName, view.handle, URL(string: view.avatarURL))
                 }
             }
-            return await group.reduce(into: [(ProfileID, String, String)]()) { partial, triple in
-                if let triple { partial.append(triple) }
+            return await group.reduce(into: [(ProfileID, String, String, URL?)]()) { partial, tuple in
+                if let tuple { partial.append(tuple) }
             }
         }
-        for (id, name, handle) in fetched {
-            authorCache[id] = (name, handle)
+        for (id, name, handle, avatarURL) in fetched {
+            authorCache[id] = (name, handle, avatarURL)
         }
     }
 
     private func makeEntry(from view: Comment_V1_CommentView) -> CommentEntry {
         let authorID = ProfileID(view.authorID)
-        let author = authorCache[authorID] ?? (name: "Someone", handle: "")
+        let author = authorCache[authorID] ?? (name: "Someone", handle: "", avatarURL: nil)
         return CommentEntry(
             id: view.commentID,
             authorID: authorID,
             authorName: author.name,
             authorHandle: author.handle,
+            authorAvatarURL: author.avatarURL,
             body: view.body,
             createdAt: Date(timeIntervalSince1970: TimeInterval(view.createdAtMs) / 1000),
             parentID: view.parentID.isEmpty ? nil : view.parentID

@@ -340,10 +340,14 @@ final class PostDetailViewController: UIViewController {
         composeBar.onClose = handler
     }
 
-    /// Wires the composer's vertical swipe exit (+1 up / -1 down) — the
-    /// engaged context's page-away from the footer band.
-    func setEngagedSwipeHandler(_ handler: @escaping (Int) -> Void) {
-        composeBar.onSwipeExit = handler
+    /// Wires the composer's INTERACTIVE page-swipe — the bar forwards each
+    /// pan phase (began/changed/ended) with the raw vertical translation and
+    /// velocity, and the host drives the feed pager's `contentOffset` in
+    /// real time (finger-linked paging), settling on release.
+    func setEngagedPageSwipeHandler(
+        _ handler: @escaping (CommentsInputBar.PageSwipePhase, CGFloat, CGFloat) -> Void
+    ) {
+        composeBar.onPageSwipe = handler
     }
 
     /// The composer's entrance state for the engaged footer handoff:
