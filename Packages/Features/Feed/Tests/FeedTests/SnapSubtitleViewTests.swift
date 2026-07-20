@@ -161,13 +161,12 @@ struct SnapSubtitleViewTests {
         #expect(avatar(idle)?.layer.animation(forKey: "subtitle-avatar") == nil)
     }
 
-    /// The alignment contract: the avatar WRAPPER leads the row and CENTERS
-    /// vertically on the pill (same middle whether the cue is one line or
-    /// two), with the pill flowing to its right — measuring its gap from the
-    /// WRAPPER's edge — so a two-line cue keeps line two beside the avatar
-    /// column (aligned with line one's leading edge, never wrapping under the
-    /// circle).
-    @Test func avatarCentersVerticallyAndTextFlowsBeside() throws {
+    /// The fixed-anchor contract: the avatar WRAPPER is a ROCK-SOLID anchor
+    /// at the zone's center — its frame is IDENTICAL whether the cue is one
+    /// line or two — while the pill is the dynamic element, centered on the
+    /// wrapper (so it expands symmetrically) and flowing off its trailing
+    /// edge (line two beside the avatar, never under it).
+    @Test func avatarBlockStaysFixedWhileTextCentersOnIt() throws {
         let view = makeView([cue("a")])
         let oneLine = SubtitleCue(id: "one", text: "Short cue.")
         let twoLine = SubtitleCue(
@@ -175,20 +174,31 @@ struct SnapSubtitleViewTests {
             text: "A deliberately much longer semantic comment that has no chance of fitting on a single rendered line at this width."
         )
 
+        var containerFrames: [CGRect] = []
+        var badgeFrames: [CGRect] = []
         for probe in [oneLine, twoLine] {
+            view.setCommentCount(24)
             view.setCues([probe, cue("b"), cue("c")])
             view.setActive(true)
             view.layoutIfNeeded()
             let pill = try #require(view.subviews.compactMap { $0 as? UILabel }.first)
             let container = try #require(avatarContainer(view))
+            let badge = try #require(countBadge(view))
             #expect(container.frame.minX == 0)                          // wrapper leads the row
-            #expect(abs(container.frame.midY - pill.frame.midY) < 0.5)  // vertically centered on the pill
+            #expect(abs(container.frame.midY - pill.frame.midY) < 0.5)  // pill centers on the wrapper
             #expect(pill.frame.minX > container.frame.maxX)             // text flows off the wrapper's edge
             // The avatar fills the wrapper exactly (its own round clip).
             let circle = try #require(avatar(view))
             #expect(circle.frame.size == container.bounds.size)
+            containerFrames.append(container.frame)
+            badgeFrames.append(view.convert(badge.frame, from: badge.superview))
             view.setActive(false)
         }
+
+        // The whole avatar block — wrapper AND its overflowing badge — sits
+        // at the EXACT same coordinates for a one-line and a two-line cue.
+        #expect(containerFrames[0] == containerFrames[1])
+        #expect(badgeFrames[0] == badgeFrames[1])
     }
 
     /// The count badge sits on the wrapper's BOTTOM-RIGHT corner and

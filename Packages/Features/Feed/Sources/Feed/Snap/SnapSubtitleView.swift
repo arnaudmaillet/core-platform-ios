@@ -85,14 +85,13 @@ final class SnapSubtitleView: UIView {
     /// there is nothing to double-buffer.
     private let label = SubtitlePillLabel()
     /// The author avatar leading the cue — a compact round image at the
-    /// zone's leading edge, CENTERED vertically on the pill so it holds the
-    /// same middle whether the cue is one line or two, while the text flows
-    /// to its right (line two aligns with line one's leading edge, never
-    /// wrapping under the circle). It fades in once with the first cue (the
-    /// old count bubble's entrance envelope) and stays clamped visible; each
-    /// hard-cut handoff swaps in the new author's image, so it rides the cue
-    /// cycle rather than the flicker-free pill pipeline (a separate layer, so
-    /// it can't disturb it).
+    /// zone's leading edge, pinned (via its wrapper) to the ZONE'S fixed
+    /// center so it never moves as the cue grows from one line to two; the
+    /// text centers on it and expands symmetrically instead. It fades in once
+    /// with the first cue (the old count bubble's entrance envelope) and
+    /// stays clamped visible; each hard-cut handoff swaps in the new author's
+    /// image, so it rides the cue cycle rather than the flicker-free pill
+    /// pipeline (a separate layer, so it can't disturb it).
     private static let avatarDiameter: CGFloat = 28
     /// The single leading anchor: a non-clipping wrapper the exact size of
     /// the avatar. It — not the avatar or the text — is what centers on the
@@ -171,17 +170,20 @@ final class SnapSubtitleView: UIView {
         avatarContainerView.clipsToBounds = false
         avatarContainerView.accessibilityIdentifier = "subtitle-avatar-container"
 
-        // Horizontal flow: [avatar wrapper] [gap] [pill →]. The CONTAINER
-        // centers vertically on the pill and the pill TOP-pins, so the block
-        // grows DOWNWARD from a fixed top while the wrapper holds the pill's
-        // middle whatever its line count — and because the pill's leading is
-        // the CONTAINER'S trailing, the gap is stable regardless of the
-        // badge, and line two aligns with line one's leading edge, never
-        // wrapping under the circle. The avatar fills the wrapper (and clips
-        // itself round); the badge sits on the wrapper's bottom-right, offset
-        // OUT so it overflows for the overlapping-chip look. Every view is
-        // added BEFORE the constraints activate: they cross-reference each
-        // other (container.centerY → label.centerY, label.leading →
+        // Horizontal flow: [avatar wrapper] [gap] [pill →]. The wrapper is
+        // the ROCK-SOLID anchor: it centers on the ZONE'S fixed center (not
+        // the variable-height pill), so it — and its overflowing badge — hold
+        // the exact same coordinates whatever the cue's line count. The pill
+        // is the dynamic element: it centers on the WRAPPER, so a one-line
+        // cue sits adjacent to the static avatar and a two-line cue expands
+        // symmetrically up AND down around that same center, never nudging
+        // the avatar. The pill's leading is the wrapper's trailing, so the
+        // gap is stable and line two aligns with line one's leading edge,
+        // never wrapping under the circle. The avatar fills the wrapper (and
+        // clips itself round); the badge sits on the wrapper's bottom-right,
+        // offset OUT so it overflows for the overlapping-chip look. Every
+        // view is added BEFORE the constraints activate: they cross-reference
+        // each other (label.centerY → container.centerY, label.leading →
         // container.trailing), so none can be fully constrained until they
         // share this ancestor.
         for view in [avatarContainerView, avatarView, label, countBadge, countLabel] {
@@ -193,20 +195,24 @@ final class SnapSubtitleView: UIView {
         avatarContainerView.addSubview(countBadge) // above the avatar, may overflow
         countBadge.addSubview(countLabel)
         NSLayoutConstraint.activate([
-            // The wrapper: fixed avatar-sized box, leading, centered on the pill.
+            // The wrapper: fixed avatar-sized box, leading, pinned to the
+            // ZONE'S fixed center — the static anchor, independent of the
+            // pill's height.
             avatarContainerView.widthAnchor.constraint(equalToConstant: Self.avatarDiameter),
             avatarContainerView.heightAnchor.constraint(equalToConstant: Self.avatarDiameter),
             avatarContainerView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            avatarContainerView.centerYAnchor.constraint(equalTo: label.centerYAnchor),
+            avatarContainerView.centerYAnchor.constraint(equalTo: centerYAnchor),
             // The avatar fills the wrapper.
             avatarView.leadingAnchor.constraint(equalTo: avatarContainerView.leadingAnchor),
             avatarView.trailingAnchor.constraint(equalTo: avatarContainerView.trailingAnchor),
             avatarView.topAnchor.constraint(equalTo: avatarContainerView.topAnchor),
             avatarView.bottomAnchor.constraint(equalTo: avatarContainerView.bottomAnchor),
-            // The text measures its leading gap from the WRAPPER's edge.
+            // The text is the dynamic element: it measures its leading gap
+            // from the WRAPPER's edge and CENTERS on the wrapper, so it grows
+            // symmetrically up/down while the avatar stays put.
             label.leadingAnchor.constraint(equalTo: avatarContainerView.trailingAnchor, constant: Spacing.sm),
             label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
-            label.topAnchor.constraint(equalTo: topAnchor),
+            label.centerYAnchor.constraint(equalTo: avatarContainerView.centerYAnchor),
 
             // Badge: capsule of fixed height, min-width == height (a circle
             // for one digit), hugging its count with small side padding, and
