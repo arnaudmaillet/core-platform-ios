@@ -1,4 +1,5 @@
 import DesignSystem
+import MediaCore
 import UIKit
 
 /// The subtitle zone: semantic comments rendered one at a time, directly
@@ -83,18 +84,21 @@ final class SnapSubtitleView: UIView {
     /// One persistent pill: hard cuts swap text on the visible label, so
     /// there is nothing to double-buffer.
     private let label = SubtitlePillLabel()
-    /// The engagement anchor: a material-blur bubble carrying the post's
-    /// total comment count, leading the pill. It fades in once with the
-    /// first cue and then just sits there — cue handoffs never touch it,
-    /// so it can't participate in (or break) the zero-flicker pipeline.
-    ///
-    /// Built with a nil effect (the ticker's blur does the same): the
-    /// material materializes on window attach (`didMoveToWindow`), because
-    /// creating a real `UIBlurEffect` contacts the render server — a
-    /// multi-second main-thread stall on headless CI simulators, where
-    /// unit-tested views never join a window and must never pay it.
-    private let countBubble = UIVisualEffectView(effect: nil)
-    private let countLabel = UILabel()
+    /// The author avatar leading the cue — a compact round image at the
+    /// zone's leading edge, TOP-aligned to the pill's first line so a
+    /// two-line cue flows beside it (line two aligns with line one's leading
+    /// edge, never wrapping under the circle). It fades in once with the
+    /// first cue (the old count bubble's entrance envelope) and stays
+    /// clamped visible; each hard-cut handoff swaps in the new author's
+    /// image, so it rides the cue cycle rather than the flicker-free pill
+    /// pipeline (a separate layer, so it can't disturb it).
+    private static let avatarDiameter: CGFloat = 28
+    private let avatarView = AvatarImageView()
+    /// The pipeline avatars load through, and the in-flight load — cancelled
+    /// on each handoff and on teardown so a slow fetch can't paint a stale
+    /// author onto the current cue.
+    private var imagePipeline: ImagePipeline?
+    private var avatarTask: Task<Void, Never>?
 
     /// A tap landed anywhere in the zone (pill, count bubble, or the slack
     /// between them) — the comments engagement's entry point on posts with
@@ -118,42 +122,37 @@ final class SnapSubtitleView: UIView {
         // so a cue segment still touches exactly one layer — background and
         // glyphs move as a unit.
         label.layer.opacity = 0
-        // The count bubble: a rounded material chip that hugs its count.
-        // Blur NEEDS `clipsToBounds` for the rounded shape (unlike the
-        // pill's backgroundColor, an effect view's backdrop doesn't clip to
-        // the layer radius on its own) — safe here because the bubble's
-        // layer never animates after its one fade-in.
-        countBubble.clipsToBounds = true
-        countBubble.layer.cornerRadius = 12
-        countBubble.layer.cornerCurve = .continuous
-        countBubble.layer.opacity = 0
-        countLabel.font = UIFont.preferredFont(forTextStyle: .footnote).withWeight(.semibold)
-        countLabel.textColor = .white
-        // The pill's vertical insets on the same footnote tier, so the
-        // bubble's height exactly equals a one-line pill — flush top and
-        // bottom when the cue is short.
-        countLabel.constrain(in: countBubble.contentView) { parent in
-            countLabel.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: 10)
-            countLabel.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -10)
-            countLabel.topAnchor.constraint(equalTo: parent.topAnchor, constant: SubtitlePillLabel.textInsets.top)
-            countLabel.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -SubtitlePillLabel.textInsets.bottom)
-        }
+        // The avatar: a compact round image at the zone's leading edge. A
+        // placeholder fill so an unhydrated/loading author still reads as an
+        // avatar rather than a hole. Its opacity rides the cue cycle (fades
+        // in once, then clamped), so it starts invisible like the pill.
+        avatarView.backgroundColor = UIColor.white.withAlphaComponent(0.15)
+        avatarView.layer.opacity = 0
 
-        // Horizontal flow: [count bubble] [gap] [pill →]. Both BOTTOM-pin
-        // to the zone, which IS the vertical alignment invariant: a cue
-        // wrapping to two lines grows the pill upward while the bubble
-        // holds the shared bottom edge — it never centers or rides to the
-        // top. The bubble hugs its count; the pill hugs its text and may
-        // reclaim all remaining width.
-        countBubble.constrain(in: self) { parent in
-            countBubble.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
-            countBubble.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
-        }
-        label.constrain(in: self) { parent in
-            label.leadingAnchor.constraint(equalTo: countBubble.trailingAnchor, constant: Spacing.sm)
-            label.trailingAnchor.constraint(lessThanOrEqualTo: parent.trailingAnchor)
-            label.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
-        }
+        // Horizontal flow: [avatar] [gap] [pill →]. The avatar TOP-aligns to
+        // the pill's first line and the pill TOP-pins too, so the block
+        // grows DOWNWARD from a fixed top: a two-line cue keeps line one
+        // (and the avatar beside it) anchored while line two flows below —
+        // and because the pill's leading is the avatar's trailing, line two
+        // aligns with line one's leading edge, never wrapping under the
+        // circle. The avatar hugs its fixed box; the pill hugs its text and
+        // may reclaim all remaining width. Both views are added BEFORE the
+        // constraints activate — they cross-reference each other (avatar.top
+        // → label.top, label.leading → avatar.trailing), so neither can be
+        // fully constrained until both share this ancestor.
+        avatarView.translatesAutoresizingMaskIntoConstraints = false
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(avatarView)
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            avatarView.widthAnchor.constraint(equalToConstant: Self.avatarDiameter),
+            avatarView.heightAnchor.constraint(equalToConstant: Self.avatarDiameter),
+            avatarView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            avatarView.topAnchor.constraint(equalTo: label.topAnchor),
+            label.leadingAnchor.constraint(equalTo: avatarView.trailingAnchor, constant: Spacing.sm),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            label.topAnchor.constraint(equalTo: topAnchor),
+        ])
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: SnapSubtitleView, _) in
             self.invalidateIntrinsicContentSize()
         }
@@ -164,16 +163,6 @@ final class SnapSubtitleView: UIView {
 
     @objc private func handleTap() {
         onTap?()
-    }
-
-    /// Materializes the bubble's material on first window attach — see
-    /// `countBubble`. Idempotent; the bubble is invisible pre-window
-    /// (model opacity 0), so the effect can never pop in view.
-    override func didMoveToWindow() {
-        super.didMoveToWindow()
-        if window != nil, countBubble.effect == nil {
-            countBubble.effect = UIBlurEffect(style: .systemThinMaterialDark)
-        }
     }
 
     /// A fixed two-line slot: the zone's geometry is content-independent, so
@@ -205,14 +194,16 @@ final class SnapSubtitleView: UIView {
         startIfNeeded(fadingIn: true)
     }
 
-    /// Updates the count bubble's engagement figure. Rides the same
-    /// update path as the cues (`updateCommentStreams`, never `configure`),
-    /// so the flight replica's bubble stays empty and invisible by
-    /// construction. Text-only (no relayout beyond the bubble's own hug);
-    /// visibility is owned by the cue cycle's fade-in.
-    func setCommentCount(_ count: Int) {
-        countLabel.text = count > 0 ? Self.countText(count) : nil
+    /// The pipeline cue author avatars load through — set at configure,
+    /// before any cue arrives (see `SnapChromeView.setImagePipeline`).
+    func setImagePipeline(_ pipeline: ImagePipeline) {
+        imagePipeline = pipeline
     }
+
+    /// The zone's leading avatar now carries author identity, not a count;
+    /// the total figure lives on the engaged card's comment counter. Kept so
+    /// the `updateCommentStreams` call site stays uniform across surfaces.
+    func setCommentCount(_ count: Int) {}
 
     /// Follows the owning page's visibility (the band's seam): a page
     /// dragged partway in is already showing its zone — see the class doc.
@@ -238,7 +229,7 @@ final class SnapSubtitleView: UIView {
         nextIndex = 0
         isActive = false
         isHidden = true
-        countLabel.text = nil
+        avatarView.image = nil
     }
 
     private func startIfNeeded(fadingIn: Bool) {
@@ -250,10 +241,12 @@ final class SnapSubtitleView: UIView {
     private func stopCycle() {
         generation += 1
         isCycling = false
+        avatarTask?.cancel()
+        avatarTask = nil
         label.layer.removeAllAnimations()
         label.layer.opacity = 0
-        countBubble.layer.removeAllAnimations()
-        countBubble.layer.opacity = 0
+        avatarView.layer.removeAllAnimations()
+        avatarView.layer.opacity = 0
     }
 
     private func presentNextCue(fadingIn: Bool) {
@@ -265,8 +258,10 @@ final class SnapSubtitleView: UIView {
         nextIndex = (index + 1) % cues.count
         // On a handoff (`fadingIn == false`) the predecessor's filled
         // segment is still clamping the pill at full opacity, so setting the
-        // text here IS the hard cut — same pill, new line, one frame.
+        // text here IS the hard cut — same pill, new line, one frame. The
+        // avatar's IMAGE swaps to the new cue's author on the same beat.
         label.attributedText = Self.renderedCue(cues[index].text)
+        updateAvatar(url: cues[index].avatarURL)
 
         let expected = generation
         CATransaction.begin()
@@ -281,17 +276,34 @@ final class SnapSubtitleView: UIView {
         // exposes that model value in between.
         label.layer.opacity = 0
         label.layer.add(Self.segmentAnimation(fadingIn: fadingIn), forKey: "subtitle-cue")
-        // The count bubble rises once, alongside the first cue and with the
-        // same entrance kind, then its filled animation clamps it visible
-        // for the page's whole visible life — handoffs never touch this
-        // layer (the key-presence guard makes this idempotent), so the
-        // bubble is inert through every hard cut (and backgrounding still
-        // hides it, same model-at-0 doctrine).
-        if countLabel.text != nil, countBubble.layer.animation(forKey: "subtitle-count") == nil {
-            countBubble.layer.opacity = 0
-            countBubble.layer.add(Self.bubbleEntrance(fadingIn: fadingIn), forKey: "subtitle-count")
+        // The avatar rises ONCE, alongside the first cue and with the same
+        // entrance kind, then its filled animation clamps it visible for the
+        // page's whole visible life. Handoffs swap its image but never touch
+        // this OPACITY layer (the key-presence guard makes the entrance
+        // idempotent), so it's inert through every hard cut — and
+        // backgrounding still hides it (same model-at-0 doctrine as the pill).
+        if avatarView.layer.animation(forKey: "subtitle-avatar") == nil {
+            avatarView.layer.opacity = 0
+            avatarView.layer.add(Self.bubbleEntrance(fadingIn: fadingIn), forKey: "subtitle-avatar")
         }
         CATransaction.commit()
+    }
+
+    /// Swaps the avatar to `url`'s author. Clears to the placeholder first so
+    /// a handoff never shows the previous author under the new cue, then
+    /// loads asynchronously; the in-flight load is cancelled on the next
+    /// handoff and on teardown, and the generation/cancellation guards keep
+    /// a late fetch from painting a stale author.
+    private func updateAvatar(url: URL?) {
+        avatarTask?.cancel()
+        avatarView.image = nil
+        guard let url, let pipeline = imagePipeline else { return }
+        let expected = generation
+        avatarTask = Task { [weak self] in
+            guard let image = try? await pipeline.image(for: url) else { return }
+            guard !Task.isCancelled, let self, self.generation == expected else { return }
+            self.avatarView.image = image
+        }
     }
 
     /// The bubble's one-shot entrance, matching the first cue's kind:

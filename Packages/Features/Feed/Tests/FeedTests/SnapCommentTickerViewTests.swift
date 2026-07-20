@@ -12,8 +12,12 @@ struct SnapCommentTickerViewTests {
         return ticker
     }
 
-    private func bubbleLabels(_ ticker: SnapCommentTickerView) -> [UILabel] {
-        ticker.subviews.compactMap { $0 as? UILabel }
+    /// The in-flight bubble CONTAINERS — each a `[avatar][text]` view whose
+    /// own layer the conveyor animates on `position.x` (identified by
+    /// carrying the text label). The flight animation and the scrub position
+    /// live on the container, not the nested label.
+    private func bubbleViews(_ ticker: SnapCommentTickerView) -> [UIView] {
+        ticker.subviews.filter { view in view.subviews.contains { $0 is UILabel } }
     }
 
     /// The cold-start contract: the instant the band activates, every lane is
@@ -23,7 +27,7 @@ struct SnapCommentTickerViewTests {
         let ticker = makeTicker()
         ticker.setActive(true)
 
-        let labels = bubbleLabels(ticker)
+        let labels = bubbleViews(ticker)
         #expect(labels.count >= SnapCommentTickerView.laneCount)
         #expect(labels.allSatisfy { $0.layer.animation(forKey: "flight") != nil })
     }
@@ -31,10 +35,10 @@ struct SnapCommentTickerViewTests {
     @Test func deactivationClearsEveryBubble() {
         let ticker = makeTicker()
         ticker.setActive(true)
-        #expect(!bubbleLabels(ticker).isEmpty)
+        #expect(!bubbleViews(ticker).isEmpty)
 
         ticker.setActive(false)
-        #expect(bubbleLabels(ticker).isEmpty)
+        #expect(bubbleViews(ticker).isEmpty)
     }
 
     @Test func emptyQueueKeepsTheBandHiddenAndUnpopulated() {
@@ -43,7 +47,7 @@ struct SnapCommentTickerViewTests {
         ticker.setActive(true)
 
         #expect(ticker.isHidden)
-        #expect(bubbleLabels(ticker).isEmpty)
+        #expect(bubbleViews(ticker).isEmpty)
     }
 
     // MARK: - Scrub
@@ -56,7 +60,7 @@ struct SnapCommentTickerViewTests {
 
         ticker.beginScrub()
 
-        let labels = bubbleLabels(ticker)
+        let labels = bubbleViews(ticker)
         #expect(!labels.isEmpty)
         #expect(labels.allSatisfy { $0.layer.animation(forKey: "flight") == nil })
         // Frozen positions are the visible train, not the parked exit values.
@@ -75,7 +79,7 @@ struct SnapCommentTickerViewTests {
         // translation and their (pooled) label can be reused by backfill in
         // the same pass, which would alias the identity check.
         let before = Dictionary(
-            uniqueKeysWithValues: bubbleLabels(ticker)
+            uniqueKeysWithValues: bubbleViews(ticker)
                 .filter { (150..<300).contains($0.layer.position.x) }
                 .map { ($0, $0.layer.position.x) }
         )
@@ -85,11 +89,11 @@ struct SnapCommentTickerViewTests {
         for (label, x) in before {
             #expect(abs(label.layer.position.x - (x - 120)) < 0.5)
         }
-        let rightmostAfterForward = bubbleLabels(ticker).map { $0.frame.maxX }.max() ?? 0
+        let rightmostAfterForward = bubbleViews(ticker).map { $0.frame.maxX }.max() ?? 0
         #expect(rightmostAfterForward > bandWidth - SnapCommentTickerView.interItemGap - 48)
 
         ticker.applyScrubTranslation(600) // scrub far backward: rewinds the queue
-        let labels = bubbleLabels(ticker)
+        let labels = bubbleViews(ticker)
         #expect(!labels.isEmpty)
         let leftmostAfterBackward = labels.map { $0.frame.minX }.min() ?? 0
         #expect(leftmostAfterBackward < SnapCommentTickerView.interItemGap + 48)
@@ -114,7 +118,7 @@ struct SnapCommentTickerViewTests {
         // so the train must still be flowing afterwards.
         try await Task.sleep(for: .seconds(1.0))
 
-        let labels = bubbleLabels(ticker)
+        let labels = bubbleViews(ticker)
         #expect(!labels.isEmpty)
         // Time-dilation safe (a starved CI runner stretched this sleep to
         // 44s once, long enough for flights to finish): every label either
@@ -183,7 +187,7 @@ struct SnapCommentTickerViewTests {
 
         ticker.coastStep(now: start + 30) // decay long settled → handover
         #expect(ticker.currentKineticFraction == 0) // disengaged; reversal fades out
-        let labels = bubbleLabels(ticker)
+        let labels = bubbleViews(ticker)
         #expect(!labels.isEmpty)
         #expect(labels.allSatisfy { $0.layer.animation(forKey: "flight") != nil })
     }

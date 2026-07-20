@@ -1390,6 +1390,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         guard orderedIDs.indices.contains(index),
               let model = modelsByID[orderedIDs[index]] else { return }
         chrome.configure(with: model)
+        chrome.setImagePipeline(imagePipeline)
     }
 
     /// A rightward grab may begin from any page — the horizontal axis is free

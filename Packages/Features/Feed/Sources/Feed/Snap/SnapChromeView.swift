@@ -1,5 +1,6 @@
 import CoreModels
 import DesignSystem
+import MediaCore
 import UIKit
 
 /// The snap *page's* UI chrome — the caption over the bottom scrim.
@@ -616,6 +617,15 @@ final class SnapChromeView: UIView {
     /// `setTickerStreaming`).
     func setTickerActive(_ active: Bool) {
         commentTicker.setActive(active)
+    }
+
+    /// The image pipeline the comment surfaces load author avatars through —
+    /// forwarded to the ticker and the subtitle zone (both render an avatar
+    /// leading their comment content). Set at configure, before any stream
+    /// arrives via `updateCommentStreams`.
+    func setImagePipeline(_ pipeline: ImagePipeline) {
+        commentTicker.setImagePipeline(pipeline)
+        subtitleView.setImagePipeline(pipeline)
     }
 
     /// How much trailing width the engaged comments content must reserve

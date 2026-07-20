@@ -6,10 +6,14 @@ import Foundation
 public struct TickerCommentModel: Equatable, Sendable, Identifiable {
     public let id: String
     public let text: String
+    /// The comment author's avatar, shown leading the bubble. Optional — a
+    /// missing/unhydrated author renders the bubble's placeholder circle.
+    public let avatarURL: URL?
 
-    public init(id: String, text: String) {
+    public init(id: String, text: String, avatarURL: URL? = nil) {
         self.id = id
         self.text = text
+        self.avatarURL = avatarURL
     }
 }
 
@@ -49,7 +53,7 @@ public struct CommentTickerBuilder: Sendable {
                   !body.contains(where: \.isNewline),
                   Self.isReactionShaped(body),
                   seenBodies.insert(body.lowercased()).inserted else { continue }
-            qualifying.append(TickerCommentModel(id: entry.id, text: body))
+            qualifying.append(TickerCommentModel(id: entry.id, text: body, avatarURL: entry.authorAvatarURL))
         }
         guard qualifying.count >= Self.minTickerCount else { return [] }
 

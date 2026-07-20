@@ -29,6 +29,22 @@ struct CommentTickerBuilderTests {
         #expect(dense.count == CommentTickerBuilder.minTickerCount)
     }
 
+    /// The author's avatar rides from the comment entry into the ticker
+    /// model, so the bubble can draw it leading the text.
+    @Test func carriesTheAuthorAvatarIntoTheModel() {
+        let url = URL(string: "mock://avatar/3?w=128&h=128")!
+        let entries = (0..<CommentTickerBuilder.minTickerCount).map { index in
+            CommentEntry(
+                id: "c\(index)", authorID: ProfileID("p\(index)"), authorName: "Ava",
+                authorHandle: "ava", authorAvatarURL: url, body: "Nice one \(index)",
+                createdAt: Date(timeIntervalSince1970: 1000)
+            )
+        }
+        let models = builder.build(entries, postID: PostID("post-1"))
+        #expect(!models.isEmpty)
+        #expect(models.allSatisfy { $0.avatarURL == url })
+    }
+
     @Test func gateCountsOnlyQualifyingComments() {
         // 5 short + 4 disqualified: the gate must see 5, not 9.
         let entries = shortEntries(5) + [

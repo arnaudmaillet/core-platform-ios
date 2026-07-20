@@ -446,6 +446,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         mediaKind = model.mediaKind
         self.videoPlayback = videoPlayback
         chrome.configure(with: model)
+        chrome.setImagePipeline(pipeline)
         chrome.onCommentsTapped = { [weak self] in
             guard let self, let id = self.representedID, !self.isCommentsEngaged else { return }
             self.onRequestComments?(id)

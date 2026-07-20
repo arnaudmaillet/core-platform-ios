@@ -105,16 +105,17 @@ struct SnapSubtitleViewTests {
         #expect(cueAnimation(view) == nil)
     }
 
-    // MARK: - Count bubble
+    // MARK: - Author avatar
 
-    private func bubble(_ view: SnapSubtitleView) -> UIVisualEffectView? {
-        view.subviews.compactMap { $0 as? UIVisualEffectView }.first
+    /// The leading avatar (an `AvatarImageView`, i.e. a `UIImageView`).
+    private func avatar(_ view: SnapSubtitleView) -> UIImageView? {
+        view.subviews.compactMap { $0 as? UIImageView }.first
     }
 
-    /// The bubble's one-shot entrance matches the first cue's kind — fade
+    /// The avatar's one-shot entrance matches the first cue's kind — fade
     /// envelope or immediate clamp — and either way ends AT 1 and fills
     /// forwards: its hold is the page's visible lifetime.
-    @Test func bubbleEntranceMatchesTheCueEntranceKind() {
+    @Test func avatarEntranceMatchesTheCueEntranceKind() {
         let fade = SnapSubtitleView.bubbleEntrance(fadingIn: true)
         #expect((fade.values as? [NSNumber])?.map(\.doubleValue) == [0, 0, 1])
         #expect(fade.fillMode == .forwards)
@@ -128,23 +129,24 @@ struct SnapSubtitleViewTests {
         #expect(!instant.isRemovedOnCompletion)
     }
 
-    @Test func activationRaisesTheBubbleOnlyWhenACountExists() {
-        let counted = makeView([cue("a"), cue("b"), cue("c")])
-        counted.setCommentCount(24)
-        counted.setActive(true)
-        #expect(bubble(counted)?.layer.animation(forKey: "subtitle-count") != nil)
+    /// The avatar carries author identity, so it rises whenever cues do —
+    /// with the first cue, no longer gated on a comment count. An idle
+    /// (never-activated) zone keeps it down.
+    @Test func activationRaisesTheAvatarWithTheFirstCue() {
+        let active = makeView([cue("a"), cue("b"), cue("c")])
+        active.setActive(true)
+        #expect(avatar(active)?.layer.animation(forKey: "subtitle-avatar") != nil)
 
-        let uncounted = makeView([cue("a"), cue("b"), cue("c")])
-        uncounted.setActive(true)
-        #expect(bubble(uncounted)?.layer.animation(forKey: "subtitle-count") == nil)
+        let idle = makeView([cue("a"), cue("b"), cue("c")])
+        #expect(avatar(idle)?.layer.animation(forKey: "subtitle-avatar") == nil)
     }
 
-    /// The vertical alignment invariant: bubble and pill share the zone's
-    /// bottom edge, so a two-line cue grows the pill upward while the
-    /// bubble holds its ground — never centered, never at the top.
-    @Test func bubbleBottomAlignsWithThePillAcrossLineWraps() {
+    /// The alignment contract: the avatar LEADS the row and TOP-aligns to
+    /// the pill's first line, with the pill flowing to its right — so a
+    /// two-line cue keeps line two beside the avatar column (aligned with
+    /// line one's leading edge, never wrapping under the circle).
+    @Test func avatarTopAlignsWithFirstLineAndTextFlowsBeside() {
         let view = makeView([cue("a")])
-        view.setCommentCount(24)
         let oneLine = SubtitleCue(id: "one", text: "Short cue.")
         let twoLine = SubtitleCue(
             id: "two",
@@ -156,12 +158,12 @@ struct SnapSubtitleViewTests {
             view.setActive(true)
             view.layoutIfNeeded()
             let pill = view.subviews.compactMap { $0 as? UILabel }.first
-            let chip = bubble(view)
-            #expect(pill != nil && chip != nil)
-            if let pill, let chip {
-                #expect(abs(pill.frame.maxY - chip.frame.maxY) < 0.5)
-                #expect(chip.frame.minX == 0) // bubble leads the row
-                #expect(pill.frame.minX > chip.frame.maxX) // pill flows after it
+            let circle = avatar(view)
+            #expect(pill != nil && circle != nil)
+            if let pill, let circle {
+                #expect(circle.frame.minX == 0)                        // avatar leads the row
+                #expect(abs(circle.frame.minY - pill.frame.minY) < 0.5) // top-aligned to line one
+                #expect(pill.frame.minX > circle.frame.maxX)           // text flows to its right
             }
             view.setActive(false)
         }
