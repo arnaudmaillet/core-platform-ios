@@ -1222,4 +1222,22 @@ struct SnapCommentsPresentationTests {
         #expect(fires == 3)
     }
 
+    /// The interactive page-drive's rubber-band past the feed ends: maps
+    /// [0, ∞) into [0, dimension) — zero at zero, monotonic, and always
+    /// resisting (the mapped excess is strictly less than the raw drag), so
+    /// you can drag past the first/last post but never fling off the feed.
+    @Test func pageDriveRubberBandResistsPastTheEnds() {
+        let d: CGFloat = 800
+        #expect(SnapFeedViewController.rubberBand(0, dimension: d) == 0)
+        // Monotonic and bounded below the dimension…
+        var previous: CGFloat = 0
+        for raw in stride(from: CGFloat(40), through: 4000, by: 40) {
+            let mapped = SnapFeedViewController.rubberBand(raw, dimension: d)
+            #expect(mapped > previous)         // increasing
+            #expect(mapped < d)                // never reaches a full page
+            #expect(mapped < raw)              // always resists
+            previous = mapped
+        }
+    }
+
 }

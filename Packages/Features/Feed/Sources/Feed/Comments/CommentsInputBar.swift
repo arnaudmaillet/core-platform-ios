@@ -20,14 +20,20 @@ final class CommentsInputBar: UIView {
     var onClose: (() -> Void)? {
         didSet { updateTrailingButtons(animated: false) }
     }
-    /// A decisive vertical swipe anywhere on the bar (field, buttons, gaps):
-    /// the engaged context's swipe exit. Direction is +1 for an upward
-    /// swipe (next post), -1 downward (previous). The bar OWNS this pan
-    /// because the feed pager cannot reliably wrest a drag from the
-    /// text-input stack (empirically: neither cancellation opt-in nor
-    /// arbitration passthrough gets the pager's pan going here) — so the
-    /// bar detects the gesture and the host pages programmatically.
-    var onSwipeExit: ((Int) -> Void)?
+    /// One phase of an interactive vertical page-swipe born on the bar.
+    enum PageSwipePhase { case began, changed, ended }
+    /// A vertical drag anywhere on the bar (field, buttons, gaps) drives the
+    /// feed pager INTERACTIVELY — the bar forwards the raw translation and
+    /// velocity, and the host offsets the parent scroll view in real time
+    /// (the finger-linked page drag), settling on release. The bar OWNS the
+    /// pan because the feed pager cannot wrest a drag from the text-input
+    /// stack (empirically: neither cancellation opt-in nor arbitration
+    /// passthrough starts the pager's own pan here) — so the bar detects it
+    /// and the host drives `contentOffset` directly. `translation`/
+    /// `velocity` are the pan's vertical components; up (negative) pages to
+    /// the next post. Wiring this ENABLES the drive; hosts that leave it nil
+    /// (the pushed comments screen) have no page-swipe.
+    var onPageSwipe: ((PageSwipePhase, _ translation: CGFloat, _ velocity: CGFloat) -> Void)?
 
     /// Disables sending while a comment is in flight (spinner in the button).
     var isSending = false {
@@ -204,39 +210,32 @@ final class CommentsInputBar: UIView {
     }
 
     @objc private func handleSwipe(_ pan: UIPanGestureRecognizer) {
-        guard onSwipeExit != nil else { return } // pushed screen: no exit, no nudge
+        // No drive on the pushed screen (no page-swipe), and NOT while the
+        // keyboard is up — a downward drag there is a keyboard dismissal,
+        // not a page change (the list's interactive dismiss handles that).
+        guard onPageSwipe != nil, !isKeyboardOpen else { return }
         let dy = pan.translation(in: self).y
+        let vy = pan.velocity(in: self).y
         switch pan.state {
+        case .began:
+            // The whole engaged layer (media card, comments, THIS bar — all
+            // in the leaving cell) rides the pager's contentOffset from
+            // here on; the bar no longer self-nudges (that would double the
+            // motion).
+            onPageSwipe?(.began, 0, 0)
         case .changed:
-            // Finger-connected: the bar rides the drag (damped) instead of
-            // waiting inert for the release — the physical half of the
-            // swipe exit; the page change itself stays programmatic and
-            // fires only on commit.
-            transform = CGAffineTransform(translationX: 0, y: Self.nudgeOffset(for: dy))
+            onPageSwipe?(.changed, dy, vy)
         case .ended:
-            let vy = pan.velocity(in: self).y
-            settleNudge()
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-gesture-log") {
-                print("GESTURELOG: bar pan ended dy=\(dy) vy=\(vy)")
+                print("GESTURELOG: bar page-swipe ended dy=\(dy) vy=\(vy)")
             }
             #endif
-            if abs(dy) > 50 || abs(vy) > 300 {
-                onSwipeExit?((dy + vy) < 0 ? 1 : -1)
-            }
+            onPageSwipe?(.ended, dy, vy)
         case .cancelled, .failed:
-            settleNudge()
+            onPageSwipe?(.ended, dy, vy) // release: the host settles back
         default:
             break
-        }
-    }
-
-    /// Springs the nudge home — on commit the collapse takes over the
-    /// screen while the bar quietly re-seats beneath it.
-    private func settleNudge() {
-        UIView.animate(withDuration: 0.3, delay: 0,
-                       usingSpringWithDamping: 0.8, initialSpringVelocity: 0) {
-            self.transform = .identity
         }
     }
 

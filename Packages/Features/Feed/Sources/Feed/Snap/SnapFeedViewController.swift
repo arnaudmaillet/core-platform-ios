@@ -92,6 +92,13 @@ final class SnapFeedViewController: UIViewController {
     /// engaged toolbar context) has been applied — set when the page
     /// activates, so a pre-render that never settles never locks.
     private var restingLockApplied = false
+    /// The pager's `contentOffset.y` captured when an interactive page-swipe
+    /// begins — the datum the drive offsets from. Nil when no drive is
+    /// live. The drive hand-moves `contentOffset` while the pager's own pan
+    /// stays disabled (the dead-end lock is untouched), so the finger
+    /// drives the leaving page directly and the engaged layer (all in the
+    /// cell) rides for free.
+    private var pageDriveStartOffset: CGFloat?
 
     init(
         viewModel: FeedViewModel,
@@ -448,8 +455,8 @@ final class SnapFeedViewController: UIViewController {
                 // pill opens the panel, a strip tap while engaged closes it.
                 cell.onRequestComments = { [weak self] id in self?.presentComments(for: id) }
                 cell.onRequestCommentsClose = { [weak self] in self?.dismissComments() }
-                cell.onRequestCommentsPageAway = { [weak self] direction in
-                    self?.pageAwayFromComments(direction: direction)
+                cell.onRequestCommentsPageDrive = { [weak self] phase, translation, velocity in
+                    self?.drivePageSwipe(phase, translation: translation, velocity: velocity)
                 }
             }
             return cell
@@ -851,8 +858,8 @@ final class SnapFeedViewController: UIViewController {
             // way off the post is paging.
             detail?.setEngagedCloseHandler { [weak self] in self?.dismissComments() }
         }
-        detail?.setEngagedSwipeHandler { [weak self] direction in
-            self?.pageAwayFromComments(direction: direction)
+        detail?.setEngagedPageSwipeHandler { [weak self] phase, translation, velocity in
+            self?.drivePageSwipe(phase, translation: translation, velocity: velocity)
         }
         // ONE unified motion profile: the composer starts offstage (alpha
         // 0, slight downward offset) and physically slides into its
@@ -915,8 +922,8 @@ final class SnapFeedViewController: UIViewController {
         )
         // No close handler — a resting page is undismissable; the swipe
         // handler pages the feed (the only way off a text post).
-        detail?.setEngagedSwipeHandler { [weak self] direction in
-            self?.pageAwayFromComments(direction: direction)
+        detail?.setEngagedPageSwipeHandler { [weak self] phase, translation, velocity in
+            self?.drivePageSwipe(phase, translation: translation, velocity: velocity)
         }
         // INSTANT: composer already onstage, cell engaged synchronously —
         // no spring, no offstage→onstage slide. The interface simply IS,
@@ -972,35 +979,88 @@ final class SnapFeedViewController: UIViewController {
     }
 
 
-    /// The footer band's swipe exit: collapse and page in one motion. The
-    /// bar detects the gesture (its own vertical-intent pan — the pager
-    /// cannot wrest drags from the text-input stack) and the page change
-    /// runs programmatically, matching the swipe's direction; at the
-    /// feed's ends the swipe still collapses, it just doesn't page.
-    private func pageAwayFromComments(direction: Int) {
-        guard let engagedID = commentsEngagedID else { return }
-        let current = lifecycle.activeIndex ?? 0
-        let target = current + direction
-        if modelsByID[engagedID]?.mediaURL == nil {
-            // TEXT-ONLY: the engagement is the page's face — it RIDES the
-            // leaving page instead of collapsing first (there is no
-            // default layout to collapse to), and the resign leg tears it
-            // down instantly once the pager settles. At the feed's ends
-            // the swipe is a no-op: the post stays exactly as it is.
-            guard orderedIDs.indices.contains(target) else { return }
-        } else {
-            dismissComments()
-            guard orderedIDs.indices.contains(target) else { return }
+    /// The INTERACTIVE page-swipe drive (bar-owned pan → this). The finger
+    /// hand-moves the pager's `contentOffset` in real time, so the leaving
+    /// page — and the whole engaged layer riding inside its cell (docked
+    /// media card, comments, composer) — follows the drag exactly as if the
+    /// user were swiping the feed itself. The pager's OWN pan stays disabled
+    /// throughout (the dead-end lock is preserved: the comments list still
+    /// cannot chain), because programmatic `contentOffset` ignores
+    /// `isScrollEnabled`. On release the drive settles to the target page;
+    /// the page change tears the old engagement down via the resign leg.
+    private func drivePageSwipe(
+        _ phase: CommentsInputBar.PageSwipePhase, translation dy: CGFloat, velocity vy: CGFloat
+    ) {
+        switch phase {
+        case .began: beginPageDrive()
+        case .changed: updatePageDrive(translation: dy)
+        case .ended: endPageDrive(translation: dy, velocity: vy)
         }
-        collectionView.scrollToItem(
-            at: IndexPath(item: target, section: 0), at: .top, animated: true
-        )
-        // Animated scrollToItem ends in scrollViewDidEndScrollingAnimation,
-        // which this VC doesn't observe (finger scrolls don't emit it) —
-        // settle the active page manually, the scroll-demo's pattern.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+    }
+
+    private func beginPageDrive() {
+        guard commentsEngagedID != nil else { return }
+        // Interrupt any in-flight settle: seize the CURRENT on-screen offset
+        // (presentation layer) so a re-grab mid-settle doesn't jump.
+        let live = collectionView.layer.presentation()?.bounds.origin.y ?? collectionView.contentOffset.y
+        collectionView.layer.removeAllAnimations()
+        collectionView.contentOffset.y = live
+        pageDriveStartOffset = live
+    }
+
+    private func updatePageDrive(translation dy: CGFloat) {
+        guard let start = pageDriveStartOffset else { return }
+        // Drag up (dy < 0) advances toward the next post (offset grows).
+        collectionView.contentOffset.y = rubberBandedOffset(start - dy)
+    }
+
+    private func endPageDrive(translation dy: CGFloat, velocity vy: CGFloat) {
+        guard let start = pageDriveStartOffset else { return }
+        pageDriveStartOffset = nil
+        let page = collectionView.bounds.height
+        guard page > 0 else { return }
+        let startIndex = Int((start / page).rounded())
+        // Commit on a decisive drag OR a fling; the projected motion (drag +
+        // a slice of velocity) picks the direction — up pages next.
+        let committed = abs(dy) > page * 0.18 || abs(vy) > 500
+        let step = committed ? ((dy + vy * 0.2) < 0 ? 1 : -1) : 0
+        let target = max(0, min(orderedIDs.count - 1, startIndex + step))
+        let targetOffset = CGFloat(target) * page
+        let distance = abs(collectionView.contentOffset.y - targetOffset)
+        let springVelocity = distance > 0 ? min(3, abs(vy) / distance) : 0
+        UIView.animate(
+            withDuration: 0.4, delay: 0,
+            usingSpringWithDamping: 0.9, initialSpringVelocity: springVelocity,
+            options: [.curveEaseOut, .allowUserInteraction]
+        ) {
+            self.collectionView.contentOffset.y = targetOffset
+        } completion: { [weak self] finished in
+            guard finished else { return }
+            // Now the target page is settled: recompute the active item,
+            // which fires the resign→teardown / activate legs (the landed
+            // page auto-engages if it's a text post; the old engagement is
+            // torn down as it resigns).
             self?.updateActiveItem()
         }
+    }
+
+    /// UIScrollView-style rubber-band past the first/last page: the drive
+    /// resists beyond the ends so you cannot fling off the feed.
+    private func rubberBandedOffset(_ offset: CGFloat) -> CGFloat {
+        let page = collectionView.bounds.height
+        guard page > 0 else { return offset }
+        let maxOffset = CGFloat(max(0, orderedIDs.count - 1)) * page
+        if offset < 0 { return -Self.rubberBand(-offset, dimension: page) }
+        if offset > maxOffset { return maxOffset + Self.rubberBand(offset - maxOffset, dimension: page) }
+        return offset
+    }
+
+    /// The standard iOS rubber-band curve: `(1 − 1/(x·c/d + 1))·d`. It maps
+    /// [0, ∞) into [0, d) — monotonically increasing, always resisting (the
+    /// mapped excess is strictly less than the raw excess), zero at zero.
+    /// Internal for the pure-logic test.
+    static func rubberBand(_ x: CGFloat, dimension d: CGFloat) -> CGFloat {
+        (1 - 1 / (x * 0.55 / d + 1)) * d
     }
 
     private func engagedCell() -> SnapFeedCell? {

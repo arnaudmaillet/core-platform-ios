@@ -47,11 +47,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// While engaged, a tap on the strip (the docked media / the page
     /// background) asks to expand back — the owning VC dismisses the panel.
     var onRequestCommentsClose: (() -> Void)?
-    /// While engaged, a committed vertical swipe on the docked media tile
-    /// asks to page away (+1 next / -1 previous) — the strip-side mirror
-    /// of the composer bar's swipe exit, wired to the same programmatic
-    /// page-away path.
-    var onRequestCommentsPageAway: ((Int) -> Void)?
+    /// While engaged, a vertical swipe on the glass card drives the feed
+    /// pager INTERACTIVELY — the strip-side mirror of the composer bar's
+    /// page-swipe. The cell forwards each pan phase with the raw vertical
+    /// translation and velocity; the host hand-moves `contentOffset` so the
+    /// whole engaged layer (which rides inside this cell) follows the finger
+    /// in real time, settling on release.
+    var onRequestCommentsPageDrive: ((CommentsInputBar.PageSwipePhase, CGFloat, CGFloat) -> Void)?
     /// Whether the cell is in the comments-engaged layout (media docked in
     /// the strip's slot, chrome faded out, caption re-homed beside the
     /// media). Pure layout state: playback is deliberately untouched.
@@ -524,50 +526,26 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             .contains(point)
     }
 
-    /// The WHOLE card assembly rides the finger as one body — glass
-    /// backdrop (carrying the column content), docked media, and the
-    /// caption label — through the same damped, saturating curve as the
-    /// composer bar (`CommentsInputBar.nudgeOffset` — one curve, one
-    /// feel). The media's nudge composes ON TOP of the dock transform
-    /// the engagement owns; release either commits the page-away (the
-    /// bar's thresholds verbatim) or springs everything home. The settle
-    /// runs before the commit fires, so a triggered dismissal's own
-    /// transform animation supersedes it — the bar's ordering doctrine.
+    /// A vertical swipe on the glass card drives the feed pager
+    /// INTERACTIVELY (same as the composer bar's page-swipe). The whole
+    /// engaged layer — docked media card, glass, comments — lives inside
+    /// THIS cell, so once the host hand-moves the pager's `contentOffset`
+    /// the entire assembly rides the finger for free; the cell only
+    /// forwards the pan's phase + raw translation/velocity. No self-nudge
+    /// (that would double the motion), no commit-only settle.
     @objc private func handleCardSwipe(_ pan: UIPanGestureRecognizer) {
         guard isCommentsEngaged else { return }
-        let bounds = contentView.bounds
-        let dock = SnapCommentsLayout.mediaTransform(
-            bounds: bounds,
-            slot: SnapCommentsLayout.mediaSlotFrame(in: bounds, topInset: frozenInsets.top)
-        )
         let dy = pan.translation(in: self).y
+        let vy = pan.velocity(in: self).y
         switch pan.state {
+        case .began:
+            onRequestCommentsPageDrive?(.began, 0, 0)
         case .changed:
-            let nudge = CGAffineTransform(
-                translationX: 0, y: CommentsInputBar.nudgeOffset(for: dy)
-            )
-            mediaCard.applyDockNudge(dock: dock, nudge: nudge)
-            mediaCard.setGlassNudge(nudge)
-            // Both glass cards ride the same nudge as one body.
-            infoCard.transform = nudge
-        case .ended:
-            let vy = pan.velocity(in: self).y
-            settleCardNudge(to: dock)
-            if abs(dy) > 50 || abs(vy) > 300 {
-                onRequestCommentsPageAway?((dy + vy) < 0 ? 1 : -1)
-            }
-        case .cancelled, .failed:
-            settleCardNudge(to: dock)
+            onRequestCommentsPageDrive?(.changed, dy, vy)
+        case .ended, .cancelled, .failed:
+            onRequestCommentsPageDrive?(.ended, dy, vy)
         default:
             break
-        }
-    }
-
-    private func settleCardNudge(to dock: CGAffineTransform) {
-        UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.8, initialSpringVelocity: 0) {
-            self.mediaCard.settleDock(to: dock)
-            self.mediaCard.setGlassNudge(.identity)
-            self.infoCard.transform = .identity
         }
     }
 
@@ -693,7 +671,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         clearComments()
         onRequestComments = nil
         onRequestCommentsClose = nil
-        onRequestCommentsPageAway = nil
+        onRequestCommentsPageDrive = nil
         infoCard.reset()
         stopKenBurns()
         setPauseGlyphVisible(false)
