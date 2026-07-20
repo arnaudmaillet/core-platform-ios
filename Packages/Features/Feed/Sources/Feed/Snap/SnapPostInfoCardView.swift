@@ -161,20 +161,18 @@ final class SnapPostInfoCardView: UIView {
     /// the effect property. Call inside the engagement's animation block.
     func setGlassActive(_ active: Bool) { glass.setGlassActive(active) }
 
-    /// The content's entrance pose: offstage = invisible with a slight
-    /// downward offset (the disengage/rest pose), onstage = risen into
-    /// place. The glass frame itself never moves — only its content.
+    /// The content's entrance pose: a PURE fade — offstage = transparent
+    /// (the disengage/rest pose), onstage = opaque. No translation: the
+    /// content fades straight in and out in place, riding the engagement
+    /// spring alongside the glass's blur materialization. The glass frame
+    /// itself never moves.
     func setContentEntrance(offstage: Bool) {
         content.alpha = offstage ? 0 : 1
-        content.transform = offstage
-            ? CGAffineTransform(translationX: 0, y: SnapCommentsLayout.cardContentEntranceOffset)
-            : .identity
     }
 
-    /// The content's current entrance state (the glass frame never moves) —
-    /// read-only, for the choreography test.
+    /// The content's current entrance state (a pure alpha fade) — read-only,
+    /// for the choreography test.
     var contentAlpha: CGFloat { content.alpha }
-    var contentEntranceOffset: CGFloat { content.transform.ty }
 
     // MARK: - Content
 

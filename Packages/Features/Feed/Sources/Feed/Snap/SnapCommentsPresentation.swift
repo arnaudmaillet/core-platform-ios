@@ -60,9 +60,6 @@ enum SnapCommentsLayout {
     /// toolbar stays onstage through the engagement — keep-and-stack —
     /// and its attribution item owns the audio credit.)
     static let cardActionsHeight: CGFloat = 24
-    /// The card content's entrance micro-translation — the rows rise into
-    /// place as they fade in, the composer-entrance recipe at card scale.
-    static let cardContentEntranceOffset: CGFloat = 12
 
     /// The card's FULL height: the 88pt media square with uniform padding
     /// (a two-line caption's home).

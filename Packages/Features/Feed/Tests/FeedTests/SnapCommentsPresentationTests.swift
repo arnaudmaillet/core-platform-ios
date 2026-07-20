@@ -585,21 +585,18 @@ struct SnapCommentsPresentationTests {
         #expect(like.configuration?.attributedTitle == nil)
     }
 
-    /// The info card's CONTENT choreography: offstage at rest (alpha 0, the
-    /// entrance offset), risen while engaged, and back on disengage — the
-    /// glass frame itself never moves (only its content rises), so the fade
-    /// rides the content, not the blur.
-    @Test func engagedCardRisesAndSinksWithTheSpring() throws {
+    /// The info card's CONTENT choreography: a PURE FADE — transparent at
+    /// rest (alpha 0), opaque while engaged, and back to transparent on
+    /// disengage — with NO translation (the content fades in place). The
+    /// glass frame never moves; the fade rides the content, not the blur.
+    @Test func engagedCardFadesInAndOutWithTheSpring() throws {
         let cell = makeConfiguredCell(audioText: nil, likeCount: 0)
         let card = try infoCard(of: cell)
         #expect(card.contentAlpha == 0)
-        #expect(card.contentEntranceOffset == SnapCommentsLayout.cardContentEntranceOffset)
         cell.setCommentsEngaged(true)
         #expect(card.contentAlpha == 1)
-        #expect(card.contentEntranceOffset == 0)
         cell.setCommentsEngaged(false)
         #expect(card.contentAlpha == 0)
-        #expect(card.contentEntranceOffset == SnapCommentsLayout.cardContentEntranceOffset)
     }
 
     /// The engaged tap boundary: a touch anywhere inside the hosted
