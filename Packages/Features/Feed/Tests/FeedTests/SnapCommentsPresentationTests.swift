@@ -97,7 +97,9 @@ struct SnapCommentsPresentationTests {
                 mediaURL: media ? URL(string: "mock://media/0.jpg") : nil,
                 mediaKind: .image,
                 thumbnailURL: nil,
-                audioText: media ? "Original audio · @ava" : nil
+                audioText: media ? "Original audio · @ava" : nil,
+                likeCount: 0,
+                timestampText: "5d"
             ),
             pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             videoPlayback: nil
@@ -797,6 +799,64 @@ struct SnapCommentsPresentationTests {
         // In the card's own coordinate space (the glass fills it).
         let maxX = row.superview?.convert(row.frame, to: card).maxX ?? row.frame.maxX
         #expect(abs(maxX - (width - pad)) < 0.5)
+    }
+
+    /// The timestamp is a dual-anchor row with the counters: leading-
+    /// aligned, on the counters' baseline, and it YIELDS — a tight row
+    /// truncates the date (tail) so it never pushes or overlaps the
+    /// right-aligned counters (which keep their intrinsic width).
+    @Test func timestampAnchorsLeadingAndYieldsToCounters() throws {
+        let inset = SnapPostInfoCardView.contentInset
+
+        func labelledCard(_ width: CGFloat, timestamp: String) -> (SnapPostInfoCardView, UILabel, UIStackView) {
+            let card = SnapPostInfoCardView(frame: CGRect(x: 0, y: 0, width: width, height: SnapCommentsLayout.cardHeight))
+            card.configure(with: FeedItemDisplayModel(
+                id: PostID("p"), authorID: ProfileID("a"), authorName: "Ava",
+                metaText: "@ava · 5d", avatarURL: nil, caption: "caption",
+                mediaURL: nil, mediaKind: .image, thumbnailURL: nil, audioText: nil,
+                likeCount: 1234, timestampText: timestamp
+            ))
+            card.setCommentCount(56, isLoaded: true)
+            card.layoutIfNeeded()
+            var labels: [UILabel] = [], stacks: [UIStackView] = []
+            var stack: [UIView] = [card]
+            while let v = stack.popLast() {
+                if let l = v as? UILabel { labels.append(l) }
+                if let s = v as? UIStackView { stacks.append(s) }
+                stack.append(contentsOf: v.subviews)
+            }
+            let ts = labels.first { $0.text == timestamp }!
+            return (card, ts, stacks.first!)
+        }
+
+        // Roomy card: the timestamp sits at the leading inset, on the
+        // counters' baseline row, with the full date visible.
+        let (card, ts, actions) = labelledCard(374, timestamp: "5d")
+        let tsFrame = ts.superview!.convert(ts.frame, to: card)
+        let actionsFrame = actions.superview!.convert(actions.frame, to: card)
+        #expect(abs(tsFrame.minX - inset) < 0.5)
+        #expect(abs(tsFrame.midY - actionsFrame.midY) < 0.5)
+        // Counters keep their intrinsic width, trailing-pinned.
+        #expect(abs(actionsFrame.maxX - (374 - inset)) < 0.5)
+        // No overlap: the timestamp ends before the counters begin.
+        #expect(tsFrame.maxX <= actionsFrame.minX + 0.5)
+
+        // A card sized to hold the counters at full width with only a
+        // sliver of room for the timestamp, plus a very long date: the
+        // counters WIN (still trailing-pinned at full intrinsic width) and
+        // the timestamp YIELDS — truncating so it never crosses into them.
+        let sliver: CGFloat = 24
+        let narrow = ceil(inset + sliver + Spacing.md + actionsFrame.width + inset)
+        let (card2, ts2, actions2) = labelledCard(narrow, timestamp: "999 weeks ago, give or take")
+        let actions2Frame = actions2.superview!.convert(actions2.frame, to: card2)
+        let ts2Frame = ts2.superview!.convert(ts2.frame, to: card2)
+        // Counters uncompressed and trailing-pinned (full width preserved).
+        #expect(abs(actions2Frame.maxX - (narrow - inset)) < 0.5)
+        #expect(abs(actions2Frame.width - actionsFrame.width) < 0.5)
+        // The timestamp truncated into the sliver — no overlap with counters.
+        #expect(ts2Frame.maxX <= actions2Frame.minX + 0.5)
+        #expect(ts2Frame.width <= sliver + 0.5)
+        #expect(ts2.text == "999 weeks ago, give or take") // full text kept; the LABEL truncates at draw
     }
 
     /// HOMOGENEOUS PADDING: the info card insets its content by the SAME

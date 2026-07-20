@@ -31,5 +31,14 @@ struct FeedDisplayModelBuilderTests {
             relativeTo: now
         )[0]
         #expect(model.metaText == "@ava · 3m")
+        // The standalone timestamp (engaged info card) is the same compact
+        // relative form, without the handle.
+        #expect(model.timestampText == "3m")
+    }
+
+    @Test func timestampTextUsesTheDayForm() {
+        let fiveDays = now.addingTimeInterval(-5 * 86_400)
+        let model = builder.build([entry(caption: "x", publishedAt: fiveDays)], relativeTo: now)[0]
+        #expect(model.timestampText == "5d")
     }
 }

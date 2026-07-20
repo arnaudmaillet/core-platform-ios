@@ -35,6 +35,11 @@ public struct FeedItemDisplayModel: Identifiable, Sendable {
     /// updates supersede it via the realtime plane). Rendered by the
     /// engaged card's metrics row.
     let likeCount: Int64
+    /// The post's age as a compact relative string ("now"/"3m"/"5h"/"5d"),
+    /// the design system's timestamp form (the nav pill and comment rows
+    /// use the same). Rendered leading on the engaged info card's actions
+    /// row. Empty only for models built outside the feed builder (tests).
+    let timestampText: String
 
     init(
         id: PostID,
@@ -47,7 +52,8 @@ public struct FeedItemDisplayModel: Identifiable, Sendable {
         mediaKind: MediaKind,
         thumbnailURL: URL?,
         audioText: String?,
-        likeCount: Int64 = 0
+        likeCount: Int64 = 0,
+        timestampText: String = ""
     ) {
         self.id = id
         self.authorID = authorID
@@ -60,6 +66,7 @@ public struct FeedItemDisplayModel: Identifiable, Sendable {
         self.thumbnailURL = thumbnailURL
         self.audioText = audioText
         self.likeCount = likeCount
+        self.timestampText = timestampText
     }
 }
 
@@ -88,7 +95,8 @@ public struct FeedDisplayModelBuilder: Sendable {
             thumbnailURL: attachment?.thumbnailURL,
             audioText: (attachment != nil && mediaKind == .video)
                 ? "Original audio · @\(entry.author.handle)" : nil,
-            likeCount: entry.likeCount
+            likeCount: entry.likeCount,
+            timestampText: Self.relativeTime(from: entry.post.publishedAt, to: now)
         )
     }
 

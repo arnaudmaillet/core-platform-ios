@@ -38,6 +38,11 @@ final class SnapPostInfoCardView: UIView {
     private let saveButton = SnapPostInfoCardView.makeMetricButton(
         symbol: "bookmark", accessibilityLabel: "Save"
     )
+    /// The post's age ("5d") — leading on the actions row, opposite the
+    /// counters. Secondary metadata styling (the comment-row timestamp
+    /// register). Yields FIRST when the row is tight (truncates), so it can
+    /// never push or overlap the counters.
+    private let timestampLabel = UILabel()
     /// This component's OWN floating glass card, filling it — so the info
     /// renders as a distinct glass surface, independent of the media card
     /// beside it (or standalone full-width on text posts).
@@ -97,11 +102,36 @@ final class SnapPostInfoCardView: UIView {
         actions.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(actions)
 
+        // The timestamp: secondary metadata, leading on the actions row.
+        timestampLabel.font = .preferredFont(forTextStyle: .footnote)
+        timestampLabel.adjustsFontForContentSizeCategory = true
+        timestampLabel.textColor = UIColor.white.withAlphaComponent(0.55)
+        timestampLabel.numberOfLines = 1
+        timestampLabel.lineBreakMode = .byTruncatingTail
+        timestampLabel.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(timestampLabel)
+
+        // COUNTERS WIN: they never compress or move — required hugging AND
+        // compression resistance on the stack AND its buttons keep the
+        // cluster at its intrinsic width, trailing-pinned. The timestamp
+        // HUGS its text tightly (required hugging — it never expands to
+        // push the counters) but yields under pressure (required
+        // compression resistance dropped to the floor — a tight row
+        // truncates the date tail). The gap between them is the flex space.
+        actions.setContentHuggingPriority(.required, for: .horizontal)
+        actions.setContentCompressionResistancePriority(.required, for: .horizontal)
+        for button in [likeButton, commentButton, repostButton, saveButton] {
+            button.setContentCompressionResistancePriority(.required, for: .horizontal)
+        }
+        timestampLabel.setContentHuggingPriority(.required, for: .horizontal)
+        timestampLabel.setContentCompressionResistancePriority(UILayoutPriority(1), for: .horizontal)
+
         // A clean linear top→bottom chain (no centering guide, no midpoint
         // math): the caption pins to the TOP inset, the counters pin to the
         // BOTTOM inset (the card's floor), and the counters clear the
         // caption by the tight `captionActionsGap`. All four edge margins
-        // are the same uniform inset.
+        // are the same uniform inset. The timestamp shares the counters'
+        // baseline row, anchored to the leading edge.
         NSLayoutConstraint.activate([
             captionLabel.topAnchor.constraint(equalTo: content.topAnchor, constant: inset),
             captionLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: inset),
@@ -109,9 +139,14 @@ final class SnapPostInfoCardView: UIView {
 
             actions.topAnchor.constraint(greaterThanOrEqualTo: captionLabel.bottomAnchor, constant: Self.captionActionsGap),
             actions.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -inset),
-            actions.leadingAnchor.constraint(greaterThanOrEqualTo: content.leadingAnchor, constant: inset),
             actions.heightAnchor.constraint(equalToConstant: SnapCommentsLayout.cardActionsHeight),
             actions.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -inset),
+
+            timestampLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: inset),
+            timestampLabel.centerYAnchor.constraint(equalTo: actions.centerYAnchor),
+            // Never encroach on the counters — the min flex gap is the
+            // truncation boundary (required, so the date clips to fit).
+            timestampLabel.trailingAnchor.constraint(lessThanOrEqualTo: actions.leadingAnchor, constant: -Spacing.md),
         ])
     }
 
@@ -142,11 +177,13 @@ final class SnapPostInfoCardView: UIView {
     /// by the card geometry, so this is content only, never a re-layout.
     func setCaption(_ text: String?) { captionLabel.text = text }
 
-    /// Fills the counters from the post's display model. Called at cell
-    /// configure — the card is populated long before an engagement.
+    /// Fills the counters and the timestamp from the post's display model.
+    /// Called at cell configure — the card is populated long before an
+    /// engagement.
     func configure(with model: FeedItemDisplayModel) {
         Self.setCount(model.likeCount > 0 ? Int(clamping: model.likeCount) : nil, on: likeButton)
         Self.setCount(nil, on: commentButton)
+        timestampLabel.text = model.timestampText
     }
 
     /// The comment metric follows the streams: shown once loaded, blank
@@ -158,6 +195,7 @@ final class SnapPostInfoCardView: UIView {
     /// Cell reuse: drop content.
     func reset() {
         captionLabel.text = nil
+        timestampLabel.text = nil
         Self.setCount(nil, on: likeButton)
         Self.setCount(nil, on: commentButton)
     }
