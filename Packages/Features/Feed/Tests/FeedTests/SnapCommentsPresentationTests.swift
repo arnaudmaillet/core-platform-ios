@@ -292,12 +292,17 @@ struct SnapCommentsPresentationTests {
         #expect(frostMask.frame == frost.bounds)
 
         // …under the info card, which draws its OWN glass (a distinct
-        // rounded, hairline-stroked surface) at the info card frame…
+        // rounded, hairline-stroked surface). Its width is DYNAMIC (hugs
+        // the short "caption"), so on a media post it's LEADING-pinned at
+        // the media-adjacent region and no wider than that region.
         let info = try #require(subviews.compactMap { $0 as? SnapPostInfoCardView }.first)
         #expect(info.isHidden == false)
-        #expect(info.frame == SnapCommentsLayout.infoCardFrame(
-            in: Self.container, topInset: Self.topInset, hasMedia: true
-        ))
+        let mediaRegion = SnapCommentsLayout.infoCardFrame(in: Self.container, topInset: Self.topInset, hasMedia: true)
+        #expect(abs(info.frame.minX - mediaRegion.minX) < 0.5)
+        #expect(info.frame.minY == mediaRegion.minY)
+        #expect(info.frame.height == mediaRegion.height)
+        #expect(info.frame.width <= mediaRegion.width + 0.5)
+        #expect(info.frame.width >= info.minimumWidth - 0.5) // never below the floor
         let infoGlass = try #require(info.subviews.compactMap { $0 as? SnapGlassCardView }.first)
         #expect(infoGlass.layer.cornerRadius == SnapCommentsLayout.stripCardCornerRadius)
 
@@ -682,27 +687,29 @@ struct SnapCommentsPresentationTests {
         cell.setCommentsEngaged(true)
         cell.contentView.layoutIfNeeded()
 
-        // Text posts show ONE standalone glass card, full width (the media
-        // card is omitted): the info card spans the whole strip, drawing
-        // its own glass, under the wall-to-wall frost.
+        // Text posts show ONE standalone glass card. Its width is DYNAMIC
+        // (hugs the short "caption") and, being narrower than the full
+        // strip, it CENTERS horizontally within the strip — no stretching
+        // into empty space.
+        let strip = SnapCommentsLayout.stripCardFrame(in: Self.container, topInset: Self.topInset)
         let info = try infoCard(of: cell)
         #expect(info.isHidden == false)
-        #expect(info.frame == SnapCommentsLayout.stripCardFrame(in: Self.container, topInset: Self.topInset))
+        #expect(info.frame.width < strip.width)                 // hugged narrow
+        #expect(abs(info.frame.midX - strip.midX) < 0.5)        // centered in the strip
+        #expect(info.frame.minY == strip.minY && info.frame.height == strip.height)
+        #expect(info.frame.width >= info.minimumWidth - 0.5)    // never below the floor
         #expect(info.subviews.compactMap { $0 as? SnapGlassCardView }.first != nil)
         // No media card glass is shown on a text page.
         #expect(cell.contentView.subviews.compactMap { $0 as? SnapMediaCardView }.first?
             .subviews.contains { $0 is SnapGlassCardView && !$0.isHidden } == false)
         let frost = try #require(cell.contentView.subviews.compactMap { $0 as? ProgressiveFrostView }.first)
         #expect(frost.frame.height == SnapCommentsLayout.stripBottom(topInset: Self.topInset))
-        // The caption claims the full-width card: leading at the card's
-        // uniform inner inset from its own left edge (the standalone info
-        // card IS the strip on a text post).
-        let textInfoFrame = SnapCommentsLayout.infoCardFrame(in: Self.container, topInset: Self.topInset, hasMedia: false)
+        // The caption sits at the (centered) card's own uniform inner inset.
         let caption = try engagedCaptionFrame(in: cell)
-        #expect(abs(caption.minX - (textInfoFrame.minX + SnapPostInfoCardView.contentInset)) < 0.5)
+        #expect(abs(caption.minX - (info.frame.minX + SnapPostInfoCardView.contentInset)) < 0.5)
         // …and TOP-PINS to the card's top inset (no centering — the text
         // starts flush at the top, no artificial gap above).
-        #expect(abs(caption.minY - (textInfoFrame.minY + SnapPostInfoCardView.contentInset)) < 0.5)
+        #expect(abs(caption.minY - (info.frame.minY + SnapPostInfoCardView.contentInset)) < 0.5)
         // The card page-drive pan IS armed — a vertical swipe on the card
         // drives the pager interactively (it pages, never dismisses), so a
         // text post's resting interface arms it exactly like media.
@@ -801,6 +808,34 @@ struct SnapCommentsPresentationTests {
         // In the card's own coordinate space (the glass fills it).
         let maxX = row.superview?.convert(row.frame, to: card).maxX ?? row.frame.maxX
         #expect(abs(maxX - (width - pad)) < 0.5)
+    }
+
+    /// The card's DYNAMIC intrinsic width: a short caption yields a card
+    /// only as wide as its content, a long caption reaches wider, and the
+    /// width never drops below the bottom-row floor (`minimumWidth` — date +
+    /// gap + counters + insets), so the interaction row never clips.
+    @Test func infoCardWidthIsDynamicWithAFloor() {
+        let card = SnapPostInfoCardView(frame: .zero)
+        card.configure(with: FeedItemDisplayModel(
+            id: PostID("p"), authorID: ProfileID("a"), authorName: "Ava",
+            metaText: "@ava · 5d", avatarURL: nil, caption: "hi",
+            mediaURL: nil, mediaKind: .image, thumbnailURL: nil, audioText: nil,
+            likeCount: 1234, timestampText: "5 days"
+        ))
+        card.setCommentCount(56, isLoaded: true)
+
+        // A tiny caption ("hi") can't drive the card below the bottom row.
+        card.setCaption("hi")
+        let floor = card.minimumWidth
+        #expect(card.intrinsicContentSize.width == floor)
+
+        // A long caption reaches wider than the floor.
+        card.setCaption("A considerably longer caption that clearly outruns the counters row")
+        #expect(card.intrinsicContentSize.width > floor)
+
+        // The floor genuinely reserves the bottom row (date + md gap +
+        // counters + the two edge insets) — comfortably past the bare gap.
+        #expect(floor > 2 * SnapPostInfoCardView.contentInset + Spacing.md)
     }
 
     /// The timestamp is a dual-anchor row with the counters: leading-

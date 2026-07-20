@@ -43,6 +43,11 @@ final class SnapPostInfoCardView: UIView {
     /// register). Yields FIRST when the row is tight (truncates), so it can
     /// never push or overlap the counters.
     private let timestampLabel = UILabel()
+    /// The counters cluster — stored so its intrinsic width feeds the card's
+    /// dynamic-width floor (the card never shrinks below the bottom row).
+    private lazy var actionsStack = UIStackView(
+        arrangedSubviews: [likeButton, commentButton, repostButton, saveButton]
+    )
     /// This component's OWN floating glass card, filling it — so the info
     /// renders as a distinct glass surface, independent of the media card
     /// beside it (or standalone full-width on text posts).
@@ -95,7 +100,7 @@ final class SnapPostInfoCardView: UIView {
         content.addSubview(captionLabel)
 
         // Counters: the column's floor, RIGHT-ALIGNED on every post type.
-        let actions = UIStackView(arrangedSubviews: [likeButton, commentButton, repostButton, saveButton])
+        let actions = actionsStack
         actions.axis = .horizontal
         actions.spacing = Spacing.lg
         actions.alignment = .center
@@ -173,9 +178,13 @@ final class SnapPostInfoCardView: UIView {
 
     // MARK: - Content
 
-    /// Sets the caption text; the layout's line cap and centering are fixed
-    /// by the card geometry, so this is content only, never a re-layout.
-    func setCaption(_ text: String?) { captionLabel.text = text }
+    /// Sets the caption text. The card's DYNAMIC width follows the caption
+    /// (a short caption yields a narrow card), so a change re-derives the
+    /// intrinsic width.
+    func setCaption(_ text: String?) {
+        captionLabel.text = text
+        invalidateIntrinsicContentSize()
+    }
 
     /// Fills the counters and the timestamp from the post's display model.
     /// Called at cell configure — the card is populated long before an
@@ -184,12 +193,15 @@ final class SnapPostInfoCardView: UIView {
         Self.setCount(model.likeCount > 0 ? Int(clamping: model.likeCount) : nil, on: likeButton)
         Self.setCount(nil, on: commentButton)
         timestampLabel.text = model.timestampText
+        invalidateIntrinsicContentSize()
     }
 
     /// The comment metric follows the streams: shown once loaded, blank
-    /// while unknown (the `isLoaded` seam — no lying "0" mid-fetch).
+    /// while unknown (the `isLoaded` seam — no lying "0" mid-fetch). The
+    /// count widens the counters, so the card's minimum-width floor follows.
     func setCommentCount(_ count: Int, isLoaded: Bool) {
         Self.setCount(isLoaded ? count : nil, on: commentButton)
+        invalidateIntrinsicContentSize()
     }
 
     /// Cell reuse: drop content.
@@ -198,6 +210,40 @@ final class SnapPostInfoCardView: UIView {
         timestampLabel.text = nil
         Self.setCount(nil, on: likeButton)
         Self.setCount(nil, on: commentButton)
+        invalidateIntrinsicContentSize()
+    }
+
+    // MARK: - Dynamic width
+
+    /// The card sizes its WIDTH to its content: the caption's single-line
+    /// width (the caption wraps only when the cell caps it at the region
+    /// width), floored at `minimumWidth` so the bottom row never clips. The
+    /// height stays layout-driven (the cell pins it to `cardHeight`). The
+    /// cell clamps this to the available region and positions it (centered
+    /// for text, leading-pinned for media).
+    override var intrinsicContentSize: CGSize {
+        CGSize(width: max(minimumWidth, captionPreferredWidth), height: UIView.noIntrinsicMetric)
+    }
+
+    /// The strict minimum width: the bottom row — the date, the `md` flex
+    /// gap, and the counters cluster — plus the two edge insets. Below this
+    /// the date or the interaction buttons would clip, so the card never
+    /// shrinks past it.
+    var minimumWidth: CGFloat {
+        let counters = actionsStack.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+        let date = timestampLabel.intrinsicContentSize.width
+        return 2 * Self.contentInset + ceil(date) + Spacing.md + ceil(counters)
+    }
+
+    /// The width the caption wants on a single line, plus the two insets —
+    /// the card's content-driven upper reach before the cell's region clamp
+    /// forces it to wrap.
+    private var captionPreferredWidth: CGFloat {
+        guard let text = captionLabel.text, !text.isEmpty, let font = captionLabel.font else {
+            return 2 * Self.contentInset
+        }
+        let width = (text as NSString).size(withAttributes: [.font: font]).width
+        return 2 * Self.contentInset + ceil(width)
     }
 
     // MARK: - Geometry

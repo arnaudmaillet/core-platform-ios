@@ -244,20 +244,43 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             ),
         ]
         NSLayoutConstraint.activate(headerFrostConstraints)
-        // The post-info glass card, positioned per post: beside the media
-        // card (`hasMedia: true`) or standalone full-width (text). Its own
-        // distinct floating surface — the media card carries the OTHER one.
+        // The post-info glass card, positioned per post. Its WIDTH is
+        // DYNAMIC — it hugs its content (short caption → narrow card),
+        // floored at the card's own `minimumWidth` (the bottom row never
+        // clips) and clamped to the available region below. Positioning
+        // differs by format:
+        //   • MEDIA — leading-pinned immediately right of the media card
+        //     (`infoFrame.minX` = media card trailing + the card gap).
+        //   • TEXT — CENTERED horizontally in the strip when narrower than
+        //     the full width (no stretching into empty space).
+        // The card hugs its intrinsic width (required hugging) up to the
+        // region cap, so the caption wraps only when it would overflow.
         let infoFrame = SnapCommentsLayout.infoCardFrame(
             in: contentView.bounds, topInset: frozenInsets.top, hasMedia: mediaURL != nil
         )
         infoCard.isHidden = false
+        infoCard.setContentHuggingPriority(.required, for: .horizontal)
         NSLayoutConstraint.deactivate(infoCardConstraints)
         infoCardConstraints = [
             infoCard.topAnchor.constraint(equalTo: contentView.topAnchor, constant: infoFrame.minY),
-            infoCard.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: infoFrame.minX),
-            infoCard.widthAnchor.constraint(equalToConstant: infoFrame.width),
             infoCard.heightAnchor.constraint(equalToConstant: infoFrame.height),
+            // Never exceed the region (media-adjacent slot, or the full
+            // strip for text); the intrinsic width fills below this.
+            infoCard.widthAnchor.constraint(lessThanOrEqualToConstant: infoFrame.width),
         ]
+        if mediaURL == nil {
+            // Text: center within the strip; clamp inside its margins so a
+            // full-width card still respects the strip edges.
+            infoCardConstraints += [
+                infoCard.centerXAnchor.constraint(equalTo: contentView.leadingAnchor, constant: infoFrame.midX),
+                infoCard.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: infoFrame.minX),
+            ]
+        } else {
+            // Media: leading-pinned right of the media card.
+            infoCardConstraints.append(
+                infoCard.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: infoFrame.minX)
+            )
+        }
         NSLayoutConstraint.activate(infoCardConstraints)
         // The docked media card rides ABOVE the stream and the frosted
         // header for the engagement's lifetime (restored on
