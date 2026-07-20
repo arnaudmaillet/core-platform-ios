@@ -74,7 +74,12 @@ enum SnapCommentsLayout {
     /// `SnapPostInfoCardView` so the compact height and the card's own
     /// interior agree exactly.
     static let cardContentInset: CGFloat = Spacing.md
-    static let captionActionsGap: CGFloat = Spacing.xs
+    /// The single interior separation between the caption and the counters
+    /// row — the SAME comfortable value whether the caption is one line
+    /// (compact card) or two (full card). At `sm` it gives the single-line
+    /// state a premium breath instead of the cramped `xs` hairline; the
+    /// compact card height absorbs the change (it's a pure function of this).
+    static let captionActionsGap: CGFloat = Spacing.sm
     /// The caption's line height, the compact-height unit (one caption line).
     static var captionLineHeight: CGFloat {
         UIFont.preferredFont(forTextStyle: .subheadline).lineHeight

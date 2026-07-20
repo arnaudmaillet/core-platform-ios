@@ -300,6 +300,14 @@ final class SnapChromeView: UIView {
         super.layoutSubviews()
         shortcutRail.bottomReservedInset = commentTicker.bounds.height
 
+        // The caption's two-line/timestamp composition is width-dependent —
+        // re-resolve it once the label has a (new) real width. Guarded on the
+        // width so the re-render (which invalidates layout) converges in one
+        // extra pass instead of looping.
+        if captionLabel.bounds.width != lastRenderedCaptionWidth {
+            renderCaption()
+        }
+
         let top = layoutMargins.top
         guard top <= Self.maxSettledTopMargin, commentTicker.frame.maxY > 0 else { return }
         let base = top + Spacing.sm
@@ -350,6 +358,9 @@ final class SnapChromeView: UIView {
         // engaged layout floats over it identically on all of them.
         hasMedia = model.mediaURL != nil
         scrimView.isHidden = !hasMedia
+        // Set the timestamp before the caption so the caption's didSet
+        // composes with both already in hand.
+        timestampText = hasMedia ? model.timestampText : nil
         caption = hasMedia ? model.caption : nil
         applyCaptionVisibility()
         if !hasMedia {
@@ -373,6 +384,20 @@ final class SnapChromeView: UIView {
         didSet { renderCaption() }
     }
 
+    /// The post's age ("7 weeks"), composed onto the caption under the
+    /// strict two-line contract (see `composedCaption`). Kept raw so Dynamic
+    /// Type and width changes can re-resolve the composed rendering.
+    private var timestampText: String? {
+        didSet { renderCaption() }
+    }
+
+    /// The label width the current caption rendering was composed for. The
+    /// two-line + timestamp layout is WIDTH-dependent (line counts and the
+    /// truncation point both move with it), so `layoutSubviews` re-renders
+    /// whenever the label's width changes — rotation, iPad, or the flight
+    /// replica's first real layout — and skips when it hasn't.
+    private var lastRenderedCaptionWidth: CGFloat = 0
+
     private func applyCaptionVisibility() {
         captionLabel.isHidden = caption?.isEmpty ?? true
     }
@@ -383,25 +408,104 @@ final class SnapChromeView: UIView {
     private var hasMedia = true
 
     private func renderCaption() {
-        captionLabel.attributedText = caption.map(Self.renderedCaption)
+        lastRenderedCaptionWidth = captionLabel.bounds.width
+        captionLabel.attributedText = caption.map {
+            Self.composedCaption($0, timestamp: timestampText, width: captionLabel.bounds.width)
+        }
     }
 
-    /// The caption's attributed rendering — the single source of caption
-    /// typography for every post kind and both chrome instances (live cell
-    /// and flight replica); no caller may size it conditionally. The text
-    /// shadow lives here (an `NSShadow` drawn with the glyphs) rather than
-    /// as a `CALayer` shadow: a layer shadow on a full-width label has no
-    /// `shadowPath` and costs an offscreen pass every scrolled frame.
-    private static func renderedCaption(_ text: String) -> NSAttributedString {
+    /// The caption typography — the shared attributes for the caption glyphs
+    /// and, dimmed, the appended timestamp. The text shadow lives here (an
+    /// `NSShadow` drawn WITH the glyphs) rather than as a `CALayer` shadow: a
+    /// layer shadow on a full-width label has no `shadowPath` and costs an
+    /// offscreen pass every scrolled frame.
+    private static func captionAttributes(secondary: Bool) -> [NSAttributedString.Key: Any] {
         let shadow = NSShadow()
         shadow.shadowColor = UIColor.black.withAlphaComponent(0.5)
         shadow.shadowBlurRadius = 3
         shadow.shadowOffset = .zero
-        return NSAttributedString(string: text, attributes: [
+        return [
             .font: UIFont.preferredFont(forTextStyle: .body),
-            .foregroundColor: UIColor.white,
+            .foregroundColor: secondary ? UIColor.white.withAlphaComponent(0.6) : UIColor.white,
             .shadow: shadow,
-        ])
+        ]
+    }
+
+    /// How many lines `string` occupies at `width` — the two-line contract's
+    /// yardstick. A pure measurement (no label state), so `composedCaption`
+    /// can probe candidate renderings before committing one.
+    static func captionLineCount(_ string: NSAttributedString, width: CGFloat) -> Int {
+        guard width > 0, string.length > 0 else { return 0 }
+        let height = string.boundingRect(
+            with: CGSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            context: nil
+        ).height
+        let lineHeight = UIFont.preferredFont(forTextStyle: .body).lineHeight
+        return max(1, Int((height / lineHeight).rounded()))
+    }
+
+    /// The single source of caption typography for every media post and both
+    /// chrome instances (live cell + flight replica) — a PURE function of
+    /// (text, timestamp, width) so both resolve identically. It enforces a
+    /// strict two-line contract with the timestamp always visible:
+    ///
+    ///   • Case A — a single-line caption drops the timestamp onto its OWN
+    ///     second line (`caption\n7 weeks`).
+    ///   • Case B — a caption that fills two lines takes the timestamp inline
+    ///     at the end of line two (`…line two  7 weeks`).
+    ///   • Case C — a longer caption truncates early on line two so the
+    ///     ellipsis + timestamp always sit un-clipped at that line's end
+    ///     (`…cut off here…  7 weeks`).
+    ///
+    /// With no timestamp (or an unmeasured zero width) it returns the bare
+    /// caption — the label's own `numberOfLines`/truncation then applies.
+    static func composedCaption(_ caption: String, timestamp: String?, width: CGFloat) -> NSAttributedString {
+        let captionString = NSAttributedString(string: caption, attributes: captionAttributes(secondary: false))
+        guard let timestamp, !timestamp.isEmpty, width > 0 else { return captionString }
+
+        let timestampString = NSAttributedString(string: timestamp, attributes: captionAttributes(secondary: true))
+        let gap = NSAttributedString(string: "  ", attributes: captionAttributes(secondary: false))
+
+        // Case A: a single-line caption pushes the timestamp to its own line.
+        if captionLineCount(captionString, width: width) <= 1 {
+            let out = NSMutableAttributedString(attributedString: captionString)
+            out.append(NSAttributedString(string: "\n", attributes: captionAttributes(secondary: false)))
+            out.append(timestampString)
+            return out
+        }
+
+        // Case B: the whole caption plus an inline timestamp still fits two lines.
+        let inline = NSMutableAttributedString(attributedString: captionString)
+        inline.append(gap)
+        inline.append(timestampString)
+        if captionLineCount(inline, width: width) <= 2 { return inline }
+
+        // Case C: bisect for the longest caption prefix that keeps the
+        // ellipsis + timestamp inside two lines (prefix length grows the
+        // line count monotonically, so the largest fitting prefix is the
+        // truncation point).
+        let characters = Array(caption)
+        func candidate(prefixLength: Int) -> NSAttributedString {
+            let prefix = String(characters[0..<prefixLength])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let out = NSMutableAttributedString(
+                string: prefix + "… ", attributes: captionAttributes(secondary: false)
+            )
+            out.append(timestampString)
+            return out
+        }
+        var low = 0, high = characters.count, best = 0
+        while low <= high {
+            let mid = (low + high) / 2
+            if captionLineCount(candidate(prefixLength: mid), width: width) <= 2 {
+                best = mid
+                low = mid + 1
+            } else {
+                high = mid - 1
+            }
+        }
+        return candidate(prefixLength: best)
     }
 
     /// Replaces both comment surfaces' content (the ticker's wrap-around

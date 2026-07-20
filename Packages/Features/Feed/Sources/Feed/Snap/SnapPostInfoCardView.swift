@@ -134,7 +134,7 @@ final class SnapPostInfoCardView: UIView {
         // A clean linear top→bottom chain (no centering guide, no midpoint
         // math): the caption pins to the TOP inset, the counters pin to the
         // BOTTOM inset (the card's floor), and the counters clear the
-        // caption by the tight `captionActionsGap`. All four edge margins
+        // caption by the comfortable `captionActionsGap`. All four edge margins
         // are the same uniform inset. The timestamp shares the counters'
         // baseline row, anchored to the leading edge.
         NSLayoutConstraint.activate([
