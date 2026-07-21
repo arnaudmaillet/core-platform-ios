@@ -108,11 +108,13 @@ final class MainTabCoordinator: NSObject, Coordinator {
             },
             for: .touchUpInside
         )
-        // Long-press the avatar → the profile switcher (the exact same menu the
-        // profile header's switcher item shows). `showsMenuAsPrimaryAction`
-        // stays false, so the short-tap action above still opens Profile and the
-        // menu only appears on a hold.
-        avatarButton.menu = makeSwitcherMenu()
+        // Long-press the avatar → the profile switcher. An explicit recognizer
+        // (not UIButton.menu / UIContextMenuInteraction, which don't fire for a
+        // custom view inside a bar item) presents an action sheet; the short-tap
+        // action above still opens Profile.
+        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(avatarLongPressed))
+        longPress.minimumPressDuration = 0.4
+        avatarButton.addGestureRecognizer(longPress)
         // A switch (from either entry point) broadcasts this; reload the avatar
         // so the map chrome reflects the new active profile.
         NotificationCenter.default.addObserver(
@@ -234,12 +236,13 @@ final class MainTabCoordinator: NSObject, Coordinator {
         loadAvatar()
     }
 
-    /// The profile switcher menu for the map avatar's long-press. Its contents
-    /// load through a deferred element, so profiles + the active marker refresh
-    /// each time it opens. `onSwitch` is a no-op here — the avatar reloads via
-    /// `.activeProfileDidChange`.
-    private func makeSwitcherMenu() -> UIMenu {
-        container.profileFeature.makeProfileSwitcherMenu(
+    @objc private func avatarLongPressed(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began else { return }
+        // Present the switcher from the shell over the avatar. `onSwitch` is a
+        // no-op — the avatar reloads via `.activeProfileDidChange`.
+        container.profileFeature.presentProfileSwitcher(
+            from: tabBarController,
+            sourceView: avatarButton,
             onSwitch: {},
             onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
         )

@@ -348,15 +348,30 @@ final class ProfileViewController: UIViewController {
         // Profile switcher — a standalone item beside the gear. Tapping presents
         // the shared switcher menu; a switch refreshes this screen to the new
         // active profile (the map avatar refreshes via `.activeProfileDidChange`).
-        if let switcherFactory {
-            let menu = switcherFactory.makeMenu(
-                onSwitch: { [weak self] in self?.viewModel.refresh() },
-                onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
-            )
-            let switcher = UIBarButtonItem(image: UIImage(systemName: "person.2"), menu: menu)
+        if switcherFactory != nil {
+            let switcher = UIBarButtonItem(image: UIImage(systemName: "person.2"), menu: UIMenu(children: []))
             switcher.tintColor = .label
             switcher.accessibilityLabel = "Switch Profile"
             switcherItem = switcher
+            // Pre-load profiles + avatars, then set a SYNCHRONOUS menu — its
+            // content lands in the first frame, not popped in after the popover.
+            reloadSwitcherMenu()
+        }
+    }
+
+    /// Pre-fetches the switcher snapshot and installs a synchronous menu on the
+    /// switcher item. Re-run after a switch so the active marker updates.
+    private func reloadSwitcherMenu() {
+        guard let switcherFactory, let switcherItem else { return }
+        Task { [weak self] in
+            await switcherFactory.reload()
+            switcherItem.menu = switcherFactory.makeMenu(
+                onSwitch: { [weak self] in
+                    self?.viewModel.refresh()
+                    self?.reloadSwitcherMenu()
+                },
+                onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
+            )
         }
     }
 

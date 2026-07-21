@@ -26,13 +26,19 @@ public protocol ProfileFeatureBuilding {
     /// no avatar or it can't be fetched; callers render a placeholder glyph.
     func viewerAvatarImage() async -> UIImage?
 
-    /// The reusable profile-switcher menu: every account profile (avatar + name
-    /// + @handle) with a checkmark on the active one, plus "Add Profile". The
-    /// shell attaches it to the map avatar's long-press; the profile header uses
-    /// it too. `onSwitch` fires after the active profile changes; `onAddProfile`
-    /// when "Add Profile" is tapped. A switch also broadcasts
+    /// Presents the profile switcher as an action sheet from `presenter`,
+    /// anchored to `sourceView` (the map avatar) — the reliable native
+    /// presentation for the avatar's long-press, where a `UIMenu` can't be shown
+    /// programmatically. Lists the account's profiles (active one marked) and
+    /// "Add Profile". `onSwitch` fires after the active profile changes;
+    /// `onAddProfile` when "Add Profile" is tapped. A switch also broadcasts
     /// `.activeProfileDidChange` so identity chrome (the map avatar) can refresh.
-    func makeProfileSwitcherMenu(onSwitch: @escaping () -> Void, onAddProfile: @escaping () -> Void) -> UIMenu
+    func presentProfileSwitcher(
+        from presenter: UIViewController,
+        sourceView: UIView,
+        onSwitch: @escaping () -> Void,
+        onAddProfile: @escaping () -> Void
+    )
 }
 
 public extension Notification.Name {

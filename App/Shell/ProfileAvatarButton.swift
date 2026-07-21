@@ -5,12 +5,12 @@ import UIKit
 /// unread-notifications dot (the badge surface the removed Profile tab used to
 /// provide). Shows a placeholder glyph until — or instead of — the avatar.
 ///
-/// A `UIButton` (not a bare `UIControl`) so a `menu` can be attached: with
-/// `showsMenuAsPrimaryAction` left `false`, a short tap fires the button's
-/// action (open profile) while a long-press presents the menu (the profile
-/// switcher) — the reliable native pairing a raw `UIContextMenuInteraction`
-/// couldn't get past `UIControl`'s own touch tracking inside a bar item.
-final class ProfileAvatarButton: UIButton {
+/// A lightweight `UIControl` (matching the rest of the header chrome): a short
+/// tap opens the profile via `.touchUpInside`; the shell attaches an explicit
+/// `UILongPressGestureRecognizer` for the profile switcher (neither
+/// `UIContextMenuInteraction` nor `UIButton.menu` fired reliably for a custom
+/// view inside a bar item).
+final class ProfileAvatarButton: UIControl {
     /// Shared with every other bar avatar (e.g. the snap feed's author pill)
     /// via the design system, so the surfaces cannot drift apart.
     private static let diameter = AvatarImageView.barDiameter
