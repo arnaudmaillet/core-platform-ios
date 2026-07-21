@@ -15,6 +15,18 @@ public final class MockSocialServices: @unchecked Sendable {
     private let lock = NSLock()
     private var servedWarmRequest = false
 
+    /// The viewer's editable profile, mutated by the `UpdateProfile` /
+    /// `ChangeHandle` mocks so edits persist for the session (the seed is a
+    /// static struct; these overlay it). Guarded by `lock`. Seeded with a
+    /// starter custom link so the Links editor has something to show.
+    private var viewerHandle = MockPostStore.viewer.handle
+    private var viewerDisplayName = MockPostStore.viewer.displayName
+    private var viewerBio = MockPostStore.viewer.bio
+    private var viewerWebsite = MockPostStore.viewer.websiteURL
+    private var viewerLinks: [(label: String, url: String)] = [
+        (label: "Portfolio", url: "https://www.example.com/demo/portfolio")
+    ]
+
     public init(
         dataset: MockSocialDataset = MockSocialDataset(),
         postStore: MockPostStore? = nil,
@@ -53,6 +65,12 @@ public final class MockSocialServices: @unchecked Sendable {
         }
         bff.register(path: "/profile.v1.ProfileService/ListProfilesByAccount") { [self] (request: Profile_V1_ListProfilesByAccountRequest) in
             listProfilesByAccount(request)
+        }
+        bff.register(path: "/profile.v1.ProfileService/UpdateProfile") { [self] (request: Profile_V1_UpdateProfileRequest) in
+            updateProfile(request)
+        }
+        bff.register(path: "/profile.v1.ProfileService/ChangeHandle") { [self] (request: Profile_V1_ChangeHandleRequest) in
+            changeHandle(request)
         }
     }
 
@@ -177,15 +195,26 @@ public final class MockSocialServices: @unchecked Sendable {
     // MARK: - profile.v1
 
     private func getProfileByID(_ request: Profile_V1_GetProfileByIdRequest) -> Result<Profile_V1_ProfileView, ConnectError> {
-        // The viewer's own profile, so their authored posts hydrate.
+        // The viewer's own profile, so their authored posts hydrate. Identity
+        // fields come from the mutable overlay so a save via UpdateProfile /
+        // ChangeHandle is reflected on the next read.
         if request.profileID == MockPostStore.viewer.profileID {
+            let snapshot = lock.withLock {
+                (handle: viewerHandle, name: viewerDisplayName, bio: viewerBio, website: viewerWebsite, links: viewerLinks)
+            }
             var view = Profile_V1_ProfileView()
             view.profileID = MockPostStore.viewer.profileID
-            view.handle = MockPostStore.viewer.handle
-            view.displayName = MockPostStore.viewer.displayName
+            view.handle = snapshot.handle
+            view.displayName = snapshot.name
             view.avatarURL = MockPostStore.viewer.avatarURL
-            view.bio = MockPostStore.viewer.bio
-            view.websiteURL = MockPostStore.viewer.websiteURL
+            view.bio = snapshot.bio
+            view.websiteURL = snapshot.website
+            view.customLinks = snapshot.links.map { link in
+                var proto = Profile_V1_ProfileLinkProto()
+                proto.label = link.label
+                proto.url = link.url
+                return proto
+            }
             return .success(view)
         }
         guard let author = dataset.author(for: request.profileID) else {
@@ -213,5 +242,42 @@ public final class MockSocialServices: @unchecked Sendable {
         summary.avatarURL = "mock://avatar/viewer?w=128&h=128"
         response.profiles = [summary]
         return .success(response)
+    }
+
+    /// Persists edited metadata (display name, bio, website, links) into the
+    /// mutable overlay so the next `GetProfileById` reflects it. No field mask
+    /// in the contract, so the request carries the full set — we store it whole.
+    private func updateProfile(_ request: Profile_V1_UpdateProfileRequest) -> Result<Profile_V1_CommandResponse, ConnectError> {
+        guard request.profileID == MockPostStore.viewer.profileID else {
+            return .failure(ConnectError(code: .permissionDenied, message: "can only edit your own profile"))
+        }
+        lock.withLock {
+            viewerDisplayName = request.displayName
+            viewerBio = request.bio
+            viewerWebsite = request.websiteURL
+            viewerLinks = request.customLinks.map { (label: $0.label, url: $0.url) }
+        }
+        return .success(Self.accepted(profileID: request.profileID))
+    }
+
+    /// Swaps the viewer's @handle in the overlay (the fleet tombstones the old
+    /// one for 30 days; the mock just renames). Rejects an empty handle.
+    private func changeHandle(_ request: Profile_V1_ChangeHandleRequest) -> Result<Profile_V1_CommandResponse, ConnectError> {
+        guard request.profileID == MockPostStore.viewer.profileID else {
+            return .failure(ConnectError(code: .permissionDenied, message: "can only change your own handle"))
+        }
+        let handle = request.newHandle.trimmingCharacters(in: .whitespaces)
+        guard !handle.isEmpty else {
+            return .failure(ConnectError(code: .invalidArgument, message: "handle cannot be empty"))
+        }
+        lock.withLock { viewerHandle = handle }
+        return .success(Self.accepted(profileID: request.profileID))
+    }
+
+    private static func accepted(profileID: String) -> Profile_V1_CommandResponse {
+        var response = Profile_V1_CommandResponse()
+        response.success = true
+        response.profileID = profileID
+        return response
     }
 }

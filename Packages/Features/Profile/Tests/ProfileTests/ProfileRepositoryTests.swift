@@ -209,7 +209,7 @@ struct ProfileRepositoryTests {
             authSession: AuthenticatedSessionStub()
         )
 
-        _ = try await repository.updateCurrentUserProfile(displayName: "New Name", bio: "New bio", website: "https://new.dev")
+        _ = try await repository.updateCurrentUserProfile(displayName: "New Name", bio: "New bio", website: "https://new.dev", links: [])
 
         #expect(capture.lastID == MockSocialDataset.viewerProfileID)
         #expect(capture.lastDisplayName == "New Name")

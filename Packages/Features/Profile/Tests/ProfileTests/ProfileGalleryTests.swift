@@ -53,7 +53,10 @@ private actor StubProfileProvider: ProfileProviding {
         .other(isFollowing: false)
     }
     func setFollowing(_ following: Bool, for profileID: ProfileID) async throws {}
-    func updateCurrentUserProfile(displayName: String, bio: String, website: String) async throws -> UserProfile {
+    func updateCurrentUserProfile(displayName: String, bio: String, website: String, links: [ProfileLink]) async throws -> UserProfile {
+        profile
+    }
+    func changeHandle(_ newHandle: String) async throws -> UserProfile {
         profile
     }
 }
