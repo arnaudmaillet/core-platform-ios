@@ -4,7 +4,13 @@ import UIKit
 /// The Maps nav-bar Profile entry point: the viewer's circular avatar with an
 /// unread-notifications dot (the badge surface the removed Profile tab used to
 /// provide). Shows a placeholder glyph until — or instead of — the avatar.
-final class ProfileAvatarButton: UIControl {
+///
+/// A `UIButton` (not a bare `UIControl`) so a `menu` can be attached: with
+/// `showsMenuAsPrimaryAction` left `false`, a short tap fires the button's
+/// action (open profile) while a long-press presents the menu (the profile
+/// switcher) — the reliable native pairing a raw `UIContextMenuInteraction`
+/// couldn't get past `UIControl`'s own touch tracking inside a bar item.
+final class ProfileAvatarButton: UIButton {
     /// Shared with every other bar avatar (e.g. the snap feed's author pill)
     /// via the design system, so the surfaces cannot drift apart.
     private static let diameter = AvatarImageView.barDiameter

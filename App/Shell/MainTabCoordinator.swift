@@ -109,8 +109,10 @@ final class MainTabCoordinator: NSObject, Coordinator {
             for: .touchUpInside
         )
         // Long-press the avatar → the profile switcher (the exact same menu the
-        // profile header's switcher item shows). Short tap still opens Profile.
-        avatarButton.addInteraction(UIContextMenuInteraction(delegate: self))
+        // profile header's switcher item shows). `showsMenuAsPrimaryAction`
+        // stays false, so the short-tap action above still opens Profile and the
+        // menu only appears on a hold.
+        avatarButton.menu = makeSwitcherMenu()
         // A switch (from either entry point) broadcasts this; reload the avatar
         // so the map chrome reflects the new active profile.
         NotificationCenter.default.addObserver(
@@ -232,9 +234,10 @@ final class MainTabCoordinator: NSObject, Coordinator {
         loadAvatar()
     }
 
-    /// The profile switcher for the map avatar's long-press. Built fresh each
-    /// time so its deferred contents (profiles + active checkmark) are current.
-    /// `onSwitch` is a no-op here — the avatar reloads via `.activeProfileDidChange`.
+    /// The profile switcher menu for the map avatar's long-press. Its contents
+    /// load through a deferred element, so profiles + the active marker refresh
+    /// each time it opens. `onSwitch` is a no-op here — the avatar reloads via
+    /// `.activeProfileDidChange`.
     private func makeSwitcherMenu() -> UIMenu {
         container.profileFeature.makeProfileSwitcherMenu(
             onSwitch: {},
@@ -353,15 +356,3 @@ extension MainTabCoordinator: AppNavigating {
     }
 }
 
-// MARK: - Avatar long-press profile switcher
-
-extension MainTabCoordinator: UIContextMenuInteractionDelegate {
-    func contextMenuInteraction(
-        _ interaction: UIContextMenuInteraction,
-        configurationForMenuAtLocation location: CGPoint
-    ) -> UIContextMenuConfiguration? {
-        UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
-            self?.makeSwitcherMenu()
-        }
-    }
-}

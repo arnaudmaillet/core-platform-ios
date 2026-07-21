@@ -30,7 +30,8 @@ final class ProfileSwitcherMenuFactory {
                 completion(await self.buildElements(onSwitch: onSwitch, onAddProfile: onAddProfile))
             }
         }
-        return UIMenu(title: "Switch Profile", children: [deferred])
+        // No title — a clean, compact popover.
+        return UIMenu(title: "", children: [deferred])
     }
 
     private func buildElements(onSwitch: @escaping () -> Void, onAddProfile: @escaping () -> Void) async -> [UIMenuElement] {
@@ -40,11 +41,13 @@ final class ProfileSwitcherMenuFactory {
         var rows: [UIMenuElement] = []
         for profile in profiles {
             let image = await thumbnail(for: profile.avatarURL)
+            // No checkmark — the active profile is distinguished by its subtitle
+            // ("Active Profile") instead of the default `.on` state glyph.
+            let isActive = profile.id == activeID
             let action = UIAction(
                 title: profile.displayName,
-                subtitle: "@" + profile.handle,
-                image: image,
-                state: profile.id == activeID ? .on : .off
+                subtitle: isActive ? "Active Profile" : "@" + profile.handle,
+                image: image
             ) { [weak self] _ in
                 guard let self else { return }
                 Task { @MainActor in

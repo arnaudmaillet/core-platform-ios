@@ -433,10 +433,16 @@ final class ProfileViewController: UIViewController {
         }
         // Relationship action for other users; the gear + switcher for own
         // profile (where `action` is nil). Trailing-to-leading: gear rightmost,
-        // switcher to its left.
-        navigationItem.rightBarButtonItems = (action.map { [$0] } ?? [])
-            + (settingsItem.map { [$0] } ?? [])
-            + (switcherItem.map { [$0] } ?? [])
+        // switcher to its left, with a fixedSpace so they read as two distinct
+        // glass bubbles rather than one grouped capsule.
+        var items: [UIBarButtonItem] = []
+        if let action { items.append(action) }
+        if let settingsItem { items.append(settingsItem) }
+        if let switcherItem {
+            if !items.isEmpty { items.append(.fixedSpace(8)) }
+            items.append(switcherItem)
+        }
+        navigationItem.rightBarButtonItems = items
     }
 
     private func makeActionItem(title: String) -> UIBarButtonItem {
