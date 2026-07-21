@@ -1,9 +1,10 @@
 import DesignSystem
 import UIKit
 
-/// Modal form for editing the viewer's own profile: display name, bio, website.
-/// Presented from the "Edit Profile" button; dismisses itself on cancel, and
-/// (via the view model's `onSaved`) on a successful save.
+/// Form for editing the viewer's own profile: display name, bio, website.
+/// Pushed from the profile's "Edit Profile" button onto the same stack — the
+/// native back button (and edge-swipe) returns to the profile, and a successful
+/// save pops back automatically (via the view model's `onSaved`).
 final class EditProfileViewController: UIViewController {
     private let viewModel: EditProfileViewModel
 
@@ -41,10 +42,8 @@ final class EditProfileViewController: UIViewController {
     // MARK: - Setup
 
     private func configureNavigationBar() {
-        navigationItem.leftBarButtonItem = UIBarButtonItem(
-            systemItem: .cancel,
-            primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) }
-        )
+        // Pushed, not modal: the native back button returns to the profile, so
+        // there's no Cancel item to install — only Save on the trailing side.
         navigationItem.rightBarButtonItem = saveButton
     }
 

@@ -3,42 +3,46 @@ import NotificationsInterface
 import ProfileInterface
 import UIKit
 
-/// Presents the signed-in viewer's profile as a sheet over the shell — the
-/// destination of the Maps nav-bar avatar button (which replaced the Profile
-/// tab). Profile and Notifications are composed here at the shell layer, as
-/// the former Profile tab did, so the two packages stay decoupled: a bell in
-/// the sheet's nav bar pushes the notifications feed onto the sheet's own stack.
+/// Pushes the signed-in viewer's profile onto the Maps tab's navigation stack —
+/// the destination of the Maps nav-bar avatar button (which replaced the
+/// Profile tab). Profile and Notifications are composed here at the shell
+/// layer, as the former Profile tab did, so the two packages stay decoupled: a
+/// bell in the profile's nav bar pushes the notifications feed onto the same
+/// stack, and the native edge-swipe returns to the map.
 ///
-/// The profile view controller is built per presentation and released on
-/// dismissal — freshness lives in the repositories and image cache, not in a
-/// retained view controller.
+/// The profile view controller is built per push and released on pop —
+/// freshness lives in the repositories and image cache, not in a retained view
+/// controller.
 @MainActor
-final class ProfileFlowCoordinator: NSObject, Coordinator {
+final class ProfileFlowCoordinator: Coordinator {
     var childCoordinators: [Coordinator] = []
 
     private let container: AppContainer
     private let onLogout: () -> Void
-    /// Fired after a user-initiated dismissal, so the owner can refresh chrome
-    /// that mirrors profile state (the avatar button's unread dot — the user
-    /// may have just read notifications in the sheet).
-    private let onDismiss: () -> Void
 
-    init(container: AppContainer, onLogout: @escaping () -> Void, onDismiss: @escaping () -> Void) {
+    init(container: AppContainer, onLogout: @escaping () -> Void) {
         self.container = container
         self.onLogout = onLogout
-        self.onDismiss = onDismiss
     }
 
-    /// Nothing to build up front; the sheet is assembled per `present` call.
+    /// Nothing to build up front; the profile is assembled per `push` call.
     func start() {}
 
-    func present(from presenter: UIViewController) {
-        guard presenter.presentedViewController == nil else { return }
+    /// Pushes the viewer's own profile onto `navigationController` (the Maps
+    /// tab's stack). Guarded to the stack root — the avatar that triggers this
+    /// only lives on the Maps root's nav bar, so a profile is never stacked on a
+    /// profile.
+    func push(onto navigationController: UINavigationController) {
+        guard navigationController.viewControllers.count == 1,
+              navigationController.presentedViewController == nil else { return }
 
         let profileViewController = container.profileFeature.makeCurrentUserProfileViewController(onLogout: onLogout)
         // Activity lives inside Profile: the bell goes on the *leading* side —
         // the Profile VC owns the trailing item (its account overflow menu) and
         // resets it in viewDidLoad, which would clobber anything we set there.
+        // The Profile VC keeps `leftItemsSupplementBackButton`, so the bell sits
+        // beside the back button rather than replacing it — the swipe-to-map
+        // gesture stays live.
         profileViewController.navigationItem.leftBarButtonItem = UIBarButtonItem(
             image: UIImage(systemName: "bell"),
             primaryAction: UIAction { [weak self, weak profileViewController] _ in
@@ -49,19 +53,6 @@ final class ProfileFlowCoordinator: NSObject, Coordinator {
                 )
             }
         )
-
-        let navigationController = UINavigationController(rootViewController: profileViewController)
-        if let sheet = navigationController.sheetPresentationController {
-            sheet.detents = [.large()]
-            sheet.prefersGrabberVisible = true
-        }
-        navigationController.presentationController?.delegate = self
-        presenter.present(navigationController, animated: true)
-    }
-}
-
-extension ProfileFlowCoordinator: UIAdaptivePresentationControllerDelegate {
-    func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
-        onDismiss()
+        navigationController.pushViewController(profileViewController, animated: true)
     }
 }

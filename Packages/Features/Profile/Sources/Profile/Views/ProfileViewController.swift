@@ -241,7 +241,7 @@ final class ProfileViewController: UIViewController {
         if !didAutoPresentEdit, makeEditViewController != nil,
            ProcessInfo.processInfo.arguments.contains("-edit-profile") {
             didAutoPresentEdit = true
-            presentEditProfile()
+            pushEditProfile()
         }
         // Dev convenience: `-profile-overscroll` parks the scroll view in the
         // pulled-down region (no touch injection in the sim), so the banner's
@@ -292,19 +292,21 @@ final class ProfileViewController: UIViewController {
     /// the edit form; Follow/Following toggle the relationship.
     private func handleActionTapped() {
         if followButtonState == .edit {
-            presentEditProfile()
+            pushEditProfile()
         } else {
             viewModel.toggleFollow()
         }
     }
 
-    private func presentEditProfile() {
+    private func pushEditProfile() {
         guard let makeEditViewController else { return }
+        // Pushed onto the profile's own stack, not presented: back / edge-swipe
+        // returns here, and a successful save pops back and refreshes.
         let editViewController = makeEditViewController { [weak self] in
-            self?.dismiss(animated: true)
+            self?.navigationController?.popViewController(animated: true)
             self?.viewModel.refresh()
         }
-        present(UINavigationController(rootViewController: editViewController), animated: true)
+        navigationController?.pushViewController(editViewController, animated: true)
     }
 
     // MARK: - Setup

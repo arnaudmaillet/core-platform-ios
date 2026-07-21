@@ -66,18 +66,20 @@ final class MainTabCoordinator: NSObject, Coordinator {
     }
 
     func start() {
-        let profileFlow = ProfileFlowCoordinator(
-            container: container,
-            onLogout: onLogout,
-            onDismiss: { [weak self] in self?.refreshUnreadDot() }
-        )
+        let profileFlow = ProfileFlowCoordinator(container: container, onLogout: onLogout)
         addChild(profileFlow)
         self.profileFlow = profileFlow
 
         avatarButton.addAction(
             UIAction { [weak self] _ in
-                guard let self else { return }
-                self.profileFlow?.present(from: tabBarController)
+                guard let self, let navigationController = mapsNavigationController else { return }
+                // Push onto the Maps stack (the avatar only shows there) rather
+                // than presenting a sheet: back / edge-swipe returns to the map.
+                self.profileFlow?.push(onto: navigationController)
+                // The avatar's unread dot goes stale the moment we leave for
+                // Profile (its bell reads notifications on the same stack);
+                // refresh on entry so it re-reflects on return to the map.
+                self.refreshUnreadDot()
             },
             for: .touchUpInside
         )
@@ -127,8 +129,8 @@ final class MainTabCoordinator: NSObject, Coordinator {
         // UI. Deferred a tick: at `start()` the shell isn't the window root yet.
         if arguments.contains("-open-my-profile") {
             DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                self.profileFlow?.present(from: tabBarController)
+                guard let self, let navigationController = mapsNavigationController else { return }
+                self.profileFlow?.push(onto: navigationController)
             }
         }
         // `-present-compose` presents the compose sheet on launch, for
@@ -161,6 +163,13 @@ final class MainTabCoordinator: NSObject, Coordinator {
             }
         }
         #endif
+    }
+
+    /// The Maps tab's navigation stack — where the profile (the avatar's
+    /// destination) is pushed. Resolved from `orderedTabs` so it tracks the one
+    /// `MapsTabCoordinator` the shell built.
+    private var mapsNavigationController: UINavigationController? {
+        orderedTabs.first(where: { $0.0 == .maps })?.1.navigationController
     }
 
     /// Resolves the viewer's avatar into the button; the placeholder glyph
