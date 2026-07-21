@@ -38,19 +38,6 @@ final class EditProfileViewController: UIViewController {
             case .links: "Links"
             }
         }
-
-        #if DEBUG
-        init?(debugName: String) {
-            switch debugName {
-            case "name": self = .name
-            case "username": self = .username
-            case "bio": self = .bio
-            case "website": self = .website
-            case "links": self = .links
-            default: return nil
-            }
-        }
-        #endif
     }
 
     private enum Item: Hashable {
@@ -150,9 +137,6 @@ final class EditProfileViewController: UIViewController {
         case .ready(let fields):
             self.fields = fields
             applyRealSnapshot()
-            #if DEBUG
-            handleDebugArgs()
-            #endif
         case .failed(let message):
             presentError(message)
         }
@@ -373,21 +357,6 @@ final class EditProfileViewController: UIViewController {
         present(alert, animated: true)
     }
 
-    #if DEBUG
-    private var didHandleDebugArgs = false
-    /// Dev convenience (no tap injection in the sim): `-edit-profile-field
-    /// <name|username|bio|website|links>` auto-pushes that child editor so the
-    /// focused screens are screenshottable without tapping a row.
-    private func handleDebugArgs() {
-        guard !didHandleDebugArgs, fields != nil else { return }
-        let arguments = ProcessInfo.processInfo.arguments
-        if let index = arguments.firstIndex(of: "-edit-profile-field"), index + 1 < arguments.count,
-           let field = Field(debugName: arguments[index + 1]) {
-            didHandleDebugArgs = true
-            DispatchQueue.main.async { [weak self] in self?.edit(field) }
-        }
-    }
-    #endif
 
     // MARK: - Validation
 

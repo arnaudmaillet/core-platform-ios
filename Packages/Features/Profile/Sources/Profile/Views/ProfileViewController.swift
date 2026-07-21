@@ -219,10 +219,6 @@ final class ProfileViewController: UIViewController {
         concealFilterToolbar()
     }
 
-    #if DEBUG
-    private var didAutoPresentEdit = false
-    #endif
-
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         // The pager's horizontal pan yields to the stack's edge-swipe pop:
@@ -236,13 +232,6 @@ final class ProfileViewController: UIViewController {
             galleryPager.horizontalPan.require(toFail: pop)
         }
         #if DEBUG
-        // Dev convenience: `-edit-profile` opens the edit form on the viewer's
-        // own profile, so the form is testable without tapping the button.
-        if !didAutoPresentEdit, makeEditViewController != nil,
-           ProcessInfo.processInfo.arguments.contains("-edit-profile") {
-            didAutoPresentEdit = true
-            pushEditProfile()
-        }
         // Dev convenience: `-profile-overscroll` parks the scroll view in the
         // pulled-down region (no touch injection in the sim), so the banner's
         // stretch-over-overscroll behavior can be screenshotted.
