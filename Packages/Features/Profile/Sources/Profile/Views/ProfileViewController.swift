@@ -70,8 +70,6 @@ final class ProfileViewController: UIViewController {
     private var skeletonViewportFill: NSLayoutConstraint?
     private var didSubordinatePagerToPop = false
 
-    /// The own-profile overflow menu (Log Out); sits inside the action item.
-    private var overflowItem: UIBarButtonItem?
     /// The own-profile settings gear; pushes `AccountSettingsViewController`.
     private var settingsItem: UIBarButtonItem?
     /// Defensive rendering for a `.hidden` relationship state. In practice the
@@ -321,8 +319,9 @@ final class ProfileViewController: UIViewController {
         navigationItem.scrollEdgeAppearance = transparent
         navigationItem.standardAppearance = UINavigationBarAppearance()
 
-        // Account actions only exist for the viewer's own profile.
-        guard let onLogout else { return }
+        // Account actions only exist for the viewer's own profile. (`onLogout`
+        // is retained for the Account Settings screen, which will host Log Out.)
+        guard onLogout != nil else { return }
         // Settings gear — the viewer's account entry point. A plain trailing
         // item (no leading item, so it never disturbs the edge-swipe pop),
         // tinted `.label` to read as primary dark chrome over the banner.
@@ -333,15 +332,6 @@ final class ProfileViewController: UIViewController {
         settings.tintColor = .label
         settings.accessibilityLabel = "Settings"
         settingsItem = settings
-        // Log Out lives in an overflow menu — destructive, so it's one tap
-        // removed from the surface, matching where it sat on the placeholder.
-        let logout = UIAction(title: "Log Out", image: UIImage(systemName: "rectangle.portrait.and.arrow.right"), attributes: .destructive) { _ in
-            onLogout()
-        }
-        overflowItem = UIBarButtonItem(
-            image: UIImage(systemName: "ellipsis.circle"),
-            menu: UIMenu(children: [logout])
-        )
     }
 
     private func pushSettings() {
@@ -404,12 +394,10 @@ final class ProfileViewController: UIViewController {
         case .following: makeActionItem(title: "Following")
         case .edit: nil
         }
-        // Trailing-to-leading: relationship action (others), then the gear and
-        // overflow (own profile). For own profile `action` is nil, so the gear
-        // is the trailing-most item with the overflow menu to its left.
+        // Relationship action for other users; the settings gear for own
+        // profile (where `action` is nil).
         navigationItem.rightBarButtonItems = (action.map { [$0] } ?? [])
             + (settingsItem.map { [$0] } ?? [])
-            + (overflowItem.map { [$0] } ?? [])
     }
 
     private func makeActionItem(title: String) -> UIBarButtonItem {
