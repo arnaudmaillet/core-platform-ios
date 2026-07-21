@@ -37,7 +37,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     }
 
     private func makeSwitcherFactory() -> ProfileSwitcherMenuFactory? {
-        switching.map { ProfileSwitcherMenuFactory(switching: $0) }
+        switching.map { ProfileSwitcherMenuFactory(switching: $0, imagePipeline: imagePipeline) }
     }
 
     public func makeProfileSwitcher() -> ProfileSwitcherPresenting? {

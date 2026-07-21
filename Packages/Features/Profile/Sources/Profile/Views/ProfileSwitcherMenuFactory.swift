@@ -1,4 +1,5 @@
 import CoreModels
+import MediaCore
 import ProfileInterface
 import UIKit
 
@@ -6,53 +7,61 @@ import UIKit
 /// button and the map avatar's long-press context menu — both build the exact
 /// same `UIMenu`.
 ///
-/// Rows are pre-formatted into ready-to-render strings by `reload` (an async
-/// fetch of the account's profiles). `makeMenu` is then **fully synchronous**:
-/// no async work, no deferred element, no image loading/formatting — every
-/// `UIAction(title:subtitle:)` is complete, so title and subtitle render
-/// together in the menu's first frame with zero delay.
+/// `reload` (an async fetch) pre-formats every row into ready strings AND
+/// pre-decodes its rounded avatar `UIImage`. `makeMenu` is then **fully
+/// synchronous**: each `UIAction(title:subtitle:image:)` is assembled complete
+/// in one pass — no deferred element, no async, no image work at build time —
+/// so title, subtitle, and avatar all render together in the menu's first frame.
 @MainActor
 final class ProfileSwitcherMenuFactory: ProfileSwitcherPresenting {
     private let switching: any ProfileSwitching
+    private let imagePipeline: ImagePipeline
 
-    /// A pre-formatted row: nothing here is computed at menu-build time.
+    /// A pre-built row: nothing here is computed at menu-build time.
     private struct Row {
         let id: ProfileID
         let title: String
         let subtitle: String
+        let image: UIImage?
         let isActive: Bool
     }
     private var rows: [Row] = []
 
-    init(switching: any ProfileSwitching) {
+    init(switching: any ProfileSwitching, imagePipeline: ImagePipeline) {
         self.switching = switching
+        self.imagePipeline = imagePipeline
     }
 
-    /// Fetches the account's profiles and pre-formats every row's strings, so
-    /// subsequent `makeMenu` calls are synchronous.
+    /// Fetches the account's profiles and pre-builds every row (strings + rounded
+    /// avatar), so subsequent `makeMenu` calls are synchronous.
     func reload() async {
         let profiles = (try? await switching.accountProfiles()) ?? []
         let activeID = await switching.activeProfileID()
-        rows = profiles.map { profile in
+        var loaded: [Row] = []
+        for profile in profiles {
             let isActive = profile.id == activeID
-            return Row(
+            loaded.append(Row(
                 id: profile.id,
                 title: profile.displayName,
                 subtitle: isActive ? "Active Profile" : "@" + profile.handle,
+                image: await thumbnail(for: profile.avatarURL),
                 isActive: isActive
-            )
+            ))
         }
+        rows = loaded
     }
 
-    /// A synchronous switcher `UIMenu` from the pre-formatted rows. The active
+    /// A synchronous switcher `UIMenu` from the pre-built rows. The active
     /// profile is highlighted in place of a checkmark: an "Active Profile"
-    /// subtitle plus a red (`.destructive`) accent, so it reads at a glance.
+    /// subtitle plus a red (`.destructive`) title accent. The avatars are
+    /// `.alwaysOriginal`, so the red accent tints only the text, not the photo.
     func makeMenu(onSwitch: @escaping () -> Void, onAddProfile: @escaping () -> Void) -> UIMenu {
         var elements: [UIMenuElement] = []
         for row in rows {
             let action = UIAction(
                 title: row.title,
                 subtitle: row.subtitle,
+                image: row.image,
                 attributes: row.isActive ? .destructive : []
             ) { [weak self] _ in
                 self?.commitSwitch(to: row.id, then: onSwitch)
@@ -61,7 +70,6 @@ final class ProfileSwitcherMenuFactory: ProfileSwitcherPresenting {
         }
         let profilesMenu = UIMenu(title: "", options: .displayInline, children: elements)
 
-        // A system glyph (SF Symbol) — synchronous, no formatting.
         let addAction = UIAction(
             title: "Add Profile",
             image: UIImage(systemName: "person.badge.plus")
@@ -80,5 +88,18 @@ final class ProfileSwitcherMenuFactory: ProfileSwitcherPresenting {
             NotificationCenter.default.post(name: .activeProfileDidChange, object: nil)
             onSwitch()
         }
+    }
+
+    /// A small circular avatar for a menu row (or nil). Rendered `.alwaysOriginal`
+    /// so the photo shows through the menu's tinting (incl. the active row's red).
+    private func thumbnail(for url: URL?) async -> UIImage? {
+        guard let url, let image = try? await imagePipeline.image(for: url) else { return nil }
+        let side: CGFloat = 36
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side))
+        return renderer.image { _ in
+            let rect = CGRect(x: 0, y: 0, width: side, height: side)
+            UIBezierPath(ovalIn: rect).addClip()
+            image.draw(in: rect)
+        }.withRenderingMode(.alwaysOriginal)
     }
 }

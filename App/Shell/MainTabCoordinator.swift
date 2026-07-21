@@ -33,6 +33,10 @@ final class MainTabCoordinator: NSObject, Coordinator {
     /// The profile switcher for the avatar's long-press context menu. Pre-loaded
     /// so the menu is non-empty and synchronous when it opens.
     private lazy var profileSwitcher = container.profileFeature.makeProfileSwitcher()
+    /// The pre-built switcher menu, rebuilt whenever the profile snapshot
+    /// changes. The context menu returns this as-is — nothing is constructed
+    /// during the presentation transition.
+    private var switcherMenu: UIMenu?
     /// The Notifications entry point: a plain bar item like the map's "+", tinted
     /// `.label` so it renders dark in the glass bubble (not system blue). The
     /// unread badge is a clean image swap — `bell` ↔ `bell.badge` (a red badge
@@ -116,7 +120,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
         // non-empty and synchronous when it opens; the short-tap action above
         // still opens Profile (a tap resolves before the menu's long-press).
         avatarButton.addInteraction(UIContextMenuInteraction(delegate: self))
-        Task { await profileSwitcher?.reload() }
+        rebuildSwitcherMenu()
         // A switch (from either entry point) broadcasts this; reload the avatar
         // and the switcher snapshot so the map chrome reflects the new profile.
         NotificationCenter.default.addObserver(
@@ -236,7 +240,19 @@ final class MainTabCoordinator: NSObject, Coordinator {
 
     @objc private func activeProfileChanged() {
         loadAvatar()
-        Task { await profileSwitcher?.reload() }
+        rebuildSwitcherMenu()
+    }
+
+    /// Re-fetches the switcher snapshot and rebuilds the static menu the context
+    /// menu will hand back verbatim.
+    private func rebuildSwitcherMenu() {
+        Task { @MainActor in
+            await profileSwitcher?.reload()
+            switcherMenu = profileSwitcher?.makeMenu(
+                onSwitch: {},
+                onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
+            )
+        }
     }
 
     private func presentAddProfilePlaceholder() {
@@ -357,15 +373,36 @@ extension MainTabCoordinator: UIContextMenuInteractionDelegate {
         _ interaction: UIContextMenuInteraction,
         configurationForMenuAtLocation location: CGPoint
     ) -> UIContextMenuConfiguration? {
-        // The exact same synchronous UIMenu the profile header uses, presented
-        // as a native popover anchored to the avatar. `onSwitch` is a no-op —
-        // the avatar reloads via `.activeProfileDidChange`.
+        // Hand back the pre-built menu as-is — nothing is constructed during the
+        // presentation transition (the same UIMenu the profile header shows).
         UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
-            self?.profileSwitcher?.makeMenu(
-                onSwitch: {},
-                onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
-            )
+            self?.switcherMenu
         }
+    }
+
+    // A custom preview so the lift keeps the avatar a clean circle inside its
+    // glass capsule, instead of the default rectangular snapshot that yanks it
+    // out of the header. `previewForHighlighting…` is the variant that fires for
+    // a single-view interaction (identifier-keyed previews don't apply here).
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        previewForHighlightingMenuWithConfiguration configuration: UIContextMenuConfiguration
+    ) -> UITargetedPreview? {
+        avatarTargetedPreview()
+    }
+
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        previewForDismissingMenuWithConfiguration configuration: UIContextMenuConfiguration
+    ) -> UITargetedPreview? {
+        avatarTargetedPreview()
+    }
+
+    private func avatarTargetedPreview() -> UITargetedPreview {
+        let parameters = UIPreviewParameters()
+        parameters.backgroundColor = .clear
+        parameters.visiblePath = UIBezierPath(ovalIn: avatarButton.bounds)
+        return UITargetedPreview(view: avatarButton, parameters: parameters)
     }
 }
 
