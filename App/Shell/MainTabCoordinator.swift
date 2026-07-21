@@ -16,9 +16,9 @@ import UploadInterface
 ///
 /// Two bar buttons are not tabs. Profile pushes onto the Maps stack from the
 /// avatar button in the Maps nav bar (see `ProfileFlowCoordinator`), and
-/// Notifications pushes from a bell button seated directly to the avatar's
-/// left; the unread-notifications badge the Profile tab used to carry now lives
-/// on that bell as a dot. Feed keeps its bar button, but selecting it is vetoed
+/// Notifications pushes from a bell item seated directly to the avatar's left;
+/// the unread-notifications badge the Profile tab used to carry now lives on
+/// that bell. Feed keeps its bar button, but selecting it is vetoed
 /// (`shouldSelectTab`) and the timeline is *pushed* onto the current tab's
 /// stack instead (see `FeedFlowCoordinator`) — back returns to where the user
 /// was, and no tab switch occurs.
@@ -30,7 +30,31 @@ final class MainTabCoordinator: NSObject, Coordinator {
     private let container: AppContainer
     private let onLogout: () -> Void
     private let avatarButton = ProfileAvatarButton()
-    private let bellButton = NotificationsBellButton()
+    /// The Notifications entry point: a plain bar item like the map's "+", tinted
+    /// `.label` so it renders dark in the glass bubble (not system blue). The
+    /// unread badge is a clean image swap — `bell` ↔ `bell.badge` (a red badge
+    /// dot) — driven by `refreshUnreadBadge`, no custom view needed.
+    private lazy var notificationsBarItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            image: Self.bellImage(unread: false),
+            primaryAction: UIAction { [weak self] _ in self?.pushNotifications() }
+        )
+        item.tintColor = .label
+        item.accessibilityLabel = "Notifications"
+        return item
+    }()
+
+    /// The bell glyph for the current unread state. When unread, a palette
+    /// `bell.badge` (bell in `.label`, badge in red) rendered `.alwaysOriginal`
+    /// so the item's `.label` tint can't flatten the badge; otherwise a plain
+    /// template `bell` that the tint draws dark. Both keep dynamic colors, so
+    /// they adapt to light/dark on their own.
+    private static func bellImage(unread: Bool) -> UIImage? {
+        guard unread else { return UIImage(systemName: "bell") }
+        let config = UIImage.SymbolConfiguration(paletteColors: [.label, .systemRed])
+        return UIImage(systemName: "bell.badge", withConfiguration: config)?
+            .withRenderingMode(.alwaysOriginal)
+    }
     private var profileFlow: ProfileFlowCoordinator?
     private var feedFlow: FeedFlowCoordinator?
     /// Tabs paired with their `AppTab`, in bar order — the lookup `selectTab`
@@ -78,15 +102,10 @@ final class MainTabCoordinator: NSObject, Coordinator {
                 // Push onto the Maps stack (the avatar only shows there) rather
                 // than presenting a sheet: back / edge-swipe returns to the map.
                 self.profileFlow?.push(onto: navigationController)
-                // The bell's unread dot goes stale the moment we leave for
+                // The bell's unread badge goes stale the moment we leave for
                 // Profile; refresh on entry so it re-reflects on return.
-                self.refreshUnreadDot()
+                self.refreshUnreadBadge()
             },
-            for: .touchUpInside
-        )
-
-        bellButton.addAction(
-            UIAction { [weak self] _ in self?.pushNotifications() },
             for: .touchUpInside
         )
 
@@ -99,7 +118,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
             (.maps, MapsTabCoordinator(
                 container: container,
                 profileButtonItem: UIBarButtonItem(customView: avatarButton),
-                notificationsButtonItem: UIBarButtonItem(customView: bellButton)
+                notificationsButtonItem: notificationsBarItem
             )),
             (.messages, MessagesTabCoordinator(container: container)),
             (.search, SearchTabCoordinator(container: container))
@@ -117,7 +136,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
         tabBarController.delegate = self
 
         loadAvatar()
-        refreshUnreadDot()
+        refreshUnreadBadge()
 
         #if DEBUG
         // Dev convenience: `-select-tab N` opens directly on a tab for testing,
@@ -190,7 +209,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
 
     /// Pushes Notifications onto the Maps stack — the bell's action (the bell
     /// only shows on the Maps root). Rooted at the map so back returns there;
-    /// reading clears the badge server-side, and `refreshUnreadDot` reconciles
+    /// reading clears the badge server-side, and `refreshUnreadBadge` reconciles
     /// on return. Shared with the `-open-notifications` debug hook.
     private func pushNotifications() {
         guard let navigationController = mapsNavigationController else { return }
@@ -210,14 +229,15 @@ final class MainTabCoordinator: NSObject, Coordinator {
         }
     }
 
-    /// Mirrors the unread notifications count onto the bell's dot. Best-effort
-    /// and idempotent — called on start, on every tab switch, and when a
-    /// notifications-bearing surface (Profile / the pushed feed) is left.
-    private func refreshUnreadDot() {
+    /// Mirrors the unread notifications count onto the bell (a `bell` ↔
+    /// `bell.badge` image swap). Best-effort and idempotent — called on start,
+    /// on every tab switch, and when a notifications-bearing surface (Profile /
+    /// the pushed feed) is left.
+    private func refreshUnreadBadge() {
         Task { [weak self] in
             guard let self else { return }
             let count = await container.notificationsFeature.unreadCount()
-            bellButton.setHasUnread(count > 0)
+            notificationsBarItem.image = Self.bellImage(unread: count > 0)
         }
     }
 }
@@ -233,12 +253,12 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
         openFeed()
         // Vetoed selections never reach `didSelect`; refresh the dot here so a
         // Feed tap keeps the same badge freshness a tab switch has.
-        refreshUnreadDot()
+        refreshUnreadBadge()
         return false
     }
 
     func tabBarController(_ tabBarController: UITabBarController, didSelect viewController: UIViewController) {
-        refreshUnreadDot()
+        refreshUnreadBadge()
         syncTabBarVisibility()
     }
 
