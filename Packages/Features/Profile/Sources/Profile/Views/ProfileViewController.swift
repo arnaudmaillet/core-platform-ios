@@ -11,6 +11,9 @@ final class ProfileViewController: UIViewController {
     /// Builds the edit form (for the viewer's own profile); the closure it
     /// receives is invoked after a successful save. Nil for other users.
     private let makeEditViewController: ((@escaping () -> Void) -> UIViewController)?
+    /// Builds the account settings screen (own profile only, the gear's
+    /// destination). Nil for other users.
+    private let makeSettingsViewController: (() -> UIViewController)?
 
     private let scrollView = UIScrollView()
     private let headerView: ProfileHeaderView
@@ -112,11 +115,13 @@ final class ProfileViewController: UIViewController {
         imagePipeline: ImagePipeline,
         onLogout: (() -> Void)?,
         makeEditViewController: ((@escaping () -> Void) -> UIViewController)? = nil,
+        makeSettingsViewController: (() -> UIViewController)? = nil,
         identityStub: ProfileIdentityStub? = nil
     ) {
         self.viewModel = viewModel
         self.onLogout = onLogout
         self.makeEditViewController = makeEditViewController
+        self.makeSettingsViewController = makeSettingsViewController
         headerView = ProfileHeaderView(imagePipeline: imagePipeline)
         galleryPager = ProfileGalleryPagerView(imagePipeline: imagePipeline)
         super.init(nibName: nil, bundle: nil)
@@ -335,7 +340,8 @@ final class ProfileViewController: UIViewController {
     }
 
     private func pushSettings() {
-        navigationController?.pushViewController(AccountSettingsViewController(), animated: true)
+        guard let settingsViewController = makeSettingsViewController?() else { return }
+        navigationController?.pushViewController(settingsViewController, animated: true)
     }
 
     /// The single application point for everything the navigation bar shows —

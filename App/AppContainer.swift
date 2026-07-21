@@ -221,6 +221,13 @@ final class AppContainer {
         authSession: sessionManager
     )
 
+    /// The viewer's account details for the settings screen (read-only —
+    /// `account.v1` exposes no change-email/phone RPC).
+    private lazy var accountRepository = AccountRepository(
+        accountClient: Account_V1_AccountServiceClient(client: authenticatedRPCClient),
+        authSession: sessionManager
+    )
+
     /// The profile media grid's source: post listing/hydration plus the
     /// search-backed "Tagged" corpus (post caption search — mock indexes it
     /// exactly; fleet quality tracks the search index).
@@ -234,7 +241,8 @@ final class AppContainer {
         repository: profileRepository,
         gallery: profileGalleryRepository,
         imagePipeline: imagePipeline,
-        router: routeResolver
+        router: routeResolver,
+        account: accountRepository
     )
 
     // MARK: - Search

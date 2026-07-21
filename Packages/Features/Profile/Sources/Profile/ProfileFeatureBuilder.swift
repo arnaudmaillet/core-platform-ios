@@ -15,17 +15,21 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     private let galleryPreferences = GalleryPreferences()
     private let imagePipeline: ImagePipeline
     private let router: (any Router)?
+    /// Reads the viewer's account for the settings screen (own profile only).
+    private let account: (any AccountProviding)?
 
     public init(
         repository: any ProfileProviding,
         gallery: (any ProfileGalleryProviding)? = nil,
         imagePipeline: ImagePipeline,
-        router: (any Router)? = nil
+        router: (any Router)? = nil,
+        account: (any AccountProviding)? = nil
     ) {
         self.repository = repository
         self.gallery = gallery
         self.imagePipeline = imagePipeline
         self.router = router
+        self.account = account
     }
 
     public func makeCurrentUserProfileViewController(onLogout: @escaping () -> Void) -> UIViewController {
@@ -45,6 +49,9 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                     viewModel: EditProfileViewModel(repository: repository, onSaved: onSaved),
                     imagePipeline: imagePipeline
                 )
+            },
+            makeSettingsViewController: account.map { account in
+                { AccountSettingsViewController(account: account, onLogout: onLogout) }
             }
         )
     }

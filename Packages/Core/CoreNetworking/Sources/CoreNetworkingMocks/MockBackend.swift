@@ -23,6 +23,7 @@ public struct MockBackend: Sendable {
         let bff = MockBFF()
         bff.simulatedConditions = conditions
         MockAuthService().register(on: bff)
+        MockAccountService().register(on: bff)
         MockSocialServices(dataset: dataset, postStore: postStore).register(on: bff)
         MockEngagementService(store: counterStore).register(on: bff)
         MockCounterService(store: counterStore).register(on: bff)
