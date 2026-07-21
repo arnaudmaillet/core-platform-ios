@@ -108,6 +108,15 @@ final class MainTabCoordinator: NSObject, Coordinator {
             },
             for: .touchUpInside
         )
+        // Long-press the avatar → the profile switcher (the exact same menu the
+        // profile header's switcher item shows). Short tap still opens Profile.
+        avatarButton.addInteraction(UIContextMenuInteraction(delegate: self))
+        // A switch (from either entry point) broadcasts this; reload the avatar
+        // so the map chrome reflects the new active profile.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(activeProfileChanged),
+            name: .activeProfileDidChange, object: nil
+        )
 
         let feedFlow = FeedFlowCoordinator(container: container)
         feedFlow.start()
@@ -219,6 +228,30 @@ final class MainTabCoordinator: NSObject, Coordinator {
         )
     }
 
+    @objc private func activeProfileChanged() {
+        loadAvatar()
+    }
+
+    /// The profile switcher for the map avatar's long-press. Built fresh each
+    /// time so its deferred contents (profiles + active checkmark) are current.
+    /// `onSwitch` is a no-op here — the avatar reloads via `.activeProfileDidChange`.
+    private func makeSwitcherMenu() -> UIMenu {
+        container.profileFeature.makeProfileSwitcherMenu(
+            onSwitch: {},
+            onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
+        )
+    }
+
+    private func presentAddProfilePlaceholder() {
+        let alert = UIAlertController(
+            title: "Add Profile",
+            message: "Creating a new profile isn't available yet.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        tabBarController.present(alert, animated: true)
+    }
+
     /// Resolves the viewer's avatar into the button; the placeholder glyph
     /// stays if there is none (or it can't be fetched).
     private func loadAvatar() {
@@ -317,5 +350,18 @@ extension MainTabCoordinator: AppNavigating {
         }
         guard let navigationController = tabBarController.selectedViewController as? UINavigationController else { return }
         feedFlow?.push(on: navigationController)
+    }
+}
+
+// MARK: - Avatar long-press profile switcher
+
+extension MainTabCoordinator: UIContextMenuInteractionDelegate {
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        configurationForMenuAtLocation location: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+            self?.makeSwitcherMenu()
+        }
     }
 }

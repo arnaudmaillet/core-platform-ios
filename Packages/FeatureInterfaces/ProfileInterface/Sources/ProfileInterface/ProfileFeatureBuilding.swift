@@ -25,4 +25,18 @@ public protocol ProfileFeatureBuilding {
     /// (the Maps nav-bar avatar button). Best-effort: `nil` when the viewer has
     /// no avatar or it can't be fetched; callers render a placeholder glyph.
     func viewerAvatarImage() async -> UIImage?
+
+    /// The reusable profile-switcher menu: every account profile (avatar + name
+    /// + @handle) with a checkmark on the active one, plus "Add Profile". The
+    /// shell attaches it to the map avatar's long-press; the profile header uses
+    /// it too. `onSwitch` fires after the active profile changes; `onAddProfile`
+    /// when "Add Profile" is tapped. A switch also broadcasts
+    /// `.activeProfileDidChange` so identity chrome (the map avatar) can refresh.
+    func makeProfileSwitcherMenu(onSwitch: @escaping () -> Void, onAddProfile: @escaping () -> Void) -> UIMenu
+}
+
+public extension Notification.Name {
+    /// Posted after the viewer switches the active profile, so identity surfaces
+    /// (the map avatar, an open profile screen) can refresh to the new profile.
+    static let activeProfileDidChange = Notification.Name("cn.wynn.core-platform-ios.activeProfileDidChange")
 }

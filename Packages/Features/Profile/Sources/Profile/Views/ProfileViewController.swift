@@ -14,6 +14,9 @@ final class ProfileViewController: UIViewController {
     /// Builds the account settings screen (own profile only, the gear's
     /// destination). Nil for other users.
     private let makeSettingsViewController: (() -> UIViewController)?
+    /// Builds the reusable profile-switcher menu (own profile only). Nil for
+    /// other users — switching is a viewer affordance.
+    private let switcherFactory: ProfileSwitcherMenuFactory?
 
     private let scrollView = UIScrollView()
     private let headerView: ProfileHeaderView
@@ -75,6 +78,8 @@ final class ProfileViewController: UIViewController {
 
     /// The own-profile settings gear; pushes `AccountSettingsViewController`.
     private var settingsItem: UIBarButtonItem?
+    /// The own-profile switcher; taps present the profile-switcher menu.
+    private var switcherItem: UIBarButtonItem?
     /// Defensive rendering for a `.hidden` relationship state. In practice the
     /// slot always has a concrete default from init ("Follow" / "Edit
     /// Profile"), so this skeleton only shows if a future code path ever
@@ -116,12 +121,14 @@ final class ProfileViewController: UIViewController {
         onLogout: (() -> Void)?,
         makeEditViewController: ((@escaping () -> Void) -> UIViewController)? = nil,
         makeSettingsViewController: (() -> UIViewController)? = nil,
+        switcherFactory: ProfileSwitcherMenuFactory? = nil,
         identityStub: ProfileIdentityStub? = nil
     ) {
         self.viewModel = viewModel
         self.onLogout = onLogout
         self.makeEditViewController = makeEditViewController
         self.makeSettingsViewController = makeSettingsViewController
+        self.switcherFactory = switcherFactory
         headerView = ProfileHeaderView(imagePipeline: imagePipeline)
         galleryPager = ProfileGalleryPagerView(imagePipeline: imagePipeline)
         super.init(nibName: nil, bundle: nil)
@@ -337,6 +344,30 @@ final class ProfileViewController: UIViewController {
         settings.tintColor = .label
         settings.accessibilityLabel = "Settings"
         settingsItem = settings
+
+        // Profile switcher — a standalone item beside the gear. Tapping presents
+        // the shared switcher menu; a switch refreshes this screen to the new
+        // active profile (the map avatar refreshes via `.activeProfileDidChange`).
+        if let switcherFactory {
+            let menu = switcherFactory.makeMenu(
+                onSwitch: { [weak self] in self?.viewModel.refresh() },
+                onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
+            )
+            let switcher = UIBarButtonItem(image: UIImage(systemName: "person.2"), menu: menu)
+            switcher.tintColor = .label
+            switcher.accessibilityLabel = "Switch Profile"
+            switcherItem = switcher
+        }
+    }
+
+    private func presentAddProfilePlaceholder() {
+        let alert = UIAlertController(
+            title: "Add Profile",
+            message: "Creating a new profile isn't available yet.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
     }
 
     private func pushSettings() {
@@ -400,10 +431,12 @@ final class ProfileViewController: UIViewController {
         case .following: makeActionItem(title: "Following")
         case .edit: nil
         }
-        // Relationship action for other users; the settings gear for own
-        // profile (where `action` is nil).
+        // Relationship action for other users; the gear + switcher for own
+        // profile (where `action` is nil). Trailing-to-leading: gear rightmost,
+        // switcher to its left.
         navigationItem.rightBarButtonItems = (action.map { [$0] } ?? [])
             + (settingsItem.map { [$0] } ?? [])
+            + (switcherItem.map { [$0] } ?? [])
     }
 
     private func makeActionItem(title: String) -> UIBarButtonItem {

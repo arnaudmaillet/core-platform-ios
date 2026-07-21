@@ -55,6 +55,27 @@ struct ProfileRepositoryTests {
         #expect(profile.displayName == "Demo Viewer")
     }
 
+    @Test func listsAccountProfilesAndSwitchesActive() async throws {
+        let repository = makeRepository()
+
+        // The account lists the viewer plus two more switchable profiles.
+        let profiles = try await repository.accountProfiles()
+        #expect(profiles.count == 3)
+        #expect(profiles.first?.id == ProfileID(MockSocialDataset.viewerProfileID))
+        #expect(profiles.map(\.handle) == ["you", "ava.moreau", "lena_klein"])
+
+        // Active defaults to the first (viewer).
+        #expect(await repository.activeProfileID() == ProfileID(MockSocialDataset.viewerProfileID))
+
+        // Switching changes who `currentUserProfile` (profile screen + avatar)
+        // resolves to — the whole point of the switch.
+        await repository.setActiveProfile(ProfileID("prof-0"))
+        #expect(await repository.activeProfileID() == ProfileID("prof-0"))
+        let switched = try await repository.currentUserProfile()
+        #expect(switched.id == ProfileID("prof-0"))
+        #expect(switched.displayName == "Ava Moreau")
+    }
+
     @Test func fetchesAnyProfileByID() async throws {
         // Routing to another user resolves their view directly (no account hop).
         let repository = makeRepository()

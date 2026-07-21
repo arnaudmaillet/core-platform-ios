@@ -242,7 +242,8 @@ final class AppContainer {
         gallery: profileGalleryRepository,
         imagePipeline: imagePipeline,
         router: routeResolver,
-        account: accountRepository
+        account: accountRepository,
+        switching: profileRepository
     )
 
     // MARK: - Search

@@ -235,12 +235,31 @@ public final class MockSocialServices: @unchecked Sendable {
         guard request.accountID == MockAuthService.accountID else {
             return .success(response) // no profiles for unknown accounts
         }
-        var summary = Profile_V1_ProfileSummaryView()
-        summary.profileID = MockSocialDataset.viewerProfileID
-        summary.handle = "you"
-        summary.displayName = "Demo Viewer"
-        summary.avatarURL = "mock://avatar/viewer?w=128&h=128"
-        response.profiles = [summary]
+        func summary(id: String, handle: String, name: String, avatar: String) -> Profile_V1_ProfileSummaryView {
+            var summary = Profile_V1_ProfileSummaryView()
+            summary.profileID = id
+            summary.handle = handle
+            summary.displayName = name
+            summary.avatarURL = avatar
+            return summary
+        }
+        // The viewer stays FIRST — every viewer-id resolver takes `.first`, so
+        // this keeps existing behavior. Two seeded authors ride along as extra
+        // profiles on the account, giving the profile switcher real multi-profile
+        // data to list and switch between.
+        var summaries = [summary(
+            id: MockSocialDataset.viewerProfileID, handle: "you",
+            name: "Demo Viewer", avatar: "mock://avatar/viewer?w=128&h=128"
+        )]
+        for id in ["prof-0", "prof-2"] {
+            if let author = dataset.author(for: id) {
+                summaries.append(summary(
+                    id: author.profileID, handle: author.handle,
+                    name: author.displayName, avatar: author.avatarURL
+                ))
+            }
+        }
+        response.profiles = summaries
         return .success(response)
     }
 

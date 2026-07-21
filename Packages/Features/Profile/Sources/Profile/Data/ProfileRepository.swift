@@ -137,6 +137,36 @@ public protocol ProfileProviding: Sendable {
     func changeHandle(_ newHandle: String) async throws -> UserProfile
 }
 
+/// A lightweight profile summary for the account's profile switcher — enough to
+/// list a profile (name, @handle, avatar) without a full `UserProfile` fetch.
+public struct AccountProfile: Equatable, Sendable {
+    public let id: ProfileID
+    public let handle: String
+    public let displayName: String
+    public let avatarURL: URL?
+
+    public init(id: ProfileID, handle: String, displayName: String, avatarURL: URL?) {
+        self.id = id
+        self.handle = handle
+        self.displayName = displayName
+        self.avatarURL = avatarURL
+    }
+}
+
+/// Multi-profile support for the switcher: list the account's profiles, read the
+/// active one, and switch it. "Active" is scoped to the identity surfaces the
+/// `ProfileRepository` drives (the profile screen + the map avatar) — switching
+/// overrides its cached viewer id; the other feature repositories keep their own
+/// viewer caches.
+public protocol ProfileSwitching: Sendable {
+    /// All profiles linked to the signed-in account.
+    func accountProfiles() async throws -> [AccountProfile]
+    /// The active profile id (the one the profile screen + avatar resolve to).
+    func activeProfileID() async -> ProfileID?
+    /// Switches the active profile; the profile screen + avatar refresh to it.
+    func setActiveProfile(_ id: ProfileID) async
+}
+
 /// Reads the viewer's identity and social counters from profile.v1, counter.v1,
 /// and (as a fallback) social_graph.v1.
 ///
@@ -149,7 +179,7 @@ public protocol ProfileProviding: Sendable {
 /// counting `social_graph.v1` edges so real counts still render today; the fast
 /// path takes over automatically once the backend projects. See
 /// `dev/BACKEND_GAPS.md` §7.
-public actor ProfileRepository: ProfileProviding {
+public actor ProfileRepository: ProfileProviding, ProfileSwitching {
     private let profileClient: any Profile_V1_ProfileServiceClientInterface
     private let counterClient: any Counter_V1_CounterServiceClientInterface
     private let socialGraphClient: any SocialGraph_V1_SocialGraphServiceClientInterface
@@ -330,6 +360,41 @@ public actor ProfileRepository: ProfileProviding {
         case .failure(let error):
             throw ProfileError.transport(message: error.message ?? "code \(error.code)")
         }
+    }
+
+    // MARK: - ProfileSwitching
+
+    public func accountProfiles() async throws -> [AccountProfile] {
+        guard case .authenticated(let accountID) = await authSession.currentState() else {
+            throw ProfileError.notAuthenticated
+        }
+        var request = Profile_V1_ListProfilesByAccountRequest()
+        request.accountID = accountID.rawValue
+        let response = await profileClient.listProfilesByAccount(request: request, headers: [:])
+        switch response.result {
+        case .success(let body):
+            return body.profiles.map { profile in
+                AccountProfile(
+                    id: ProfileID(profile.profileID),
+                    handle: profile.handle,
+                    displayName: profile.displayName,
+                    avatarURL: URL(string: profile.avatarURL)
+                )
+            }
+        case .failure(let error):
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+        }
+    }
+
+    public func activeProfileID() async -> ProfileID? {
+        try? await resolveViewerProfileID()
+    }
+
+    public func setActiveProfile(_ id: ProfileID) async {
+        // Overriding the cached viewer id is the whole switch: `currentUserProfile`
+        // (profile screen) and `viewerAvatarImage` (map avatar) both resolve
+        // through this, so they refresh to the chosen profile on their next read.
+        viewerProfileID = id
     }
 
     // MARK: - Social counters
