@@ -1,14 +1,12 @@
 import CoreNavigation
-import NotificationsInterface
 import ProfileInterface
 import UIKit
 
 /// Pushes the signed-in viewer's profile onto the Maps tab's navigation stack —
 /// the destination of the Maps nav-bar avatar button (which replaced the
-/// Profile tab). Profile and Notifications are composed here at the shell
-/// layer, as the former Profile tab did, so the two packages stay decoupled: a
-/// bell in the profile's nav bar pushes the notifications feed onto the same
-/// stack, and the native edge-swipe returns to the map.
+/// Profile tab). Notifications no longer live here: the bell moved to the Maps
+/// header beside the avatar, so the pushed profile carries only the native back
+/// button and its own account chrome.
 ///
 /// The profile view controller is built per push and released on pop —
 /// freshness lives in the repositories and image cache, not in a retained view
@@ -37,22 +35,6 @@ final class ProfileFlowCoordinator: Coordinator {
               navigationController.presentedViewController == nil else { return }
 
         let profileViewController = container.profileFeature.makeCurrentUserProfileViewController(onLogout: onLogout)
-        // Activity lives inside Profile: the bell goes on the *leading* side —
-        // the Profile VC owns the trailing item (its account overflow menu) and
-        // resets it in viewDidLoad, which would clobber anything we set there.
-        // The Profile VC keeps `leftItemsSupplementBackButton`, so the bell sits
-        // beside the back button rather than replacing it — the swipe-to-map
-        // gesture stays live.
-        profileViewController.navigationItem.leftBarButtonItem = UIBarButtonItem(
-            image: UIImage(systemName: "bell"),
-            primaryAction: UIAction { [weak self, weak profileViewController] _ in
-                guard let self, let navigationController = profileViewController?.navigationController else { return }
-                navigationController.pushViewController(
-                    container.notificationsFeature.makeNotificationsViewController(),
-                    animated: true
-                )
-            }
-        )
         navigationController.pushViewController(profileViewController, animated: true)
     }
 }

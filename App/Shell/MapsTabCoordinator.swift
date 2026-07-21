@@ -12,6 +12,7 @@ final class MapsTabCoordinator: TabCoordinator {
 
     private let container: AppContainer
     private let profileButtonItem: UIBarButtonItem
+    private let notificationsButtonItem: UIBarButtonItem
 
     private(set) lazy var tab = UITab(
         title: "Maps",
@@ -37,18 +38,28 @@ final class MapsTabCoordinator: TabCoordinator {
         return item
     }()
 
-    init(container: AppContainer, profileButtonItem: UIBarButtonItem) {
+    init(container: AppContainer, profileButtonItem: UIBarButtonItem, notificationsButtonItem: UIBarButtonItem) {
         self.container = container
         self.profileButtonItem = profileButtonItem
+        self.notificationsButtonItem = notificationsButtonItem
     }
 
     func start() {
         let mapViewController = container.mapsFeature.makeMapViewController()
-        // The Profile entry point lives here — and only here — as the viewer's
-        // avatar: a navigationItem belongs to this one view controller, so no
-        // other tab can show it and nothing needs conditional hiding. Injected
-        // by the shell so the Maps package stays Profile-agnostic.
-        mapViewController.navigationItem.rightBarButtonItem = profileButtonItem
+        // The Profile (avatar) and Notifications (bell) entry points live here —
+        // and only here: a navigationItem belongs to this one view controller,
+        // so no other tab can show them and nothing needs conditional hiding.
+        // Both are injected by the shell (they carry avatar image / unread
+        // state) so the Maps package stays Profile- and Notifications-agnostic.
+        // `rightBarButtonItems` fills trailing-to-leading, so the avatar sits at
+        // the far right with the bell directly to its left. A fixedSpace between
+        // them breaks iOS 26's automatic grouping, so each gets its own
+        // standalone glass bubble instead of sharing one capsule.
+        mapViewController.navigationItem.rightBarButtonItems = [
+            profileButtonItem,
+            UIBarButtonItem.fixedSpace(8),
+            notificationsButtonItem
+        ]
         // The post-creation "+" sits opposite the avatar, top-left.
         mapViewController.navigationItem.leftBarButtonItem = createPostButtonItem
         navigationController.viewControllers = [mapViewController]
