@@ -29,14 +29,26 @@ final class MainTabCoordinator: NSObject, Coordinator {
 
     private let container: AppContainer
     private let onLogout: () -> Void
-    private let avatarButton = ProfileAvatarButton()
-    /// The profile switcher for the avatar's long-press context menu. Pre-loaded
-    /// so the menu is non-empty and synchronous when it opens.
+    /// The Maps nav-bar Profile entry point: a standard bar item showing the
+    /// viewer's circular avatar. Short tap opens Profile (its `primaryAction`);
+    /// long-press shows the switcher menu — UIKit drives both natively from
+    /// `UIBarButtonItem.menu` (with a primary action present, the menu appears on
+    /// long-press), so there's no custom gesture, interaction, or lift glitch.
+    private lazy var avatarBarItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            title: nil,
+            image: Self.avatarPlaceholder,
+            primaryAction: UIAction { [weak self] _ in self?.openProfileFromAvatar() },
+            menu: nil
+        )
+        item.changesSelectionAsPrimaryAction = false
+        item.accessibilityLabel = "Profile"
+        return item
+    }()
+    /// The profile switcher whose menu the avatar item presents on long-press.
     private lazy var profileSwitcher = container.profileFeature.makeProfileSwitcher()
-    /// The pre-built switcher menu, rebuilt whenever the profile snapshot
-    /// changes. The context menu returns this as-is — nothing is constructed
-    /// during the presentation transition.
-    private var switcherMenu: UIMenu?
+
+    private static let avatarPlaceholder = UIImage(systemName: "person.crop.circle")
     /// The Notifications entry point: a plain bar item like the map's "+", tinted
     /// `.label` so it renders dark in the glass bubble (not system blue). The
     /// unread badge is a clean image swap — `bell` ↔ `bell.badge` (a red badge
@@ -103,23 +115,8 @@ final class MainTabCoordinator: NSObject, Coordinator {
         addChild(profileFlow)
         self.profileFlow = profileFlow
 
-        avatarButton.addAction(
-            UIAction { [weak self] _ in
-                guard let self, let navigationController = mapsNavigationController else { return }
-                // Push onto the Maps stack (the avatar only shows there) rather
-                // than presenting a sheet: back / edge-swipe returns to the map.
-                self.profileFlow?.push(onto: navigationController)
-                // The bell's unread badge goes stale the moment we leave for
-                // Profile; refresh on entry so it re-reflects on return.
-                self.refreshUnreadBadge()
-            },
-            for: .touchUpInside
-        )
-        // Long-press the avatar → a native popover context menu, the exact same
-        // UIMenu the profile header shows. Pre-loaded (below) so the menu is
-        // non-empty and synchronous when it opens; the short-tap action above
-        // still opens Profile (a tap resolves before the menu's long-press).
-        avatarButton.addInteraction(UIContextMenuInteraction(delegate: self))
+        // Build the avatar item's switcher menu up front (and keep it fresh on
+        // profile switches). Tap / long-press are handled natively by the item.
         rebuildSwitcherMenu()
         // A switch (from either entry point) broadcasts this; reload the avatar
         // and the switcher snapshot so the map chrome reflects the new profile.
@@ -136,7 +133,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
         orderedTabs = [
             (.maps, MapsTabCoordinator(
                 container: container,
-                profileButtonItem: UIBarButtonItem(customView: avatarButton),
+                profileButtonItem: avatarBarItem,
                 notificationsButtonItem: notificationsBarItem
             )),
             (.messages, MessagesTabCoordinator(container: container)),
@@ -243,16 +240,24 @@ final class MainTabCoordinator: NSObject, Coordinator {
         rebuildSwitcherMenu()
     }
 
-    /// Re-fetches the switcher snapshot and rebuilds the static menu the context
-    /// menu will hand back verbatim.
+    /// Re-fetches the switcher snapshot and installs the (synchronous) menu on
+    /// the avatar bar item, which UIKit presents natively on long-press.
     private func rebuildSwitcherMenu() {
         Task { @MainActor in
             await profileSwitcher?.reload()
-            switcherMenu = profileSwitcher?.makeMenu(
+            avatarBarItem.menu = profileSwitcher?.makeMenu(
                 onSwitch: {},
                 onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
             )
         }
+    }
+
+    /// The avatar item's short-tap: push the viewer's profile onto the Maps
+    /// stack (back / edge-swipe returns to the map) and refresh the unread badge.
+    private func openProfileFromAvatar() {
+        guard let navigationController = mapsNavigationController else { return }
+        profileFlow?.push(onto: navigationController)
+        refreshUnreadBadge()
     }
 
     private func presentAddProfilePlaceholder() {
@@ -265,14 +270,26 @@ final class MainTabCoordinator: NSObject, Coordinator {
         tabBarController.present(alert, animated: true)
     }
 
-    /// Resolves the viewer's avatar into the button; the placeholder glyph
-    /// stays if there is none (or it can't be fetched).
+    /// Resolves the viewer's avatar into the bar item as a circular image; the
+    /// placeholder glyph stays if there is none (or it can't be fetched).
     private func loadAvatar() {
         Task { [weak self] in
             guard let self else { return }
             let image = await container.profileFeature.viewerAvatarImage()
-            avatarButton.setAvatar(image)
+            avatarBarItem.image = image.map(Self.circularBarImage) ?? Self.avatarPlaceholder
         }
+    }
+
+    /// Renders an avatar into a circular bar-sized image (`.alwaysOriginal` so
+    /// the photo isn't tinted).
+    private static func circularBarImage(_ image: UIImage) -> UIImage {
+        let side: CGFloat = 30
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side))
+        return renderer.image { _ in
+            let rect = CGRect(x: 0, y: 0, width: side, height: side)
+            UIBezierPath(ovalIn: rect).addClip()
+            image.draw(in: rect)
+        }.withRenderingMode(.alwaysOriginal)
     }
 
     /// Mirrors the unread notifications count onto the bell (a `bell` ↔
@@ -363,46 +380,6 @@ extension MainTabCoordinator: AppNavigating {
         }
         guard let navigationController = tabBarController.selectedViewController as? UINavigationController else { return }
         feedFlow?.push(on: navigationController)
-    }
-}
-
-// MARK: - Avatar long-press profile switcher
-
-extension MainTabCoordinator: UIContextMenuInteractionDelegate {
-    func contextMenuInteraction(
-        _ interaction: UIContextMenuInteraction,
-        configurationForMenuAtLocation location: CGPoint
-    ) -> UIContextMenuConfiguration? {
-        // Hand back the pre-built menu as-is — nothing is constructed during the
-        // presentation transition (the same UIMenu the profile header shows).
-        UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
-            self?.switcherMenu
-        }
-    }
-
-    // A custom preview so the lift keeps the avatar a clean circle inside its
-    // glass capsule, instead of the default rectangular snapshot that yanks it
-    // out of the header. `previewForHighlighting…` is the variant that fires for
-    // a single-view interaction (identifier-keyed previews don't apply here).
-    func contextMenuInteraction(
-        _ interaction: UIContextMenuInteraction,
-        previewForHighlightingMenuWithConfiguration configuration: UIContextMenuConfiguration
-    ) -> UITargetedPreview? {
-        avatarTargetedPreview()
-    }
-
-    func contextMenuInteraction(
-        _ interaction: UIContextMenuInteraction,
-        previewForDismissingMenuWithConfiguration configuration: UIContextMenuConfiguration
-    ) -> UITargetedPreview? {
-        avatarTargetedPreview()
-    }
-
-    private func avatarTargetedPreview() -> UITargetedPreview {
-        let parameters = UIPreviewParameters()
-        parameters.backgroundColor = .clear
-        parameters.visiblePath = UIBezierPath(ovalIn: avatarButton.bounds)
-        return UITargetedPreview(view: avatarButton, parameters: parameters)
     }
 }
 

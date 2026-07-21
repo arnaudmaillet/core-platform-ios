@@ -21,7 +21,6 @@ final class ProfileSwitcherMenuFactory: ProfileSwitcherPresenting {
     private struct Row {
         let id: ProfileID
         let title: String
-        let subtitle: String
         let image: UIImage?
         let isActive: Bool
     }
@@ -39,45 +38,41 @@ final class ProfileSwitcherMenuFactory: ProfileSwitcherPresenting {
         let activeID = await switching.activeProfileID()
         var loaded: [Row] = []
         for profile in profiles {
-            let isActive = profile.id == activeID
             loaded.append(Row(
                 id: profile.id,
                 title: profile.displayName,
-                subtitle: isActive ? "Active Profile" : "@" + profile.handle,
                 image: await thumbnail(for: profile.avatarURL),
-                isActive: isActive
+                isActive: profile.id == activeID
             ))
         }
         rows = loaded
     }
 
-    /// A synchronous switcher `UIMenu` from the pre-built rows. The active
-    /// profile is highlighted in place of a checkmark: an "Active Profile"
-    /// subtitle plus a red (`.destructive`) title accent. The avatars are
-    /// `.alwaysOriginal`, so the red accent tints only the text, not the photo.
+    /// A synchronous switcher `UIMenu` from the pre-built rows, in the Telegram
+    /// two-section shape: inactive profiles up top, then an inline section with
+    /// the active profile and "Add Profile". Just avatar + display name, all in
+    /// standard `.label` — the section split marks the active one, no checkmark
+    /// or accent color.
     func makeMenu(onSwitch: @escaping () -> Void, onAddProfile: @escaping () -> Void) -> UIMenu {
-        var elements: [UIMenuElement] = []
-        for row in rows {
-            let action = UIAction(
-                title: row.title,
-                subtitle: row.subtitle,
-                image: row.image,
-                attributes: row.isActive ? .destructive : []
-            ) { [weak self] _ in
+        func action(for row: Row) -> UIAction {
+            UIAction(title: row.title, image: row.image) { [weak self] _ in
                 self?.commitSwitch(to: row.id, then: onSwitch)
             }
-            elements.append(action)
         }
-        let profilesMenu = UIMenu(title: "", options: .displayInline, children: elements)
 
-        let addAction = UIAction(
+        // Section 1: the other profiles you can switch to.
+        let inactive = rows.filter { !$0.isActive }.map(action(for:))
+        let inactiveSection = UIMenu(title: "", options: .displayInline, children: inactive)
+
+        // Section 2: the active profile, then Add Profile.
+        var activeAndActions: [UIMenuElement] = rows.filter(\.isActive).map(action(for:))
+        activeAndActions.append(UIAction(
             title: "Add Profile",
             image: UIImage(systemName: "person.badge.plus")
-        ) { _ in onAddProfile() }
-        let addMenu = UIMenu(title: "", options: .displayInline, children: [addAction])
+        ) { _ in onAddProfile() })
+        let activeSection = UIMenu(title: "", options: .displayInline, children: activeAndActions)
 
-        // No title — a clean, compact popover.
-        return UIMenu(title: "", children: [profilesMenu, addMenu])
+        return UIMenu(title: "", children: [inactiveSection, activeSection])
     }
 
     /// Switches the active profile, broadcasts the change (so identity chrome
