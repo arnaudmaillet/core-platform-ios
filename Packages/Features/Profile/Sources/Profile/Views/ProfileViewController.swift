@@ -177,6 +177,9 @@ final class ProfileViewController: UIViewController {
         headerView.onMessageTapped = { [weak self] in
             self?.viewModel.messageTapped()
         }
+        headerView.onEditTapped = { [weak self] in
+            self?.pushEditProfile()
+        }
         headerView.onWebsiteTapped = { url in
             UIApplication.shared.open(url)
         }
@@ -277,14 +280,11 @@ final class ProfileViewController: UIViewController {
         }
     }
 
-    /// The header's action button means different things per state: Edit opens
-    /// the edit form; Follow/Following toggle the relationship.
+    /// The nav-bar relationship action toggles Follow / Following. Edit is not
+    /// a bar item — it's the header tray's own capsule (`onEditTapped`), so it
+    /// never routes through here.
     private func handleActionTapped() {
-        if followButtonState == .edit {
-            pushEditProfile()
-        } else {
-            viewModel.toggleFollow()
-        }
+        viewModel.toggleFollow()
     }
 
     private func pushEditProfile() {
@@ -379,13 +379,16 @@ final class ProfileViewController: UIViewController {
     /// styling floods the capsule with tint. The own-profile overflow menu
     /// keeps its slot next to it either way.
     private func updateActionBarItem(_ state: ProfileViewModel.FollowButton) {
-        let action: UIBarButtonItem = switch state {
+        // Edit is no longer a bar item — it lives in the header tray beside the
+        // avatar (see `ProfileHeaderView.configureAction`), so own-profile keeps
+        // only its account overflow menu here.
+        let action: UIBarButtonItem? = switch state {
         case .hidden: actionPlaceholderItem
         case .follow: makeActionItem(title: "Follow")
         case .following: makeActionItem(title: "Following")
-        case .edit: makeActionItem(title: "Edit Profile")
+        case .edit: nil
         }
-        navigationItem.rightBarButtonItems = [action] + (overflowItem.map { [$0] } ?? [])
+        navigationItem.rightBarButtonItems = (action.map { [$0] } ?? []) + (overflowItem.map { [$0] } ?? [])
     }
 
     private func makeActionItem(title: String) -> UIBarButtonItem {
