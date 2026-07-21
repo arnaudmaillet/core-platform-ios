@@ -1,64 +1,67 @@
 import CoreModels
-import MediaCore
 import ProfileInterface
 import UIKit
 
-/// The reusable profile switcher: lists the account's profiles (rounded avatar +
-/// name), marks the active one, and offers "Add Profile". Shared by the profile
-/// header's switcher bar button (a `UIMenu`) and the map avatar's long-press
-/// (an action sheet the shell presents through `presentSwitcher`).
+/// The reusable profile switcher, shared by the profile header's switcher bar
+/// button and the map avatar's long-press context menu — both build the exact
+/// same `UIMenu`.
 ///
-/// Profiles + avatars are pre-fetched into a snapshot (`reload`) so the menu is
-/// built **synchronously** — its content, including the active row's subtitle,
-/// is in the first layout frame instead of popping in after the popover
-/// animates (which a `UIDeferredMenuElement` would cause).
+/// Rows are pre-formatted into ready-to-render strings by `reload` (an async
+/// fetch of the account's profiles). `makeMenu` is then **fully synchronous**:
+/// no async work, no deferred element, no image loading/formatting — every
+/// `UIAction(title:subtitle:)` is complete, so title and subtitle render
+/// together in the menu's first frame with zero delay.
 @MainActor
-final class ProfileSwitcherMenuFactory {
+final class ProfileSwitcherMenuFactory: ProfileSwitcherPresenting {
     private let switching: any ProfileSwitching
-    private let imagePipeline: ImagePipeline
 
-    private var snapshot: [(profile: AccountProfile, image: UIImage?)] = []
-    private var activeID: ProfileID?
+    /// A pre-formatted row: nothing here is computed at menu-build time.
+    private struct Row {
+        let id: ProfileID
+        let title: String
+        let subtitle: String
+        let isActive: Bool
+    }
+    private var rows: [Row] = []
 
-    init(switching: any ProfileSwitching, imagePipeline: ImagePipeline) {
+    init(switching: any ProfileSwitching) {
         self.switching = switching
-        self.imagePipeline = imagePipeline
     }
 
-    /// Pre-fetch profiles + avatars so subsequent `makeMenu` calls are synchronous.
+    /// Fetches the account's profiles and pre-formats every row's strings, so
+    /// subsequent `makeMenu` calls are synchronous.
     func reload() async {
         let profiles = (try? await switching.accountProfiles()) ?? []
-        activeID = await switching.activeProfileID()
-        var loaded: [(profile: AccountProfile, image: UIImage?)] = []
-        for profile in profiles {
-            loaded.append((profile: profile, image: await thumbnail(for: profile.avatarURL)))
+        let activeID = await switching.activeProfileID()
+        rows = profiles.map { profile in
+            let isActive = profile.id == activeID
+            return Row(
+                id: profile.id,
+                title: profile.displayName,
+                subtitle: isActive ? "Active Profile" : "@" + profile.handle,
+                isActive: isActive
+            )
         }
-        snapshot = loaded
     }
 
-    /// The current snapshot's profiles + active id (for the action-sheet path).
-    var profiles: [AccountProfile] { snapshot.map(\.profile) }
-    var currentActiveID: ProfileID? { activeID }
-
-    /// A synchronous switcher `UIMenu` from the current snapshot. The active
+    /// A synchronous switcher `UIMenu` from the pre-formatted rows. The active
     /// profile is highlighted in place of a checkmark: an "Active Profile"
-    /// subtitle plus a red (`.destructive`) accent so it reads at a glance.
+    /// subtitle plus a red (`.destructive`) accent, so it reads at a glance.
     func makeMenu(onSwitch: @escaping () -> Void, onAddProfile: @escaping () -> Void) -> UIMenu {
-        var rows: [UIMenuElement] = []
-        for entry in snapshot {
-            let isActive = entry.profile.id == activeID
+        var elements: [UIMenuElement] = []
+        for row in rows {
             let action = UIAction(
-                title: entry.profile.displayName,
-                subtitle: isActive ? "Active Profile" : "@" + entry.profile.handle,
-                image: entry.image,
-                attributes: isActive ? .destructive : []
+                title: row.title,
+                subtitle: row.subtitle,
+                attributes: row.isActive ? .destructive : []
             ) { [weak self] _ in
-                self?.commitSwitch(to: entry.profile.id, then: onSwitch)
+                self?.commitSwitch(to: row.id, then: onSwitch)
             }
-            rows.append(action)
+            elements.append(action)
         }
-        let profilesMenu = UIMenu(title: "", options: .displayInline, children: rows)
+        let profilesMenu = UIMenu(title: "", options: .displayInline, children: elements)
 
+        // A system glyph (SF Symbol) — synchronous, no formatting.
         let addAction = UIAction(
             title: "Add Profile",
             image: UIImage(systemName: "person.badge.plus")
@@ -71,24 +74,11 @@ final class ProfileSwitcherMenuFactory {
 
     /// Switches the active profile, broadcasts the change (so identity chrome
     /// like the map avatar refreshes), then runs the caller's `onSwitch`.
-    func commitSwitch(to id: ProfileID, then onSwitch: @escaping () -> Void) {
+    private func commitSwitch(to id: ProfileID, then onSwitch: @escaping () -> Void) {
         Task { @MainActor in
             await switching.setActiveProfile(id)
             NotificationCenter.default.post(name: .activeProfileDidChange, object: nil)
             onSwitch()
         }
-    }
-
-    /// A small circular avatar for a menu row (or nil). Rendered `.alwaysOriginal`
-    /// so the photo shows through the menu's template tinting.
-    private func thumbnail(for url: URL?) async -> UIImage? {
-        guard let url, let image = try? await imagePipeline.image(for: url) else { return nil }
-        let side: CGFloat = 36
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side))
-        return renderer.image { _ in
-            let rect = CGRect(x: 0, y: 0, width: side, height: side)
-            UIBezierPath(ovalIn: rect).addClip()
-            image.draw(in: rect)
-        }.withRenderingMode(.alwaysOriginal)
     }
 }

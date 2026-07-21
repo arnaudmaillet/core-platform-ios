@@ -37,35 +37,11 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     }
 
     private func makeSwitcherFactory() -> ProfileSwitcherMenuFactory? {
-        switching.map { ProfileSwitcherMenuFactory(switching: $0, imagePipeline: imagePipeline) }
+        switching.map { ProfileSwitcherMenuFactory(switching: $0) }
     }
 
-    public func presentProfileSwitcher(
-        from presenter: UIViewController,
-        sourceView: UIView,
-        onSwitch: @escaping () -> Void,
-        onAddProfile: @escaping () -> Void
-    ) {
-        guard let factory = makeSwitcherFactory() else { return }
-        Task { @MainActor in
-            await factory.reload()
-            let activeID = factory.currentActiveID
-            let sheet = UIAlertController(title: "Switch Profile", message: nil, preferredStyle: .actionSheet)
-            for profile in factory.profiles {
-                let isActive = profile.id == activeID
-                sheet.addAction(UIAlertAction(
-                    title: isActive ? "\(profile.displayName) (Active)" : profile.displayName,
-                    style: .default
-                ) { _ in factory.commitSwitch(to: profile.id, then: onSwitch) })
-            }
-            sheet.addAction(UIAlertAction(title: "Add Profile", style: .default) { _ in onAddProfile() })
-            sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-            if let popover = sheet.popoverPresentationController {
-                popover.sourceView = sourceView
-                popover.sourceRect = sourceView.bounds
-            }
-            presenter.present(sheet, animated: true)
-        }
+    public func makeProfileSwitcher() -> ProfileSwitcherPresenting? {
+        makeSwitcherFactory()
     }
 
     public func makeCurrentUserProfileViewController(onLogout: @escaping () -> Void) -> UIViewController {

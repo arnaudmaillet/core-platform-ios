@@ -30,6 +30,9 @@ final class MainTabCoordinator: NSObject, Coordinator {
     private let container: AppContainer
     private let onLogout: () -> Void
     private let avatarButton = ProfileAvatarButton()
+    /// The profile switcher for the avatar's long-press context menu. Pre-loaded
+    /// so the menu is non-empty and synchronous when it opens.
+    private lazy var profileSwitcher = container.profileFeature.makeProfileSwitcher()
     /// The Notifications entry point: a plain bar item like the map's "+", tinted
     /// `.label` so it renders dark in the glass bubble (not system blue). The
     /// unread badge is a clean image swap — `bell` ↔ `bell.badge` (a red badge
@@ -108,15 +111,14 @@ final class MainTabCoordinator: NSObject, Coordinator {
             },
             for: .touchUpInside
         )
-        // Long-press the avatar → the profile switcher. An explicit recognizer
-        // (not UIButton.menu / UIContextMenuInteraction, which don't fire for a
-        // custom view inside a bar item) presents an action sheet; the short-tap
-        // action above still opens Profile.
-        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(avatarLongPressed))
-        longPress.minimumPressDuration = 0.4
-        avatarButton.addGestureRecognizer(longPress)
+        // Long-press the avatar → a native popover context menu, the exact same
+        // UIMenu the profile header shows. Pre-loaded (below) so the menu is
+        // non-empty and synchronous when it opens; the short-tap action above
+        // still opens Profile (a tap resolves before the menu's long-press).
+        avatarButton.addInteraction(UIContextMenuInteraction(delegate: self))
+        Task { await profileSwitcher?.reload() }
         // A switch (from either entry point) broadcasts this; reload the avatar
-        // so the map chrome reflects the new active profile.
+        // and the switcher snapshot so the map chrome reflects the new profile.
         NotificationCenter.default.addObserver(
             self, selector: #selector(activeProfileChanged),
             name: .activeProfileDidChange, object: nil
@@ -234,18 +236,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
 
     @objc private func activeProfileChanged() {
         loadAvatar()
-    }
-
-    @objc private func avatarLongPressed(_ gesture: UILongPressGestureRecognizer) {
-        guard gesture.state == .began else { return }
-        // Present the switcher from the shell over the avatar. `onSwitch` is a
-        // no-op — the avatar reloads via `.activeProfileDidChange`.
-        container.profileFeature.presentProfileSwitcher(
-            from: tabBarController,
-            sourceView: avatarButton,
-            onSwitch: {},
-            onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
-        )
+        Task { await profileSwitcher?.reload() }
     }
 
     private func presentAddProfilePlaceholder() {
@@ -356,6 +347,25 @@ extension MainTabCoordinator: AppNavigating {
         }
         guard let navigationController = tabBarController.selectedViewController as? UINavigationController else { return }
         feedFlow?.push(on: navigationController)
+    }
+}
+
+// MARK: - Avatar long-press profile switcher
+
+extension MainTabCoordinator: UIContextMenuInteractionDelegate {
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        configurationForMenuAtLocation location: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        // The exact same synchronous UIMenu the profile header uses, presented
+        // as a native popover anchored to the avatar. `onSwitch` is a no-op —
+        // the avatar reloads via `.activeProfileDidChange`.
+        UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+            self?.profileSwitcher?.makeMenu(
+                onSwitch: {},
+                onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
+            )
+        }
     }
 }
 

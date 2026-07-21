@@ -26,19 +26,23 @@ public protocol ProfileFeatureBuilding {
     /// no avatar or it can't be fetched; callers render a placeholder glyph.
     func viewerAvatarImage() async -> UIImage?
 
-    /// Presents the profile switcher as an action sheet from `presenter`,
-    /// anchored to `sourceView` (the map avatar) — the reliable native
-    /// presentation for the avatar's long-press, where a `UIMenu` can't be shown
-    /// programmatically. Lists the account's profiles (active one marked) and
-    /// "Add Profile". `onSwitch` fires after the active profile changes;
-    /// `onAddProfile` when "Add Profile" is tapped. A switch also broadcasts
-    /// `.activeProfileDidChange` so identity chrome (the map avatar) can refresh.
-    func presentProfileSwitcher(
-        from presenter: UIViewController,
-        sourceView: UIView,
-        onSwitch: @escaping () -> Void,
-        onAddProfile: @escaping () -> Void
-    )
+    /// The reusable profile switcher. The shell holds one for the map avatar's
+    /// long-press context menu; the profile header builds its own. Nil when
+    /// multi-profile switching isn't available. Call `reload()` up front so
+    /// `makeMenu()` is synchronous when the menu is requested.
+    func makeProfileSwitcher() -> ProfileSwitcherPresenting?
+}
+
+/// Vends the switcher `UIMenu`. `reload()` pre-fetches + pre-formats the account
+/// profiles so `makeMenu` is fully synchronous (its `UIAction`s render title +
+/// subtitle together, no deferred load) — the same menu on the profile header
+/// and the map avatar's `UIContextMenuInteraction`.
+@MainActor
+public protocol ProfileSwitcherPresenting: AnyObject {
+    /// Pre-fetch + pre-format the account's profiles.
+    func reload() async
+    /// A synchronous switcher menu built from the last `reload`.
+    func makeMenu(onSwitch: @escaping () -> Void, onAddProfile: @escaping () -> Void) -> UIMenu
 }
 
 public extension Notification.Name {
