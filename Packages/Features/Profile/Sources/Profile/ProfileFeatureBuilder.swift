@@ -40,9 +40,10 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             ),
             imagePipeline: imagePipeline,
             onLogout: onLogout,
-            makeEditViewController: { onSaved in
+            makeEditViewController: { [imagePipeline] onSaved in
                 EditProfileViewController(
-                    viewModel: EditProfileViewModel(repository: repository, onSaved: onSaved)
+                    viewModel: EditProfileViewModel(repository: repository, onSaved: onSaved),
+                    imagePipeline: imagePipeline
                 )
             }
         )

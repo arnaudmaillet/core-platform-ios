@@ -301,9 +301,10 @@ final class ProfileViewController: UIViewController {
     private func pushEditProfile() {
         guard let makeEditViewController else { return }
         // Pushed onto the profile's own stack, not presented: back / edge-swipe
-        // returns here, and a successful save pops back and refreshes.
+        // returns here. Edits are per-field (each pushes its own screen), so a
+        // save refreshes the profile underneath but does NOT pop the editor —
+        // the user leaves the list themselves when done.
         let editViewController = makeEditViewController { [weak self] in
-            self?.navigationController?.popViewController(animated: true)
             self?.viewModel.refresh()
         }
         navigationController?.pushViewController(editViewController, animated: true)
