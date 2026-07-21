@@ -15,17 +15,33 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     private let galleryPreferences = GalleryPreferences()
     private let imagePipeline: ImagePipeline
     private let router: (any Router)?
+    /// Reads the viewer's account for the settings screen (own profile only).
+    private let account: (any AccountProviding)?
+    /// Multi-profile switching for the account (lists profiles, switches active).
+    private let switching: (any ProfileSwitching)?
 
     public init(
         repository: any ProfileProviding,
         gallery: (any ProfileGalleryProviding)? = nil,
         imagePipeline: ImagePipeline,
-        router: (any Router)? = nil
+        router: (any Router)? = nil,
+        account: (any AccountProviding)? = nil,
+        switching: (any ProfileSwitching)? = nil
     ) {
         self.repository = repository
         self.gallery = gallery
         self.imagePipeline = imagePipeline
         self.router = router
+        self.account = account
+        self.switching = switching
+    }
+
+    private func makeSwitcherFactory() -> ProfileSwitcherMenuFactory? {
+        switching.map { ProfileSwitcherMenuFactory(switching: $0, imagePipeline: imagePipeline) }
+    }
+
+    public func makeProfileSwitcher() -> ProfileSwitcherPresenting? {
+        makeSwitcherFactory()
     }
 
     public func makeCurrentUserProfileViewController(onLogout: @escaping () -> Void) -> UIViewController {
@@ -40,11 +56,16 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             ),
             imagePipeline: imagePipeline,
             onLogout: onLogout,
-            makeEditViewController: { onSaved in
+            makeEditViewController: { [imagePipeline] onSaved in
                 EditProfileViewController(
-                    viewModel: EditProfileViewModel(repository: repository, onSaved: onSaved)
+                    viewModel: EditProfileViewModel(repository: repository, onSaved: onSaved),
+                    imagePipeline: imagePipeline
                 )
-            }
+            },
+            makeSettingsViewController: account.map { account in
+                { AccountSettingsViewController(account: account, onLogout: onLogout) }
+            },
+            switcherFactory: makeSwitcherFactory()
         )
     }
 

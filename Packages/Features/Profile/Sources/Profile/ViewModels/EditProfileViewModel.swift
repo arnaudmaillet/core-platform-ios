@@ -9,17 +9,28 @@ public final class EditProfileViewModel {
         case failed(message: String)
     }
 
-    /// The editable fields, mirrored from `Profile_V1_UpdateProfileRequest`
-    /// (the subset the form exposes).
+    /// The editable fields the form exposes. `displayName`, `bio`, `website`,
+    /// and `links` are persisted together via `UpdateProfile`; `username`
+    /// (the @handle) travels its own `ChangeHandle` RPC.
     public nonisolated struct Fields: Equatable, Sendable {
         public var displayName: String
+        public var username: String
         public var bio: String
         public var website: String
+        public var links: [ProfileLink]
 
-        public init(displayName: String, bio: String, website: String) {
+        public init(
+            displayName: String,
+            username: String,
+            bio: String,
+            website: String,
+            links: [ProfileLink]
+        ) {
             self.displayName = displayName
+            self.username = username
             self.bio = bio
             self.website = website
+            self.links = links
         }
     }
 
@@ -31,9 +42,15 @@ public final class EditProfileViewModel {
 
     public var onPhaseChange: ((Phase) -> Void)?
     public var onSaveStateChange: ((SaveState) -> Void)?
+    /// The viewer's avatar URL for the hero. Display-only (avatar edits need an
+    /// upload path the contract doesn't expose), so it rides beside `Fields`
+    /// rather than inside it.
+    public var onAvatarURLChange: ((URL?) -> Void)?
 
     private let repository: any ProfileProviding
-    /// Called after a successful save; the presenter dismisses and refreshes.
+    /// Called after each successful save so the profile underneath refreshes.
+    /// It does NOT dismiss the editor — edits happen per-field and the user
+    /// stays on the list until they navigate back themselves.
     private let onSaved: () -> Void
 
     private var phase: Phase = .loading {
@@ -42,6 +59,8 @@ public final class EditProfileViewModel {
     private var saveState: SaveState = .idle {
         didSet { onSaveStateChange?(saveState) }
     }
+    /// The tail of the serialized save chain. Saves are queued behind one
+    /// another (never dropped) so two quick field edits both persist, in order.
     private var saveTask: Task<Void, Never>?
 
     public init(repository: any ProfileProviding, onSaved: @escaping () -> Void) {
@@ -49,17 +68,25 @@ public final class EditProfileViewModel {
         self.onSaved = onSaved
     }
 
-    // MARK: - Inputs
+    // MARK: - Load
 
-    public func viewDidLoad() {
+    public func viewDidLoad() { load() }
+
+    /// Re-fetches authoritative state — used to recover after a failed save.
+    public func reload() { load() }
+
+    private func load() {
         Task { [weak self] in
             guard let self else { return }
             do {
                 let profile = try await self.repository.currentUserProfile()
+                self.onAvatarURLChange?(profile.avatarURL)
                 self.phase = .ready(Fields(
                     displayName: profile.displayName,
+                    username: profile.handle,
                     bio: profile.bio,
-                    website: profile.websiteURL?.absoluteString ?? ""
+                    website: profile.websiteURL?.absoluteString ?? "",
+                    links: profile.customLinks
                 ))
             } catch {
                 self.phase = .failed(message: "Couldn't load your profile.")
@@ -67,25 +94,46 @@ public final class EditProfileViewModel {
         }
     }
 
-    /// Saves the edited fields. Coalesced: a save while one is in flight is
-    /// ignored. On success the presenter is notified via `onSaved`.
-    public func save(_ fields: Fields) {
-        guard saveTask == nil else { return }
+    // MARK: - Save
+
+    /// Persists display name, bio, website, and links together via `UpdateProfile`.
+    public func saveMetadata(_ fields: Fields) {
+        performSave { repository in
+            _ = try await repository.updateCurrentUserProfile(
+                displayName: Self.trimmed(fields.displayName),
+                bio: Self.trimmed(fields.bio),
+                website: Self.trimmed(fields.website),
+                links: fields.links.map { ProfileLink(label: Self.trimmed($0.label), url: Self.trimmed($0.url)) }
+            )
+        }
+    }
+
+    /// Persists the @handle via the dedicated `ChangeHandle` RPC.
+    public func saveUsername(_ username: String) {
+        performSave { repository in
+            _ = try await repository.changeHandle(Self.trimmed(username))
+        }
+    }
+
+    /// Serializes a save behind any in-flight one so none are dropped. On
+    /// success refreshes the profile underneath; on failure surfaces `.failed`.
+    private func performSave(_ operation: @escaping (any ProfileProviding) async throws -> Void) {
+        let previous = saveTask
+        let repository = repository
         saveState = .saving
         saveTask = Task { [weak self] in
-            guard let self else { return }
+            await previous?.value
             do {
-                _ = try await self.repository.updateCurrentUserProfile(
-                    displayName: fields.displayName.trimmingCharacters(in: .whitespacesAndNewlines),
-                    bio: fields.bio.trimmingCharacters(in: .whitespacesAndNewlines),
-                    website: fields.website.trimmingCharacters(in: .whitespacesAndNewlines)
-                )
-                self.saveState = .idle
-                self.onSaved()
+                try await operation(repository)
+                self?.saveState = .idle
+                self?.onSaved()
             } catch {
-                self.saveState = .failed(message: "Couldn't save. Please try again.")
+                self?.saveState = .failed(message: "Couldn't save. Please try again.")
             }
-            self.saveTask = nil
         }
+    }
+
+    private static func trimmed(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

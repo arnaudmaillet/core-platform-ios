@@ -25,4 +25,28 @@ public protocol ProfileFeatureBuilding {
     /// (the Maps nav-bar avatar button). Best-effort: `nil` when the viewer has
     /// no avatar or it can't be fetched; callers render a placeholder glyph.
     func viewerAvatarImage() async -> UIImage?
+
+    /// The reusable profile switcher. The shell holds one for the map avatar's
+    /// long-press context menu; the profile header builds its own. Nil when
+    /// multi-profile switching isn't available. Call `reload()` up front so
+    /// `makeMenu()` is synchronous when the menu is requested.
+    func makeProfileSwitcher() -> ProfileSwitcherPresenting?
+}
+
+/// Vends the switcher `UIMenu`. `reload()` pre-fetches + pre-formats the account
+/// profiles so `makeMenu` is fully synchronous (its `UIAction`s render title +
+/// subtitle together, no deferred load) — the same menu on the profile header
+/// and the map avatar's `UIContextMenuInteraction`.
+@MainActor
+public protocol ProfileSwitcherPresenting: AnyObject {
+    /// Pre-fetch + pre-format the account's profiles.
+    func reload() async
+    /// A synchronous switcher menu built from the last `reload`.
+    func makeMenu(onSwitch: @escaping () -> Void, onAddProfile: @escaping () -> Void) -> UIMenu
+}
+
+public extension Notification.Name {
+    /// Posted after the viewer switches the active profile, so identity surfaces
+    /// (the map avatar, an open profile screen) can refresh to the new profile.
+    static let activeProfileDidChange = Notification.Name("cn.wynn.core-platform-ios.activeProfileDidChange")
 }

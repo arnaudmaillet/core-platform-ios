@@ -14,10 +14,11 @@ import UploadInterface
 /// a `UISearchTab`, which the system detaches to the trailing edge, producing
 /// the grouped bar `| Maps  Feed  Messages |  Search |` natively.
 ///
-/// Two bar buttons are not tabs. Profile opens as a sheet from the avatar
-/// button in the Maps nav bar (see `ProfileFlowCoordinator`), and the
-/// unread-notifications badge the Profile tab used to carry lives on that
-/// avatar as a dot. Feed keeps its bar button, but selecting it is vetoed
+/// Two bar buttons are not tabs. Profile pushes onto the Maps stack from the
+/// avatar button in the Maps nav bar (see `ProfileFlowCoordinator`), and
+/// Notifications pushes from a bell item seated directly to the avatar's left;
+/// the unread-notifications badge the Profile tab used to carry now lives on
+/// that bell. Feed keeps its bar button, but selecting it is vetoed
 /// (`shouldSelectTab`) and the timeline is *pushed* onto the current tab's
 /// stack instead (see `FeedFlowCoordinator`) — back returns to where the user
 /// was, and no tab switch occurs.
@@ -28,7 +29,51 @@ final class MainTabCoordinator: NSObject, Coordinator {
 
     private let container: AppContainer
     private let onLogout: () -> Void
-    private let avatarButton = ProfileAvatarButton()
+    /// The Maps nav-bar Profile entry point: a standard bar item showing the
+    /// viewer's circular avatar. Short tap opens Profile (its `primaryAction`);
+    /// long-press shows the switcher menu — UIKit drives both natively from
+    /// `UIBarButtonItem.menu` (with a primary action present, the menu appears on
+    /// long-press), so there's no custom gesture, interaction, or lift glitch.
+    private lazy var avatarBarItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            title: nil,
+            image: Self.avatarPlaceholder,
+            primaryAction: UIAction { [weak self] _ in self?.openProfileFromAvatar() },
+            menu: nil
+        )
+        item.changesSelectionAsPrimaryAction = false
+        item.accessibilityLabel = "Profile"
+        return item
+    }()
+    /// The profile switcher whose menu the avatar item presents on long-press.
+    private lazy var profileSwitcher = container.profileFeature.makeProfileSwitcher()
+
+    private static let avatarPlaceholder = UIImage(systemName: "person.crop.circle")
+    /// The Notifications entry point: a plain bar item like the map's "+", tinted
+    /// `.label` so it renders dark in the glass bubble (not system blue). The
+    /// unread badge is a clean image swap — `bell` ↔ `bell.badge` (a red badge
+    /// dot) — driven by `refreshUnreadBadge`, no custom view needed.
+    private lazy var notificationsBarItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            image: Self.bellImage(unread: false),
+            primaryAction: UIAction { [weak self] _ in self?.pushNotifications() }
+        )
+        item.tintColor = .label
+        item.accessibilityLabel = "Notifications"
+        return item
+    }()
+
+    /// The bell glyph for the current unread state. When unread, a palette
+    /// `bell.badge` (bell in `.label`, badge in red) rendered `.alwaysOriginal`
+    /// so the item's `.label` tint can't flatten the badge; otherwise a plain
+    /// template `bell` that the tint draws dark. Both keep dynamic colors, so
+    /// they adapt to light/dark on their own.
+    private static func bellImage(unread: Bool) -> UIImage? {
+        guard unread else { return UIImage(systemName: "bell") }
+        let config = UIImage.SymbolConfiguration(paletteColors: [.label, .systemRed])
+        return UIImage(systemName: "bell.badge", withConfiguration: config)?
+            .withRenderingMode(.alwaysOriginal)
+    }
     private var profileFlow: ProfileFlowCoordinator?
     private var feedFlow: FeedFlowCoordinator?
     /// Tabs paired with their `AppTab`, in bar order — the lookup `selectTab`
@@ -66,20 +111,18 @@ final class MainTabCoordinator: NSObject, Coordinator {
     }
 
     func start() {
-        let profileFlow = ProfileFlowCoordinator(
-            container: container,
-            onLogout: onLogout,
-            onDismiss: { [weak self] in self?.refreshUnreadDot() }
-        )
+        let profileFlow = ProfileFlowCoordinator(container: container, onLogout: onLogout)
         addChild(profileFlow)
         self.profileFlow = profileFlow
 
-        avatarButton.addAction(
-            UIAction { [weak self] _ in
-                guard let self else { return }
-                self.profileFlow?.present(from: tabBarController)
-            },
-            for: .touchUpInside
+        // Build the avatar item's switcher menu up front (and keep it fresh on
+        // profile switches). Tap / long-press are handled natively by the item.
+        rebuildSwitcherMenu()
+        // A switch (from either entry point) broadcasts this; reload the avatar
+        // and the switcher snapshot so the map chrome reflects the new profile.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(activeProfileChanged),
+            name: .activeProfileDidChange, object: nil
         )
 
         let feedFlow = FeedFlowCoordinator(container: container)
@@ -88,7 +131,11 @@ final class MainTabCoordinator: NSObject, Coordinator {
         self.feedFlow = feedFlow
 
         orderedTabs = [
-            (.maps, MapsTabCoordinator(container: container, profileButtonItem: UIBarButtonItem(customView: avatarButton))),
+            (.maps, MapsTabCoordinator(
+                container: container,
+                profileButtonItem: avatarBarItem,
+                notificationsButtonItem: notificationsBarItem
+            )),
             (.messages, MessagesTabCoordinator(container: container)),
             (.search, SearchTabCoordinator(container: container))
         ]
@@ -105,7 +152,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
         tabBarController.delegate = self
 
         loadAvatar()
-        refreshUnreadDot()
+        refreshUnreadBadge()
 
         #if DEBUG
         // Dev convenience: `-select-tab N` opens directly on a tab for testing,
@@ -122,14 +169,20 @@ final class MainTabCoordinator: NSObject, Coordinator {
                 selectTab(tab)
             }
         }
-        // `-open-my-profile` presents the profile sheet on launch — the avatar
-        // tap's code path — so the sheet flow is testable without driving the
+        // `-open-my-profile` pushes the viewer's profile on launch — the avatar
+        // tap's code path — so the push flow is testable without driving the
         // UI. Deferred a tick: at `start()` the shell isn't the window root yet.
         if arguments.contains("-open-my-profile") {
             DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                self.profileFlow?.present(from: tabBarController)
+                guard let self, let navigationController = mapsNavigationController else { return }
+                self.profileFlow?.push(onto: navigationController)
             }
+        }
+        // `-open-notifications` pushes the notifications feed on launch — the
+        // map bell's exact code path — so it's screenshottable without a tap
+        // (the sim injects none). Deferred a tick, as above.
+        if arguments.contains("-open-notifications") {
+            DispatchQueue.main.async { [weak self] in self?.pushNotifications() }
         }
         // `-present-compose` presents the compose sheet on launch, for
         // driving/screenshotting compose without tapping through the UI.
@@ -163,24 +216,91 @@ final class MainTabCoordinator: NSObject, Coordinator {
         #endif
     }
 
-    /// Resolves the viewer's avatar into the button; the placeholder glyph
-    /// stays if there is none (or it can't be fetched).
+    /// The Maps tab's navigation stack — where the profile (the avatar's
+    /// destination) and notifications (the bell's) are pushed. Resolved from
+    /// `orderedTabs` so it tracks the one `MapsTabCoordinator` the shell built.
+    private var mapsNavigationController: UINavigationController? {
+        orderedTabs.first(where: { $0.0 == .maps })?.1.navigationController
+    }
+
+    /// Pushes Notifications onto the Maps stack — the bell's action (the bell
+    /// only shows on the Maps root). Rooted at the map so back returns there;
+    /// reading clears the badge server-side, and `refreshUnreadBadge` reconciles
+    /// on return. Shared with the `-open-notifications` debug hook.
+    private func pushNotifications() {
+        guard let navigationController = mapsNavigationController else { return }
+        navigationController.pushViewController(
+            container.notificationsFeature.makeNotificationsViewController(),
+            animated: true
+        )
+    }
+
+    @objc private func activeProfileChanged() {
+        loadAvatar()
+        rebuildSwitcherMenu()
+    }
+
+    /// Re-fetches the switcher snapshot and installs the (synchronous) menu on
+    /// the avatar bar item, which UIKit presents natively on long-press.
+    private func rebuildSwitcherMenu() {
+        Task { @MainActor in
+            await profileSwitcher?.reload()
+            avatarBarItem.menu = profileSwitcher?.makeMenu(
+                onSwitch: {},
+                onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
+            )
+        }
+    }
+
+    /// The avatar item's short-tap: push the viewer's profile onto the Maps
+    /// stack (back / edge-swipe returns to the map) and refresh the unread badge.
+    private func openProfileFromAvatar() {
+        guard let navigationController = mapsNavigationController else { return }
+        profileFlow?.push(onto: navigationController)
+        refreshUnreadBadge()
+    }
+
+    private func presentAddProfilePlaceholder() {
+        let alert = UIAlertController(
+            title: "Add Profile",
+            message: "Creating a new profile isn't available yet.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        tabBarController.present(alert, animated: true)
+    }
+
+    /// Resolves the viewer's avatar into the bar item as a circular image; the
+    /// placeholder glyph stays if there is none (or it can't be fetched).
     private func loadAvatar() {
         Task { [weak self] in
             guard let self else { return }
             let image = await container.profileFeature.viewerAvatarImage()
-            avatarButton.setAvatar(image)
+            avatarBarItem.image = image.map(Self.circularBarImage) ?? Self.avatarPlaceholder
         }
     }
 
-    /// Mirrors the unread notifications count onto the avatar's dot. Best-effort
-    /// and idempotent — called on start, on every tab switch, and when the
-    /// profile sheet (which hosts the notifications feed) is dismissed.
-    private func refreshUnreadDot() {
+    /// Renders an avatar into a circular bar-sized image (`.alwaysOriginal` so
+    /// the photo isn't tinted).
+    private static func circularBarImage(_ image: UIImage) -> UIImage {
+        let side: CGFloat = 30
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side))
+        return renderer.image { _ in
+            let rect = CGRect(x: 0, y: 0, width: side, height: side)
+            UIBezierPath(ovalIn: rect).addClip()
+            image.draw(in: rect)
+        }.withRenderingMode(.alwaysOriginal)
+    }
+
+    /// Mirrors the unread notifications count onto the bell (a `bell` ↔
+    /// `bell.badge` image swap). Best-effort and idempotent — called on start,
+    /// on every tab switch, and when a notifications-bearing surface (Profile /
+    /// the pushed feed) is left.
+    private func refreshUnreadBadge() {
         Task { [weak self] in
             guard let self else { return }
             let count = await container.notificationsFeature.unreadCount()
-            avatarButton.setHasUnread(count > 0)
+            notificationsBarItem.image = Self.bellImage(unread: count > 0)
         }
     }
 }
@@ -196,12 +316,12 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
         openFeed()
         // Vetoed selections never reach `didSelect`; refresh the dot here so a
         // Feed tap keeps the same badge freshness a tab switch has.
-        refreshUnreadDot()
+        refreshUnreadBadge()
         return false
     }
 
     func tabBarController(_ tabBarController: UITabBarController, didSelect viewController: UIViewController) {
-        refreshUnreadDot()
+        refreshUnreadBadge()
         syncTabBarVisibility()
     }
 
@@ -262,3 +382,4 @@ extension MainTabCoordinator: AppNavigating {
         feedFlow?.push(on: navigationController)
     }
 }
+

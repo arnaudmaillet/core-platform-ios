@@ -6,7 +6,8 @@ import Testing
 private actor EditStubProvider: ProfileProviding {
     private let profile: UserProfile
     private let updateError: Error?
-    private(set) var updateCalls: [(displayName: String, bio: String, website: String)] = []
+    private(set) var updateCalls: [(displayName: String, bio: String, website: String, links: [ProfileLink])] = []
+    private(set) var handleCalls: [String] = []
 
     init(profile: UserProfile, updateError: Error? = nil) {
         self.profile = profile
@@ -18,8 +19,14 @@ private actor EditStubProvider: ProfileProviding {
     func relationship(for profileID: ProfileID) async throws -> ProfileRelationship { .me }
     func setFollowing(_ following: Bool, for profileID: ProfileID) async throws {}
 
-    func updateCurrentUserProfile(displayName: String, bio: String, website: String) async throws -> UserProfile {
-        updateCalls.append((displayName, bio, website))
+    func updateCurrentUserProfile(displayName: String, bio: String, website: String, links: [ProfileLink]) async throws -> UserProfile {
+        updateCalls.append((displayName, bio, website, links))
+        if let updateError { throw updateError }
+        return profile
+    }
+
+    func changeHandle(_ newHandle: String) async throws -> UserProfile {
+        handleCalls.append(newHandle)
         if let updateError { throw updateError }
         return profile
     }
@@ -30,11 +37,12 @@ private struct SaveError: Error {}
 private func viewerProfile() -> UserProfile {
     UserProfile(
         id: ProfileID("prof-me"),
-        handle: "me",
+        handle: "ada",
         displayName: "Ada Lovelace",
         bio: "Countess of computing",
         avatarURL: nil,
         websiteURL: URL(string: "https://ada.example"),
+        customLinks: [ProfileLink(label: "Notes", url: "https://ada.example/notes")],
         isVerified: false,
         followerCount: .exact(3),
         followingCount: .exact(5),
@@ -60,17 +68,36 @@ struct EditProfileViewModelTests {
 
         #expect(lastPhase == .ready(.init(
             displayName: "Ada Lovelace",
+            username: "ada",
             bio: "Countess of computing",
-            website: "https://ada.example"
+            website: "https://ada.example",
+            links: [ProfileLink(label: "Notes", url: "https://ada.example/notes")]
         )))
     }
 
-    @Test func saveTrimsFieldsAndNotifiesOnSuccess() async {
+    @Test func exposesAvatarURLOnLoad() async {
+        let viewModel = EditProfileViewModel(repository: EditStubProvider(profile: viewerProfile()), onSaved: {})
+        var receivedURLCallback = false
+        viewModel.onAvatarURLChange = { _ in receivedURLCallback = true }
+
+        viewModel.viewDidLoad()
+        await settle()
+
+        #expect(receivedURLCallback)
+    }
+
+    @Test func saveMetadataTrimsFieldsAndNotifiesOnSuccess() async {
         let provider = EditStubProvider(profile: viewerProfile())
         var saved = false
         let viewModel = EditProfileViewModel(repository: provider, onSaved: { saved = true })
 
-        viewModel.save(.init(displayName: "  Ada L  ", bio: " hi ", website: " https://x.dev "))
+        viewModel.saveMetadata(.init(
+            displayName: "  Ada L  ",
+            username: "ada",
+            bio: " hi ",
+            website: " https://x.dev ",
+            links: [ProfileLink(label: "  Site  ", url: " https://u.dev ")]
+        ))
         await settle()
 
         let calls = await provider.updateCalls
@@ -78,6 +105,20 @@ struct EditProfileViewModelTests {
         #expect(calls.first?.displayName == "Ada L")
         #expect(calls.first?.bio == "hi")
         #expect(calls.first?.website == "https://x.dev")
+        #expect(calls.first?.links == [ProfileLink(label: "Site", url: "https://u.dev")])
+        #expect(saved)
+    }
+
+    @Test func saveUsernameGoesThroughChangeHandle() async {
+        let provider = EditStubProvider(profile: viewerProfile())
+        var saved = false
+        let viewModel = EditProfileViewModel(repository: provider, onSaved: { saved = true })
+
+        viewModel.saveUsername("  new_handle  ")
+        await settle()
+
+        #expect(await provider.handleCalls == ["new_handle"])
+        #expect(await provider.updateCalls.isEmpty)
         #expect(saved)
     }
 
@@ -88,7 +129,7 @@ struct EditProfileViewModelTests {
         var lastSaveState: EditProfileViewModel.SaveState?
         viewModel.onSaveStateChange = { lastSaveState = $0 }
 
-        viewModel.save(.init(displayName: "Ada", bio: "", website: ""))
+        viewModel.saveMetadata(.init(displayName: "Ada", username: "ada", bio: "", website: "", links: []))
         await settle()
 
         #expect(!saved)
@@ -98,14 +139,17 @@ struct EditProfileViewModelTests {
         }
     }
 
-    @Test func concurrentSavesAreCoalesced() async {
+    @Test func sequentialSavesAllRun() async {
         let provider = EditStubProvider(profile: viewerProfile())
         let viewModel = EditProfileViewModel(repository: provider, onSaved: {})
 
-        viewModel.save(.init(displayName: "A", bio: "", website: ""))
-        viewModel.save(.init(displayName: "B", bio: "", website: "")) // ignored while first in flight
+        // Serialized, not coalesced: both a metadata save and a handle change
+        // queued back-to-back must each reach the repository.
+        viewModel.saveMetadata(.init(displayName: "A", username: "ada", bio: "", website: "", links: []))
+        viewModel.saveUsername("new_handle")
         await settle()
 
         #expect(await provider.updateCalls.count == 1)
+        #expect(await provider.handleCalls == ["new_handle"])
     }
 }

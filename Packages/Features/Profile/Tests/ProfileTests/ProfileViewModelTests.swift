@@ -48,7 +48,10 @@ private actor StubProfileProvider: ProfileProviding {
         if let setFollowingError { throw setFollowingError }
     }
 
-    func updateCurrentUserProfile(displayName: String, bio: String, website: String) async throws -> UserProfile {
+    func updateCurrentUserProfile(displayName: String, bio: String, website: String, links: [ProfileLink]) async throws -> UserProfile {
+        try await resolve()
+    }
+    func changeHandle(_ newHandle: String) async throws -> UserProfile {
         try await resolve()
     }
 

@@ -53,6 +53,18 @@ public enum ProfileRelationship: Equatable, Sendable {
     case other(isFollowing: Bool)
 }
 
+/// A labelled external link on a profile (`custom_links`) — a second site, a
+/// storefront, a social handle. Order is meaningful: it's the display order.
+public struct ProfileLink: Equatable, Sendable {
+    public var label: String
+    public var url: String
+
+    public init(label: String, url: String) {
+        self.label = label
+        self.url = url
+    }
+}
+
 /// A fully-resolved public profile plus its social-graph counters, ready for
 /// the presentation layer.
 public struct UserProfile: Equatable, Sendable {
@@ -62,6 +74,9 @@ public struct UserProfile: Equatable, Sendable {
     public let bio: String
     public let avatarURL: URL?
     public let websiteURL: URL?
+    /// The profile's ordered custom links (`custom_links`). Editable through the
+    /// same `UpdateProfile` RPC as bio/name/website.
+    public let customLinks: [ProfileLink]
     public let isVerified: Bool
     public let followerCount: CountEstimate
     public let followingCount: CountEstimate
@@ -79,6 +94,7 @@ public struct UserProfile: Equatable, Sendable {
         bio: String,
         avatarURL: URL?,
         websiteURL: URL?,
+        customLinks: [ProfileLink] = [],
         isVerified: Bool,
         followerCount: CountEstimate,
         followingCount: CountEstimate,
@@ -91,6 +107,7 @@ public struct UserProfile: Equatable, Sendable {
         self.bio = bio
         self.avatarURL = avatarURL
         self.websiteURL = websiteURL
+        self.customLinks = customLinks
         self.isVerified = isVerified
         self.followerCount = followerCount
         self.followingCount = followingCount
@@ -110,10 +127,44 @@ public protocol ProfileProviding: Sendable {
     func relationship(for profileID: ProfileID) async throws -> ProfileRelationship
     /// Follow (`true`) or unfollow (`false`) `profileID` as the viewer.
     func setFollowing(_ following: Bool, for profileID: ProfileID) async throws
-    /// Edits the viewer's own mutable profile metadata, returning the refreshed
-    /// profile. Fields not exposed here (handle, avatar, locale, links) are
-    /// preserved.
-    func updateCurrentUserProfile(displayName: String, bio: String, website: String) async throws -> UserProfile
+    /// Edits the viewer's own mutable profile metadata via `UpdateProfile`,
+    /// returning the refreshed profile. Fields not exposed here (avatar, banner,
+    /// locale, visibility) are preserved; the handle is changed separately via
+    /// `changeHandle`.
+    func updateCurrentUserProfile(displayName: String, bio: String, website: String, links: [ProfileLink]) async throws -> UserProfile
+    /// Changes the viewer's @handle via the dedicated `ChangeHandle` RPC (atomic
+    /// swap on the fleet; a plain rename in mock), returning the refreshed profile.
+    func changeHandle(_ newHandle: String) async throws -> UserProfile
+}
+
+/// A lightweight profile summary for the account's profile switcher — enough to
+/// list a profile (name, @handle, avatar) without a full `UserProfile` fetch.
+public struct AccountProfile: Equatable, Sendable {
+    public let id: ProfileID
+    public let handle: String
+    public let displayName: String
+    public let avatarURL: URL?
+
+    public init(id: ProfileID, handle: String, displayName: String, avatarURL: URL?) {
+        self.id = id
+        self.handle = handle
+        self.displayName = displayName
+        self.avatarURL = avatarURL
+    }
+}
+
+/// Multi-profile support for the switcher: list the account's profiles, read the
+/// active one, and switch it. "Active" is scoped to the identity surfaces the
+/// `ProfileRepository` drives (the profile screen + the map avatar) — switching
+/// overrides its cached viewer id; the other feature repositories keep their own
+/// viewer caches.
+public protocol ProfileSwitching: Sendable {
+    /// All profiles linked to the signed-in account.
+    func accountProfiles() async throws -> [AccountProfile]
+    /// The active profile id (the one the profile screen + avatar resolve to).
+    func activeProfileID() async -> ProfileID?
+    /// Switches the active profile; the profile screen + avatar refresh to it.
+    func setActiveProfile(_ id: ProfileID) async
 }
 
 /// Reads the viewer's identity and social counters from profile.v1, counter.v1,
@@ -128,7 +179,7 @@ public protocol ProfileProviding: Sendable {
 /// counting `social_graph.v1` edges so real counts still render today; the fast
 /// path takes over automatically once the backend projects. See
 /// `dev/BACKEND_GAPS.md` §7.
-public actor ProfileRepository: ProfileProviding {
+public actor ProfileRepository: ProfileProviding, ProfileSwitching {
     private let profileClient: any Profile_V1_ProfileServiceClientInterface
     private let counterClient: any Counter_V1_CounterServiceClientInterface
     private let socialGraphClient: any SocialGraph_V1_SocialGraphServiceClientInterface
@@ -216,10 +267,11 @@ public actor ProfileRepository: ProfileProviding {
 
     // MARK: - Edit
 
-    public func updateCurrentUserProfile(displayName: String, bio: String, website: String) async throws -> UserProfile {
+    public func updateCurrentUserProfile(displayName: String, bio: String, website: String, links: [ProfileLink]) async throws -> UserProfile {
         let id = try await resolveViewerProfileID()
         // The contract has no field mask; start from the current view so fields
-        // the form doesn't edit (locale, custom links) are preserved, not cleared.
+        // the form doesn't edit (locale) are preserved, not cleared. Links ARE
+        // edited now, so they come from the caller rather than the current view.
         let current = try await fetchProfileView(id: id)
 
         var request = Profile_V1_UpdateProfileRequest()
@@ -228,7 +280,12 @@ public actor ProfileRepository: ProfileProviding {
         request.bio = bio
         request.websiteURL = website
         request.locale = current.locale
-        request.customLinks = current.customLinks
+        request.customLinks = links.map { link in
+            var proto = Profile_V1_ProfileLinkProto()
+            proto.label = link.label
+            proto.url = link.url
+            return proto
+        }
 
         let response = await profileClient.updateProfile(request: request, headers: [:])
         if let error = response.error {
@@ -236,6 +293,23 @@ public actor ProfileRepository: ProfileProviding {
         }
         guard response.message?.success == true else {
             throw ProfileError.transport(message: "profile update rejected")
+        }
+
+        return try await loadProfile(id: id)
+    }
+
+    public func changeHandle(_ newHandle: String) async throws -> UserProfile {
+        let id = try await resolveViewerProfileID()
+        var request = Profile_V1_ChangeHandleRequest()
+        request.profileID = id.rawValue
+        request.newHandle = newHandle
+
+        let response = await profileClient.changeHandle(request: request, headers: [:])
+        if let error = response.error {
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+        }
+        guard response.message?.success == true else {
+            throw ProfileError.transport(message: "handle change rejected")
         }
 
         return try await loadProfile(id: id)
@@ -286,6 +360,41 @@ public actor ProfileRepository: ProfileProviding {
         case .failure(let error):
             throw ProfileError.transport(message: error.message ?? "code \(error.code)")
         }
+    }
+
+    // MARK: - ProfileSwitching
+
+    public func accountProfiles() async throws -> [AccountProfile] {
+        guard case .authenticated(let accountID) = await authSession.currentState() else {
+            throw ProfileError.notAuthenticated
+        }
+        var request = Profile_V1_ListProfilesByAccountRequest()
+        request.accountID = accountID.rawValue
+        let response = await profileClient.listProfilesByAccount(request: request, headers: [:])
+        switch response.result {
+        case .success(let body):
+            return body.profiles.map { profile in
+                AccountProfile(
+                    id: ProfileID(profile.profileID),
+                    handle: profile.handle,
+                    displayName: profile.displayName,
+                    avatarURL: URL(string: profile.avatarURL)
+                )
+            }
+        case .failure(let error):
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+        }
+    }
+
+    public func activeProfileID() async -> ProfileID? {
+        try? await resolveViewerProfileID()
+    }
+
+    public func setActiveProfile(_ id: ProfileID) async {
+        // Overriding the cached viewer id is the whole switch: `currentUserProfile`
+        // (profile screen) and `viewerAvatarImage` (map avatar) both resolve
+        // through this, so they refresh to the chosen profile on their next read.
+        viewerProfileID = id
     }
 
     // MARK: - Social counters
@@ -380,6 +489,7 @@ public actor ProfileRepository: ProfileProviding {
             bio: view.bio,
             avatarURL: URL(string: view.avatarURL),
             websiteURL: URL(string: view.websiteURL),
+            customLinks: view.customLinks.map { ProfileLink(label: $0.label, url: $0.url) },
             isVerified: view.verified,
             followerCount: counts.followers,
             followingCount: counts.following,

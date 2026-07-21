@@ -11,6 +11,12 @@ final class ProfileViewController: UIViewController {
     /// Builds the edit form (for the viewer's own profile); the closure it
     /// receives is invoked after a successful save. Nil for other users.
     private let makeEditViewController: ((@escaping () -> Void) -> UIViewController)?
+    /// Builds the account settings screen (own profile only, the gear's
+    /// destination). Nil for other users.
+    private let makeSettingsViewController: (() -> UIViewController)?
+    /// Builds the reusable profile-switcher menu (own profile only). Nil for
+    /// other users — switching is a viewer affordance.
+    private let switcherFactory: ProfileSwitcherMenuFactory?
 
     private let scrollView = UIScrollView()
     private let headerView: ProfileHeaderView
@@ -70,8 +76,10 @@ final class ProfileViewController: UIViewController {
     private var skeletonViewportFill: NSLayoutConstraint?
     private var didSubordinatePagerToPop = false
 
-    /// The own-profile overflow menu (Log Out); sits inside the action item.
-    private var overflowItem: UIBarButtonItem?
+    /// The own-profile settings gear; pushes `AccountSettingsViewController`.
+    private var settingsItem: UIBarButtonItem?
+    /// The own-profile switcher; taps present the profile-switcher menu.
+    private var switcherItem: UIBarButtonItem?
     /// Defensive rendering for a `.hidden` relationship state. In practice the
     /// slot always has a concrete default from init ("Follow" / "Edit
     /// Profile"), so this skeleton only shows if a future code path ever
@@ -112,11 +120,15 @@ final class ProfileViewController: UIViewController {
         imagePipeline: ImagePipeline,
         onLogout: (() -> Void)?,
         makeEditViewController: ((@escaping () -> Void) -> UIViewController)? = nil,
+        makeSettingsViewController: (() -> UIViewController)? = nil,
+        switcherFactory: ProfileSwitcherMenuFactory? = nil,
         identityStub: ProfileIdentityStub? = nil
     ) {
         self.viewModel = viewModel
         self.onLogout = onLogout
         self.makeEditViewController = makeEditViewController
+        self.makeSettingsViewController = makeSettingsViewController
+        self.switcherFactory = switcherFactory
         headerView = ProfileHeaderView(imagePipeline: imagePipeline)
         galleryPager = ProfileGalleryPagerView(imagePipeline: imagePipeline)
         super.init(nibName: nil, bundle: nil)
@@ -177,6 +189,9 @@ final class ProfileViewController: UIViewController {
         headerView.onMessageTapped = { [weak self] in
             self?.viewModel.messageTapped()
         }
+        headerView.onEditTapped = { [weak self] in
+            self?.pushEditProfile()
+        }
         headerView.onWebsiteTapped = { url in
             UIApplication.shared.open(url)
         }
@@ -219,10 +234,6 @@ final class ProfileViewController: UIViewController {
         concealFilterToolbar()
     }
 
-    #if DEBUG
-    private var didAutoPresentEdit = false
-    #endif
-
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         // The pager's horizontal pan yields to the stack's edge-swipe pop:
@@ -236,13 +247,6 @@ final class ProfileViewController: UIViewController {
             galleryPager.horizontalPan.require(toFail: pop)
         }
         #if DEBUG
-        // Dev convenience: `-edit-profile` opens the edit form on the viewer's
-        // own profile, so the form is testable without tapping the button.
-        if !didAutoPresentEdit, makeEditViewController != nil,
-           ProcessInfo.processInfo.arguments.contains("-edit-profile") {
-            didAutoPresentEdit = true
-            presentEditProfile()
-        }
         // Dev convenience: `-profile-overscroll` parks the scroll view in the
         // pulled-down region (no touch injection in the sim), so the banner's
         // stretch-over-overscroll behavior can be screenshotted.
@@ -288,23 +292,23 @@ final class ProfileViewController: UIViewController {
         }
     }
 
-    /// The header's action button means different things per state: Edit opens
-    /// the edit form; Follow/Following toggle the relationship.
+    /// The nav-bar relationship action toggles Follow / Following. Edit is not
+    /// a bar item — it's the header tray's own capsule (`onEditTapped`), so it
+    /// never routes through here.
     private func handleActionTapped() {
-        if followButtonState == .edit {
-            presentEditProfile()
-        } else {
-            viewModel.toggleFollow()
-        }
+        viewModel.toggleFollow()
     }
 
-    private func presentEditProfile() {
+    private func pushEditProfile() {
         guard let makeEditViewController else { return }
+        // Pushed onto the profile's own stack, not presented: back / edge-swipe
+        // returns here. Edits are per-field (each pushes its own screen), so a
+        // save refreshes the profile underneath but does NOT pop the editor —
+        // the user leaves the list themselves when done.
         let editViewController = makeEditViewController { [weak self] in
-            self?.dismiss(animated: true)
             self?.viewModel.refresh()
         }
-        present(UINavigationController(rootViewController: editViewController), animated: true)
+        navigationController?.pushViewController(editViewController, animated: true)
     }
 
     // MARK: - Setup
@@ -327,17 +331,63 @@ final class ProfileViewController: UIViewController {
         navigationItem.scrollEdgeAppearance = transparent
         navigationItem.standardAppearance = UINavigationBarAppearance()
 
-        // Account actions only exist for the viewer's own profile.
-        guard let onLogout else { return }
-        // Log Out lives in an overflow menu — destructive, so it's one tap
-        // removed from the surface, matching where it sat on the placeholder.
-        let logout = UIAction(title: "Log Out", image: UIImage(systemName: "rectangle.portrait.and.arrow.right"), attributes: .destructive) { _ in
-            onLogout()
-        }
-        overflowItem = UIBarButtonItem(
-            image: UIImage(systemName: "ellipsis.circle"),
-            menu: UIMenu(children: [logout])
+        // Account actions only exist for the viewer's own profile. (`onLogout`
+        // is retained for the Account Settings screen, which will host Log Out.)
+        guard onLogout != nil else { return }
+        // Settings gear — the viewer's account entry point. A plain trailing
+        // item (no leading item, so it never disturbs the edge-swipe pop),
+        // tinted `.label` to read as primary dark chrome over the banner.
+        let settings = UIBarButtonItem(
+            image: UIImage(systemName: "gearshape"),
+            primaryAction: UIAction { [weak self] _ in self?.pushSettings() }
         )
+        settings.tintColor = .label
+        settings.accessibilityLabel = "Settings"
+        settingsItem = settings
+
+        // Profile switcher — a standalone item beside the gear. Tapping presents
+        // the shared switcher menu; a switch refreshes this screen to the new
+        // active profile (the map avatar refreshes via `.activeProfileDidChange`).
+        if switcherFactory != nil {
+            let switcher = UIBarButtonItem(image: UIImage(systemName: "person.2"), menu: UIMenu(children: []))
+            switcher.tintColor = .label
+            switcher.accessibilityLabel = "Switch Profile"
+            switcherItem = switcher
+            // Pre-load profiles + avatars, then set a SYNCHRONOUS menu — its
+            // content lands in the first frame, not popped in after the popover.
+            reloadSwitcherMenu()
+        }
+    }
+
+    /// Pre-fetches the switcher snapshot and installs a synchronous menu on the
+    /// switcher item. Re-run after a switch so the active marker updates.
+    private func reloadSwitcherMenu() {
+        guard let switcherFactory, let switcherItem else { return }
+        Task { [weak self] in
+            await switcherFactory.reload()
+            switcherItem.menu = switcherFactory.makeMenu(
+                onSwitch: { [weak self] in
+                    self?.viewModel.refresh()
+                    self?.reloadSwitcherMenu()
+                },
+                onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
+            )
+        }
+    }
+
+    private func presentAddProfilePlaceholder() {
+        let alert = UIAlertController(
+            title: "Add Profile",
+            message: "Creating a new profile isn't available yet.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+
+    private func pushSettings() {
+        guard let settingsViewController = makeSettingsViewController?() else { return }
+        navigationController?.pushViewController(settingsViewController, animated: true)
     }
 
     /// The single application point for everything the navigation bar shows —
@@ -387,13 +437,27 @@ final class ProfileViewController: UIViewController {
     /// styling floods the capsule with tint. The own-profile overflow menu
     /// keeps its slot next to it either way.
     private func updateActionBarItem(_ state: ProfileViewModel.FollowButton) {
-        let action: UIBarButtonItem = switch state {
+        // Edit is no longer a bar item — it lives in the header tray beside the
+        // avatar (see `ProfileHeaderView.configureAction`), so own-profile keeps
+        // only its account overflow menu here.
+        let action: UIBarButtonItem? = switch state {
         case .hidden: actionPlaceholderItem
         case .follow: makeActionItem(title: "Follow")
         case .following: makeActionItem(title: "Following")
-        case .edit: makeActionItem(title: "Edit Profile")
+        case .edit: nil
         }
-        navigationItem.rightBarButtonItems = [action] + (overflowItem.map { [$0] } ?? [])
+        // Relationship action for other users; the gear + switcher for own
+        // profile (where `action` is nil). Trailing-to-leading: gear rightmost,
+        // switcher to its left, with a fixedSpace so they read as two distinct
+        // glass bubbles rather than one grouped capsule.
+        var items: [UIBarButtonItem] = []
+        if let action { items.append(action) }
+        if let settingsItem { items.append(settingsItem) }
+        if let switcherItem {
+            if !items.isEmpty { items.append(.fixedSpace(8)) }
+            items.append(switcherItem)
+        }
+        navigationItem.rightBarButtonItems = items
     }
 
     private func makeActionItem(title: String) -> UIBarButtonItem {

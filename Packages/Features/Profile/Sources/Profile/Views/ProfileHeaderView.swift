@@ -15,8 +15,8 @@ import UIKit
 ///   (owned by `ProfileViewController`), NOT in this view;
 /// - then the two-column identity block — circular avatar left, sized to span
 ///   the three lines beside it: display name + verified badge, @handle, and
-///   the Liquid Glass action tray (Message capsule, then circular bookmark,
-///   QR-code, and see-more bubbles, leading-aligned);
+///   the Liquid Glass action tray (a leading Message-or-Edit-Profile capsule,
+///   then QR-code and see-more bubbles trailing-aligned);
 /// - below, full width: the 4-metric counter row (Followers / Following /
 ///   Reactions / Views) directly under the identity block, then bio and
 ///   website link closing the header right above the content threshold. The
@@ -56,7 +56,7 @@ final class ProfileHeaderView: UIView {
     private let reactionsStat = ProfileStatView(caption: "Reactions")
     private let viewsStat = ProfileStatView(caption: "Views")
     private let messageButton = UIButton(configuration: .glass())
-    private let bookmarkButton = UIButton(configuration: .glass())
+    private let editButton = UIButton(configuration: .glass())
     private let qrCodeButton = UIButton(configuration: .glass())
     private let moreButton = UIButton(configuration: .glass())
     private var columnTopConstraint: NSLayoutConstraint?
@@ -84,8 +84,8 @@ final class ProfileHeaderView: UIView {
 
     /// Invoked when the Message button is tapped (other users only).
     var onMessageTapped: (() -> Void)?
-    /// Invoked when the bookmark bubble is tapped.
-    var onBookmarkTapped: (() -> Void)?
+    /// Invoked when the Edit Profile capsule is tapped (own profile only).
+    var onEditTapped: (() -> Void)?
     /// Invoked when the QR-code bubble is tapped.
     var onQRCodeTapped: (() -> Void)?
     /// Invoked when the see-more (ellipsis) bubble is tapped.
@@ -136,16 +136,23 @@ final class ProfileHeaderView: UIView {
         loadAvatar(model.avatarURL)
     }
 
-    /// Adjusts the tray to the viewer's relationship: Message applies to other
-    /// users only; the QR and see-more bubbles are always available. The
-    /// Follow / Following / Edit button itself lives in the navigation bar and
-    /// is styled by `ProfileViewController`.
+    /// Adjusts the tray's leading capsule to the viewer's relationship: Message
+    /// for other users, Edit Profile for the viewer's own profile (they're
+    /// mutually exclusive, sharing the slot beside the avatar); the QR and
+    /// see-more bubbles are always available. The Follow / Following capsule
+    /// still lives in the navigation bar (styled by `ProfileViewController`) —
+    /// only Edit moved down here.
     func configureAction(_ state: ProfileViewModel.FollowButton) {
         switch state {
         case .follow, .following:
             messageButton.isHidden = false
-        case .hidden, .edit:
+            editButton.isHidden = true
+        case .edit:
             messageButton.isHidden = true
+            editButton.isHidden = false
+        case .hidden:
+            messageButton.isHidden = true
+            editButton.isHidden = true
         }
     }
 
@@ -412,11 +419,18 @@ final class ProfileHeaderView: UIView {
             for: .primaryActionTriggered
         )
 
-        bookmarkButton.configuration = Self.glassBubble(systemImage: "bookmark")
-        bookmarkButton.addAction(
-            UIAction { [weak self] _ in self?.onBookmarkTapped?() },
+        // Edit Profile: the own-profile action, a glass capsule sharing the
+        // leading slot with Message (never both shown). Same capsule styling as
+        // Message so the two read as one action affordance beside the avatar.
+        var editConfig = Self.styledCapsule(.glass())
+        editConfig.title = "Edit Profile"
+        editButton.configuration = editConfig
+        editButton.isHidden = true
+        editButton.addAction(
+            UIAction { [weak self] _ in self?.onEditTapped?() },
             for: .primaryActionTriggered
         )
+
         qrCodeButton.configuration = Self.glassBubble(systemImage: "qrcode")
         qrCodeButton.addAction(
             UIAction { [weak self] _ in self?.onQRCodeTapped?() },
@@ -428,24 +442,27 @@ final class ProfileHeaderView: UIView {
             for: .primaryActionTriggered
         )
 
-        // The Liquid Glass tray, split composition: Message + bookmark lead
-        // the identity stack; a stretching mid-spacer forces the QR and
-        // see-more bubbles flush against the identity block's trailing edge.
-        // The spacer's neighbors get zero stack spacing — the spacer IS the
-        // gap — so the tray degrades gracefully when width is scarce. The
-        // split holds whether or not Message is visible (own profile).
+        // The Liquid Glass tray, split composition: the leading capsule
+        // (Message for others, Edit Profile for the viewer) leads the identity
+        // stack; a stretching mid-spacer forces the QR and see-more bubbles
+        // flush against the identity block's trailing edge. The spacer's
+        // neighbors get zero stack spacing — the spacer IS the gap — so the
+        // tray degrades gracefully when width is scarce. The split holds
+        // whichever leading capsule is visible.
         let traySpacer = UIView()
         traySpacer.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
         let actionRow = UIStackView(
-            arrangedSubviews: [messageButton, bookmarkButton, traySpacer, qrCodeButton, moreButton]
+            arrangedSubviews: [messageButton, editButton, traySpacer, qrCodeButton, moreButton]
         )
         actionRow.axis = .horizontal
         actionRow.alignment = .fill
         actionRow.distribution = .fill
         actionRow.spacing = Spacing.sm
-        actionRow.setCustomSpacing(0, after: bookmarkButton)
+        // Whichever leading capsule shows hugs the spacer (the other is hidden).
+        actionRow.setCustomSpacing(0, after: messageButton)
+        actionRow.setCustomSpacing(0, after: editButton)
         actionRow.setCustomSpacing(0, after: traySpacer)
-        for bubble in [bookmarkButton, qrCodeButton, moreButton] {
+        for bubble in [qrCodeButton, moreButton] {
             // The diameter is 999, not required: on the narrowest devices the
             // tray can overrun the column beside the avatar, and the bubbles
             // shaving a point (staying circular via the required square tie)
