@@ -147,6 +147,20 @@ final class MapsViewController: UIViewController {
                 self.updateSubFilterBar(for: filter)
             }
         }
+        // `-maps-select-filter-2 <token|all>`: a SECOND primary selection at
+        // ~3.5s — drives primary-to-primary switches (sub-row cross-dissolve)
+        // and, with `all`, the fade-out path.
+        if let token = UserDefaults.standard.string(forKey: "maps-select-filter-2") {
+            let second: MapFilter? = token == "all" ? nil : MapFilter(wireToken: token)
+            if second != nil || token == "all" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { [weak self] in
+                    guard let self else { return }
+                    self.filterBar.setSelectedFilter(second)
+                    self.viewModel.filterChanged(second)
+                    self.updateSubFilterBar(for: second)
+                }
+            }
+        }
         // `-maps-open-subfilter-sheet`: presents the sub-filter full-list
         // sheet ~3s in (the trailing bubble's tap). Pair with
         // `-maps-select-filter friends|following|pinned`.
@@ -316,9 +330,7 @@ final class MapsViewController: UIViewController {
             // 1) Instant: whatever the cache holds right now.
             let cached = peopleCache[primary] ?? []
             if !cached.isEmpty {
-                currentSubFilterOptions = MapSubFilterOption.people(cached)
-                subFilterBar.setOptions(currentSubFilterOptions)
-                setSubFilterBar(visible: true)
+                showSubFilterRow(MapSubFilterOption.people(cached))
             }
             // 2) Refresh behind it (also the cold path pre-prefetch, where
             // the row appears when data lands — nothing to render sooner).
@@ -332,18 +344,33 @@ final class MapsViewController: UIViewController {
                 guard self.filterBar.selectedFilter == primary else { return }
                 // Don't churn the row (and its selection) for identical data.
                 guard people != cached else { return }
-                self.currentSubFilterOptions = MapSubFilterOption.people(people)
-                self.subFilterBar.setOptions(self.currentSubFilterOptions)
-                self.setSubFilterBar(visible: !people.isEmpty)
+                if people.isEmpty {
+                    self.currentSubFilterOptions = []
+                    self.setSubFilterBar(visible: false)
+                } else {
+                    self.showSubFilterRow(MapSubFilterOption.people(people))
+                }
             }
         case .pinned:
-            currentSubFilterOptions = MapSubFilterOption.placeCategories
-            subFilterBar.setOptions(currentSubFilterOptions)
-            setSubFilterBar(visible: true)
+            showSubFilterRow(MapSubFilterOption.placeCategories)
         default:
             // All / a favorite: no refinement dimension.
             currentSubFilterOptions = []
             setSubFilterBar(visible: false)
+        }
+    }
+
+    /// One entry point for populating the row, choosing the right
+    /// transition: hidden → set content and fade the bar in; already
+    /// visible → cross-dissolve the pills in place (a hard swap while
+    /// on-screen reads as a snap).
+    private func showSubFilterRow(_ options: [MapSubFilterOption]) {
+        currentSubFilterOptions = options
+        if isSubFilterBarVisible {
+            subFilterBar.transition(to: options)
+        } else {
+            subFilterBar.setOptions(options)
+            setSubFilterBar(visible: true)
         }
     }
 

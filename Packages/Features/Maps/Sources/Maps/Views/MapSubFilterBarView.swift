@@ -121,6 +121,11 @@ final class MapSubFilterBarView: UIView {
 
     private let scrollView = UIScrollView()
     private let stack = UIStackView()
+    /// Monotonic token superseding in-flight cross-dissolves: a stale
+    /// fade-out completion must never swap content selected later (rapid
+    /// taps land mid-animation; `.beginFromCurrentState` retargets the
+    /// alphas, this retargets the *intent*).
+    private var transitionGeneration = 0
     private let expandButton = MapPillButton(
         content: MapPillButton.Content(
             title: nil,
@@ -185,10 +190,34 @@ final class MapSubFilterBarView: UIView {
         expandButton.addAction(UIAction { [weak self] _ in self?.onExpandTapped?() }, for: .touchUpInside)
     }
 
+    /// Cross-dissolves to a new option set while the row stays visible (a
+    /// primary-to-primary switch, e.g. Friends → Places): fade the current
+    /// pills out, swap the content at zero alpha, fade the new pills in.
+    /// The fixed expand bubble deliberately stays put — it belongs to the
+    /// bar, not to either state. Safe under rapid taps: a newer transition
+    /// (or a direct `setOptions`) supersedes the pending swap.
+    func transition(to options: [MapSubFilterOption]) {
+        transitionGeneration += 1
+        let generation = transitionGeneration
+        UIView.animate(
+            withDuration: 0.2, delay: 0,
+            options: [.allowUserInteraction, .beginFromCurrentState],
+            animations: { self.scrollView.alpha = 0 },
+            completion: { _ in
+                guard generation == self.transitionGeneration else { return }
+                // Content swaps at alpha 0; `setOptions` restores the scroll
+                // surface and fades the new pills in.
+                self.setOptions(options)
+            }
+        )
+    }
+
     /// Replaces the row's options; selection resets (a new option set always
     /// belongs to a freshly chosen primary) and the row rewinds to its head.
     /// People pills get their avatars resolved async and a pin context menu.
     func setOptions(_ options: [MapSubFilterOption]) {
+        // Direct set supersedes any in-flight cross-dissolve…
+        transitionGeneration += 1
         for task in avatarTasks { task.cancel() }
         avatarTasks.removeAll()
         for entry in entries { entry.pill.removeFromSuperview() }
@@ -216,6 +245,9 @@ final class MapSubFilterBarView: UIView {
         // only as far as it should).
         UIView.performWithoutAnimation { layoutIfNeeded() }
         for entry in entries { entry.pill.alpha = 0 }
+        // …and repairs the scroll surface if an interrupted swap left it
+        // faded (the new pills are at alpha 0, so this can't flash).
+        scrollView.alpha = 1
         UIView.animate(
             withDuration: 0.2, delay: 0,
             options: [.allowUserInteraction, .beginFromCurrentState]
