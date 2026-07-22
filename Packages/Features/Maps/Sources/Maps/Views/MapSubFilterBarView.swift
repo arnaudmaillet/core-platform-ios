@@ -82,18 +82,18 @@ struct MapSubFilterOption {
 /// bar: people under Friends/Following (avatar + first name), place
 /// categories under Places; hidden for All / favorite selections. Same
 /// Liquid Glass system as the main bar, one size down (32pt pills) so the
-/// two rows read as a hierarchy.
+/// two rows read as a hierarchy. A horizontally scrolling `UICollectionView`
+/// (compositional + diffable), mirroring the main bar's architecture.
 ///
-/// Anatomy: a scrollable pill row plus a FIXED circular expand button pinned
-/// to the trailing edge (opens the full-list sheet — presentation is the view
-/// controller's job, reported via `onExpandTapped`). Pills scrolling past the
-/// fixed button duck-fade beneath it, mirroring the main bar's sticky-header
+/// Anatomy: the pill row plus a FIXED circular expand button pinned to the
+/// trailing edge (opens the full-list sheet — presentation is the view
+/// controller's job, reported via `onExpandTapped`). Cells scrolling past
+/// the fixed button duck-fade beneath it, mirroring the main bar's sticky
 /// treatment. Long-pressing a person pill offers Pin/Unpin to Favorites via
-/// a context menu (`onTogglePin` / `isPinned`).
+/// the collection view's native context-menu hooks.
 ///
 /// Single-select; tapping the active pill clears the refinement (back to the
-/// bare primary). Pill widths are strictly content-determined — no width
-/// constraints on titled pills.
+/// bare primary). Cells are presentation-only (`MapPillCell`).
 final class MapSubFilterBarView: UIView {
     /// Fired on every selection change; `nil` means "no refinement".
     var onSubFilterChanged: ((MapSubFilter?) -> Void)?
@@ -114,18 +114,22 @@ final class MapSubFilterBarView: UIView {
     static let verticalPadding: CGFloat = 6
     static var barHeight: CGFloat { pillHeight + verticalPadding * 2 }
 
-    private struct Entry {
-        let option: MapSubFilterOption
-        let pill: MapPillButton
-    }
+    private enum Section: Hashable { case main }
 
-    private let scrollView = UIScrollView()
-    private let stack = UIStackView()
+    private var collectionView: UICollectionView!
+    private var dataSource: UICollectionViewDiffableDataSource<Section, MapSubFilter>!
+    private var optionsBySubFilter: [MapSubFilter: MapSubFilterOption] = [:]
+    private var orderedSubFilters: [MapSubFilter] = []
+    /// Resolved avatars, keyed by profile — survives cell reuse and option
+    /// refreshes (the pipeline's cache makes re-resolution cheap anyway).
+    private var avatarCache: [ProfileID: UIImage] = [:]
+    private var avatarTasks: [Task<Void, Never>] = []
     /// Monotonic token superseding in-flight cross-dissolves: a stale
     /// fade-out completion must never swap content selected later (rapid
     /// taps land mid-animation; `.beginFromCurrentState` retargets the
     /// alphas, this retargets the *intent*).
     private var transitionGeneration = 0
+
     private let expandButton = MapPillButton(
         content: MapPillButton.Content(
             title: nil,
@@ -134,52 +138,76 @@ final class MapSubFilterBarView: UIView {
         ),
         height: MapSubFilterBarView.pillHeight
     )
-    private var entries: [Entry] = []
-    private var avatarTasks: [Task<Void, Never>] = []
 
     init() {
         super.init(frame: .zero)
-        configureLayout()
+        configureCollectionView()
+        configureExpandButton()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    private func configureLayout() {
+    // MARK: - Collection view
+
+    private func makeLayout() -> UICollectionViewCompositionalLayout {
+        let configuration = UICollectionViewCompositionalLayoutConfiguration()
+        configuration.scrollDirection = .horizontal
+
+        let itemSize = NSCollectionLayoutSize(
+            widthDimension: .estimated(80), heightDimension: .absolute(Self.pillHeight)
+        )
+        let group = NSCollectionLayoutGroup.horizontal(
+            layoutSize: itemSize, subitems: [NSCollectionLayoutItem(layoutSize: itemSize)]
+        )
+        let section = NSCollectionLayoutSection(group: group)
+        section.interGroupSpacing = Spacing.sm
+        section.contentInsets = NSDirectionalEdgeInsets(
+            top: Self.verticalPadding, leading: 0,
+            bottom: Self.verticalPadding, trailing: 0
+        )
+        return UICollectionViewCompositionalLayout(section: section, configuration: configuration)
+    }
+
+    private func configureCollectionView() {
+        collectionView = UICollectionView(frame: .zero, collectionViewLayout: makeLayout())
         // Unclipped halos, same as the main bar (safe: edge-to-edge scroll).
         clipsToBounds = false
-        scrollView.clipsToBounds = false
-        scrollView.showsHorizontalScrollIndicator = false
-        scrollView.delegate = self
+        collectionView.clipsToBounds = false
+        collectionView.backgroundColor = .clear
+        collectionView.showsHorizontalScrollIndicator = false
+        collectionView.delegate = self
+        // A selection swap changes pill intrinsics (weight) — cells must
+        // re-self-size on content/constraint changes, not serve their cached
+        // measurement (a stale width wraps the title).
+        collectionView.selfSizingInvalidation = .enabledIncludingConstraints
         // Trailing inset clears the fixed expand bubble so pills rest free of
         // it and only overlap mid-scroll (where the duck-fade takes over).
-        scrollView.contentInset = UIEdgeInsets(
+        collectionView.contentInset = UIEdgeInsets(
             top: 0, left: Spacing.lg,
             bottom: 0, right: Spacing.lg + Self.pillHeight + Spacing.sm
         )
-        scrollView.pin(to: self)
+        collectionView.pin(to: self)
 
-        stack.axis = .horizontal
-        stack.spacing = Spacing.sm
-        // .fill (NOT .fillEqually): each pill keeps its intrinsic width —
-        // "Ava" rests tight while "Restaurants" runs wide.
-        stack.distribution = .fill
-        stack.alignment = .center
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor),
-            stack.topAnchor.constraint(
-                equalTo: scrollView.contentLayoutGuide.topAnchor, constant: Self.verticalPadding
-            ),
-            stack.bottomAnchor.constraint(
-                equalTo: scrollView.contentLayoutGuide.bottomAnchor, constant: -Self.verticalPadding
+        let pillRegistration = UICollectionView.CellRegistration<MapPillCell, MapSubFilter> { [weak self] cell, _, subFilter in
+            guard let self, let option = self.optionsBySubFilter[subFilter] else { return }
+            cell.configure(
+                content: option.content, height: Self.pillHeight,
+                selected: subFilter == self.selectedSubFilter
             )
-        ])
+            if let favorite = option.favorite {
+                cell.setAvatar(self.avatarCache[favorite.profileID])
+            }
+        }
+        dataSource = UICollectionViewDiffableDataSource<Section, MapSubFilter>(collectionView: collectionView) {
+            collectionView, indexPath, subFilter in
+            collectionView.dequeueConfiguredReusableCell(using: pillRegistration, for: indexPath, item: subFilter)
+        }
+    }
 
-        // The fixed expand bubble: a sibling of the scroll view (it must not
-        // scroll), floating above pills gliding beneath it.
+    private func configureExpandButton() {
+        // The fixed expand bubble: a sibling of the collection view (it must
+        // not scroll), floating above cells gliding beneath it.
         addSubview(expandButton)
         expandButton.translatesAutoresizingMaskIntoConstraints = false
         expandButton.layer.zPosition = 1
@@ -190,9 +218,47 @@ final class MapSubFilterBarView: UIView {
         expandButton.addAction(UIAction { [weak self] _ in self?.onExpandTapped?() }, for: .touchUpInside)
     }
 
+    // MARK: - Content
+
+    /// Replaces the row's options; selection resets (a new option set always
+    /// belongs to a freshly chosen primary) and the row rewinds to its head.
+    /// Structure lands synchronously at final widths, arrival is a pure
+    /// cross-dissolve to each cell's resting alpha (the trailing duck-fade
+    /// decides that); avatars resolve async into the cache and reconfigure.
+    func setOptions(_ options: [MapSubFilterOption]) {
+        // Direct set supersedes any in-flight cross-dissolve…
+        transitionGeneration += 1
+        for task in avatarTasks { task.cancel() }
+        avatarTasks.removeAll()
+        selectedSubFilter = nil
+        orderedSubFilters = options.map(\.subFilter)
+        optionsBySubFilter = Dictionary(uniqueKeysWithValues: options.map { ($0.subFilter, $0) })
+
+        UIView.performWithoutAnimation {
+            var snapshot = NSDiffableDataSourceSnapshot<Section, MapSubFilter>()
+            snapshot.appendSections([.main])
+            snapshot.appendItems(orderedSubFilters)
+            // A fresh option set may reuse identities (friends ⊂ following) —
+            // force reconfiguration so stale presentation can't survive.
+            snapshot.reconfigureItems(orderedSubFilters)
+            dataSource.apply(snapshot, animatingDifferences: false)
+            collectionView.setContentOffset(
+                CGPoint(x: -collectionView.adjustedContentInset.left, y: 0), animated: false
+            )
+            collectionView.layoutIfNeeded()
+        }
+
+        // …and repairs the scroll surface if an interrupted swap left it
+        // faded (the new cells are at alpha 0, so this can't flash).
+        for cell in collectionView.visibleCells { cell.alpha = 0 }
+        collectionView.alpha = 1
+        UIView.mapBarFade { self.updateTrailingFade() }
+        loadAvatars(for: options)
+    }
+
     /// Cross-dissolves to a new option set while the row stays visible (a
     /// primary-to-primary switch, e.g. Friends → Places): fade the current
-    /// pills out, swap the content at zero alpha, fade the new pills in.
+    /// cells out, swap the content at zero alpha, fade the new cells in.
     /// The fixed expand bubble deliberately stays put — it belongs to the
     /// bar, not to either state. Safe under rapid taps: a newer transition
     /// (or a direct `setOptions`) supersedes the pending swap.
@@ -200,68 +266,39 @@ final class MapSubFilterBarView: UIView {
         transitionGeneration += 1
         let generation = transitionGeneration
         UIView.mapBarFade(
-            { self.scrollView.alpha = 0 },
+            { self.collectionView.alpha = 0 },
             completion: { _ in
                 guard generation == self.transitionGeneration else { return }
                 // Content swaps at alpha 0; `setOptions` restores the scroll
-                // surface and fades the new pills in.
+                // surface and fades the new cells in.
                 self.setOptions(options)
             }
         )
     }
 
-    /// Replaces the row's options; selection resets (a new option set always
-    /// belongs to a freshly chosen primary) and the row rewinds to its head.
-    /// People pills get their avatars resolved async and a pin context menu.
-    func setOptions(_ options: [MapSubFilterOption]) {
-        // Direct set supersedes any in-flight cross-dissolve…
-        transitionGeneration += 1
-        for task in avatarTasks { task.cancel() }
-        avatarTasks.removeAll()
-        for entry in entries { entry.pill.removeFromSuperview() }
-        selectedSubFilter = nil
-
-        entries = options.map { option in
-            let pill = MapPillButton(content: option.content, height: Self.pillHeight)
-            pill.addAction(
-                UIAction { [weak self] _ in self?.didTap(option.subFilter) },
-                for: .touchUpInside
-            )
-            if option.favorite != nil {
-                pill.addInteraction(UIContextMenuInteraction(delegate: self))
-            }
-            return Entry(option: option, pill: pill)
-        }
-        for entry in entries { stack.addArrangedSubview(entry.pill) }
-        scrollView.setContentOffset(
-            CGPoint(x: -scrollView.adjustedContentInset.left, y: 0), animated: false
-        )
-        // Structure lands synchronously — every pill at its final intrinsic
-        // width BEFORE anything is visible — then arrival is a pure
-        // cross-dissolve to each pill's resting alpha (the trailing duck-fade
-        // decides that, so a pill resting under the expand bubble fades in
-        // only as far as it should).
-        UIView.performWithoutAnimation { layoutIfNeeded() }
-        for entry in entries { entry.pill.alpha = 0 }
-        // …and repairs the scroll surface if an interrupted swap left it
-        // faded (the new pills are at alpha 0, so this can't flash).
-        scrollView.alpha = 1
-        UIView.mapBarFade { self.updateTrailingFade() }
-        loadAvatars()
-    }
-
-    private func loadAvatars() {
+    private func loadAvatars(for options: [MapSubFilterOption]) {
         guard let imagePipeline else { return }
-        for entry in entries {
-            guard let url = entry.option.favorite?.avatarURL else { continue }
-            let pill = entry.pill
-            avatarTasks.append(Task { [weak pill] in
+        for option in options {
+            guard let favorite = option.favorite, let url = favorite.avatarURL,
+                  avatarCache[favorite.profileID] == nil else { continue }
+            let subFilter = option.subFilter
+            avatarTasks.append(Task { [weak self] in
                 guard let image = try? await imagePipeline.image(for: url),
-                      !Task.isCancelled else { return }
-                pill?.setAvatar(image)
+                      let self, !Task.isCancelled else { return }
+                self.avatarCache[favorite.profileID] = image
+                // Atomic content refresh — no width animation on arrival.
+                UIView.performWithoutAnimation {
+                    if let indexPath = self.dataSource.indexPath(for: subFilter) {
+                        (self.collectionView.cellForItem(at: indexPath) as? MapPillCell)?.setAvatar(image)
+                        self.collectionView.collectionViewLayout.invalidateLayout()
+                        self.collectionView.layoutIfNeeded()
+                    }
+                }
             })
         }
     }
+
+    // MARK: - Selection
 
     private func didTap(_ subFilter: MapSubFilter) {
         // Re-tapping the active refinement clears it.
@@ -273,57 +310,74 @@ final class MapSubFilterBarView: UIView {
     /// Programmatic selection (no callback); reveals the selected pill.
     func setSelectedSubFilter(_ subFilter: MapSubFilter?) {
         selectedSubFilter = subFilter
-        for entry in entries {
-            entry.pill.setSelectedAppearance(entry.option.subFilter == subFilter)
+        UIView.performWithoutAnimation {
+            for indexPath in collectionView.indexPathsForVisibleItems {
+                guard let item = dataSource.itemIdentifier(for: indexPath),
+                      let option = optionsBySubFilter[item],
+                      let cell = collectionView.cellForItem(at: indexPath) as? MapPillCell else { continue }
+                cell.configure(
+                    content: option.content, height: Self.pillHeight,
+                    selected: item == subFilter
+                )
+                if let favorite = option.favorite {
+                    cell.setAvatar(avatarCache[favorite.profileID])
+                }
+            }
         }
         // Selection nudges widths (weight shift) — glide, don't snap.
         UIView.mapBarMorph {
-            self.layoutIfNeeded()
+            self.collectionView.performBatchUpdates(nil)
             self.updateTrailingFade()
         }
-        if let selected = entries.first(where: { $0.option.subFilter == subFilter })?.pill {
-            scrollView.layoutIfNeeded()
-            scrollView.scrollRectToVisible(
-                selected.convert(selected.bounds, to: scrollView), animated: true
-            )
+        if let subFilter, let indexPath = dataSource.indexPath(for: subFilter) {
+            collectionView.layoutIfNeeded()
+            if let frame = collectionView.layoutAttributesForItem(at: indexPath)?.frame {
+                collectionView.scrollRectToVisible(frame, animated: true)
+            }
         }
     }
 
-    /// Mirrors the main bar's sticky-header treatment at the trailing edge:
-    /// pills sliding beneath the fixed expand bubble fade over a short
-    /// duck-under ramp, so their text never ghosts through its glass.
+    // MARK: - Trailing duck-fade
+
+    /// Mirrors the main bar's sticky treatment at the trailing edge: cells
+    /// sliding beneath the fixed expand bubble fade over a short duck-under
+    /// ramp, so their text never ghosts through its glass.
     private func updateTrailingFade() {
         let buttonFrame = expandButton.frame // bar coords
-        for entry in entries {
-            let frame = entry.pill.convert(entry.pill.bounds, to: self)
+        for cell in collectionView.visibleCells {
+            let frame = cell.convert(cell.bounds, to: self)
             guard buttonFrame.maxX > frame.minX, buttonFrame.minX < frame.maxX, frame.width > 0 else {
-                entry.pill.alpha = 1
+                cell.alpha = 1
                 continue
             }
             let overlap = min(buttonFrame.maxX, frame.maxX) - max(buttonFrame.minX, frame.minX)
             let rampDistance = min(frame.width, Self.trailingFadeDistance)
-            entry.pill.alpha = 1 - min(1, overlap / rampDistance)
+            cell.alpha = 1 - min(1, overlap / rampDistance)
         }
     }
 
     private static let trailingFadeDistance: CGFloat = 60
 }
 
-extension MapSubFilterBarView: UIScrollViewDelegate {
+extension MapSubFilterBarView: UICollectionViewDelegate {
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        collectionView.deselectItem(at: indexPath, animated: false)
+        guard let subFilter = dataSource.itemIdentifier(for: indexPath) else { return }
+        didTap(subFilter)
+    }
+
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         updateTrailingFade()
     }
-}
 
-extension MapSubFilterBarView: UIContextMenuInteractionDelegate {
-    func contextMenuInteraction(
-        _ interaction: UIContextMenuInteraction,
-        configurationForMenuAtLocation location: CGPoint
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
+        point: CGPoint
     ) -> UIContextMenuConfiguration? {
-        guard let pill = interaction.view as? MapPillButton,
-              let favorite = entries.first(where: { $0.pill === pill })?.option.favorite else {
-            return nil
-        }
+        guard let indexPath = indexPaths.first,
+              let subFilter = dataSource.itemIdentifier(for: indexPath),
+              let favorite = optionsBySubFilter[subFilter]?.favorite else { return nil }
         let pinned = isPinned?(favorite.profileID) ?? false
         return UIContextMenuConfiguration(actionProvider: { [weak self] _ in
             UIMenu(children: [

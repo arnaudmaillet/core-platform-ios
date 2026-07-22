@@ -38,7 +38,7 @@ final class MapPillButton: UIButton {
         }
     }
 
-    let content: Content
+    private(set) var content: Content
     private var hasGlass = false
     private var isSelectedAppearance = false
     /// Circular avatar thumbnail replacing the symbol (people pills). Set
@@ -94,6 +94,20 @@ final class MapPillButton: UIButton {
         circleConstraint.isActive = isCircular
         UIView.performWithoutAnimation {
             configuration = makeConfiguration(glass: hasGlass, selected: selected)
+        }
+    }
+
+    /// Swaps what the pill represents (collection cells reconfigure across
+    /// reuse). Atomic like every structural change; clears any stale avatar —
+    /// the owner re-resolves it for the new identity.
+    func setContent(_ newContent: Content) {
+        guard newContent != content else { return }
+        content = newContent
+        avatarImage = nil
+        accessibilityLabel = newContent.accessibilityLabel
+        circleConstraint.isActive = isCircular
+        UIView.performWithoutAnimation {
+            configuration = makeConfiguration(glass: hasGlass, selected: isSelectedAppearance)
         }
     }
 
@@ -161,6 +175,9 @@ final class MapPillButton: UIButton {
             // pills keep a hairline gap (glyphs carry whitespace of their
             // own).
             config.imagePadding = avatarImage == nil ? 4 : 6
+            // Titles are single-line by contract — a mis-measured cell must
+            // truncate, never wrap into a two-line pill.
+            config.titleLineBreakMode = .byTruncatingTail
         }
         // A real avatar (people pills) beats the symbol; otherwise a lone
         // glyph carries the whole circle — give it more presence than the

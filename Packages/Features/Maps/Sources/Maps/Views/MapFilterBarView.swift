@@ -3,31 +3,28 @@ import DesignSystem
 import UIKit
 
 /// The filter bar floating above the tab bar on the map — one horizontally
-/// scrolling row:
+/// scrolling `UICollectionView`:
 ///
 ///   [ ✦ All ] ( 👥 ) ( 🫱 ) ( 📍 ) [ ◉ favorite ] [ ◉ favorite ] …
-///    capsule    circular bubbles     capsules, one per followed profile
+///    pinned     morphing primaries    capsules, one per pinned profile
 ///
-/// "All" is the leading header item of the scrollable content — and a STICKY
-/// one: once the row scrolls past it, it pins to the leading edge (translated
-/// by the scroll overshoot, floating above the pills gliding beneath) and
-/// settles back into its natural slot as the row scrolls home. The icon-only
-/// primaries are perfect 36×36 circular glass bubbles; favorites are
-/// icon + name capsules. Everything else scrolls as one smooth surface. A
-/// deliberate free-floating overlay rather than a toolbar item — the iOS 26
-/// bar systems wrap custom items in their own glass capsule, and a second
-/// material inside reads as a dark "double bubble" ring (the
+/// Compositional layout + diffable snapshots. "All" is a boundary
+/// supplementary with `pinToVisibleBounds` — it scrolls as the leading item
+/// and pins to the leading edge once the row runs past it, with cells
+/// duck-fading beneath it (custom scroll pass; pinned headers can't fade
+/// their underlap). The icon primaries morph circle → icon+title capsule on
+/// selection via cell self-sizing (`performBatchUpdates` inside the morph
+/// spring). A deliberate free-floating overlay rather than a toolbar item —
+/// the iOS 26 bar systems wrap custom items in their own glass capsule, and
+/// a second material inside reads as a dark "double bubble" ring (the
 /// `GlassSegmentRow` doctrine).
 ///
-/// Pills are plain `MapPillButton`s — no collection view: the set is small,
-/// nothing recycles, and selection is a straight configuration swap. "All"
-/// renders the `nil` selection and is active by default; other pills toggle
-/// back to All on a second tap.
+/// Selection semantics: "All" renders the `nil` selection and is active by
+/// default; other pills toggle back to All on a second tap. Cells are
+/// presentation-only (`MapPillCell`) — taps arrive via `didSelectItemAt`.
 ///
-/// Clipping: neither the bar nor the scroll view clips (`clipsToBounds =
-/// false`) so glass halos breathe — safe because the scroll view spans the
-/// bar edge-to-edge (overscrolled content exits the screen, it has no fixed
-/// sibling to draw over).
+/// Clipping: bar and collection view never clip, so glass halos breathe;
+/// the vertical halo padding lives in the section's content insets.
 final class MapFilterBarView: UIView {
     /// Fired on every selection change; `nil` means "All".
     var onFilterChanged: ((MapFilter?) -> Void)?
@@ -43,26 +40,16 @@ final class MapFilterBarView: UIView {
     /// What the owner constrains the bar to: pill plus halo headroom.
     static var barHeight: CGFloat { pillHeight + verticalPadding * 2 }
 
-    /// One selectable pill: the filter it represents (`nil` = All) + button.
-    private struct Entry {
-        let filter: MapFilter?
-        let pill: MapPillButton
+    private enum Section: Hashable { case main }
+    private enum Item: Hashable {
+        case primary(MapFilter)
+        case favorite(ProfileID)
     }
 
-    private let scrollView = UIScrollView()
-    private let stack = UIStackView()
-    private var primaryEntries: [Entry] = []
-    private var favoriteEntries: [Entry] = []
-    private var allEntries: [Entry] { primaryEntries + favoriteEntries }
+    private static let allHeaderKind = "map-filter-all-header"
 
-    /// The fixed section: All (icon + text, the default) then icon-only
-    /// Friends / Following / Places.
-    private static let primaries: [(filter: MapFilter?, content: MapPillButton.Content)] = [
-        (nil, MapPillButton.Content(
-            title: "All",
-            symbolName: "sparkles", selectedSymbolName: "sparkles",
-            accessibilityLabel: "All posts"
-        )),
+    /// The morphing icon primaries (All lives in the pinned header).
+    private static let primaries: [(filter: MapFilter, content: MapPillButton.Content)] = [
         (.friends, MapPillButton.Content(
             title: "Friends",
             symbolName: "person.2", selectedSymbolName: "person.2.fill",
@@ -83,134 +70,160 @@ final class MapFilterBarView: UIView {
         ))
     ]
 
+    private static let allContent = MapPillButton.Content(
+        title: "All",
+        symbolName: "sparkles", selectedSymbolName: "sparkles",
+        accessibilityLabel: "All posts"
+    )
+
+    private var collectionView: UICollectionView!
+    private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
+    private var favoritesByID: [ProfileID: MapFavorite] = [:]
+    private weak var allHeaderView: MapAllHeaderView?
+
     init() {
         super.init(frame: .zero)
-        configureLayout()
-        configurePrimaryPills()
-        // The default state: "All" active until a narrower pill is chosen.
-        applySelectionAppearance()
+        configureCollectionView()
+        applySnapshot(favorites: [], animatingDifferences: false)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    // MARK: - Layout
+    // MARK: - Collection view
 
-    private func configureLayout() {
-        // Halos must never be cut mid-render: neither the bar nor the scroll
-        // view masks (safe — the scroll view spans the bar edge-to-edge, so
-        // overscrolled content exits the screen rather than covering anything).
+    private func makeLayout() -> UICollectionViewCompositionalLayout {
+        let configuration = UICollectionViewCompositionalLayoutConfiguration()
+        configuration.scrollDirection = .horizontal
+
+        let itemSize = NSCollectionLayoutSize(
+            widthDimension: .estimated(80), heightDimension: .absolute(Self.pillHeight)
+        )
+        let group = NSCollectionLayoutGroup.horizontal(
+            layoutSize: itemSize, subitems: [NSCollectionLayoutItem(layoutSize: itemSize)]
+        )
+        let section = NSCollectionLayoutSection(group: group)
+        section.interGroupSpacing = Spacing.sm
+        // Halo padding above/below the pills; leading gap between the pinned
+        // All header and the first cell; trailing rest inset.
+        section.contentInsets = NSDirectionalEdgeInsets(
+            top: Self.verticalPadding, leading: Spacing.sm,
+            bottom: Self.verticalPadding, trailing: Spacing.lg
+        )
+
+        let headerSize = NSCollectionLayoutSize(
+            widthDimension: .estimated(80), heightDimension: .fractionalHeight(1.0)
+        )
+        let header = NSCollectionLayoutBoundarySupplementaryItem(
+            layoutSize: headerSize, elementKind: Self.allHeaderKind, alignment: .leading
+        )
+        // THE sticky mechanic: All scrolls in the flow, then pins to the
+        // leading edge as the row runs past it.
+        header.pinToVisibleBounds = true
+        section.boundarySupplementaryItems = [header]
+
+        return UICollectionViewCompositionalLayout(section: section, configuration: configuration)
+    }
+
+    private func configureCollectionView() {
+        collectionView = UICollectionView(frame: .zero, collectionViewLayout: makeLayout())
+        // Halos must never be cut mid-render: neither the bar nor the
+        // collection view masks (safe — it spans the bar edge-to-edge, so
+        // overscrolled content exits the screen).
         clipsToBounds = false
-        scrollView.clipsToBounds = false
-        scrollView.showsHorizontalScrollIndicator = false
-        scrollView.delegate = self
-        // Pills scroll edge-to-edge but rest inset from the screen edges.
-        scrollView.contentInset = UIEdgeInsets(top: 0, left: Spacing.lg, bottom: 0, right: Spacing.lg)
-        scrollView.pin(to: self)
+        collectionView.clipsToBounds = false
+        collectionView.backgroundColor = .clear
+        collectionView.showsHorizontalScrollIndicator = false
+        collectionView.delegate = self
+        // A selection swap changes pill intrinsics (weight, morph) — cells
+        // must re-self-size on content/constraint changes, not serve their
+        // cached measurement (a stale width wraps the title).
+        collectionView.selfSizingInvalidation = .enabledIncludingConstraints
+        // Rest inset from the screen edge for the pinned/leading All header.
+        collectionView.contentInset = UIEdgeInsets(top: 0, left: Spacing.lg, bottom: 0, right: 0)
+        collectionView.pin(to: self)
 
-        stack.axis = .horizontal
-        stack.spacing = Spacing.sm
-        // .fill (NOT .fillEqually): each pill keeps its intrinsic width.
-        stack.distribution = .fill
-        stack.alignment = .center
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor),
-            // The halo padding lives inside the content, so the content height
-            // matches the frame (no incidental vertical scroll).
-            stack.topAnchor.constraint(
-                equalTo: scrollView.contentLayoutGuide.topAnchor, constant: Self.verticalPadding
-            ),
-            stack.bottomAnchor.constraint(
-                equalTo: scrollView.contentLayoutGuide.bottomAnchor, constant: -Self.verticalPadding
+        let pillRegistration = UICollectionView.CellRegistration<MapPillCell, Item> { [weak self] cell, _, item in
+            guard let self, let (content, selected) = self.presentation(for: item) else { return }
+            cell.configure(content: content, height: Self.pillHeight, selected: selected)
+        }
+        dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) {
+            collectionView, indexPath, item in
+            collectionView.dequeueConfiguredReusableCell(using: pillRegistration, for: indexPath, item: item)
+        }
+
+        let headerRegistration = UICollectionView.SupplementaryRegistration<MapAllHeaderView>(
+            elementKind: Self.allHeaderKind
+        ) { [weak self] header, _, _ in
+            guard let self else { return }
+            header.configure(
+                content: Self.allContent, height: Self.pillHeight,
+                selected: self.selectedFilter == nil
             )
-        ])
-    }
-
-    private func configurePrimaryPills() {
-        primaryEntries = Self.primaries.map { makeEntry(filter: $0.filter, content: $0.content) }
-        for entry in primaryEntries { stack.addArrangedSubview(entry.pill) }
-        // The sticky header must draw ABOVE the pills gliding beneath it.
-        // z only — arrangement (and thus layout) is untouched.
-        primaryEntries.first?.pill.layer.zPosition = 1
-    }
-
-    private func makeEntry(filter: MapFilter?, content: MapPillButton.Content) -> Entry {
-        let pill = MapPillButton(content: content, height: Self.pillHeight)
-        pill.addAction(UIAction { [weak self] _ in self?.didTap(filter) }, for: .touchUpInside)
-        return Entry(filter: filter, pill: pill)
-    }
-
-    /// The sticky-header engine: once the row scrolls past "All"'s natural
-    /// slot, translate it by exactly the overshoot so it pins to the leading
-    /// rest edge; at-or-before rest, identity — it rides (and rubber-bands)
-    /// with the row and settles seamlessly into its origin. Transforms don't
-    /// disturb Auto Layout's alignment rects, so the stack never re-lays-out,
-    /// and hit-testing follows the pill wherever it sits.
-    ///
-    /// Pills passing beneath the pinned header fade out in proportion to how
-    /// far they've slid under it — both surfaces are translucent glass, so
-    /// without the fade the underlying pill's text reads straight through the
-    /// header ("All" + "ji Tanaka" collide into gibberish).
-    private func updateStickyHeader() {
-        guard let allPill = primaryEntries.first?.pill else { return }
-        let overshoot = scrollView.contentOffset.x + scrollView.adjustedContentInset.left
-        allPill.transform = overshoot > 0 ? CGAffineTransform(translationX: overshoot, y: 0) : .identity
-
-        let headerFrame = allPill.frame // transform-inclusive, stack coords
-        for entry in allEntries where entry.pill !== allPill {
-            let frame = entry.pill.frame
-            guard headerFrame.maxX > frame.minX, headerFrame.minX < frame.maxX, frame.width > 0 else {
-                entry.pill.alpha = 1
-                continue
-            }
-            let overlap = min(headerFrame.maxX, frame.maxX) - max(headerFrame.minX, frame.minX)
-            // Ramp over a short duck-under distance, not the pill's full
-            // width — a wide favorite would otherwise linger half-faded with
-            // its text still ghosting through the header's glass.
-            let rampDistance = min(frame.width, Self.stickyFadeDistance)
-            entry.pill.alpha = 1 - min(1, overlap / rampDistance)
+            header.onTap = { [weak self] in self?.didTap(nil) }
+            self.allHeaderView = header
+        }
+        dataSource.supplementaryViewProvider = { collectionView, _, indexPath in
+            collectionView.dequeueConfiguredReusableSupplementary(using: headerRegistration, for: indexPath)
         }
     }
 
-    /// How far a pill slides beneath the sticky header before it is fully
-    /// faded (shorter for pills narrower than this).
-    private static let stickyFadeDistance: CGFloat = 60
+    private func presentation(for item: Item) -> (MapPillButton.Content, Bool)? {
+        switch item {
+        case .primary(let filter):
+            guard let content = Self.primaries.first(where: { $0.filter == filter })?.content else { return nil }
+            return (content, filter == selectedFilter)
+        case .favorite(let id):
+            guard let favorite = favoritesByID[id] else { return nil }
+            let content = MapPillButton.Content(
+                title: favorite.title,
+                symbolName: "person.crop.circle", selectedSymbolName: "person.crop.circle.fill",
+                accessibilityLabel: favorite.title
+            )
+            return (content, MapFilter.profile(id) == selectedFilter)
+        }
+    }
+
+    private func filter(for item: Item) -> MapFilter {
+        switch item {
+        case .primary(let filter): filter
+        case .favorite(let id): .profile(id)
+        }
+    }
+
+    private func applySnapshot(favorites: [MapFavorite], animatingDifferences: Bool) {
+        favoritesByID = Dictionary(uniqueKeysWithValues: favorites.map { ($0.profileID, $0) })
+        var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
+        snapshot.appendSections([.main])
+        snapshot.appendItems(Self.primaries.map { .primary($0.filter) })
+        snapshot.appendItems(favorites.map { .favorite($0.profileID) })
+        dataSource.apply(snapshot, animatingDifferences: animatingDifferences)
+    }
 
     // MARK: - Favorites
 
-    /// Populates (or refreshes) the scrollable favorites section. If the
-    /// active filter's favorite disappeared in the refresh, selection falls
-    /// back to All — silently, since nothing narrower is being shown anymore.
+    /// Populates (or refreshes) the favorites section. Structure lands
+    /// synchronously, arrival is a pure cross-dissolve to each cell's resting
+    /// alpha (the sticky duck-fade decides that). If the active filter's
+    /// favorite disappeared in the refresh, selection falls back to All.
     func setFavorites(_ favorites: [MapFavorite]) {
-        for entry in favoriteEntries { entry.pill.removeFromSuperview() }
-        favoriteEntries = favorites.map { favorite in
-            makeEntry(
-                filter: .profile(favorite.profileID),
-                content: MapPillButton.Content(
-                    title: favorite.title,
-                    symbolName: "person.crop.circle", selectedSymbolName: "person.crop.circle.fill",
-                    accessibilityLabel: favorite.title
-                )
-            )
+        UIView.performWithoutAnimation {
+            applySnapshot(favorites: favorites, animatingDifferences: false)
+            collectionView.layoutIfNeeded()
         }
-        for entry in favoriteEntries { stack.addArrangedSubview(entry.pill) }
 
-        if case .profile(let id) = selectedFilter,
-           !favorites.contains(where: { $0.profileID == id }) {
+        if case .profile(let id) = selectedFilter, favoritesByID[id] == nil {
             selectedFilter = nil
             onFilterChanged?(nil)
+            reconfigureVisiblePresentation()
         }
-        applySelectionAppearance()
 
-        // Structure synchronously, arrival as a pure cross-dissolve — the
-        // sticky-fade pass decides each pill's resting alpha (same recipe as
-        // the sub-filter row; no width interpolation, ever).
-        UIView.performWithoutAnimation { layoutIfNeeded() }
-        for entry in favoriteEntries { entry.pill.alpha = 0 }
-        UIView.mapBarFade { self.updateStickyHeader() }
+        for indexPath in collectionView.indexPathsForVisibleItems {
+            if case .favorite = dataSource.itemIdentifier(for: indexPath) {
+                collectionView.cellForItem(at: indexPath)?.alpha = 0
+            }
+        }
+        UIView.mapBarFade { self.updateStickyFade() }
     }
 
     // MARK: - Selection
@@ -228,45 +241,90 @@ final class MapFilterBarView: UIView {
         onFilterChanged?(next)
     }
 
-    /// Programmatic selection (no callback) — keeps the pills honest if state
-    /// is ever restored from outside. Reveals the selected pill: an active
-    /// filter hiding off the carousel's edge would leave the bar looking
-    /// unfiltered while the map is not. (Not for All — the sticky header is
-    /// always on screen, and clearing shouldn't yank the row home.)
+    /// Programmatic selection (no callback). Content swaps land atomically,
+    /// then one morph-spring batch update glides every frame (an expanding
+    /// primary pushes its neighbors aside smoothly — the sanctioned width
+    /// animation) and reveals the selected pill.
     func setSelectedFilter(_ filter: MapFilter?, animated: Bool = true) {
         selectedFilter = filter
-        applySelectionAppearance(animated: animated)
-        if filter != nil, let selected = allEntries.first(where: { $0.filter == filter })?.pill {
-            scrollView.layoutIfNeeded()
-            scrollView.scrollRectToVisible(
-                selected.convert(selected.bounds, to: scrollView), animated: true
+        reconfigureVisiblePresentation()
+        if animated {
+            UIView.mapBarMorph {
+                self.collectionView.performBatchUpdates(nil)
+                self.updateStickyFade()
+            }
+        } else {
+            UIView.performWithoutAnimation {
+                self.collectionView.collectionViewLayout.invalidateLayout()
+                self.collectionView.layoutIfNeeded()
+            }
+        }
+        // Reveal the selected pill (not for All — the sticky header is
+        // always on screen, and clearing shouldn't yank the row home).
+        if let filter, let indexPath = dataSource.indexPath(for: item(for: filter)) {
+            collectionView.layoutIfNeeded()
+            if let frame = collectionView.layoutAttributesForItem(at: indexPath)?.frame {
+                collectionView.scrollRectToVisible(frame, animated: true)
+            }
+        }
+    }
+
+    private func item(for filter: MapFilter) -> Item {
+        if case .profile(let id) = filter { .favorite(id) } else { .primary(filter) }
+    }
+
+    /// Pushes the current selection into every on-screen pill + the header —
+    /// atomically, content only; sizing animates separately.
+    private func reconfigureVisiblePresentation() {
+        UIView.performWithoutAnimation {
+            for indexPath in collectionView.indexPathsForVisibleItems {
+                guard let item = dataSource.itemIdentifier(for: indexPath),
+                      let cell = collectionView.cellForItem(at: indexPath) as? MapPillCell,
+                      let (content, selected) = presentation(for: item) else { continue }
+                cell.configure(content: content, height: Self.pillHeight, selected: selected)
+            }
+            allHeaderView?.configure(
+                content: Self.allContent, height: Self.pillHeight, selected: selectedFilter == nil
             )
         }
     }
 
-    /// Appearance swap plus — when animated — the deliberate width morph:
-    /// pill content/constraints land atomically inside the pills, then one
-    /// animated layout pass glides every frame (an expanding primary pushes
-    /// its neighbors aside smoothly) and retargets the sticky header + fades
-    /// for the new geometry. This is the sanctioned width animation: both
-    /// endpoints are fully-laid-out states, unlike the appearance accordion.
-    private func applySelectionAppearance(animated: Bool = false) {
-        for entry in allEntries {
-            entry.pill.setSelectedAppearance(entry.filter == selectedFilter)
-        }
-        guard animated else {
-            UIView.performWithoutAnimation { layoutIfNeeded() }
-            return
-        }
-        UIView.mapBarMorph {
-            self.layoutIfNeeded()
-            self.updateStickyHeader()
+    // MARK: - Sticky duck-fade
+
+    /// Cells passing beneath the pinned All header fade out in proportion to
+    /// how far they've slid under it — both surfaces are translucent glass,
+    /// so without the fade the underlying pill's text reads straight through
+    /// the header. (The pinning itself is the layout's; the fade is ours.)
+    private func updateStickyFade() {
+        guard let header = allHeaderView, header.window != nil else { return }
+        let headerFrame = header.convert(header.bounds, to: collectionView)
+        for cell in collectionView.visibleCells {
+            let frame = cell.frame
+            guard headerFrame.maxX > frame.minX, headerFrame.minX < frame.maxX, frame.width > 0 else {
+                cell.alpha = 1
+                continue
+            }
+            let overlap = min(headerFrame.maxX, frame.maxX) - max(headerFrame.minX, frame.minX)
+            // Ramp over a short duck-under distance, not the pill's full
+            // width — a wide favorite would otherwise linger half-faded.
+            let rampDistance = min(frame.width, Self.stickyFadeDistance)
+            cell.alpha = 1 - min(1, overlap / rampDistance)
         }
     }
+
+    /// How far a pill slides beneath the sticky header before it is fully
+    /// faded (shorter for pills narrower than this).
+    private static let stickyFadeDistance: CGFloat = 60
 }
 
-extension MapFilterBarView: UIScrollViewDelegate {
+extension MapFilterBarView: UICollectionViewDelegate {
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        collectionView.deselectItem(at: indexPath, animated: false)
+        guard let item = dataSource.itemIdentifier(for: indexPath) else { return }
+        didTap(filter(for: item))
+    }
+
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        updateStickyHeader()
+        updateStickyFade()
     }
 }
