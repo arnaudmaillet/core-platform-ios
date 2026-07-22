@@ -8,7 +8,7 @@ import SwiftProtobuf
 /// Inject it into `ProtocolClient` and every generated client works against
 /// it unmodified, deterministically and offline.
 public final class MockBFF: HTTPClientInterface, @unchecked Sendable {
-    private typealias RawHandler = @Sendable (Data) -> Result<Data, ConnectError>
+    private typealias RawHandler = @Sendable (Data, Headers) -> Result<Data, ConnectError>
 
     public struct RecordedRequest: Sendable {
         public let path: String
@@ -41,14 +41,24 @@ public final class MockBFF: HTTPClientInterface, @unchecked Sendable {
         path: String,
         handler: @escaping @Sendable (Request) -> Result<Response, ConnectError>
     ) {
-        let raw: RawHandler = { body in
+        register(path: path) { (request: Request, _: Headers) in handler(request) }
+    }
+
+    /// Headers-aware variant, for the rare handler that reads a side-channel
+    /// request header (e.g. the Phase-1 `x-map-filter` the geo mock honors
+    /// while the real contract has no filter field).
+    public func register<Request: SwiftProtobuf.Message, Response: SwiftProtobuf.Message>(
+        path: String,
+        handler: @escaping @Sendable (Request, Headers) -> Result<Response, ConnectError>
+    ) {
+        let raw: RawHandler = { body, headers in
             let request: Request
             do {
                 request = try Request(serializedBytes: body)
             } catch {
                 return .failure(ConnectError(code: .invalidArgument, message: "undecodable request: \(error)"))
             }
-            switch handler(request) {
+            switch handler(request, headers) {
             case .success(let response):
                 do {
                     return .success(try response.serializedData())
@@ -87,7 +97,7 @@ public final class MockBFF: HTTPClientInterface, @unchecked Sendable {
                 tracingInfo: nil
             )
         } else if let handler {
-            switch handler(request.message ?? Data()) {
+            switch handler(request.message ?? Data(), request.headers) {
             case .success(let body):
                 response = HTTPResponse(
                     code: .ok,

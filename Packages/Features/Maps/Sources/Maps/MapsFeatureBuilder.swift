@@ -10,6 +10,7 @@ import UIKit
 @MainActor
 public struct MapsFeatureBuilder: MapsFeatureBuilding {
     private let repository: any GeoDiscoveryProviding
+    private let favoritesRepository: any MapFavoritesProviding
     private let imagePipeline: ImagePipeline
     private let videoPlayback: VideoPlaybackController
     private let feedFeature: () -> any FeedFeatureBuilding
@@ -22,11 +23,13 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
     ///     ordering the two features.
     public init(
         repository: any GeoDiscoveryProviding,
+        favoritesRepository: any MapFavoritesProviding,
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController,
         feedFeature: @escaping () -> any FeedFeatureBuilding
     ) {
         self.repository = repository
+        self.favoritesRepository = favoritesRepository
         self.imagePipeline = imagePipeline
         self.videoPlayback = videoPlayback
         self.feedFeature = feedFeature
@@ -36,6 +39,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         let feedFeature = feedFeature
         return MapsViewController(
             viewModel: MapsViewModel(repository: repository),
+            favoritesRepository: favoritesRepository,
             imagePipeline: imagePipeline,
             videoPlayback: videoPlayback,
             makeSnapFeed: { postIDs in feedFeature().makeSnapFeedViewController(postIDs: postIDs) },

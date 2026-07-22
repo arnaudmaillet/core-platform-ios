@@ -28,13 +28,21 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     }
 
     public func register(on bff: MockBFF) {
-        bff.register(path: "/geo_discovery.v1.GeoDiscoveryService/QueryTile") { [self] (request: GeoDiscovery_V1_QueryTileRequest) in
-            queryTile(request)
+        bff.register(path: "/geo_discovery.v1.GeoDiscoveryService/QueryTile") { [self] (request: GeoDiscovery_V1_QueryTileRequest, headers: Headers) in
+            queryTile(request, filter: headers[Self.filterHeader]?.first)
         }
     }
 
+    /// The Phase-1 map-filter side channel: `QueryTileRequest` has no filter
+    /// field on the wire, so the Maps repository sends the active pill as this
+    /// request header. The values are `MapFilter.rawValue` strings from the
+    /// Maps feature, matched literally here (this package can't import it);
+    /// unknown or absent tokens fail open to "all".
+    static let filterHeader = "x-map-filter"
+
     private func queryTile(
-        _ request: GeoDiscovery_V1_QueryTileRequest
+        _ request: GeoDiscovery_V1_QueryTileRequest,
+        filter: String?
     ) -> Result<GeoDiscovery_V1_QueryTileResponse, ConnectError> {
         let viewport = request.viewport
         var response = GeoDiscovery_V1_QueryTileResponse()
@@ -42,7 +50,9 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         let pins = dataset.posts.enumerated().compactMap { index, post -> GeoDiscovery_V1_RadarPin? in
             guard let media = post.media else { return nil } // text-only posts aren't mapped
             let (lat, lng) = Self.coordinate(forIndex: index)
-            guard Self.contains(viewport: viewport, lat: lat, lng: lng) else { return nil }
+            guard Self.contains(viewport: viewport, lat: lat, lng: lng),
+                  matches(filter: filter, post: post, lat: lat, lng: lng, viewport: viewport)
+            else { return nil }
 
             var pin = GeoDiscovery_V1_RadarPin()
             pin.postID = post.postID
@@ -57,6 +67,51 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         response.tileCount = Int32(max(1, pins.count / 12 + 1))
         return .success(response)
     }
+
+    /// One `MapFilter` bucket, resolved against the shared dataset:
+    /// - `friends` / `following`: author-set intersection (the backend's
+    ///   documented client-side design, playable here because the mock knows
+    ///   authorship even though `RadarPin` carries no `author_id`).
+    /// - `pinned`: the dataset's seeded saved-places set.
+    /// - `nearby`: a tight radius around the viewport center (the mock has no
+    ///   user location; the center is the stand-in).
+    /// - `profile:<id>`: that profile's posts only (the bar's favorites).
+    private func matches(
+        filter: String?,
+        post: MockSocialDataset.PostRecord,
+        lat: Double,
+        lng: Double,
+        viewport: GeoDiscovery_V1_Viewport
+    ) -> Bool {
+        switch filter {
+        case "friends":
+            return dataset.mutualProfileIDs.contains(post.authorProfileID)
+        case "following":
+            return dataset.followedProfileIDs.contains(post.authorProfileID)
+        case "pinned":
+            return dataset.pinnedPostIDs.contains(post.postID)
+        case "nearby":
+            let centerLat = (viewport.swLat + viewport.neLat) / 2
+            let centerLng = (viewport.swLng + viewport.neLng) / 2
+            let dLat = lat - centerLat
+            let dLng = lng - centerLng
+            return dLat * dLat + dLng * dLng <= Self.nearbyRadius * Self.nearbyRadius
+        default:
+            if let filter, filter.hasPrefix("profile:") {
+                return post.authorProfileID == String(filter.dropFirst("profile:".count))
+            }
+            if let filter, filter.hasPrefix("pinned:") {
+                // Places narrowed to one category (the sub-filter row).
+                let category = String(filter.dropFirst("pinned:".count))
+                return dataset.pinnedPlaceCategories[post.postID] == category
+            }
+            return true // no/unknown filter → fail open, show everything
+        }
+    }
+
+    /// "Nearby" cutoff in degrees (~4 km) — well inside the ±0.15° scatter,
+    /// so selecting the pill visibly thins the field at the default zoom.
+    private static let nearbyRadius = 0.04
 
     /// Deterministic scatter: two coprime strides over the index fan posts out
     /// across the box without randomness, so runs are reproducible.
