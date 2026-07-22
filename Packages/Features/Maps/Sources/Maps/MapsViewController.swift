@@ -427,21 +427,15 @@ final class MapsViewController: UIViewController {
                 subFilterBar.isHidden = false
                 barsStack.layoutIfNeeded()
             }
-            // …then fade the finished row in, in place.
-            UIView.animate(
-                withDuration: 0.2, delay: 0,
-                options: [.allowUserInteraction, .beginFromCurrentState]
-            ) {
-                self.subFilterBar.alpha = 1
-            }
+            // …then fade the finished row in, in place (spring-settled,
+            // zero bounce — opacity never overshoots).
+            UIView.mapBarFade { self.subFilterBar.alpha = 1 }
         } else {
-            UIView.animate(
-                withDuration: 0.2, delay: 0,
-                options: [.allowUserInteraction, .beginFromCurrentState],
-                animations: { self.subFilterBar.alpha = 0 },
+            UIView.mapBarFade(
+                { self.subFilterBar.alpha = 0 },
                 completion: { _ in
-                    // Collapse only after the fade — and only if a re-show
-                    // didn't land while the fade-out was in flight.
+                    // Collapse only after the fade settles — and only if a
+                    // re-show didn't land while the fade-out was in flight.
                     guard !self.isSubFilterBarVisible else { return }
                     self.subFilterBar.isHidden = true
                 }

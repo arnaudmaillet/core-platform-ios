@@ -192,6 +192,38 @@ final class MapPillButton: UIButton {
     }
 }
 
+extension UIView {
+    /// The bars' fade primitive: a critically-damped spring (zero bounce).
+    /// Opacity must NEVER overshoot — an alpha bounce reads as flicker, which
+    /// is exactly what made the naive all-spring pass feel wrong. The spring
+    /// solver still gives the natural ease-out settle of system fades.
+    static func mapBarFade(
+        _ animations: @escaping () -> Void,
+        completion: ((Bool) -> Void)? = nil
+    ) {
+        UIView.animate(
+            springDuration: 0.25, bounce: 0,
+            delay: 0, options: [.allowUserInteraction, .beginFromCurrentState],
+            animations: animations, completion: completion
+        )
+    }
+
+    /// The bars' geometry primitive: a gently underdamped spring for layout
+    /// morphs and glides (pill expansion, neighbors shifting) — the subtle
+    /// physical settle system components have, without wobble. Interrupted
+    /// springs retarget from current position via `.beginFromCurrentState`.
+    static func mapBarMorph(
+        _ animations: @escaping () -> Void,
+        completion: ((Bool) -> Void)? = nil
+    ) {
+        UIView.animate(
+            springDuration: 0.32, bounce: 0.18,
+            delay: 0, options: [.allowUserInteraction, .beginFromCurrentState],
+            animations: animations, completion: completion
+        )
+    }
+}
+
 private extension UIFont {
     func withWeight(_ weight: UIFont.Weight) -> UIFont {
         let descriptor = fontDescriptor.addingAttributes([
