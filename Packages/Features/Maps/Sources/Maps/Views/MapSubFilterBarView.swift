@@ -181,6 +181,9 @@ final class MapSubFilterBarView: UIView {
         // re-self-size on content/constraint changes, not serve their cached
         // measurement (a stale width wraps the title).
         collectionView.selfSizingInvalidation = .enabledIncludingConstraints
+        // Highlight must land on touch-down, not after the scroll-intent
+        // grace period — the press dip reads as lag otherwise.
+        collectionView.delaysContentTouches = false
         // Trailing inset clears the fixed expand bubble so pills rest free of
         // it and only overlap mid-scroll (where the duck-fade takes over).
         collectionView.contentInset = UIEdgeInsets(

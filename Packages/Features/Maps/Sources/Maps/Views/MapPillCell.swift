@@ -35,6 +35,17 @@ final class MapPillCell: UICollectionViewCell {
         pill?.setAvatar(image)
     }
 
+    /// Forwards the cell's touch state to the pill so pressing a cell feels
+    /// exactly like pressing the interactive sticky-All header: same glass
+    /// pressed look, same 0.95 dip and spring-back (both implemented in
+    /// `MapPillButton.isHighlighted`).
+    override var isHighlighted: Bool {
+        didSet {
+            guard isHighlighted != oldValue else { return }
+            pill?.isHighlighted = isHighlighted
+        }
+    }
+
     private func existingPill(height: CGFloat, initialContent: MapPillButton.Content) -> MapPillButton {
         if let pill { return pill }
         let pill = MapPillButton(content: initialContent, height: height)

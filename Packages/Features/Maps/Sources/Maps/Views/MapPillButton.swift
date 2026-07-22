@@ -83,6 +83,33 @@ final class MapPillButton: UIButton {
         }
     }
 
+    /// The tactile press: a quick dip to 95% on touch-down, a springy bounce
+    /// back on release. Lives HERE so the interactive sticky-All header gets
+    /// it natively from its own tracking, and collection cells get the
+    /// identical feel by forwarding their highlight state — one code path,
+    /// uniform response. (The glass material's own pressed look rides the
+    /// same `isHighlighted` change via the configuration system.)
+    override var isHighlighted: Bool {
+        didSet {
+            guard isHighlighted != oldValue else { return }
+            if isHighlighted {
+                UIView.animate(
+                    withDuration: 0.12, delay: 0,
+                    options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseOut]
+                ) {
+                    self.transform = CGAffineTransform(scaleX: 0.95, y: 0.95)
+                }
+            } else {
+                UIView.animate(
+                    springDuration: 0.3, bounce: 0.3,
+                    delay: 0, options: [.allowUserInteraction, .beginFromCurrentState]
+                ) {
+                    self.transform = .identity
+                }
+            }
+        }
+    }
+
     /// Selection swap. Content and shape land atomically (no implicit width
     /// animation — the accordion doctrine); when the swap changes the pill's
     /// footprint (a morphing primary, a weight shift), the OWNING BAR runs

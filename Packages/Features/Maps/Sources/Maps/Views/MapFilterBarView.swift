@@ -139,6 +139,9 @@ final class MapFilterBarView: UIView {
         // must re-self-size on content/constraint changes, not serve their
         // cached measurement (a stale width wraps the title).
         collectionView.selfSizingInvalidation = .enabledIncludingConstraints
+        // Highlight must land on touch-down, not after the scroll-intent
+        // grace period — the press dip reads as lag otherwise.
+        collectionView.delaysContentTouches = false
         // Rest inset from the screen edge for the pinned/leading All header.
         collectionView.contentInset = UIEdgeInsets(top: 0, left: Spacing.lg, bottom: 0, right: 0)
         collectionView.pin(to: self)
