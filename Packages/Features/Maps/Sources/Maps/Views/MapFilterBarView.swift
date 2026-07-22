@@ -64,19 +64,22 @@ final class MapFilterBarView: UIView {
             accessibilityLabel: "All posts"
         )),
         (.friends, MapPillButton.Content(
-            title: nil,
+            title: "Friends",
             symbolName: "person.2", selectedSymbolName: "person.2.fill",
-            accessibilityLabel: "Friends"
+            accessibilityLabel: "Friends",
+            expandsWhenSelected: true
         )),
         (.following, MapPillButton.Content(
-            title: nil,
+            title: "Following",
             symbolName: "person.wave.2", selectedSymbolName: "person.wave.2.fill",
-            accessibilityLabel: "Following"
+            accessibilityLabel: "Following",
+            expandsWhenSelected: true
         )),
         (.pinned, MapPillButton.Content(
-            title: nil,
+            title: "Places",
             symbolName: "mappin.and.ellipse", selectedSymbolName: "mappin.and.ellipse",
-            accessibilityLabel: "Pinned Places"
+            accessibilityLabel: "Pinned Places",
+            expandsWhenSelected: true
         ))
     ]
 
@@ -226,7 +229,7 @@ final class MapFilterBarView: UIView {
             next = nil
         }
         guard next != selectedFilter else { return }
-        setSelectedFilter(next)
+        setSelectedFilter(next, animated: true)
         onFilterChanged?(next)
     }
 
@@ -235,9 +238,9 @@ final class MapFilterBarView: UIView {
     /// filter hiding off the carousel's edge would leave the bar looking
     /// unfiltered while the map is not. (Not for All — the sticky header is
     /// always on screen, and clearing shouldn't yank the row home.)
-    func setSelectedFilter(_ filter: MapFilter?) {
+    func setSelectedFilter(_ filter: MapFilter?, animated: Bool = true) {
         selectedFilter = filter
-        applySelectionAppearance()
+        applySelectionAppearance(animated: animated)
         if filter != nil, let selected = allEntries.first(where: { $0.filter == filter })?.pill {
             scrollView.layoutIfNeeded()
             scrollView.scrollRectToVisible(
@@ -246,9 +249,26 @@ final class MapFilterBarView: UIView {
         }
     }
 
-    private func applySelectionAppearance() {
+    /// Appearance swap plus — when animated — the deliberate width morph:
+    /// pill content/constraints land atomically inside the pills, then one
+    /// animated layout pass glides every frame (an expanding primary pushes
+    /// its neighbors aside smoothly) and retargets the sticky header + fades
+    /// for the new geometry. This is the sanctioned width animation: both
+    /// endpoints are fully-laid-out states, unlike the appearance accordion.
+    private func applySelectionAppearance(animated: Bool = false) {
         for entry in allEntries {
             entry.pill.setSelectedAppearance(entry.filter == selectedFilter)
+        }
+        guard animated else {
+            UIView.performWithoutAnimation { layoutIfNeeded() }
+            return
+        }
+        UIView.animate(
+            withDuration: 0.25, delay: 0,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.layoutIfNeeded()
+            self.updateStickyHeader()
         }
     }
 }

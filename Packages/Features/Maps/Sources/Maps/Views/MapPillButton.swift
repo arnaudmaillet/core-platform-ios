@@ -18,6 +18,24 @@ final class MapPillButton: UIButton {
         let symbolName: String
         let selectedSymbolName: String
         let accessibilityLabel: String
+        /// Morphing pills (the icon primaries): compact icon-only circle at
+        /// rest, expanding into an icon + title capsule while selected. The
+        /// owning bar animates the layout pass so neighbors shift smoothly.
+        let expandsWhenSelected: Bool
+
+        init(
+            title: String?,
+            symbolName: String,
+            selectedSymbolName: String,
+            accessibilityLabel: String,
+            expandsWhenSelected: Bool = false
+        ) {
+            self.title = title
+            self.symbolName = symbolName
+            self.selectedSymbolName = selectedSymbolName
+            self.accessibilityLabel = accessibilityLabel
+            self.expandsWhenSelected = expandsWhenSelected
+        }
     }
 
     let content: Content
@@ -27,8 +45,15 @@ final class MapPillButton: UIButton {
     /// async once the pipeline resolves; nil keeps the symbol placeholder.
     private var avatarImage: UIImage?
 
-    /// Icon-only pills are perfect circles, not narrow capsules.
-    private var isCircular: Bool { content.title == nil }
+    /// The pill currently renders as a perfect circle: permanently for
+    /// title-less pills, at rest for morphing (`expandsWhenSelected`) ones.
+    private var isCircular: Bool {
+        content.title == nil || (content.expandsWhenSelected && !isSelectedAppearance)
+    }
+
+    /// Pins width to height while circular; deactivated when a morphing pill
+    /// expands, handing width back to the intrinsic icon + title + insets.
+    private lazy var circleConstraint = widthAnchor.constraint(equalTo: heightAnchor)
 
     init(content: Content, height: CGFloat) {
         self.content = content
@@ -39,9 +64,7 @@ final class MapPillButton: UIButton {
         // height (capsule corners → a circle); text pills stay intrinsic —
         // strictly content-determined, never constrained.
         heightAnchor.constraint(equalToConstant: height).isActive = true
-        if isCircular {
-            widthAnchor.constraint(equalTo: heightAnchor).isActive = true
-        }
+        circleConstraint.isActive = isCircular
         // Width is sacred: hug the content and refuse compression, so no
         // stack/scroll ambiguity can ever stretch or squeeze a pill away
         // from its intrinsic avatar + title + insets width.
@@ -60,10 +83,18 @@ final class MapPillButton: UIButton {
         }
     }
 
+    /// Selection swap. Content and shape land atomically (no implicit width
+    /// animation — the accordion doctrine); when the swap changes the pill's
+    /// footprint (a morphing primary, a weight shift), the OWNING BAR runs
+    /// the animated layout pass so frames glide while content is already
+    /// final.
     func setSelectedAppearance(_ selected: Bool) {
         guard selected != isSelectedAppearance else { return }
         isSelectedAppearance = selected
-        applyConfiguration()
+        circleConstraint.isActive = isCircular
+        UIView.performWithoutAnimation {
+            configuration = makeConfiguration(glass: hasGlass, selected: selected)
+        }
     }
 
     /// Swaps the symbol for a real avatar, pre-cropped to a circle sized for
@@ -116,7 +147,9 @@ final class MapPillButton: UIButton {
             config.background.strokeColor = UIColor.white.withAlphaComponent(0.25)
             config.background.strokeWidth = 1
         }
-        if let title = content.title {
+        // A morphing pill hides its title while resting as a circle; the
+        // label only exists in the expanded capsule.
+        if let title = content.title, !isCircular {
             config.attributedTitle = AttributedString(
                 title,
                 attributes: AttributeContainer([

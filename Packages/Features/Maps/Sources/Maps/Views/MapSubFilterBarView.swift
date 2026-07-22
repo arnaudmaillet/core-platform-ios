@@ -283,6 +283,14 @@ final class MapSubFilterBarView: UIView {
         for entry in entries {
             entry.pill.setSelectedAppearance(entry.option.subFilter == subFilter)
         }
+        // Selection nudges widths (weight shift) — glide, don't snap.
+        UIView.animate(
+            withDuration: 0.25, delay: 0,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.layoutIfNeeded()
+            self.updateTrailingFade()
+        }
         if let selected = entries.first(where: { $0.option.subFilter == subFilter })?.pill {
             scrollView.layoutIfNeeded()
             scrollView.scrollRectToVisible(
