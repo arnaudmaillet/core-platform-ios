@@ -31,20 +31,24 @@ public final class MockSocialGraphService: @unchecked Sendable {
             response.success = true
             return .success(response)
         }
+        // Both edge lists derive from the dataset's shared viewer graph, so
+        // they, the map's Friends/Following filters, and a client-side
+        // following ∩ followers mutual derivation all agree on one truth.
         bff.register(path: "/social_graph.v1.SocialGraphService/ListFollowers") { [self] (_: SocialGraph_V1_ListFollowersRequest) in
             var response = SocialGraph_V1_ListFollowersResponse()
-            response.followers = edges(count: 3)
+            response.followers = edges(for: dataset.followerProfileIDs)
             return .success(response)
         }
         bff.register(path: "/social_graph.v1.SocialGraphService/ListFollowing") { [self] (_: SocialGraph_V1_ListFollowingRequest) in
             var response = SocialGraph_V1_ListFollowingResponse()
-            response.following = edges(count: 2)
+            response.following = edges(for: dataset.followedProfileIDs)
             return .success(response)
         }
     }
 
-    private func edges(count: Int) -> [SocialGraph_V1_EdgeSummary] {
-        dataset.authors.prefix(count).map { author in
+    /// Edges for the given profile ids, in stable author order.
+    private func edges(for ids: Set<String>) -> [SocialGraph_V1_EdgeSummary] {
+        dataset.authors.filter { ids.contains($0.profileID) }.map { author in
             var edge = SocialGraph_V1_EdgeSummary()
             edge.profileID = author.profileID
             return edge

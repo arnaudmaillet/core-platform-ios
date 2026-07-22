@@ -27,7 +27,18 @@ public protocol GeoDiscoveryProviding: Sendable {
     /// The Radar pan path: lightweight pins for the current viewport. Fail-open
     /// by contract (TIER-1) — a sparse/empty result is normal, and the caller
     /// must never block the map on it.
-    func queryTile(_ viewport: MapViewport) async throws -> TileResult
+    ///
+    /// `filter` narrows the result to one `MapFilter` bucket; `nil` is "all".
+    /// Wire status is Phase 1 (see `MapFilter`): the selection rides a request
+    /// header the mock honors and the fleet ignores.
+    func queryTile(_ viewport: MapViewport, filter: MapFilter?) async throws -> TileResult
+}
+
+public extension GeoDiscoveryProviding {
+    /// Unfiltered convenience — the pre-filter call shape.
+    func queryTile(_ viewport: MapViewport) async throws -> TileResult {
+        try await queryTile(viewport, filter: nil)
+    }
 }
 
 /// Reads map pins from `geo_discovery.v1` over the authenticated edge. Maps the
@@ -39,7 +50,7 @@ public actor GeoDiscoveryRepository: GeoDiscoveryProviding {
         self.geoClient = geoClient
     }
 
-    public func queryTile(_ viewport: MapViewport) async throws -> TileResult {
+    public func queryTile(_ viewport: MapViewport, filter: MapFilter?) async throws -> TileResult {
         var request = GeoDiscovery_V1_QueryTileRequest()
         var box = GeoDiscovery_V1_Viewport()
         box.swLat = viewport.swLat
@@ -49,7 +60,11 @@ public actor GeoDiscoveryRepository: GeoDiscoveryProviding {
         request.viewport = box
         request.zoomLevel = viewport.zoomLevel
 
-        let response = await geoClient.queryTile(request: request, headers: [:])
+        // Phase-1 filter channel (see `MapFilter`): a request header, not a
+        // proto field — `QueryTileRequest` has none yet. Absent when nil, so
+        // the unfiltered request stays byte-identical to the pre-filter one.
+        let headers = filter.map { [MapFilter.headerName: [$0.wireToken]] } ?? [:]
+        let response = await geoClient.queryTile(request: request, headers: headers)
         switch response.result {
         case .success(let body):
             return TileResult(

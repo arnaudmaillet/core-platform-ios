@@ -17,6 +17,15 @@ public final class MapsViewModel {
     /// Authoritative id → pin state; the diff is computed against this.
     private var pins: [PostID: MapPin] = [:]
     private var queryTask: Task<Void, Never>?
+    /// The last settled viewport, so a filter change re-queries in place
+    /// without waiting for the next pan.
+    private var lastViewport: MapViewport?
+    /// The active pill; `nil` is "all". Applied to every query until changed.
+    public private(set) var activeFilter: MapFilter?
+    /// The active refinement of `activeFilter` (a person under Friends/
+    /// Following, a category under Places); cleared whenever the primary
+    /// changes.
+    public private(set) var activeSubFilter: MapSubFilter?
 
     /// The annotation mutations to apply. Emitted only when non-empty.
     public var onDiff: ((MapAnnotationDiff) -> Void)?
@@ -31,12 +40,57 @@ public final class MapsViewModel {
     /// The map settled on a new viewport (debounced by the caller). Cancels any
     /// in-flight query and starts a fresh one.
     public func viewportChanged(_ viewport: MapViewport) {
+        lastViewport = viewport
+        query(viewport)
+    }
+
+    /// The filter bar changed selection. Re-queries the current viewport under
+    /// the new filter; the resulting diff removes the pins that fell out and
+    /// adds the ones that qualify. Before the first settle there is no
+    /// viewport yet — the pending filter still applies to the first query.
+    public func filterChanged(_ filter: MapFilter?) {
+        guard filter != activeFilter else { return }
+        activeFilter = filter
+        // A new primary invalidates any refinement of the old one.
+        activeSubFilter = nil
+        guard let viewport = lastViewport else { return }
+        query(viewport)
+    }
+
+    /// The sub-filter bar changed selection (`nil` clears the refinement,
+    /// falling back to the primary). Meaningless without a primary — ignored.
+    public func subFilterChanged(_ subFilter: MapSubFilter?) {
+        guard activeFilter != nil, subFilter != activeSubFilter else { return }
+        activeSubFilter = subFilter
+        guard let viewport = lastViewport else { return }
+        query(viewport)
+    }
+
+    /// (primary, sub) resolved into the one filter that goes on the wire: a
+    /// person refinement becomes `.profile` (a person's posts are already a
+    /// subset of Friends/Following), a category refinement becomes
+    /// `.pinnedCategory`. A sub that doesn't fit the primary is ignored
+    /// (defensive — the UI never produces one).
+    private var resolvedFilter: MapFilter? {
+        guard let activeFilter else { return nil }
+        switch (activeFilter, activeSubFilter) {
+        case (.friends, .profile(let id)), (.following, .profile(let id)):
+            return .profile(id)
+        case (.pinned, .placeCategory(let category)):
+            return .pinnedCategory(category)
+        default:
+            return activeFilter
+        }
+    }
+
+    private func query(_ viewport: MapViewport) {
         queryTask?.cancel()
+        let filter = resolvedFilter
         queryTask = Task { [weak self] in
             guard let self else { return }
             let result: TileResult
             do {
-                result = try await self.repository.queryTile(viewport)
+                result = try await self.repository.queryTile(viewport, filter: filter)
             } catch {
                 // Fail-open (TIER-1): keep the pins we have, drop this attempt.
                 return

@@ -195,6 +195,14 @@ final class AppContainer {
         geoClient: GeoDiscovery_V1_GeoDiscoveryServiceClient(client: authenticatedRPCClient)
     )
 
+    /// The filter bar's favorites section (Phase 1: the viewer's followed
+    /// profiles). Fail-open — on the fleet this resolves empty until a viewer
+    /// profile-id resolver reaches the Maps feature (see the repository doc).
+    private lazy var mapsFavoritesRepository = MapFavoritesRepository(
+        socialGraphClient: SocialGraph_V1_SocialGraphServiceClient(client: authenticatedRPCClient),
+        profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient)
+    )
+
     /// A Maps-dedicated player pool for live pin previews, separate from the
     /// feed's, so the two surfaces never contend for players.
     private lazy var mapsVideoPlayback: VideoPlaybackController = {
@@ -207,6 +215,7 @@ final class AppContainer {
 
     private(set) lazy var mapsFeature: any MapsFeatureBuilding = MapsFeatureBuilder(
         repository: mapsRepository,
+        favoritesRepository: mapsFavoritesRepository,
         imagePipeline: imagePipeline,
         videoPlayback: mapsVideoPlayback,
         feedFeature: { [unowned self] in self.feedFeature }

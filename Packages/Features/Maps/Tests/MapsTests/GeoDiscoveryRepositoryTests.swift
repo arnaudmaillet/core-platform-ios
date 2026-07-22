@@ -100,6 +100,117 @@ struct GeoDiscoveryRepositoryTests {
         #expect(result.pins.first?.thumbnailURL == nil)
     }
 
+    @Test func attachesFilterHeaderOnTheWire() async throws {
+        // Phase-1 filter channel: the selection rides `x-map-filter`, not a
+        // proto field (QueryTileRequest has none). Asserted via the transport's
+        // request log, since the proto bytes can't carry it by construction.
+        let bff = MockBFF()
+        bff.register(path: "/geo_discovery.v1.GeoDiscoveryService/QueryTile") { (_: GeoDiscovery_V1_QueryTileRequest) in
+            .success(GeoDiscovery_V1_QueryTileResponse())
+        }
+        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        let repository = GeoDiscoveryRepository(geoClient: GeoDiscovery_V1_GeoDiscoveryServiceClient(client: client))
+
+        _ = try await repository.queryTile(
+            .make(centerLat: 0, centerLng: 0, latitudeSpan: 1, longitudeSpan: 1),
+            filter: .friends
+        )
+
+        let sent = bff.recordedRequests.first { $0.path.hasSuffix("/QueryTile") }
+        #expect(sent?.headers[MapFilter.headerName] == ["friends"])
+    }
+
+    @Test func omitsFilterHeaderWhenUnfiltered() async throws {
+        // A nil filter must leave the request byte- and header-identical to
+        // the pre-filter call shape.
+        let bff = MockBFF()
+        bff.register(path: "/geo_discovery.v1.GeoDiscoveryService/QueryTile") { (_: GeoDiscovery_V1_QueryTileRequest) in
+            .success(GeoDiscovery_V1_QueryTileResponse())
+        }
+        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        let repository = GeoDiscoveryRepository(geoClient: GeoDiscovery_V1_GeoDiscoveryServiceClient(client: client))
+
+        _ = try await repository.queryTile(.make(
+            centerLat: 0, centerLng: 0, latitudeSpan: 1, longitudeSpan: 1
+        ))
+
+        let sent = bff.recordedRequests.first { $0.path.hasSuffix("/QueryTile") }
+        #expect(sent != nil)
+        #expect(sent?.headers[MapFilter.headerName] == nil)
+    }
+
+    @Test func mockGeoServiceHonorsRelationshipFilters() async throws {
+        // End-to-end over production wire bytes: repository → ProtocolClient →
+        // MockBFF → MockGeoDiscoveryService, viewport wide enough to cover the
+        // whole mock scatter. "Friends" must return a non-empty strict subset
+        // of "following", which is a strict subset of "all" — the seeded graph
+        // (2 mutuals ⊂ 4 followed ⊂ 8 authors) guarantees the gaps.
+        let dataset = MockSocialDataset()
+        let bff = MockBFF()
+        MockGeoDiscoveryService(dataset: dataset).register(on: bff)
+        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        let repository = GeoDiscoveryRepository(geoClient: GeoDiscovery_V1_GeoDiscoveryServiceClient(client: client))
+        let paris = MapViewport.make(
+            centerLat: 48.8566, centerLng: 2.3522, latitudeSpan: 0.5, longitudeSpan: 0.5
+        )
+
+        let all = try await repository.queryTile(paris)
+        let following = try await repository.queryTile(paris, filter: .following)
+        let friends = try await repository.queryTile(paris, filter: .friends)
+
+        #expect(!friends.pins.isEmpty)
+        #expect(friends.pins.count < following.pins.count)
+        #expect(following.pins.count < all.pins.count)
+        // Every friends pin belongs to a mutual author.
+        let friendAuthors = Set(friends.pins.compactMap { pin in
+            dataset.post(for: pin.postID.rawValue)?.authorProfileID
+        })
+        #expect(friendAuthors.isSubset(of: dataset.mutualProfileIDs))
+    }
+
+    @Test func mockGeoServiceHonorsProfileFavoriteFilter() async throws {
+        // The favorites section's `profile:<id>` token: only that author's
+        // posts survive.
+        let dataset = MockSocialDataset()
+        let bff = MockBFF()
+        MockGeoDiscoveryService(dataset: dataset).register(on: bff)
+        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        let repository = GeoDiscoveryRepository(geoClient: GeoDiscovery_V1_GeoDiscoveryServiceClient(client: client))
+        let paris = MapViewport.make(
+            centerLat: 48.8566, centerLng: 2.3522, latitudeSpan: 0.5, longitudeSpan: 0.5
+        )
+
+        let result = try await repository.queryTile(paris, filter: .profile(ProfileID("prof-3")))
+
+        #expect(!result.pins.isEmpty)
+        let authors = Set(result.pins.compactMap { pin in
+            dataset.post(for: pin.postID.rawValue)?.authorProfileID
+        })
+        #expect(authors == ["prof-3"])
+    }
+
+    @Test func mockGeoServiceHonorsPinnedCategoryFilter() async throws {
+        // The Places sub-filter's `pinned:<category>` token: only pinned
+        // posts of that category survive, a strict subset of bare `pinned`.
+        let dataset = MockSocialDataset()
+        let bff = MockBFF()
+        MockGeoDiscoveryService(dataset: dataset).register(on: bff)
+        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        let repository = GeoDiscoveryRepository(geoClient: GeoDiscovery_V1_GeoDiscoveryServiceClient(client: client))
+        let paris = MapViewport.make(
+            centerLat: 48.8566, centerLng: 2.3522, latitudeSpan: 0.5, longitudeSpan: 0.5
+        )
+
+        let pinned = try await repository.queryTile(paris, filter: .pinned)
+        let cafes = try await repository.queryTile(paris, filter: .pinnedCategory("cafes"))
+
+        #expect(!cafes.pins.isEmpty)
+        #expect(cafes.pins.count < pinned.pins.count)
+        #expect(cafes.pins.allSatisfy { pin in
+            dataset.pinnedPlaceCategories[pin.postID.rawValue] == "cafes"
+        })
+    }
+
     @Test func surfacesTransportFailuresAsGeoDiscoveryError() async throws {
         // No route registered for QueryTile → MockBFF answers `unimplemented`,
         // which the repository must surface as a `.transport` error (not crash,

@@ -34,6 +34,32 @@ public struct MockSocialDataset: Sendable {
     public let authors: [Author]
     public let posts: [PostRecord]
 
+    /// The viewer's social graph, shared by the social-graph and geo-discovery
+    /// mocks so the map's "Friends"/"Following" filters and the following list
+    /// agree on one truth. The viewer follows the first four authors; the
+    /// first two follow back (mutual = the implicit "friend" state, per
+    /// social_graph.v1's `RelationStatus` doc).
+    public let followedProfileIDs: Set<String>
+    public let mutualProfileIDs: Set<String>
+    /// Who follows the viewer: the mutuals (they follow back, by definition)
+    /// plus one unrequited follower (prof-4) — so a client deriving friends
+    /// as following ∩ followers lands exactly on `mutualProfileIDs`, and the
+    /// follower list isn't a trivial copy of either set.
+    public let followerProfileIDs: Set<String>
+    /// Posts the viewer saved as places ("Pinned Places" on the map). No wire
+    /// contract exists for pinning yet — a hand-curated set, as befits a
+    /// user-curated feature: four land inside the map's default Paris
+    /// viewport (indices 19/48/63/91 under the geo mock's coprime scatter, so
+    /// the filter visibly selects at launch), two outside it (4/24, so
+    /// panning still changes the field). Mix of image and video posts.
+    public let pinnedPostIDs: Set<String>
+    /// postID → place-category token for every pinned post (the map's Places
+    /// sub-filters: cafes/restaurants/parks/nightlife). Each category has one
+    /// post inside the default viewport (19/48/63/91) so every sub-filter
+    /// visibly selects at launch; the out-of-viewport pins (4/24) give cafes
+    /// and restaurants a second hit when panning.
+    public let pinnedPlaceCategories: [String: String]
+
     public init(postCount: Int = 120) {
         // (handle, name, bio, website) — bios vary from empty to multi-line so
         // the profile header exercises every identity-row combination.
@@ -105,6 +131,21 @@ public struct MockSocialDataset: Sendable {
             ))
         }
         posts = records
+
+        followedProfileIDs = Set(authors.prefix(4).map(\.profileID))
+        mutualProfileIDs = Set(authors.prefix(2).map(\.profileID))
+        followerProfileIDs = mutualProfileIDs.union([authors[4].profileID])
+
+        let pinnedCategoriesByIndex = [
+            19: "cafes", 48: "restaurants", 63: "parks", 91: "nightlife", // in default viewport
+            4: "cafes", 24: "restaurants" // outside — panning changes the field
+        ]
+        var categories: [String: String] = [:]
+        for (index, category) in pinnedCategoriesByIndex where index < records.count {
+            categories[records[index].postID] = category
+        }
+        pinnedPlaceCategories = categories
+        pinnedPostIDs = Set(categories.keys)
     }
 
     public func author(for profileID: String) -> Author? {
