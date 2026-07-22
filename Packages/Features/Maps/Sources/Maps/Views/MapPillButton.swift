@@ -104,16 +104,16 @@ final class MapPillButton: UIButton {
     }
 
     private func makeConfiguration(glass: Bool, selected: Bool) -> UIButton.Configuration {
-        // Selected = ILLUMINATED glass, not opaque: the blur stays live and a
-        // soft white tint + brighter hairline lift the capsule, so selection
-        // reads as lit-from-within translucent glass over the map (an opaque
-        // `.label` fill clashed with the material family). Unselected = the
-        // resting clear glass. Foregrounds use dynamic colors so pills stay
-        // legible over light and dark tiles.
+        // Selected = TINTED glass, not opaque: the blur stays live and a
+        // subtle accent-blue tint + matching hairline lift the capsule, so
+        // selection reads as branded translucent glass over the map (an
+        // opaque `.label` fill clashed with the material family). Unselected
+        // = the resting clear glass. Foregrounds use dynamic colors so pills
+        // stay legible over light and dark tiles.
         var config: UIButton.Configuration = glass ? .glass() : .plain()
         if selected {
-            config.background.backgroundColor = UIColor.white.withAlphaComponent(0.22)
-            config.background.strokeColor = UIColor.white.withAlphaComponent(0.35)
+            config.background.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.22)
+            config.background.strokeColor = UIColor.systemBlue.withAlphaComponent(0.40)
             config.background.strokeWidth = 1
         }
         if let title = content.title {
