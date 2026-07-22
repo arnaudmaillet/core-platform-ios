@@ -126,7 +126,7 @@ final class MapFilterBarView: UIView {
     }
 
     private func configureCollectionView() {
-        collectionView = UICollectionView(frame: .zero, collectionViewLayout: makeLayout())
+        collectionView = MapBarCollectionView(frame: .zero, collectionViewLayout: makeLayout())
         // Halos must never be cut mid-render: neither the bar nor the
         // collection view masks (safe — it spans the bar edge-to-edge, so
         // overscrolled content exits the screen).
@@ -149,6 +149,12 @@ final class MapFilterBarView: UIView {
         let pillRegistration = UICollectionView.CellRegistration<MapPillCell, Item> { [weak self] cell, _, item in
             guard let self, let (content, selected) = self.presentation(for: item) else { return }
             cell.configure(content: content, height: Self.pillHeight, selected: selected)
+            // The pill is natively interactive — its own tracking supplies
+            // press feedback; the recognized tap routes into selection.
+            cell.onTap = { [weak self] in
+                guard let self else { return }
+                self.didTap(self.filter(for: item))
+            }
         }
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) {
             collectionView, indexPath, item in
@@ -321,12 +327,6 @@ final class MapFilterBarView: UIView {
 }
 
 extension MapFilterBarView: UICollectionViewDelegate {
-    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        collectionView.deselectItem(at: indexPath, animated: false)
-        guard let item = dataSource.itemIdentifier(for: indexPath) else { return }
-        didTap(filter(for: item))
-    }
-
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         updateStickyFade()
     }

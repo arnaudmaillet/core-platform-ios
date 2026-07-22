@@ -170,7 +170,7 @@ final class MapSubFilterBarView: UIView {
     }
 
     private func configureCollectionView() {
-        collectionView = UICollectionView(frame: .zero, collectionViewLayout: makeLayout())
+        collectionView = MapBarCollectionView(frame: .zero, collectionViewLayout: makeLayout())
         // Unclipped halos, same as the main bar (safe: edge-to-edge scroll).
         clipsToBounds = false
         collectionView.clipsToBounds = false
@@ -198,8 +198,24 @@ final class MapSubFilterBarView: UIView {
                 content: option.content, height: Self.pillHeight,
                 selected: subFilter == self.selectedSubFilter
             )
+            // Native pill interaction: tap → selection; long-press → the
+            // Pin/Unpin menu directly on the pill (people only).
+            cell.onTap = { [weak self] in self?.didTap(subFilter) }
             if let favorite = option.favorite {
                 cell.setAvatar(self.avatarCache[favorite.profileID])
+                cell.menuProvider = { [weak self] in
+                    guard let self else { return nil }
+                    let pinned = self.isPinned?(favorite.profileID) ?? false
+                    return UIMenu(children: [
+                        UIAction(
+                            title: pinned ? "Unpin from Favorites" : "Pin to Favorites",
+                            image: UIImage(systemName: pinned ? "pin.slash" : "pin"),
+                            handler: { [weak self] _ in self?.onTogglePin?(favorite) }
+                        )
+                    ])
+                }
+            } else {
+                cell.menuProvider = nil
             }
         }
         dataSource = UICollectionViewDiffableDataSource<Section, MapSubFilter>(collectionView: collectionView) {
@@ -363,33 +379,7 @@ final class MapSubFilterBarView: UIView {
 }
 
 extension MapSubFilterBarView: UICollectionViewDelegate {
-    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        collectionView.deselectItem(at: indexPath, animated: false)
-        guard let subFilter = dataSource.itemIdentifier(for: indexPath) else { return }
-        didTap(subFilter)
-    }
-
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         updateTrailingFade()
-    }
-
-    func collectionView(
-        _ collectionView: UICollectionView,
-        contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
-        point: CGPoint
-    ) -> UIContextMenuConfiguration? {
-        guard let indexPath = indexPaths.first,
-              let subFilter = dataSource.itemIdentifier(for: indexPath),
-              let favorite = optionsBySubFilter[subFilter]?.favorite else { return nil }
-        let pinned = isPinned?(favorite.profileID) ?? false
-        return UIContextMenuConfiguration(actionProvider: { [weak self] _ in
-            UIMenu(children: [
-                UIAction(
-                    title: pinned ? "Unpin from Favorites" : "Pin to Favorites",
-                    image: UIImage(systemName: pinned ? "pin.slash" : "pin"),
-                    handler: { _ in self?.onTogglePin?(favorite) }
-                )
-            ])
-        })
     }
 }

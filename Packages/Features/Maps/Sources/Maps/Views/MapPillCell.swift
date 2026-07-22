@@ -1,16 +1,28 @@
 import UIKit
 
-/// One filter pill inside a bar's collection view: a `MapPillButton` hosted
-/// non-interactively (the collection view owns taps, selection, and context
-/// menus — the pill is pure presentation). The cell self-sizes from the
-/// pill's intrinsic width, so compositional `.estimated` items land exactly
-/// on the content-determined widths the bars guarantee.
+/// One filter pill inside a bar's collection view: a FULLY INTERACTIVE
+/// `MapPillButton` — native touch-down, tracking, highlight, and glass
+/// material response, exactly as in the pre-collection scroll-view bars.
+/// The collection view orchestrates (layout, diffable identity); the button
+/// owns the touch. Taps surface through `onTap` (the button consumes the
+/// event, so `didSelectItemAt` never fires for pill hits), and long-press
+/// menus attach to the pill itself via `menuProvider`. The cell self-sizes
+/// from the pill's intrinsic width.
 ///
 /// Reuse & glass: the pill is created once per cell and kept across
 /// reconfigures (`setContent` swaps identity), so the Liquid Glass material
 /// is materialized once on window attach — reuse never re-contacts the
 /// render server (the CI doctrine survives recycling).
 final class MapPillCell: UICollectionViewCell {
+    /// The pill's own `.touchUpInside` — the bar maps it to its selection.
+    var onTap: (() -> Void)?
+    /// Non-nil arms the pill's native long-press menu (person pills'
+    /// Pin/Unpin); nil renders the pill menu-less. Resolved lazily at
+    /// presentation time, so the Pin/Unpin title reflects live state.
+    var menuProvider: (() -> UIMenu?)? {
+        didSet { updateMenu() }
+    }
+
     private var pill: MapPillButton?
 
     override init(frame: CGRect) {
@@ -35,21 +47,13 @@ final class MapPillCell: UICollectionViewCell {
         pill?.setAvatar(image)
     }
 
-    /// Forwards the cell's touch state to the pill so pressing a cell feels
-    /// exactly like pressing the interactive sticky-All header: same glass
-    /// pressed look, same 0.95 dip and spring-back (both implemented in
-    /// `MapPillButton.isHighlighted`).
-    override var isHighlighted: Bool {
-        didSet {
-            guard isHighlighted != oldValue else { return }
-            pill?.isHighlighted = isHighlighted
-        }
-    }
-
     private func existingPill(height: CGFloat, initialContent: MapPillButton.Content) -> MapPillButton {
         if let pill { return pill }
         let pill = MapPillButton(content: initialContent, height: height)
-        pill.isUserInteractionEnabled = false
+        // Direct native interaction — the button tracks its own touches
+        // (touch-down highlight, press dip, glass response), the cell just
+        // relays the recognized tap.
+        pill.addAction(UIAction { [weak self] _ in self?.onTap?() }, for: .touchUpInside)
         pill.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(pill)
         NSLayoutConstraint.activate([
@@ -59,8 +63,34 @@ final class MapPillCell: UICollectionViewCell {
             pill.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
         ])
         self.pill = pill
+        updateMenu()
         return pill
     }
+
+    /// The UIButton-native long-press menu: `button.menu` without
+    /// `showsMenuAsPrimaryAction` presents on press-and-hold while taps stay
+    /// taps. A manually-attached `UIContextMenuInteraction` does NOT fire on
+    /// a tracking UIButton — verified dead under real long-presses.
+    private func updateMenu() {
+        guard let pill else { return }
+        guard menuProvider != nil else {
+            pill.menu = nil
+            return
+        }
+        pill.menu = UIMenu(children: [
+            UIDeferredMenuElement.uncached { [weak self] completion in
+                completion(self?.menuProvider?()?.children ?? [])
+            }
+        ])
+    }
+}
+
+/// A bar's collection view: with `delaysContentTouches = false` (immediate
+/// button touch-down), UIKit refuses by default to cancel a UIControl's
+/// tracking — a drag STARTING on a pill would never scroll the row. Restore
+/// the scroll-view contract: touches on pills cancel into scrolling.
+final class MapBarCollectionView: UICollectionView {
+    override func touchesShouldCancel(in view: UIView) -> Bool { true }
 }
 
 /// The sticky "All" header: a boundary supplementary hosting the All pill.
