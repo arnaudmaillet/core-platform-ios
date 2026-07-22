@@ -104,16 +104,16 @@ final class MapPillButton: UIButton {
     }
 
     private func makeConfiguration(glass: Bool, selected: Bool) -> UIButton.Configuration {
-        // Selected = TINTED glass, not opaque: the blur stays live and a
-        // subtle accent-blue tint + matching hairline lift the capsule, so
-        // selection reads as branded translucent glass over the map (an
-        // opaque `.label` fill clashed with the material family). Unselected
-        // = the resting clear glass. Foregrounds use dynamic colors so pills
-        // stay legible over light and dark tiles.
+        // Selection is carried by the CONTENT, not the material: a selected
+        // pill keeps a neutral frosted lift (soft white fill + subtle
+        // hairline, blur live underneath) while its glyph and title turn
+        // accent blue — the glass family stays monochrome and the color
+        // means exactly one thing. Unselected = resting clear glass with
+        // secondary-level content.
         var config: UIButton.Configuration = glass ? .glass() : .plain()
         if selected {
-            config.background.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.22)
-            config.background.strokeColor = UIColor.systemBlue.withAlphaComponent(0.40)
+            config.background.backgroundColor = UIColor.white.withAlphaComponent(0.18)
+            config.background.strokeColor = UIColor.white.withAlphaComponent(0.25)
             config.background.strokeWidth = 1
         }
         if let title = content.title {
@@ -131,11 +131,16 @@ final class MapPillButton: UIButton {
         }
         // A real avatar (people pills) beats the symbol; otherwise a lone
         // glyph carries the whole circle — give it more presence than the
-        // inline icon that sits beside a label.
+        // inline icon that sits beside a label. The tint is BAKED into the
+        // symbol image (`.alwaysOriginal`): the glass style applies its own
+        // vibrancy to template images and neither `baseForegroundColor` nor
+        // an `imageColorTransformer` reliably lands on the glyph.
+        let contentColor: UIColor = selected ? .systemBlue : .secondaryLabel
         config.image = avatarImage ?? UIImage(
             systemName: selected ? content.selectedSymbolName : content.symbolName
         )?.withConfiguration(UIImage.SymbolConfiguration(pointSize: isCircular ? 13 : 11, weight: .semibold))
-        config.baseForegroundColor = .label
+            .withTintColor(contentColor, renderingMode: .alwaysOriginal)
+        config.baseForegroundColor = contentColor
         // Circles get no insets — the constrained square frame centers the
         // glyph; capsules pad their content. An avatar pill tucks the photo
         // near the capsule's leading curve (the circle itself reads as
