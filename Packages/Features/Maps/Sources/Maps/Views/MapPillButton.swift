@@ -104,14 +104,17 @@ final class MapPillButton: UIButton {
     }
 
     private func makeConfiguration(glass: Bool, selected: Bool) -> UIButton.Configuration {
-        // Selected = prominent (tinted) glass, unselected = clear glass; the
-        // same on/off language as the system's own glass controls. Foregrounds
-        // use dynamic colors so pills stay legible over light and dark tiles.
-        var config: UIButton.Configuration
-        if glass {
-            config = selected ? .prominentGlass() : .glass()
-        } else {
-            config = .plain()
+        // Selected = ILLUMINATED glass, not opaque: the blur stays live and a
+        // soft white tint + brighter hairline lift the capsule, so selection
+        // reads as lit-from-within translucent glass over the map (an opaque
+        // `.label` fill clashed with the material family). Unselected = the
+        // resting clear glass. Foregrounds use dynamic colors so pills stay
+        // legible over light and dark tiles.
+        var config: UIButton.Configuration = glass ? .glass() : .plain()
+        if selected {
+            config.background.backgroundColor = UIColor.white.withAlphaComponent(0.22)
+            config.background.strokeColor = UIColor.white.withAlphaComponent(0.35)
+            config.background.strokeWidth = 1
         }
         if let title = content.title {
             config.attributedTitle = AttributedString(
@@ -132,8 +135,7 @@ final class MapPillButton: UIButton {
         config.image = avatarImage ?? UIImage(
             systemName: selected ? content.selectedSymbolName : content.symbolName
         )?.withConfiguration(UIImage.SymbolConfiguration(pointSize: isCircular ? 13 : 11, weight: .semibold))
-        config.baseForegroundColor = selected ? .systemBackground : .label
-        if selected { config.baseBackgroundColor = .label }
+        config.baseForegroundColor = .label
         // Circles get no insets — the constrained square frame centers the
         // glyph; capsules pad their content. An avatar pill tucks the photo
         // near the capsule's leading curve (the circle itself reads as
