@@ -110,7 +110,10 @@ final class MapPillButton: UIButton {
                         .withWeight(selected ? .semibold : .medium)
                 ])
             )
-            config.imagePadding = 4
+            // Avatar pills sit the name snugly against the photo; symbol
+            // pills keep a hairline gap (glyphs carry whitespace of their
+            // own).
+            config.imagePadding = avatarImage == nil ? 4 : 6
         }
         // A real avatar (people pills) beats the symbol; otherwise a lone
         // glyph carries the whole circle — give it more presence than the
@@ -121,10 +124,16 @@ final class MapPillButton: UIButton {
         config.baseForegroundColor = selected ? .systemBackground : .label
         if selected { config.baseBackgroundColor = .label }
         // Circles get no insets — the constrained square frame centers the
-        // glyph; capsules pad their content.
-        config.contentInsets = isCircular
-            ? .zero
-            : NSDirectionalEdgeInsets(top: 0, leading: Spacing.md, bottom: 0, trailing: Spacing.md)
+        // glyph; capsules pad their content. An avatar pill tucks the photo
+        // near the capsule's leading curve (the circle itself reads as
+        // padding) and keeps standard breathing room after the title.
+        config.contentInsets = if isCircular {
+            .zero
+        } else if avatarImage != nil {
+            NSDirectionalEdgeInsets(top: 0, leading: 6, bottom: 0, trailing: 10)
+        } else {
+            NSDirectionalEdgeInsets(top: 0, leading: Spacing.md, bottom: 0, trailing: Spacing.md)
+        }
         // Capsule corners = bounds.height / 2 everywhere: a circle on the
         // square pills, the oval on the dynamic-width ones.
         config.cornerStyle = .capsule
