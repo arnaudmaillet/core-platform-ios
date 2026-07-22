@@ -199,10 +199,8 @@ final class MapSubFilterBarView: UIView {
     func transition(to options: [MapSubFilterOption]) {
         transitionGeneration += 1
         let generation = transitionGeneration
-        UIView.animate(
-            withDuration: 0.2, delay: 0,
-            options: [.allowUserInteraction, .beginFromCurrentState],
-            animations: { self.scrollView.alpha = 0 },
+        UIView.mapBarSpring(
+            { self.scrollView.alpha = 0 },
             completion: { _ in
                 guard generation == self.transitionGeneration else { return }
                 // Content swaps at alpha 0; `setOptions` restores the scroll
@@ -248,12 +246,7 @@ final class MapSubFilterBarView: UIView {
         // …and repairs the scroll surface if an interrupted swap left it
         // faded (the new pills are at alpha 0, so this can't flash).
         scrollView.alpha = 1
-        UIView.animate(
-            withDuration: 0.2, delay: 0,
-            options: [.allowUserInteraction, .beginFromCurrentState]
-        ) {
-            self.updateTrailingFade()
-        }
+        UIView.mapBarSpring { self.updateTrailingFade() }
         loadAvatars()
     }
 
@@ -284,10 +277,7 @@ final class MapSubFilterBarView: UIView {
             entry.pill.setSelectedAppearance(entry.option.subFilter == subFilter)
         }
         // Selection nudges widths (weight shift) — glide, don't snap.
-        UIView.animate(
-            withDuration: 0.25, delay: 0,
-            options: [.allowUserInteraction, .beginFromCurrentState]
-        ) {
+        UIView.mapBarSpring {
             self.layoutIfNeeded()
             self.updateTrailingFade()
         }
