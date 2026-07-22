@@ -201,6 +201,18 @@ final class MapFilterBarView: UIView {
             onFilterChanged?(nil)
         }
         applySelectionAppearance()
+
+        // Structure synchronously, arrival as a pure cross-dissolve — the
+        // sticky-fade pass decides each pill's resting alpha (same recipe as
+        // the sub-filter row; no width interpolation, ever).
+        UIView.performWithoutAnimation { layoutIfNeeded() }
+        for entry in favoriteEntries { entry.pill.alpha = 0 }
+        UIView.animate(
+            withDuration: 0.2, delay: 0,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.updateStickyHeader()
+        }
     }
 
     // MARK: - Selection

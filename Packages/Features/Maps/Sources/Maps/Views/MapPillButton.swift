@@ -63,14 +63,25 @@ final class MapPillButton: UIButton {
     func setSelectedAppearance(_ selected: Bool) {
         guard selected != isSelectedAppearance else { return }
         isSelectedAppearance = selected
-        configuration = makeConfiguration(glass: hasGlass, selected: selected)
+        applyConfiguration()
     }
 
     /// Swaps the symbol for a real avatar, pre-cropped to a circle sized for
     /// the pill. The raw image is rendered once here, not per configuration.
     func setAvatar(_ image: UIImage?) {
         avatarImage = image.map { Self.circularThumbnail(from: $0, diameter: avatarDiameter) }
-        configuration = makeConfiguration(glass: hasGlass, selected: isSelectedAppearance)
+        applyConfiguration()
+    }
+
+    /// Configuration swaps can change intrinsic width (weight shift on
+    /// selection, avatar insets on arrival). Landing them inside an implicit
+    /// animation makes the stack interpolate widths — the accordion. Apply
+    /// structure atomically instead: new width takes effect in one frame.
+    private func applyConfiguration() {
+        UIView.performWithoutAnimation {
+            configuration = makeConfiguration(glass: hasGlass, selected: isSelectedAppearance)
+            superview?.layoutIfNeeded()
+        }
     }
 
     private var avatarDiameter: CGFloat { 20 }

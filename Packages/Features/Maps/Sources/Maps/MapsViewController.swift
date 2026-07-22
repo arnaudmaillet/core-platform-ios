@@ -63,6 +63,9 @@ final class MapsViewController: UIViewController {
     /// In-flight people fetch for the sub-filter row; superseded on every
     /// primary change so a slow list can't populate a stale row.
     private var subFilterLoadTask: Task<Void, Never>?
+    /// Logical sub-filter-bar visibility — tracked separately from
+    /// `isHidden`, which lags behind during the fade-out.
+    private var isSubFilterBarVisible = false
     /// id → live marker, so a diff can target the exact annotation to remove or
     /// refresh without rebuilding the set.
     private var annotations: [PostID: MapAnnotation] = [:]
@@ -348,14 +351,40 @@ final class MapsViewController: UIViewController {
         loadFavorites()
     }
 
-    /// Animated collapse/expansion: `isHidden` on an arranged subview slides
-    /// the stack shut while the alpha fade keeps the glass from popping.
+    /// Pure cross-dissolve show/hide. Structure (`isHidden`, stack layout)
+    /// always lands OUTSIDE animation blocks: animating `isHidden` on the
+    /// arranged subview made the stack interpolate the freshly-laid-out
+    /// pills from zero frames — the accordion unfold. The main bar never
+    /// moves either way (the stack's BOTTOM is pinned; the row grows upward
+    /// into free map space), so nothing but opacity needs animating.
     private func setSubFilterBar(visible: Bool) {
-        guard subFilterBar.isHidden == visible else { return }
-        UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseInOut]) {
-            self.subFilterBar.isHidden = !visible
-            self.subFilterBar.alpha = visible ? 1 : 0
-            self.barsStack.layoutIfNeeded()
+        guard visible != isSubFilterBarVisible else { return }
+        isSubFilterBarVisible = visible
+        if visible {
+            // Un-collapse and lay out at full width while still transparent…
+            UIView.performWithoutAnimation {
+                subFilterBar.isHidden = false
+                barsStack.layoutIfNeeded()
+            }
+            // …then fade the finished row in, in place.
+            UIView.animate(
+                withDuration: 0.2, delay: 0,
+                options: [.allowUserInteraction, .beginFromCurrentState]
+            ) {
+                self.subFilterBar.alpha = 1
+            }
+        } else {
+            UIView.animate(
+                withDuration: 0.2, delay: 0,
+                options: [.allowUserInteraction, .beginFromCurrentState],
+                animations: { self.subFilterBar.alpha = 0 },
+                completion: { _ in
+                    // Collapse only after the fade — and only if a re-show
+                    // didn't land while the fade-out was in flight.
+                    guard !self.isSubFilterBarVisible else { return }
+                    self.subFilterBar.isHidden = true
+                }
+            )
         }
     }
 

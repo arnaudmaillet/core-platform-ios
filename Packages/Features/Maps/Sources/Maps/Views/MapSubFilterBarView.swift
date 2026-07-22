@@ -209,6 +209,19 @@ final class MapSubFilterBarView: UIView {
         scrollView.setContentOffset(
             CGPoint(x: -scrollView.adjustedContentInset.left, y: 0), animated: false
         )
+        // Structure lands synchronously — every pill at its final intrinsic
+        // width BEFORE anything is visible — then arrival is a pure
+        // cross-dissolve to each pill's resting alpha (the trailing duck-fade
+        // decides that, so a pill resting under the expand bubble fades in
+        // only as far as it should).
+        UIView.performWithoutAnimation { layoutIfNeeded() }
+        for entry in entries { entry.pill.alpha = 0 }
+        UIView.animate(
+            withDuration: 0.2, delay: 0,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.updateTrailingFade()
+        }
         loadAvatars()
     }
 
