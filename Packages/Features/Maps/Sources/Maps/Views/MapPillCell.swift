@@ -93,43 +93,24 @@ final class MapBarCollectionView: UICollectionView {
     override func touchesShouldCancel(in view: UIView) -> Bool { true }
 }
 
-/// The sticky "All" header: a boundary supplementary hosting the All pill.
-/// Interactive (unlike cells) — supplementaries sit outside item selection,
-/// so the pill itself takes the tap and reports through `onTap`.
-final class MapAllHeaderView: UICollectionReusableView {
-    var onTap: (() -> Void)?
-    private var pill: MapPillButton?
+/// The bars' duck-fade curve: pills dissolve as they APPROACH an obstructing
+/// glass element (sticky All header, fixed expand bubble) and are fully
+/// transparent at shallow overlap. Starting the fade only at first contact
+/// left pills half-under the obstruction at high alpha — the obstruction's
+/// capsule edge then sliced them into a blurred-behind-glass half and a
+/// sharp half, reading as a hard rectangular clip. Fading across
+/// `approach` (before contact) → `depth` (into the overlap) means nothing
+/// legible ever sits beneath the glass.
+enum MapBarDuckFade {
+    /// Points before contact at which the dissolve begins.
+    static let approach: CGFloat = 12
+    /// Overlap depth at which the pill is fully transparent.
+    static let depth: CGFloat = 28
 
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        clipsToBounds = false
-        // Pinned headers float over cells; make the stacking explicit so the
-        // duck-fade never renders a pill above the header.
-        layer.zPosition = 1
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    func configure(content: MapPillButton.Content, height: CGFloat, selected: Bool) {
-        let pill = existingPill(height: height, initialContent: content)
-        pill.setContent(content)
-        pill.setSelectedAppearance(selected)
-    }
-
-    private func existingPill(height: CGFloat, initialContent: MapPillButton.Content) -> MapPillButton {
-        if let pill { return pill }
-        let pill = MapPillButton(content: initialContent, height: height)
-        pill.addAction(UIAction { [weak self] _ in self?.onTap?() }, for: .touchUpInside)
-        pill.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(pill)
-        NSLayoutConstraint.activate([
-            pill.leadingAnchor.constraint(equalTo: leadingAnchor),
-            pill.trailingAnchor.constraint(equalTo: trailingAnchor),
-            pill.centerYAnchor.constraint(equalTo: centerYAnchor),
-            pill.heightAnchor.constraint(equalToConstant: MapFilterBarView.pillHeight)
-        ])
-        self.pill = pill
-        return pill
+    /// `penetration`: how far the pill's approaching edge has advanced past
+    /// the fade's start line (obstruction edge + approach margin).
+    static func alpha(forPenetration penetration: CGFloat) -> CGFloat {
+        1 - min(1, max(0, penetration / (approach + depth)))
     }
 }
+

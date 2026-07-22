@@ -359,23 +359,20 @@ final class MapSubFilterBarView: UIView {
     // MARK: - Trailing duck-fade
 
     /// Mirrors the main bar's sticky treatment at the trailing edge: cells
-    /// sliding beneath the fixed expand bubble fade over a short duck-under
-    /// ramp, so their text never ghosts through its glass.
+    /// nearing / sliding beneath the fixed expand bubble dissolve on
+    /// approach (`MapBarDuckFade`), so nothing legible ever sits under its
+    /// glass and the bubble's edge never reads as a hard clip.
     private func updateTrailingFade() {
         let buttonFrame = expandButton.frame // bar coords
         for cell in collectionView.visibleCells {
             let frame = cell.convert(cell.bounds, to: self)
-            guard buttonFrame.maxX > frame.minX, buttonFrame.minX < frame.maxX, frame.width > 0 else {
-                cell.alpha = 1
-                continue
-            }
-            let overlap = min(buttonFrame.maxX, frame.maxX) - max(buttonFrame.minX, frame.minX)
-            let rampDistance = min(frame.width, Self.trailingFadeDistance)
-            cell.alpha = 1 - min(1, overlap / rampDistance)
+            // Pills scroll trailing-ward under the bubble: penetration is how
+            // far the pill's trailing edge has advanced past the fade line
+            // leading the bubble.
+            let penetration = frame.maxX - (buttonFrame.minX - MapBarDuckFade.approach)
+            cell.alpha = MapBarDuckFade.alpha(forPenetration: penetration)
         }
     }
-
-    private static let trailingFadeDistance: CGFloat = 60
 }
 
 extension MapSubFilterBarView: UICollectionViewDelegate {

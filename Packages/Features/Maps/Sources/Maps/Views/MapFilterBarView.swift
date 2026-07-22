@@ -46,9 +46,7 @@ final class MapFilterBarView: UIView {
         case favorite(ProfileID)
     }
 
-    private static let allHeaderKind = "map-filter-all-header"
-
-    /// The morphing icon primaries (All lives in the pinned header).
+    /// The morphing icon primaries (All lives in the fixed leading bubble).
     private static let primaries: [(filter: MapFilter, content: MapPillButton.Content)] = [
         (.friends, MapPillButton.Content(
             title: "Friends",
@@ -79,11 +77,21 @@ final class MapFilterBarView: UIView {
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
     private var favoritesByID: [ProfileID: MapFavorite] = [:]
-    private weak var allHeaderView: MapAllHeaderView?
+    /// The sticky "All": a FIXED interactive pill overlaying the leading
+    /// edge (the sub bar's expand-bubble architecture, mirrored). NOT a
+    /// pinned boundary supplementary — compositional pinning hosts the
+    /// header in a private container that hard-clips cells across a fixed
+    /// leading region (pills sliced in half ~50pt past the header, verified
+    /// via frame logging), and it culls nothing here since the button never
+    /// scrolls at all.
+    private let allButton = MapPillButton(
+        content: MapFilterBarView.allContent, height: MapFilterBarView.pillHeight
+    )
 
     init() {
         super.init(frame: .zero)
         configureCollectionView()
+        configureAllButton()
         applySnapshot(favorites: [], animatingDifferences: false)
     }
 
@@ -104,24 +112,13 @@ final class MapFilterBarView: UIView {
         )
         let section = NSCollectionLayoutSection(group: group)
         section.interGroupSpacing = Spacing.sm
-        // Halo padding above/below the pills; leading gap between the pinned
-        // All header and the first cell; trailing rest inset.
+        // Halo padding above/below the pills; horizontal rest insets come
+        // from the collection view's contentInset (the leading one is sized
+        // to the fixed All bubble at layout time).
         section.contentInsets = NSDirectionalEdgeInsets(
-            top: Self.verticalPadding, leading: Spacing.sm,
+            top: Self.verticalPadding, leading: 0,
             bottom: Self.verticalPadding, trailing: Spacing.lg
         )
-
-        let headerSize = NSCollectionLayoutSize(
-            widthDimension: .estimated(80), heightDimension: .fractionalHeight(1.0)
-        )
-        let header = NSCollectionLayoutBoundarySupplementaryItem(
-            layoutSize: headerSize, elementKind: Self.allHeaderKind, alignment: .leading
-        )
-        // THE sticky mechanic: All scrolls in the flow, then pins to the
-        // leading edge as the row runs past it.
-        header.pinToVisibleBounds = true
-        section.boundarySupplementaryItems = [header]
-
         return UICollectionViewCompositionalLayout(section: section, configuration: configuration)
     }
 
@@ -142,7 +139,8 @@ final class MapFilterBarView: UIView {
         // Highlight must land on touch-down, not after the scroll-intent
         // grace period — the press dip reads as lag otherwise.
         collectionView.delaysContentTouches = false
-        // Rest inset from the screen edge for the pinned/leading All header.
+        // Leading inset is finalized in layoutSubviews once the All bubble
+        // has a width; this is the pre-layout approximation.
         collectionView.contentInset = UIEdgeInsets(top: 0, left: Spacing.lg, bottom: 0, right: 0)
         collectionView.pin(to: self)
 
@@ -161,19 +159,32 @@ final class MapFilterBarView: UIView {
             collectionView.dequeueConfiguredReusableCell(using: pillRegistration, for: indexPath, item: item)
         }
 
-        let headerRegistration = UICollectionView.SupplementaryRegistration<MapAllHeaderView>(
-            elementKind: Self.allHeaderKind
-        ) { [weak self] header, _, _ in
-            guard let self else { return }
-            header.configure(
-                content: Self.allContent, height: Self.pillHeight,
-                selected: self.selectedFilter == nil
-            )
-            header.onTap = { [weak self] in self?.didTap(nil) }
-            self.allHeaderView = header
-        }
-        dataSource.supplementaryViewProvider = { collectionView, _, indexPath in
-            collectionView.dequeueConfiguredReusableSupplementary(using: headerRegistration, for: indexPath)
+    }
+
+    private func configureAllButton() {
+        addSubview(allButton)
+        allButton.translatesAutoresizingMaskIntoConstraints = false
+        // Above the cells gliding beneath it.
+        allButton.layer.zPosition = 1
+        NSLayoutConstraint.activate([
+            allButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Spacing.lg),
+            allButton.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+        allButton.addAction(UIAction { [weak self] _ in self?.didTap(nil) }, for: .touchUpInside)
+        allButton.setSelectedAppearance(true) // resting state: All active
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // The scrolled row rests just past the fixed All bubble; keep the
+        // inset honest as All's width shifts with its selection weight.
+        let neededInset = allButton.frame.maxX + Spacing.sm
+        if abs(collectionView.contentInset.left - neededInset) > 0.5, neededInset > 0 {
+            let atRest = collectionView.contentOffset.x <= -collectionView.contentInset.left + 0.5
+            collectionView.contentInset.left = neededInset
+            if atRest {
+                collectionView.contentOffset.x = -neededInset
+            }
         }
     }
 
@@ -282,8 +293,8 @@ final class MapFilterBarView: UIView {
         if case .profile(let id) = filter { .favorite(id) } else { .primary(filter) }
     }
 
-    /// Pushes the current selection into every on-screen pill + the header —
-    /// atomically, content only; sizing animates separately.
+    /// Pushes the current selection into every on-screen pill + the fixed
+    /// All bubble — atomically, content only; sizing animates separately.
     private func reconfigureVisiblePresentation() {
         UIView.performWithoutAnimation {
             for indexPath in collectionView.indexPathsForVisibleItems {
@@ -292,38 +303,29 @@ final class MapFilterBarView: UIView {
                       let (content, selected) = presentation(for: item) else { continue }
                 cell.configure(content: content, height: Self.pillHeight, selected: selected)
             }
-            allHeaderView?.configure(
-                content: Self.allContent, height: Self.pillHeight, selected: selectedFilter == nil
-            )
         }
+        allButton.setSelectedAppearance(selectedFilter == nil)
     }
 
     // MARK: - Sticky duck-fade
 
-    /// Cells passing beneath the pinned All header fade out in proportion to
-    /// how far they've slid under it — both surfaces are translucent glass,
-    /// so without the fade the underlying pill's text reads straight through
-    /// the header. (The pinning itself is the layout's; the fade is ours.)
+    /// Cells nearing / passing beneath the fixed All bubble dissolve on
+    /// approach (`MapBarDuckFade`): both surfaces are translucent glass, so a
+    /// pill allowed to sit half-under would be sliced by the bubble's capsule
+    /// edge into a blurred half and a sharp half — a hard visual clip. The
+    /// approach-fade means nothing legible ever reaches the glass. Exact
+    /// mirror of the sub bar's trailing treatment, on the leading side.
     private func updateStickyFade() {
-        guard let header = allHeaderView, header.window != nil else { return }
-        let headerFrame = header.convert(header.bounds, to: collectionView)
+        let allFrame = allButton.frame // bar coords
         for cell in collectionView.visibleCells {
-            let frame = cell.frame
-            guard headerFrame.maxX > frame.minX, headerFrame.minX < frame.maxX, frame.width > 0 else {
-                cell.alpha = 1
-                continue
-            }
-            let overlap = min(headerFrame.maxX, frame.maxX) - max(headerFrame.minX, frame.minX)
-            // Ramp over a short duck-under distance, not the pill's full
-            // width — a wide favorite would otherwise linger half-faded.
-            let rampDistance = min(frame.width, Self.stickyFadeDistance)
-            cell.alpha = 1 - min(1, overlap / rampDistance)
+            let frame = cell.convert(cell.bounds, to: self)
+            // Pills scroll leading-ward under the bubble: penetration is how
+            // far the pill's leading edge has advanced past the fade line
+            // trailing the bubble.
+            let penetration = allFrame.maxX + MapBarDuckFade.approach - frame.minX
+            cell.alpha = MapBarDuckFade.alpha(forPenetration: penetration)
         }
     }
-
-    /// How far a pill slides beneath the sticky header before it is fully
-    /// faded (shorter for pills narrower than this).
-    private static let stickyFadeDistance: CGFloat = 60
 }
 
 extension MapFilterBarView: UICollectionViewDelegate {
