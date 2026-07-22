@@ -210,7 +210,12 @@ final class MapFilterBarView: UIView {
         // the sub-filter row; no width interpolation, ever).
         UIView.performWithoutAnimation { layoutIfNeeded() }
         for entry in favoriteEntries { entry.pill.alpha = 0 }
-        UIView.mapBarSpring { self.updateStickyHeader() }
+        UIView.animate(
+            withDuration: 0.2, delay: 0,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.updateStickyHeader()
+        }
     }
 
     // MARK: - Selection
@@ -258,7 +263,10 @@ final class MapFilterBarView: UIView {
             UIView.performWithoutAnimation { layoutIfNeeded() }
             return
         }
-        UIView.mapBarSpring {
+        UIView.animate(
+            withDuration: 0.25, delay: 0,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
             self.layoutIfNeeded()
             self.updateStickyHeader()
         }

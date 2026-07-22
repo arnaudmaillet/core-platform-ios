@@ -192,25 +192,6 @@ final class MapPillButton: UIButton {
     }
 }
 
-extension UIView {
-    /// The filter bars' house animation: native spring physics instead of a
-    /// linear curve, so fades, morphs, and layout glides settle with a
-    /// subtle natural bounce. One primitive → every bar transition shares
-    /// identical feel, and `.beginFromCurrentState` lets a rapid re-tap
-    /// retarget an in-flight spring from its current position/opacity.
-    static func mapBarSpring(
-        _ animations: @escaping () -> Void,
-        completion: ((Bool) -> Void)? = nil
-    ) {
-        UIView.animate(
-            withDuration: 0.4, delay: 0,
-            usingSpringWithDamping: 0.7, initialSpringVelocity: 0.5,
-            options: [.allowUserInteraction, .beginFromCurrentState],
-            animations: animations, completion: completion
-        )
-    }
-}
-
 private extension UIFont {
     func withWeight(_ weight: UIFont.Weight) -> UIFont {
         let descriptor = fontDescriptor.addingAttributes([
