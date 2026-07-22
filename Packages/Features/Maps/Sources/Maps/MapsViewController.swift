@@ -66,6 +66,10 @@ final class MapsViewController: UIViewController {
     /// Logical sub-filter-bar visibility — tracked separately from
     /// `isHidden`, which lags behind during the fade-out.
     private var isSubFilterBarVisible = false
+    /// Session cache of the people rows, prefetched at screen load so a
+    /// primary tap renders its sub-filter row SYNCHRONOUSLY — the row must
+    /// never wait on the social graph. Keyed by `.friends` / `.following`.
+    private var peopleCache: [MapFilter: [MapFavorite]] = [:]
     /// id → live marker, so a diff can target the exact annotation to remove or
     /// refresh without rebuilding the set.
     private var annotations: [PostID: MapAnnotation] = [:]
@@ -117,6 +121,7 @@ final class MapsViewController: UIViewController {
         bindViewModel()
         observeAppLifecycle()
         loadFavorites()
+        prefetchPeople()
         mapView.setRegion(Self.defaultRegion, animated: false)
         #if DEBUG
         // `-maps-wide-region`: open zoomed out far enough that the mock pins
@@ -284,20 +289,49 @@ final class MapsViewController: UIViewController {
 
     // MARK: - Sub-filter row
 
+    /// Warms the people cache once at screen load (both lists in parallel),
+    /// so the first Friends/Following tap already has its row in memory.
+    private func prefetchPeople() {
+        let repository = favoritesRepository
+        Task { [weak self] in
+            async let friends = repository.friends()
+            async let following = repository.following()
+            let (friendsList, followingList) = await (friends, following)
+            guard let self else { return }
+            self.peopleCache[.friends] = friendsList
+            self.peopleCache[.following] = followingList
+        }
+    }
+
     /// Repopulates (or hides) the refinement row for a newly selected
-    /// primary. People rows load async; the fetch is superseded on the next
-    /// change and its result is dropped if the selection moved on meanwhile.
+    /// primary. UI first, data second: the row renders SYNCHRONOUSLY from
+    /// the session cache (0ms — never awaiting the network), then a
+    /// background refresh re-renders only if the list actually changed and
+    /// the selection hasn't moved on.
     private func updateSubFilterBar(for filter: MapFilter?) {
         subFilterLoadTask?.cancel()
         switch filter {
         case .friends, .following:
+            guard let primary = filter else { return } // matched .some above
+            // 1) Instant: whatever the cache holds right now.
+            let cached = peopleCache[primary] ?? []
+            if !cached.isEmpty {
+                currentSubFilterOptions = MapSubFilterOption.people(cached)
+                subFilterBar.setOptions(currentSubFilterOptions)
+                setSubFilterBar(visible: true)
+            }
+            // 2) Refresh behind it (also the cold path pre-prefetch, where
+            // the row appears when data lands — nothing to render sooner).
             let repository = favoritesRepository
             subFilterLoadTask = Task { [weak self] in
-                let people = filter == .friends
+                let people = primary == .friends
                     ? await repository.friends()
                     : await repository.following()
-                guard let self, !Task.isCancelled,
-                      self.filterBar.selectedFilter == filter else { return }
+                guard let self, !Task.isCancelled else { return }
+                self.peopleCache[primary] = people
+                guard self.filterBar.selectedFilter == primary else { return }
+                // Don't churn the row (and its selection) for identical data.
+                guard people != cached else { return }
                 self.currentSubFilterOptions = MapSubFilterOption.people(people)
                 self.subFilterBar.setOptions(self.currentSubFilterOptions)
                 self.setSubFilterBar(visible: !people.isEmpty)

@@ -53,9 +53,12 @@ public actor MapFavoritesRepository: MapFavoritesProviding {
     }
 
     public func friends() async -> [MapFavorite] {
-        let followers = await followerIDs()
+        // Both edge lists in flight together — the intersection needs both
+        // anyway, so serializing them would just sum their latencies.
+        async let followers = followerIDs()
+        async let following = followingIDs()
         // Following order is preserved; the follower set just gates it.
-        let mutuals = await followingIDs().filter(followers.contains)
+        let mutuals = await following.filter(await followers.contains)
         return await hydrate(ids: mutuals)
     }
 
@@ -79,21 +82,31 @@ public actor MapFavoritesRepository: MapFavoritesProviding {
 
     // MARK: - Hydration
 
+    /// All profile lookups in flight concurrently (a serial per-id chain sums
+    /// N round trips — the original sub-filter-row lag). Input order is
+    /// preserved; a profile that fails to hydrate is dropped, not a blocker.
     private func hydrate(ids: [String]) async -> [MapFavorite] {
-        var favorites: [MapFavorite] = []
-        for id in ids.prefix(Self.limit) {
-            var request = Profile_V1_GetProfileByIdRequest()
-            request.profileID = id
-            let profile = await profileClient.getProfileByID(request: request, headers: [:])
-            // A profile that fails to hydrate is dropped, not a blocker.
-            guard case .success(let view) = profile.result else { continue }
-            let title = view.displayName.isEmpty ? "@\(view.handle)" : view.displayName
-            favorites.append(MapFavorite(
-                profileID: ProfileID(id),
-                title: title,
-                avatarURL: view.avatarURL.isEmpty ? nil : URL(string: view.avatarURL)
-            ))
+        let capped = Array(ids.prefix(Self.limit))
+        return await withTaskGroup(of: (Int, MapFavorite?).self) { group in
+            for (index, id) in capped.enumerated() {
+                group.addTask { (index, await self.fetchProfile(id)) }
+            }
+            var slots: [MapFavorite?] = Array(repeating: nil, count: capped.count)
+            for await (index, favorite) in group { slots[index] = favorite }
+            return slots.compactMap(\.self)
         }
-        return favorites
+    }
+
+    private func fetchProfile(_ id: String) async -> MapFavorite? {
+        var request = Profile_V1_GetProfileByIdRequest()
+        request.profileID = id
+        let profile = await profileClient.getProfileByID(request: request, headers: [:])
+        guard case .success(let view) = profile.result else { return nil }
+        let title = view.displayName.isEmpty ? "@\(view.handle)" : view.displayName
+        return MapFavorite(
+            profileID: ProfileID(id),
+            title: title,
+            avatarURL: view.avatarURL.isEmpty ? nil : URL(string: view.avatarURL)
+        )
     }
 }
