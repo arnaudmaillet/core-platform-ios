@@ -10,19 +10,39 @@ final class ChatInputBar: UIView {
     var onSend: ((String) -> Void)?
     /// Fired by the media (+) button; media composition is the host's affair.
     var onAttachMedia: (() -> Void)?
+    /// Fired by the reply preview's close control — the host cancels the reply.
+    var onCancelReply: (() -> Void)?
 
     /// Disables sending while a message is in flight (spinner in the button).
     var isSending = false {
-        didSet {
-            sendButton.configuration?.showsActivityIndicator = isSending
-            updateSendButton()
-        }
+        didSet { updateActionButton() }
     }
 
     private enum Metrics {
         static let maxLines: CGFloat = 5
         static let controlSize: CGFloat = 38
     }
+
+    // Reply preview: the "Replying to …" accessory that grows in above the
+    // compose row when a reply is active. `replyPreview` is a height-toggled
+    // container (collapsed to 0 at rest, so a plain composer is unchanged);
+    // `replyGlass` is the signature Liquid Glass banner it hosts, inset from
+    // the container bottom so it doesn't kiss the compose field below.
+    private let replyPreview = UIView()
+    private let replyGlass = UIVisualEffectView(effect: nil)
+    private let replyQuoteView = QuotedReplyView()
+    private let replyCloseButton = UIButton(configuration: .plain())
+    private var replyCollapsed: NSLayoutConstraint!
+
+    /// What the trailing round button does right now. With text present it
+    /// sends; with the field empty *while focused* it collapses the keyboard
+    /// (nothing to send, so the send glyph would be a dead control) — the
+    /// button morphs between the two as text and focus change.
+    private enum ActionMode { case send, dismissKeyboard }
+    private var actionMode: ActionMode = .send
+    /// Mirrors the text view's first-responder state (`keyboard open`),
+    /// tracked via the begin/end-editing delegate callbacks.
+    private var isEditingText = false
 
     // Effect set on window attach: materializing one in init contacts the
     // render server and stalls headless CI simulators (see ci memory).
@@ -71,12 +91,11 @@ final class ChatInputBar: UIView {
         mediaButton.configuration?.cornerStyle = .capsule
         mediaButton.addAction(UIAction { [weak self] _ in self?.onAttachMedia?() }, for: .primaryActionTriggered)
 
-        sendButton.configuration?.image = UIImage(
-            systemName: "arrow.up",
-            withConfiguration: UIImage.SymbolConfiguration(weight: .semibold)
-        )
-        sendButton.configuration?.cornerStyle = .capsule
-        sendButton.addAction(UIAction { [weak self] _ in self?.sendTapped() }, for: .primaryActionTriggered)
+        sendButton.accessibilityLabel = "Send"
+        applyButtonStyle(for: .send)
+        sendButton.addAction(UIAction { [weak self] _ in self?.actionTapped() }, for: .primaryActionTriggered)
+
+        configureReplyPreview()
 
         addSubview(mediaButton)
         addSubview(field)
@@ -97,7 +116,10 @@ final class ChatInputBar: UIView {
             mediaButton.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
             mediaButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
             field.leadingAnchor.constraint(equalTo: mediaButton.trailingAnchor, constant: Spacing.sm),
-            field.topAnchor.constraint(equalTo: topAnchor),
+            // The compose row sits below the reply preview; when the preview is
+            // collapsed (height 0) this lands the field flush at the top edge,
+            // so a plain composer is unchanged.
+            field.topAnchor.constraint(equalTo: replyPreview.bottomAnchor),
             field.bottomAnchor.constraint(equalTo: bottomAnchor),
             sendButton.leadingAnchor.constraint(equalTo: field.trailingAnchor, constant: Spacing.sm),
             sendButton.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -106,23 +128,164 @@ final class ChatInputBar: UIView {
             sendButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize)
         ])
 
-        updateSendButton()
+        updateActionButton()
         updateFieldHeight()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    // MARK: - Reply preview
+
+    private func configureReplyPreview() {
+        // The container must NOT clip: clipping it to its rectangle would cut
+        // the glass pill's soft rounded shadow into a hard rectangular box.
+        // Content is hidden on collapse by `replyGlass`'s own clip (below), so
+        // the container stays a pure, invisible layout frame — like the field,
+        // which floats cleanly with no wrapping clip of its own. Opacity is
+        // driven HERE (on the container), never on the glass effect view — so
+        // the glass renders once at full strength and its shadow can't glitch
+        // mid-fade. Starts transparent (collapsed anyway) for a clean first show.
+        replyPreview.alpha = 0
+
+        // Signature Liquid Glass, matching the compose field: the shape is
+        // driven by the corner configuration (not a layer radius) so the glass
+        // keeps its edge refraction, and the effect is materialized on window
+        // attach (see `didMoveToWindow`) — building one in init contacts the
+        // render server and stalls headless CI simulators.
+        replyGlass.clipsToBounds = true
+        replyGlass.cornerConfiguration = .capsule(maximumRadius: Metrics.controlSize / 2)
+
+        replyQuoteView.tint(accent: .systemBlue, author: .systemBlue, snippet: .secondaryLabel)
+
+        replyCloseButton.configuration?.image = UIImage(systemName: "xmark.circle.fill")
+        replyCloseButton.configuration?.baseForegroundColor = .secondaryLabel
+        replyCloseButton.configuration?.contentInsets = .zero
+        replyCloseButton.accessibilityLabel = "Cancel Reply"
+        replyCloseButton.addAction(UIAction { [weak self] _ in self?.onCancelReply?() }, for: .primaryActionTriggered)
+
+        let content = replyGlass.contentView
+        for subview in [replyQuoteView, replyCloseButton] {
+            content.addSubview(subview)
+            subview.translatesAutoresizingMaskIntoConstraints = false
+        }
+
+        replyPreview.addSubview(replyGlass)
+        replyGlass.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(replyPreview)
+        replyPreview.translatesAutoresizingMaskIntoConstraints = false
+
+        replyCollapsed = replyPreview.heightAnchor.constraint(equalToConstant: 0)
+        replyCollapsed.isActive = true
+
+        // Content top/bottom define the glass banner's height; kept below
+        // `required` so the collapse constraint wins cleanly while it's active.
+        let contentTop = replyQuoteView.topAnchor.constraint(equalTo: content.topAnchor, constant: Spacing.sm)
+        let contentBottom = replyQuoteView.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -Spacing.sm)
+        contentTop.priority = .defaultHigh
+        contentBottom.priority = .defaultHigh
+
+        NSLayoutConstraint.activate([
+            replyPreview.topAnchor.constraint(equalTo: topAnchor),
+            replyPreview.leadingAnchor.constraint(equalTo: leadingAnchor),
+            replyPreview.trailingAnchor.constraint(equalTo: trailingAnchor),
+
+            // Glass fills the container but stops a hair above the field, so the
+            // two glass pills read as distinct elements instead of pinching.
+            replyGlass.topAnchor.constraint(equalTo: replyPreview.topAnchor),
+            replyGlass.leadingAnchor.constraint(equalTo: replyPreview.leadingAnchor),
+            replyGlass.trailingAnchor.constraint(equalTo: replyPreview.trailingAnchor),
+            replyGlass.bottomAnchor.constraint(equalTo: replyPreview.bottomAnchor, constant: -Spacing.xs),
+
+            contentTop,
+            contentBottom,
+            // Inset from the rounded glass edges so nothing clips into a corner.
+            replyQuoteView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: Spacing.md),
+
+            replyCloseButton.leadingAnchor.constraint(equalTo: replyQuoteView.trailingAnchor, constant: Spacing.sm),
+            replyCloseButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -Spacing.md),
+            replyCloseButton.centerYAnchor.constraint(equalTo: replyQuoteView.centerYAnchor),
+            replyCloseButton.widthAnchor.constraint(equalToConstant: 24),
+            replyCloseButton.heightAnchor.constraint(equalToConstant: 24)
+        ])
+    }
+
+    /// Focuses the composer — used when a reply begins, so the keyboard rises
+    /// with the preview (Messages behavior).
+    func focus() { textView.becomeFirstResponder() }
+
+    /// Shows (or updates) the "Replying to …" preview, growing it in when it
+    /// wasn't already visible. The host pins the collection inset off this
+    /// bar's frame, so the transcript reflows as the bar grows.
+    func setReplyContext(author: String, snippet: String) {
+        replyQuoteView.setContent(author: author, snippet: snippet)
+        let wasCollapsed = replyCollapsed.isActive
+        replyCollapsed.isActive = false
+        // Already visible (content-only update) or off-window: show at once.
+        guard wasCollapsed, window != nil else {
+            replyPreview.alpha = 1
+            superview?.layoutIfNeeded()
+            return
+        }
+        // Pure fade-in: the container takes its FINAL height immediately (a
+        // non-animated layout pass), so the glass and its interior never
+        // stretch or shift. Then animate opacity on the PLAIN CONTAINER, never
+        // on `replyGlass` itself — animating a UIVisualEffectView's own alpha
+        // makes UIKit recompute its glass/shadow compositing every frame (the
+        // shadow-box glitch that pops at the end). The container has no effect
+        // or shadow, so a group-opacity fade there is clean while the glass
+        // renders once at full strength (`replyGlass.alpha` stays 1).
+        replyPreview.alpha = 0
+        superview?.layoutIfNeeded()
+        UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseOut]) {
+            self.replyPreview.alpha = 1
+        }
+    }
+
+    /// Collapses the reply preview back out of the bar. Fades the glass out in
+    /// place FIRST (a height collapse under a visible pill reads as an awkward
+    /// vertical squash), then collapses the now-invisible height so the compose
+    /// field slides up cleanly.
+    func clearReplyContext() {
+        guard !replyCollapsed.isActive else { return }
+        guard window != nil else {
+            replyPreview.alpha = 0
+            replyCollapsed.isActive = true
+            superview?.layoutIfNeeded()
+            return
+        }
+        // Fade the PLAIN CONTAINER, not the glass effect view (same shadow-safe
+        // reason as `setReplyContext`).
+        UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseOut]) {
+            self.replyPreview.alpha = 0
+        } completion: { _ in
+            self.replyCollapsed.isActive = true
+            UIView.animate(withDuration: 0.22, delay: 0, options: [.curveEaseInOut]) {
+                self.superview?.layoutIfNeeded()
+            }
+        }
+    }
+
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window != nil, field.effect == nil {
-            field.effect = UIGlassEffect()
-        }
+        guard window != nil else { return }
+        // Both glass surfaces are materialized here, not in init (render-server
+        // stall on headless CI sims); each gets its own effect instance.
+        if field.effect == nil { field.effect = UIGlassEffect() }
+        if replyGlass.effect == nil { replyGlass.effect = UIGlassEffect() }
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
         updateFieldHeight()
+    }
+
+    /// Routes the trailing button to whatever its current mode means.
+    private func actionTapped() {
+        switch actionMode {
+        case .send: sendTapped()
+        case .dismissKeyboard: textView.resignFirstResponder()
+        }
     }
 
     private func sendTapped() {
@@ -133,9 +296,66 @@ final class ChatInputBar: UIView {
         onSend?(text)
     }
 
-    private func updateSendButton() {
+    private static func actionImage(for mode: ActionMode) -> UIImage? {
+        let symbol = mode == .send ? "arrow.up" : "keyboard.chevron.compact.down"
+        return UIImage(
+            systemName: symbol,
+            withConfiguration: UIImage.SymbolConfiguration(weight: .semibold)
+        )
+    }
+
+    /// Rebuilds the trailing button's Liquid-Glass configuration for a mode:
+    /// a prominent blue fill + white glyph to send; the plain clear-glass
+    /// material (no color fill) + secondary-label glyph to dismiss the
+    /// keyboard — nothing to send, so the control recedes into the bar the
+    /// same way the leading `+` does. `UIView.transition` wrapping this call
+    /// cross-dissolves the glyph AND the material together.
+    private func applyButtonStyle(for mode: ActionMode) {
+        switch mode {
+        case .send:
+            var config = UIButton.Configuration.prominentGlass()
+            config.cornerStyle = .capsule
+            config.image = Self.actionImage(for: mode)
+            config.baseBackgroundColor = .systemBlue
+            config.baseForegroundColor = .white
+            sendButton.configuration = config
+        case .dismissKeyboard:
+            var config = UIButton.Configuration.glass()
+            config.cornerStyle = .capsule
+            config.image = Self.actionImage(for: mode)
+            config.baseForegroundColor = .secondaryLabel
+            sendButton.configuration = config
+        }
+    }
+
+    /// Resolves the button's mode from text + focus, cross-dissolving the
+    /// glyph and background when the mode flips, and setting the spinner +
+    /// enablement per mode:
+    ///  - text present → Send (enabled while not in flight)
+    ///  - empty + keyboard open → Dismiss keyboard (always live)
+    ///  - empty + keyboard closed → Send, disabled (the resting affordance)
+    private func updateActionButton() {
         let hasText = !textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        sendButton.isEnabled = hasText && !isSending
+        let newMode: ActionMode = hasText ? .send : (isEditingText ? .dismissKeyboard : .send)
+
+        if newMode != actionMode {
+            actionMode = newMode
+            sendButton.accessibilityLabel = newMode == .send ? "Send" : "Dismiss Keyboard"
+            UIView.transition(
+                with: sendButton, duration: 0.2,
+                options: [.transitionCrossDissolve, .allowUserInteraction]
+            ) {
+                self.applyButtonStyle(for: newMode)
+            }
+        }
+
+        // Spinner + enablement change more often than the mode (every keystroke,
+        // every in-flight toggle), so drive them directly — no re-dissolve.
+        sendButton.configuration?.showsActivityIndicator = isSending && newMode == .send
+        switch newMode {
+        case .send: sendButton.isEnabled = hasText && !isSending
+        case .dismissKeyboard: sendButton.isEnabled = !isSending
+        }
     }
 
     /// Grows the field with its content up to `maxLines`, then hands the
@@ -159,7 +379,17 @@ final class ChatInputBar: UIView {
 extension ChatInputBar: UITextViewDelegate {
     func textViewDidChange(_ textView: UITextView) {
         placeholderLabel.isHidden = textView.hasText
-        updateSendButton()
+        updateActionButton()
         updateFieldHeight()
+    }
+
+    func textViewDidBeginEditing(_ textView: UITextView) {
+        isEditingText = true
+        updateActionButton()
+    }
+
+    func textViewDidEndEditing(_ textView: UITextView) {
+        isEditingText = false
+        updateActionButton()
     }
 }

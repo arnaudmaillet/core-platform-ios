@@ -52,6 +52,9 @@ public struct MessageDisplayModel: Equatable, Sendable, Identifiable {
     public let body: String
     public let sentAt: Date
     public let isMine: Bool
+    /// The id of the message this one replies to, if any — resolved into a
+    /// quoted preview by the transcript builder.
+    public let replyToID: String?
 
     public init(message: ChatMessage) {
         id = message.id
@@ -59,5 +62,6 @@ public struct MessageDisplayModel: Equatable, Sendable, Identifiable {
         body = message.body
         sentAt = message.createdAt
         isMine = message.isMine
+        replyToID = message.replyToID
     }
 }

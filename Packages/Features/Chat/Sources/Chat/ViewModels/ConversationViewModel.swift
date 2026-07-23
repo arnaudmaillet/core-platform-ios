@@ -18,11 +18,22 @@ public final class ConversationViewModel {
         case delete
     }
 
+    /// The active reply target, surfaced to the compose bar's preview: who is
+    /// being answered and a one-line excerpt of their message.
+    public nonisolated struct ReplyDraft: Equatable, Sendable {
+        public let messageID: String
+        public let author: String
+        public let snippet: String
+    }
+
     public var onPhaseChange: ((Phase) -> Void)?
     /// True while a message is being sent (disables the send control).
     public var onSendingChange: ((Bool) -> Void)?
     /// Fires once the peer's name resolves; best-effort (no title on failure).
     public var onTitleChange: ((String) -> Void)?
+    /// The active reply target (or `nil` when cleared) — drives the compose
+    /// bar's reply preview.
+    public var onReplyStateChange: ((ReplyDraft?) -> Void)?
     /// Transient user-facing notice `(title, message)` — the view presents it
     /// modally (same honest-seam surface as the compose bar's media stub).
     public var onActionNotice: ((String, String) -> Void)?
@@ -38,6 +49,14 @@ public final class ConversationViewModel {
     private var load: Task<Void, Never>?
     /// The DM correspondent, once known — the header identity's destination.
     private var peerProfileID: ProfileID?
+    /// The correspondent's display name, once resolved — labels reply drafts.
+    private var peerName = ""
+    /// The message currently being replied to; folded into the next send.
+    private var replyingToID: String?
+    /// Messages deleted this session. chat.v1 has no DeleteMessage RPC
+    /// (`dev/BACKEND_GAPS.md`), so removal is local — this set filters them
+    /// back out of every reload, exactly as the conversation list does.
+    private var deletedMessageIDs: Set<String> = []
 
     public init(
         conversationID: ConversationID,
@@ -61,14 +80,18 @@ public final class ConversationViewModel {
         reload()
     }
 
-    /// Sends a message and appends it. Empty/whitespace input is ignored.
+    /// Sends a message and appends it, carrying the active reply reference if
+    /// any. Empty/whitespace input is ignored. The reply state clears up front,
+    /// so the compose preview collapses as the bubble flies out.
     public func send(_ text: String) {
         let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty, !isSending else { return }
+        let replyTo = replyingToID
+        cancelReply()
         setSending(true)
         Task { [weak self] in
             guard let self else { return }
-            if let message = try? await self.repository.send(body, to: self.conversationID) {
+            if let message = try? await self.repository.send(body, to: self.conversationID, replyingTo: replyTo) {
                 self.messages.append(message)
                 self.emit()
                 try? await self.repository.markRead(self.conversationID, upTo: message.id)
@@ -77,23 +100,48 @@ public final class ConversationViewModel {
         }
     }
 
-    /// The context menu's action funnel. Every case is an honest stub today —
-    /// chat.v1's write plane is send + markRead, nothing else — kept as one
-    /// exhaustive switch so each branch picks up its repository call without
-    /// reshaping the view: swap the notice for the call, keep the signature.
+    /// The context menu's action funnel. Reply and Delete are wired; Forward
+    /// remains an honest stub (needs a conversation picker + cross-thread
+    /// send). Delete here is unconfirmed — the view gates it behind a native
+    /// confirmation before calling.
     public func perform(_ action: MessageAction, on messageID: String) {
         switch action {
         case .reply:
-            // Needs a reply-to reference on chat.v1 SendMessage.
-            onActionNotice?("Reply", "Replying to a specific message isn't available yet.")
+            beginReply(to: messageID)
         case .forward:
-            // Needs a conversation picker and a cross-thread send.
             onActionNotice?("Forward", "Forwarding messages isn't available yet.")
         case .delete:
-            // Needs a chat.v1 DeleteMessage; a local-only removal would
-            // resurrect on the next refresh, so no optimistic fake here.
-            onActionNotice?("Delete", "Deleting messages isn't available yet.")
+            deleteMessage(messageID)
         }
+    }
+
+    /// Enters reply mode for `messageID`, publishing the draft the compose bar
+    /// previews. A no-op if the message isn't in the loaded transcript.
+    public func beginReply(to messageID: String) {
+        guard let message = messages.first(where: { $0.id == messageID }) else { return }
+        replyingToID = messageID
+        onReplyStateChange?(ReplyDraft(
+            messageID: messageID,
+            author: ChatTranscript.quoteAuthor(isMine: message.isMine, peerName: peerName),
+            snippet: ChatTranscript.snippet(message.body)
+        ))
+    }
+
+    /// Leaves reply mode. Idempotent — silent when not replying.
+    public func cancelReply() {
+        guard replyingToID != nil else { return }
+        replyingToID = nil
+        onReplyStateChange?(nil)
+    }
+
+    /// Removes a message from the thread. Session-local (no DeleteMessage RPC):
+    /// `deletedMessageIDs` keeps it out of subsequent reloads. Re-emits so the
+    /// diffable data source animates the row out.
+    public func deleteMessage(_ messageID: String) {
+        guard messages.contains(where: { $0.id == messageID }) else { return }
+        deletedMessageIDs.insert(messageID)
+        if replyingToID == messageID { cancelReply() }
+        emit()
     }
 
     private func reload() {
@@ -136,6 +184,7 @@ public final class ConversationViewModel {
         // cached one, resolves after the transition has started.
         if let cached = directory?.summary(for: conversationID), !cached.title.isEmpty {
             peerProfileID = cached.directPeerID
+            peerName = cached.title
             onTitleChange?(cached.title)
             return
         }
@@ -146,13 +195,21 @@ public final class ConversationViewModel {
             if let summary = try? await self.repository.conversationSummary(for: self.conversationID),
                !summary.title.isEmpty {
                 self.peerProfileID = summary.directPeerID
+                self.peerName = summary.title
                 self.onTitleChange?(summary.title)
+                // Re-render so quotes from the peer pick up their now-known
+                // author name (content may have landed before the title did).
+                if case .content = self.phase { self.emit() }
             }
         }
     }
 
     private func emit() {
-        phase = .content(messages.map(MessageDisplayModel.init))
+        // One pass; skip the filter entirely in the common no-deletions case.
+        let models = deletedMessageIDs.isEmpty
+            ? messages.map(MessageDisplayModel.init)
+            : messages.compactMap { deletedMessageIDs.contains($0.id) ? nil : MessageDisplayModel(message: $0) }
+        phase = .content(models)
     }
 
     private func setSending(_ sending: Bool) {

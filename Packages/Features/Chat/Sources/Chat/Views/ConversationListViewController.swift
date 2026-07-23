@@ -43,6 +43,14 @@ final class ConversationListViewController: UIViewController {
         return item
     }()
 
+    /// Native "Cancel" shown in place of the Edit/Done toggle while editing;
+    /// leaves multi-selection (deletes already commit immediately via the
+    /// trailing Delete item, so there's nothing to discard).
+    private lazy var cancelItem = UIBarButtonItem(
+        title: "Cancel",
+        primaryAction: UIAction { [weak self] _ in self?.setEditing(false, animated: true) }
+    )
+
     init(viewModel: ConversationListViewModel) {
         self.viewModel = viewModel
         super.init(nibName: nil, bundle: nil)
@@ -118,14 +126,16 @@ final class ConversationListViewController: UIViewController {
 
     // MARK: - Editing (multi-selection)
 
-    /// `editButtonItem` funnels here. Batch actions replace compose for the
-    /// mode's duration; UIKit animates the selection affordances and clears
-    /// any selection when the mode ends, so exit needs no manual cleanup
+    /// `editButtonItem` (and the `Cancel` item) funnel here. While editing, the
+    /// leading toggle becomes a native `Cancel` and the trailing compose item
+    /// becomes batch `Delete`; UIKit animates the selection affordances and
+    /// clears any selection when the mode ends, so exit needs no manual cleanup
     /// beyond restoring the bar.
     override func setEditing(_ editing: Bool, animated: Bool) {
         super.setEditing(editing, animated: animated)
         tableView.setEditing(editing, animated: animated)
         batchDeleteItem.isEnabled = false
+        navigationItem.leftBarButtonItem = editing ? cancelItem : editButtonItem
         navigationItem.rightBarButtonItem = editing ? batchDeleteItem : composeItem
     }
 

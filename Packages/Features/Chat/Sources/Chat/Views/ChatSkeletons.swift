@@ -14,7 +14,6 @@ import UIKit
 /// size) is the cell's own.
 final class ConversationListSkeletonView: UIView {
     private enum Metrics {
-        static let rowCount = 7
         /// `ConversationCell.Metrics.avatarSize`.
         static let avatarSize: CGFloat = 48
         static let titleHeight: CGFloat = 13
@@ -24,26 +23,59 @@ final class ConversationListSkeletonView: UIView {
         /// reads as organic content, not a repeated stamp.
         static let titleFractions: [CGFloat] = [0.42, 0.58, 0.36]
         static let previewFractions: [CGFloat] = [0.82, 0.64, 0.9]
+        /// One row's silhouette height: the avatar plus its symmetric vertical
+        /// margins (matches the real cell). The row *count* is derived from
+        /// this at layout time, so the stack fills any viewport — SE through
+        /// Max — instead of a hard-coded tally that leaves the short screens
+        /// tall and the tall screens gapped at the bottom.
+        static let rowHeight: CGFloat = avatarSize + Spacing.sm * 2
     }
+
+    private let rows = UIStackView()
+    /// The row count currently built into `rows`; guards `layoutSubviews`
+    /// against rebuilding the stack on every pass — only a genuine height
+    /// change (rotation, split-view resize) re-derives it.
+    private var builtRowCount = 0
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         isUserInteractionEnabled = false
+        // The last row is rounded up to overshoot the bottom edge; clip so it
+        // crops cleanly instead of leaving a partial-row gap on viewports that
+        // aren't an exact multiple of the row height.
+        clipsToBounds = true
 
-        let rows = UIStackView(arrangedSubviews: (0..<Metrics.rowCount).map(makeRow))
         rows.axis = .vertical
         addSubview(rows)
         rows.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             rows.topAnchor.constraint(equalTo: topAnchor),
             rows.leadingAnchor.constraint(equalTo: leadingAnchor),
-            rows.trailingAnchor.constraint(equalTo: trailingAnchor),
-            rows.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor)
+            rows.trailingAnchor.constraint(equalTo: trailingAnchor)
         ])
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        rebuildRowsIfNeeded()
+    }
+
+    /// Rebuilds the stack to as many rows as the current height fits (rounding
+    /// up so the bottom row clips at the edge rather than leaving a gap). A
+    /// no-op unless the fitting count changed since the last build.
+    private func rebuildRowsIfNeeded() {
+        let height = bounds.height
+        guard height > 0 else { return }
+        let count = max(1, Int((height / Metrics.rowHeight).rounded(.up)))
+        guard count != builtRowCount else { return }
+        builtRowCount = count
+
+        rows.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        (0..<count).forEach { rows.addArrangedSubview(makeRow(at: $0)) }
+    }
 
     private func makeRow(at index: Int) -> UIView {
         let avatar = SkeletonBoneView(rounding: .capsule)
