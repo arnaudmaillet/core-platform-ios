@@ -6,7 +6,7 @@ import UIKit
 /// One entry in the sub-filter bar: the refinement it applies plus its pill
 /// presentation. People entries carry their `MapFavorite` (full name + avatar
 /// URL) for the pin menu and the full-list sheet.
-struct MapSubFilterOption {
+struct MapSubFilterOption: Equatable {
     let subFilter: MapSubFilter
     let content: MapPillButton.Content
     let favorite: MapFavorite?
@@ -14,6 +14,19 @@ struct MapSubFilterOption {
     /// The full-list sheet's row title (full name for people, pill title
     /// otherwise).
     var sheetTitle: String { favorite?.title ?? content.title ?? content.accessibilityLabel }
+
+    /// The sheet's subtitle line: the person's `@handle`. Nil for place
+    /// categories (nothing to say) and for a profile whose handle never
+    /// hydrated — the row then renders as a plain single-line cell rather
+    /// than reserving an empty second line.
+    var sheetSubtitle: String? {
+        guard let handle = favorite?.handle, !handle.isEmpty else { return nil }
+        return "@\(handle)"
+    }
+
+    /// Person rows carry the profile and mute swipe actions; place
+    /// categories have no account behind them.
+    var profileID: ProfileID? { favorite?.profileID }
 
     /// The Places refinements. Purely client-side vocabulary — no place-
     /// category contract exists; the tokens ride the Phase-1 filter header as
@@ -92,11 +105,14 @@ struct MapSubFilterOption {
 /// treatment. Long-pressing a person pill offers Pin/Unpin to Favorites via
 /// the collection view's native context-menu hooks.
 ///
-/// Single-select; tapping the active pill clears the refinement (back to the
-/// bare primary). Cells are presentation-only (`MapPillCell`).
+/// Selection is a SET and every tap toggles one pill: several refinements can
+/// ride at once and the map queries their union, and clearing the last one
+/// falls back to the bare primary. There is no single/multi mode — one
+/// behaviour, in the bar and in the full-list sheet alike. Cells are
+/// presentation-only (`MapPillCell`).
 final class MapSubFilterBarView: UIView {
-    /// Fired on every selection change; `nil` means "no refinement".
-    var onSubFilterChanged: ((MapSubFilter?) -> Void)?
+    /// Fired on every selection change; the empty set means "no refinement".
+    var onSubFiltersChanged: ((Set<MapSubFilter>) -> Void)?
     /// The trailing expand bubble was tapped — present the full-list sheet.
     var onExpandTapped: (() -> Void)?
     /// Long-press menu action on a person pill.
@@ -106,7 +122,8 @@ final class MapSubFilterBarView: UIView {
     /// Resolves avatar thumbnails for people pills.
     var imagePipeline: ImagePipeline?
 
-    private(set) var selectedSubFilter: MapSubFilter?
+    /// Every refinement currently applied; empty means "no refinement".
+    private(set) var selectedSubFilters: Set<MapSubFilter> = []
 
     /// One size below the main bar's 36pt family, per the type ladder.
     static let pillHeight: CGFloat = 32
@@ -196,7 +213,7 @@ final class MapSubFilterBarView: UIView {
             guard let self, let option = self.optionsBySubFilter[subFilter] else { return }
             cell.configure(
                 content: option.content, height: Self.pillHeight,
-                selected: subFilter == self.selectedSubFilter
+                selected: self.selectedSubFilters.contains(subFilter)
             )
             // Native pill interaction: tap → selection; long-press → the
             // Pin/Unpin menu directly on the pill (people only).
@@ -249,7 +266,7 @@ final class MapSubFilterBarView: UIView {
         transitionGeneration += 1
         for task in avatarTasks { task.cancel() }
         avatarTasks.removeAll()
-        selectedSubFilter = nil
+        selectedSubFilters = []
         orderedSubFilters = options.map(\.subFilter)
         optionsBySubFilter = Dictionary(uniqueKeysWithValues: options.map { ($0.subFilter, $0) })
 
@@ -273,6 +290,27 @@ final class MapSubFilterBarView: UIView {
         collectionView.alpha = 1
         UIView.mapBarFade { self.updateTrailingFade() }
         loadAvatars(for: options)
+    }
+
+    /// Live restack from the full-list sheet's edit mode: the same options
+    /// reordered, minus any the viewer deleted. Deliberately not
+    /// `setOptions` — this is not a content swap, so the selection survives,
+    /// the row keeps its scroll offset, and nothing cross-dissolves; pills
+    /// glide to their new seats and a removed one animates out via the
+    /// diffable diff (the one width/position animation both endpoints are
+    /// laid out for). Fires while the sheet is still open, so the row is
+    /// already correct when it closes.
+    func restack(to options: [MapSubFilterOption]) {
+        orderedSubFilters = options.map(\.subFilter)
+        optionsBySubFilter = Dictionary(uniqueKeysWithValues: options.map { ($0.subFilter, $0) })
+        var snapshot = NSDiffableDataSourceSnapshot<Section, MapSubFilter>()
+        snapshot.appendSections([.main])
+        snapshot.appendItems(orderedSubFilters)
+        dataSource.apply(snapshot, animatingDifferences: true) { [weak self] in
+            // Pills changed seats: whoever now sits under the fixed bubble
+            // must re-derive its duck-fade alpha.
+            self?.updateTrailingFade()
+        }
     }
 
     /// Cross-dissolves to a new option set while the row stays visible (a
@@ -320,15 +358,15 @@ final class MapSubFilterBarView: UIView {
     // MARK: - Selection
 
     private func didTap(_ subFilter: MapSubFilter) {
-        // Re-tapping the active refinement clears it.
-        let next: MapSubFilter? = (subFilter == selectedSubFilter) ? nil : subFilter
-        setSelectedSubFilter(next)
-        onSubFilterChanged?(next)
+        // Every tap toggles its own pill; the rest hold their state.
+        let next = selectedSubFilters.symmetricDifference([subFilter])
+        setSelectedSubFilters(next, reveal: subFilter)
+        onSubFiltersChanged?(next)
     }
 
-    /// Programmatic selection (no callback); reveals the selected pill.
-    func setSelectedSubFilter(_ subFilter: MapSubFilter?) {
-        selectedSubFilter = subFilter
+    /// Programmatic selection (no callback); reveals `reveal` if given.
+    func setSelectedSubFilters(_ subFilters: Set<MapSubFilter>, reveal: MapSubFilter? = nil) {
+        selectedSubFilters = subFilters
         UIView.performWithoutAnimation {
             for indexPath in collectionView.indexPathsForVisibleItems {
                 guard let item = dataSource.itemIdentifier(for: indexPath),
@@ -336,7 +374,7 @@ final class MapSubFilterBarView: UIView {
                       let cell = collectionView.cellForItem(at: indexPath) as? MapPillCell else { continue }
                 cell.configure(
                     content: option.content, height: Self.pillHeight,
-                    selected: item == subFilter
+                    selected: subFilters.contains(item)
                 )
                 if let favorite = option.favorite {
                     cell.setAvatar(avatarCache[favorite.profileID])
@@ -348,7 +386,9 @@ final class MapSubFilterBarView: UIView {
             self.collectionView.performBatchUpdates(nil)
             self.updateTrailingFade()
         }
-        if let subFilter, let indexPath = dataSource.indexPath(for: subFilter) {
+        // Only ever reveal the pill the viewer just touched: with several
+        // selected, scrolling to "the selection" has no single answer.
+        if let reveal, let indexPath = dataSource.indexPath(for: reveal) {
             collectionView.layoutIfNeeded()
             if let frame = collectionView.layoutAttributesForItem(at: indexPath)?.frame {
                 collectionView.scrollRectToVisible(frame, animated: true)
@@ -378,5 +418,32 @@ final class MapSubFilterBarView: UIView {
 extension MapSubFilterBarView: UICollectionViewDelegate {
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         updateTrailingFade()
+    }
+
+    /// Magnetic snap (trailing): the mirror of the main bar's rule — the
+    /// release lands the nearest pill's TRAILING edge flush against the fixed
+    /// expand bubble, so no pill ever rests half-ducked beneath it.
+    func scrollViewWillEndDragging(
+        _ scrollView: UIScrollView,
+        withVelocity velocity: CGPoint,
+        targetContentOffset: UnsafeMutablePointer<CGPoint>
+    ) {
+        targetContentOffset.pointee.x = MapBarSnap.offsetX(
+            snapping: collectionView,
+            proposedX: targetContentOffset.pointee.x,
+            velocityX: velocity.x,
+            alignment: .trailing
+        )
+    }
+
+    /// A release too slow to decelerate never honours the retargeted offset —
+    /// snap it home directly.
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        guard !decelerate else { return }
+        MapBarSnap.settle(collectionView, alignment: .trailing)
+    }
+
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        MapBarSnap.settle(collectionView, alignment: .trailing)
     }
 }

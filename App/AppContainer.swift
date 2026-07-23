@@ -218,7 +218,10 @@ final class AppContainer {
         favoritesRepository: mapsFavoritesRepository,
         imagePipeline: imagePipeline,
         videoPlayback: mapsVideoPlayback,
-        feedFeature: { [unowned self] in self.feedFeature }
+        feedFeature: { [unowned self] in self.feedFeature },
+        openProfile: { [unowned self] id, stub in
+            self.router.route(to: .profile(id, stub: stub))
+        }
     )
 
     // MARK: - Profile

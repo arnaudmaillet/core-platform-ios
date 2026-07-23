@@ -332,4 +332,31 @@ extension MapFilterBarView: UICollectionViewDelegate {
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         updateStickyFade()
     }
+
+    /// Magnetic snap (leading): the release lands the nearest pill's leading
+    /// edge flush against the sticky All bubble, so no pill ever rests
+    /// half-ducked beneath it. See `MapBarSnap`.
+    func scrollViewWillEndDragging(
+        _ scrollView: UIScrollView,
+        withVelocity velocity: CGPoint,
+        targetContentOffset: UnsafeMutablePointer<CGPoint>
+    ) {
+        targetContentOffset.pointee.x = MapBarSnap.offsetX(
+            snapping: collectionView,
+            proposedX: targetContentOffset.pointee.x,
+            velocityX: velocity.x,
+            alignment: .leading
+        )
+    }
+
+    /// A release too slow to decelerate never honours the retargeted offset —
+    /// snap it home directly.
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        guard !decelerate else { return }
+        MapBarSnap.settle(collectionView, alignment: .leading)
+    }
+
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        MapBarSnap.settle(collectionView, alignment: .leading)
+    }
 }
