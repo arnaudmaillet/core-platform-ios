@@ -36,6 +36,16 @@ final class MapPillCell: UICollectionViewCell {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// Alpha is BAR state, not cell state: the sub bar drives it from the
+    /// duck-fade and both bars fade cells in on arrival. A recycled cell must
+    /// therefore come back opaque — inheriting a ducked (or mid-dissolve)
+    /// alpha from its previous tenant would strand a pill invisible in a bar
+    /// that has no obstruction to fade it back.
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        alpha = 1
+    }
+
     func configure(content: MapPillButton.Content, height: CGFloat, selected: Bool) {
         let pill = existingPill(height: height, initialContent: content)
         pill.setContent(content)
@@ -94,7 +104,7 @@ final class MapBarCollectionView: UICollectionView {
 }
 
 /// The bars' duck-fade curve: pills dissolve as they APPROACH an obstructing
-/// glass element (sticky All header, fixed expand bubble) and are fully
+/// glass element (the sub bar's fixed leading button) and are fully
 /// transparent at shallow overlap. Starting the fade only at first contact
 /// left pills half-under the obstruction at high alpha — the obstruction's
 /// capsule edge then sliced them into a blurred-behind-glass half and a

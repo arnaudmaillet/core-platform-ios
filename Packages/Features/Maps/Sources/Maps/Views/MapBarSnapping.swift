@@ -2,29 +2,23 @@ import UIKit
 
 /// Magnetic pill snapping, shared by the two map filter bars.
 ///
-/// Both bars park a FIXED glass bubble over one edge of a scrolling pill row
-/// — the sticky "All" header on the leading edge, the expand button on the
-/// trailing one — and duck-fade cells that slide beneath it. A free-scrolling
-/// row can therefore come to rest with a pill parked half-dissolved under the
-/// glass: too faded to read, too present to ignore. Snapping deletes that
-/// state — on release the row lands with a pill boundary flush against the
-/// bubble.
+/// Both bars scroll their pill row leading-ward under something: the sub bar
+/// parks a FIXED glass button over its leading edge and duck-fades cells
+/// sliding beneath it; the main bar has no furniture, but its row still runs
+/// off the bar's leading margin. A free-scrolling row can therefore come to
+/// rest with a pill half-dissolved under the button, or sliced by the bar's
+/// edge: too faded to read, too present to ignore. Snapping deletes that
+/// state — on release the row lands with a pill's LEADING edge flush against
+/// the anchor line.
 ///
-/// The anchor line is the collection view's own horizontal content inset,
-/// which is exactly the gap the bars already reserve for their bubble. Using
-/// it (rather than re-deriving the button geometry) makes the first pill's
-/// snap and the row's RESTING offset the same number by construction — a
+/// That anchor is the collection view's own leading content inset, which is
+/// exactly the gap each bar already reserves (the button plus its fade margin
+/// in the sub bar, the container margin in the main one). Using it — rather
+/// than re-deriving the chrome's geometry — makes the first pill's snap and
+/// the row's RESTING offset the same number by construction, so a
 /// scrolled-home row can't jitter by a point on release.
 @MainActor
 enum MapBarSnap {
-    /// Which pill edge lands on the anchor line.
-    enum Alignment {
-        /// Pill leading edges align just past the leading bubble (main bar).
-        case leading
-        /// Pill trailing edges align just before the trailing bubble (sub bar).
-        case trailing
-    }
-
     /// Points/ms below which a release reads as a nudge rather than a flick;
     /// a nudge may snap in either direction, a flick may not reverse.
     private static let flickVelocity: CGFloat = 0.25
@@ -39,8 +33,7 @@ enum MapBarSnap {
     static func offsetX(
         snapping collectionView: UICollectionView,
         proposedX: CGFloat,
-        velocityX: CGFloat,
-        alignment: Alignment
+        velocityX: CGFloat
     ) -> CGFloat {
         let inset = collectionView.adjustedContentInset
         let minX = -inset.left
@@ -49,11 +42,8 @@ enum MapBarSnap {
         guard maxX > minX else { return proposedX }
 
         // The anchor in collection-view coordinates: the inner edge of the
-        // gap the bar reserves for its fixed bubble.
-        let anchorX = switch alignment {
-        case .leading: inset.left
-        case .trailing: collectionView.bounds.width - inset.right
-        }
+        // gap the bar reserves ahead of its row.
+        let anchorX = inset.left
 
         let contentRect = CGRect(origin: .zero, size: collectionView.contentSize)
         let cells = collectionView.collectionViewLayout
@@ -62,8 +52,7 @@ enum MapBarSnap {
         guard !cells.isEmpty else { return proposedX }
 
         let candidates = cells
-            .map { alignment == .leading ? $0.frame.minX : $0.frame.maxX }
-            .map { min(max($0 - anchorX, minX), maxX) }
+            .map { min(max($0.frame.minX - anchorX, minX), maxX) }
 
         // A flick keeps its direction — snapping back past the release point
         // would fight the gesture. If it flicked clean off the end, the
@@ -85,11 +74,9 @@ enum MapBarSnap {
     /// layout that shifts under it; this re-aligns once the real geometry
     /// exists. A no-op (sub-point) in the common case, so it can be wired to
     /// every scroll end without reading as a second animation.
-    static func settle(_ collectionView: UICollectionView, alignment: Alignment) {
+    static func settle(_ collectionView: UICollectionView) {
         let currentX = collectionView.contentOffset.x
-        let snappedX = offsetX(
-            snapping: collectionView, proposedX: currentX, velocityX: 0, alignment: alignment
-        )
+        let snappedX = offsetX(snapping: collectionView, proposedX: currentX, velocityX: 0)
         guard abs(snappedX - currentX) > tolerance else { return }
         collectionView.setContentOffset(
             CGPoint(x: snappedX, y: collectionView.contentOffset.y), animated: true
