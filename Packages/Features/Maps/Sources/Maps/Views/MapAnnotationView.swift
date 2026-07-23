@@ -120,6 +120,13 @@ final class MapAnnotationView: MKAnnotationView {
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        // Pop state is per-APPEARANCE, not per-view: a marker retired mid-fade
+        // goes back to the pool at alpha 0 and half scale, and the next pin to
+        // dequeue it would be invisible until something happened to animate it
+        // again. `MapAnnotationPopChoreographer` re-poses every view it pops
+        // in, but a view can also be dequeued for a pin that never pops.
+        alpha = 1
+        transform = .identity
         // Note: `clusteringIdentifier` is deliberately NOT touched here — clearing
         // it would drop the view from clustering until re-set. It's re-asserted
         // in `prepareForDisplay()` before the view is shown again.

@@ -15,6 +15,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
     private let videoPlayback: VideoPlaybackController
     private let feedFeature: () -> any FeedFeatureBuilding
     private let openProfile: (ProfileID, ProfileIdentityStub?) -> Void
+    private let openConversation: (ProfileID) -> Void
 
     /// - Parameters:
     ///   - videoPlayback: a Maps-dedicated player pool (separate from the feed's)
@@ -26,13 +27,17 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
     ///     surfaces (the sub-filter sheet's Profile swipe). Injected rather than
     ///     imported so Maps keeps knowing nothing about routes or the Profile
     ///     feature.
+    ///   - openConversation: fires the app's message-this-person destination
+    ///     (the sub-filter pill menu's Send Message). Injected for the same
+    ///     reason as `openProfile`.
     public init(
         repository: any GeoDiscoveryProviding,
         favoritesRepository: any MapFavoritesProviding,
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController,
         feedFeature: @escaping () -> any FeedFeatureBuilding,
-        openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void
+        openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
+        openConversation: @escaping (ProfileID) -> Void
     ) {
         self.repository = repository
         self.favoritesRepository = favoritesRepository
@@ -40,6 +45,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         self.videoPlayback = videoPlayback
         self.feedFeature = feedFeature
         self.openProfile = openProfile
+        self.openConversation = openConversation
     }
 
     public func makeMapViewController() -> UIViewController {
@@ -51,7 +57,8 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             videoPlayback: videoPlayback,
             makeSnapFeed: { postIDs in feedFeature().makeSnapFeedViewController(postIDs: postIDs) },
             prewarm: { ids in await feedFeature().prewarmPosts(ids) },
-            openProfile: openProfile
+            openProfile: openProfile,
+            openConversation: openConversation
         )
     }
 }

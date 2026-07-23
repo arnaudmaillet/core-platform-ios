@@ -308,6 +308,11 @@ final class MapPillButton: UIButton {
 }
 
 extension UIView {
+    /// The perceptual length of `mapBarFade`. Public because callers that
+    /// SEQUENCE fades need to phrase their timing as a fraction of it rather
+    /// than duplicating the number (see `MapSubFilterBarView.transition`).
+    static let mapBarFadeDuration: TimeInterval = 0.25
+
     /// The bars' fade primitive: a critically-damped spring (zero bounce).
     /// Opacity must NEVER overshoot — an alpha bounce reads as flicker, which
     /// is exactly what made the naive all-spring pass feel wrong. The spring
@@ -317,7 +322,7 @@ extension UIView {
         completion: ((Bool) -> Void)? = nil
     ) {
         UIView.animate(
-            springDuration: 0.25, bounce: 0,
+            springDuration: mapBarFadeDuration, bounce: 0,
             delay: 0, options: [.allowUserInteraction, .beginFromCurrentState],
             animations: animations, completion: completion
         )

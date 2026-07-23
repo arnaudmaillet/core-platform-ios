@@ -77,6 +77,11 @@ final class MapClusterAnnotationView: MKAnnotationView {
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        // Same reason as `MapAnnotationView`: pop state belongs to an
+        // appearance, and a cluster view recycled mid-fade would otherwise
+        // come back invisible and half-size.
+        alpha = 1
+        transform = .identity
         imageTask?.cancel()
         imageTask = nil
         representedURL = nil
