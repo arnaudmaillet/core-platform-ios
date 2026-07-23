@@ -71,13 +71,13 @@ struct MapsViewModelTests {
         viewModel.filterChanged(.friends)
         await waitUntil { provider.calls.count == 2 }
 
-        viewModel.subFilterChanged(.profile(ProfileID("prof-0")))
+        viewModel.subFiltersChanged([.profile(ProfileID("prof-0"))])
         await waitUntil { provider.calls.count == 3 }
         #expect(provider.calls.last == .init(viewport: Self.paris, filter: .profile(ProfileID("prof-0"))))
 
         viewModel.filterChanged(.pinned)
         await waitUntil { provider.calls.count == 4 }
-        viewModel.subFilterChanged(.placeCategory("cafes"))
+        viewModel.subFiltersChanged([.placeCategory("cafes")])
         await waitUntil { provider.calls.count == 5 }
         #expect(provider.calls.last == .init(viewport: Self.paris, filter: .pinnedCategory("cafes")))
     }
@@ -87,14 +87,14 @@ struct MapsViewModelTests {
         let viewModel = MapsViewModel(repository: provider)
         viewModel.viewportChanged(Self.paris)
         viewModel.filterChanged(.friends)
-        viewModel.subFilterChanged(.profile(ProfileID("prof-0")))
+        viewModel.subFiltersChanged([.profile(ProfileID("prof-0"))])
         await waitUntil { provider.calls.count == 3 }
 
         viewModel.filterChanged(.following)
         await waitUntil { provider.calls.count == 4 }
 
         // The refinement of the old primary must not leak into the new one.
-        #expect(viewModel.activeSubFilter == nil)
+        #expect(viewModel.activeSubFilters.isEmpty)
         #expect(provider.calls.last == .init(viewport: Self.paris, filter: .following))
     }
 
@@ -103,10 +103,10 @@ struct MapsViewModelTests {
         let viewModel = MapsViewModel(repository: provider)
         viewModel.viewportChanged(Self.paris)
         viewModel.filterChanged(.pinned)
-        viewModel.subFilterChanged(.placeCategory("parks"))
+        viewModel.subFiltersChanged([.placeCategory("parks")])
         await waitUntil { provider.calls.count == 3 }
 
-        viewModel.subFilterChanged(nil)
+        viewModel.subFiltersChanged([])
         await waitUntil { provider.calls.count == 4 }
 
         #expect(provider.calls.last == .init(viewport: Self.paris, filter: .pinned))
@@ -118,10 +118,10 @@ struct MapsViewModelTests {
         viewModel.viewportChanged(Self.paris)
         await waitUntil { provider.calls.count == 1 }
 
-        viewModel.subFilterChanged(.placeCategory("cafes"))
+        viewModel.subFiltersChanged([.placeCategory("cafes")])
 
         #expect(provider.calls.count == 1)
-        #expect(viewModel.activeSubFilter == nil)
+        #expect(viewModel.activeSubFilters.isEmpty)
     }
 
     @Test func clearingTheFilterRequeriesAll() async {

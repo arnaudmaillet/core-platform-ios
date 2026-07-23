@@ -38,6 +38,22 @@ final class MapPillButton: UIButton {
         }
     }
 
+    /// The pill's hard width ceiling, and the share of the screen it may
+    /// never exceed. Titles are user content — a display name like
+    /// "Maximilian Schwarzenberger-Ulrichsdottir" would otherwise mint a
+    /// capsule wider than the bar, pushing every sibling primary past the
+    /// fold and leaving nothing to scroll back to. Half the screen keeps at
+    /// least one neighbour (and the fixed bubble) in view on small devices;
+    /// the 200pt ceiling stops an iPad from minting a banner.
+    static let widthCeiling: CGFloat = 200
+    static let widthScreenShare: CGFloat = 0.5
+
+    /// The resolved cap for a given screen width — pure, so the sizing rule
+    /// is testable without a window.
+    static func maxWidth(forScreenWidth screenWidth: CGFloat) -> CGFloat {
+        min(widthCeiling, screenWidth * widthScreenShare)
+    }
+
     private(set) var content: Content
     private var hasGlass = false
     private var isSelectedAppearance = false
@@ -55,21 +71,38 @@ final class MapPillButton: UIButton {
     /// expands, handing width back to the intrinsic icon + title + insets.
     private lazy var circleConstraint = widthAnchor.constraint(equalTo: heightAnchor)
 
+    /// The cap. Always active — a circle's `width == height` sits far below
+    /// it, so only overlong capsules ever feel it. Its constant is retuned to
+    /// the real screen on window attach.
+    private lazy var maxWidthConstraint = widthAnchor.constraint(
+        lessThanOrEqualToConstant: Self.widthCeiling
+    )
+
     init(content: Content, height: CGFloat) {
         self.content = content
         super.init(frame: .zero)
         configuration = makeConfiguration(glass: false, selected: false)
         accessibilityLabel = content.accessibilityLabel
+        // The pill activates its own height / circle / cap constraints, so it
+        // is an Auto Layout view by construction — leaving the autoresizing
+        // translation on would let a frame-sized parent fight them (and makes
+        // `systemLayoutSizeFitting` measure the bare content instead).
+        translatesAutoresizingMaskIntoConstraints = false
         // Fixed height (the bar-bubble family). Width: circles pin to the
         // height (capsule corners → a circle); text pills stay intrinsic —
         // strictly content-determined, never constrained.
         heightAnchor.constraint(equalToConstant: height).isActive = true
         circleConstraint.isActive = isCircular
-        // Width is sacred: hug the content and refuse compression, so no
+        maxWidthConstraint.isActive = true
+        // Width is sacred: hug the content and resist compression, so no
         // stack/scroll ambiguity can ever stretch or squeeze a pill away
-        // from its intrinsic avatar + title + insets width.
+        // from its intrinsic avatar + title + insets width. Compression
+        // resistance stops ONE point short of required — the cap is the only
+        // force allowed to win against the intrinsic width, and a required
+        // resistance would make an overlong title an unsatisfiable conflict
+        // (UIKit would break one of them, arbitrarily, and log).
         setContentHuggingPriority(.required, for: .horizontal)
-        setContentCompressionResistancePriority(.required, for: .horizontal)
+        setContentCompressionResistancePriority(.required - 1, for: .horizontal)
     }
 
     @available(*, unavailable)
@@ -81,6 +114,26 @@ final class MapPillButton: UIButton {
             hasGlass = true
             configuration = makeConfiguration(glass: true, selected: isSelectedAppearance)
         }
+        updateMaxWidth()
+    }
+
+    override func layoutSubviews() {
+        // Rotation / iPad split-view resizes change the share; the guard
+        // inside makes this a no-op in every ordinary pass (a constant that
+        // never changes can't retrigger layout).
+        updateMaxWidth()
+        super.layoutSubviews()
+    }
+
+    /// Retunes the cap to the CONTAINING WINDOW rather than the physical
+    /// screen — under iPad multitasking the window is the real estate the bar
+    /// actually has, and "half the screen" would let a pill fill a slim
+    /// column edge to edge.
+    private func updateMaxWidth() {
+        guard let containerWidth = window?.bounds.width, containerWidth > 0 else { return }
+        let cap = Self.maxWidth(forScreenWidth: containerWidth)
+        guard abs(maxWidthConstraint.constant - cap) > 0.5 else { return }
+        maxWidthConstraint.constant = cap
     }
 
     /// The tactile press: a quick dip to 95% on touch-down, a springy bounce
@@ -175,6 +228,22 @@ final class MapPillButton: UIButton {
         return rendered.withRenderingMode(.alwaysOriginal)
     }
 
+    /// What the pill actually renders. Identity to the caller's title in a
+    /// shipping build; under the DEBUG `-maps-long-titles` stress arg every
+    /// title grows past the cap, which is the only way to exercise truncation
+    /// in-sim (no seeded profile or place category has a name long enough).
+    private static func displayTitle(_ title: String) -> String {
+        #if DEBUG
+        if stressesLongTitles { return "\(title) Maximilian Schwarzenberger-Ulrichsdottir" }
+        #endif
+        return title
+    }
+
+    #if DEBUG
+    private static let stressesLongTitles =
+        ProcessInfo.processInfo.arguments.contains("-maps-long-titles")
+    #endif
+
     private func makeConfiguration(glass: Bool, selected: Bool) -> UIButton.Configuration {
         // Selection is carried by the CONTENT, not the material: a selected
         // pill keeps a neutral frosted lift (soft white fill + subtle
@@ -192,7 +261,7 @@ final class MapPillButton: UIButton {
         // label only exists in the expanded capsule.
         if let title = content.title, !isCircular {
             config.attributedTitle = AttributedString(
-                title,
+                Self.displayTitle(title),
                 attributes: AttributeContainer([
                     .font: UIFont.preferredFont(forTextStyle: .footnote)
                         .withWeight(selected ? .semibold : .medium)
@@ -202,8 +271,10 @@ final class MapPillButton: UIButton {
             // pills keep a hairline gap (glyphs carry whitespace of their
             // own).
             config.imagePadding = avatarImage == nil ? 4 : 6
-            // Titles are single-line by contract — a mis-measured cell must
-            // truncate, never wrap into a two-line pill.
+            // Titles are single-line by contract: at the cap the label is
+            // narrower than the text it holds, so it must truncate with an
+            // ellipsis — never wrap into a two-line pill inside a
+            // fixed-height capsule.
             config.titleLineBreakMode = .byTruncatingTail
         }
         // A real avatar (people pills) beats the symbol; otherwise a lone

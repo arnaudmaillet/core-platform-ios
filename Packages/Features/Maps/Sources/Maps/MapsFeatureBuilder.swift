@@ -14,6 +14,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
     private let imagePipeline: ImagePipeline
     private let videoPlayback: VideoPlaybackController
     private let feedFeature: () -> any FeedFeatureBuilding
+    private let openProfile: (ProfileID, ProfileIdentityStub?) -> Void
 
     /// - Parameters:
     ///   - videoPlayback: a Maps-dedicated player pool (separate from the feed's)
@@ -21,18 +22,24 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
     ///   - feedFeature: resolves the feed builder lazily, so the map can expand a
     ///     pin/cluster into the shared snap feed without the composition root
     ///     ordering the two features.
+    ///   - openProfile: fires the app's profile destination for a person the map
+    ///     surfaces (the sub-filter sheet's Profile swipe). Injected rather than
+    ///     imported so Maps keeps knowing nothing about routes or the Profile
+    ///     feature.
     public init(
         repository: any GeoDiscoveryProviding,
         favoritesRepository: any MapFavoritesProviding,
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController,
-        feedFeature: @escaping () -> any FeedFeatureBuilding
+        feedFeature: @escaping () -> any FeedFeatureBuilding,
+        openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void
     ) {
         self.repository = repository
         self.favoritesRepository = favoritesRepository
         self.imagePipeline = imagePipeline
         self.videoPlayback = videoPlayback
         self.feedFeature = feedFeature
+        self.openProfile = openProfile
     }
 
     public func makeMapViewController() -> UIViewController {
@@ -43,7 +50,8 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             imagePipeline: imagePipeline,
             videoPlayback: videoPlayback,
             makeSnapFeed: { postIDs in feedFeature().makeSnapFeedViewController(postIDs: postIDs) },
-            prewarm: { ids in await feedFeature().prewarmPosts(ids) }
+            prewarm: { ids in await feedFeature().prewarmPosts(ids) },
+            openProfile: openProfile
         )
     }
 }

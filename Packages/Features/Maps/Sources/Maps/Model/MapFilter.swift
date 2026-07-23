@@ -24,11 +24,36 @@ public enum MapFilter: Hashable, Sendable {
     case profile(ProfileID)
     /// Pinned places narrowed to one category (the Places sub-filter row).
     case pinnedCategory(String)
+    /// Several refinements at once — the sub-filter row's multi-selection.
+    /// Semantics are OR: a pin matching ANY member is shown ("Lena AND
+    /// Marcus" in the viewer's words is "Lena's posts ∪ Marcus's posts").
+    /// Members are always leaf cases; `resolved(_:)` is the only builder, and
+    /// it flattens and orders them so one selection has exactly one token.
+    case any([MapFilter])
 
     /// The request-header channel the selection travels on (see above).
     public static let headerName = "x-map-filter"
     private static let profileTokenPrefix = "profile:"
     private static let pinnedCategoryTokenPrefix = "pinned:"
+    /// Separates the members of an `any` token. The mock splits on it and
+    /// matches any component.
+    private static let anySeparator = ","
+
+    /// Collapses a set of filters into one: nothing, the lone member, or an
+    /// `any` in a stable order (sets are unordered — the header must not
+    /// churn between two identical selections).
+    public static func resolved(_ filters: [MapFilter]) -> MapFilter? {
+        let leaves = filters.flatMap { filter -> [MapFilter] in
+            if case .any(let members) = filter { return members }
+            return [filter]
+        }
+        let unique = Array(Set(leaves)).sorted { $0.wireToken < $1.wireToken }
+        switch unique.count {
+        case 0: return nil
+        case 1: return unique[0]
+        default: return .any(unique)
+        }
+    }
 
     /// The wire encoding sent in `headerName` (and accepted by the
     /// `-maps-select-filter` debug arg).
@@ -40,10 +65,20 @@ public enum MapFilter: Hashable, Sendable {
         case .nearby: "nearby"
         case .profile(let id): Self.profileTokenPrefix + id.rawValue
         case .pinnedCategory(let category): Self.pinnedCategoryTokenPrefix + category
+        case .any(let members): members.map(\.wireToken).joined(separator: Self.anySeparator)
         }
     }
 
     public init?(wireToken: String) {
+        // A multi-selection token is the leaf tokens joined; parse it back
+        // through `resolved` so the round trip is exact.
+        if wireToken.contains(Self.anySeparator) {
+            let members = wireToken.split(separator: Self.anySeparator)
+                .compactMap { MapFilter(wireToken: String($0)) }
+            guard let resolved = Self.resolved(members) else { return nil }
+            self = resolved
+            return
+        }
         switch wireToken {
         case "friends": self = .friends
         case "following": self = .following
@@ -87,10 +122,15 @@ public struct MapFavorite: Sendable, Equatable {
     public let title: String
     /// Avatar thumbnail, rendered in people pills and the full-list sheet.
     public let avatarURL: URL?
+    /// Raw handle, no "@" sigil — the consumer applies presentation (the
+    /// sheet's subtitle line, the profile route's identity stub). Optional:
+    /// a profile that failed to hydrate a handle still makes a valid pill.
+    public let handle: String?
 
-    public init(profileID: ProfileID, title: String, avatarURL: URL? = nil) {
+    public init(profileID: ProfileID, title: String, avatarURL: URL? = nil, handle: String? = nil) {
         self.profileID = profileID
         self.title = title
         self.avatarURL = avatarURL
+        self.handle = handle
     }
 }

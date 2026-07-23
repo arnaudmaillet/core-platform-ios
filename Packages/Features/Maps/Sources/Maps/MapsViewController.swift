@@ -34,6 +34,11 @@ final class MapsViewController: UIViewController {
     private let makeSnapFeed: ([PostID]) -> UIViewController
     /// Warms the given posts into the shared cache so a tap opens instantly.
     private let prewarm: ([PostID]) async -> Void
+    /// Opens someone's profile (the sub-filter sheet's Profile swipe). A
+    /// closure, not a router: the Maps package stays navigation-agnostic —
+    /// the shell decides that this means the `.profile` route, exactly as it
+    /// does for the avatar and compose bar items.
+    private let openProfile: (ProfileID, ProfileIdentityStub?) -> Void
     /// The current viewport's prefetch, cancelled when the map settles elsewhere.
     private var prewarmTask: Task<Void, Never>?
     /// Runaway guard: clustering already bounds the visible set to a handful, but
@@ -70,6 +75,19 @@ final class MapsViewController: UIViewController {
     /// primary tap renders its sub-filter row SYNCHRONOUSLY — the row must
     /// never wait on the social graph. Keyed by `.friends` / `.following`.
     private var peopleCache: [MapFilter: [MapFavorite]] = [:]
+    /// The viewer's manual sub-filter order per primary, set by dragging rows
+    /// in the full-list sheet. Session-scoped: it outlives primary switches
+    /// and background refreshes, not the process.
+    private var subFilterOrder: [MapFilter: [MapSubFilter]] = [:]
+    /// Refinements deleted in the sheet's edit mode, per primary — the social
+    /// graph still returns them, so the row has to remember they're gone.
+    private var subFilterHidden: [MapFilter: Set<MapSubFilter>] = [:]
+    /// Accounts muted from the sheet's swipe action. Session-local, like the
+    /// conversation list's mute: `social_graph.v1` has no mute concept, and
+    /// muting can't filter the map either until `RadarPin` carries an author
+    /// id (the same Phase-2 gate as the filter header). Today it marks the
+    /// row, and nothing more — a deliberately honest half of the feature.
+    private var mutedProfiles: Set<ProfileID> = []
     /// id → live marker, so a diff can target the exact annotation to remove or
     /// refresh without rebuilding the set.
     private var annotations: [PostID: MapAnnotation] = [:]
@@ -100,7 +118,8 @@ final class MapsViewController: UIViewController {
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController,
         makeSnapFeed: @escaping ([PostID]) -> UIViewController,
-        prewarm: @escaping ([PostID]) async -> Void
+        prewarm: @escaping ([PostID]) async -> Void,
+        openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void
     ) {
         self.viewModel = viewModel
         self.favoritesRepository = favoritesRepository
@@ -108,6 +127,7 @@ final class MapsViewController: UIViewController {
         self.videoCoordinator = MapVideoPlaybackCoordinator(pool: videoPlayback)
         self.makeSnapFeed = makeSnapFeed
         self.prewarm = prewarm
+        self.openProfile = openProfile
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -178,22 +198,26 @@ final class MapsViewController: UIViewController {
                 self?.togglePinnedFavorite(MapFavorite(profileID: ProfileID(id), title: ""))
             }
         }
-        // `-maps-select-subfilter <profile:ID|place:token>`: selects a
-        // refinement pill ~3s in (after the sub-filter row has loaded).
-        // Pair with `-maps-select-filter friends|following|pinned`.
-        if let token = UserDefaults.standard.string(forKey: "maps-select-subfilter") {
-            let subFilter: MapSubFilter? = if token.hasPrefix("profile:") {
-                .profile(ProfileID(String(token.dropFirst("profile:".count))))
-            } else if token.hasPrefix("place:") {
-                .placeCategory(String(token.dropFirst("place:".count)))
-            } else {
-                nil
-            }
-            if let subFilter {
+        // `-maps-select-subfilter <profile:ID|place:token>[,…]`: selects
+        // refinement pills ~3s in (after the sub-filter row has loaded).
+        // Several comma-separated tokens select several at once — the row and
+        // the query then carry their union. Pair with
+        // `-maps-select-filter friends|following|pinned`.
+        if let tokens = UserDefaults.standard.string(forKey: "maps-select-subfilter") {
+            let subFilters = Set(tokens.split(separator: ",").compactMap { token -> MapSubFilter? in
+                if token.hasPrefix("profile:") {
+                    .profile(ProfileID(String(token.dropFirst("profile:".count))))
+                } else if token.hasPrefix("place:") {
+                    .placeCategory(String(token.dropFirst("place:".count)))
+                } else {
+                    nil
+                }
+            })
+            if !subFilters.isEmpty {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
                     guard let self else { return }
-                    self.subFilterBar.setSelectedSubFilter(subFilter)
-                    self.viewModel.subFilterChanged(subFilter)
+                    subFilterBar.setSelectedSubFilters(subFilters)
+                    viewModel.subFiltersChanged(subFilters)
                 }
             }
         }
@@ -287,8 +311,8 @@ final class MapsViewController: UIViewController {
             self?.updateSubFilterBar(for: filter)
         }
         subFilterBar.imagePipeline = imagePipeline
-        subFilterBar.onSubFilterChanged = { [weak self] subFilter in
-            self?.viewModel.subFilterChanged(subFilter)
+        subFilterBar.onSubFiltersChanged = { [weak self] subFilters in
+            self?.viewModel.subFiltersChanged(subFilters)
         }
         subFilterBar.onExpandTapped = { [weak self] in
             self?.presentSubFilterSheet()
@@ -365,6 +389,7 @@ final class MapsViewController: UIViewController {
     /// visible → cross-dissolve the pills in place (a hard swap while
     /// on-screen reads as a snap).
     private func showSubFilterRow(_ options: [MapSubFilterOption]) {
+        let options = orderedByPreference(options)
         currentSubFilterOptions = options
         if isSubFilterBarVisible {
             subFilterBar.transition(to: options)
@@ -378,24 +403,131 @@ final class MapsViewController: UIViewController {
     /// bottom sheet; a row tap applies (or clears) that refinement.
     private func presentSubFilterSheet() {
         guard !currentSubFilterOptions.isEmpty else { return }
-        let title: String? = switch filterBar.selectedFilter {
+        // Only the primaries that HAVE a refinement dimension get a sheet —
+        // and the primary's own name is the sheet's title.
+        guard let title = subFilterTitle(for: filterBar.selectedFilter) else { return }
+        let sheet = MapSubFilterSheetViewController.makeSheet(
+            title: title,
+            // The sheet shows the whole catalogue split in two: what the bar
+            // carries, and everything else this primary could offer.
+            all: allSubFilterOptions(),
+            activeSubFilters: currentSubFilterOptions.map(\.subFilter),
+            selected: subFilterBar.selectedSubFilters,
+            imagePipeline: imagePipeline,
+            rowActions: MapSubFilterSheetViewController.RowActions(
+                openProfile: { [weak self] favorite in self?.openProfile(favorite) },
+                toggleMute: { [weak self] favorite in
+                    self?.mutedProfiles.formSymmetricDifference([favorite.profileID])
+                },
+                isMuted: { [weak self] id in self?.mutedProfiles.contains(id) ?? false }
+            ),
+            onOptionsChanged: { [weak self] options in
+                self?.adoptSubFilterOptions(options)
+            },
+            onSelectionChanged: { [weak self] subFilters in
+                guard let self else { return }
+                subFilterBar.setSelectedSubFilters(subFilters)
+                viewModel.subFiltersChanged(subFilters)
+            }
+        )
+        present(sheet, animated: true)
+    }
+
+    /// The primary's display name — the sheet's title, and the test for
+    /// whether a primary has a refinement dimension at all (All and the
+    /// favorite pills answer nil, and get no sheet).
+    private func subFilterTitle(for filter: MapFilter?) -> String? {
+        switch filter {
         case .friends: "Friends"
         case .following: "Following"
         case .pinned: "Places"
         default: nil
         }
-        guard let title else { return }
-        let sheet = MapSubFilterSheetViewController(
-            title: title,
-            options: currentSubFilterOptions,
-            selected: subFilterBar.selectedSubFilter,
-            imagePipeline: imagePipeline
-        ) { [weak self] subFilter in
-            guard let self else { return }
-            self.subFilterBar.setSelectedSubFilter(subFilter)
-            self.viewModel.subFilterChanged(subFilter)
+    }
+
+    /// Every refinement the current primary can offer, edits ignored — the
+    /// catalogue the sheet splits into Active and Available.
+    private func allSubFilterOptions() -> [MapSubFilterOption] {
+        switch filterBar.selectedFilter {
+        case .friends, .following:
+            guard let primary = filterBar.selectedFilter else { return [] }
+            return MapSubFilterOption.people(peopleCache[primary] ?? [])
+        case .pinned:
+            return MapSubFilterOption.placeCategories
+        default:
+            return []
         }
-        present(sheet, animated: true)
+    }
+
+    /// The sheet's Profile swipe. Maps stays navigation-agnostic (the tab
+    /// coordinator owns routing), so this hands the shell an id plus the
+    /// identity it already has on screen — the destination renders its header
+    /// from the stub instead of flashing empty while the profile loads.
+    private func openProfile(_ favorite: MapFavorite) {
+        openProfile(
+            favorite.profileID,
+            favorite.handle.map {
+                ProfileIdentityStub(handle: $0, displayName: favorite.title, isFollowing: true)
+            }
+        )
+    }
+
+    /// A drop or a deletion in the sheet's list. The horizontal row restacks
+    /// immediately (the sheet is still open — by the time it closes the row is
+    /// already right), and both edits are remembered for this primary so a
+    /// later Friends → Places → Friends round trip doesn't silently rebuild
+    /// the repository's list over the viewer's. Session-scoped and in memory:
+    /// these are viewing preferences, not state the backend knows about.
+    private func adoptSubFilterOptions(_ options: [MapSubFilterOption]) {
+        let surviving = Set(options.map(\.subFilter))
+        currentSubFilterOptions = options
+
+        if let primary = filterBar.selectedFilter {
+            subFilterOrder[primary] = options.map(\.subFilter)
+            // Hidden is simply "in the catalogue but not in the row" —
+            // recomputed rather than accumulated, so a promotion out of the
+            // Available section un-hides in the same stroke a demotion hides.
+            // Without it the next background refresh would resurrect every
+            // removed row: they are still in the social graph.
+            subFilterHidden[primary] = Set(allSubFilterOptions().map(\.subFilter))
+                .subtracting(surviving)
+        }
+        // A refinement can't outlive its pill: any applied refinement whose
+        // row left the bar is dropped from the selection.
+        let stillApplied = subFilterBar.selectedSubFilters.intersection(surviving)
+        if stillApplied != subFilterBar.selectedSubFilters {
+            subFilterBar.setSelectedSubFilters(stillApplied)
+            viewModel.subFiltersChanged(stillApplied)
+        }
+        // Delete the last row and the refinement dimension is empty — there is
+        // nothing left to show, so the row retires rather than sitting there
+        // as a lone expand bubble.
+        if options.isEmpty {
+            setSubFilterBar(visible: false)
+        } else {
+            subFilterBar.restack(to: options)
+            // …and back again: emptying the row retires it, so refilling it
+            // from the sheet has to un-retire it, or the pills the viewer just
+            // restored have nowhere to land (a no-op while already visible).
+            setSubFilterBar(visible: true)
+        }
+    }
+
+    /// Re-applies the viewer's edits to a freshly built option list: deleted
+    /// rows stay gone, known items keep their dragged seats, anything the
+    /// refresh added lands at the end (the sort is written as two passes
+    /// because `sorted(by:)` is not stable — a rank-or-`Int.max` comparator
+    /// would shuffle the newcomers).
+    private func orderedByPreference(_ options: [MapSubFilterOption]) -> [MapSubFilterOption] {
+        guard let primary = filterBar.selectedFilter else { return options }
+        let hidden = subFilterHidden[primary] ?? []
+        let options = hidden.isEmpty ? options : options.filter { !hidden.contains($0.subFilter) }
+        guard let order = subFilterOrder[primary], !order.isEmpty else { return options }
+        let rank = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, $0) })
+        let known = options.filter { rank[$0.subFilter] != nil }
+            .sorted { rank[$0.subFilter, default: 0] < rank[$1.subFilter, default: 0] }
+        let newcomers = options.filter { rank[$0.subFilter] == nil }
+        return known + newcomers
     }
 
     /// Long-press pin/unpin from a person pill. The first mutation

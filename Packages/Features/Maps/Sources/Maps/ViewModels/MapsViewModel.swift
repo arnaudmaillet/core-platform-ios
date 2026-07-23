@@ -22,10 +22,10 @@ public final class MapsViewModel {
     private var lastViewport: MapViewport?
     /// The active pill; `nil` is "all". Applied to every query until changed.
     public private(set) var activeFilter: MapFilter?
-    /// The active refinement of `activeFilter` (a person under Friends/
-    /// Following, a category under Places); cleared whenever the primary
-    /// changes.
-    public private(set) var activeSubFilter: MapSubFilter?
+    /// The active refinements of `activeFilter` (people under Friends/
+    /// Following, categories under Places) — a SET since the sub-filter row
+    /// supports multi-selection; cleared whenever the primary changes.
+    public private(set) var activeSubFilters: Set<MapSubFilter> = []
 
     /// The annotation mutations to apply. Emitted only when non-empty.
     public var onDiff: ((MapAnnotationDiff) -> Void)?
@@ -52,35 +52,40 @@ public final class MapsViewModel {
         guard filter != activeFilter else { return }
         activeFilter = filter
         // A new primary invalidates any refinement of the old one.
-        activeSubFilter = nil
+        activeSubFilters = []
         guard let viewport = lastViewport else { return }
         query(viewport)
     }
 
-    /// The sub-filter bar changed selection (`nil` clears the refinement,
-    /// falling back to the primary). Meaningless without a primary — ignored.
-    public func subFilterChanged(_ subFilter: MapSubFilter?) {
-        guard activeFilter != nil, subFilter != activeSubFilter else { return }
-        activeSubFilter = subFilter
+    /// The sub-filter bar changed selection: none (falling back to the bare
+    /// primary), one, or — under multi-selection — several at once.
+    /// Meaningless without a primary, so ignored then.
+    public func subFiltersChanged(_ subFilters: Set<MapSubFilter>) {
+        guard activeFilter != nil, subFilters != activeSubFilters else { return }
+        activeSubFilters = subFilters
         guard let viewport = lastViewport else { return }
         query(viewport)
     }
 
-    /// (primary, sub) resolved into the one filter that goes on the wire: a
+    /// (primary, subs) resolved into the one filter that goes on the wire: a
     /// person refinement becomes `.profile` (a person's posts are already a
     /// subset of Friends/Following), a category refinement becomes
-    /// `.pinnedCategory`. A sub that doesn't fit the primary is ignored
-    /// (defensive — the UI never produces one).
+    /// `.pinnedCategory`, and several of either collapse into `.any` (OR).
+    /// A sub that doesn't fit the primary is dropped (defensive — the UI
+    /// never produces one); if that leaves nothing, the bare primary stands.
     private var resolvedFilter: MapFilter? {
         guard let activeFilter else { return nil }
-        switch (activeFilter, activeSubFilter) {
-        case (.friends, .profile(let id)), (.following, .profile(let id)):
-            return .profile(id)
-        case (.pinned, .placeCategory(let category)):
-            return .pinnedCategory(category)
-        default:
-            return activeFilter
+        let refinements = activeSubFilters.compactMap { sub -> MapFilter? in
+            switch (activeFilter, sub) {
+            case (.friends, .profile(let id)), (.following, .profile(let id)):
+                return .profile(id)
+            case (.pinned, .placeCategory(let category)):
+                return .pinnedCategory(category)
+            default:
+                return nil
+            }
         }
+        return MapFilter.resolved(refinements) ?? activeFilter
     }
 
     private func query(_ viewport: MapViewport) {

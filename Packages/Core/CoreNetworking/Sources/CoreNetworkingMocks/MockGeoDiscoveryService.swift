@@ -83,6 +83,16 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         lng: Double,
         viewport: GeoDiscovery_V1_Viewport
     ) -> Bool {
+        // Multi-selection (the sub-filter row's multi-select) arrives as its
+        // leaf tokens joined by commas, with OR semantics: a pin matching any
+        // member is shown.
+        if let filter, filter.contains(",") {
+            return filter.split(separator: ",").contains { member in
+                matches(
+                    filter: String(member), post: post, lat: lat, lng: lng, viewport: viewport
+                )
+            }
+        }
         switch filter {
         case "friends":
             return dataset.mutualProfileIDs.contains(post.authorProfileID)

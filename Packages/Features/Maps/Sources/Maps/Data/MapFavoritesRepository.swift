@@ -106,7 +106,8 @@ public actor MapFavoritesRepository: MapFavoritesProviding {
         return MapFavorite(
             profileID: ProfileID(id),
             title: title,
-            avatarURL: view.avatarURL.isEmpty ? nil : URL(string: view.avatarURL)
+            avatarURL: view.avatarURL.isEmpty ? nil : URL(string: view.avatarURL),
+            handle: view.handle.isEmpty ? nil : view.handle
         )
     }
 }
