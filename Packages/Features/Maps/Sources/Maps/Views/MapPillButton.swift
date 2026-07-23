@@ -43,8 +43,8 @@ final class MapPillButton: UIButton {
     /// "Maximilian Schwarzenberger-Ulrichsdottir" would otherwise mint a
     /// capsule wider than the bar, pushing every sibling primary past the
     /// fold and leaving nothing to scroll back to. Half the screen keeps at
-    /// least one neighbour (and the fixed bubble) in view on small devices;
-    /// the 200pt ceiling stops an iPad from minting a banner.
+    /// least one neighbour (and the sub bar's fixed button) in view on small
+    /// devices; the 200pt ceiling stops an iPad from minting a banner.
     static let widthCeiling: CGFloat = 200
     static let widthScreenShare: CGFloat = 0.5
 
@@ -137,7 +137,7 @@ final class MapPillButton: UIButton {
     }
 
     /// The tactile press: a quick dip to 95% on touch-down, a springy bounce
-    /// back on release. Lives HERE so the interactive sticky-All header gets
+    /// back on release. Lives HERE so the sub bar's fixed leading button gets
     /// it natively from its own tracking, and collection cells get the
     /// identical feel by forwarding their highlight state — one code path,
     /// uniform response. (The glass material's own pressed look rides the

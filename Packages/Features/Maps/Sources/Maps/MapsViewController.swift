@@ -182,7 +182,7 @@ final class MapsViewController: UIViewController {
             }
         }
         // `-maps-open-subfilter-sheet`: presents the sub-filter full-list
-        // sheet ~3s in (the trailing bubble's tap). Pair with
+        // sheet ~3s in (the header's organize tap). Pair with
         // `-maps-select-filter friends|following|pinned`.
         if ProcessInfo.processInfo.arguments.contains("-maps-open-subfilter-sheet") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
@@ -399,8 +399,10 @@ final class MapsViewController: UIViewController {
         }
     }
 
-    /// The trailing bubble: the row's full contents as a searchable native
-    /// bottom sheet; a row tap applies (or clears) that refinement.
+    /// The header's organize button: the row's full contents as a searchable
+    /// native bottom sheet, purely for arranging what the row carries. It
+    /// applies nothing — the sheet edits a buffer and hands back a list on
+    /// Done, or hands back nothing at all on Cancel.
     private func presentSubFilterSheet() {
         guard !currentSubFilterOptions.isEmpty else { return }
         // Only the primaries that HAVE a refinement dimension get a sheet —
@@ -412,7 +414,6 @@ final class MapsViewController: UIViewController {
             // carries, and everything else this primary could offer.
             all: allSubFilterOptions(),
             activeSubFilters: currentSubFilterOptions.map(\.subFilter),
-            selected: subFilterBar.selectedSubFilters,
             imagePipeline: imagePipeline,
             rowActions: MapSubFilterSheetViewController.RowActions(
                 openProfile: { [weak self] favorite in self?.openProfile(favorite) },
@@ -423,11 +424,6 @@ final class MapsViewController: UIViewController {
             ),
             onOptionsChanged: { [weak self] options in
                 self?.adoptSubFilterOptions(options)
-            },
-            onSelectionChanged: { [weak self] subFilters in
-                guard let self else { return }
-                subFilterBar.setSelectedSubFilters(subFilters)
-                viewModel.subFiltersChanged(subFilters)
             }
         )
         present(sheet, animated: true)
@@ -472,12 +468,13 @@ final class MapsViewController: UIViewController {
         )
     }
 
-    /// A drop or a deletion in the sheet's list. The horizontal row restacks
-    /// immediately (the sheet is still open — by the time it closes the row is
-    /// already right), and both edits are remembered for this primary so a
-    /// later Friends → Places → Friends round trip doesn't silently rebuild
-    /// the repository's list over the viewer's. Session-scoped and in memory:
-    /// these are viewing preferences, not state the backend knows about.
+    /// The sheet's committed arrangement, landing once when the viewer taps
+    /// Done. The horizontal row restacks as the sheet slides away, so what is
+    /// revealed is already right, and the edits are remembered for this
+    /// primary so a later Friends → Places → Friends round trip doesn't
+    /// silently rebuild the repository's list over the viewer's.
+    /// Session-scoped and in memory: these are viewing preferences, not state
+    /// the backend knows about. Cancel never reaches here at all.
     private func adoptSubFilterOptions(_ options: [MapSubFilterOption]) {
         let surviving = Set(options.map(\.subFilter))
         currentSubFilterOptions = options
@@ -501,7 +498,7 @@ final class MapsViewController: UIViewController {
         }
         // Delete the last row and the refinement dimension is empty — there is
         // nothing left to show, so the row retires rather than sitting there
-        // as a lone expand bubble.
+        // as a lone header.
         if options.isEmpty {
             setSubFilterBar(visible: false)
         } else {

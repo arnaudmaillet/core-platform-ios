@@ -3,25 +3,30 @@ import DesignSystem
 import UIKit
 
 /// The filter bar floating above the tab bar on the map — one horizontally
-/// scrolling `UICollectionView`:
+/// scrolling `UICollectionView`, edge to edge with NO fixed furniture:
 ///
-///   [ ✦ All ] ( 👥 ) ( 🫱 ) ( 📍 ) [ ◉ favorite ] [ ◉ favorite ] …
-///    pinned     morphing primaries    capsules, one per pinned profile
+///   ( 👥 ) ( 🫱 ) ( 📍 ) [ ◉ favorite ] [ ◉ favorite ] …
+///    morphing primaries    capsules, one per pinned profile
 ///
-/// Compositional layout + diffable snapshots. "All" is a boundary
-/// supplementary with `pinToVisibleBounds` — it scrolls as the leading item
-/// and pins to the leading edge once the row runs past it, with cells
-/// duck-fading beneath it (custom scroll pass; pinned headers can't fade
-/// their underlap). The icon primaries morph circle → icon+title capsule on
-/// selection via cell self-sizing (`performBatchUpdates` inside the morph
-/// spring). A deliberate free-floating overlay rather than a toolbar item —
-/// the iOS 26 bar systems wrap custom items in their own glass capsule, and
-/// a second material inside reads as a dark "double bubble" ring (the
-/// `GlassSegmentRow` doctrine).
+/// Compositional layout + diffable snapshots. There is deliberately no sticky
+/// "All" bubble here: the bar is SINGLE-selection, so "all" is simply the
+/// absence of a selection — reachable by tapping the active pill again — and
+/// a permanently-parked header would spend the leading third of a phone-width
+/// row restating the resting state. Without an obstruction there is nothing
+/// to duck-fade beneath and nothing to reserve, so the row rests against the
+/// bar's own leading margin and every pill is legible for its whole travel.
+/// (The sub bar keeps a fixed leading header — see `MapSubFilterBarView` —
+/// because MULTI-selection genuinely needs a reset affordance.)
 ///
-/// Selection semantics: "All" renders the `nil` selection and is active by
-/// default; other pills toggle back to All on a second tap. Cells are
-/// presentation-only (`MapPillCell`) — taps arrive via `didSelectItemAt`.
+/// The icon primaries morph circle → icon+title capsule on selection via cell
+/// self-sizing (`performBatchUpdates` inside the morph spring). A deliberate
+/// free-floating overlay rather than a toolbar item — the iOS 26 bar systems
+/// wrap custom items in their own glass capsule, and a second material inside
+/// reads as a dark "double bubble" ring (the `GlassSegmentRow` doctrine).
+///
+/// Selection semantics: `nil` means "All" and is the default; every pill
+/// toggles back to it on a second tap. Cells are presentation-only
+/// (`MapPillCell`) — taps arrive through the pill's own `onTap`.
 ///
 /// Clipping: bar and collection view never clip, so glass halos breathe;
 /// the vertical halo padding lives in the section's content insets.
@@ -46,7 +51,8 @@ final class MapFilterBarView: UIView {
         case favorite(ProfileID)
     }
 
-    /// The morphing icon primaries (All lives in the fixed leading bubble).
+    /// The morphing icon primaries. "All" is not among them — it is the
+    /// `nil` selection, not a pill.
     private static let primaries: [(filter: MapFilter, content: MapPillButton.Content)] = [
         (.friends, MapPillButton.Content(
             title: "Friends",
@@ -68,30 +74,13 @@ final class MapFilterBarView: UIView {
         ))
     ]
 
-    private static let allContent = MapPillButton.Content(
-        title: "All",
-        symbolName: "sparkles", selectedSymbolName: "sparkles",
-        accessibilityLabel: "All posts"
-    )
-
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
     private var favoritesByID: [ProfileID: MapFavorite] = [:]
-    /// The sticky "All": a FIXED interactive pill overlaying the leading
-    /// edge (the sub bar's expand-bubble architecture, mirrored). NOT a
-    /// pinned boundary supplementary — compositional pinning hosts the
-    /// header in a private container that hard-clips cells across a fixed
-    /// leading region (pills sliced in half ~50pt past the header, verified
-    /// via frame logging), and it culls nothing here since the button never
-    /// scrolls at all.
-    private let allButton = MapPillButton(
-        content: MapFilterBarView.allContent, height: MapFilterBarView.pillHeight
-    )
 
     init() {
         super.init(frame: .zero)
         configureCollectionView()
-        configureAllButton()
         applySnapshot(favorites: [], animatingDifferences: false)
     }
 
@@ -112,9 +101,9 @@ final class MapFilterBarView: UIView {
         )
         let section = NSCollectionLayoutSection(group: group)
         section.interGroupSpacing = Spacing.sm
-        // Halo padding above/below the pills; horizontal rest insets come
-        // from the collection view's contentInset (the leading one is sized
-        // to the fixed All bubble at layout time).
+        // Halo padding above/below the pills; the horizontal rest insets come
+        // from the collection view's contentInset (which is also the snap
+        // anchor — see `MapBarSnap`).
         section.contentInsets = NSDirectionalEdgeInsets(
             top: Self.verticalPadding, leading: 0,
             bottom: Self.verticalPadding, trailing: Spacing.lg
@@ -139,8 +128,11 @@ final class MapFilterBarView: UIView {
         // Highlight must land on touch-down, not after the scroll-intent
         // grace period — the press dip reads as lag otherwise.
         collectionView.delaysContentTouches = false
-        // Leading inset is finalized in layoutSubviews once the All bubble
-        // has a width; this is the pre-layout approximation.
+        // The leading container margin — and, with no fixed bubble to clear,
+        // also the snap anchor (`MapBarSnap` reads exactly this inset), so the
+        // resting offset and the first pill's snap target are the same number
+        // by construction. Trailing breathing room lives in the section's own
+        // insets, so it rides inside the content size.
         collectionView.contentInset = UIEdgeInsets(top: 0, left: Spacing.lg, bottom: 0, right: 0)
         collectionView.pin(to: self)
 
@@ -159,33 +151,6 @@ final class MapFilterBarView: UIView {
             collectionView.dequeueConfiguredReusableCell(using: pillRegistration, for: indexPath, item: item)
         }
 
-    }
-
-    private func configureAllButton() {
-        addSubview(allButton)
-        allButton.translatesAutoresizingMaskIntoConstraints = false
-        // Above the cells gliding beneath it.
-        allButton.layer.zPosition = 1
-        NSLayoutConstraint.activate([
-            allButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Spacing.lg),
-            allButton.centerYAnchor.constraint(equalTo: centerYAnchor)
-        ])
-        allButton.addAction(UIAction { [weak self] _ in self?.didTap(nil) }, for: .touchUpInside)
-        allButton.setSelectedAppearance(true) // resting state: All active
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        // The scrolled row rests just past the fixed All bubble; keep the
-        // inset honest as All's width shifts with its selection weight.
-        let neededInset = allButton.frame.maxX + Spacing.sm
-        if abs(collectionView.contentInset.left - neededInset) > 0.5, neededInset > 0 {
-            let atRest = collectionView.contentOffset.x <= -collectionView.contentInset.left + 0.5
-            collectionView.contentInset.left = neededInset
-            if atRest {
-                collectionView.contentOffset.x = -neededInset
-            }
-        }
     }
 
     private func presentation(for item: Item) -> (MapPillButton.Content, Bool)? {
@@ -223,9 +188,9 @@ final class MapFilterBarView: UIView {
     // MARK: - Favorites
 
     /// Populates (or refreshes) the favorites section. Structure lands
-    /// synchronously, arrival is a pure cross-dissolve to each cell's resting
-    /// alpha (the sticky duck-fade decides that). If the active filter's
-    /// favorite disappeared in the refresh, selection falls back to All.
+    /// synchronously at final widths, arrival is a pure cross-dissolve. If the
+    /// active filter's favorite disappeared in the refresh, selection falls
+    /// back to All.
     func setFavorites(_ favorites: [MapFavorite]) {
         UIView.performWithoutAnimation {
             applySnapshot(favorites: favorites, animatingDifferences: false)
@@ -243,7 +208,9 @@ final class MapFilterBarView: UIView {
                 collectionView.cellForItem(at: indexPath)?.alpha = 0
             }
         }
-        UIView.mapBarFade { self.updateStickyFade() }
+        UIView.mapBarFade {
+            for cell in self.collectionView.visibleCells { cell.alpha = 1 }
+        }
     }
 
     // MARK: - Selection
@@ -269,18 +236,16 @@ final class MapFilterBarView: UIView {
         selectedFilter = filter
         reconfigureVisiblePresentation()
         if animated {
-            UIView.mapBarMorph {
-                self.collectionView.performBatchUpdates(nil)
-                self.updateStickyFade()
-            }
+            UIView.mapBarMorph { self.collectionView.performBatchUpdates(nil) }
         } else {
             UIView.performWithoutAnimation {
                 self.collectionView.collectionViewLayout.invalidateLayout()
                 self.collectionView.layoutIfNeeded()
             }
         }
-        // Reveal the selected pill (not for All — the sticky header is
-        // always on screen, and clearing shouldn't yank the row home).
+        // Reveal the selected pill. Clearing to All reveals nothing — there
+        // is no "All" pill to scroll to, and yanking the row home behind the
+        // viewer's back would undo their scroll position for free.
         if let filter, let indexPath = dataSource.indexPath(for: item(for: filter)) {
             collectionView.layoutIfNeeded()
             if let frame = collectionView.layoutAttributesForItem(at: indexPath)?.frame {
@@ -293,8 +258,8 @@ final class MapFilterBarView: UIView {
         if case .profile(let id) = filter { .favorite(id) } else { .primary(filter) }
     }
 
-    /// Pushes the current selection into every on-screen pill + the fixed
-    /// All bubble — atomically, content only; sizing animates separately.
+    /// Pushes the current selection into every on-screen pill — atomically,
+    /// content only; sizing animates separately.
     private func reconfigureVisiblePresentation() {
         UIView.performWithoutAnimation {
             for indexPath in collectionView.indexPathsForVisibleItems {
@@ -304,38 +269,13 @@ final class MapFilterBarView: UIView {
                 cell.configure(content: content, height: Self.pillHeight, selected: selected)
             }
         }
-        allButton.setSelectedAppearance(selectedFilter == nil)
-    }
-
-    // MARK: - Sticky duck-fade
-
-    /// Cells nearing / passing beneath the fixed All bubble dissolve on
-    /// approach (`MapBarDuckFade`): both surfaces are translucent glass, so a
-    /// pill allowed to sit half-under would be sliced by the bubble's capsule
-    /// edge into a blurred half and a sharp half — a hard visual clip. The
-    /// approach-fade means nothing legible ever reaches the glass. Exact
-    /// mirror of the sub bar's trailing treatment, on the leading side.
-    private func updateStickyFade() {
-        let allFrame = allButton.frame // bar coords
-        for cell in collectionView.visibleCells {
-            let frame = cell.convert(cell.bounds, to: self)
-            // Pills scroll leading-ward under the bubble: penetration is how
-            // far the pill's leading edge has advanced past the fade line
-            // trailing the bubble.
-            let penetration = allFrame.maxX + MapBarDuckFade.approach - frame.minX
-            cell.alpha = MapBarDuckFade.alpha(forPenetration: penetration)
-        }
     }
 }
 
 extension MapFilterBarView: UICollectionViewDelegate {
-    func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        updateStickyFade()
-    }
-
-    /// Magnetic snap (leading): the release lands the nearest pill's leading
-    /// edge flush against the sticky All bubble, so no pill ever rests
-    /// half-ducked beneath it. See `MapBarSnap`.
+    /// Magnetic snap: the release lands the nearest pill's leading edge flush
+    /// against the bar's leading container margin, so the row always comes to
+    /// rest on a pill boundary rather than mid-capsule. See `MapBarSnap`.
     func scrollViewWillEndDragging(
         _ scrollView: UIScrollView,
         withVelocity velocity: CGPoint,
@@ -344,8 +284,7 @@ extension MapFilterBarView: UICollectionViewDelegate {
         targetContentOffset.pointee.x = MapBarSnap.offsetX(
             snapping: collectionView,
             proposedX: targetContentOffset.pointee.x,
-            velocityX: velocity.x,
-            alignment: .leading
+            velocityX: velocity.x
         )
     }
 
@@ -353,10 +292,10 @@ extension MapFilterBarView: UICollectionViewDelegate {
     /// snap it home directly.
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         guard !decelerate else { return }
-        MapBarSnap.settle(collectionView, alignment: .leading)
+        MapBarSnap.settle(collectionView)
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-        MapBarSnap.settle(collectionView, alignment: .leading)
+        MapBarSnap.settle(collectionView)
     }
 }
