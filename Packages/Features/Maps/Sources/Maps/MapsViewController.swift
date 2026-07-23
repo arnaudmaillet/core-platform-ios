@@ -39,6 +39,10 @@ final class MapsViewController: UIViewController {
     /// the shell decides that this means the `.profile` route, exactly as it
     /// does for the avatar and compose bar items.
     private let openProfile: (ProfileID, ProfileIdentityStub?) -> Void
+    /// Starts (or resumes) a thread with someone the map surfaces — the pill
+    /// menu's Send Message. Injected for the same reason as `openProfile`:
+    /// Maps stays ignorant of routes and of the Messages feature.
+    private let openConversation: (ProfileID) -> Void
     /// The current viewport's prefetch, cancelled when the map settles elsewhere.
     private var prewarmTask: Task<Void, Never>?
     /// Runaway guard: clustering already bounds the visible set to a handful, but
@@ -48,6 +52,10 @@ final class MapsViewController: UIViewController {
     private var activeTransition: MapsZoomTransition?
     /// Chooses which ≤3 visible video pins autoplay.
     private let videoCoordinator: MapVideoPlaybackCoordinator
+    /// Runs the pins' staggered pop-in/pop-out and owns the in-flight
+    /// animators — including the marker-reclaim that keeps a fast filter
+    /// flip-flop from doubling a pin (see `MapAnnotationPopChoreographer`).
+    private lazy var popChoreographer = MapAnnotationPopChoreographer(mapView: mapView)
     private let appObservers = MapNotificationBag()
     #if DEBUG
     private var didDebugOpenPin = false
@@ -119,7 +127,8 @@ final class MapsViewController: UIViewController {
         videoPlayback: VideoPlaybackController,
         makeSnapFeed: @escaping ([PostID]) -> UIViewController,
         prewarm: @escaping ([PostID]) async -> Void,
-        openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void
+        openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
+        openConversation: @escaping (ProfileID) -> Void
     ) {
         self.viewModel = viewModel
         self.favoritesRepository = favoritesRepository
@@ -128,6 +137,7 @@ final class MapsViewController: UIViewController {
         self.makeSnapFeed = makeSnapFeed
         self.prewarm = prewarm
         self.openProfile = openProfile
+        self.openConversation = openConversation
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -317,11 +327,28 @@ final class MapsViewController: UIViewController {
         subFilterBar.onExpandTapped = { [weak self] in
             self?.presentSubFilterSheet()
         }
-        subFilterBar.isPinned = { [weak self] profileID in
-            self?.currentFavorites.contains { $0.profileID == profileID } ?? false
+        // The pill long-press menu. Every destination is resolved here — the
+        // bar reports which verb was chosen and knows nothing beyond that.
+        subFilterBar.onViewProfile = { [weak self] favorite in
+            self?.openProfile(favorite)
         }
-        subFilterBar.onTogglePin = { [weak self] favorite in
-            self?.togglePinnedFavorite(favorite)
+        subFilterBar.onSendMessage = { [weak self] favorite in
+            self?.openConversation(favorite.profileID)
+        }
+        subFilterBar.isMuted = { [weak self] profileID in
+            self?.mutedProfiles.contains(profileID) ?? false
+        }
+        subFilterBar.onToggleMute = { [weak self] favorite in
+            self?.mutedProfiles.formSymmetricDifference([favorite.profileID])
+        }
+        subFilterBar.onViewDetails = { [weak self] category in
+            self?.isolateSubFilter(.placeCategory(category))
+        }
+        subFilterBar.onShare = { [weak self] option in
+            self?.presentShareSheet(for: option)
+        }
+        subFilterBar.onUnpinSubFilter = { [weak self] subFilter in
+            self?.removeSubFilterFromRow(subFilter)
         }
     }
 
@@ -466,6 +493,44 @@ final class MapsViewController: UIViewController {
                 ProfileIdentityStub(handle: $0, displayName: favorite.title, isFollowing: true)
             }
         )
+    }
+
+    // MARK: - Pill menu destinations
+
+    /// "Remove from Sub-filters": drop the refinement from the row, routed
+    /// through the SAME adopt path the organize sheet commits on. That is what
+    /// keeps one removal consistent everywhere — the hidden set is recomputed
+    /// (so the next background refresh can't resurrect it), the order memory
+    /// is rewritten, an applied refinement whose pill just left is dropped
+    /// from the selection, and an emptied row retires itself.
+    private func removeSubFilterFromRow(_ subFilter: MapSubFilter) {
+        let remaining = currentSubFilterOptions.filter { $0.subFilter != subFilter }
+        guard remaining.count != currentSubFilterOptions.count else { return }
+        adoptSubFilterOptions(remaining)
+    }
+
+    /// "View Details" on a place category. There is no place-detail screen in
+    /// the app — place categories are client-side vocabulary, not entities the
+    /// BFF can describe — so this does the most honest thing the surface can:
+    /// isolates that category on the map, dropping every other refinement.
+    /// Swap the body for a push once a real destination exists.
+    private func isolateSubFilter(_ subFilter: MapSubFilter) {
+        let only: Set<MapSubFilter> = [subFilter]
+        guard subFilterBar.selectedSubFilters != only else { return }
+        subFilterBar.setSelectedSubFilters(only, reveal: subFilter)
+        viewModel.subFiltersChanged(only)
+    }
+
+    /// "Share". Like the snap feed's share, this offers what the model
+    /// actually carries: no canonical web URL for a profile or a place
+    /// category exists on the wire yet, so the display name (and a person's
+    /// `@handle`) stand in until one does.
+    private func presentShareSheet(for option: MapSubFilterOption) {
+        var items: [Any] = [option.sheetTitle]
+        if let subtitle = option.sheetSubtitle { items.append(subtitle) }
+        let activity = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        activity.popoverPresentationController?.sourceView = subFilterBar
+        present(activity, animated: true)
     }
 
     /// The sheet's committed arrangement, landing once when the viewer taps
@@ -646,16 +711,32 @@ final class MapsViewController: UIViewController {
     // MARK: - Diff application
 
     private func apply(_ diff: MapAnnotationDiff) {
-        var toRemove: [MapAnnotation] = []
+        // Removals LEAVE rather than vanish: the choreographer fades them and
+        // retires them from the map in its own completion. They are out of
+        // `annotations` from this moment (so nothing queries or autoplays
+        // them) but still on screen for the length of the pop.
+        var departing: [MapAnnotation] = []
         for pin in diff.removed {
             if let annotation = annotations.removeValue(forKey: pin.postID) {
-                toRemove.append(annotation)
+                departing.append(annotation)
             }
         }
-        if !toRemove.isEmpty { mapView.removeAnnotations(toRemove) }
+        popChoreographer.popOut(departing)
 
         var toAdd: [MapAnnotation] = []
         for pin in diff.added {
+            // A pin coming back while it is still fading out — the ordinary
+            // shape of a fast filter flip-flop. Take the marker that is
+            // already on the map back rather than adding a second one for the
+            // same post on top of it.
+            if let reclaimed = popChoreographer.reclaim(pin.postID) {
+                reclaimed.update(pin: pin)
+                annotations[pin.postID] = reclaimed
+                if let view = mapView.view(for: reclaimed) as? MapAnnotationView {
+                    view.configure(with: pin, imagePipeline: imagePipeline)
+                }
+                continue
+            }
             let annotation = MapAnnotation(pin: pin)
             annotations[pin.postID] = annotation
             toAdd.append(annotation)
@@ -749,6 +830,11 @@ extension MapsViewController: MKMapViewDelegate {
     }
 
     func mapView(_ mapView: MKMapView, didAdd views: [MKAnnotationView]) {
+        // Land them: scale-and-fade in, staggered across the batch. This fires
+        // for pins panning into the rendered region too, not only for a fresh
+        // query — which is what makes the map feel populated rather than
+        // stamped.
+        popChoreographer.popIn(views)
         // Annotation views now exist (clustering is current) → bind autoplay and
         // warm the visible posts so a tap opens instantly.
         refreshVideoPlayback()

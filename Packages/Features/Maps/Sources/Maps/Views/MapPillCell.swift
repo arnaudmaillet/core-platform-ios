@@ -80,9 +80,17 @@ final class MapPillCell: UICollectionViewCell {
     /// The UIButton-native long-press menu: `button.menu` without
     /// `showsMenuAsPrimaryAction` presents on press-and-hold while taps stay
     /// taps. A manually-attached `UIContextMenuInteraction` does NOT fire on
-    /// a tracking UIButton — verified dead under real long-presses.
+    /// a tracking UIButton — verified dead under real long-presses, which is
+    /// why this stays on the button even though the menu is now a full
+    /// entity-aware ladder rather than one action.
+    ///
+    /// `.priority` keeps the authored order thumb-first. These bars sit
+    /// directly above the tab bar, so their menus always open UPWARD, and
+    /// `.automatic` reverses the ladder in that direction — which would put a
+    /// destructive Remove under the thumb and the common verb farthest away.
     private func updateMenu() {
         guard let pill else { return }
+        pill.preferredMenuElementOrder = .priority
         guard menuProvider != nil else {
             pill.menu = nil
             return

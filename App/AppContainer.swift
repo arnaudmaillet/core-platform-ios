@@ -221,6 +221,9 @@ final class AppContainer {
         feedFeature: { [unowned self] in self.feedFeature },
         openProfile: { [unowned self] id, stub in
             self.router.route(to: .profile(id, stub: stub))
+        },
+        openConversation: { [unowned self] id in
+            self.router.route(to: .messageUser(id))
         }
     )
 

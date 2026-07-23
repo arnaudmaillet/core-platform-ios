@@ -134,12 +134,28 @@ final class MapSubFilterBarView: UIView {
     /// The fixed button was tapped in its ORGANIZE role — present the
     /// full-list sheet. (Its rewind role is handled entirely in-bar.)
     var onExpandTapped: (() -> Void)?
-    /// Long-press menu action on a person pill.
-    var onTogglePin: ((MapFavorite) -> Void)?
-    /// Whether a person is currently pinned (titles the menu Pin vs Unpin).
-    var isPinned: ((ProfileID) -> Bool)?
     /// Resolves avatar thumbnails for people pills.
     var imagePipeline: ImagePipeline?
+
+    // MARK: Long-press menu
+
+    /// The pill menu's destinations. Every one is the HOST's affair — the bar
+    /// knows which verb was chosen and nothing about where it goes, exactly as
+    /// the sheet's `RowActions` does. Which of them a given pill offers is
+    /// `MapSubFilterMenuAction.actions(for:)`, keyed on the entity behind it.
+    var onViewProfile: ((MapFavorite) -> Void)?
+    var onSendMessage: ((MapFavorite) -> Void)?
+    var onToggleMute: ((MapFavorite) -> Void)?
+    /// Live mute state, read when the menu is BUILT (not when the pill was
+    /// configured), so a stale flag can't title the row wrong.
+    var isMuted: ((ProfileID) -> Bool)?
+    /// A place category's detail destination, by category token.
+    var onViewDetails: ((String) -> Void)?
+    /// Share whatever this refinement stands for.
+    var onShare: ((MapSubFilterOption) -> Void)?
+    /// Drop this refinement from the row. The host owns the list, so it
+    /// republishes and the bar restacks — see `restack(to:)`.
+    var onUnpinSubFilter: ((MapSubFilter) -> Void)?
 
     /// Every refinement currently applied; empty means "no refinement".
     private(set) var selectedSubFilters: Set<MapSubFilter> = []
@@ -269,24 +285,11 @@ final class MapSubFilterBarView: UIView {
                 cell.menuProvider = nil
             case .subFilter(let subFilter):
                 // Native pill interaction: tap → selection; long-press → the
-                // Pin/Unpin menu directly on the pill (people only).
+                // entity-aware menu, built fresh at presentation time.
                 cell.onTap = { [weak self] in self?.didTap(subFilter) }
-                if let favorite = self.optionsBySubFilter[subFilter]?.favorite {
-                    cell.setAvatar(self.avatarCache[favorite.profileID])
-                    cell.menuProvider = { [weak self] in
-                        guard let self else { return nil }
-                        let pinned = self.isPinned?(favorite.profileID) ?? false
-                        return UIMenu(children: [
-                            UIAction(
-                                title: pinned ? "Unpin from Favorites" : "Pin to Favorites",
-                                image: UIImage(systemName: pinned ? "pin.slash" : "pin"),
-                                handler: { [weak self] _ in self?.onTogglePin?(favorite) }
-                            )
-                        ])
-                    }
-                } else {
-                    cell.menuProvider = nil
-                }
+                cell.setAvatar(self.optionsBySubFilter[subFilter]?.favorite
+                    .flatMap { self.avatarCache[$0.profileID] })
+                cell.menuProvider = { [weak self] in self?.menu(for: subFilter) }
             }
         }
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) {
@@ -352,12 +355,19 @@ final class MapSubFilterBarView: UIView {
         }
 
         // …and repairs the scroll surface if an interrupted swap left it
-        // faded (the new cells are at alpha 0, so this can't flash).
+        // faded (the new cells are at alpha 0, so this can't flash). The
+        // surface alpha is ANIMATED back rather than assigned: `transition`
+        // hands over while its fade-out spring is still running, and a bare
+        // assignment would set the model value under a live animation that
+        // keeps driving toward 0. Re-entering the same spring retargets it
+        // from wherever it is (`.beginFromCurrentState`).
         for cell in collectionView.visibleCells { cell.alpha = 0 }
-        collectionView.alpha = 1
+        UIView.mapBarFade {
+            self.collectionView.alpha = 1
+            self.updateHeaderFade()
+        }
         // The row is home, so the button is back to organizing — but this is
         // a content swap, not a scroll: land that state, don't crossfade it.
-        UIView.mapBarFade { self.updateHeaderFade() }
         updateHeaderRole(animated: false)
         loadAvatars(for: options)
     }
@@ -382,31 +392,50 @@ final class MapSubFilterBarView: UIView {
         snapshot.appendSections([.main])
         snapshot.appendItems(Self.items(for: orderedSubFilters))
         dataSource.apply(snapshot, animatingDifferences: true) { [weak self] in
+            guard let self else { return }
             // Pills changed seats: whoever now sits under the fixed button
             // must re-derive its duck-fade alpha — and All may have moved
             // out from under it, or back beneath it.
-            self?.updateHeader()
+            updateHeader()
+            // A removal shortens the row under a stationary offset, so the
+            // rest position the viewer was snapped to may not be a pill
+            // boundary any more — or may be past the end entirely. Settle
+            // re-aligns (a sub-point no-op when the row didn't shorten past
+            // where they were sitting).
+            MapBarSnap.settle(collectionView)
         }
     }
 
+    /// How far into the fade-OUT the incoming row starts arriving. The two
+    /// halves used to run end to end (fade out, then in the completion, fade
+    /// in) — two full springs, ~0.5s for what reads as one gesture. Handing
+    /// over at 60% overlaps them into ~0.4s and, because the outgoing spring
+    /// is critically damped, the old row is already down near a tenth of its
+    /// opacity by then: the swap still happens somewhere the eye can't
+    /// resolve it, which is the property the original sequencing was really
+    /// protecting.
+    private static let transitionHandoff = 0.6
+
     /// Cross-dissolves to a new option set while the row stays visible (a
     /// primary-to-primary switch, e.g. Friends → Places): fade the current
-    /// cells out, swap the content at zero alpha, fade the new cells in.
-    /// The fixed button deliberately stays put — it belongs to the bar, not
-    /// to either state. Safe under rapid taps: a newer transition
-    /// (or a direct `setOptions`) supersedes the pending swap.
+    /// cells out and, before that has finished settling, swap the content and
+    /// bring the new cells up through it. The fixed button deliberately stays
+    /// put — it belongs to the bar, not to either state. Safe under rapid
+    /// taps: a newer transition (or a direct `setOptions`) supersedes the
+    /// pending swap, and the handoff is a generation-guarded hop rather than a
+    /// completion block, so an abandoned fade-out can't drag a stale row in
+    /// behind it.
     func transition(to options: [MapSubFilterOption]) {
         transitionGeneration += 1
         let generation = transitionGeneration
-        UIView.mapBarFade(
-            { self.collectionView.alpha = 0 },
-            completion: { _ in
-                guard generation == self.transitionGeneration else { return }
-                // Content swaps at alpha 0; `setOptions` restores the scroll
-                // surface and fades the new cells in.
-                self.setOptions(options)
-            }
-        )
+        UIView.mapBarFade { self.collectionView.alpha = 0 }
+        let handoff = UIView.mapBarFadeDuration * Self.transitionHandoff
+        DispatchQueue.main.asyncAfter(deadline: .now() + handoff) { [weak self] in
+            guard let self, generation == transitionGeneration else { return }
+            // `setOptions` swaps the content and springs the surface back up,
+            // retargeting the fade-out that is still in flight.
+            setOptions(options)
+        }
     }
 
     private func loadAvatars(for options: [MapSubFilterOption]) {
@@ -438,6 +467,65 @@ final class MapSubFilterBarView: UIView {
         let next = selectedSubFilters.symmetricDifference([subFilter])
         setSelectedSubFilters(next, reveal: subFilter)
         onSubFiltersChanged?(next)
+    }
+
+    // MARK: - Long-press menu
+
+    /// The entity behind a pill, or nil once the row no longer carries it.
+    func entity(for subFilter: MapSubFilter) -> MapSubFilterEntity? {
+        optionsBySubFilter[subFilter].map(MapSubFilterEntity.init(option:))
+    }
+
+    /// This pill's menu, assembled at PRESENTATION time (the cell's
+    /// `menuProvider` runs inside a `UIDeferredMenuElement.uncached`), so the
+    /// mute title reflects live state rather than whatever was true when the
+    /// cell was last configured.
+    ///
+    /// Ordering is thumb-first, and the pill sets
+    /// `preferredMenuElementOrder = .priority` to keep it that way: this bar
+    /// sits directly above the tab bar, so its menus always open UPWARD, and
+    /// under `.automatic` UIKit would flip the ladder and put the destructive
+    /// Remove nearest the thumb. `.priority` pins the first action closest to
+    /// the touch and leaves Remove farthest from it.
+    func menu(for subFilter: MapSubFilter) -> UIMenu? {
+        guard let option = optionsBySubFilter[subFilter] else { return nil }
+        let entity = MapSubFilterEntity(option: option)
+        let muted = if case .person(let favorite) = entity {
+            isMuted?(favorite.profileID) ?? false
+        } else {
+            false
+        }
+        let children = MapSubFilterMenuAction.actions(for: entity).map { action in
+            UIAction(
+                title: action.title(isMuted: muted),
+                image: UIImage(systemName: action.symbolName(isMuted: muted)),
+                attributes: action.isDestructive ? .destructive : [],
+                handler: { [weak self] _ in self?.perform(action, on: subFilter) }
+            )
+        }
+        return UIMenu(children: children)
+    }
+
+    /// Routes one chosen verb to its callback. Split out from menu building so
+    /// the routing is exercisable without a long-press: a `UIAction`'s handler
+    /// is not reachable from a test, its identity is.
+    func perform(_ action: MapSubFilterMenuAction, on subFilter: MapSubFilter) {
+        guard let option = optionsBySubFilter[subFilter] else { return }
+        let favorite = option.favorite
+        switch action {
+        case .viewProfile:
+            favorite.map { onViewProfile?($0) }
+        case .sendMessage:
+            favorite.map { onSendMessage?($0) }
+        case .toggleMute:
+            favorite.map { onToggleMute?($0) }
+        case .viewDetails:
+            if case .placeCategory(let token) = subFilter { onViewDetails?(token) }
+        case .share:
+            onShare?(option)
+        case .unpin:
+            onUnpinSubFilter?(subFilter)
+        }
     }
 
     /// The All pill: clears every refinement at once. Absolute (never a
