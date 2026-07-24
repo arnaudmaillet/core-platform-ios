@@ -27,6 +27,9 @@ final class MapClusterAnnotationView: MKAnnotationView {
     /// The loaded cover image, handed to the hero transition to fly.
     var heroImage: UIImage? { card.imageView.image }
 
+    /// Fired the instant the cluster is tapped — see `installInstantTap`.
+    var onSelect: (() -> Void)?
+
     override init(annotation: (any MKAnnotation)?, reuseIdentifier: String?) {
         super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
         // Square collision + center anchoring, identical to a single pin.
@@ -41,7 +44,10 @@ final class MapClusterAnnotationView: MKAnnotationView {
         // The card clips, so the shadow lives on this outer layer — same as
         // the single pin.
         PinCardView.applyPinShadow(to: layer)
+        installInstantTap(target: self, action: #selector(handleTap))
     }
+
+    @objc private func handleTap() { onSelect?() }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -69,6 +75,7 @@ final class MapClusterAnnotationView: MKAnnotationView {
         // come back invisible and half-size.
         alpha = 1
         transform = .identity
+        onSelect = nil
         imageTask?.cancel()
         imageTask = nil
         representedURL = nil

@@ -36,9 +36,13 @@ enum MapClusterEngine {
         var isCluster: Bool { memberIDs.count > 1 }
 
         /// Stable identity for diffing across settles: the representative's id.
-        /// A group and the lone pin it collapses from share it, so zooming
-        /// between the two reuses the marker instead of flickering.
         var key: PostID { representative.postID }
+
+        /// Diffing identity for the map layer, encoding single-vs-cluster so a
+        /// lone pin and the cluster it collapses into never occupy the same
+        /// slot — the zoom between them is then an honest cross-fade (one
+        /// marker out, the other in), not a silent type-swap under one key.
+        var identity: String { (isCluster ? "c:" : "p:") + representative.postID.rawValue }
     }
 
     /// Groups `pins` so that no two resulting markers overlap on screen — the

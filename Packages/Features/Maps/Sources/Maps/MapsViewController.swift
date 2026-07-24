@@ -100,10 +100,11 @@ final class MapsViewController: UIViewController {
     /// this: the map itself never holds raw pins, only the engine's markers, so
     /// the query/diff layer stays a pure model feed with no MapKit coupling.
     private var pins: [PostID: MapPin] = [:]
-    /// The engine's markers currently on the map, keyed by the item's stable
-    /// identity (its representative post id): a `MapAnnotation` for a lone pin,
-    /// a `MapComputedCluster` for a group.
-    private var displayed: [PostID: MKAnnotation] = [:]
+    /// The engine's markers currently on the map, keyed by the item's diffing
+    /// identity (`p:`/`c:` + representative id): a `MapAnnotation` for a lone
+    /// pin, a `MapComputedCluster` for a group. Excludes markers mid fade-out —
+    /// those live in the pop choreographer until their animation retires them.
+    private var displayed: [String: MKAnnotation] = [:]
     /// Marker collision size in screen points — the pin footprint plus a hair
     /// of margin, so two markers that would touch are grouped instead.
     private static let clusterCellPoints = MapAnnotationView.side + 8
@@ -736,46 +737,59 @@ final class MapsViewController: UIViewController {
             zoomScale: currentZoomScale,
             cellPoints: Double(Self.clusterCellPoints)
         )
-        var target = Set<PostID>()
+        var target = Set<String>()
         target.reserveCapacity(items.count)
 
         var toAdd: [MKAnnotation] = []
         for item in items {
-            target.insert(item.key)
-            let existing = displayed[item.key]
-            let kindMatches = (existing is MapComputedCluster) == item.isCluster
-            if let existing, kindMatches {
-                // Same marker, possibly moved (a cluster's centroid shifts as
-                // its membership changes) or re-faced — update it in place.
-                if let cluster = existing as? MapComputedCluster {
-                    cluster.apply(item)
-                    (mapView.view(for: cluster) as? MapClusterAnnotationView)?
-                        .configure(with: cluster, imagePipeline: imagePipeline)
-                } else if let single = existing as? MapAnnotation {
-                    single.update(pin: item.representative)
-                    (mapView.view(for: single) as? MapAnnotationView)?
-                        .configure(with: item.representative, imagePipeline: imagePipeline)
-                }
+            let id = item.identity
+            target.insert(id)
+
+            // Already shown at this identity (same kind, by construction) —
+            // update in place: a cluster's centroid shifts as membership
+            // changes, a single's pin may be re-faced.
+            if let existing = displayed[id] {
+                update(existing, to: item)
                 continue
             }
-            // New marker, or a single/cluster flip at this identity: replace.
-            if let existing {
-                mapView.removeAnnotation(existing)
+            // Coming back while still fading out (a fast leave→return): take the
+            // very marker the choreographer is retiring rather than mint a
+            // duplicate on top of it. It's already on the map — no re-add.
+            if let reclaimed = popChoreographer.reclaim(id) {
+                update(reclaimed, to: item)
+                displayed[id] = reclaimed
+                continue
             }
             let annotation: MKAnnotation = item.isCluster
                 ? MapComputedCluster(item)
                 : MapAnnotation(pin: item.representative)
-            displayed[item.key] = annotation
+            displayed[id] = annotation
             toAdd.append(annotation)
         }
 
-        for (key, annotation) in displayed where !target.contains(key) {
-            mapView.removeAnnotation(annotation)
-            displayed[key] = nil
-        }
-        if !toAdd.isEmpty { mapView.addAnnotations(toAdd) }
+        // Departures: hand them to the choreographer to scale-and-fade out
+        // (mirroring the arrival), which removes them from the map when the
+        // animation ends. They leave `displayed` now — the choreographer is
+        // their sole owner until then.
+        let departing = displayed.filter { !target.contains($0.key) }
+        for id in departing.keys { displayed[id] = nil }
+        popChoreographer.popOut(departing.map { (id: $0.key, annotation: $0.value) })
 
+        if !toAdd.isEmpty { mapView.addAnnotations(toAdd) }
         refreshVideoPlayback()
+    }
+
+    /// Re-points and re-faces a marker already on the map for a recomputed item.
+    private func update(_ annotation: any MKAnnotation, to item: MapClusterEngine.Item) {
+        if let cluster = annotation as? MapComputedCluster {
+            cluster.apply(item)
+            (mapView.view(for: cluster) as? MapClusterAnnotationView)?
+                .configure(with: cluster, imagePipeline: imagePipeline)
+        } else if let single = annotation as? MapAnnotation {
+            single.update(pin: item.representative)
+            (mapView.view(for: single) as? MapAnnotationView)?
+                .configure(with: item.representative, imagePipeline: imagePipeline)
+        }
     }
 
     /// Screen points per map point at the current region — the projection the
@@ -925,6 +939,10 @@ extension MapsViewController: MKMapViewDelegate {
                 for: annotation
             ) as? MapClusterAnnotationView
             view?.configure(with: cluster, imagePipeline: imagePipeline)
+            // Instant tap — bypasses MapKit's ~0.3s selection delay.
+            view?.onSelect = { [weak self, weak view] in
+                self?.openAnnotation(cluster, thumbnail: view?.heroImage)
+            }
             return view
         }
         guard let pinAnnotation = annotation as? MapAnnotation else { return nil }
@@ -933,34 +951,43 @@ extension MapsViewController: MKMapViewDelegate {
             for: annotation
         ) as? MapAnnotationView
         view?.configure(with: pinAnnotation.pin, imagePipeline: imagePipeline)
+        view?.onSelect = { [weak self, weak view] in
+            self?.openAnnotation(pinAnnotation, thumbnail: view?.heroImage)
+        }
         return view
     }
 
-    func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
-        // Deselect immediately so the pin can be tapped again after dismissal.
-        guard let annotation = view.annotation else { return }
-        mapView.deselectAnnotation(annotation, animated: false)
-
-        // Resolve the tapped post(s): a single pin opens its post; a cluster
-        // opens all its members (their ids are already held locally — no extra
-        // round-trip).
+    /// Opens a tapped marker's post(s) with the hero transition — a single pin
+    /// opens its post, a cluster opens all its members (their ids are already
+    /// held locally, no extra round-trip). The re-entrancy guard makes this
+    /// safe to call from both the instant tap recognizer and MapKit's own
+    /// `didSelect` (the fallback): whichever lands first wins, the other is a
+    /// no-op while the flight is alive.
+    private func openAnnotation(_ annotation: any MKAnnotation, thumbnail: UIImage?) {
+        guard activeTransition == nil else { return }
         let postIDs: [PostID]
-        let thumbnail: UIImage?
         switch annotation {
         case let pin as MapAnnotation:
             postIDs = [pin.pin.postID]
-            thumbnail = (view as? MapAnnotationView)?.heroImage
         case let cluster as MapComputedCluster:
             postIDs = cluster.memberIDs
-            // The cluster's face is the representative's cover — fly it, so the
-            // frame-0 handshake holds for clusters exactly as for pins.
-            thumbnail = (view as? MapClusterAnnotationView)?.heroImage
         default:
             return
         }
         guard !postIDs.isEmpty else { return }
-
         presentSnapFeed(postIDs: postIDs, from: annotation, thumbnail: thumbnail)
+    }
+
+    func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
+        // Deselect immediately so the pin can be tapped again after dismissal.
+        // The instant-tap recognizer normally fires first; this is the fallback
+        // (and clears MapKit's own selection either way).
+        guard let annotation = view.annotation else { return }
+        mapView.deselectAnnotation(annotation, animated: false)
+
+        let thumbnail = (view as? MapAnnotationView)?.heroImage
+            ?? (view as? MapClusterAnnotationView)?.heroImage
+        openAnnotation(annotation, thumbnail: thumbnail)
     }
 
     private func presentSnapFeed(postIDs: [PostID], from annotation: any MKAnnotation, thumbnail: UIImage?) {

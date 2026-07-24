@@ -37,6 +37,9 @@ final class MapAnnotationView: MKAnnotationView {
     /// player bound to it to the pool before it's reused for another pin.
     var onReuse: (() -> Void)?
 
+    /// Fired the instant the pin is tapped — see `installInstantTap`.
+    var onSelect: (() -> Void)?
+
     /// Reveals the live-preview surface over the thumbnail (playback is attached
     /// by the coordinator via `videoRenderView`). Seeds the render view's poster
     /// with the already-loaded thumbnail so the pin shows the still image — not a
@@ -62,7 +65,10 @@ final class MapAnnotationView: MKAnnotationView {
         centerOffset = .zero
         backgroundColor = .clear
         buildLayout()
+        installInstantTap(target: self, action: #selector(handleTap))
     }
+
+    @objc private func handleTap() { onSelect?() }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -118,6 +124,7 @@ final class MapAnnotationView: MKAnnotationView {
         // in, but a view can also be dequeued for a pin that never pops.
         alpha = 1
         transform = .identity
+        onSelect = nil
         onReuse?()
         onReuse = nil
         endVideoPreview()

@@ -72,12 +72,14 @@ final class MapAnnotationPopChoreographer {
     /// retires the stale animator still pointing at it.
     private var arrivals: [ObjectIdentifier: UIViewPropertyAnimator] = [:]
 
-    /// In-flight departures, keyed by post. These markers are STILL ON THE MAP
-    /// and no longer in the caller's index; this is the only record of them.
-    private var departures: [PostID: Departure] = [:]
+    /// In-flight departures, keyed by the caller's stable identity (encoding
+    /// single-vs-cluster so a pin and the cluster it collapses into never share
+    /// a slot). These markers are STILL ON THE MAP and no longer in the caller's
+    /// index; this is the only record of them.
+    private var departures: [String: Departure] = [:]
 
     private struct Departure {
-        let annotation: MapAnnotation
+        let annotation: any MKAnnotation
         let animator: UIViewPropertyAnimator
     }
 
@@ -114,20 +116,26 @@ final class MapAnnotationPopChoreographer {
 
     // MARK: - Departure
 
-    /// Fades a batch out and retires it from the map in each animator's
-    /// completion — the removal is the LAST thing that happens, so the marker
-    /// the viewer is watching never blinks out from under the animation.
+    /// Scale-and-fades a batch OUT — mirroring `popIn` — and retires each from
+    /// the map in its animator's completion, so the removal is the LAST thing
+    /// that happens and the marker never blinks out from under the animation.
+    /// Each item is `(identity, annotation)`; the identity is how `reclaim`
+    /// finds a marker that comes back mid-fade.
     ///
-    /// A pin with no view (scrolled out of the rendered region, or never
+    /// A marker with no view (scrolled out of the rendered region, or never
     /// realized) has nothing to animate and is removed at once.
-    func popOut(_ annotations: [MapAnnotation]) {
-        guard !annotations.isEmpty else { return }
-        var immediate: [MapAnnotation] = []
+    func popOut(_ items: [(id: String, annotation: any MKAnnotation)]) {
+        guard !items.isEmpty else { return }
+        var immediate: [any MKAnnotation] = []
 
-        for (index, annotation) in annotations.enumerated() {
-            let postID = annotation.pin.postID
-            guard let view = mapView.view(for: annotation) else {
-                immediate.append(annotation)
+        for (index, item) in items.enumerated() {
+            // A prior departure for this identity (a rapid leave→return→leave)
+            // is superseded — stop it without finishing so its completion can't
+            // remove the marker we are about to re-animate.
+            departures.removeValue(forKey: item.id)?.animator.stopAnimation(true)
+
+            guard let view = mapView.view(for: item.annotation) else {
+                immediate.append(item.annotation)
                 continue
             }
             // An arrival still in flight would keep animating toward alpha 1
@@ -141,26 +149,26 @@ final class MapAnnotationPopChoreographer {
             }
             animator.addCompletion { [weak self] position in
                 guard let self else { return }
-                departures.removeValue(forKey: postID)
-                // `.end` only: a reclaimed pin stops at `.current` and must
+                departures.removeValue(forKey: item.id)
+                // `.end` only: a reclaimed marker stops at `.current` and must
                 // stay on the map. (Reclaim stops without finishing, so this
                 // block does not run for it at all — the check is the belt to
                 // that braces.)
                 guard position == .end else { return }
-                mapView.removeAnnotation(annotation)
+                mapView.removeAnnotation(item.annotation)
             }
-            departures[postID] = Departure(annotation: annotation, animator: animator)
+            departures[item.id] = Departure(annotation: item.annotation, animator: animator)
             animator.startAnimation(afterDelay: MapAnnotationPop.stagger(for: index))
         }
 
         if !immediate.isEmpty { mapView.removeAnnotations(immediate) }
     }
 
-    /// Takes a mid-departure pin back: stops the fade where it is, springs it
-    /// home, and returns the marker so the caller re-indexes it instead of
-    /// adding a duplicate. Nil when this post isn't leaving.
-    func reclaim(_ postID: PostID) -> MapAnnotation? {
-        guard let departure = departures.removeValue(forKey: postID) else { return nil }
+    /// Takes a mid-departure marker back: stops the fade where it is, springs
+    /// it home, and returns it so the caller re-indexes it instead of adding a
+    /// duplicate. Nil when nothing with this identity is leaving.
+    func reclaim(_ id: String) -> (any MKAnnotation)? {
+        guard let departure = departures.removeValue(forKey: id) else { return nil }
         // Without finishing: the completion (which would remove it) never runs.
         departure.animator.stopAnimation(true)
         if let view = mapView.view(for: departure.annotation) {
@@ -182,7 +190,7 @@ final class MapAnnotationPopChoreographer {
     /// them. Also the answer to "did anything orphan?" — after this, both
     /// ledgers are empty by construction.
     @discardableResult
-    func finishAllDepartures() -> [MapAnnotation] {
+    func finishAllDepartures() -> [any MKAnnotation] {
         let pending = departures.values.map(\.annotation)
         for departure in departures.values { departure.animator.stopAnimation(true) }
         departures.removeAll()
