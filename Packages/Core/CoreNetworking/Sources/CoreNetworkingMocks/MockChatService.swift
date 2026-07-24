@@ -95,6 +95,10 @@ public final class MockChatService: @unchecked Sendable {
                 (viewer, "Yeah, shipping it today 🚀", 58),
                 (other, "Nice — ping me when it's live", 55)
             ]
+        // Seeded threaded replies (message index → the index it answers), so
+        // the quoted-reply rendering is present in the dense demo thread
+        // without having to compose one. conv-0 only.
+        let replyLinks: [Int: Int] = conversationID == "conv-0" ? [6: 5, 8: 7] : [:]
         return specs.enumerated().map { index, spec in
             let (sender, body, minutesAgo) = spec
             var view = Chat_V1_MessageView()
@@ -102,6 +106,7 @@ public final class MockChatService: @unchecked Sendable {
             view.senderID = sender
             view.body = body
             view.createdAtMs = nowMs - minutesAgo * minute
+            if let target = replyLinks[index] { view.replyTo = "\(conversationID)-m\(target)" }
             return view
         }
     }
@@ -129,6 +134,7 @@ public final class MockChatService: @unchecked Sendable {
                 view.messageID = id
                 view.senderID = request.senderID
                 view.body = request.body
+                view.replyTo = request.replyTo
                 view.createdAtMs = Int64(Date().timeIntervalSince1970 * 1000)
                 sent[request.conversationID, default: []].append(view)
                 return id

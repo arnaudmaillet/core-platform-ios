@@ -105,4 +105,47 @@ struct ChatTranscriptTests {
     @Test func emptyInputProducesNoSections() {
         #expect(build([]).isEmpty)
     }
+
+    // MARK: - Quoted replies
+
+    private func reply(_ id: String, to targetID: String, mine: Bool = true, minutesAgo: Double) -> MessageDisplayModel {
+        MessageDisplayModel(message: ChatMessage(
+            id: id,
+            senderID: ProfileID(mine ? "me" : "them"),
+            body: "body-\(id)",
+            createdAt: now.addingTimeInterval(-minutesAgo * 60),
+            isMine: mine,
+            replyToID: targetID
+        ))
+    }
+
+    @Test func replyResolvesQuoteFromReferencedMessage() {
+        let sections = ChatTranscript.build(
+            from: [message("orig", minutesAgo: 10), reply("ans", to: "orig", minutesAgo: 1)],
+            peerName: "Ava", calendar: calendar, now: now
+        )
+        let rows = sections.flatMap(\.rows)
+        let quote = rows.first { $0.id == "ans" }?.quote
+        #expect(quote?.messageID == "orig")
+        #expect(quote?.author == "Ava")        // original is the peer's
+        #expect(quote?.snippet == "body-orig")
+        #expect(rows.first { $0.id == "orig" }?.quote == nil) // non-reply carries none
+    }
+
+    @Test func replyToOwnMessageLabelsQuoteYou() {
+        let mineOriginal = message("orig", sender: "me", minutesAgo: 10, mine: true)
+        let sections = ChatTranscript.build(
+            from: [mineOriginal, reply("ans", to: "orig", mine: false, minutesAgo: 1)],
+            peerName: "Ava", calendar: calendar, now: now
+        )
+        #expect(sections.flatMap(\.rows).first { $0.id == "ans" }?.quote?.author == "You")
+    }
+
+    @Test func replyToMissingOriginalHasNoQuote() {
+        let sections = ChatTranscript.build(
+            from: [reply("ans", to: "ghost", minutesAgo: 1)],
+            peerName: "Ava", calendar: calendar, now: now
+        )
+        #expect(sections.flatMap(\.rows).first?.quote == nil)
+    }
 }

@@ -30,6 +30,24 @@ final class ConversationViewController: UIViewController {
     private var rowsByID: [String: MessageRowModel] = [:]
     private var newestRowID: String?
     private var hasRenderedContent = false
+    /// The correspondent's name, once resolved — labels quoted replies from
+    /// the peer. Empty until `onTitleChange`; the view model re-emits content
+    /// when it lands, so late resolution still names existing quotes.
+    private var peerName = ""
+    /// A message a quote-tap is scrolling toward; flashed once the scroll
+    /// settles (the destination cell isn't realized until then).
+    private var pendingFlashID: String?
+    /// The bubble currently in "Select Text" mode, if any.
+    private weak var textSelectionCell: MessageCell?
+    /// Tap-anywhere-else recognizer that ends text selection; live only while
+    /// selecting. Rides on the collection view so the floating Copy/Share
+    /// callout (a separate view tree) never trips it.
+    private lazy var textSelectionDismissTap: UITapGestureRecognizer = {
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTextSelectionDismissTap))
+        tap.cancelsTouchesInView = false
+        tap.delegate = self
+        return tap
+    }()
     /// Preview only: the platter can resize while animating in, stranding
     /// the one-shot tail scroll mid-history — tracked to re-pin on change.
     private var lastPreviewLayoutSize = CGSize.zero
@@ -74,10 +92,20 @@ final class ConversationViewController: UIViewController {
             // `title` still carries the name (it feeds pushed screens' back
             // labels); the visible identity lives in the trailing pill.
             self.title = name
+            self.peerName = name
             self.identityView.setIdentity(
                 name: name,
                 monogram: ConversationDisplayModel.monogram(name)
             )
+        }
+        viewModel.onReplyStateChange = { [weak self] draft in
+            guard let self else { return }
+            if let draft {
+                self.inputBar.setReplyContext(author: draft.author, snippet: draft.snippet)
+                self.inputBar.focus()
+            } else {
+                self.inputBar.clearReplyContext()
+            }
         }
         render(.loading)
         viewModel.viewDidLoad()
@@ -101,6 +129,12 @@ final class ConversationViewController: UIViewController {
         // push transition is being set up, so the pill animates in at its
         // final dimensions instead of settling after the transition.
         navigationController?.navigationBar.layoutIfNeeded()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        // Don't strand a text selection when navigating away.
+        endTextSelection()
     }
 
     override func viewDidLayoutSubviews() {
@@ -192,7 +226,11 @@ final class ConversationViewController: UIViewController {
 
         let cellRegistration = UICollectionView.CellRegistration<MessageCell, String> {
             [weak self] cell, _, id in
-            if let row = self?.rowsByID[id] { cell.configure(with: row) }
+            guard let self, let row = self.rowsByID[id] else { return }
+            cell.configure(with: row)
+            cell.delegate = self
+            // No compose bar to reply into inside the context-menu peek.
+            cell.isReplySwipeEnabled = self.mode == .full
         }
         dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) {
             collectionView, indexPath, id in
@@ -231,6 +269,7 @@ final class ConversationViewController: UIViewController {
             inputBar.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor, constant: -Spacing.sm)
         ])
         inputBar.onSend = { [weak self] text in self?.viewModel.send(text) }
+        inputBar.onCancelReply = { [weak self] in self?.viewModel.cancelReply() }
         // Honest seam: chat.v1 SendMessage is text-only today. The affordance
         // ships per the design spec; the picker wires in with the media plane.
         inputBar.onAttachMedia = { [weak self] in
@@ -323,7 +362,7 @@ final class ConversationViewController: UIViewController {
     }
 
     private func applyTranscript(for models: [MessageDisplayModel]) {
-        let sections = ChatTranscript.build(from: models)
+        let sections = ChatTranscript.build(from: models, peerName: peerName)
 
         var snapshot = NSDiffableDataSourceSnapshot<TranscriptDay, String>()
         var newRows: [String: MessageRowModel] = [:]
@@ -336,10 +375,14 @@ final class ConversationViewController: UIViewController {
         rowsByID = newRows
 
         // Follow the conversation tail on first render and on new messages —
-        // but never yank a reader who has scrolled up into history.
+        // but never yank a reader who has scrolled up into history. A message
+        // *I* just sent always wins the scroll (Messages behavior): a reply's
+        // compose preview can leave the tail off-screen, and I want to see
+        // what I sent regardless.
         let newestID = snapshot.itemIdentifiers.last
+        let newestIsMine = newestID.flatMap { newRows[$0] }?.isMine ?? false
         let isFirstRender = !hasRenderedContent
-        let shouldFollow = isFirstRender || (newestID != newestRowID && isNearBottom)
+        let shouldFollow = isFirstRender || (newestID != newestRowID && (isNearBottom || newestIsMine))
 
         dataSource.apply(snapshot, animatingDifferences: !isFirstRender)
         newestRowID = newestID
@@ -399,6 +442,8 @@ extension ConversationViewController: UICollectionViewDelegate {
         contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
         point: CGPoint
     ) -> UIContextMenuConfiguration? {
+        // A fresh long-press supersedes any active text selection.
+        endTextSelection()
         guard mode == .full, indexPaths.count == 1, let indexPath = indexPaths.first,
               let cell = collectionView.cellForItem(at: indexPath) as? MessageCell,
               cell.bubbleContains(collectionView.convert(point, to: cell)),
@@ -441,19 +486,23 @@ extension ConversationViewController: UICollectionViewDelegate {
         (collectionView.cellForItem(at: indexPath) as? MessageCell)?.bubblePreview()
     }
 
-    /// Standard messaging actions. Copy is complete today (pasteboard, from
-    /// the row the menu was built for); the rest funnel through the view
-    /// model's `perform` seam. Destructive action sits in its own inline
-    /// section, per system menus.
+    /// Standard messaging actions. Reply enters the compose reply state; Copy
+    /// is complete (pasteboard, from the row the menu was built for); Forward
+    /// remains an honest stub; Delete gates behind a native confirmation.
+    /// Destructive action sits in its own inline section, per system menus.
     private func messageMenu(for row: MessageRowModel) -> UIMenu {
         let reply = UIAction(
             title: "Reply",
             image: UIImage(systemName: "arrowshape.turn.up.left")
-        ) { [weak self] _ in self?.viewModel.perform(.reply, on: row.id) }
+        ) { [weak self] _ in self?.viewModel.beginReply(to: row.id) }
         let copy = UIAction(
             title: "Copy",
             image: UIImage(systemName: "doc.on.doc")
         ) { _ in UIPasteboard.general.string = row.body }
+        let selectText = UIAction(
+            title: "Select Text",
+            image: UIImage(systemName: "text.magnifyingglass")
+        ) { [weak self] _ in self?.beginTextSelection(for: row.id) }
         let forward = UIAction(
             title: "Forward",
             image: UIImage(systemName: "arrowshape.turn.up.right")
@@ -462,7 +511,133 @@ extension ConversationViewController: UICollectionViewDelegate {
             title: "Delete",
             image: UIImage(systemName: "trash"),
             attributes: .destructive
-        ) { [weak self] _ in self?.viewModel.perform(.delete, on: row.id) }
-        return UIMenu(children: [reply, copy, forward, UIMenu(options: .displayInline, children: [delete])])
+        ) { [weak self] _ in self?.confirmDelete(row.id) }
+        return UIMenu(children: [reply, copy, selectText, forward, UIMenu(options: .displayInline, children: [delete])])
+    }
+
+    /// Native destructive confirmation before removing a message — an action
+    /// sheet with the single "Delete Message" affordance, mirroring Messages.
+    /// Deferred a runloop so it presents cleanly after the context menu's own
+    /// dismissal animation, never on top of it.
+    private func confirmDelete(_ messageID: String) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let sheet = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
+            sheet.addAction(UIAlertAction(title: "Delete Message", style: .destructive) { [weak self] _ in
+                self?.viewModel.deleteMessage(messageID)
+            })
+            sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+            // iPad: anchor the popover to the message's bubble if it's on screen.
+            if let popover = sheet.popoverPresentationController {
+                popover.sourceView = self.collectionView
+                if let indexPath = self.dataSource.indexPath(for: messageID),
+                   let cell = self.collectionView.cellForItem(at: indexPath) {
+                    popover.sourceRect = cell.frame
+                } else {
+                    popover.sourceRect = CGRect(
+                        x: self.collectionView.bounds.midX, y: self.collectionView.bounds.midY,
+                        width: 0, height: 0
+                    )
+                }
+            }
+            self.present(sheet, animated: true)
+        }
+    }
+
+    /// Jumps to a message by id — the tap target of a reply's quoted preview —
+    /// and, once the scroll settles, flashes the destination bubble. The flash
+    /// waits for `scrollViewDidEndScrollingAnimation` because a big jump's
+    /// destination cell isn't realized until the animation lands; a fallback
+    /// timer covers the case where the target was already on screen (no scroll,
+    /// so no end-animation callback fires).
+    private func scrollToMessage(_ id: String, highlight: Bool) {
+        guard let indexPath = dataSource.indexPath(for: id) else { return }
+        pendingFlashID = highlight ? id : nil
+        collectionView.scrollToItem(at: indexPath, at: .centeredVertically, animated: true)
+        guard highlight else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self, self.pendingFlashID == id else { return }
+            self.pendingFlashID = nil
+            self.flashMessage(id)
+        }
+    }
+
+    private func flashMessage(_ id: String) {
+        guard let indexPath = dataSource.indexPath(for: id) else { return }
+        (collectionView.cellForItem(at: indexPath) as? MessageCell)?.flashHighlight()
+    }
+
+    func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        guard let id = pendingFlashID else { return }
+        pendingFlashID = nil
+        flashMessage(id)
+    }
+
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        // Scrolling dismisses a text selection (Messages behavior).
+        endTextSelection()
+    }
+}
+
+// MARK: - Select text
+
+extension ConversationViewController: UIGestureRecognizerDelegate {
+    /// Enters interactive text selection on a bubble — the context menu's
+    /// "Select Text". Deferred a runloop so it starts cleanly after the menu's
+    /// own dismissal, then installs the tap-outside dismissal.
+    private func beginTextSelection(for id: String) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  let indexPath = self.dataSource.indexPath(for: id),
+                  let cell = self.collectionView.cellForItem(at: indexPath) as? MessageCell
+            else { return }
+            self.endTextSelection()
+            cell.beginTextSelection()
+            self.textSelectionCell = cell
+            self.collectionView.addGestureRecognizer(self.textSelectionDismissTap)
+        }
+    }
+
+    private func endTextSelection() {
+        guard textSelectionCell != nil else { return }
+        textSelectionCell?.endTextSelection()
+        textSelectionCell = nil
+        collectionView.removeGestureRecognizer(textSelectionDismissTap)
+    }
+
+    @objc private func handleTextSelectionDismissTap() {
+        endTextSelection()
+    }
+
+    /// The dismiss tap fires only for taps that land OUTSIDE the selected
+    /// bubble and inside the transcript — taps on the bubble/handles go to the
+    /// text view, and the floating Copy/Share callout (a separate view tree,
+    /// not a collection-view descendant) is ignored so it stays interactive.
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        guard gestureRecognizer === textSelectionDismissTap, let cell = textSelectionCell else { return true }
+        guard let touched = touch.view, touched.isDescendant(of: collectionView) else { return false }
+        return !cell.bounds.contains(touch.location(in: cell))
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+    ) -> Bool {
+        true
+    }
+}
+
+// MARK: - Quoted-reply tap
+
+extension ConversationViewController: MessageCellDelegate {
+    /// Tapping a bubble's quoted preview jumps to the original message.
+    func messageCell(_ cell: MessageCell, didTapQuotedMessage id: String) {
+        scrollToMessage(id, highlight: true)
+    }
+
+    /// Swiping a bubble past the threshold enters the reply compose state —
+    /// same seam as the context-menu Reply.
+    func messageCell(_ cell: MessageCell, didSwipeToReply id: String) {
+        viewModel.beginReply(to: id)
     }
 }

@@ -48,20 +48,33 @@ public struct ChatMessage: Equatable, Sendable, Identifiable {
     public let body: String
     public let createdAt: Date
     public let isMine: Bool
+    /// The id of the message this one replies to, if any — chat.v1's
+    /// `reply_to`. `nil` for a normal (non-threaded) message.
+    public let replyToID: String?
 
-    public init(id: String, senderID: ProfileID, body: String, createdAt: Date, isMine: Bool) {
+    public init(
+        id: String,
+        senderID: ProfileID,
+        body: String,
+        createdAt: Date,
+        isMine: Bool,
+        replyToID: String? = nil
+    ) {
         self.id = id
         self.senderID = senderID
         self.body = body
         self.createdAt = createdAt
         self.isMine = isMine
+        self.replyToID = replyToID
     }
 }
 
 public protocol ChatProviding: Sendable {
     func loadConversations() async throws -> [Conversation]
     func loadMessages(in conversationID: ConversationID) async throws -> [ChatMessage]
-    func send(_ body: String, to conversationID: ConversationID) async throws -> ChatMessage
+    /// Sends `body`, optionally as a threaded reply to `replyToID` (chat.v1
+    /// `reply_to`). Returns the created, viewer-owned message.
+    func send(_ body: String, to conversationID: ConversationID, replyingTo replyToID: String?) async throws -> ChatMessage
     func markRead(_ conversationID: ConversationID, upTo messageID: String) async throws
     /// The direct-message conversation with `profileID`, reusing an existing
     /// 1:1 conversation or creating one.
@@ -74,6 +87,11 @@ extension ChatProviding {
     /// once chat.v1 exposes a single-conversation lookup.
     public func conversationSummary(for id: ConversationID) async throws -> Conversation? {
         try await loadConversations().first { $0.id == id }
+    }
+
+    /// Non-reply convenience — the common case reads `send(body, to:)`.
+    public func send(_ body: String, to conversationID: ConversationID) async throws -> ChatMessage {
+        try await send(body, to: conversationID, replyingTo: nil)
     }
 }
 
@@ -180,13 +198,14 @@ public actor ChatRepository: ChatProviding {
         }
     }
 
-    public func send(_ body: String, to conversationID: ConversationID) async throws -> ChatMessage {
+    public func send(_ body: String, to conversationID: ConversationID, replyingTo replyToID: String?) async throws -> ChatMessage {
         let viewer = try await resolveViewerProfileID()
         var request = Chat_V1_SendMessageRequest()
         request.conversationID = conversationID.rawValue
         request.senderID = viewer.rawValue
         request.contentType = .text
         request.body = body
+        if let replyToID { request.replyTo = replyToID }
         let response = await chatClient.sendMessage(request: request, headers: [:])
         switch response.result {
         case .success(let created):
@@ -195,7 +214,8 @@ public actor ChatRepository: ChatProviding {
                 senderID: viewer,
                 body: body,
                 createdAt: Date(),
-                isMine: true
+                isMine: true,
+                replyToID: replyToID
             )
         case .failure(let error):
             throw ChatError.transport(message: error.message ?? "code \(error.code)")
@@ -300,7 +320,8 @@ public actor ChatRepository: ChatProviding {
             senderID: sender,
             body: view.body,
             createdAt: Date(timeIntervalSince1970: TimeInterval(view.createdAtMs) / 1000),
-            isMine: sender == viewer
+            isMine: sender == viewer,
+            replyToID: view.replyTo.isEmpty ? nil : view.replyTo
         )
     }
 

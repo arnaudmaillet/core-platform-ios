@@ -8,6 +8,7 @@ private actor StubChatProvider: ChatProviding {
     var conversations: [Conversation]
     var messages: [ChatMessage]
     private(set) var sentBodies: [String] = []
+    private(set) var sentReplyTos: [String?] = []
     private(set) var markReadCalls = 0
 
     init(conversations: [Conversation] = [], messages: [ChatMessage] = []) {
@@ -17,9 +18,10 @@ private actor StubChatProvider: ChatProviding {
 
     func loadConversations() async throws -> [Conversation] { conversations }
     func loadMessages(in conversationID: ConversationID) async throws -> [ChatMessage] { messages }
-    func send(_ body: String, to conversationID: ConversationID) async throws -> ChatMessage {
+    func send(_ body: String, to conversationID: ConversationID, replyingTo replyToID: String?) async throws -> ChatMessage {
         sentBodies.append(body)
-        let message = ChatMessage(id: "sent", senderID: ProfileID("me"), body: body, createdAt: Date(timeIntervalSince1970: 200), isMine: true)
+        sentReplyTos.append(replyToID)
+        let message = ChatMessage(id: "sent", senderID: ProfileID("me"), body: body, createdAt: Date(timeIntervalSince1970: 200), isMine: true, replyToID: replyToID)
         messages.append(message)
         return message
     }
@@ -260,23 +262,82 @@ struct ChatViewModelTests {
 
     // MARK: - Thread
 
-    /// The context-menu seam contract while the write plane is send-only:
-    /// every action surfaces an honest notice instead of silently no-oping.
-    /// Delete once wired should FAIL this test — that's the reminder to
-    /// replace the notice with the repository call.
-    @Test func messageActionsSurfaceHonestNotices() {
-        let viewModel = ConversationViewModel(
-            conversationID: ConversationID("c1"),
-            repository: StubChatProvider()
-        )
+    /// Forward is the last honest stub — reply and delete are wired, so only
+    /// forward surfaces a notice now.
+    @Test func forwardSurfacesHonestNotice() async {
+        let provider = StubChatProvider(messages: [message("m1", mine: false)])
+        let viewModel = ConversationViewModel(conversationID: ConversationID("c1"), repository: provider)
+        viewModel.viewDidLoad()
+        await settle()
+
         var noticeTitles: [String] = []
         viewModel.onActionNotice = { title, _ in noticeTitles.append(title) }
+        var replyDrafts: [ConversationViewModel.ReplyDraft?] = []
+        viewModel.onReplyStateChange = { replyDrafts.append($0) }
 
         viewModel.perform(.reply, on: "m1")
         viewModel.perform(.forward, on: "m1")
-        viewModel.perform(.delete, on: "m1")
 
-        #expect(noticeTitles == ["Reply", "Forward", "Delete"])
+        #expect(noticeTitles == ["Forward"])          // reply did NOT notice
+        #expect(replyDrafts.compactMap(\.self).map(\.messageID) == ["m1"]) // reply set a draft
+    }
+
+    @Test func replyDraftPublishesAndSendCarriesReplyTo() async {
+        let provider = StubChatProvider(messages: [message("m1", mine: false)])
+        let viewModel = ConversationViewModel(conversationID: ConversationID("c1"), repository: provider)
+        var drafts: [ConversationViewModel.ReplyDraft?] = []
+        viewModel.onReplyStateChange = { drafts.append($0) }
+        viewModel.viewDidLoad()
+        await settle()
+
+        viewModel.beginReply(to: "m1")
+        #expect(drafts.last??.messageID == "m1")
+        #expect(drafts.last??.snippet == "m1") // body used as the excerpt
+
+        viewModel.send("on it")
+        await settle()
+
+        #expect(await provider.sentReplyTos == ["m1"]) // reply reference threaded through
+        #expect(drafts.last == .some(nil))             // reply state cleared on send
+    }
+
+    @Test func cancelReplyClearsTheDraft() async {
+        let provider = StubChatProvider(messages: [message("m1", mine: false)])
+        let viewModel = ConversationViewModel(conversationID: ConversationID("c1"), repository: provider)
+        var drafts: [ConversationViewModel.ReplyDraft?] = []
+        viewModel.onReplyStateChange = { drafts.append($0) }
+        viewModel.viewDidLoad()
+        await settle()
+
+        viewModel.beginReply(to: "m1")
+        viewModel.cancelReply()
+        #expect(drafts.last == .some(nil))
+    }
+
+    @Test func deleteRemovesMessageAndSurvivesReload() async {
+        let provider = StubChatProvider(messages: [message("m1", mine: false), message("m2", mine: true)])
+        let viewModel = ConversationViewModel(conversationID: ConversationID("c1"), repository: provider)
+        var last: ConversationViewModel.Phase?
+        viewModel.onPhaseChange = { last = $0 }
+        viewModel.viewDidLoad()
+        await settle()
+
+        viewModel.deleteMessage("m1")
+        guard case .content(let afterDelete) = last else {
+            Issue.record("expected content, got \(String(describing: last))")
+            return
+        }
+        #expect(afterDelete.map(\.id) == ["m2"])
+
+        // A reload re-fetches m1 from the repository; the session-local delete
+        // set must keep it out.
+        viewModel.refresh()
+        await settle()
+        guard case .content(let afterReload) = last else {
+            Issue.record("expected content, got \(String(describing: last))")
+            return
+        }
+        #expect(afterReload.map(\.id) == ["m2"])
     }
 
     @Test func threadLoadsMessagesAndMarksRead() async {

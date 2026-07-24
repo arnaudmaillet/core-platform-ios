@@ -49,7 +49,7 @@ final class DayHeaderView: UICollectionReusableView {
     }
 }
 
-private extension UIFont {
+extension UIFont {
     func withWeight(_ weight: UIFont.Weight) -> UIFont {
         let descriptor = fontDescriptor.addingAttributes([
             .traits: [UIFontDescriptor.TraitKey.weight: weight]
