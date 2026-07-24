@@ -295,9 +295,15 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         let toolbar = toolbar
         let presentingView = presentingView
         let screenRadius = screenRadius
+        // The SAME spring as the tap-back dismissal (`ZoomFlight.spring*`), so a
+        // released swipe and a tap land with identical physics — commit and
+        // cancel alike. Only the initial velocity differs: it's the hand's
+        // release velocity (the card is caught mid-fling, not restarted), so a
+        // harder fling overshoots more, but the damping curve is one and the
+        // same.
         UIView.animate(
-            withDuration: 0.38, delay: 0,
-            usingSpringWithDamping: commit ? 0.9 : 0.82,
+            withDuration: ZoomFlight.springDuration, delay: 0,
+            usingSpringWithDamping: ZoomFlight.springDamping,
             initialSpringVelocity: springVelocity,
             options: [.beginFromCurrentState, .allowUserInteraction]
         ) {
@@ -320,8 +326,9 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // ambit can be deferred indefinitely (observed: a cancel's completion
         // frozen for seconds, then flushed by the NEXT grab's animation — and
         // tearing down that newer grab's transition). A timer makes teardown
-        // deterministic; the spring is visuals-only.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) { [weak self] in
+        // deterministic; the spring is visuals-only. A hair past the spring's
+        // own duration so the card has reached its pose before it's retired.
+        DispatchQueue.main.asyncAfter(deadline: .now() + ZoomFlight.springDuration + 0.04) { [weak self] in
             self?.finishTransition(cancelled: !commit)
         }
     }

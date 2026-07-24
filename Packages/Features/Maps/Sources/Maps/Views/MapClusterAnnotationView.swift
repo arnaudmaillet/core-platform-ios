@@ -27,47 +27,44 @@ final class MapClusterAnnotationView: MKAnnotationView {
     /// The loaded cover image, handed to the hero transition to fly.
     var heroImage: UIImage? { card.imageView.image }
 
+    /// Fired the instant the cluster is tapped — see `installInstantTap`.
+    var onSelect: (() -> Void)?
+
     override init(annotation: (any MKAnnotation)?, reuseIdentifier: String?) {
         super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
         // Square collision + center anchoring, identical to a single pin.
+        // No `clusteringIdentifier`: `MapClusterEngine` does the grouping, so
+        // MapKit must not run its own clustering pass over these markers.
         collisionMode = .rectangle
         frame = CGRect(x: 0, y: 0, width: Self.side, height: Self.side)
         centerOffset = .zero
         backgroundColor = .clear
-        // Share the pins' clustering identifier so clusters keep participating in
-        // the clustering tree — they merge into larger clusters as you zoom out
-        // instead of falling out of clustering entirely.
-        clusteringIdentifier = MapAnnotation.clusteringIdentifier
 
         addSubview(card)
         // The card clips, so the shadow lives on this outer layer — same as
         // the single pin.
         PinCardView.applyPinShadow(to: layer)
+        installInstantTap(target: self, action: #selector(handleTap))
     }
+
+    @objc private func handleTap() { onSelect?() }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// Re-assert the clustering identifier on every display, for the same
-    /// reuse-consumption reason as `MapAnnotationView` — so a recycled cluster
-    /// view never drops out of the clustering tree mid-zoom.
-    override func prepareForDisplay() {
-        super.prepareForDisplay()
-        clusteringIdentifier = MapAnnotation.clusteringIdentifier
-    }
-
-    /// Renders the first member post's thumbnail. Called from the map delegate,
-    /// which owns the image pipeline.
-    func configure(with cluster: MKClusterAnnotation, imagePipeline: ImagePipeline) {
-        let firstThumbnail = cluster.memberAnnotations
-            .lazy
-            .compactMap { ($0 as? MapAnnotation)?.pin.thumbnailURL }
-            .first
-
+    /// Renders the representative post's thumbnail — the cluster's face and the
+    /// image the hero transition flies. Called from the map delegate, which
+    /// owns the image pipeline.
+    func configure(with cluster: MapComputedCluster, imagePipeline: ImagePipeline) {
+        let url = cluster.representative.thumbnailURL
+        // Idempotent: a tracked cluster is re-configured on every reconcile even
+        // when its face is unchanged (same representative thumbnail). Blanking
+        // and re-fetching it then would flash the card, so leave it be.
+        guard representedURL != url else { return }
         imageTask?.cancel()
-        representedURL = firstThumbnail
+        representedURL = url
         card.imageView.image = nil
-        guard let url = firstThumbnail else { return }
+        guard let url else { return }
         imageTask = Task { [weak self] in
             guard let image = try? await imagePipeline.image(for: url) else { return }
             guard let self, self.representedURL == url else { return }
@@ -82,6 +79,7 @@ final class MapClusterAnnotationView: MKAnnotationView {
         // come back invisible and half-size.
         alpha = 1
         transform = .identity
+        onSelect = nil
         imageTask?.cancel()
         imageTask = nil
         representedURL = nil

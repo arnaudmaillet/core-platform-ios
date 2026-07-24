@@ -31,10 +31,10 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     private let isPresenting: Bool
     private let source: MapPinZoomSource
     private weak var destination: (any ZoomTransitionDestination)?
-    private let duration: TimeInterval = 0.42
-    /// Fraction of the dismissal spent on the detach dip. Front-loaded so the
-    /// flight reads as "picked up, then flown home".
-    private static let detachPhase: Double = 0.15
+    /// The flight's spring is defined once on `ZoomFlight` and shared with the
+    /// interactive grab, so present, tap-back, and released-swipe dismissals all
+    /// settle with identical physics.
+    private let duration = ZoomFlight.springDuration
 
     init(isPresenting: Bool, source: MapPinZoomSource, destination: any ZoomTransitionDestination) {
         self.isPresenting = isPresenting
@@ -102,25 +102,27 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
 
         let screenRadius = ZoomFlight.screenCornerRadius(behind: container)
 
-        // Depth cue: the presenting map recedes to 0.95 with a gentle spring, so
-        // the feed reads as lifting off a 3D canvas. (`view(forKey:)` is nil under
-        // an over-full-screen present, so reach the root via the view controller.)
+        // Depth cue: the presenting map recedes to 0.95, so the feed reads as
+        // lifting off a 3D canvas. (`view(forKey:)` is nil under an
+        // over-full-screen present, so reach the root via the view controller.)
         let presentingView = context.viewController(forKey: .from)?.view
         ZoomFlight.applyRecededChrome(to: presentingView, radius: screenRadius)
-        UIView.animate(withDuration: duration, delay: 0, usingSpringWithDamping: 0.85,
-                       initialSpringVelocity: 0, options: [.curveEaseInOut]) {
-            presentingView?.transform = CGAffineTransform(
-                scaleX: ZoomFlight.mapDepthScale, y: ZoomFlight.mapDepthScale
-            )
-        }
 
+        // Dim fades on a plain curve — opacity should never bounce.
         UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseIn]) {
             dim.alpha = 1
         }
-        UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseInOut]) {
-            // Lands flush with the device's own display corners, so the reveal
-            // of the (screen-clipped) feed underneath is seamless.
+        // Card and the map's depth ride ONE spring, so the lift-off and the
+        // canvas receding stay locked together and land as a single settle.
+        // The card lands flush with the device's own display corners, so the
+        // reveal of the (screen-clipped) feed underneath is seamless.
+        UIView.animate(withDuration: duration, delay: 0,
+                       usingSpringWithDamping: ZoomFlight.springDamping,
+                       initialSpringVelocity: ZoomFlight.springVelocity, options: []) {
             flight.poseAsPage(cornerRadius: screenRadius)
+            presentingView?.transform = CGAffineTransform(
+                scaleX: ZoomFlight.mapDepthScale, y: ZoomFlight.mapDepthScale
+            )
         } completion: { _ in
             self.destination?.setZoomContentHidden(false)
             flight.card.removeFromSuperview()
@@ -183,39 +185,31 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             scaleX: ZoomFlight.mapDepthScale, y: ZoomFlight.mapDepthScale
         )
 
-        // Phase 1 (front-loaded): the card dips to 0.95 — "picked up". Phase
-        // 2: the clip-morph home — card shrinks + rounds + regrows its ring
-        // and shadow, chrome fades, while dim lifts and the map returns
-        // across the whole flight.
-        UIView.animateKeyframes(withDuration: duration, delay: 0, options: []) {
-            UIView.addKeyframe(withRelativeStartTime: 0, relativeDuration: Self.detachPhase) {
-                flight.poseDetached(scale: ZoomFlight.detachScale, cornerRadius: screenRadius)
-            }
-            UIView.addKeyframe(withRelativeStartTime: Self.detachPhase, relativeDuration: 1 - Self.detachPhase) {
-                flight.poseAsPin()
-            }
-            UIView.addKeyframe(withRelativeStartTime: 0, relativeDuration: 1) {
-                dim.alpha = 0
-                presentingView?.transform = .identity
-            }
+        // The clip-morph home on one spring — card shrinks + rounds + regrows
+        // its ring and shadow, chrome fades, dim lifts, and the map returns, all
+        // settling onto the pin together. The same spring as the grab dismissal,
+        // so a tap-back and a released grab land with the same physics; a hair
+        // of overshoot reads as the card snapping into its pin socket.
+        UIView.animate(withDuration: duration, delay: 0,
+                       usingSpringWithDamping: ZoomFlight.springDamping,
+                       initialSpringVelocity: ZoomFlight.springVelocity, options: []) {
+            flight.poseAsPin()
+            dim.alpha = 0
+            presentingView?.transform = .identity
         } completion: { _ in
-            // Unlike UIView.animate, the keyframe API's completion isn't
-            // @MainActor-annotated in the SDK; UIKit still delivers it on main.
-            MainActor.assumeIsolated {
-                let cancelled = context.transitionWasCancelled
-                flight.card.removeFromSuperview()
-                flight.shadow.removeFromSuperview()
-                dim.removeFromSuperview()
-                presentingView?.transform = .identity
-                ZoomFlight.clearRecededChrome(from: presentingView) // bezel-aligned again at scale 1
-                // Restore the feed content for the cancel path; moot when finished.
-                self.destination?.setZoomContentHidden(false)
-                self.destination?.zoomTransitionDidEnd()
-                if !cancelled {
-                    self.source.zoomSourceDidReturn()
-                }
-                context.completeTransition(!cancelled)
+            let cancelled = context.transitionWasCancelled
+            flight.card.removeFromSuperview()
+            flight.shadow.removeFromSuperview()
+            dim.removeFromSuperview()
+            presentingView?.transform = .identity
+            ZoomFlight.clearRecededChrome(from: presentingView) // bezel-aligned again at scale 1
+            // Restore the feed content for the cancel path; moot when finished.
+            self.destination?.setZoomContentHidden(false)
+            self.destination?.zoomTransitionDidEnd()
+            if !cancelled {
+                self.source.zoomSourceDidReturn()
             }
+            context.completeTransition(!cancelled)
         }
     }
 }

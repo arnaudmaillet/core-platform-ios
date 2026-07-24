@@ -12,11 +12,6 @@ final class MapAnnotation: NSObject, MKAnnotation {
 
     private(set) var pin: MapPin
 
-    /// Collapses overlapping / co-located markers into a cluster bubble. This is
-    /// visual de-densification of the *returned* pins (honest given the server's
-    /// Top-K), not a claim about true world density.
-    static let clusteringIdentifier = "post-pin"
-
     init(pin: MapPin) {
         self.pin = pin
         self.coordinate = CLLocationCoordinate2D(latitude: pin.latitude, longitude: pin.longitude)
