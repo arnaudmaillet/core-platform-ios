@@ -51,6 +51,15 @@ final class ConversationViewController: UIViewController {
     /// Preview only: the platter can resize while animating in, stranding
     /// the one-shot tail scroll mid-history — tracked to re-pin on change.
     private var lastPreviewLayoutSize = CGSize.zero
+    /// The bubble currently being dragged for a reply, if any. While it is set
+    /// the transcript's scrolling is suspended, so the swipe runs on a purely
+    /// horizontal axis; identity is tracked (not a bare flag) so a stale end
+    /// call from a recycled cell can't unlock a swipe already in progress.
+    private weak var replySwipingCell: MessageCell?
+    /// False until the compose bar's resting clearance has been measured once.
+    /// Establishing that first inset is not keyboard travel, so it must not
+    /// drag the transcript with it.
+    private var hasEstablishedClearance = false
 
     init(viewModel: ConversationViewModel, mode: Mode = .full) {
         self.viewModel = viewModel
@@ -75,9 +84,12 @@ final class ConversationViewController: UIViewController {
         configureStatusViews()
         if mode == .full {
             configureInputBar()
+            // ONE notification covers the whole surface: raise, dismiss, and
+            // every mid-session height change (autocorrect bar, hardware
+            // keyboard toggling, floating/split). Show-only misses the rest.
             NotificationCenter.default.addObserver(
-                self, selector: #selector(keyboardWillShow),
-                name: UIResponder.keyboardWillShowNotification, object: nil
+                self, selector: #selector(keyboardWillChangeFrame),
+                name: UIResponder.keyboardWillChangeFrameNotification, object: nil
             )
         }
         configureSkeleton()
@@ -135,6 +147,9 @@ final class ConversationViewController: UIViewController {
         super.viewWillDisappear(animated)
         // Don't strand a text selection when navigating away.
         endTextSelection()
+        // Nor a suspended scroll: a swipe interrupted by the pop gesture never
+        // resolves, and the transcript would come back frozen.
+        unlockTranscriptScrolling()
     }
 
     override func viewDidLayoutSubviews() {
@@ -153,14 +168,10 @@ final class ConversationViewController: UIViewController {
             return
         }
         // The transcript scrolls under the floating bar: keep a clearance
-        // inset matching the bar's overlap beyond the bottom safe area. Runs
-        // on every keyboard-guide-driven pass, so it tracks docking too.
-        let overlap = max(0, view.bounds.height - inputBar.frame.minY - view.safeAreaInsets.bottom)
-        let clearance = overlap + Spacing.md
-        if collectionView.contentInset.bottom != clearance {
-            collectionView.contentInset.bottom = clearance
-            collectionView.verticalScrollIndicatorInsets.bottom = clearance
-        }
+        // inset matching the bar's overlap beyond the bottom safe area, and
+        // carry the content the same distance. Runs on every keyboard-guide-
+        // driven pass, so it tracks docking, undocking and scrubs alike.
+        syncTranscriptClearance()
     }
 
     // MARK: - Setup
@@ -419,13 +430,98 @@ final class ConversationViewController: UIViewController {
         return IndexPath(item: count - 1, section: snapshot.numberOfSections - 1)
     }
 
-    /// Keyboard rising while the tail is on screen keeps the tail pinned
-    /// (Telegram behavior); deep in history, the view stays put.
-    @objc private func keyboardWillShow(_ notification: Notification) {
-        guard isNearBottom else { return }
-        DispatchQueue.main.async { [weak self] in
-            self?.scrollToBottom(animated: true)
+    // MARK: - Keyboard tracking
+
+    /// Backstop for the keyboard transition, using the notification's own
+    /// duration and curve.
+    ///
+    /// The compose bar is docked to `keyboardLayoutGuide`, and UIKit normally
+    /// resolves that guide — bar move, clearance inset and content shift, all
+    /// inside its own keyboard animation — BEFORE this notification is even
+    /// delivered (verified by instrumenting the layout pass against the
+    /// handler). When that happens `layoutIfNeeded` here is a no-op and
+    /// `syncTranscriptClearance` finds a zero delta, so this costs nothing.
+    ///
+    /// It earns its keep in the opposite ordering, where the guide has not yet
+    /// been resolved: the layout then lands inside THIS block and travels on
+    /// the keyboard's exact timing rather than jumping a frame ahead of it.
+    @objc private func keyboardWillChangeFrame(_ notification: Notification) {
+        guard mode == .full, isViewLoaded, view.window != nil,
+              let userInfo = notification.userInfo else { return }
+        // Defaults match the system's own fallback for a malformed payload.
+        let duration = userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.25
+        // The keyboard reports curve 7 — a private `UIView.AnimationCurve` case
+        // with no `AnimationOptions` twin, so it is shifted into the options'
+        // curve field verbatim rather than round-tripped through the enum
+        // (which would silently degrade it to `.easeInOut` and desync the bar).
+        let curve = userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? Int
+            ?? Int(UIView.AnimationCurve.easeInOut.rawValue)
+        let options = UIView.AnimationOptions(rawValue: UInt(curve) << 16)
+
+        UIView.animate(
+            withDuration: duration, delay: 0, options: [options, .beginFromCurrentState]
+        ) {
+            self.view.layoutIfNeeded()
+            self.syncTranscriptClearance()
         }
+    }
+
+    /// The transcript's single clearance authority: matches the bottom inset to
+    /// the compose bar's overlap and translates the content by the same delta.
+    ///
+    /// The translation is the fix for a list that sat behind the keyboard: an
+    /// inset change only extends the scrollable RANGE, it never moves what is
+    /// on screen. Shifting `contentOffset` by the identical delta pins the
+    /// visible messages to the bar 1:1 — at the tail and equally deep in
+    /// history, where the old near-bottom gate left the view stranded.
+    ///
+    /// Deliberately NOT gated on "a keyboard transition is in flight": UIKit
+    /// usually runs this pass from inside its own keyboard animation before the
+    /// notification arrives, so any such flag reads false exactly when it
+    /// matters. Riding the layout pass instead makes the shift race-free — and
+    /// it inherits that animation's timing for free. The delta guard keeps it
+    /// idempotent, so the notification path can safely call it again.
+    ///
+    /// The same treatment falls out for the compose bar growing (a fifth line
+    /// of text, the reply banner): the transcript stays pinned to the bar
+    /// instead of hiding behind it.
+    private func syncTranscriptClearance() {
+        let overlap = max(0, view.bounds.height - inputBar.frame.minY - view.safeAreaInsets.bottom)
+        let clearance = overlap + Spacing.md
+        let delta = clearance - collectionView.contentInset.bottom
+        // Sub-point deltas are layout noise, not keyboard travel.
+        guard abs(delta) > 0.5 else { return }
+        collectionView.contentInset.bottom = clearance
+        collectionView.verticalScrollIndicatorInsets.bottom = clearance
+
+        // Measuring the resting clearance for the first time is not travel.
+        guard hasEstablishedClearance else {
+            hasEstablishedClearance = true
+            return
+        }
+        // Nothing to carry before the first transcript exists, and never out
+        // from under a finger already dragging the list — which is what makes
+        // an interactive keyboard dismissal scrub with the finger instead of
+        // fighting it.
+        guard hasRenderedContent, !collectionView.isTracking else { return }
+        let insets = collectionView.adjustedContentInset
+        let minOffset = -insets.top
+        // `insets.bottom` already carries the new clearance, so the reachable
+        // maximum grows with the keyboard — a tail-pinned transcript stays
+        // exactly tail-pinned instead of clamping short.
+        let reachable = collectionView.contentSize.height + insets.bottom - collectionView.bounds.height
+        let maxOffset = max(minOffset, reachable)
+        collectionView.contentOffset.y = min(max(collectionView.contentOffset.y + delta, minOffset), maxOffset)
+    }
+
+    // MARK: - Reply-swipe scroll lock
+
+    /// Hands scrolling back to the transcript. Idempotent, and safe to call
+    /// from teardown paths that don't know whether a swipe was in flight.
+    private func unlockTranscriptScrolling() {
+        guard replySwipingCell != nil else { return }
+        replySwipingCell = nil
+        collectionView.isScrollEnabled = true
     }
 }
 
@@ -639,5 +735,24 @@ extension ConversationViewController: MessageCellDelegate {
     /// same seam as the context-menu Reply.
     func messageCell(_ cell: MessageCell, didSwipeToReply id: String) {
         viewModel.beginReply(to: id)
+    }
+
+    /// Freeze the transcript for the drag. `isScrollEnabled = false` does two
+    /// jobs at once: it stops the vertical component of a diagonal drag from
+    /// reaching the scroll pan (the diagonal-drift bug), and it CANCELS any
+    /// scroll already in flight, so a horizontal swipe that starts mid-scroll
+    /// takes the gesture over outright instead of sharing the finger.
+    func messageCellDidBeginReplySwipe(_ cell: MessageCell) {
+        // A text selection and a reply drag are mutually exclusive modes.
+        endTextSelection()
+        replySwipingCell = cell
+        collectionView.isScrollEnabled = false
+    }
+
+    /// Only the cell that took the lock may release it — a recycled cell's late
+    /// end call must not unfreeze a swipe that has since begun on another row.
+    func messageCellDidEndReplySwipe(_ cell: MessageCell) {
+        guard replySwipingCell === cell else { return }
+        unlockTranscriptScrolling()
     }
 }

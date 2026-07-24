@@ -6,10 +6,17 @@ import UIKit
 /// per-configure closures: the cell registration runs on every dequeue/
 /// reconfigure, so a weak reference set there costs a pointer write, not fresh
 /// allocations each time.
+///
+/// The begin/end swipe pair exists so the host can freeze the transcript for
+/// the drag's duration: the cell can't reach the collection view, and the
+/// scroll pan must be suspended, not merely out-prioritized (see
+/// `gestureRecognizer(_:shouldRecognizeSimultaneouslyWith:)`).
 @MainActor
 protocol MessageCellDelegate: AnyObject {
     func messageCell(_ cell: MessageCell, didTapQuotedMessage id: String)
     func messageCell(_ cell: MessageCell, didSwipeToReply id: String)
+    func messageCellDidBeginReplySwipe(_ cell: MessageCell)
+    func messageCellDidEndReplySwipe(_ cell: MessageCell)
 }
 
 /// One transcript bubble, self-sized by Auto Layout. A single cell class
@@ -77,6 +84,11 @@ final class MessageCell: UICollectionViewCell {
     private var messageID: String?
     /// One haptic per threshold crossing (reset when the drag falls back under).
     private var didCrossReplyThreshold = false
+    /// True between the pan's `.began` and its resolution — the window during
+    /// which the host holds the transcript's scrolling suspended. Tracked so the
+    /// unlock fires exactly once, from whichever path ends the drag (including
+    /// a reuse that recycles the cell mid-swipe).
+    private var isSwipingToReply = false
 
     /// Off in the context-menu preview (a static peek, no compose bar to
     /// reply into); the host sets it per mode.
@@ -157,6 +169,7 @@ final class MessageCell: UICollectionViewCell {
         replyIndicator.alpha = 0
         replyIndicator.transform = CGAffineTransform(scaleX: 0.4, y: 0.4)
         didCrossReplyThreshold = false
+        endReplySwipe()
         endTextSelection()
         quotedMessageID = nil
         messageID = nil
@@ -292,6 +305,7 @@ final class MessageCell: UICollectionViewCell {
         switch pan.state {
         case .began:
             didCrossReplyThreshold = false
+            beginReplySwipe()
         case .changed:
             // Leftward only; 1:1 up to the threshold, then rubber-banded.
             let dx = replyResistance(min(0, pan.translation(in: self).x))
@@ -314,11 +328,33 @@ final class MessageCell: UICollectionViewCell {
                 delegate?.messageCell(self, didSwipeToReply: messageID)
             }
             springReplyBack()
+            endReplySwipe()
         case .cancelled, .failed:
             springReplyBack()
+            endReplySwipe()
         default:
             break
         }
+    }
+
+    /// Opens the drag window: the host suspends transcript scrolling so the
+    /// bubble travels on a purely horizontal axis. Suspending also *cancels*
+    /// any scroll drag already in flight, which is what makes a horizontal
+    /// swipe genuinely override the vertical scroll rather than share it.
+    private func beginReplySwipe() {
+        guard !isSwipingToReply else { return }
+        isSwipingToReply = true
+        delegate?.messageCellDidBeginReplySwipe(self)
+    }
+
+    /// Closes the drag window and hands scrolling back. Idempotent, and called
+    /// from every path that can end a swipe — including `prepareForReuse`,
+    /// since a cell recycled mid-drag never sees `.ended`/`.cancelled` and
+    /// would otherwise leave the transcript frozen for good.
+    private func endReplySwipe() {
+        guard isSwipingToReply else { return }
+        isSwipingToReply = false
+        delegate?.messageCellDidEndReplySwipe(self)
     }
 
     /// Tracks the finger 1:1 up to the threshold, then dampens further travel
@@ -532,8 +568,14 @@ extension MessageCell: UIGestureRecognizerDelegate {
     }
 
     /// Track alongside the collection view's scroll pan so it never cancels the
-    /// swipe mid-drag (the two never move together — one is horizontal-left,
-    /// the other vertical).
+    /// swipe mid-drag.
+    ///
+    /// Simultaneous recognition alone is NOT enough to keep the two apart: the
+    /// begin gate above samples only the drag's opening velocity, so once the
+    /// swipe is live every later vertical component still reaches the scroll
+    /// pan and the list slides diagonally under the finger. The separation is
+    /// enforced by suspending the transcript's scrolling for the drag's
+    /// duration (`beginReplySwipe`/`endReplySwipe`), not by this method.
     func gestureRecognizer(
         _ gestureRecognizer: UIGestureRecognizer,
         shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
