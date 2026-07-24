@@ -57,6 +57,10 @@ final class MapClusterAnnotationView: MKAnnotationView {
     /// owns the image pipeline.
     func configure(with cluster: MapComputedCluster, imagePipeline: ImagePipeline) {
         let url = cluster.representative.thumbnailURL
+        // Idempotent: a tracked cluster is re-configured on every reconcile even
+        // when its face is unchanged (same representative thumbnail). Blanking
+        // and re-fetching it then would flash the card, so leave it be.
+        guard representedURL != url else { return }
         imageTask?.cancel()
         representedURL = url
         card.imageView.image = nil

@@ -83,6 +83,13 @@ final class MapAnnotationPopChoreographer {
         let animator: UIViewPropertyAnimator
     }
 
+    /// The markers still fading out, keyed by the identity they left under — so
+    /// a reconcile can match a returning cluster against one mid-departure and
+    /// `reclaim` it instead of minting a duplicate on top.
+    var departingMarkers: [String: any MKAnnotation] {
+        departures.mapValues(\.annotation)
+    }
+
     init(mapView: MKMapView) {
         self.mapView = mapView
     }

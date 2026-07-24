@@ -95,6 +95,10 @@ final class MapAnnotationView: MKAnnotationView {
     /// Renders the pin's thumbnail and (dormant) video badge.
     func configure(with pin: MapPin, imagePipeline: ImagePipeline) {
         self.imagePipeline = imagePipeline
+        // Idempotent: a reconcile re-configures every surviving marker, so a
+        // marker already showing this post must be left exactly as it is —
+        // blanking and re-fetching an unchanged thumbnail is what flashes it.
+        guard representedID != pin.postID else { return }
         representedID = pin.postID
         playBadge.isHidden = pin.mediaKind != .video
 

@@ -35,14 +35,11 @@ enum MapClusterEngine {
 
         var isCluster: Bool { memberIDs.count > 1 }
 
-        /// Stable identity for diffing across settles: the representative's id.
+        /// The representative's id. Note this is NOT a stable marker identity: a
+        /// cluster's representative churns as the Top-K set shifts, which is
+        /// exactly why the map layer tracks clusters by membership overlap
+        /// (`MapClusterTracker`) rather than keying off this.
         var key: PostID { representative.postID }
-
-        /// Diffing identity for the map layer, encoding single-vs-cluster so a
-        /// lone pin and the cluster it collapses into never occupy the same
-        /// slot — the zoom between them is then an honest cross-fade (one
-        /// marker out, the other in), not a silent type-swap under one key.
-        var identity: String { (isCluster ? "c:" : "p:") + representative.postID.rawValue }
     }
 
     /// Groups `pins` so that no two resulting markers overlap on screen — the
@@ -143,10 +140,16 @@ enum MapClusterEngine {
     }
 }
 
-/// The `MKAnnotation` for an engine-computed group. Mirrors `MapAnnotation`
-/// (identity is the representative post id; coordinate is KVO-observed so a
-/// centroid shift moves the marker without a remove/add cycle), and carries its
-/// member ids so a tap opens the whole group with no round-trip.
+/// The `MKAnnotation` for an engine-computed group. Coordinate is KVO-observed
+/// so a centroid shift moves the marker without a remove/add cycle, and it
+/// carries its member ids so a tap opens the whole group with no round-trip.
+///
+/// Identity is the OBJECT, not any of its contents. `MapClusterTracker` keeps a
+/// group's marker alive across reconciles even as its representative and
+/// membership shift, so `apply(_:)` mutates all of those in place — and MapKit
+/// hashes annotations to track them, so a content-derived hash that changed
+/// under a live marker would corrupt the map's internal set. Object identity is
+/// stable for the marker's whole life on the map.
 final class MapComputedCluster: NSObject, MKAnnotation {
     @objc dynamic var coordinate: CLLocationCoordinate2D
     private(set) var representative: MapPin
@@ -168,10 +171,4 @@ final class MapComputedCluster: NSObject, MKAnnotation {
             coordinate = next
         }
     }
-
-    override func isEqual(_ object: Any?) -> Bool {
-        (object as? MapComputedCluster)?.representative.postID == representative.postID
-    }
-
-    override var hash: Int { representative.postID.hashValue }
 }

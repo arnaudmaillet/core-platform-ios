@@ -100,14 +100,20 @@ final class MapsViewController: UIViewController {
     /// this: the map itself never holds raw pins, only the engine's markers, so
     /// the query/diff layer stays a pure model feed with no MapKit coupling.
     private var pins: [PostID: MapPin] = [:]
-    /// The engine's markers currently on the map, keyed by the item's diffing
-    /// identity (`p:`/`c:` + representative id): a `MapAnnotation` for a lone
-    /// pin, a `MapComputedCluster` for a group. Excludes markers mid fade-out —
-    /// those live in the pop choreographer until their animation retires them.
+    /// The engine's markers currently on the map, keyed by a stable identity: a
+    /// `MapAnnotation` single keys off its post id (`p:<id>`), a
+    /// `MapComputedCluster` off a synthetic id (`c:<n>`) it keeps for life so it
+    /// survives representative churn (see `reconcileClusters`). Excludes markers
+    /// mid fade-out — those live in the pop choreographer until it retires them.
     private var displayed: [String: MKAnnotation] = [:]
     /// Marker collision size in screen points — the pin footprint plus a hair
     /// of margin, so two markers that would touch are grouped instead.
     private static let clusterCellPoints = MapAnnotationView.side + 8
+    /// Mints stable, content-free identities for cluster markers. A cluster's
+    /// natural id (its representative) churns as the Top-K set shifts; a marker
+    /// keeps this synthetic id for its whole life on the map instead
+    /// (see `reconcileClusters` / `MapClusterTracker`).
+    private var clusterMarkerSeq = 0
 
     /// Debounce so a continuous pan fires one query on settle, not per frame.
     private var pendingQuery: DispatchWorkItem?
@@ -731,6 +737,13 @@ final class MapsViewController: UIViewController {
     /// across pan+zoom (see `MapClusterEngine`): the map is handed finished
     /// markers with no `clusteringIdentifier`, so MapKit never runs the pass
     /// that breaks — it just draws each one where we place it.
+    ///
+    /// Stable markers are LEFT ON THE MAP and updated in place — never removed
+    /// and re-added — so they don't flicker. Singles key off their post id
+    /// (stable by nature); clusters are matched to the marker they most overlap
+    /// (`MapClusterTracker`), because a cluster's representative churns as the
+    /// Top-K set shifts and keying off it would fade a settled cluster out and a
+    /// near-identical one back in.
     private func reconcileClusters() {
         let items = MapClusterEngine.cluster(
             Array(pins.values),
@@ -739,38 +752,68 @@ final class MapsViewController: UIViewController {
         )
         var target = Set<String>()
         target.reserveCapacity(items.count)
-
         var toAdd: [MKAnnotation] = []
-        for item in items {
-            let id = item.identity
-            target.insert(id)
 
-            // Already shown at this identity (same kind, by construction) —
-            // update in place: a cluster's centroid shifts as membership
-            // changes, a single's pin may be re-faced.
+        // Singles: one pin, one identity — reuse or reclaim by post id.
+        for item in items where !item.isCluster {
+            let id = Self.singleIdentity(item.representative.postID)
+            target.insert(id)
             if let existing = displayed[id] {
                 update(existing, to: item)
-                continue
-            }
-            // Coming back while still fading out (a fast leave→return): take the
-            // very marker the choreographer is retiring rather than mint a
-            // duplicate on top of it. It's already on the map — no re-add.
-            if let reclaimed = popChoreographer.reclaim(id) {
+            } else if let reclaimed = popChoreographer.reclaim(id) {
                 update(reclaimed, to: item)
                 displayed[id] = reclaimed
-                continue
+            } else {
+                let annotation = MapAnnotation(pin: item.representative)
+                displayed[id] = annotation
+                toAdd.append(annotation)
             }
-            let annotation: MKAnnotation = item.isCluster
-                ? MapComputedCluster(item)
-                : MapAnnotation(pin: item.representative)
-            displayed[id] = annotation
-            toAdd.append(annotation)
         }
 
-        // Departures: hand them to the choreographer to scale-and-fade out
-        // (mirroring the arrival), which removes them from the map when the
-        // animation ends. They leave `displayed` now — the choreographer is
-        // their sole owner until then.
+        // Clusters: match by shared membership so a marker persists through the
+        // representative churn. Candidates are the shown clusters PLUS the ones
+        // still fading out — matching a returning cluster to a departing marker
+        // reclaims it instead of stacking a duplicate.
+        let clusterItems = items.filter(\.isCluster)
+        var candidates: [MapClusterTracker.Candidate] = []
+        var candidateIsDeparting: [String: Bool] = [:]
+        for (key, annotation) in displayed {
+            guard let cluster = annotation as? MapComputedCluster else { continue }
+            candidates.append(.init(key: key, members: Set(cluster.memberIDs)))
+            candidateIsDeparting[key] = false
+        }
+        for (key, annotation) in popChoreographer.departingMarkers {
+            guard let cluster = annotation as? MapComputedCluster else { continue }
+            candidates.append(.init(key: key, members: Set(cluster.memberIDs)))
+            candidateIsDeparting[key] = true
+        }
+
+        let matches = MapClusterTracker.assign(
+            incoming: clusterItems.map { Set($0.memberIDs) }, candidates: candidates
+        )
+        for (item, matchedKey) in zip(clusterItems, matches) {
+            if let key = matchedKey {
+                target.insert(key)
+                if candidateIsDeparting[key] == true, let reclaimed = popChoreographer.reclaim(key) {
+                    update(reclaimed, to: item)
+                    displayed[key] = reclaimed
+                } else if let existing = displayed[key] {
+                    update(existing, to: item)
+                }
+            } else {
+                clusterMarkerSeq += 1
+                let key = "c:\(clusterMarkerSeq)"
+                let annotation = MapComputedCluster(item)
+                displayed[key] = annotation
+                toAdd.append(annotation)
+                target.insert(key)
+            }
+        }
+
+        // Departures: the still-shown markers no target claimed. Hand them to
+        // the choreographer to scale-and-fade out (mirroring the arrival),
+        // which removes them from the map when the animation ends. They leave
+        // `displayed` now — the choreographer is their sole owner until then.
         let departing = displayed.filter { !target.contains($0.key) }
         for id in departing.keys { displayed[id] = nil }
         popChoreographer.popOut(departing.map { (id: $0.key, annotation: $0.value) })
@@ -778,6 +821,8 @@ final class MapsViewController: UIViewController {
         if !toAdd.isEmpty { mapView.addAnnotations(toAdd) }
         refreshVideoPlayback()
     }
+
+    private static func singleIdentity(_ postID: PostID) -> String { "p:" + postID.rawValue }
 
     /// Re-points and re-faces a marker already on the map for a recomputed item.
     private func update(_ annotation: any MKAnnotation, to item: MapClusterEngine.Item) {
