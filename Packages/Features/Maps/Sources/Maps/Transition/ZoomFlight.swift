@@ -161,14 +161,6 @@ struct ZoomFlight {
         }
     }
 
-    /// The page pose scaled about the page center — the non-interactive
-    /// "pick up, then fly" detach dip. (The interactive grab uses
-    /// `poseFloating` instead, keeping position on its own channel.)
-    func poseDetached(scale: CGFloat, cornerRadius: CGFloat) {
-        poseFloating(scale: scale, cornerRadius: cornerRadius)
-        card.center = CGPoint(x: pageFrame.midX, y: pageFrame.midY)
-    }
-
     // MARK: - Stage dressing
 
     /// A black view, initially transparent, that dims the source (map) behind
