@@ -32,6 +32,19 @@ struct ZoomFlight {
     /// visibly detaches from the screen canvas before flying home.
     static let detachScale: CGFloat = 0.95
 
+    /// The single spring every FLIGHT lands on — the non-interactive present
+    /// and tap-back (`MapsZoomAnimator`) and the released grab
+    /// (`ZoomDismissInteractionController`) — so all three settle with identical
+    /// physics. Damping just under 1 gives a hair of overshoot ("placed", not
+    /// "switched to"); shared here so no driver can drift from the others.
+    ///
+    /// A non-interactive leg starts with `springVelocity` (a lively push off
+    /// the mark); a grab feeds in the hand's release velocity instead, so a
+    /// hard fling overshoots more than a tap — but the CURVE is the same one.
+    static let springDamping: CGFloat = 0.82
+    static let springDuration: TimeInterval = 0.42
+    static let springVelocity: CGFloat = 0.6
+
     /// Builds the card in page pose (so the chrome replica can resolve its
     /// full-screen layout before the first frame) plus its shadow stand-in.
     /// The caller inserts both into the container and lays out.

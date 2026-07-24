@@ -31,16 +31,10 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     private let isPresenting: Bool
     private let source: MapPinZoomSource
     private weak var destination: (any ZoomTransitionDestination)?
-    private let duration: TimeInterval = 0.42
-    /// The flight's spring. Damping just under 1 gives a hair of overshoot as
-    /// the card lands — enough to read as "placed" rather than "switched to",
-    /// never a visible bounce; the initial velocity gives it a lively push off
-    /// the mark rather than a slow ease-in. Shared by both non-interactive legs
-    /// so present and tap-back dismiss feel like the same physical object, and
-    /// tuned to sit alongside the grab dismissal's own spring
-    /// (`ZoomDismissInteractionController`).
-    private static let springDamping: CGFloat = 0.82
-    private static let springVelocity: CGFloat = 0.6
+    /// The flight's spring is defined once on `ZoomFlight` and shared with the
+    /// interactive grab, so present, tap-back, and released-swipe dismissals all
+    /// settle with identical physics.
+    private let duration = ZoomFlight.springDuration
 
     init(isPresenting: Bool, source: MapPinZoomSource, destination: any ZoomTransitionDestination) {
         self.isPresenting = isPresenting
@@ -123,8 +117,8 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // The card lands flush with the device's own display corners, so the
         // reveal of the (screen-clipped) feed underneath is seamless.
         UIView.animate(withDuration: duration, delay: 0,
-                       usingSpringWithDamping: Self.springDamping,
-                       initialSpringVelocity: Self.springVelocity, options: []) {
+                       usingSpringWithDamping: ZoomFlight.springDamping,
+                       initialSpringVelocity: ZoomFlight.springVelocity, options: []) {
             flight.poseAsPage(cornerRadius: screenRadius)
             presentingView?.transform = CGAffineTransform(
                 scaleX: ZoomFlight.mapDepthScale, y: ZoomFlight.mapDepthScale
@@ -197,8 +191,8 @@ final class MapsZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // so a tap-back and a released grab land with the same physics; a hair
         // of overshoot reads as the card snapping into its pin socket.
         UIView.animate(withDuration: duration, delay: 0,
-                       usingSpringWithDamping: Self.springDamping,
-                       initialSpringVelocity: Self.springVelocity, options: []) {
+                       usingSpringWithDamping: ZoomFlight.springDamping,
+                       initialSpringVelocity: ZoomFlight.springVelocity, options: []) {
             flight.poseAsPin()
             dim.alpha = 0
             presentingView?.transform = .identity
