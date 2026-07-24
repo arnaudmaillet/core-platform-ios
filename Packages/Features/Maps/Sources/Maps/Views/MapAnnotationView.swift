@@ -54,7 +54,8 @@ final class MapAnnotationView: MKAnnotationView {
 
     override init(annotation: (any MKAnnotation)?, reuseIdentifier: String?) {
         super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
-        clusteringIdentifier = MapAnnotation.clusteringIdentifier
+        // No `clusteringIdentifier`: `MapClusterEngine` computes the grouping,
+        // so MapKit must not run its own clustering pass over these markers.
         // A plain square whose center sits exactly on the coordinate (no tail):
         // `centerOffset` stays zero so the marker doesn't drift on pan/zoom.
         frame = CGRect(x: 0, y: 0, width: Self.side, height: Self.side)
@@ -65,16 +66,6 @@ final class MapAnnotationView: MKAnnotationView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    /// MapKit's designated "about to be shown" hook — including after reuse. We
-    /// re-assert `clusteringIdentifier` here every time because a view dequeued
-    /// out of a cluster comes back with its identifier consumed; during rapid
-    /// zoom that silently disables clustering and dumps every pin on screen.
-    /// Setting it deterministically on each display keeps clustering resilient.
-    override func prepareForDisplay() {
-        super.prepareForDisplay()
-        clusteringIdentifier = MapAnnotation.clusteringIdentifier
-    }
 
     private func buildLayout() {
         addSubview(card)
@@ -127,9 +118,6 @@ final class MapAnnotationView: MKAnnotationView {
         // in, but a view can also be dequeued for a pin that never pops.
         alpha = 1
         transform = .identity
-        // Note: `clusteringIdentifier` is deliberately NOT touched here — clearing
-        // it would drop the view from clustering until re-set. It's re-asserted
-        // in `prepareForDisplay()` before the view is shown again.
         onReuse?()
         onReuse = nil
         endVideoPreview()

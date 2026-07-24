@@ -96,22 +96,29 @@ final class MapsViewController: UIViewController {
     /// id (the same Phase-2 gate as the filter header). Today it marks the
     /// row, and nothing more — a deliberately honest half of the feature.
     private var mutedProfiles: Set<ProfileID> = []
-    /// id → live marker, so a diff can target the exact annotation to remove or
-    /// refresh without rebuilding the set.
-    private var annotations: [PostID: MapAnnotation] = [:]
+    /// The raw pin model, updated from each diff. Clustering is computed from
+    /// this: the map itself never holds raw pins, only the engine's markers, so
+    /// the query/diff layer stays a pure model feed with no MapKit coupling.
+    private var pins: [PostID: MapPin] = [:]
+    /// The engine's markers currently on the map, keyed by the item's stable
+    /// identity (its representative post id): a `MapAnnotation` for a lone pin,
+    /// a `MapComputedCluster` for a group.
+    private var displayed: [PostID: MKAnnotation] = [:]
+    /// Marker collision size in screen points — the pin footprint plus a hair
+    /// of margin, so two markers that would touch are grouped instead.
+    private static let clusterCellPoints = MapAnnotationView.side + 8
 
     /// Debounce so a continuous pan fires one query on settle, not per frame.
     private var pendingQuery: DispatchWorkItem?
     private static let settleDelay: TimeInterval = 0.25
 
     /// True between `regionWillChange` and `regionDidChange` — i.e. while a
-    /// zoom/pan is animating. Mutating annotations during that window can corrupt
-    /// MapKit's clustering pass, so diffs that arrive mid-flight are buffered.
+    /// zoom/pan is animating. The cluster layout depends on the zoom level, so
+    /// it is recomputed on the settle, not mid-flight.
     private var isRegionTransitioning = false
-    /// Diffs deferred while a transition was in flight, applied in order on
-    /// settle. Order preservation means the applied set still converges to the
-    /// view model's authoritative state.
-    private var pendingDiffs: [MapAnnotationDiff] = []
+    /// A diff folded into the model during a transition still owes a layout;
+    /// this asks the settle to run one.
+    private var layoutPending = false
 
     /// A sensible default until location permission / deep-linking lands: central
     /// Paris at neighbourhood zoom (also where the mock dataset seeds its pins).
@@ -168,7 +175,7 @@ final class MapsViewController: UIViewController {
         // filtered-query path in the sim, where taps can't be injected.
         // Tokens are `MapFilter.wireToken` (friends/following/pinned/nearby/
         // profile:<id>).
-        if let token = UserDefaults.standard.string(forKey: "maps-select-filter"),
+        if let token = Self.debugArgumentValue("-maps-select-filter"),
            let filter = MapFilter(wireToken: token) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 guard let self else { return }
@@ -180,7 +187,7 @@ final class MapsViewController: UIViewController {
         // `-maps-select-filter-2 <token|all>`: a SECOND primary selection at
         // ~3.5s — drives primary-to-primary switches (sub-row cross-dissolve)
         // and, with `all`, the fade-out path.
-        if let token = UserDefaults.standard.string(forKey: "maps-select-filter-2") {
+        if let token = Self.debugArgumentValue("-maps-select-filter-2") {
             let second: MapFilter? = token == "all" ? nil : MapFilter(wireToken: token)
             if second != nil || token == "all" {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { [weak self] in
@@ -203,7 +210,7 @@ final class MapsViewController: UIViewController {
         // pinned-favorites store ~2s in (the long-press menu's mutation,
         // which can't be driven by injected touches). Pair with
         // `-maps-reset-favorites` for deterministic runs.
-        if let id = UserDefaults.standard.string(forKey: "maps-pin-favorite") {
+        if let id = Self.debugArgumentValue("-maps-pin-favorite") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                 self?.togglePinnedFavorite(MapFavorite(profileID: ProfileID(id), title: ""))
             }
@@ -213,7 +220,7 @@ final class MapsViewController: UIViewController {
         // Several comma-separated tokens select several at once — the row and
         // the query then carry their union. Pair with
         // `-maps-select-filter friends|following|pinned`.
-        if let tokens = UserDefaults.standard.string(forKey: "maps-select-subfilter") {
+        if let tokens = Self.debugArgumentValue("-maps-select-subfilter") {
             let subFilters = Set(tokens.split(separator: ",").compactMap { token -> MapSubFilter? in
                 if token.hasPrefix("profile:") {
                     .profile(ProfileID(String(token.dropFirst("profile:".count))))
@@ -671,21 +678,24 @@ final class MapsViewController: UIViewController {
         // `onTileCount` is a "zoom in for more" hint hook; wired to UI later.
     }
 
-    /// Applies a diff now, or buffers it if a region transition is animating —
-    /// so `add/removeAnnotations` never lands mid-clustering-pass.
+    /// Folds a diff into the raw model, then re-lays-out the markers — unless a
+    /// region change is animating, in which case the layout waits for the
+    /// settle (`regionDidChange`), so markers are never restacked mid-flight.
     private func handleDiff(_ diff: MapAnnotationDiff) {
+        for pin in diff.removed { pins[pin.postID] = nil }
+        for pin in diff.added { pins[pin.postID] = pin }
+        for pin in diff.updated { pins[pin.postID] = pin }
         if isRegionTransitioning {
-            pendingDiffs.append(diff)
+            layoutPending = true
         } else {
-            apply(diff)
+            reconcileClusters()
         }
     }
 
     private func flushPendingDiffs() {
-        guard !pendingDiffs.isEmpty else { return }
-        let diffs = pendingDiffs
-        pendingDiffs.removeAll()
-        for diff in diffs { apply(diff) }
+        guard layoutPending else { return }
+        layoutPending = false
+        reconcileClusters()
     }
 
     // MARK: - Querying
@@ -708,70 +718,94 @@ final class MapsViewController: UIViewController {
         viewModel.viewportChanged(viewport)
     }
 
-    // MARK: - Diff application
+    // MARK: - Clustering
 
-    private func apply(_ diff: MapAnnotationDiff) {
-        // Removals LEAVE rather than vanish: the choreographer fades them and
-        // retires them from the map in its own completion. They are out of
-        // `annotations` from this moment (so nothing queries or autoplays
-        // them) but still on screen for the length of the pop.
-        var departing: [MapAnnotation] = []
-        for pin in diff.removed {
-            if let annotation = annotations.removeValue(forKey: pin.postID) {
-                departing.append(annotation)
-            }
-        }
-        popChoreographer.popOut(departing)
+    /// Re-lays-out the map from the current pin model: `MapClusterEngine`
+    /// decides the markers (a `MapAnnotation` per lone pin, a
+    /// `MapComputedCluster` per group), and this reconciles them against
+    /// what's on screen — updating a surviving marker in place, adding the new,
+    /// removing the gone.
+    ///
+    /// This replaces `MKMapView`'s own clustering, which degrades irreparably
+    /// across pan+zoom (see `MapClusterEngine`): the map is handed finished
+    /// markers with no `clusteringIdentifier`, so MapKit never runs the pass
+    /// that breaks — it just draws each one where we place it.
+    private func reconcileClusters() {
+        let items = MapClusterEngine.cluster(
+            Array(pins.values),
+            zoomScale: currentZoomScale,
+            cellPoints: Double(Self.clusterCellPoints)
+        )
+        var target = Set<PostID>()
+        target.reserveCapacity(items.count)
 
-        var toAdd: [MapAnnotation] = []
-        for pin in diff.added {
-            // A pin coming back while it is still fading out — the ordinary
-            // shape of a fast filter flip-flop. Take the marker that is
-            // already on the map back rather than adding a second one for the
-            // same post on top of it.
-            if let reclaimed = popChoreographer.reclaim(pin.postID) {
-                reclaimed.update(pin: pin)
-                annotations[pin.postID] = reclaimed
-                if let view = mapView.view(for: reclaimed) as? MapAnnotationView {
-                    view.configure(with: pin, imagePipeline: imagePipeline)
+        var toAdd: [MKAnnotation] = []
+        for item in items {
+            target.insert(item.key)
+            let existing = displayed[item.key]
+            let kindMatches = (existing is MapComputedCluster) == item.isCluster
+            if let existing, kindMatches {
+                // Same marker, possibly moved (a cluster's centroid shifts as
+                // its membership changes) or re-faced — update it in place.
+                if let cluster = existing as? MapComputedCluster {
+                    cluster.apply(item)
+                    (mapView.view(for: cluster) as? MapClusterAnnotationView)?
+                        .configure(with: cluster, imagePipeline: imagePipeline)
+                } else if let single = existing as? MapAnnotation {
+                    single.update(pin: item.representative)
+                    (mapView.view(for: single) as? MapAnnotationView)?
+                        .configure(with: item.representative, imagePipeline: imagePipeline)
                 }
                 continue
             }
-            let annotation = MapAnnotation(pin: pin)
-            annotations[pin.postID] = annotation
+            // New marker, or a single/cluster flip at this identity: replace.
+            if let existing {
+                mapView.removeAnnotation(existing)
+            }
+            let annotation: MKAnnotation = item.isCluster
+                ? MapComputedCluster(item)
+                : MapAnnotation(pin: item.representative)
+            displayed[item.key] = annotation
             toAdd.append(annotation)
+        }
+
+        for (key, annotation) in displayed where !target.contains(key) {
+            mapView.removeAnnotation(annotation)
+            displayed[key] = nil
         }
         if !toAdd.isEmpty { mapView.addAnnotations(toAdd) }
 
-        // Updated: keep the marker, refresh its model + (if on screen) its view.
-        for pin in diff.updated {
-            guard let annotation = annotations[pin.postID] else { continue }
-            annotation.update(pin: pin)
-            if let view = mapView.view(for: annotation) as? MapAnnotationView {
-                view.configure(with: pin, imagePipeline: imagePipeline)
-            }
-        }
-
         refreshVideoPlayback()
+    }
+
+    /// Screen points per map point at the current region — the projection the
+    /// engine grids in. Guarded so a zero-width rect (before first layout)
+    /// can't divide by zero.
+    private var currentZoomScale: Double {
+        let mapWidth = mapView.visibleMapRect.size.width
+        guard mapWidth > 0 else { return 0 }
+        return Double(mapView.bounds.width) / mapWidth
     }
 
     // MARK: - Live previews
 
     /// Recomputes the ≤3 video pins to autoplay: the on-screen, video-capable,
-    /// un-clustered annotations, ranked by closeness to the viewport center.
+    /// LONE pins (a clustered post isn't its own marker), ranked by closeness
+    /// to the viewport center.
     private func refreshVideoPlayback() {
         let center = mapView.centerCoordinate
         let visibleRect = mapView.visibleMapRect
         var scored: [(distance: Double, candidate: MapVideoPlaybackCoordinator.Candidate)] = []
-        for annotation in annotations.values {
-            guard annotation.pin.mediaKind == .video,
-                  let url = annotation.pin.previewVideoURL,
-                  visibleRect.contains(MKMapPoint(annotation.coordinate)),
-                  let view = mapView.view(for: annotation) as? MapAnnotationView else { continue }
+        for annotation in displayed.values {
+            guard let single = annotation as? MapAnnotation,
+                  single.pin.mediaKind == .video,
+                  let url = single.pin.previewVideoURL,
+                  visibleRect.contains(MKMapPoint(single.coordinate)),
+                  let view = mapView.view(for: single) as? MapAnnotationView else { continue }
             let candidate = MapVideoPlaybackCoordinator.Candidate(
-                id: annotation.pin.postID, url: url, view: view
+                id: single.pin.postID, url: url, view: view
             )
-            scored.append((Self.squaredDistance(annotation.coordinate, center), candidate))
+            scored.append((Self.squaredDistance(single.coordinate, center), candidate))
         }
         let ranked = scored.sorted { $0.distance < $1.distance }.map(\.candidate)
         videoCoordinator.update(candidates: ranked)
@@ -797,9 +831,8 @@ final class MapsViewController: UIViewController {
         for element in visible {
             if let pin = element as? MapAnnotation {
                 add(pin.pin.postID)
-            } else if let cluster = element as? MKClusterAnnotation,
-                      let first = cluster.memberAnnotations.first as? MapAnnotation {
-                add(first.pin.postID)
+            } else if let cluster = element as? MapComputedCluster {
+                cluster.memberIDs.forEach(add)
             }
         }
         guard !ids.isEmpty else { return }
@@ -820,13 +853,13 @@ extension MapsViewController: MKMapViewDelegate {
     }
 
     func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
-        // Settled: safe to mutate again. Apply anything that arrived mid-flight
-        // before requesting the next page.
+        // Settled. The zoom level changed, so re-lay-out the clusters now (with
+        // the settled projection), fold in anything a mid-flight diff staged,
+        // then request the next page.
         isRegionTransitioning = false
+        reconcileClusters()
         flushPendingDiffs()
         scheduleQuery()
-        // Panning without new pins still changes which are visible/central.
-        refreshVideoPlayback()
     }
 
     func mapView(_ mapView: MKMapView, didAdd views: [MKAnnotationView]) {
@@ -845,6 +878,29 @@ extension MapsViewController: MKMapViewDelegate {
     }
 
     #if DEBUG
+    /// The value following a `-flag value` DEBUG launch argument, read from
+    /// the process arguments and NOWHERE else.
+    ///
+    /// These hooks used to read `UserDefaults.standard.string(forKey:)`, which
+    /// is a superset: it resolves the argument domain, but also every
+    /// PERSISTED domain. Anything that had ever written `maps-select-filter`
+    /// into a simulator's preference store — a stray `defaults write`, a
+    /// device-level plist surviving an app reinstall — was then replayed on
+    /// EVERY launch, scripting a filter selection with no launch argument
+    /// present and leaving the map booted into a filtered state nobody asked
+    /// for. Scanning the arguments makes the hooks strictly opt-in per launch,
+    /// so the resting default is unfiltered by construction.
+    static func debugArgumentValue(_ flag: String) -> String? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: flag), index + 1 < arguments.count else {
+            return nil
+        }
+        let value = arguments[index + 1]
+        // A bare flag followed by another flag carries no value.
+        guard !value.hasPrefix("-") else { return nil }
+        return value
+    }
+
     /// `-maps-open-first-pin`: taps a pin shortly after it appears so the hero
     /// transition into the snap feed can be driven/screenshotted in the sim.
     /// Prefers a video pin when any exists (with `-maps-force-video`), so
@@ -863,7 +919,7 @@ extension MapsViewController: MKMapViewDelegate {
     #endif
 
     func mapView(_ mapView: MKMapView, viewFor annotation: any MKAnnotation) -> MKAnnotationView? {
-        if let cluster = annotation as? MKClusterAnnotation {
+        if let cluster = annotation as? MapComputedCluster {
             let view = mapView.dequeueReusableAnnotationView(
                 withIdentifier: MapClusterAnnotationView.reuseIdentifier,
                 for: annotation
@@ -894,9 +950,9 @@ extension MapsViewController: MKMapViewDelegate {
         case let pin as MapAnnotation:
             postIDs = [pin.pin.postID]
             thumbnail = (view as? MapAnnotationView)?.heroImage
-        case let cluster as MKClusterAnnotation:
-            postIDs = cluster.memberAnnotations.compactMap { ($0 as? MapAnnotation)?.pin.postID }
-            // The cluster's face is the first member's cover — fly it, so the
+        case let cluster as MapComputedCluster:
+            postIDs = cluster.memberIDs
+            // The cluster's face is the representative's cover — fly it, so the
             // frame-0 handshake holds for clusters exactly as for pins.
             thumbnail = (view as? MapClusterAnnotationView)?.heroImage
         default:
