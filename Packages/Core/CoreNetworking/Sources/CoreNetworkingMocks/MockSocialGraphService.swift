@@ -41,7 +41,7 @@ public final class MockSocialGraphService: @unchecked Sendable {
         // following ∩ followers mutual derivation all agree on one truth.
         bff.register(path: "/social_graph.v1.SocialGraphService/ListFollowers") { [self] (request: SocialGraph_V1_ListFollowersRequest) in
             var response = SocialGraph_V1_ListFollowersResponse()
-            response.followers = edges(for: followers(of: request.followeeID))
+            response.followers = edges(for: followers(of: subject(request.followeeID)))
             return .success(response)
         }
         // Honors `follower_id`: friend-of-friend suggestions walk a SECOND hop
@@ -49,9 +49,22 @@ public final class MockSocialGraphService: @unchecked Sendable {
         // would collapse to nothing.
         bff.register(path: "/social_graph.v1.SocialGraphService/ListFollowing") { [self] (request: SocialGraph_V1_ListFollowingRequest) in
             var response = SocialGraph_V1_ListFollowingResponse()
-            response.following = edges(for: dataset.followingByProfileID[request.followerID] ?? [])
+            response.following = edges(for: dataset.followingByProfileID[subject(request.followerID)] ?? [])
             return .success(response)
         }
+    }
+
+    /// Whose edges an request is asking for. An EMPTY id means "unspecified",
+    /// which resolves to the viewer.
+    ///
+    /// This is load-bearing, not lenient parsing: `MapFavoritesRepository` has
+    /// no viewer resolver yet and deliberately sends empty ids, documenting
+    /// that the mock serves the seeded graph for them (on the fleet those
+    /// sections stay hidden). Honouring a *specified* id — which the inbox's
+    /// friend-of-friend suggestions need for their second hop — must not take
+    /// that away.
+    private func subject(_ profileID: String) -> String {
+        profileID.isEmpty ? MockSocialDataset.viewerProfileID : profileID
     }
 
     private func relationStatus(from actorID: String, to targetID: String) -> SocialGraph_V1_RelationStatus {
