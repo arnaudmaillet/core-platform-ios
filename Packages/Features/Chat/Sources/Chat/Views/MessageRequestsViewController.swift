@@ -28,61 +28,41 @@ final class MessageRequestsViewController: UIViewController {
 
     var onChromeChange: ((InboxSurfaceChrome) -> Void)?
 
-    // MARK: - Batch actions
+    // MARK: - Chrome
 
-    /// Accept/Refuse in bulk — the same two decisions the rows carry, applied
-    /// to a selection. Enabled only with one.
-    private lazy var batchAcceptItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(
-            title: "Accept",
-            primaryAction: UIAction { [weak self] _ in self?.applyToSelection { $0.accept($1) } }
-        )
-        item.isEnabled = false
-        return item
-    }()
-
-    private lazy var batchRefuseItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(
-            title: "Refuse",
-            primaryAction: UIAction { [weak self] _ in self?.applyToSelection { $0.decline($1) } }
-        )
-        item.tintColor = .systemRed
-        item.isEnabled = false
-        return item
-    }()
-
-    private lazy var cancelItem = UIBarButtonItem(
-        title: "Cancel",
-        primaryAction: UIAction { [weak self] _ in self?.setEditing(false, animated: true) }
+    /// Requests offers no multi-selection editing: every row already carries
+    /// its own accept/refuse pair, so the only bulk operation worth a bar item
+    /// is "make them all go away".
+    ///
+    /// It is destructive and irreversible for the session, so it asks first.
+    private lazy var clearAllItem = UIBarButtonItem(
+        title: "Clear All",
+        primaryAction: UIAction { [weak self] _ in self?.confirmClearAll() }
     )
 
     private func publishChrome() {
-        let hasSelection = !selectedIDs.isEmpty
-        batchAcceptItem.isEnabled = hasSelection
-        batchRefuseItem.isEnabled = hasSelection
+        clearAllItem.isEnabled = viewModel.count > 0
         chrome = InboxSurfaceChrome(
-            leadingBarItem: isEditing ? cancelItem : editButtonItem,
-            trailingBarItems: isEditing ? [batchRefuseItem, batchAcceptItem] : [],
-            badgeCount: viewModel.count,
-            locksPaging: isEditing
+            leadingBarItem: viewModel.count > 0 ? clearAllItem : nil,
+            badgeCount: viewModel.count
         )
     }
 
-    private var selectedIDs: [ConversationID] {
-        (tableView.indexPathsForSelectedRows ?? []).compactMap { dataSource.itemIdentifier(for: $0) }
-    }
-
-    private func applyToSelection(_ decide: (MessageRequestsViewModel, ConversationID) -> Void) {
-        let ids = selectedIDs
-        guard !ids.isEmpty else { return }
-        for id in ids { decide(viewModel, id) }
-        setEditing(false, animated: true)
-    }
-
-    override func setEditing(_ editing: Bool, animated: Bool) {
-        super.setEditing(editing, animated: animated)
-        tableView.setEditing(editing, animated: animated)
-        publishChrome()
+    private func confirmClearAll() {
+        let count = viewModel.count
+        guard count > 0 else { return }
+        let alert = UIAlertController(
+            title: "Clear All Requests?",
+            message: count == 1
+                ? "This removes the pending request. The sender won't be notified."
+                : "This removes all \(count) pending requests. The senders won't be notified.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Clear All", style: .destructive) { [weak self] _ in
+            self?.viewModel.clearAll()
+        })
+        present(alert, animated: true)
     }
 
     init(viewModel: MessageRequestsViewModel) {
@@ -112,13 +92,12 @@ final class MessageRequestsViewController: UIViewController {
         tableView.delegate = self
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 84
-        tableView.allowsMultipleSelectionDuringEditing = true
         tableView.pin(to: view)
 
         refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
         tableView.refreshControl = refreshControl
 
-        dataSource = EditableDiffableDataSource(tableView: tableView) {
+        dataSource = UITableViewDiffableDataSource(tableView: tableView) {
             [weak self] tableView, indexPath, id in
             let cell = tableView.dequeueReusableCell(
                 withIdentifier: MessageRequestCell.reuseIdentifier, for: indexPath
@@ -127,7 +106,7 @@ final class MessageRequestsViewController: UIViewController {
             // Decisions are captured per row: the diffable snapshot animates
             // the row out, so neither handler needs an index path.
             cell.onAccept = { [weak self] in self?.viewModel.accept(id) }
-            cell.onDecline = { [weak self] in self?.viewModel.decline(id) }
+            cell.onDismiss = { [weak self] in self?.viewModel.decline(id) }
             return cell
         }
     }
@@ -157,7 +136,9 @@ final class MessageRequestsViewController: UIViewController {
             snapshot.appendSections([.main])
             snapshot.appendItems(models.map(\.id), toSection: .main)
             modelsByID = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
-            dataSource.apply(snapshot, animatingDifferences: hasRenderedContent)
+            // Animate only while visible — an off-screen change would replay
+            // its animation after the next transition.
+            dataSource.apply(snapshot, animatingDifferences: hasRenderedContent && view.window != nil)
             hasRenderedContent = true
             revealContent()
         case .empty:
@@ -198,18 +179,9 @@ final class MessageRequestsViewController: UIViewController {
 
 extension MessageRequestsViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        // In multi-selection mode a tap is a selection, not navigation.
-        if tableView.isEditing {
-            publishChrome()
-            return
-        }
         tableView.deselectRow(at: indexPath, animated: true)
         guard let id = dataSource.itemIdentifier(for: indexPath) else { return }
         viewModel.didSelect(id)
-    }
-
-    func tableView(_ tableView: UITableView, didDeselectRowAt indexPath: IndexPath) {
-        if tableView.isEditing { publishChrome() }
     }
 }
 

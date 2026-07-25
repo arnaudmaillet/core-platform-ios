@@ -27,6 +27,16 @@ public final class ConversationViewModel {
     }
 
     public var onPhaseChange: ((Phase) -> Void)?
+    /// Fired the moment this thread counts as read — before the server write,
+    /// so the inbox underneath is already correct by the time anyone can
+    /// navigate back to it.
+    public var onDidMarkRead: ((ConversationID) -> Void)?
+    /// Fired if that write then failed, so the inbox can put the row back.
+    public var onMarkReadDidFail: ((ConversationID) -> Void)?
+    /// Fired when the viewer's own message has been accepted by the server.
+    /// The inbox listens so the row's preview, time and position are already
+    /// right underneath this screen — sending changes all three.
+    public var onDidSendMessage: ((ConversationID, ChatMessage) -> Void)?
     /// True while a message is being sent (disables the send control).
     public var onSendingChange: ((Bool) -> Void)?
     /// Fires once the peer's name resolves; best-effort (no title on failure).
@@ -94,7 +104,11 @@ public final class ConversationViewModel {
             if let message = try? await self.repository.send(body, to: self.conversationID, replyingTo: replyTo) {
                 self.messages.append(message)
                 self.emit()
-                try? await self.repository.markRead(self.conversationID, upTo: message.id)
+                // Only reached when the send succeeded, so there is nothing to
+                // roll back — an optimistic bubble the server rejected never
+                // gets this far.
+                self.onDidSendMessage?(self.conversationID, message)
+                await self.markRead(upTo: message.id)
             }
             self.setSending(false)
         }
@@ -144,6 +158,26 @@ public final class ConversationViewModel {
         emit()
     }
 
+    /// Announces the read FIRST, then moves the cursor server-side.
+    ///
+    /// The order is the point. The inbox has to be correct *underneath* this
+    /// screen, not after it closes: a back swipe reveals the list
+    /// progressively, so anything that lands after the transition is a
+    /// visible jump. Announcing before the `await` means the inbox has already
+    /// dropped this row — and possibly retired its Unread tab — while the
+    /// viewer is still reading, leaving nothing to update on the way out.
+    ///
+    /// The write can still fail, so it reports that too and the inbox rolls
+    /// the row back.
+    private func markRead(upTo messageID: String) async {
+        onDidMarkRead?(conversationID)
+        do {
+            try await repository.markRead(conversationID, upTo: messageID)
+        } catch {
+            onMarkReadDidFail?(conversationID)
+        }
+    }
+
     private func reload() {
         load?.cancel()
         load = Task { [weak self] in
@@ -153,7 +187,7 @@ public final class ConversationViewModel {
                 self.messages = loaded
                 self.emit()
                 if let last = loaded.last {
-                    try? await self.repository.markRead(self.conversationID, upTo: last.id)
+                    await self.markRead(upTo: last.id)
                 }
             } catch is CancellationError {
                 // Superseded.

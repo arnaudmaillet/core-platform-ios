@@ -23,6 +23,18 @@ public struct Conversation: Equatable, Sendable, Identifiable {
     /// sender is already in hand) and the signal `MessageRequestPolicy` reads
     /// to tell a pending request from a conversation the viewer answered.
     public let lastMessageIsMine: Bool
+    /// The newest message's id, or empty for a conversation with no messages.
+    /// Carried because marking a thread read means moving the read cursor
+    /// *to a specific message* — the inbox can't do that from a preview
+    /// string, and re-fetching history per row to find it would be absurd.
+    public let lastMessageID: String
+    /// Whether the viewer has yet to read the latest message.
+    ///
+    /// Unlike the request partition, this is NOT a heuristic: `chat.v1` tracks
+    /// it properly as `MemberView.last_read`, and `markRead` (already sent
+    /// when a thread is opened) clears it server-side. A conversation whose
+    /// last message is the viewer's own is never unread.
+    public let isUnread: Bool
 
     public init(
         id: ConversationID,
@@ -30,7 +42,9 @@ public struct Conversation: Equatable, Sendable, Identifiable {
         lastMessage: String,
         lastActivityAt: Date?,
         otherMemberIDs: [ProfileID] = [],
-        lastMessageIsMine: Bool = false
+        lastMessageIsMine: Bool = false,
+        lastMessageID: String = "",
+        isUnread: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -38,12 +52,30 @@ public struct Conversation: Equatable, Sendable, Identifiable {
         self.lastActivityAt = lastActivityAt
         self.otherMemberIDs = otherMemberIDs
         self.lastMessageIsMine = lastMessageIsMine
+        self.lastMessageID = lastMessageID
+        self.isUnread = isUnread
     }
 
     /// The DM correspondent: the single other member. `nil` for group shapes,
     /// where "the peer" is not a meaningful destination.
     public var directPeerID: ProfileID? {
         otherMemberIDs.count == 1 ? otherMemberIDs.first : nil
+    }
+
+    /// The inbox's row order: newest activity first, ties broken on id.
+    ///
+    /// The tie-break is not decoration — it is what makes this a TOTAL order.
+    /// Swift's `sort` is introsort and explicitly **not stable**, so ordering
+    /// on the timestamp alone lets rows with equal activity swap places
+    /// between two otherwise identical loads. Equal timestamps are ordinary
+    /// (messages within the same millisecond, backfills, seeded fixtures), and
+    /// the symptom is a list that reshuffles for no visible reason every time
+    /// you come back to it.
+    public static func isOrderedBefore(_ lhs: Conversation, _ rhs: Conversation) -> Bool {
+        let left = lhs.lastActivityAt ?? .distantPast
+        let right = rhs.lastActivityAt ?? .distantPast
+        guard left == right else { return left > right }
+        return lhs.id.rawValue < rhs.id.rawValue
     }
 }
 
@@ -157,14 +189,19 @@ public actor ChatRepository: ChatProviding {
 
         var conversations: [Conversation] = []
         for id in ids {
+            // A cancelled load must REPORT cancellation, not hand back what it
+            // managed to hydrate first. Cancelling in-flight Connect calls
+            // makes them fail rather than throw, and `hydrateConversation`
+            // skips failures — so without this check a superseded load returns
+            // a truncated inbox that looks exactly like a real, shorter one.
+            try Task.checkCancellation()
             if let conversation = await hydrateConversation(ConversationID(id), viewer: viewer) {
                 conversations.append(conversation)
             }
         }
+        try Task.checkCancellation()
         // Most recent activity first; conversations without messages sink.
-        return conversations.sorted {
-            ($0.lastActivityAt ?? .distantPast) > ($1.lastActivityAt ?? .distantPast)
-        }
+        return conversations.sorted(by: Conversation.isOrderedBefore)
     }
 
     private func hydrateConversation(_ id: ConversationID, viewer: ProfileID) async -> Conversation? {
@@ -189,13 +226,21 @@ public actor ChatRepository: ChatProviding {
             ? "Conversation"
             : otherIDs.compactMap { nameCache[$0] }.joined(separator: ", ")
 
+        let latestIsMine = latest.map { ProfileID($0.senderID) == viewer } ?? false
+        // The viewer's own membership carries how far they have read. Both
+        // sides of the comparison come from calls this hydration already
+        // makes, so unread costs no extra traffic.
+        let viewerLastRead = members.first { ProfileID($0.profileID) == viewer }?.lastRead
+
         return Conversation(
             id: id,
             title: title.isEmpty ? "Conversation" : title,
             lastMessage: latest?.body ?? "",
             lastActivityAt: latest.map { Date(timeIntervalSince1970: TimeInterval($0.createdAtMs) / 1000) },
             otherMemberIDs: otherIDs,
-            lastMessageIsMine: latest.map { ProfileID($0.senderID) == viewer } ?? false
+            lastMessageIsMine: latestIsMine,
+            lastMessageID: latest?.messageID ?? "",
+            isUnread: Self.isUnread(latest: latest, viewerLastRead: viewerLastRead, latestIsMine: latestIsMine)
         )
     }
 
@@ -332,6 +377,18 @@ public actor ChatRepository: ChatProviding {
             }
         }
         for (id, name) in fetched { nameCache[id] = name }
+    }
+
+    /// A conversation is unread when its newest message is someone else's and
+    /// the viewer's read cursor hasn't reached it. An empty cursor means the
+    /// viewer has never read the thread, which is unread by definition.
+    private static func isUnread(
+        latest: Chat_V1_MessageView?,
+        viewerLastRead: String?,
+        latestIsMine: Bool
+    ) -> Bool {
+        guard let latest, !latestIsMine else { return false }
+        return viewerLastRead != latest.messageID
     }
 
     private static func makeMessage(from view: Chat_V1_MessageView, viewer: ProfileID) -> ChatMessage {

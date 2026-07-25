@@ -2,7 +2,8 @@ import CoreModels
 import CoreNavigation
 import Foundation
 
-/// The "All" surface's view model: active conversations only.
+/// The "All" surface's view model: active conversations, with unread ones
+/// marked in place rather than split off.
 ///
 /// Loading and inbox truth live in `InboxCatalog` (shared with the Requests
 /// surface, so the inbox's conversations are fetched once, not once per tab).
@@ -18,6 +19,11 @@ public final class ConversationListViewModel {
     }
 
     public var onPhaseChange: ((Phase) -> Void)?
+    /// How many conversations are unread, published so the container can put
+    /// the count on the All tab.
+    public var onUnreadCountChange: ((Int) -> Void)?
+
+    public private(set) var unreadCount = 0
 
     private let catalog: InboxCatalog
     private let router: (any Router)?
@@ -85,23 +91,29 @@ public final class ConversationListViewModel {
     // MARK: - Projection
 
     private func project(_ snapshot: InboxCatalog.Snapshot) {
+        let rows = snapshot.active
+        if unreadCount != snapshot.unreadIDs.count {
+            unreadCount = snapshot.unreadIDs.count
+            onUnreadCountChange?(unreadCount)
+        }
         switch snapshot.phase {
         case .loading:
             phase = .loading
         case .failed(let message):
             phase = .failed(message: message)
         case .loaded:
-            guard !snapshot.active.isEmpty else {
+            guard !rows.isEmpty else {
                 phase = .empty
                 return
             }
             let now = now()
-            phase = .content(snapshot.active.map {
+            phase = .content(rows.map {
                 ConversationDisplayModel(
                     conversation: $0,
                     now: now,
                     isPinned: snapshot.pinned.contains($0.id),
-                    isMuted: snapshot.muted.contains($0.id)
+                    isMuted: snapshot.muted.contains($0.id),
+                    isUnread: snapshot.unreadIDs.contains($0.id)
                 )
             })
         }

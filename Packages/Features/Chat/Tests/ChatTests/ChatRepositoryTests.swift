@@ -34,8 +34,9 @@ struct ChatRepositoryTests {
 
         let conversations = try await repository.loadConversations()
 
-        // Two answered threads plus the two inbound-only request seeds.
-        #expect(conversations.count == 4)
+        // Three active threads (one answered, two ending on an inbound
+        // message) plus the two inbound-only request seeds.
+        #expect(conversations.count == 5)
         let first = try #require(conversations.first)
         #expect(!first.title.isEmpty)
         #expect(first.title != first.id.rawValue) // hydrated name, not an id

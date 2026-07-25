@@ -69,28 +69,50 @@ final class InboxPagerView: UIView {
         scrollView.delaysContentTouches = false
         scrollView.pin(to: self)
 
-        // Pages chain horizontally, each exactly one viewport wide and tall —
-        // the content guide's height is tied to the frame, so this axis never
-        // scrolls and the pages' own lists own all vertical motion.
+        NSLayoutConstraint.activate([
+            scrollView.contentLayoutGuide.heightAnchor.constraint(equalTo: scrollView.frameLayoutGuide.heightAnchor)
+        ])
+        buildPageChain()
+    }
+
+    /// Re-states where the pager is: snaps the offset onto the active page and
+    /// republishes its progress.
+    ///
+    /// Needed because an animated page change can be interrupted — a row tap
+    /// pushes a thread mid-scroll, and the scroll animation that was in flight
+    /// never reports its settle. The offset lands on the target but the last
+    /// progress anyone heard is from part-way through, so the header's lens is
+    /// left pointing at a different tab than the one on screen. Called when
+    /// the inbox returns, which is BEFORE the pop draws its first frame.
+    func reassertActivePage() {
+        guard bounds.width > 0, pages.indices.contains(activeIndex) else { return }
+        scrollView.setContentOffset(CGPoint(x: offsetX(for: activeIndex), y: 0), animated: false)
+        reportedIndex = activeIndex
+        onProgress?(CGFloat(activeIndex))
+    }
+
+    /// Pages chain horizontally, each exactly one viewport wide and tall — the
+    /// content guide's height is tied to the frame, so this axis never scrolls
+    /// and the pages' own lists own all vertical motion.
+    private func buildPageChain() {
+        var pageConstraints: [NSLayoutConstraint] = []
         let content = scrollView.contentLayoutGuide
         let frame = scrollView.frameLayoutGuide
         var leading = content.leadingAnchor
         for page in pages {
             scrollView.addSubview(page)
             page.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
+            pageConstraints += [
                 page.topAnchor.constraint(equalTo: content.topAnchor),
                 page.bottomAnchor.constraint(equalTo: content.bottomAnchor),
                 page.leadingAnchor.constraint(equalTo: leading),
                 page.widthAnchor.constraint(equalTo: frame.widthAnchor),
                 page.heightAnchor.constraint(equalTo: frame.heightAnchor)
-            ])
+            ]
             leading = page.trailingAnchor
         }
-        NSLayoutConstraint.activate([
-            leading.constraint(equalTo: content.trailingAnchor),
-            content.heightAnchor.constraint(equalTo: frame.heightAnchor)
-        ])
+        pageConstraints.append(leading.constraint(equalTo: content.trailingAnchor))
+        NSLayoutConstraint.activate(pageConstraints)
     }
 
     @available(*, unavailable)

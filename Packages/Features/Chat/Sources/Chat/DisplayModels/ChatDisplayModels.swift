@@ -10,12 +10,16 @@ public struct ConversationDisplayModel: Equatable, Sendable, Identifiable {
     public let monogram: String
     public let isPinned: Bool
     public let isMuted: Bool
+    /// Drives the row's whole unread treatment — bold text and a dot — rather
+    /// than sorting the conversation into a list of its own.
+    public let isUnread: Bool
 
     public init(
         conversation: Conversation,
         now: Date = Date(),
         isPinned: Bool = false,
-        isMuted: Bool = false
+        isMuted: Bool = false,
+        isUnread: Bool = false
     ) {
         id = conversation.id
         title = conversation.title
@@ -24,6 +28,7 @@ public struct ConversationDisplayModel: Equatable, Sendable, Identifiable {
         monogram = Self.monogram(conversation.title)
         self.isPinned = isPinned
         self.isMuted = isMuted
+        self.isUnread = isUnread
     }
 
     static func monogram(_ title: String) -> String {

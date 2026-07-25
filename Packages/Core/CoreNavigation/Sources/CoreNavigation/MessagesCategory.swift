@@ -5,7 +5,9 @@
 /// category, and the shell must not import a feature to parse its own routes.
 /// The raw values are the deep-link tokens (`-open-messages requests`).
 public enum MessagesCategory: String, CaseIterable, Sendable {
-    /// Active direct-message conversations.
+    /// Active direct-message conversations. Unread ones are marked in place
+    /// (bold row, dot, and a count on this tab) rather than split into a tab
+    /// of their own.
     case all
     /// Pending message requests from accounts the viewer doesn't follow.
     case requests

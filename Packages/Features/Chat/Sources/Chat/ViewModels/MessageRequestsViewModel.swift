@@ -80,6 +80,13 @@ public final class MessageRequestsViewModel {
         catalog.decline(id)
     }
 
+    /// Declines every pending request at once. One projection for the whole
+    /// set rather than one per row, so the table animates a single change.
+    /// The caller is responsible for confirming first — this does not ask.
+    public func clearAll() {
+        catalog.declineAll()
+    }
+
     private func project(_ snapshot: InboxCatalog.Snapshot) {
         if count != snapshot.requests.count {
             count = snapshot.requests.count

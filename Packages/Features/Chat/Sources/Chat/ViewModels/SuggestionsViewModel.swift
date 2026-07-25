@@ -106,28 +106,11 @@ public final class SuggestionsViewModel {
         }
     }
 
-    /// Follows every id that isn't already followed — the batch action, which
-    /// unlike `toggleFollow` has one direction so a mixed selection can't
-    /// half-undo itself.
-    public func follow(_ ids: [ProfileID]) {
-        for id in ids where !following.contains(id) {
-            toggleFollow(id)
-        }
-    }
-
     /// Hides a suggestion for the session. No wire contract exists for
     /// "not interested", so the suppression is local — and honest about it:
     /// it does not survive relaunch.
     public func dismiss(_ id: ProfileID) {
         dismissed.insert(id)
-        emit()
-    }
-
-    /// Batch dismiss: one projection for the whole selection rather than one
-    /// per row, so the table animates a single change.
-    public func dismiss(_ ids: [ProfileID]) {
-        guard !ids.isEmpty else { return }
-        dismissed.formUnion(ids)
         emit()
     }
 

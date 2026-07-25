@@ -23,69 +23,12 @@ final class SuggestionsViewController: UIViewController {
     private var modelsByID: [ProfileID: SuggestionDisplayModel] = [:]
     private var hasRenderedContent = false
 
-    private(set) var chrome = InboxSurfaceChrome() {
-        didSet { onChromeChange?(chrome) }
-    }
-
+    /// Suggestions contributes no bar items and never changes: every row
+    /// carries its own Follow and dismiss, and there is no bulk operation over
+    /// a list the viewer is meant to skim. The container's compose item shows
+    /// through, so this is a constant and `onChromeChange` never fires.
+    let chrome = InboxSurfaceChrome()
     var onChromeChange: ((InboxSurfaceChrome) -> Void)?
-
-    // MARK: - Batch actions
-
-    /// Follow/Remove in bulk — the same two decisions the rows carry, applied
-    /// to a selection. Follow has one direction (unlike the row's toggle) so a
-    /// mixed selection can't half-undo itself.
-    private lazy var batchFollowItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(
-            title: "Follow",
-            primaryAction: UIAction { [weak self] _ in
-                guard let self else { return }
-                self.viewModel.follow(self.selectedIDs)
-                self.setEditing(false, animated: true)
-            }
-        )
-        item.isEnabled = false
-        return item
-    }()
-
-    private lazy var batchRemoveItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(
-            title: "Remove",
-            primaryAction: UIAction { [weak self] _ in
-                guard let self else { return }
-                self.viewModel.dismiss(self.selectedIDs)
-                self.setEditing(false, animated: true)
-            }
-        )
-        item.tintColor = .systemRed
-        item.isEnabled = false
-        return item
-    }()
-
-    private lazy var cancelItem = UIBarButtonItem(
-        title: "Cancel",
-        primaryAction: UIAction { [weak self] _ in self?.setEditing(false, animated: true) }
-    )
-
-    private func publishChrome() {
-        let hasSelection = !selectedIDs.isEmpty
-        batchFollowItem.isEnabled = hasSelection
-        batchRemoveItem.isEnabled = hasSelection
-        chrome = InboxSurfaceChrome(
-            leadingBarItem: isEditing ? cancelItem : editButtonItem,
-            trailingBarItems: isEditing ? [batchRemoveItem, batchFollowItem] : [],
-            locksPaging: isEditing
-        )
-    }
-
-    private var selectedIDs: [ProfileID] {
-        (tableView.indexPathsForSelectedRows ?? []).compactMap { dataSource.itemIdentifier(for: $0) }
-    }
-
-    override func setEditing(_ editing: Bool, animated: Bool) {
-        super.setEditing(editing, animated: animated)
-        tableView.setEditing(editing, animated: animated)
-        publishChrome()
-    }
 
     init(viewModel: SuggestionsViewModel, imagePipeline: ImagePipeline?) {
         self.viewModel = viewModel
@@ -101,8 +44,6 @@ final class SuggestionsViewController: UIViewController {
         view.backgroundColor = .systemBackground
         configureTableView()
         configureStatusViews()
-        publishChrome()
-
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
         render(.loading)
     }
@@ -112,13 +53,12 @@ final class SuggestionsViewController: UIViewController {
         tableView.delegate = self
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 76
-        tableView.allowsMultipleSelectionDuringEditing = true
         tableView.pin(to: view)
 
         refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
         tableView.refreshControl = refreshControl
 
-        dataSource = EditableDiffableDataSource(tableView: tableView) {
+        dataSource = UITableViewDiffableDataSource(tableView: tableView) {
             [weak self] tableView, indexPath, id in
             let cell = tableView.dequeueReusableCell(
                 withIdentifier: SuggestionCell.reuseIdentifier, for: indexPath
@@ -160,7 +100,9 @@ final class SuggestionsViewController: UIViewController {
             // follow flip reads as a button toggling rather than a reload.
             snapshot.reconfigureItems(models.filter { modelsByID[$0.id] != nil && modelsByID[$0.id] != $0 }.map(\.id))
             modelsByID = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
-            dataSource.apply(snapshot, animatingDifferences: hasRenderedContent)
+            // Animate only while visible — an off-screen change would replay
+            // its animation after the next transition.
+            dataSource.apply(snapshot, animatingDifferences: hasRenderedContent && view.window != nil)
             hasRenderedContent = true
             revealContent()
         case .empty:
@@ -199,18 +141,9 @@ final class SuggestionsViewController: UIViewController {
 
 extension SuggestionsViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        // In multi-selection mode a tap is a selection, not navigation.
-        if tableView.isEditing {
-            publishChrome()
-            return
-        }
         tableView.deselectRow(at: indexPath, animated: true)
         guard let id = dataSource.itemIdentifier(for: indexPath) else { return }
         viewModel.didSelect(id)
-    }
-
-    func tableView(_ tableView: UITableView, didDeselectRowAt indexPath: IndexPath) {
-        if tableView.isEditing { publishChrome() }
     }
 
     /// The long-press menu carries the action the row has no room for: this is
@@ -220,7 +153,7 @@ extension SuggestionsViewController: UITableViewDelegate {
         contextMenuConfigurationForRowAt indexPath: IndexPath,
         point: CGPoint
     ) -> UIContextMenuConfiguration? {
-        guard !tableView.isEditing, let id = dataSource.itemIdentifier(for: indexPath) else { return nil }
+        guard let id = dataSource.itemIdentifier(for: indexPath) else { return nil }
         return UIContextMenuConfiguration(
             identifier: id.rawValue as NSString,
             previewProvider: nil

@@ -2,7 +2,8 @@ import CoreModels
 import CoreNavigation
 import UIKit
 
-/// The inbox's "All" surface: active direct-message conversations.
+/// The inbox's "All" surface: every active direct message, with unread ones
+/// marked in place — bold row, tinted dot, and a count on the tab itself.
 ///
 /// It is a paged child of `MessagesInboxViewController`, which owns the only
 /// navigation bar on screen — so the Edit/Cancel/Delete items are *published*
@@ -39,31 +40,51 @@ final class ConversationListViewController: UIViewController {
 
     var onChromeChange: ((InboxSurfaceChrome) -> Void)?
 
-    /// Recomputes what the container should show for this surface. Editing
-    /// swaps in Cancel plus this tab's batch actions and freezes paging;
-    /// otherwise the trailing slot stays empty so the inbox's own compose item
-    /// shows through.
+    /// Recomputes what the container should show for this surface: the Edit
+    /// toggle, its batch actions while editing, and the unread count that
+    /// rides the tab.
     private func publishChrome() {
-        updateBatchItemState()
+        let selection = selectedIDs
+        let pinAction = BatchPinAction.resolve(selected: selection) { [viewModel] in viewModel.isPinned($0) }
+        batchDeleteItem.isEnabled = !selection.isEmpty
+        batchPinItem.title = pinAction.title
+
+        // A mixed selection drops the pin item entirely rather than showing a
+        // disabled one: a greyed button invites "why can't I?", an absent one
+        // reads as "not applicable to this selection".
+        var trailing: [UIBarButtonItem] = []
+        if isEditing {
+            trailing.append(batchDeleteItem)
+            if pinAction != .unavailable { trailing.append(batchPinItem) }
+        }
         chrome = InboxSurfaceChrome(
+            // The count lives in the title: it is the one place that can hold
+            // it without squeezing three bar items into a 402pt bar.
+            title: isEditing ? Self.selectionTitle(for: selection.count) : nil,
             leadingBarItem: isEditing ? cancelItem : editButtonItem,
-            trailingBarItems: isEditing ? [batchDeleteItem, batchPinItem] : [],
-            badgeCount: 0,
+            trailingBarItems: trailing,
+            // The tab carries the unread count, so "All 3" is legible without
+            // opening anything.
+            badgeCount: viewModel.unreadCount,
             locksPaging: isEditing
         )
     }
 
-    /// Batch pin toggle. Its title follows the selection: an all-pinned
-    /// selection offers "Unpin", anything else "Pin" — so the button always
-    /// names what it is about to do rather than what the rows currently are.
-    private lazy var batchPinItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(
-            title: "Pin",
-            primaryAction: UIAction { [weak self] _ in self?.togglePinOnSelectedRows() }
-        )
-        item.isEnabled = false
-        return item
-    }()
+    /// The editing title, which doubles as the selection counter.
+    static func selectionTitle(for count: Int) -> String {
+        switch count {
+        case 0: "Select Messages"
+        case 1: "1 Selected"
+        default: "\(count) Selected"
+        }
+    }
+
+    /// Batch pin toggle. Only ever shown for a uniform selection, so its title
+    /// always names exactly what it is about to do.
+    private lazy var batchPinItem = UIBarButtonItem(
+        title: "Pin",
+        primaryAction: UIAction { [weak self] _ in self?.togglePinOnSelectedRows() }
+    )
 
     /// Batch delete for multi-selection mode, enabled only with a non-empty
     /// selection.
@@ -101,6 +122,7 @@ final class ConversationListViewController: UIViewController {
         publishChrome()
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
+        viewModel.onUnreadCountChange = { [weak self] _ in self?.publishChrome() }
         render(.loading)
 
         #if DEBUG
@@ -178,25 +200,14 @@ final class ConversationListViewController: UIViewController {
         setEditing(false, animated: true)
     }
 
-    /// Pins the selection, or unpins it when every selected row is already
-    /// pinned — the same rule the button's title states.
+    /// Pins or unpins the selection. The button is only present for a uniform
+    /// selection, so every selected row flips the same way.
     private func togglePinOnSelectedRows() {
         let ids = selectedIDs
-        guard !ids.isEmpty else { return }
-        let shouldUnpin = ids.allSatisfy { viewModel.isPinned($0) }
-        for id in ids where viewModel.isPinned(id) == shouldUnpin {
-            viewModel.togglePin(id)
-        }
+        guard BatchPinAction.resolve(selected: ids, isPinned: { [viewModel] in viewModel.isPinned($0) }) != .unavailable
+        else { return }
+        for id in ids { viewModel.togglePin(id) }
         setEditing(false, animated: true)
-    }
-
-    /// Batch actions are meaningless without a selection, and the pin item
-    /// has to re-title itself as the selection changes.
-    private func updateBatchItemState() {
-        let ids = selectedIDs
-        batchDeleteItem.isEnabled = !ids.isEmpty
-        batchPinItem.isEnabled = !ids.isEmpty
-        batchPinItem.title = !ids.isEmpty && ids.allSatisfy { viewModel.isPinned($0) } ? "Unpin" : "Pin"
     }
 
     private func configureStatusViews() {
@@ -228,7 +239,11 @@ final class ConversationListViewController: UIViewController {
             // outcomes read as system row animations, not reloads.
             snapshot.reconfigureItems(models.filter { modelsByID[$0.id] != nil && modelsByID[$0.id] != $0 }.map(\.id))
             modelsByID = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
-            dataSource.apply(snapshot, animatingDifferences: hasRenderedContent)
+            // Animate only while visible. A change that arrives while a thread
+            // is pushed over the inbox — reading one, say — would otherwise
+            // play its row animation on the way back, turning a settled screen
+            // into a moving one right after the pop.
+            dataSource.apply(snapshot, animatingDifferences: hasRenderedContent && view.window != nil)
             hasRenderedContent = true
             revealContent()
         case .empty:

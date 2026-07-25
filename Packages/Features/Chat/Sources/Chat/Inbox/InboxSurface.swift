@@ -9,6 +9,11 @@ import UIKit
 /// reach for shared chrome) keeps the container the single writer of the
 /// navigation bar, which is what makes "who owns the header" answerable.
 struct InboxSurfaceChrome {
+    /// Navigation bar title while this surface is active; `nil` keeps the
+    /// inbox's own "Messages". Editing uses it for the selection count, which
+    /// is where a count belongs: hanging it off the action ("Delete (2)")
+    /// crowds the bar enough to truncate the title on a 402pt screen.
+    var title: String?
     /// Leading bar item while this surface is active; `nil` for none.
     var leadingBarItem: UIBarButtonItem?
     /// Trailing bar items while active, in `rightBarButtonItems` order

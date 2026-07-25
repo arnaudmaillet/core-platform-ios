@@ -14,7 +14,12 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     private let router: (any Router)?
     /// Shared list→thread warm-start context (the builder is a long-lived
     /// singleton in the container, so this is one directory app-wide).
-    private let directory = ConversationDirectory()
+    private let directory: ConversationDirectory
+    /// The inbox's store, owned here rather than per-inbox so that a thread
+    /// pushed later — built by an entirely separate call — can report back
+    /// into the same one. Without that, reading a thread has no way to reach
+    /// the list it should disappear from.
+    private let catalog: InboxCatalog
 
     public init(
         repository: any ChatProviding,
@@ -22,6 +27,9 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         imagePipeline: ImagePipeline? = nil,
         router: (any Router)? = nil
     ) {
+        let directory = ConversationDirectory()
+        self.directory = directory
+        catalog = InboxCatalog(repository: repository, relations: connections, directory: directory)
         self.repository = repository
         self.connections = connections
         self.imagePipeline = imagePipeline
@@ -32,8 +40,6 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     /// surfaces (so the inbox loads once, not once per tab), an independent
     /// suggestions surface, and the container that pages between them.
     public func makeInboxViewController(initialCategory: MessagesCategory) -> UIViewController {
-        let catalog = InboxCatalog(repository: repository, relations: connections, directory: directory)
-
         let conversations = ConversationListViewController(
             viewModel: ConversationListViewModel(catalog: catalog, router: router)
         )
@@ -72,14 +78,24 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     }
 
     public func makeConversationViewController(for conversationID: ConversationID) -> UIViewController {
-        ConversationViewController(
-            viewModel: ConversationViewModel(
-                conversationID: conversationID,
-                repository: repository,
-                directory: directory,
-                router: router
-            )
+        let viewModel = ConversationViewModel(
+            conversationID: conversationID,
+            repository: repository,
+            directory: directory,
+            router: router
         )
+        // Reading a thread is an inbox event, not just a thread event: the row
+        // has to leave Unread. Applied immediately — before the server write —
+        // so the list underneath is already correct during the back swipe,
+        // with a rollback if the write turns out to fail.
+        viewModel.onDidMarkRead = { [catalog] id in catalog.markRead(id) }
+        viewModel.onMarkReadDidFail = { [catalog] id in catalog.markReadDidFail(id) }
+        // Sending changes the row's preview, time and position — all of which
+        // the list underneath has to show before the viewer swipes back to it.
+        viewModel.onDidSendMessage = { [catalog] id, message in
+            catalog.recordSentMessage(message, in: id)
+        }
+        return ConversationViewController(viewModel: viewModel)
     }
 
     public func makeDirectMessageViewController(with profileID: ProfileID) async -> UIViewController? {

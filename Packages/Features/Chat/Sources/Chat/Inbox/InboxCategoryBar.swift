@@ -89,18 +89,7 @@ final class InboxCategoryBar: UIView {
         row.axis = .horizontal
         row.spacing = Metrics.interSegmentSpacing
         row.alignment = .fill
-        segments = categories.enumerated().map { index, category in
-            let segment = SegmentView(title: category.title)
-            segment.addAction(
-                UIAction { [weak self] _ in self?.onSelect?(index) },
-                // NOT `.primaryActionTriggered`: only UIButton synthesizes
-                // that. A bare UIControl sends touch events, so a segment
-                // registered for the primary action never fires at all.
-                for: .touchUpInside
-            )
-            row.addArrangedSubview(segment)
-            return segment
-        }
+        buildSegments()
         row.constrain(in: capsule.contentView) { parent in
             row.topAnchor.constraint(equalTo: parent.topAnchor)
             row.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
@@ -174,6 +163,21 @@ final class InboxCategoryBar: UIView {
         applyProgress()
     }
 
+    private func buildSegments() {
+        segments = categories.enumerated().map { index, category in
+            let segment = SegmentView(title: category.title)
+            segment.addAction(
+                UIAction { [weak self] _ in self?.onSelect?(index) },
+                // NOT `.primaryActionTriggered`: only UIButton synthesizes
+                // that. A bare UIControl sends touch events, so a segment
+                // registered for the primary action never fires at all.
+                for: .touchUpInside
+            )
+            row.addArrangedSubview(segment)
+            return segment
+        }
+    }
+
     // MARK: - Interpolation
 
     private func applyProgress() {
@@ -224,6 +228,10 @@ final class InboxCategoryBar: UIView {
 /// crossfade, plus an optional count badge. Its width is pinned to the
 /// SEMIBOLD measurement so selection can never reflow the row.
 private final class SegmentView: UIControl {
+    /// Titles scale with Dynamic Type up to here, then stop — four segments
+    /// have to stay side by side in one fixed-height capsule.
+    static let maximumTitlePointSize: CGFloat = 19
+
     private let plainLabel = UILabel()
     private let boldLabel = UILabel()
     private let badge = BadgeView()
@@ -237,7 +245,7 @@ private final class SegmentView: UIControl {
 
         for (label, weight) in [(plainLabel, UIFont.Weight.regular), (boldLabel, .semibold)] {
             label.text = title
-            label.font = .preferredFont(forTextStyle: .subheadline, weight: weight)
+            label.font = .preferredFont(forTextStyle: .subheadline, weight: weight, maximumPointSize: SegmentView.maximumTitlePointSize)
             label.adjustsFontForContentSizeCategory = true
             label.textAlignment = .center
             label.isUserInteractionEnabled = false
@@ -323,7 +331,7 @@ private final class SegmentView: UIControl {
     /// Width = the semibold title plus the badge (when shown) plus breathing
     /// room, so the lens has somewhere to sit and the row never reflows.
     private func updatePinnedWidth() {
-        let bold = UIFont.preferredFont(forTextStyle: .subheadline, weight: .semibold)
+        let bold = UIFont.preferredFont(forTextStyle: .subheadline, weight: .semibold, maximumPointSize: Self.maximumTitlePointSize)
         var width = ceil((title as NSString).size(withAttributes: [.font: bold]).width) + Spacing.lg
         if !badge.isHidden {
             width += badge.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width + Spacing.xs
@@ -341,7 +349,7 @@ private final class BadgeView: UIView {
 
     init() {
         super.init(frame: .zero)
-        label.font = .preferredFont(forTextStyle: .caption2, weight: .semibold)
+        label.font = .preferredFont(forTextStyle: .caption2, weight: .semibold, maximumPointSize: 15)
         label.adjustsFontForContentSizeCategory = true
         label.textColor = .systemBackground
         label.textAlignment = .center
@@ -371,9 +379,19 @@ private final class BadgeView: UIView {
 }
 
 private extension UIFont {
-    static func preferredFont(forTextStyle style: TextStyle, weight: Weight) -> UIFont {
+    /// Scales with Dynamic Type but stops growing past `maximumPointSize`.
+    ///
+    /// The capsule is fixed chrome holding up to four segments side by side —
+    /// at accessibility sizes unbounded scaling makes the titles collide and
+    /// clip off the edge. Capping is what the system itself does for tab bar
+    /// item titles: the row stays legible and stays a row.
+    static func preferredFont(
+        forTextStyle style: TextStyle,
+        weight: Weight,
+        maximumPointSize: CGFloat
+    ) -> UIFont {
         let metrics = UIFontMetrics(forTextStyle: style)
         let base = UIFont.systemFont(ofSize: UIFont.preferredFont(forTextStyle: style).pointSize, weight: weight)
-        return metrics.scaledFont(for: base)
+        return metrics.scaledFont(for: base, maximumPointSize: maximumPointSize)
     }
 }
