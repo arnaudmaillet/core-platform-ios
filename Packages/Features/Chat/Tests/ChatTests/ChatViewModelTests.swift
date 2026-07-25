@@ -16,6 +16,7 @@ private actor StubChatProvider: ChatProviding {
         self.messages = messages
     }
 
+    func viewerProfileID() async throws -> ProfileID { ProfileID("me") }
     func loadConversations() async throws -> [Conversation] { conversations }
     func loadMessages(in conversationID: ConversationID) async throws -> [ChatMessage] { messages }
     func send(_ body: String, to conversationID: ConversationID, replyingTo replyToID: String?) async throws -> ChatMessage {

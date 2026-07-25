@@ -46,6 +46,13 @@ public struct MockSocialDataset: Sendable {
     /// as following ∩ followers lands exactly on `mutualProfileIDs`, and the
     /// follower list isn't a trivial copy of either set.
     public let followerProfileIDs: Set<String>
+    /// Who each author follows, keyed by profile id. The viewer's own entry is
+    /// `followedProfileIDs`; the rest exist so a client deriving
+    /// friend-of-friend suggestions has a real second hop to walk. Author `i`
+    /// follows `i+1`, `i+3`, and `i+5` (mod 8, skipping itself): coprime
+    /// strides with 8, so every author is reachable, no author follows
+    /// everyone, and the followed-by counts differ enough to rank.
+    public let followingByProfileID: [String: Set<String>]
     /// Posts the viewer saved as places ("Pinned Places" on the map). No wire
     /// contract exists for pinning yet — a hand-curated set, as befits a
     /// user-curated feature: four land inside the map's default Paris
@@ -135,6 +142,25 @@ public struct MockSocialDataset: Sendable {
         followedProfileIDs = Set(authors.prefix(4).map(\.profileID))
         mutualProfileIDs = Set(authors.prefix(2).map(\.profileID))
         followerProfileIDs = mutualProfileIDs.union([authors[4].profileID])
+
+        var followingGraph: [String: Set<String>] = [
+            MockSocialDataset.viewerProfileID: followedProfileIDs
+        ]
+        // Local copy: reading the property inside the stride closure would
+        // capture a `self` that isn't fully initialized yet.
+        let roster = authors
+        for (index, author) in roster.enumerated() {
+            var following = Set([1, 3, 5].map { roster[(index + $0) % roster.count].profileID })
+            // The authors who follow the viewer must say so here too: this
+            // graph is now the single source both edge lists are answered
+            // from, so `followerProfileIDs` has to be derivable by inverting
+            // it — otherwise the viewer would read as having no followers.
+            if followerProfileIDs.contains(author.profileID) {
+                following.insert(MockSocialDataset.viewerProfileID)
+            }
+            followingGraph[author.profileID] = following
+        }
+        followingByProfileID = followingGraph
 
         let pinnedCategoriesByIndex = [
             19: "cafes", 48: "restaurants", 63: "parks", 91: "nightlife", // in default viewport

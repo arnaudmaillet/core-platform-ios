@@ -8,8 +8,10 @@ import CoreModels
 /// resolver maps them onto feature coordinators.
 public enum AppRoute: Equatable, Sendable {
     case feed
-    /// The Messages inbox (conversation list), a primary root tab.
-    case messages
+    /// The Messages inbox, a primary root tab. The category selects which of
+    /// the inbox's paged surfaces lands active — `.all` is the plain
+    /// "open Messages" case.
+    case messages(MessagesCategory)
     /// A user's profile. Origins that already render the user (feed cells,
     /// search rows) attach a `ProfileIdentityStub` so the destination can
     /// compose its navigation chrome before the push animates; `nil` when the

@@ -1,6 +1,18 @@
 import CoreModels
+import CoreNavigation
 import UIKit
 
+/// The inbox's "All" surface: active direct-message conversations.
+///
+/// It is a paged child of `MessagesInboxViewController`, which owns the only
+/// navigation bar on screen — so the Edit/Cancel/Delete items are *published*
+/// as `InboxSurfaceChrome` rather than written onto a `navigationItem` this
+/// screen doesn't display.
+///
+/// Row management (pin, mute, delete) is reached through the long-press
+/// context menu and multi-selection editing. There are deliberately no swipe
+/// actions: the horizontal axis belongs to paging between inbox categories,
+/// and a row that also claims it would make every page swipe a coin flip.
 final class ConversationListViewController: UIViewController {
     fileprivate enum Section { case main }
 
@@ -9,7 +21,7 @@ final class ConversationListViewController: UIViewController {
     private let tableView = UITableView(frame: .zero, style: .plain)
     private let refreshControl = UIRefreshControl()
     private let skeletonView = ConversationListSkeletonView()
-    private let statusLabel = UILabel()
+    private let statusView = InboxStatusView()
 
     private var dataSource: UITableViewDiffableDataSource<Section, ConversationID>!
     private var modelsByID: [ConversationID: ConversationDisplayModel] = [:]
@@ -19,20 +31,42 @@ final class ConversationListViewController: UIViewController {
     /// by the feature builder so preview and push share one construction.
     var threadPreviewProvider: ((ConversationID) -> UIViewController)?
 
-    /// Native system bar item (the bar supplies the glass bubble and
-    /// safe-area placement); the action rides the same route seam as row
-    /// selection, so the contact-selection flow lands resolver-side.
-    private lazy var composeItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(
-            image: UIImage(systemName: "square.and.pencil"),
-            primaryAction: UIAction { [weak self] _ in self?.viewModel.didTapCompose() }
+    // MARK: - InboxSurface chrome
+
+    private(set) var chrome = InboxSurfaceChrome() {
+        didSet { onChromeChange?(chrome) }
+    }
+
+    var onChromeChange: ((InboxSurfaceChrome) -> Void)?
+
+    /// Recomputes what the container should show for this surface. Editing
+    /// swaps in Cancel plus this tab's batch actions and freezes paging;
+    /// otherwise the trailing slot stays empty so the inbox's own compose item
+    /// shows through.
+    private func publishChrome() {
+        updateBatchItemState()
+        chrome = InboxSurfaceChrome(
+            leadingBarItem: isEditing ? cancelItem : editButtonItem,
+            trailingBarItems: isEditing ? [batchDeleteItem, batchPinItem] : [],
+            badgeCount: 0,
+            locksPaging: isEditing
         )
-        item.accessibilityLabel = "New Message"
+    }
+
+    /// Batch pin toggle. Its title follows the selection: an all-pinned
+    /// selection offers "Unpin", anything else "Pin" — so the button always
+    /// names what it is about to do rather than what the rows currently are.
+    private lazy var batchPinItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            title: "Pin",
+            primaryAction: UIAction { [weak self] _ in self?.togglePinOnSelectedRows() }
+        )
+        item.isEnabled = false
         return item
     }()
 
-    /// Batch delete for multi-selection mode; swapped in for compose while
-    /// editing, enabled only with a non-empty selection.
+    /// Batch delete for multi-selection mode, enabled only with a non-empty
+    /// selection.
     private lazy var batchDeleteItem: UIBarButtonItem = {
         let item = UIBarButtonItem(
             title: "Delete",
@@ -61,14 +95,10 @@ final class ConversationListViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Messages"
         view.backgroundColor = .systemBackground
-        // The system's own edit toggle: it drives `setEditing(_:animated:)`
-        // and swaps its Edit/Done title itself — no state to hand-manage.
-        navigationItem.leftBarButtonItem = editButtonItem
-        navigationItem.rightBarButtonItem = composeItem
         configureTableView()
         configureStatusViews()
+        publishChrome()
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
         render(.loading)
@@ -114,7 +144,7 @@ final class ConversationListViewController: UIViewController {
         refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
         tableView.refreshControl = refreshControl
 
-        dataSource = EditableDataSource(tableView: tableView) {
+        dataSource = EditableDiffableDataSource(tableView: tableView) {
             [weak self] tableView, indexPath, id in
             let cell = tableView.dequeueReusableCell(
                 withIdentifier: ConversationCell.reuseIdentifier, for: indexPath
@@ -127,27 +157,46 @@ final class ConversationListViewController: UIViewController {
     // MARK: - Editing (multi-selection)
 
     /// `editButtonItem` (and the `Cancel` item) funnel here. While editing, the
-    /// leading toggle becomes a native `Cancel` and the trailing compose item
-    /// becomes batch `Delete`; UIKit animates the selection affordances and
-    /// clears any selection when the mode ends, so exit needs no manual cleanup
-    /// beyond restoring the bar.
+    /// leading toggle becomes a native `Cancel` and the trailing slot becomes
+    /// this tab's batch actions; UIKit animates the selection affordances and
+    /// clears any selection when the mode ends, so exit needs no manual
+    /// cleanup beyond republishing the chrome.
     override func setEditing(_ editing: Bool, animated: Bool) {
         super.setEditing(editing, animated: animated)
         tableView.setEditing(editing, animated: animated)
-        batchDeleteItem.isEnabled = false
-        navigationItem.leftBarButtonItem = editing ? cancelItem : editButtonItem
-        navigationItem.rightBarButtonItem = editing ? batchDeleteItem : composeItem
+        publishChrome()
+    }
+
+    private var selectedIDs: [ConversationID] {
+        (tableView.indexPathsForSelectedRows ?? []).compactMap { dataSource.itemIdentifier(for: $0) }
     }
 
     private func deleteSelectedRows() {
-        guard let selected = tableView.indexPathsForSelectedRows, !selected.isEmpty else { return }
-        let ids = selected.compactMap { dataSource.itemIdentifier(for: $0) }
+        let ids = selectedIDs
+        guard !ids.isEmpty else { return }
         viewModel.delete(Set(ids))
-        batchDeleteItem.isEnabled = false
+        setEditing(false, animated: true)
     }
 
-    private func updateBatchDeleteState() {
-        batchDeleteItem.isEnabled = !(tableView.indexPathsForSelectedRows ?? []).isEmpty
+    /// Pins the selection, or unpins it when every selected row is already
+    /// pinned — the same rule the button's title states.
+    private func togglePinOnSelectedRows() {
+        let ids = selectedIDs
+        guard !ids.isEmpty else { return }
+        let shouldUnpin = ids.allSatisfy { viewModel.isPinned($0) }
+        for id in ids where viewModel.isPinned(id) == shouldUnpin {
+            viewModel.togglePin(id)
+        }
+        setEditing(false, animated: true)
+    }
+
+    /// Batch actions are meaningless without a selection, and the pin item
+    /// has to re-title itself as the selection changes.
+    private func updateBatchItemState() {
+        let ids = selectedIDs
+        batchDeleteItem.isEnabled = !ids.isEmpty
+        batchPinItem.isEnabled = !ids.isEmpty
+        batchPinItem.title = !ids.isEmpty && ids.allSatisfy { viewModel.isPinned($0) } ? "Unpin" : "Pin"
     }
 
     private func configureStatusViews() {
@@ -158,17 +207,8 @@ final class ConversationListViewController: UIViewController {
             skeletonView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
             skeletonView.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
         }
-        statusLabel.font = .preferredFont(forTextStyle: .body)
-        statusLabel.adjustsFontForContentSizeCategory = true
-        statusLabel.textColor = .secondaryLabel
-        statusLabel.textAlignment = .center
-        statusLabel.numberOfLines = 0
-        statusLabel.isHidden = true
-        statusLabel.constrain(in: view) { parent in
-            statusLabel.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
-            statusLabel.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor)
-            statusLabel.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor)
-        }
+        statusView.isHidden = true
+        statusView.pin(to: view, relativeTo: .safeArea)
     }
 
     private func render(_ phase: ConversationListViewModel.Phase) {
@@ -176,10 +216,10 @@ final class ConversationListViewController: UIViewController {
         case .loading:
             skeletonView.isHidden = false
             tableView.isHidden = true
-            statusLabel.isHidden = true
+            statusView.isHidden = true
         case .content(let models):
             refreshControl.endRefreshing()
-            statusLabel.isHidden = true
+            statusView.isHidden = true
             var snapshot = NSDiffableDataSourceSnapshot<Section, ConversationID>()
             snapshot.appendSections([.main])
             snapshot.appendItems(models.map(\.id), toSection: .main)
@@ -195,14 +235,18 @@ final class ConversationListViewController: UIViewController {
             refreshControl.endRefreshing()
             skeletonView.isHidden = true
             tableView.isHidden = true
-            statusLabel.text = "No conversations yet."
-            statusLabel.isHidden = false
+            statusView.configure(
+                symbol: "bubble.left.and.bubble.right",
+                title: "No conversations yet",
+                message: "Start one from someone's profile, or tap the compose button."
+            )
+            statusView.isHidden = false
         case .failed(let message):
             refreshControl.endRefreshing()
             skeletonView.isHidden = true
             tableView.isHidden = true
-            statusLabel.text = message
-            statusLabel.isHidden = false
+            statusView.configure(symbol: "exclamationmark.triangle", title: "Something went wrong", message: message)
+            statusView.isHidden = false
         }
     }
 
@@ -228,7 +272,7 @@ extension ConversationListViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         // In multi-selection mode a tap is a selection, not navigation.
         if tableView.isEditing {
-            updateBatchDeleteState()
+            publishChrome()
             return
         }
         tableView.deselectRow(at: indexPath, animated: true)
@@ -237,7 +281,7 @@ extension ConversationListViewController: UITableViewDelegate {
     }
 
     func tableView(_ tableView: UITableView, didDeselectRowAt indexPath: IndexPath) {
-        if tableView.isEditing { updateBatchDeleteState() }
+        if tableView.isEditing { publishChrome() }
     }
 
     // MARK: - Context menu (haptic long-press)
@@ -291,60 +335,16 @@ extension ConversationListViewController: UITableViewDelegate {
         // Destructive action in its own inline section, per system menus.
         return UIMenu(children: [pin, mute, UIMenu(options: .displayInline, children: [delete])])
     }
-
-    // MARK: - Swipe actions
-
-    /// Leading: Pin/Unpin (Messages-style), full swipe commits it.
-    func tableView(
-        _ tableView: UITableView,
-        leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath
-    ) -> UISwipeActionsConfiguration? {
-        guard let id = dataSource.itemIdentifier(for: indexPath) else { return nil }
-        let isPinned = viewModel.isPinned(id)
-        let pin = UIContextualAction(style: .normal, title: isPinned ? "Unpin" : "Pin") {
-            [weak self] _, _, completion in
-            self?.viewModel.togglePin(id)
-            completion(true)
-        }
-        pin.image = UIImage(systemName: isPinned ? "pin.slash.fill" : "pin.fill")
-        pin.backgroundColor = .systemYellow
-        return UISwipeActionsConfiguration(actions: [pin])
-    }
-
-    /// Trailing: Delete (destructive — the system's red, and the full-swipe
-    /// default) then Mute.
-    func tableView(
-        _ tableView: UITableView,
-        trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath
-    ) -> UISwipeActionsConfiguration? {
-        guard let id = dataSource.itemIdentifier(for: indexPath) else { return nil }
-
-        let delete = UIContextualAction(style: .destructive, title: "Delete") {
-            [weak self] _, _, completion in
-            self?.viewModel.delete([id])
-            completion(true)
-        }
-        delete.image = UIImage(systemName: "trash.fill")
-
-        let isMuted = viewModel.isMuted(id)
-        let mute = UIContextualAction(style: .normal, title: isMuted ? "Unmute" : "Mute") {
-            [weak self] _, _, completion in
-            self?.viewModel.toggleMute(id)
-            completion(true)
-        }
-        mute.image = UIImage(systemName: isMuted ? "bell.fill" : "bell.slash.fill")
-        mute.backgroundColor = .systemIndigo
-
-        return UISwipeActionsConfiguration(actions: [delete, mute])
-    }
 }
 
-/// Diffable data sources report rows as non-editable by default, which
-/// disables both swipe actions and editing-mode selection — opt every row in.
-private final class EditableDataSource: UITableViewDiffableDataSource<
-    ConversationListViewController.Section, ConversationID
-> {
-    override func tableView(_ tableView: UITableView, canEditRowAt indexPath: IndexPath) -> Bool {
-        true
+// MARK: - InboxSurface
+
+extension ConversationListViewController: InboxSurface {
+    var category: MessagesCategory { .all }
+
+    /// Paging back here re-checks for new messages. `refresh()` no-ops while a
+    /// load is already in flight, so this is free on the appear path.
+    func surfaceDidBecomeActive() {
+        viewModel.refresh()
     }
 }

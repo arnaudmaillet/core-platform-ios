@@ -1,0 +1,255 @@
+import CoreModels
+import CoreNavigation
+import MediaCore
+import UIKit
+
+/// The inbox's "Suggestions" surface: accounts worth following, each with an
+/// inline follow and a dismiss.
+///
+/// Loads lazily — a viewer who never swipes this far never pays for the social
+/// graph fan-out behind it.
+final class SuggestionsViewController: UIViewController {
+    fileprivate enum Section { case main }
+
+    private let viewModel: SuggestionsViewModel
+    private let imagePipeline: ImagePipeline?
+
+    private let tableView = UITableView(frame: .zero, style: .plain)
+    private let refreshControl = UIRefreshControl()
+    private let skeletonView = ConversationListSkeletonView()
+    private let statusView = InboxStatusView()
+
+    private var dataSource: UITableViewDiffableDataSource<Section, ProfileID>!
+    private var modelsByID: [ProfileID: SuggestionDisplayModel] = [:]
+    private var hasRenderedContent = false
+
+    private(set) var chrome = InboxSurfaceChrome() {
+        didSet { onChromeChange?(chrome) }
+    }
+
+    var onChromeChange: ((InboxSurfaceChrome) -> Void)?
+
+    // MARK: - Batch actions
+
+    /// Follow/Remove in bulk — the same two decisions the rows carry, applied
+    /// to a selection. Follow has one direction (unlike the row's toggle) so a
+    /// mixed selection can't half-undo itself.
+    private lazy var batchFollowItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            title: "Follow",
+            primaryAction: UIAction { [weak self] _ in
+                guard let self else { return }
+                self.viewModel.follow(self.selectedIDs)
+                self.setEditing(false, animated: true)
+            }
+        )
+        item.isEnabled = false
+        return item
+    }()
+
+    private lazy var batchRemoveItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            title: "Remove",
+            primaryAction: UIAction { [weak self] _ in
+                guard let self else { return }
+                self.viewModel.dismiss(self.selectedIDs)
+                self.setEditing(false, animated: true)
+            }
+        )
+        item.tintColor = .systemRed
+        item.isEnabled = false
+        return item
+    }()
+
+    private lazy var cancelItem = UIBarButtonItem(
+        title: "Cancel",
+        primaryAction: UIAction { [weak self] _ in self?.setEditing(false, animated: true) }
+    )
+
+    private func publishChrome() {
+        let hasSelection = !selectedIDs.isEmpty
+        batchFollowItem.isEnabled = hasSelection
+        batchRemoveItem.isEnabled = hasSelection
+        chrome = InboxSurfaceChrome(
+            leadingBarItem: isEditing ? cancelItem : editButtonItem,
+            trailingBarItems: isEditing ? [batchRemoveItem, batchFollowItem] : [],
+            locksPaging: isEditing
+        )
+    }
+
+    private var selectedIDs: [ProfileID] {
+        (tableView.indexPathsForSelectedRows ?? []).compactMap { dataSource.itemIdentifier(for: $0) }
+    }
+
+    override func setEditing(_ editing: Bool, animated: Bool) {
+        super.setEditing(editing, animated: animated)
+        tableView.setEditing(editing, animated: animated)
+        publishChrome()
+    }
+
+    init(viewModel: SuggestionsViewModel, imagePipeline: ImagePipeline?) {
+        self.viewModel = viewModel
+        self.imagePipeline = imagePipeline
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground
+        configureTableView()
+        configureStatusViews()
+        publishChrome()
+
+        viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
+        render(.loading)
+    }
+
+    private func configureTableView() {
+        tableView.register(SuggestionCell.self, forCellReuseIdentifier: SuggestionCell.reuseIdentifier)
+        tableView.delegate = self
+        tableView.rowHeight = UITableView.automaticDimension
+        tableView.estimatedRowHeight = 76
+        tableView.allowsMultipleSelectionDuringEditing = true
+        tableView.pin(to: view)
+
+        refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
+        tableView.refreshControl = refreshControl
+
+        dataSource = EditableDiffableDataSource(tableView: tableView) {
+            [weak self] tableView, indexPath, id in
+            let cell = tableView.dequeueReusableCell(
+                withIdentifier: SuggestionCell.reuseIdentifier, for: indexPath
+            ) as! SuggestionCell
+            if let model = self?.modelsByID[id] {
+                cell.configure(with: model, imagePipeline: self?.imagePipeline)
+            }
+            cell.onToggleFollow = { [weak self] in self?.viewModel.toggleFollow(id) }
+            cell.onDismiss = { [weak self] in self?.viewModel.dismiss(id) }
+            return cell
+        }
+    }
+
+    private func configureStatusViews() {
+        skeletonView.isHidden = true
+        skeletonView.constrain(in: view) { parent in
+            skeletonView.topAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.topAnchor)
+            skeletonView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+            skeletonView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
+            skeletonView.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
+        }
+        statusView.isHidden = true
+        statusView.pin(to: view, relativeTo: .safeArea)
+    }
+
+    private func render(_ phase: SuggestionsViewModel.Phase) {
+        switch phase {
+        case .loading:
+            skeletonView.isHidden = false
+            tableView.isHidden = true
+            statusView.isHidden = true
+        case .content(let models):
+            refreshControl.endRefreshing()
+            statusView.isHidden = true
+            var snapshot = NSDiffableDataSourceSnapshot<Section, ProfileID>()
+            snapshot.appendSections([.main])
+            snapshot.appendItems(models.map(\.id), toSection: .main)
+            // Follow state changes in place; only dismissals move rows, so the
+            // follow flip reads as a button toggling rather than a reload.
+            snapshot.reconfigureItems(models.filter { modelsByID[$0.id] != nil && modelsByID[$0.id] != $0 }.map(\.id))
+            modelsByID = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
+            dataSource.apply(snapshot, animatingDifferences: hasRenderedContent)
+            hasRenderedContent = true
+            revealContent()
+        case .empty:
+            refreshControl.endRefreshing()
+            skeletonView.isHidden = true
+            tableView.isHidden = true
+            statusView.configure(
+                symbol: "person.2",
+                title: "No suggestions right now",
+                message: "Follow a few accounts and we'll find people you might know."
+            )
+            statusView.isHidden = false
+        case .failed(let message):
+            refreshControl.endRefreshing()
+            skeletonView.isHidden = true
+            tableView.isHidden = true
+            statusView.configure(symbol: "exclamationmark.triangle", title: "Something went wrong", message: message)
+            statusView.isHidden = false
+        }
+    }
+
+    private func revealContent() {
+        guard !skeletonView.isHidden, view.window != nil else {
+            skeletonView.isHidden = true
+            tableView.isHidden = false
+            return
+        }
+        UIView.transition(
+            with: view, duration: 0.35, options: [.transitionCrossDissolve, .curveEaseInOut]
+        ) {
+            self.skeletonView.isHidden = true
+            self.tableView.isHidden = false
+        }
+    }
+}
+
+extension SuggestionsViewController: UITableViewDelegate {
+    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        // In multi-selection mode a tap is a selection, not navigation.
+        if tableView.isEditing {
+            publishChrome()
+            return
+        }
+        tableView.deselectRow(at: indexPath, animated: true)
+        guard let id = dataSource.itemIdentifier(for: indexPath) else { return }
+        viewModel.didSelect(id)
+    }
+
+    func tableView(_ tableView: UITableView, didDeselectRowAt indexPath: IndexPath) {
+        if tableView.isEditing { publishChrome() }
+    }
+
+    /// The long-press menu carries the action the row has no room for: this is
+    /// the Messages tab, so starting a DM belongs here.
+    func tableView(
+        _ tableView: UITableView,
+        contextMenuConfigurationForRowAt indexPath: IndexPath,
+        point: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard !tableView.isEditing, let id = dataSource.itemIdentifier(for: indexPath) else { return nil }
+        return UIContextMenuConfiguration(
+            identifier: id.rawValue as NSString,
+            previewProvider: nil
+        ) { [weak self] _ in
+            guard let self else { return nil }
+            let isFollowing = self.viewModel.isFollowing(id)
+            let message = UIAction(title: "Message", image: UIImage(systemName: "bubble.left")) {
+                [weak self] _ in self?.viewModel.message(id)
+            }
+            let follow = UIAction(
+                title: isFollowing ? "Unfollow" : "Follow",
+                image: UIImage(systemName: isFollowing ? "person.badge.minus" : "person.badge.plus")
+            ) { [weak self] _ in self?.viewModel.toggleFollow(id) }
+            let hide = UIAction(
+                title: "Not interested",
+                image: UIImage(systemName: "hand.thumbsdown"),
+                attributes: .destructive
+            ) { [weak self] _ in self?.viewModel.dismiss(id) }
+            return UIMenu(children: [message, follow, UIMenu(options: .displayInline, children: [hide])])
+        }
+    }
+}
+
+// MARK: - InboxSurface
+
+extension SuggestionsViewController: InboxSurface {
+    var category: MessagesCategory { .suggestions }
+
+    func surfaceDidBecomeActive() {
+        viewModel.loadIfNeeded()
+    }
+}

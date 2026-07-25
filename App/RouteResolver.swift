@@ -51,9 +51,14 @@ final class RouteResolver: Router {
             // the dismiss-then-push choreography.
             navigator.openFeed()
 
-        case .messages:
+        case .messages(let category):
             navigator.selectTab(.messages)
             navigator.activeNavigationController?.popToRootViewController(animated: true)
+            // The inbox is the tab's root and already built: page it rather
+            // than rebuild it, so an arriving route never resets the stack's
+            // root under the user.
+            (navigator.activeNavigationController?.viewControllers.first as? MessagesInboxCategorySelecting)?
+                .setCategory(category, animated: false)
 
         case .profile(let profileID, let stub):
             let profile = profileFeature().makeProfileViewController(for: profileID, identityStub: stub)

@@ -19,19 +19,25 @@ public struct Conversation: Equatable, Sendable, Identifiable {
     /// The non-viewer member(s). Exactly one for a DM — the identity the
     /// thread header shows and links to.
     public let otherMemberIDs: [ProfileID]
+    /// Whether `lastMessage` is the viewer's own. Free at hydration time (the
+    /// sender is already in hand) and the signal `MessageRequestPolicy` reads
+    /// to tell a pending request from a conversation the viewer answered.
+    public let lastMessageIsMine: Bool
 
     public init(
         id: ConversationID,
         title: String,
         lastMessage: String,
         lastActivityAt: Date?,
-        otherMemberIDs: [ProfileID] = []
+        otherMemberIDs: [ProfileID] = [],
+        lastMessageIsMine: Bool = false
     ) {
         self.id = id
         self.title = title
         self.lastMessage = lastMessage
         self.lastActivityAt = lastActivityAt
         self.otherMemberIDs = otherMemberIDs
+        self.lastMessageIsMine = lastMessageIsMine
     }
 
     /// The DM correspondent: the single other member. `nil` for group shapes,
@@ -69,7 +75,17 @@ public struct ChatMessage: Equatable, Sendable, Identifiable {
     }
 }
 
-public protocol ChatProviding: Sendable {
+/// Resolves who the viewer is, once, for anyone who needs it.
+///
+/// Split out of `ChatProviding` so the social surfaces beside the inbox can
+/// depend on the identity without depending on chat: they need the same
+/// profile id `ChatRepository` already resolves and caches, and two
+/// independent resolutions would mean two extra round trips per cold start.
+public protocol ViewerIdentityProviding: Sendable {
+    func viewerProfileID() async throws -> ProfileID
+}
+
+public protocol ChatProviding: ViewerIdentityProviding {
     func loadConversations() async throws -> [Conversation]
     func loadMessages(in conversationID: ConversationID) async throws -> [ChatMessage]
     /// Sends `body`, optionally as a threaded reply to `replyToID` (chat.v1
@@ -121,6 +137,10 @@ public actor ChatRepository: ChatProviding {
     }
 
     // MARK: - Conversations
+
+    public func viewerProfileID() async throws -> ProfileID {
+        try await resolveViewerProfileID()
+    }
 
     public func loadConversations() async throws -> [Conversation] {
         let viewer = try await resolveViewerProfileID()
@@ -174,7 +194,8 @@ public actor ChatRepository: ChatProviding {
             title: title.isEmpty ? "Conversation" : title,
             lastMessage: latest?.body ?? "",
             lastActivityAt: latest.map { Date(timeIntervalSince1970: TimeInterval($0.createdAtMs) / 1000) },
-            otherMemberIDs: otherIDs
+            otherMemberIDs: otherIDs,
+            lastMessageIsMine: latest.map { ProfileID($0.senderID) == viewer } ?? false
         )
     }
 

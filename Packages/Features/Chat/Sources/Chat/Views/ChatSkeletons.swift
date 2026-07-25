@@ -14,7 +14,8 @@ import UIKit
 /// size) is the cell's own.
 final class ConversationListSkeletonView: UIView {
     private enum Metrics {
-        /// `ConversationCell.Metrics.avatarSize`.
+        /// `MonogramAvatarView.rowDiameter` (copied, not referenced: this
+        /// nonisolated constant can't read a main-actor one).
         static let avatarSize: CGFloat = 48
         static let titleHeight: CGFloat = 13
         static let previewHeight: CGFloat = 11

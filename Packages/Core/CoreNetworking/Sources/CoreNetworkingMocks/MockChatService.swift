@@ -2,7 +2,7 @@ import Connect
 import CoreContracts
 import Foundation
 
-/// Fake of chat.v1.ChatService over the shared dataset. Seeds two direct
+/// Fake of chat.v1.ChatService over the shared dataset. Seeds four direct
 /// conversations (viewer ↔ a dataset author) with a short history, persists
 /// sent messages, and accepts MarkRead. Members are dataset authors, so profile
 /// hydration resolves.
@@ -11,7 +11,20 @@ public final class MockChatService: @unchecked Sendable {
     private let store = Store()
 
     /// conversationID → the other (non-viewer) member.
-    private var otherMember: [String: String] { ["conv-0": dataset.authors[0].profileID, "conv-1": dataset.authors[1].profileID] }
+    ///
+    /// `conv-0`/`conv-1` are with authors the viewer follows (and has replied
+    /// to) — the active inbox. `conv-req-0`/`conv-req-1` are with authors the
+    /// viewer does NOT follow and has never answered, which is exactly what
+    /// `MessageRequestPolicy` partitions into the Requests tab; without them
+    /// that surface would only ever render its empty state in mock mode.
+    private var otherMember: [String: String] {
+        [
+            "conv-0": dataset.authors[0].profileID,
+            "conv-1": dataset.authors[1].profileID,
+            "conv-req-0": dataset.authors[5].profileID,
+            "conv-req-1": dataset.authors[6].profileID
+        ]
+    }
     private let viewer = MockSocialDataset.viewerProfileID
 
     public init(dataset: MockSocialDataset) {
@@ -21,7 +34,7 @@ public final class MockChatService: @unchecked Sendable {
     public func register(on bff: MockBFF) {
         bff.register(path: "/chat.v1.ChatService/ListSubscriptions") { [self] (_: Chat_V1_ListSubscriptionsRequest) in
             var response = Chat_V1_ListSubscriptionsResponse()
-            response.conversationIds = ["conv-0", "conv-1"]
+            response.conversationIds = ["conv-0", "conv-1", "conv-req-0", "conv-req-1"]
             return .success(response)
         }
         bff.register(path: "/chat.v1.ChatService/ListMembers") { [self] (request: Chat_V1_ListMembersRequest) in
@@ -72,6 +85,27 @@ public final class MockChatService: @unchecked Sendable {
         // paragraph, and back-to-back turnarounds. conv-1 stays short.
         let morning: Int64 = 25 * 60
         let midday: Int64 = 24 * 60 + 30
+        // Request threads are inbound-only and unanswered by construction —
+        // that IS the partition rule, so seeding a viewer reply here would
+        // quietly move the row into the active inbox.
+        if conversationID.hasPrefix("conv-req-") {
+            let opener = conversationID == "conv-req-0"
+                ? "Hi! Loved your shot of the pier — any chance you sell prints?"
+                : "Hey, we're putting together a small show next month and I'd love to include your work."
+            let inbound: [(String, String, Int64)] = [
+                (other, opener, 90), (other, "No pressure either way 🙂", 88)
+            ]
+            return inbound
+                .enumerated()
+                .map { index, spec in
+                    var view = Chat_V1_MessageView()
+                    view.messageID = "\(conversationID)-m\(index)"
+                    view.senderID = spec.0
+                    view.body = spec.1
+                    view.createdAtMs = nowMs - spec.2 * minute
+                    return view
+                }
+        }
         let specs: [(String, String, Int64)] = conversationID == "conv-0"
             ? [
                 (other, "Morning! Standup moved to 9:30 today", morning),
