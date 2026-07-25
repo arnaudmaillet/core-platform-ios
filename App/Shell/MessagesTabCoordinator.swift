@@ -2,9 +2,9 @@ import ChatInterface
 import CoreNavigation
 import UIKit
 
-/// Owns the Messages tab: the conversation list, promoted from a sub-screen of
-/// the feed to a primary root tab. Reuses the existing Chat feature; threads
-/// still open by pushing onto this tab's stack (or the current one, via routes).
+/// Owns the Messages tab: the paged inbox (All / Requests / Suggestions),
+/// promoted from a sub-screen of the feed to a primary root tab. Threads open
+/// by pushing onto this tab's stack (or the current one, via routes).
 @MainActor
 final class MessagesTabCoordinator: TabCoordinator {
     var childCoordinators: [Coordinator] = []
@@ -23,7 +23,6 @@ final class MessagesTabCoordinator: TabCoordinator {
     }
 
     func start() {
-        let conversationList = container.chatFeature.makeConversationListViewController()
-        navigationController.viewControllers = [conversationList]
+        navigationController.viewControllers = [container.chatFeature.makeInboxViewController()]
     }
 }

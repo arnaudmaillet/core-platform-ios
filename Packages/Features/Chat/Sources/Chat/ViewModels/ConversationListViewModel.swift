@@ -2,6 +2,13 @@ import CoreModels
 import CoreNavigation
 import Foundation
 
+/// The "All" surface's view model: active conversations, with unread ones
+/// marked in place rather than split off.
+///
+/// Loading and inbox truth live in `InboxCatalog` (shared with the Requests
+/// surface, so the inbox's conversations are fetched once, not once per tab).
+/// What stays here is this surface's own presentation: phases, display-model
+/// projection, and the routes a row tap emits.
 @MainActor
 public final class ConversationListViewModel {
     public nonisolated enum Phase: Equatable, Sendable {
@@ -12,43 +19,52 @@ public final class ConversationListViewModel {
     }
 
     public var onPhaseChange: ((Phase) -> Void)?
+    /// How many conversations are unread, published so the container can put
+    /// the count on the All tab.
+    public var onUnreadCountChange: ((Int) -> Void)?
 
-    private let repository: any ChatProviding
+    public private(set) var unreadCount = 0
+
+    private let catalog: InboxCatalog
     private let router: (any Router)?
-    private let directory: ConversationDirectory?
     private let now: @Sendable () -> Date
 
-    private var conversations: [Conversation] = []
     private var phase: Phase = .loading { didSet { onPhaseChange?(phase) } }
-    private var load: Task<Void, Never>?
+    private var observation: InboxCatalog.ObservationToken?
 
-    // Inbox management state. IN-SESSION ONLY by design: chat.v1 has no
-    // pin/mute/delete plane yet — when it grows one, these become optimistic
-    // mirrors of server calls and survive relaunch; the UI contract is final.
-    private var pinned: Set<ConversationID> = []
-    private var muted: Set<ConversationID> = []
-    private var deleted: Set<ConversationID> = []
+    init(
+        catalog: InboxCatalog,
+        router: (any Router)? = nil,
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
+        self.catalog = catalog
+        self.router = router
+        self.now = now
+        observation = catalog.observe { [weak self] snapshot in self?.project(snapshot) }
+    }
 
-    public init(
+    /// Standalone construction — one surface over its own catalog. The app
+    /// injects a shared catalog instead, so All and Requests agree on one load.
+    public convenience init(
         repository: any ChatProviding,
         router: (any Router)? = nil,
         directory: ConversationDirectory? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
-        self.repository = repository
-        self.router = router
-        self.directory = directory
-        self.now = now
+        self.init(
+            catalog: InboxCatalog(repository: repository, directory: directory),
+            router: router,
+            now: now
+        )
     }
 
     public func viewWillAppear() {
         // Reload each time it appears so a just-sent message updates the preview.
-        reload()
+        catalog.reload()
     }
 
     public func refresh() {
-        guard load == nil else { return }
-        reload()
+        catalog.refresh()
     }
 
     /// Opens the tapped conversation via routing (the resolver pushes the
@@ -65,67 +81,41 @@ public final class ConversationListViewModel {
 
     // MARK: - Inbox management
 
-    public func isPinned(_ id: ConversationID) -> Bool { pinned.contains(id) }
-    public func isMuted(_ id: ConversationID) -> Bool { muted.contains(id) }
+    public func isPinned(_ id: ConversationID) -> Bool { catalog.isPinned(id) }
+    public func isMuted(_ id: ConversationID) -> Bool { catalog.isMuted(id) }
 
-    public func togglePin(_ id: ConversationID) {
-        pinned.formSymmetricDifference([id])
-        emit()
-    }
+    public func togglePin(_ id: ConversationID) { catalog.togglePin(id) }
+    public func toggleMute(_ id: ConversationID) { catalog.toggleMute(id) }
+    public func delete(_ ids: Set<ConversationID>) { catalog.delete(ids) }
 
-    public func toggleMute(_ id: ConversationID) {
-        muted.formSymmetricDifference([id])
-        emit()
-    }
+    // MARK: - Projection
 
-    /// Removes conversations from the inbox (single swipe or batch edit).
-    /// Local until the backend grows a leave/delete RPC — the filter is
-    /// re-applied across reloads so deleted rows never resurface mid-session.
-    public func delete(_ ids: Set<ConversationID>) {
-        deleted.formUnion(ids)
-        emit()
-    }
-
-    private func reload() {
-        load?.cancel()
-        load = Task { [weak self] in
-            guard let self else { return }
-            do {
-                let loaded = try await self.repository.loadConversations()
-                self.conversations = loaded
-                // Warm the thread screens' identity cache: a row tap must
-                // show its header context at push-frame zero, synchronously.
-                self.directory?.remember(loaded)
-                self.emit()
-            } catch is CancellationError {
-                // Superseded.
-            } catch {
-                if case .content = self.phase {} else {
-                    self.phase = .failed(message: "Couldn't load your messages. Pull to retry.")
-                }
+    private func project(_ snapshot: InboxCatalog.Snapshot) {
+        let rows = snapshot.active
+        if unreadCount != snapshot.unreadIDs.count {
+            unreadCount = snapshot.unreadIDs.count
+            onUnreadCountChange?(unreadCount)
+        }
+        switch snapshot.phase {
+        case .loading:
+            phase = .loading
+        case .failed(let message):
+            phase = .failed(message: message)
+        case .loaded:
+            guard !rows.isEmpty else {
+                phase = .empty
+                return
             }
-            self.load = nil
+            let now = now()
+            phase = .content(rows.map {
+                ConversationDisplayModel(
+                    conversation: $0,
+                    now: now,
+                    isPinned: snapshot.pinned.contains($0.id),
+                    isMuted: snapshot.muted.contains($0.id),
+                    isUnread: snapshot.unreadIDs.contains($0.id)
+                )
+            })
         }
-    }
-
-    /// One projection of loaded conversations through the management state:
-    /// deleted rows filtered out, pinned rows first (recency order preserved
-    /// within each group — the repository sorts), flags onto display models.
-    private func emit() {
-        let visible = conversations.filter { !deleted.contains($0.id) }
-        guard !visible.isEmpty else {
-            phase = .empty
-            return
-        }
-        let now = now()
-        let ordered = visible.filter { pinned.contains($0.id) } + visible.filter { !pinned.contains($0.id) }
-        phase = .content(ordered.map {
-            ConversationDisplayModel(
-                conversation: $0,
-                now: now,
-                isPinned: pinned.contains($0.id),
-                isMuted: muted.contains($0.id)
-            )
-        })
     }
 }

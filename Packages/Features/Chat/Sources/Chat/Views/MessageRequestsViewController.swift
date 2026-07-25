@@ -1,0 +1,199 @@
+import CoreModels
+import CoreNavigation
+import UIKit
+
+/// The inbox's "Requests" surface: conversations from accounts the viewer
+/// doesn't follow, each with its accept/decline decision on the row.
+///
+/// It renders from the same `InboxCatalog` as the conversation list, so a
+/// decision here lands in All without a refetch, and the header's badge is
+/// driven by the same projection that fills this table.
+final class MessageRequestsViewController: UIViewController {
+    fileprivate enum Section { case main }
+
+    private let viewModel: MessageRequestsViewModel
+
+    private let tableView = UITableView(frame: .zero, style: .plain)
+    private let refreshControl = UIRefreshControl()
+    private let skeletonView = ConversationListSkeletonView()
+    private let statusView = InboxStatusView()
+
+    private var dataSource: UITableViewDiffableDataSource<Section, ConversationID>!
+    private var modelsByID: [ConversationID: ConversationDisplayModel] = [:]
+    private var hasRenderedContent = false
+
+    private(set) var chrome = InboxSurfaceChrome() {
+        didSet { onChromeChange?(chrome) }
+    }
+
+    var onChromeChange: ((InboxSurfaceChrome) -> Void)?
+
+    // MARK: - Chrome
+
+    /// Requests offers no multi-selection editing: every row already carries
+    /// its own accept/refuse pair, so the only bulk operation worth a bar item
+    /// is "make them all go away".
+    ///
+    /// It is destructive and irreversible for the session, so it asks first.
+    private lazy var clearAllItem = UIBarButtonItem(
+        title: "Clear All",
+        primaryAction: UIAction { [weak self] _ in self?.confirmClearAll() }
+    )
+
+    private func publishChrome() {
+        clearAllItem.isEnabled = viewModel.count > 0
+        chrome = InboxSurfaceChrome(
+            leadingBarItem: viewModel.count > 0 ? clearAllItem : nil,
+            badgeCount: viewModel.count
+        )
+    }
+
+    private func confirmClearAll() {
+        let count = viewModel.count
+        guard count > 0 else { return }
+        let alert = UIAlertController(
+            title: "Clear All Requests?",
+            message: count == 1
+                ? "This removes the pending request. The sender won't be notified."
+                : "This removes all \(count) pending requests. The senders won't be notified.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Clear All", style: .destructive) { [weak self] _ in
+            self?.viewModel.clearAll()
+        })
+        present(alert, animated: true)
+    }
+
+    init(viewModel: MessageRequestsViewModel) {
+        self.viewModel = viewModel
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground
+        configureTableView()
+        configureStatusViews()
+
+        viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
+        // The badge rides the same chrome the bar items do, so a count landing
+        // while this surface is off screen can't drop its Edit item.
+        viewModel.onCountChange = { [weak self] _ in self?.publishChrome() }
+        publishChrome()
+        render(.loading)
+    }
+
+    private func configureTableView() {
+        tableView.register(MessageRequestCell.self, forCellReuseIdentifier: MessageRequestCell.reuseIdentifier)
+        tableView.delegate = self
+        tableView.rowHeight = UITableView.automaticDimension
+        tableView.estimatedRowHeight = 84
+        tableView.pin(to: view)
+
+        refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
+        tableView.refreshControl = refreshControl
+
+        dataSource = UITableViewDiffableDataSource(tableView: tableView) {
+            [weak self] tableView, indexPath, id in
+            let cell = tableView.dequeueReusableCell(
+                withIdentifier: MessageRequestCell.reuseIdentifier, for: indexPath
+            ) as! MessageRequestCell
+            if let model = self?.modelsByID[id] { cell.configure(with: model) }
+            // Decisions are captured per row: the diffable snapshot animates
+            // the row out, so neither handler needs an index path.
+            cell.onAccept = { [weak self] in self?.viewModel.accept(id) }
+            cell.onDismiss = { [weak self] in self?.viewModel.decline(id) }
+            return cell
+        }
+    }
+
+    private func configureStatusViews() {
+        skeletonView.isHidden = true
+        skeletonView.constrain(in: view) { parent in
+            skeletonView.topAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.topAnchor)
+            skeletonView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+            skeletonView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
+            skeletonView.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
+        }
+        statusView.isHidden = true
+        statusView.pin(to: view, relativeTo: .safeArea)
+    }
+
+    private func render(_ phase: MessageRequestsViewModel.Phase) {
+        switch phase {
+        case .loading:
+            skeletonView.isHidden = false
+            tableView.isHidden = true
+            statusView.isHidden = true
+        case .content(let models):
+            refreshControl.endRefreshing()
+            statusView.isHidden = true
+            var snapshot = NSDiffableDataSourceSnapshot<Section, ConversationID>()
+            snapshot.appendSections([.main])
+            snapshot.appendItems(models.map(\.id), toSection: .main)
+            modelsByID = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
+            // Animate only while visible — an off-screen change would replay
+            // its animation after the next transition.
+            dataSource.apply(snapshot, animatingDifferences: hasRenderedContent && view.window != nil)
+            hasRenderedContent = true
+            revealContent()
+        case .empty:
+            refreshControl.endRefreshing()
+            skeletonView.isHidden = true
+            tableView.isHidden = true
+            statusView.configure(
+                symbol: "tray",
+                title: "No requests",
+                message: "Messages from people you don't follow will wait here."
+            )
+            statusView.isHidden = false
+        case .failed(let message):
+            refreshControl.endRefreshing()
+            skeletonView.isHidden = true
+            tableView.isHidden = true
+            statusView.configure(symbol: "exclamationmark.triangle", title: "Something went wrong", message: message)
+            statusView.isHidden = false
+        }
+    }
+
+    /// Swaps the skeleton for the populated table — hydration in place, and
+    /// only when the skeleton is actually on screen.
+    private func revealContent() {
+        guard !skeletonView.isHidden, view.window != nil else {
+            skeletonView.isHidden = true
+            tableView.isHidden = false
+            return
+        }
+        UIView.transition(
+            with: view, duration: 0.35, options: [.transitionCrossDissolve, .curveEaseInOut]
+        ) {
+            self.skeletonView.isHidden = true
+            self.tableView.isHidden = false
+        }
+    }
+}
+
+extension MessageRequestsViewController: UITableViewDelegate {
+    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        guard let id = dataSource.itemIdentifier(for: indexPath) else { return }
+        viewModel.didSelect(id)
+    }
+}
+
+// MARK: - InboxSurface
+
+extension MessageRequestsViewController: InboxSurface {
+    var category: MessagesCategory { .requests }
+
+    /// The catalog is already loaded by the time this surface is reachable
+    /// (the conversation list loads it on appear), so becoming active only
+    /// asks for a refresh — which no-ops while one is in flight.
+    func surfaceDidBecomeActive() {
+        viewModel.refresh()
+    }
+}

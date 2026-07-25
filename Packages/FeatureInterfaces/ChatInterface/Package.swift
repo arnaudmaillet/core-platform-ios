@@ -8,12 +8,13 @@ let package = Package(
         .library(name: "ChatInterface", targets: ["ChatInterface"])
     ],
     dependencies: [
-        .package(path: "../../Kit/CoreModels")
+        .package(path: "../../Kit/CoreModels"),
+        .package(path: "../../Core/CoreNavigation")
     ],
     targets: [
         .target(
             name: "ChatInterface",
-            dependencies: ["CoreModels"]
+            dependencies: ["CoreModels", "CoreNavigation"]
         )
     ]
 )

@@ -34,12 +34,25 @@ struct ChatRepositoryTests {
 
         let conversations = try await repository.loadConversations()
 
-        #expect(conversations.count == 2)
+        // Three active threads (one answered, two ending on an inbound
+        // message) plus the two inbound-only request seeds.
+        #expect(conversations.count == 5)
         let first = try #require(conversations.first)
         #expect(!first.title.isEmpty)
         #expect(first.title != first.id.rawValue) // hydrated name, not an id
         #expect(!first.lastMessage.isEmpty)       // preview from getHistory
         #expect(first.lastActivityAt != nil)
+    }
+
+    /// `lastMessageIsMine` is what tells an unanswered request from a
+    /// conversation the viewer replied to, so it has to survive hydration.
+    @Test func hydrationFlagsWhoSentTheLastMessage() async throws {
+        let conversations = try await makeRepository().loadConversations()
+
+        let answered = try #require(conversations.first { $0.id == ConversationID("conv-0") })
+        #expect(answered.lastMessageIsMine)
+        let request = try #require(conversations.first { $0.id == ConversationID("conv-req-0") })
+        #expect(!request.lastMessageIsMine)
     }
 
     @Test func loadsMessagesWithMineFlag() async throws {

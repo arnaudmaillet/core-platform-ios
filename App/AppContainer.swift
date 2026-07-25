@@ -293,8 +293,21 @@ final class AppContainer {
         authSession: sessionManager
     )
 
+    /// Answers both social questions the inbox asks — "do I follow this peer"
+    /// (the Requests partition) and "who should I follow next" (Suggestions) —
+    /// off the viewer identity `chatRepository` has already resolved and
+    /// cached, so neither surface pays for a second lookup.
+    private lazy var socialConnectionsRepository = SocialConnectionsRepository(
+        socialGraphClient: SocialGraph_V1_SocialGraphServiceClient(client: authenticatedRPCClient),
+        profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
+        viewer: chatRepository,
+        pageSize: 200
+    )
+
     private(set) lazy var chatFeature: any ChatFeatureBuilding = ChatFeatureBuilder(
         repository: chatRepository,
+        connections: socialConnectionsRepository,
+        imagePipeline: imagePipeline,
         router: routeResolver
     )
 
