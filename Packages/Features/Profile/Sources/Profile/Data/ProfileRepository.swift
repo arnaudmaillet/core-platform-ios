@@ -207,7 +207,7 @@ public protocol ProfileSwitching: Sendable {
 /// counting `social_graph.v1` edges so real counts still render today; the fast
 /// path takes over automatically once the backend projects. See
 /// `dev/BACKEND_GAPS.md` §7.
-public actor ProfileRepository: ProfileProviding, ProfileSwitching {
+public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileViewerResolving {
     private let profileClient: any Profile_V1_ProfileServiceClientInterface
     private let counterClient: any Counter_V1_CounterServiceClientInterface
     private let socialGraphClient: any SocialGraph_V1_SocialGraphServiceClientInterface
@@ -494,6 +494,16 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching {
     }
 
     public func activeProfileID() async -> ProfileID? {
+        try? await resolveViewerProfileID()
+    }
+
+    // MARK: - ProfileViewerResolving
+
+    /// Same answer as `activeProfileID`, under the name the share-targets
+    /// repository depends on — so that repository never re-derives (or
+    /// re-caches) an identity this actor already owns, and a profile switch
+    /// reaches it for free.
+    public func viewerProfileID() async -> ProfileID? {
         try? await resolveViewerProfileID()
     }
 

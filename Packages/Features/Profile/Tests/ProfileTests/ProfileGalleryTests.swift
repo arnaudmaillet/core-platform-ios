@@ -208,9 +208,19 @@ struct ProfileGalleryViewModelTests {
         return (viewModel, { box.items })
     }
 
-    private func settle() async {
-        await Task.yield()
-        try? await Task.sleep(for: .milliseconds(50))
+    /// Lets the view model's load chain finish.
+    ///
+    /// Polls rather than sleeping once: swift-testing runs suites in parallel,
+    /// and a single fixed sleep is a wall-clock bet that a loaded machine
+    /// loses — these tests went flaky the moment more suites were added to the
+    /// package. `until` exits as soon as the state under test has arrived; the
+    /// no-argument form spends the whole budget, which is still bounded.
+    private func settle(until condition: @escaping () -> Bool = { false }) async {
+        for _ in 0..<60 {
+            await Task.yield()
+            if condition() { return }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
     }
 
     @Test func withoutProviderTheGalleryStaysHidden() async {

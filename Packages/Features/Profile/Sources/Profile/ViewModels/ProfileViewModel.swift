@@ -236,6 +236,15 @@ public final class ProfileViewModel {
         )))
     }
 
+    /// Send this profile to someone as a DM, with the link pre-typed in their
+    /// composer. Route-only, like `messageTapped` — Profile emits the intent
+    /// and Chat owns the destination.
+    public func sendProfile(_ card: ShareCard, to target: ProfileShareTarget) {
+        router?.route(to: .sendLink(card.url.absoluteString, to: target.id, stub: ProfileIdentityStub(
+            handle: target.handle, displayName: target.displayName
+        )))
+    }
+
     // MARK: - Overflow menu
 
     /// Block this profile, or the whole account behind it.

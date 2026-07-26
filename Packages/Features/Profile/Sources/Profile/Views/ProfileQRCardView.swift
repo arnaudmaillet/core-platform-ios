@@ -20,7 +20,8 @@ import UIKit
 /// where it is chrome rather than payload.
 final class ProfileQRCardView: UIView {
     private enum Metrics {
-        static let cornerRadius: CGFloat = 28
+        /// Floor for the concentric radius — see the initializer.
+        static let minimumCornerRadius: CGFloat = 20
         /// Padding between the card edge and the QR — doubles as the code's
         /// quiet zone, which the spec wants at four modules and the generator
         /// only partly supplies.
@@ -65,8 +66,14 @@ final class ProfileQRCardView: UIView {
         overrideUserInterfaceStyle = .light
         backgroundColor = Self.cardBackground
         isOpaque = true
-        layer.cornerRadius = Metrics.cornerRadius
-        layer.cornerCurve = .continuous
+        // Concentric with the sheet that contains it, rather than a hand-picked
+        // radius: the card is inset inside the sheet's own rounded rect, and
+        // `containerConcentricRadius` resolves the curve that stays parallel to
+        // it at that inset — the same relationship the system uses for content
+        // inside a rounded container. A fixed radius only ever matches at one
+        // inset, and reads subtly wrong at every other. The minimum keeps a
+        // sane shape if the card is ever hosted somewhere with square corners.
+        cornerConfiguration = .corners(radius: .containerConcentric(minimum: Metrics.minimumCornerRadius))
         configureSubviews()
     }
 
@@ -78,8 +85,7 @@ final class ProfileQRCardView: UIView {
     private func configureSubviews() {
         qrImageView.contentMode = .scaleAspectFit
         qrImageView.backgroundColor = .white
-        qrImageView.layer.cornerRadius = 12
-        qrImageView.layer.cornerCurve = .continuous
+        qrImageView.cornerConfiguration = .corners(radius: .containerConcentric(minimum: 8))
         qrImageView.clipsToBounds = true
         // The code is a link, and VoiceOver users cannot scan it — the label
         // says what it is, and the actions below are the accessible path.

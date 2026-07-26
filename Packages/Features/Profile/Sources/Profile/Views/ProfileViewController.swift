@@ -22,6 +22,8 @@ final class ProfileViewController: UIViewController {
     /// Retained for the share sheet, which builds its own QR card (and a
     /// throwaway one to rasterize) and needs the same avatar cache.
     private let imagePipeline: ImagePipeline
+    /// Supplies the share sheet's quick-send row; nil hides it.
+    private let shareTargeting: (any ProfileShareTargeting)?
     private let headerView: ProfileHeaderView
     private let galleryPager: ProfileGalleryPagerView
     /// The filter tray's two selectors, hosted as custom bar items in the
@@ -121,6 +123,7 @@ final class ProfileViewController: UIViewController {
     init(
         viewModel: ProfileViewModel,
         imagePipeline: ImagePipeline,
+        shareTargeting: (any ProfileShareTargeting)? = nil,
         onLogout: (() -> Void)?,
         makeEditViewController: ((@escaping () -> Void) -> UIViewController)? = nil,
         makeSettingsViewController: (() -> UIViewController)? = nil,
@@ -133,6 +136,7 @@ final class ProfileViewController: UIViewController {
         self.makeSettingsViewController = makeSettingsViewController
         self.switcherFactory = switcherFactory
         self.imagePipeline = imagePipeline
+        self.shareTargeting = shareTargeting
         headerView = ProfileHeaderView(imagePipeline: imagePipeline)
         galleryPager = ProfileGalleryPagerView(imagePipeline: imagePipeline)
         super.init(nibName: nil, bundle: nil)
@@ -303,14 +307,21 @@ final class ProfileViewController: UIViewController {
         // the profile has loaded — the sheet is behind a tap on the header's
         // QR bubble, which the sim can't deliver.
         if let index = arguments.firstIndex(of: "-profile-share-demo") {
-            let alsoOpenActivity = arguments.dropFirst(index + 1).first == "activity"
+            // `activity` chains into the system share sheet and `send` into a
+            // DM with the first quick-send target — both go through the real
+            // dismiss-then-hand-off path, so the handoff itself is what gets
+            // screenshotted, not a shortcut around it.
+            let chained = arguments.dropFirst(index + 1).first
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                 self?.presentShareSheet()
-                guard alsoOpenActivity else { return }
-                // Chains into the system share sheet, so the whole handoff —
-                // card rasterization included — is screenshottable.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                    (self?.presentedViewController as? ProfileShareViewController)?.qaPresentActivitySheet()
+                guard chained == "activity" || chained == "send" else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                    let sheet = self?.presentedViewController as? ProfileShareViewController
+                    if chained == "activity" {
+                        sheet?.qaHandOffToSystemShare()
+                    } else {
+                        sheet?.qaSendToFirstTarget()
+                    }
                 }
             }
         }
@@ -437,10 +448,31 @@ final class ProfileViewController: UIViewController {
     /// profile"; the system sheet is reachable from inside it.
     private func presentShareSheet() {
         guard let card = viewModel.shareCard else { return }
-        present(
-            ProfileShareViewController(card: card, imagePipeline: imagePipeline),
-            animated: true
+        let sheet = ProfileShareViewController(
+            card: card, imagePipeline: imagePipeline, targeting: shareTargeting
         )
+        // Both escape hatches come back HERE, after the sheet has dismissed
+        // itself: the system sheet would otherwise stack on top of this one,
+        // and a pushed thread would land behind it.
+        sheet.onSystemShare = { [weak self] card, image in
+            self?.presentActivitySheet(for: card, image: image)
+        }
+        sheet.onSendToTarget = { [weak self] target, card in
+            self?.viewModel.sendProfile(card, to: target)
+        }
+        present(sheet, animated: true)
+    }
+
+    /// The system share sheet, opened once the QR sheet is gone. Two items:
+    /// the link (carrying the metadata that gives the sheet a branded header)
+    /// and the rendered card — the image is what makes Save Image and image
+    /// targets work, which is why this feature needs no photo-library
+    /// permission of its own.
+    private func presentActivitySheet(for card: ProfileViewModel.ShareCard, image: UIImage) {
+        let source = ProfileShareItemSource(card: card, icon: image)
+        let activity = UIActivityViewController(activityItems: [source, image], applicationActivities: nil)
+        activity.popoverPresentationController?.sourceView = headerView.moreButtonAnchor
+        present(activity, animated: true)
     }
 
     private func copyProfileLink() {

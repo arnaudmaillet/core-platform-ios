@@ -214,6 +214,18 @@ final class ChatInputBar: UIView {
     /// with the preview (Messages behavior).
     func focus() { textView.becomeFirstResponder() }
 
+    /// Seeds the composer with text the user has not typed — today, a profile
+    /// link carried in from the share sheet. Deliberately NOT sent
+    /// automatically: the message is theirs to review, edit, or abandon, and a
+    /// tap in a share sheet is not consent to post something in a thread.
+    /// Runs the same state sync a keystroke would, so the field grows and Send
+    /// enables exactly as if it had been typed.
+    func setDraftText(_ text: String) {
+        guard !text.isEmpty else { return }
+        textView.text = text
+        textViewDidChange(textView)
+    }
+
     /// Shows (or updates) the "Replying to …" preview, growing it in when it
     /// wasn't already visible. The host pins the collection inset off this
     /// bar's frame, so the transcript reflows as the bar grows.

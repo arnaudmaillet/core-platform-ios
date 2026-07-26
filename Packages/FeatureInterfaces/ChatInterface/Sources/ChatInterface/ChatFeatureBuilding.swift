@@ -20,9 +20,12 @@ public protocol ChatFeatureBuilding {
     /// more than a tap can spend before something appears. `displayName` is
     /// whatever the origin already knew; empty is allowed, and the header then
     /// fills in once there is a conversation to read it from.
+    /// `prefill` seeds the composer — the profile share sheet sends a link
+    /// this way. Never auto-sent; the viewer still taps Send.
     func makeDraftConversationViewController(
         with profileID: ProfileID,
-        displayName: String
+        displayName: String,
+        prefill: String
     ) -> UIViewController
 
     /// The compose flow — pick someone, land in a thread with them. Pushed
@@ -32,6 +35,14 @@ public protocol ChatFeatureBuilding {
 }
 
 extension ChatFeatureBuilding {
+    /// The ordinary case: a thread with an empty composer.
+    public func makeDraftConversationViewController(
+        with profileID: ProfileID,
+        displayName: String
+    ) -> UIViewController {
+        makeDraftConversationViewController(with: profileID, displayName: displayName, prefill: "")
+    }
+
     /// The plain "open Messages" case.
     public func makeInboxViewController() -> UIViewController {
         makeInboxViewController(initialCategory: .all)

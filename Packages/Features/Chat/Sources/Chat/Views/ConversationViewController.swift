@@ -61,9 +61,14 @@ final class ConversationViewController: UIViewController {
     /// drag the transcript with it.
     private var hasEstablishedClearance = false
 
-    init(viewModel: ConversationViewModel, mode: Mode = .full) {
+    /// Text to seed the composer with — a profile link sent from the share
+    /// sheet. Applied once, on first load; never sent automatically.
+    private let prefill: String
+
+    init(viewModel: ConversationViewModel, mode: Mode = .full, prefill: String = "") {
         self.viewModel = viewModel
         self.mode = mode
+        self.prefill = prefill
         super.init(nibName: nil, bundle: nil)
         // A thread takes the full screen height: the system hides the tab bar
         // with the push and restores it on pop. Safe here — unlike the feed's
@@ -77,6 +82,7 @@ final class ConversationViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        inputBar.setDraftText(prefill)
         title = "Conversation"
         view.backgroundColor = .systemBackground
         configureNavigationItem()

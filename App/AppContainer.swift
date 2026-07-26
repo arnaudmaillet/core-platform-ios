@@ -261,9 +261,19 @@ final class AppContainer {
         counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient)
     )
 
+    /// The share sheet's quick-send row: mutuals first, then the rest of the
+    /// follow list. Reuses `profileRepository` as the viewer resolver so the
+    /// identity (and a profile switch) is resolved in exactly one place.
+    private lazy var profileShareTargetsRepository = ProfileShareTargetsRepository(
+        socialGraphClient: SocialGraph_V1_SocialGraphServiceClient(client: authenticatedRPCClient),
+        profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
+        viewer: profileRepository
+    )
+
     private(set) lazy var profileFeature: any ProfileFeatureBuilding = ProfileFeatureBuilder(
         repository: profileRepository,
         reporting: profileReportRepository,
+        shareTargeting: profileShareTargetsRepository,
         gallery: profileGalleryRepository,
         imagePipeline: imagePipeline,
         router: routeResolver,

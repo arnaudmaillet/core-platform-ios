@@ -29,6 +29,15 @@ public enum AppRoute: Equatable, Sendable {
     /// thread's header is correct on the push's first frame instead of after a
     /// lookup; `nil` when the origin knows only the id (deep links, debug args).
     case messageUser(ProfileID, stub: ProfileIdentityStub?)
+    /// Open a DM with `profile` and seed the composer with `text` — the
+    /// profile share sheet's "send this profile to someone" path.
+    ///
+    /// Separate from `messageUser` rather than an extra associated value on
+    /// it: this is additive, so the five existing `messageUser` call sites
+    /// keep working, and the two intents stay legible at the call site
+    /// ("message them" vs "send them this"). Nothing is sent automatically —
+    /// the thread opens with the text typed and waiting.
+    case sendLink(String, to: ProfileID, stub: ProfileIdentityStub?)
     /// Compose a new message: the contact-selection flow. The inbox's compose
     /// button emits this; the resolver owns what it presents.
     case newMessage

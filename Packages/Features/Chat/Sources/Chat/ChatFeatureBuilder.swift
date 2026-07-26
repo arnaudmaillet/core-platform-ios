@@ -87,7 +87,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         makeConversationViewController(target: .existing(conversationID))
     }
 
-    private func makeConversationViewController(target: ConversationTarget) -> UIViewController {
+    private func makeConversationViewController(target: ConversationTarget, prefill: String = "") -> UIViewController {
         let viewModel = ConversationViewModel(
             target: target,
             repository: repository,
@@ -109,16 +109,19 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         // the viewer would otherwise swipe back from a thread they started to
         // a list without it.
         viewModel.onDidResolveConversation = { [catalog] _ in catalog.refresh() }
-        return ConversationViewController(viewModel: viewModel)
+        return ConversationViewController(viewModel: viewModel, prefill: prefill)
     }
 
     /// A thread with `profileID`, opened before anyone knows whether one
     /// exists. Synchronous by design — see `ConversationTarget.draft`.
     public func makeDraftConversationViewController(
         with profileID: ProfileID,
-        displayName: String
+        displayName: String,
+        prefill: String
     ) -> UIViewController {
-        makeConversationViewController(target: .draft(peer: profileID, displayName: displayName))
+        makeConversationViewController(
+            target: .draft(peer: profileID, displayName: displayName), prefill: prefill
+        )
     }
 
     /// Suggestions per page. `-new-message-page-size <n>` shrinks it in DEBUG:
