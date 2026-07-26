@@ -25,16 +25,21 @@ final class ProfileShareTargetsView: UIView {
     private let imagePipeline: ImagePipeline?
     private var avatarTasks: [Task<Void, Never>] = []
 
-    init(imagePipeline: ImagePipeline?) {
+    /// - Parameter inset: the host's horizontal margin. Applied as a CONTENT
+    ///   inset rather than a frame inset, which is the whole point of the row:
+    ///   the scroll view itself reaches the sheet's edges, so the first and
+    ///   last avatars scroll in from under the rounded corners instead of
+    ///   being clipped against a margin.
+    init(imagePipeline: ImagePipeline?, inset: CGFloat) {
         self.imagePipeline = imagePipeline
         super.init(frame: .zero)
 
         scrollView.showsHorizontalScrollIndicator = false
         scrollView.alwaysBounceHorizontal = true
-        // The strip runs edge to edge and scrolls its content in from the
-        // margin, so items can pass under the sheet's rounded corners rather
-        // than stopping short of them.
-        scrollView.contentInset = UIEdgeInsets(top: 0, left: Spacing.xs, bottom: 0, right: Spacing.xs)
+        scrollView.contentInset = UIEdgeInsets(top: 0, left: inset, bottom: 0, right: inset)
+        // Off, so an avatar isn't shaved at the row's bounds as it scrolls
+        // past the edge.
+        scrollView.clipsToBounds = false
         scrollView.pin(to: self)
 
         row.axis = .horizontal
