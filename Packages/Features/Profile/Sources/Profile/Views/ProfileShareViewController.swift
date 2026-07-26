@@ -55,6 +55,8 @@ final class ProfileShareViewController: UIViewController {
     private static let detentIdentifier = UISheetPresentationController.Detent.Identifier("profileShare")
     /// How many people the quick-send row asks for.
     private static let targetLimit = 12
+    /// Search results fit a vertical list, so it can afford more than the row.
+    private static let searchResultLimit = 30
     /// The ONE inset in this sheet: sheet edge → card on all three visible
     /// sides, the margin every section indents by, and the content inset the
     /// two scrolling rows use. Being a single number is what makes the card's
@@ -63,9 +65,35 @@ final class ProfileShareViewController: UIViewController {
     private static let margin = Spacing.lg
     /// The search bar's row, hidden until search is entered.
     private var searchBarSection: UIView?
-    /// Everything search mode puts away: the card, the actions, and the rules
-    /// that separate them. Searching is a focused state — see `setSearching`.
+    /// Everything search mode puts away: the card, the horizontal row, the
+    /// actions, and the rules between them. Searching is a focused state —
+    /// see `setSearching`.
     private var nonSearchSections: [UIView] = []
+
+    /// Search results, as a standard vertical list.
+    ///
+    /// Lives OUTSIDE the content column and fills the space beneath it, rather
+    /// than being another arranged subview: the column is sized to its content
+    /// (that is what drives the detent), and a list wants the opposite — every
+    /// point that is left. Its bottom rides `keyboardLayoutGuide`, so the last
+    /// row always clears the keyboard.
+    private lazy var resultsView: UICollectionView = {
+        var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
+        // The sheet's glass is the background; a list appearance colour here
+        // would paint over it.
+        configuration.backgroundColor = .clear
+        let list = UICollectionView(
+            frame: .zero,
+            collectionViewLayout: UICollectionViewCompositionalLayout.list(using: configuration)
+        )
+        list.backgroundColor = .clear
+        list.keyboardDismissMode = .onDrag
+        list.delegate = self
+        list.isHidden = true
+        return list
+    }()
+    private lazy var resultsSource = makeResultsSource()
+    private let emptyResultsLabel = UILabel()
 
     init(
         card: ProfileViewModel.ShareCard,
@@ -115,6 +143,7 @@ final class ProfileShareViewController: UIViewController {
         view.backgroundColor = .clear
         glassBackdrop.pin(to: view)
         configureViews()
+        configureResultsList()
         cardView.configure(with: card)
         loadTargets()
     }
@@ -232,7 +261,7 @@ final class ProfileShareViewController: UIViewController {
         }
         searchBarSection = searchSection
         searchSection.isHidden = true
-        nonSearchSections = [cardSection, topDivider, bottomDivider, actions]
+        nonSearchSections = [cardSection, topDivider, targetsView, bottomDivider, actions]
         column.axis = .vertical
         column.alignment = .fill
         column.spacing = Spacing.md
@@ -378,6 +407,11 @@ final class ProfileShareViewController: UIViewController {
         for section in nonSearchSections {
             section.isHidden = searching
         }
+        resultsView.isHidden = !searching
+        emptyResultsLabel.isHidden = true
+        if !searching {
+            applyResults([])
+        }
         sheetPresentationController?.animateChanges {
             sheetPresentationController?.selectedDetentIdentifier = searching
                 ? .large
@@ -389,6 +423,8 @@ final class ProfileShareViewController: UIViewController {
         } else {
             searchBar.text = nil
             searchBar.resignFirstResponder()
+            // The horizontal row was never torn down, only hidden — but it is
+            // re-read so a stale suggestion set can't outlive a long search.
             targetsView.renderSkeletons()
             loadTargets()
         }
@@ -396,20 +432,72 @@ final class ProfileShareViewController: UIViewController {
 
     private func runSearch(_ query: String) {
         searchTask?.cancel()
-        guard let targeting, !query.trimmingCharacters(in: .whitespaces).isEmpty else {
-            targetsView.render([], leadingSearch: false)
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard let targeting, !trimmed.isEmpty else {
+            applyResults([])
+            emptyResultsLabel.isHidden = true
             return
         }
-        targetsView.renderSkeletons(leadingSearch: false)
         searchTask = Task { [weak self] in
             // Debounce: a keystroke every ~50ms would otherwise put a search
-            // per character on the wire, and the answers would land out of order.
+            // per character on the wire, and the answers would land out of
+            // order. The previous results stay on screen meanwhile — blanking
+            // the list on every keystroke flickers far worse than a stale row
+            // for 250ms.
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
-            let results = await targeting.searchTargets(query: query, limit: Self.targetLimit)
+            let results = await targeting.searchTargets(query: trimmed, limit: Self.searchResultLimit)
             guard let self, !Task.isCancelled, self.isSearching else { return }
-            self.targetsView.render(results, leadingSearch: false)
+            self.applyResults(results)
+            self.emptyResultsLabel.isHidden = !results.isEmpty
         }
+    }
+
+    // MARK: - Results list
+
+    private func configureResultsList() {
+        emptyResultsLabel.text = "No profiles found"
+        emptyResultsLabel.font = .preferredFont(forTextStyle: .subheadline)
+        emptyResultsLabel.adjustsFontForContentSizeCategory = true
+        emptyResultsLabel.textColor = .secondaryLabel
+        emptyResultsLabel.textAlignment = .center
+        emptyResultsLabel.isHidden = true
+
+        resultsView.constrain(in: view) { parent in
+            // Directly under the column, which in search mode holds only the
+            // search field — so the field stays pinned at the top and the list
+            // owns everything below it.
+            resultsView.topAnchor.constraint(equalTo: column.bottomAnchor, constant: Spacing.sm)
+            resultsView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+            resultsView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
+            resultsView.bottomAnchor.constraint(equalTo: parent.keyboardLayoutGuide.topAnchor)
+        }
+        emptyResultsLabel.constrain(in: view) { parent in
+            emptyResultsLabel.topAnchor.constraint(equalTo: resultsView.topAnchor, constant: Spacing.xxl)
+            emptyResultsLabel.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Self.margin)
+            emptyResultsLabel.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Self.margin)
+        }
+    }
+
+    private enum ResultsSection { case results }
+
+    private func makeResultsSource() -> UICollectionViewDiffableDataSource<ResultsSection, ProfileShareTarget> {
+        let registration = UICollectionView.CellRegistration<ProfileSearchResultCell, ProfileShareTarget> {
+            [imagePipeline] cell, _, target in
+            cell.configure(with: target, imagePipeline: imagePipeline)
+        }
+        return UICollectionViewDiffableDataSource(collectionView: resultsView) { collection, indexPath, target in
+            collection.dequeueConfiguredReusableCell(
+                using: registration, for: indexPath, item: target
+            )
+        }
+    }
+
+    private func applyResults(_ targets: [ProfileShareTarget]) {
+        var snapshot = NSDiffableDataSourceSnapshot<ResultsSection, ProfileShareTarget>()
+        snapshot.appendSections([.results])
+        snapshot.appendItems(targets)
+        resultsSource.apply(snapshot, animatingDifferences: true)
     }
 
     // MARK: - Actions
@@ -454,6 +542,14 @@ final class ProfileShareViewController: UIViewController {
     #if DEBUG
     /// Test hooks — these actions are behind taps the simulator can't inject.
     func qaHandOffToSystemShare() { handOffToSystemShare() }
+    func qaCancelSearch() { setSearching(false) }
+    /// Goes through the real delegate + data-source lookup, not a shortcut
+    /// around them — selecting a row is the path under test.
+    func qaSelectFirstResult() {
+        let first = IndexPath(item: 0, section: 0)
+        guard resultsSource.itemIdentifier(for: first) != nil else { return }
+        collectionView(resultsView, didSelectItemAt: first)
+    }
     func qaBeginSearch(_ query: String) {
         setSearching(true)
         searchBar.text = query
@@ -491,5 +587,15 @@ extension ProfileShareViewController: UISearchBarDelegate {
         // Dismiss the keyboard but stay in search: the results are the point,
         // and they are behind the keyboard on the smaller phones.
         searchBar.resignFirstResponder()
+    }
+}
+
+extension ProfileShareViewController: UICollectionViewDelegate {
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        collectionView.deselectItem(at: indexPath, animated: true)
+        guard let target = resultsSource.itemIdentifier(for: indexPath) else { return }
+        // Exactly the quick-send path: dismiss, then open the thread with the
+        // link pre-typed. A result and a suggestion are the same act.
+        send(to: target)
     }
 }

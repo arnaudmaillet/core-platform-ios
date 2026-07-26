@@ -314,13 +314,24 @@ final class ProfileViewController: UIViewController {
             let chained = arguments.dropFirst(index + 1).first
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                 self?.presentShareSheet()
-                guard ["activity", "send", "search"].contains(chained ?? "") else { return }
+                let chainedActions = ["activity", "send", "search", "search-cancel", "search-send"]
+                guard chainedActions.contains(chained ?? "") else { return }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                     let sheet = self?.presentedViewController as? ProfileShareViewController
                     switch chained {
                     case "activity": sheet?.qaHandOffToSystemShare()
                     case "send": sheet?.qaSendToFirstTarget()
-                    default: sheet?.qaBeginSearch("a")
+                    default:
+                        sheet?.qaBeginSearch("a")
+                        // `search-cancel` also backs out again, so the
+                        // restored state is screenshottable.
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                            switch chained {
+                            case "search-cancel": sheet?.qaCancelSearch()
+                            case "search-send": sheet?.qaSelectFirstResult()
+                            default: break
+                            }
+                        }
                     }
                 }
             }

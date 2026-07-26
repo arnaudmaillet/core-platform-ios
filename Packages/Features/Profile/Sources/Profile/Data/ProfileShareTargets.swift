@@ -5,7 +5,7 @@ import Foundation
 
 /// Someone the viewer can send a profile to, as the share sheet's quick row
 /// renders them.
-public struct ProfileShareTarget: Equatable, Sendable {
+public struct ProfileShareTarget: Equatable, Hashable, Sendable {
     public let id: ProfileID
     public let displayName: String
     public let handle: String
