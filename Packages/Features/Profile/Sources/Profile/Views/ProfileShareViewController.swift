@@ -100,6 +100,10 @@ final class ProfileShareViewController: UIViewController {
     /// An empty list behind a blinking cursor reads as "no one to send to";
     /// the people you'd most likely pick are already in hand.
     private var suggestedTargets: [ProfileShareTarget] = []
+    /// Set when the graph answers WHILE searching, where the horizontal row is
+    /// hidden and skips its render. Leaving search then owes it one — and only
+    /// then, which is what keeps the ordinary return free of any re-render.
+    private var suggestionsAwaitingRender = false
 
     /// - Parameter deviceCornerRadius: the physical display's corner radius,
     ///   read by the PRESENTER (which has a window) and handed in.
@@ -396,7 +400,12 @@ final class ProfileShareViewController: UIViewController {
             if self.isSearching, self.searchBar.text?.isEmpty != false {
                 self.showSuggestionsInResults()
             }
-            guard !self.isSearching else { return }
+            guard !self.isSearching else {
+                // The row is hidden; render it on the way back out instead of
+                // into a view nobody is looking at.
+                self.suggestionsAwaitingRender = true
+                return
+            }
             // Renders even when empty: the row keeps its Search bubble, which
             // is the whole point of it leading the row.
             self.targetsView.render(targets)
@@ -442,11 +451,26 @@ final class ProfileShareViewController: UIViewController {
         } else {
             searchBar.text = nil
             searchBar.resignFirstResponder()
-            // The horizontal row was never torn down, only hidden — but it is
-            // re-read so a stale suggestion set can't outlive a long search.
-            targetsView.renderSkeletons()
-            loadTargets()
+            restoreSuggestionsRow()
         }
+    }
+
+    /// Puts the horizontal row back on screen when leaving search.
+    ///
+    /// Deliberately does NOT re-render or re-fetch. The row is only ever
+    /// HIDDEN while searching — its items are still built and its avatars
+    /// still decoded — so unhiding it is the whole restore, and it is
+    /// instantaneous. The previous version tore it down to skeletons and
+    /// re-read the social graph here, which flashed a loading state over data
+    /// the sheet already had.
+    ///
+    /// The single exception is a graph answer that landed mid-search, where
+    /// the row skipped its render; that one is settled from the cache, still
+    /// without touching the network.
+    private func restoreSuggestionsRow() {
+        guard suggestionsAwaitingRender else { return }
+        suggestionsAwaitingRender = false
+        targetsView.render(suggestedTargets)
     }
 
     /// The list's resting content in search mode: the same people the
