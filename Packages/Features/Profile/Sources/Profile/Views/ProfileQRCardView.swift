@@ -20,12 +20,13 @@ import UIKit
 /// where it is chrome rather than payload.
 final class ProfileQRCardView: UIView {
     private enum Metrics {
-        /// Floor for the concentric radius — see the initializer.
+        /// Floor for the corner radius, for hosts that don't supply one.
         static let minimumCornerRadius: CGFloat = 20
         /// Padding between the card edge and the QR — doubles as the code's
         /// quiet zone, which the spec wants at four modules and the generator
-        /// only partly supplies.
-        static let quietZone: CGFloat = 24
+        /// only partly supplies. It is also the inset the QR well's own radius
+        /// is derived from, so the three curves stay concentric.
+        static let quietZone: CGFloat = 20
         /// The avatar's diameter as a fraction of the QR's side. A circle this
         /// size occludes ~6% of the code's area — comfortably inside error
         /// correction level H's ~30% budget, so the code still decodes with
@@ -66,14 +67,13 @@ final class ProfileQRCardView: UIView {
         overrideUserInterfaceStyle = .light
         backgroundColor = Self.cardBackground
         isOpaque = true
-        // Concentric with the sheet that contains it, rather than a hand-picked
-        // radius: the card is inset inside the sheet's own rounded rect, and
-        // `containerConcentricRadius` resolves the curve that stays parallel to
-        // it at that inset — the same relationship the system uses for content
-        // inside a rounded container. A fixed radius only ever matches at one
-        // inset, and reads subtly wrong at every other. The minimum keeps a
-        // sane shape if the card is ever hosted somewhere with square corners.
-        cornerConfiguration = .corners(radius: .containerConcentric(minimum: Metrics.minimumCornerRadius))
+        // A concrete radius, seeded here and corrected by the host once it
+        // knows the sheet's own (see `setCornerRadius`). `containerConcentric`
+        // was tried first and is the wrong tool: it resolves against a
+        // *superview's* corner configuration, and the sheet's radius belongs to
+        // its presentation controller, not to any view in this hierarchy — so
+        // it silently fell back to the minimum and the curves never agreed.
+        setCornerRadius(Metrics.minimumCornerRadius)
         configureSubviews()
     }
 
@@ -85,7 +85,6 @@ final class ProfileQRCardView: UIView {
     private func configureSubviews() {
         qrImageView.contentMode = .scaleAspectFit
         qrImageView.backgroundColor = .white
-        qrImageView.cornerConfiguration = .corners(radius: .containerConcentric(minimum: 8))
         qrImageView.clipsToBounds = true
         // The code is a link, and VoiceOver users cannot scan it — the label
         // says what it is, and the actions below are the accessible path.
@@ -163,6 +162,19 @@ final class ProfileQRCardView: UIView {
     }
 
     // MARK: - Configuration
+
+    /// Rounds the card to `radius`, and the QR well inside it to
+    /// `radius - quietZone` — the concentric rule applied one level down, so
+    /// all three curves (sheet, card, code) stay parallel at their insets.
+    ///
+    /// The host passes `sheetRadius - outerPadding`; this method only has to
+    /// keep the card's own children in step with whatever it is given.
+    func setCornerRadius(_ radius: CGFloat) {
+        cornerConfiguration = .corners(radius: .fixed(radius))
+        qrImageView.cornerConfiguration = .corners(
+            radius: .fixed(max(radius - Metrics.quietZone, 4))
+        )
+    }
 
     func configure(with card: ProfileViewModel.ShareCard) {
         nameLabel.text = card.displayName

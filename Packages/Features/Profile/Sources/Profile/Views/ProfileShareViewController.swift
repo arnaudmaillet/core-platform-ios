@@ -42,6 +42,9 @@ final class ProfileShareViewController: UIViewController {
     private let targetsHeading = UILabel()
     private var targetsSection: UIStackView?
     private var targetsDivider: UIView?
+    /// The content column, retained because the detent is measured from IT
+    /// rather than from `view` — see `viewDidLayoutSubviews`.
+    private let column = UIStackView()
 
     /// The measured content height the custom detent resolves to. Seeded with
     /// an estimate so the sheet has a sane height for its very first frame,
@@ -50,11 +53,11 @@ final class ProfileShareViewController: UIViewController {
     private static let detentIdentifier = UISheetPresentationController.Detent.Identifier("profileShare")
     /// How many people the quick-send row asks for.
     private static let targetLimit = 12
-    /// Ceiling on the card's width; it centres below that on wider screens.
-    private static let cardMaxWidth: CGFloat = 296
-    /// The sheet's horizontal margin. Tighter than the app's page margin: a
-    /// sheet this size is content, not a page, and the full-bleed rows need
-    /// the width more than the edges need the air.
+    /// The ONE inset in this sheet: sheet edge → card on all three visible
+    /// sides, the margin every section indents by, and the content inset the
+    /// two scrolling rows use. Being a single number is what makes the card's
+    /// gaps symmetric and its corner radius derivable (`sheetRadius - margin`),
+    /// and what keeps the card's edge aligned with the "Send to" heading's.
     private static let margin = Spacing.lg
 
     init(
@@ -125,21 +128,57 @@ final class ProfileShareViewController: UIViewController {
         sheetPresentationController?.animateChanges {
             sheetPresentationController?.preferredCornerRadius = radius
         }
+        // Concentric by construction: a shape inset by `margin` inside a
+        // rounded rect keeps a curve parallel to it when its own radius is
+        // reduced by exactly that inset. The card is inset by `margin` on
+        // every visible side, so this is the radius that makes its corners
+        // follow the sheet's rather than merely resemble them.
+        cardView.setCornerRadius(max(radius - Self.margin, 8))
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        // Measure what the content actually wants — Dynamic Type and the
-        // quick-send row's arrival both move this — and re-resolve the detent
-        // when it changes. `invalidateDetents` is the only way to make a
-        // custom detent re-ask its resolver.
-        let fitted = view.systemLayoutSizeFitting(
-            CGSize(width: view.bounds.width, height: UIView.layoutFittingCompressedSize.height),
-            withHorizontalFittingPriority: .required,
-            verticalFittingPriority: .fittingSizeLevel
-        ).height
-        guard fitted > 0, abs(fitted - contentHeight) > 1 else { return }
+        // Measured from the COLUMN, not from `view`.
+        //
+        // The column is pinned to the view's top AND bottom, which means any
+        // height ≥ the content satisfies the constraints — so asking `view`
+        // for its fitting size returns whatever height it currently has, not
+        // the smallest that would work. The detent therefore never tightened:
+        // it sat at its seeded estimate, the stack stretched to fill, and the
+        // slack surfaced as dead space under the action tray. Asking the
+        // column (whose height is genuinely content-driven) and re-adding the
+        // insets by hand gives the minimum the sheet can actually be.
+        guard view.bounds.width > 0 else { return }
+        // The column's LAID-OUT height, not a fitting estimate. Now that it is
+        // top-anchored only, its frame is exactly its content — and the
+        // estimate ran ~16pt high, which the sheet then had to park somewhere
+        // (under the tray, naturally).
+        let columnHeight = column.bounds.height
+        // Symmetric: the same `margin` above the card and below the tray, and
+        // nothing else.
+        //
+        // The safe-area inset used to be added here, and it was the dead space
+        // under the chips. A content-sized detent makes this a FLOATING sheet
+        // — its bottom edge sits above the screen's, so the home indicator is
+        // outside it entirely — while `view.safeAreaInsets.bottom` still
+        // reports the window's 34pt. Reserving that inside the sheet paid for
+        // the indicator twice.
+        let fitted = Self.margin + columnHeight + Self.margin
+        guard columnHeight > 0, abs(fitted - contentHeight) > 1 else { return }
         contentHeight = fitted
+        #if DEBUG
+        // Dev convenience: the sheet's height is derived, not authored, so the
+        // numbers behind it are worth being able to read. Sizing bugs here are
+        // invisible in a screenshot — the dead space under the tray was two
+        // separate ones (a stretched stack, then a double-counted safe area),
+        // and both were only obvious from these figures.
+        if ProcessInfo.processInfo.arguments.contains("-profile-share-demo") {
+            print("SHARE-SHEET-AUDIT column=\(Int(columnHeight)) detent=\(Int(fitted)) "
+                + "sheet=\(Int(view.bounds.height)) "
+                + "belowColumn=\(Int(view.bounds.height - column.frame.maxY)) "
+                + "sections=\(column.arrangedSubviews.map { Int($0.bounds.height.rounded()) })")
+        }
+        #endif
         sheetPresentationController?.animateChanges {
             sheetPresentationController?.invalidateDetents()
         }
@@ -175,19 +214,32 @@ final class ProfileShareViewController: UIViewController {
         divider.isHidden = true
         targetsDivider = divider
 
-        let column = UIStackView(arrangedSubviews: [
-            makeCardSection(), divider, targets, makeDivider(), makeActionsTray()
-        ])
+        for section in [makeCardSection(), divider, targets, makeDivider(), makeActionsTray()] {
+            column.addArrangedSubview(section)
+        }
         column.axis = .vertical
         column.alignment = .fill
-        column.spacing = Spacing.lg
+        column.spacing = Spacing.md
         column.constrain(in: view) { parent in
-            column.topAnchor.constraint(equalTo: parent.topAnchor, constant: Spacing.xxl)
+            // Top gap equals the card's side gap, so the card sits in a
+            // symmetric well. The grabber floats in this same strip — it is
+            // drawn over the sheet's edge and reserves no space — which is
+            // tight but correct; giving the top extra room to clear it is what
+            // made the card look off-centre before.
+            column.topAnchor.constraint(equalTo: parent.topAnchor, constant: Self.margin)
             column.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
             column.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
-            column.bottomAnchor.constraint(
-                equalTo: parent.safeAreaLayoutGuide.bottomAnchor, constant: -Spacing.lg
-            )
+            // NOT pinned to the bottom — deliberately.
+            //
+            // Pinning both ends means any height ≥ the content satisfies the
+            // layout, so a sheet even slightly taller than its content makes
+            // the stack stretch, and `.fill` hands that slack to whichever
+            // arranged view hugs least: the two scroll views, which have no
+            // intrinsic height at all. The action tray measured 114pt against
+            // ~84pt of content that way, and the surplus read as dead space
+            // under the chips. Top-anchored only, the column's height is purely
+            // its content, and the bottom spacing is whatever the detent below
+            // reserves for it.
         }
     }
 
@@ -215,22 +267,23 @@ final class ProfileShareViewController: UIViewController {
         return container
     }
 
-    /// The card is centred and capped rather than full-bleed: at full sheet
-    /// width the code alone runs past 300pt, which pushes everything below it
-    /// so far down the sheet swallows the screen. A QR only has to be big
-    /// enough to scan.
+    /// The card is inset by `margin` on both sides — the same number the top
+    /// gap and every other section use — rather than capped and centred.
+    ///
+    /// A fixed cap was tried and abandoned: it left the card's side gaps
+    /// (whatever the screen happened to leave over) unrelated to its top gap,
+    /// so the card never sat squarely in the sheet, and there was no single
+    /// inset to derive a concentric radius from. The QR fills the card's width
+    /// inside its own quiet zone, so the card's height follows its width —
+    /// which is why widening it here is paid for by the tightened top, bottom
+    /// and section spacing rather than by shrinking the code.
     private func makeCardSection() -> UIView {
         let container = UIView()
-        let cardWidth = cardView.widthAnchor.constraint(equalToConstant: Self.cardMaxWidth)
-        // Yields to the sheet's width on a screen too narrow for it, so the
-        // cap can never force a horizontal overflow.
-        cardWidth.priority = .defaultHigh
         cardView.constrain(in: container) { parent in
             cardView.topAnchor.constraint(equalTo: parent.topAnchor)
             cardView.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
-            cardView.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-            cardView.leadingAnchor.constraint(greaterThanOrEqualTo: parent.leadingAnchor, constant: Self.margin)
-            cardWidth
+            cardView.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Self.margin)
+            cardView.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Self.margin)
         }
         return container
     }
