@@ -314,13 +314,13 @@ final class ProfileViewController: UIViewController {
             let chained = arguments.dropFirst(index + 1).first
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                 self?.presentShareSheet()
-                guard chained == "activity" || chained == "send" else { return }
+                guard ["activity", "send", "search"].contains(chained ?? "") else { return }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                     let sheet = self?.presentedViewController as? ProfileShareViewController
-                    if chained == "activity" {
-                        sheet?.qaHandOffToSystemShare()
-                    } else {
-                        sheet?.qaSendToFirstTarget()
+                    switch chained {
+                    case "activity": sheet?.qaHandOffToSystemShare()
+                    case "send": sheet?.qaSendToFirstTarget()
+                    default: sheet?.qaBeginSearch("a")
                     }
                 }
             }

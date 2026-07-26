@@ -267,6 +267,7 @@ final class AppContainer {
     private lazy var profileShareTargetsRepository = ProfileShareTargetsRepository(
         socialGraphClient: SocialGraph_V1_SocialGraphServiceClient(client: authenticatedRPCClient),
         profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
+        searchClient: Search_V1_SearchServiceClient(client: authenticatedRPCClient),
         viewer: profileRepository
     )
 

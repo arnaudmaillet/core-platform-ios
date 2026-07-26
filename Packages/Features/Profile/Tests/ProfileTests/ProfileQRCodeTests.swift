@@ -123,8 +123,11 @@ struct ProfileShareCardTests {
         #expect(viewModel.shareCard == nil) // nothing to share before the load
 
         viewModel.viewDidLoad()
-        await Task.yield()
-        try? await Task.sleep(for: .milliseconds(50))
+        // Polled, not slept — see the note on `ProfileViewModelTests.settle`.
+        for _ in 0..<60 where viewModel.shareCard == nil {
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(5))
+        }
 
         let card = viewModel.shareCard
         #expect(card?.displayName == "Ada Lovelace")

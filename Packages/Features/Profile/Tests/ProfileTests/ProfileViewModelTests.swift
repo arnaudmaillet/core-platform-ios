@@ -128,9 +128,17 @@ struct ProfileViewModelTests {
     }
 
     /// Drives viewDidLoad and lets the load + relationship tasks settle.
-    private func settle() async {
-        await Task.yield()
-        try? await Task.sleep(for: .milliseconds(50))
+    ///
+    /// Polls rather than sleeping once: swift-testing runs suites in parallel,
+    /// and a single fixed sleep is a wall-clock bet a loaded machine loses —
+    /// this suite reddened wholesale the moment the package gained more
+    /// suites doing real work. Same fix `ProfileGalleryTests` already carries.
+    private func settle(until condition: @escaping () -> Bool = { false }) async {
+        for _ in 0..<60 {
+            await Task.yield()
+            if condition() { return }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
     }
 
     private func lastFollowerText(_ phases: () -> [ProfileViewModel.Phase]) -> String? {

@@ -30,6 +30,7 @@ struct ProfileShareTargetsTests {
         let bff = MockBFF()
         MockSocialServices(dataset: dataset).register(on: bff)
         MockSocialGraphService(dataset: dataset).register(on: bff)
+        MockSearchService(dataset: dataset).register(on: bff)
         MockCounterService(store: MockCounterStore(dataset: dataset)).register(on: bff)
         let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
 
@@ -42,8 +43,59 @@ struct ProfileShareTargetsTests {
         return ProfileShareTargetsRepository(
             socialGraphClient: SocialGraph_V1_SocialGraphServiceClient(client: client),
             profileClient: Profile_V1_ProfileServiceClient(client: client),
+            searchClient: Search_V1_SearchServiceClient(client: client),
             viewer: profileRepository
         )
+    }
+
+    // MARK: - Search
+
+    /// Search is the row's only route to someone the graph didn't suggest, so
+    /// it must reach beyond the follow list — `prof-4` is deliberately NOT
+    /// followed by the viewer in the seed.
+    @Test func searchReachesProfilesOutsideTheFollowList() async {
+        let repository = makeRepository()
+        let handle = MockSocialDataset().authors[4].handle
+
+        let results = await repository.searchTargets(query: handle, limit: 12)
+
+        #expect(results.contains { $0.handle == handle })
+    }
+
+    @Test func searchHydratesResultsLikeSuggestions() async {
+        let results = await makeRepository().searchTargets(query: "ava", limit: 12)
+
+        let ava = results.first { $0.handle == "ava.moreau" }
+        #expect(ava?.displayName == "Ava Moreau")
+        #expect(ava?.avatarURL != nil)
+    }
+
+    /// You cannot send a profile to yourself, and your own face in a "send to"
+    /// list reads as a bug.
+    @Test func searchNeverReturnsTheViewer() async {
+        let results = await makeRepository().searchTargets(query: "demo", limit: 12)
+
+        #expect(!results.contains { $0.id.rawValue == MockSocialDataset.viewerProfileID })
+    }
+
+    @Test func blankQueriesReturnNothingRatherThanEverything() async {
+        let repository = makeRepository()
+
+        #expect(await repository.searchTargets(query: "", limit: 12).isEmpty)
+        #expect(await repository.searchTargets(query: "   ", limit: 12).isEmpty)
+    }
+
+    @Test func searchWithoutAClientDegradesToEmpty() async {
+        let bff = MockBFF()
+        MockSocialGraphService(dataset: MockSocialDataset()).register(on: bff)
+        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        let repository = ProfileShareTargetsRepository(
+            socialGraphClient: SocialGraph_V1_SocialGraphServiceClient(client: client),
+            profileClient: Profile_V1_ProfileServiceClient(client: client),
+            viewer: UnresolvableViewer()
+        )
+
+        #expect(await repository.searchTargets(query: "ava", limit: 12).isEmpty)
     }
 
     /// Mutuals lead. This is the whole ranking: someone who follows you back is

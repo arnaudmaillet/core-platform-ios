@@ -39,9 +39,11 @@ final class ProfileShareViewController: UIViewController {
     private let glassBackdrop = UIVisualEffectView(effect: nil)
     private let cardView: ProfileQRCardView
     private let targetsView: ProfileShareTargetsView
-    private let targetsHeading = UILabel()
-    private var targetsSection: UIStackView?
-    private var targetsDivider: UIView?
+    private let searchBar = UISearchBar()
+    /// Debounces keystrokes into one query, and lets a superseded search be
+    /// cancelled rather than racing the one the user is actually typing.
+    private var searchTask: Task<Void, Never>?
+    private var isSearching = false
     /// The content column, retained because the detent is measured from IT
     /// rather than from `view` — see `viewDidLayoutSubviews`.
     private let column = UIStackView()
@@ -59,6 +61,11 @@ final class ProfileShareViewController: UIViewController {
     /// gaps symmetric and its corner radius derivable (`sheetRadius - margin`),
     /// and what keeps the card's edge aligned with the "Send to" heading's.
     private static let margin = Spacing.lg
+    /// The search bar's row, hidden until search is entered.
+    private var searchBarSection: UIView?
+    /// Everything search mode puts away: the card, the actions, and the rules
+    /// that separate them. Searching is a focused state — see `setSearching`.
+    private var nonSearchSections: [UIView] = []
 
     init(
         card: ProfileViewModel.ShareCard,
@@ -84,10 +91,18 @@ final class ProfileShareViewController: UIViewController {
     /// would only offer the user a worse version of this one.
     private func configureDetent() {
         guard let sheet = sheetPresentationController else { return }
-        sheet.detents = [.custom(identifier: Self.detentIdentifier) { [weak self] context in
-            guard let self else { return context.maximumDetentValue * 0.7 }
-            return min(self.contentHeight, context.maximumDetentValue)
-        }]
+        // Two detents, but only one is ever *offered*: the content-sized one
+        // the sheet lives at, and `.large()` it moves to while searching —
+        // where the keyboard has somewhere to go. Switching between them is
+        // driven by `setSearching`, never by the user dragging.
+        sheet.detents = [
+            .custom(identifier: Self.detentIdentifier) { [weak self] context in
+                guard let self else { return context.maximumDetentValue * 0.7 }
+                return min(self.contentHeight, context.maximumDetentValue)
+            },
+            .large()
+        ]
+        sheet.selectedDetentIdentifier = Self.detentIdentifier
         sheet.prefersGrabberVisible = true
     }
 
@@ -194,29 +209,30 @@ final class ProfileShareViewController: UIViewController {
     /// under the corner instead of being clipped against a margin. Sections
     /// that don't scroll inset themselves.
     private func configureViews() {
-        targetsHeading.text = "Send to"
-        targetsHeading.font = .preferredFont(forTextStyle: .footnote)
-        targetsHeading.adjustsFontForContentSizeCategory = true
-        targetsHeading.textColor = .secondaryLabel
         targetsView.onSelect = { [weak self] target in self?.send(to: target) }
+        targetsView.onSearch = { [weak self] in self?.setSearching(true) }
+        // No section heading: the row's leading Search bubble and the faces
+        // beside it say what it is, and a label over them was the only text in
+        // the sheet that named a section rather than an action.
+        targetsView.renderSkeletons()
 
-        let targets = UIStackView(arrangedSubviews: [inset(targetsHeading), targetsView])
-        targets.axis = .vertical
-        targets.alignment = .fill
-        targets.spacing = Spacing.sm
-        // Hidden — divider and all — until the row has someone in it. The
-        // heading must not stand alone over an empty strip while the graph
-        // read is in flight.
-        targets.isHidden = true
-        targetsSection = targets
+        searchBar.placeholder = "Search profiles"
+        searchBar.searchBarStyle = .minimal
+        searchBar.delegate = self
+        searchBar.showsCancelButton = true
+        searchBar.isHidden = true
 
-        let divider = makeDivider()
-        divider.isHidden = true
-        targetsDivider = divider
-
-        for section in [makeCardSection(), divider, targets, makeDivider(), makeActionsTray()] {
+        let cardSection = makeCardSection()
+        let topDivider = makeDivider()
+        let searchSection = inset(searchBar)
+        let bottomDivider = makeDivider()
+        let actions = makeActionsTray()
+        for section in [cardSection, topDivider, searchSection, targetsView, bottomDivider, actions] {
             column.addArrangedSubview(section)
         }
+        searchBarSection = searchSection
+        searchSection.isHidden = true
+        nonSearchSections = [cardSection, topDivider, bottomDivider, actions]
         column.axis = .vertical
         column.alignment = .fill
         column.spacing = Spacing.md
@@ -244,14 +260,16 @@ final class ProfileShareViewController: UIViewController {
     }
 
     /// A native hairline: one physical pixel in the system separator colour,
-    /// full-bleed like the sections it divides.
+    /// inset by the sheet's margin so it floats between sections rather than
+    /// cutting the sheet in half edge to edge. The scrolling rows still bleed
+    /// past it — they are content, the rule is punctuation.
     private func makeDivider() -> UIView {
         let divider = UIView()
         divider.backgroundColor = .separator
         divider.heightAnchor.constraint(
             equalToConstant: 1 / max(traitCollection.displayScale, 1)
         ).isActive = true
-        return divider
+        return inset(divider)
     }
 
     /// Wraps a view in the sheet's horizontal margin, for sections that don't
@@ -327,14 +345,70 @@ final class ProfileShareViewController: UIViewController {
     // MARK: - Targets
 
     private func loadTargets() {
-        guard let targeting else { return }
+        guard let targeting else {
+            targetsView.render([])
+            return
+        }
         Task { [weak self] in
             let targets = await targeting.shareTargets(limit: Self.targetLimit)
-            guard let self, !targets.isEmpty else { return }
+            guard let self, !self.isSearching else { return }
+            // Renders even when empty: the row keeps its Search bubble, which
+            // is the whole point of it leading the row.
             self.targetsView.render(targets)
-            self.targetsSection?.isHidden = false
-            self.targetsDivider?.isHidden = false
-            self.view.setNeedsLayout()
+        }
+    }
+
+    // MARK: - Search
+
+    /// Enters or leaves search. The sheet moves to `.large()` while searching
+    /// because the keyboard needs the room; the content-sized detent is
+    /// restored on the way out.
+    private func setSearching(_ searching: Bool) {
+        guard isSearching != searching else { return }
+        isSearching = searching
+        searchTask?.cancel()
+        searchTask = nil
+
+        // Search takes the sheet over: the card, the actions and the rules go
+        // away, leaving the field and the results at the top. Keeping the card
+        // pushed both of them under the keyboard — the results were on screen
+        // in the layout and invisible in practice.
+        searchBarSection?.isHidden = !searching
+        searchBar.isHidden = !searching
+        for section in nonSearchSections {
+            section.isHidden = searching
+        }
+        sheetPresentationController?.animateChanges {
+            sheetPresentationController?.selectedDetentIdentifier = searching
+                ? .large
+                : Self.detentIdentifier
+        }
+
+        if searching {
+            searchBar.becomeFirstResponder()
+        } else {
+            searchBar.text = nil
+            searchBar.resignFirstResponder()
+            targetsView.renderSkeletons()
+            loadTargets()
+        }
+    }
+
+    private func runSearch(_ query: String) {
+        searchTask?.cancel()
+        guard let targeting, !query.trimmingCharacters(in: .whitespaces).isEmpty else {
+            targetsView.render([], leadingSearch: false)
+            return
+        }
+        targetsView.renderSkeletons(leadingSearch: false)
+        searchTask = Task { [weak self] in
+            // Debounce: a keystroke every ~50ms would otherwise put a search
+            // per character on the wire, and the answers would land out of order.
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            let results = await targeting.searchTargets(query: query, limit: Self.targetLimit)
+            guard let self, !Task.isCancelled, self.isSearching else { return }
+            self.targetsView.render(results, leadingSearch: false)
         }
     }
 
@@ -380,6 +454,11 @@ final class ProfileShareViewController: UIViewController {
     #if DEBUG
     /// Test hooks — these actions are behind taps the simulator can't inject.
     func qaHandOffToSystemShare() { handOffToSystemShare() }
+    func qaBeginSearch(_ query: String) {
+        setSearching(true)
+        searchBar.text = query
+        runSearch(query)
+    }
     func qaSendToFirstTarget() {
         guard let targeting else { return }
         Task { [weak self] in
@@ -396,5 +475,21 @@ private extension ProfileQRCardView {
     func configured(with card: ProfileViewModel.ShareCard) -> ProfileQRCardView {
         configure(with: card)
         return self
+    }
+}
+
+extension ProfileShareViewController: UISearchBarDelegate {
+    func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
+        runSearch(searchText)
+    }
+
+    func searchBarCancelButtonClicked(_ searchBar: UISearchBar) {
+        setSearching(false)
+    }
+
+    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
+        // Dismiss the keyboard but stay in search: the results are the point,
+        // and they are behind the keyboard on the smaller phones.
+        searchBar.resignFirstResponder()
     }
 }
