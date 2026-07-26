@@ -232,6 +232,38 @@ public struct MockSocialDataset: Sendable {
         authors.first { $0.profileID == profileID }
     }
 
+    // MARK: - Accounts
+
+    /// One account owning several profiles, used by the profile screen's
+    /// account-wide block. prof-5 and prof-6 are seeded as **aliases of one
+    /// stranger** — the case the feature exists for. Everyone else gets a
+    /// private account, so the ordinary single-profile path stays the default.
+    public static let aliasAccountID = "acct-mock-alias"
+
+    /// Which account owns `profileID`.
+    ///
+    /// prof-0 and prof-2 belong to the VIEWER's account, matching the profile
+    /// switcher's seeded list — the two features have to agree or the switcher
+    /// would offer profiles this map says belong to someone else.
+    public func accountID(for profileID: String) -> String {
+        switch profileID {
+        case Self.viewerProfileID, "prof-0", "prof-2": MockAuthService.accountID
+        case "prof-5", "prof-6": Self.aliasAccountID
+        default: "acct-mock-" + profileID
+        }
+    }
+
+    /// Every profile on `accountID`. The viewer stays FIRST on its own
+    /// account — every viewer-id resolver takes `.first`.
+    public func profileIDs(inAccount accountID: String) -> [String] {
+        var ids: [String] = []
+        if accountID == MockAuthService.accountID {
+            ids.append(Self.viewerProfileID)
+        }
+        ids.append(contentsOf: authors.map(\.profileID).filter { self.accountID(for: $0) == accountID })
+        return ids
+    }
+
     public func post(for postID: String) -> PostRecord? {
         posts.first { $0.postID == postID }
     }

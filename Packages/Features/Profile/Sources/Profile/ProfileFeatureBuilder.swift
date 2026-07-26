@@ -9,6 +9,10 @@ import UIKit
 @MainActor
 public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     private let repository: any ProfileProviding
+    /// Files moderation reports from the profile's overflow menu. Optional:
+    /// nil hides nothing, but a Report tap then reports the feature as
+    /// unavailable rather than silently succeeding.
+    private let reporting: (any ProfileReporting)?
     private let gallery: (any ProfileGalleryProviding)?
     /// One store for every profile screen: the gallery filter is a GLOBAL
     /// user preference, so all view models read and write the same place.
@@ -22,6 +26,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
 
     public init(
         repository: any ProfileProviding,
+        reporting: (any ProfileReporting)? = nil,
         gallery: (any ProfileGalleryProviding)? = nil,
         imagePipeline: ImagePipeline,
         router: (any Router)? = nil,
@@ -29,6 +34,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         switching: (any ProfileSwitching)? = nil
     ) {
         self.repository = repository
+        self.reporting = reporting
         self.gallery = gallery
         self.imagePipeline = imagePipeline
         self.router = router
@@ -49,6 +55,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         return ProfileViewController(
             viewModel: ProfileViewModel(
                 repository: repository,
+                reporting: reporting,
                 gallery: gallery,
                 galleryPreferences: galleryPreferences,
                 source: .currentUser,
@@ -73,6 +80,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         ProfileViewController(
             viewModel: ProfileViewModel(
                 repository: repository,
+                reporting: reporting,
                 gallery: gallery,
                 galleryPreferences: galleryPreferences,
                 source: .profile(profileID),

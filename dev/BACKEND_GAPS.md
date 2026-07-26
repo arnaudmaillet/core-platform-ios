@@ -18,6 +18,8 @@ full functionality.
 | 8 | Envoy gateway didn't route `search.v1` (fixed in-repo) | People search (fixed; needs a gateway restart) | Low |
 | 9 | No seeded notifications | Activity tab shows empty against the fleet | Low |
 | 10 | No seeded conversations | Messages list shows empty against the fleet | Low |
+| 11 | `moderation.v1` unrouted + upstream port unknown | Profile "Report User" against the fleet | Medium |
+| 12 | No account-level block RPC; alias enumeration is client-side | Profile "Block Account & All Profiles" is best-effort | Medium |
 
 ---
 
@@ -265,6 +267,74 @@ Live delivery (`streamConversation`) is not wired — blocked by §1.
 
 **Suggested fix.** Seed a couple of conversations with messages for the demo
 user.
+
+---
+
+## 11. `moderation.v1` is unrouted and its upstream port is unknown
+
+**Symptom.** The profile overflow menu's **Report User** calls
+`moderation.v1.ModerationService/OpenCase`. The Envoy gateway had no route for
+`moderation.v1` (it was already named as latent in §8's closing note), so the
+call 404s against the local fleet.
+
+**What was done here.** A route + cluster were added to `dev/envoy/envoy.yaml`,
+mirroring the `search` fix from §8. **The upstream address is a placeholder and
+has not been verified**: no `moderation-server` port is documented anywhere in
+this repo, and the fleet's assignments are not contiguous (50051-50070 with
+several unused values), so `50054` is a guess, not a finding. The route will not
+work until someone confirms the real port against the fleet's compose file.
+
+```bash
+# Confirm the port, then update the cluster in dev/envoy/envoy.yaml:
+docker ps --format '{{.Names}}\t{{.Ports}}' | grep -i moderation
+grpcurl -plaintext localhost:<port> list   # expect moderation.v1.ModerationService
+docker restart core-platform-gateway       # reload the gateway config
+```
+
+**Client impact.** Report is fully implemented and verified against
+`MockModerationService` (which answers `OpenCase` with a deterministic case id
+and the contract's idempotent-reopen semantics). Against the fleet a report
+surfaces an honest "Couldn't send this report" until the route resolves —
+`ProfileViewModel.report` reports failures rather than pretending to succeed.
+
+**Note on scope.** Only `OpenCase` is mocked. The rest of `moderation.v1` is a
+moderator console (`listQueue`, `assignCase`, `decideCase`, appeals) with no
+client in this app.
+
+---
+
+## 12. No account-level block, and aliases must be enumerated client-side
+
+**Symptom.** The profile overflow menu offers "Block Account & All Profiles".
+`social_graph.v1.Block` takes a **profile** id and nothing else — there is no
+`BlockAccount` RPC and no account-scoped flag — so the client implements the
+scope as a fan-out: resolve `ProfileView.account_id`, call
+`ListProfilesByAccount` for the aliases, then issue one `Block` per profile.
+
+**Two consequences the client cannot fix.**
+
+1. **It is a snapshot, not a rule.** A profile created on that account *after*
+   the block is not covered. For a safety feature this is the important one: a
+   blocked user can reach the viewer again simply by making a new profile. A
+   server-side account block would hold.
+2. **It is not transactional.** Partial failure blocks some aliases and not
+   others. `ProfileRepository.blockAccount` therefore returns the ids it
+   actually blocked and the UI reports that count ("Blocked @ada and 2 more")
+   rather than claiming the whole account.
+
+**Open question for the backend — `ListProfilesByAccount` on someone else's
+account.** The client now calls it with a *stranger's* account id, which
+enumerates that person's alternate identities. That is privacy-sensitive and
+may not be what the contract intends to expose to an arbitrary viewer. The
+mock answers it (so the flow is verifiable); the fleet may refuse, and if it
+does, the client degrades correctly — `accountSiblings` falls back to blocking
+just the profile in hand. **If the fleet currently answers this for any
+caller, that is worth a look on its own merits, independent of this feature.**
+
+**Suggested fix.** Add `social_graph.v1.BlockAccount(actor_id, target_account_id)`
+(or an `account_scope` flag on `BlockRequest`) and enforce it server-side on
+profile creation. Then the client drops the fan-out entirely and the alias
+enumeration goes away with it.
 
 ---
 

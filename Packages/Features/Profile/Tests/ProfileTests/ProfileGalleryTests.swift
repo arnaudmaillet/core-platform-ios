@@ -50,9 +50,11 @@ private actor StubProfileProvider: ProfileProviding {
     func currentUserProfile() async throws -> UserProfile { profile }
     func profile(id: ProfileID) async throws -> UserProfile { profile }
     func relationship(for profileID: ProfileID) async throws -> ProfileRelationship {
-        .other(isFollowing: false)
+        .other(isFollowing: false, isBlocked: false)
     }
     func setFollowing(_ following: Bool, for profileID: ProfileID) async throws {}
+    func setBlocked(_ blocked: Bool, for profileID: ProfileID) async throws {}
+    func blockAccount(behind profileID: ProfileID) async throws -> [ProfileID] { [profileID] }
     func updateCurrentUserProfile(displayName: String, bio: String, website: String, links: [ProfileLink]) async throws -> UserProfile {
         profile
     }

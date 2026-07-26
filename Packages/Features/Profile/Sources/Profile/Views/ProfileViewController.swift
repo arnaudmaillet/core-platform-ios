@@ -195,6 +195,13 @@ final class ProfileViewController: UIViewController {
         headerView.onWebsiteTapped = { url in
             UIApplication.shared.open(url)
         }
+        configureMoreMenu()
+        viewModel.onActionResult = { [weak self] result in
+            self?.render(result)
+        }
+        viewModel.onDismissRequested = { [weak self] in
+            self?.leaveAfterBlock()
+        }
         viewModel.onGalleryChange = { [weak self] snapshot in
             self?.galleryPager.render(snapshot)
         }
@@ -267,6 +274,36 @@ final class ProfileViewController: UIViewController {
                 print("PROFILE-LAYOUT-AUDIT\n\(description.map(String.init(describing:)) ?? "unavailable")")
             }
         }
+        // Dev convenience: `-profile-menu-audit` prints the "..." menu the
+        // current state resolves to, and fires the copy action so the toast is
+        // screenshottable. The menu is the one thing on this screen no launch
+        // argument can otherwise reach — it opens on a tap, and the sim has no
+        // touch injection.
+        if ProcessInfo.processInfo.arguments.contains("-profile-menu-audit") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                guard let self else { return }
+                let titles = self.moreMenuElements().flatMap { element -> [String] in
+                    guard let group = element as? UIMenu else { return [element.title] }
+                    return ["—"] + group.children.map(\.title)
+                }
+                print("PROFILE-MENU-AUDIT canModerate=\(self.viewModel.canModerate) "
+                    + "isBlocked=\(self.viewModel.isBlocked) items=\(titles)")
+                self.copyProfileLink()
+            }
+        }
+        // Dev convenience: `-profile-block-demo [account]` runs the block
+        // command for real (mock `social_graph.v1/Block`, then the
+        // confirmation toast and the pop), skipping only the confirmation
+        // sheet — which needs a tap the simulator can't deliver. Pass
+        // `account` to exercise the account-wide fan-out.
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "-profile-block-demo") {
+            let scope: ProfileBlockScope =
+                arguments.dropFirst(index + 1).first == "account" ? .account : .profile
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.viewModel.block(scope)
+            }
+        }
         #endif
     }
 
@@ -309,6 +346,177 @@ final class ProfileViewController: UIViewController {
             self?.viewModel.refresh()
         }
         navigationController?.pushViewController(editViewController, animated: true)
+    }
+
+    // MARK: - Overflow menu
+
+    /// Installs the see-more bubble's menu. The children are built at OPEN
+    /// time through an uncached deferred element (the feed's "..." precedent),
+    /// not at wiring time: whether the moderation group belongs, and whether it
+    /// reads Block or Unblock, depends on a relationship that usually resolves
+    /// after this runs and can change while the screen is up.
+    private func configureMoreMenu() {
+        headerView.setMoreMenu(UIMenu(children: [
+            UIDeferredMenuElement.uncached { [weak self] completion in
+                completion(self?.moreMenuElements() ?? [])
+            }
+        ]))
+    }
+
+    private func moreMenuElements() -> [UIMenuElement] {
+        // Sharing needs a loaded handle; until then the menu is honestly empty
+        // rather than offering an action that would no-op.
+        var groups: [UIMenuElement] = []
+        if viewModel.shareLink != nil {
+            groups.append(UIMenu(options: .displayInline, children: [
+                UIAction(title: "Share", image: UIImage(systemName: "square.and.arrow.up")) {
+                    [weak self] _ in self?.presentShareSheet()
+                },
+                UIAction(title: "Copy Link", image: UIImage(systemName: "link")) {
+                    [weak self] _ in self?.copyProfileLink()
+                }
+            ]))
+        }
+        // Own profile (and the pre-relationship window) offers no moderation:
+        // you cannot block or report yourself, and guessing is worse than
+        // waiting — the menu is rebuilt on the next open either way.
+        guard viewModel.canModerate else { return groups }
+
+        let blocked = viewModel.isBlocked
+        groups.append(UIMenu(options: .displayInline, children: [
+            UIAction(
+                title: blocked ? "Unblock" : "Block",
+                image: UIImage(systemName: blocked ? "hand.raised.slash" : "hand.raised"),
+                // Unblocking is a restorative action, so it sheds the
+                // destructive red that blocking earns.
+                attributes: blocked ? [] : .destructive
+            ) { [weak self] _ in
+                guard let self else { return }
+                // Unblocking is harmless and reversible — it goes straight
+                // through; blocking asks first, and asks how far it reaches.
+                if blocked {
+                    self.viewModel.unblock()
+                } else {
+                    self.confirmBlock()
+                }
+            },
+            UIAction(
+                title: "Report",
+                image: UIImage(systemName: "flag"),
+                attributes: .destructive
+            ) { [weak self] _ in self?.presentReportReasons() }
+        ]))
+        return groups
+    }
+
+    /// Shares the profile's web link. The BFF returns no canonical URL, so the
+    /// link is synthesized from the handle — see `ProfileShareLink`.
+    private func presentShareSheet() {
+        guard let link = viewModel.shareLink else { return }
+        let activity = UIActivityViewController(activityItems: [link], applicationActivities: nil)
+        activity.popoverPresentationController?.sourceView = headerView.moreButtonAnchor
+        present(activity, animated: true)
+    }
+
+    private func copyProfileLink() {
+        guard let link = viewModel.shareLink else { return }
+        // Both slots: `.url` is what other apps paste as a rich link, `.string`
+        // is what plain-text fields read. Setting only the former leaves a
+        // Notes paste empty.
+        UIPasteboard.general.url = link
+        UIPasteboard.general.string = link.absoluteString
+        ToastView.present("Link copied", symbol: "link", in: view)
+    }
+
+    /// Block is destructive and, here, one-way out of the screen — so it asks
+    /// first. Named with the handle so it can't be answered on autopilot.
+    ///
+    /// An action sheet rather than an alert, because the question is not
+    /// yes/no but *how far*: this app treats one account as owning several
+    /// profiles (the switcher is a first-class affordance), so blocking one
+    /// handle can leave the same person reaching the viewer from an alias.
+    /// Two destructive options read as a scope choice; an alert's OK/Cancel
+    /// shape would have to hide one of them behind a second step.
+    private func confirmBlock() {
+        let handle = viewModel.handle ?? "this user"
+        let sheet = UIAlertController(
+            title: "Block \(handle)?",
+            message: "They won't be able to find your profile or message you, and you'll stop seeing their posts. They aren't notified.\n\nBlocking the account also blocks any other profiles it owns.",
+            preferredStyle: .actionSheet
+        )
+        // The narrow, predictable action leads: it is what "Block" meant
+        // before this choice existed, and it is the one that can't overreach.
+        sheet.addAction(UIAlertAction(title: "Block \(handle)", style: .destructive) { [weak self] _ in
+            self?.viewModel.block(.profile)
+        })
+        sheet.addAction(UIAlertAction(title: "Block Account & All Profiles", style: .destructive) { [weak self] _ in
+            self?.viewModel.block(.account)
+        })
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        sheet.popoverPresentationController?.sourceView = headerView.moreButtonAnchor
+        present(sheet, animated: true)
+    }
+
+    /// `moderation.v1.OpenCase` carries a policy category, so the report asks
+    /// for one rather than filing everything as "other" — a category-less
+    /// report is near-useless to the moderation queue.
+    private func presentReportReasons() {
+        let handle = viewModel.handle ?? "this profile"
+        let sheet = UIAlertController(
+            title: "Report \(handle)",
+            message: "Why are you reporting this profile?",
+            preferredStyle: .actionSheet
+        )
+        for reason in ProfileReportReason.allCases {
+            sheet.addAction(UIAlertAction(title: reason.title, style: .default) { [weak self] _ in
+                self?.viewModel.report(reason)
+            })
+        }
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        sheet.popoverPresentationController?.sourceView = headerView.moreButtonAnchor
+        present(sheet, animated: true)
+    }
+
+    /// Reports the outcome of a menu command. Confirmations are toasts (the
+    /// action is already done — an alert would only demand a second tap);
+    /// failures are alerts, because a failed block or report is something the
+    /// user must know to retry.
+    private func render(_ result: ProfileViewModel.ActionResult) {
+        switch result {
+        case .blocked(let handle, let profileCount):
+            // Says what was actually blocked, not what was asked for: an
+            // account-scoped block can only reach the aliases the fleet let us
+            // see, so claiming "and all their profiles" would be a promise the
+            // client can't keep (see `ProfileBlockScope`).
+            let message = profileCount > 1
+                ? "Blocked \(handle) and \(profileCount - 1) more"
+                : "Blocked \(handle)"
+            // Hosted on the navigation controller's view, not this screen's:
+            // the block pops this view controller in the same turn, and a toast
+            // parented here would leave with it.
+            ToastView.present(message, symbol: "hand.raised.fill", in: navigationController?.view ?? view)
+        case .unblocked(let handle):
+            ToastView.present("Unblocked \(handle)", symbol: "hand.raised.slash.fill", in: view)
+        case .reported:
+            ToastView.present("Report sent", in: view)
+        case .failed(let message):
+            let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            present(alert, animated: true)
+        }
+    }
+
+    /// Leaves the blocked profile: pop when pushed (the common case — a profile
+    /// reached by routing), dismiss when presented. A tab-root profile is left
+    /// standing, but it can't get here: own profiles can't be blocked.
+    private func leaveAfterBlock() {
+        // An open menu-spawned alert would otherwise ride out the pop.
+        presentedViewController?.dismiss(animated: false)
+        if let nav = navigationController, nav.viewControllers.count > 1 {
+            nav.popViewController(animated: true)
+        } else if presentingViewController != nil {
+            dismiss(animated: true)
+        }
     }
 
     // MARK: - Setup

@@ -18,6 +18,8 @@ private actor EditStubProvider: ProfileProviding {
     func profile(id: ProfileID) async throws -> UserProfile { profile }
     func relationship(for profileID: ProfileID) async throws -> ProfileRelationship { .me }
     func setFollowing(_ following: Bool, for profileID: ProfileID) async throws {}
+    func setBlocked(_ blocked: Bool, for profileID: ProfileID) async throws {}
+    func blockAccount(behind profileID: ProfileID) async throws -> [ProfileID] { [profileID] }
 
     func updateCurrentUserProfile(displayName: String, bio: String, website: String, links: [ProfileLink]) async throws -> UserProfile {
         updateCalls.append((displayName, bio, website, links))
