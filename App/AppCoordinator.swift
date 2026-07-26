@@ -198,7 +198,19 @@ final class AppCoordinator: Coordinator {
                 }
             }
             if let index = arguments.firstIndex(of: "-message-user"), index + 1 < arguments.count {
-                container.router.route(to: .messageUser(ProfileID(arguments[index + 1])))
+                container.router.route(to: .messageUser(ProfileID(arguments[index + 1]), stub: nil))
+            }
+            // `-new-message` opens the compose picker on the Messages tab ~2s
+            // in — after the inbox has loaded, so the Recent section actually
+            // has rows (it reads the catalog, and an empty catalog looks like
+            // an empty feature). Pair with `-new-message-query <text>`, read by
+            // the picker itself, to land straight in the search state.
+            if arguments.contains("-new-message") {
+                container.router.route(to: .messages(.all))
+                let router = container.router
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    router.route(to: .newMessage)
+                }
             }
             // `-auto-pop` pops the active stack ~2.5s after launch — pairs with
             // the `-open-*` args above to verify pop-side behavior (nav chrome,

@@ -223,7 +223,7 @@ final class AppContainer {
             self.router.route(to: .profile(id, stub: stub))
         },
         openConversation: { [unowned self] id in
-            self.router.route(to: .messageUser(id))
+            self.router.route(to: .messageUser(id, stub: nil))
         }
     )
 
@@ -304,9 +304,18 @@ final class AppContainer {
         pageSize: 200
     )
 
+    /// The compose picker's people lookup. Its own repository rather than the
+    /// Search feature's: features never import each other, so Chat states the
+    /// shape it needs (`PeopleDirectoryProviding`) and this is where it gets
+    /// pointed at `search.v1` — the same client the Search tab uses.
+    private lazy var peopleDirectoryRepository = PeopleDirectoryRepository(
+        searchClient: Search_V1_SearchServiceClient(client: authenticatedRPCClient)
+    )
+
     private(set) lazy var chatFeature: any ChatFeatureBuilding = ChatFeatureBuilder(
         repository: chatRepository,
         connections: socialConnectionsRepository,
+        people: peopleDirectoryRepository,
         imagePipeline: imagePipeline,
         router: routeResolver
     )

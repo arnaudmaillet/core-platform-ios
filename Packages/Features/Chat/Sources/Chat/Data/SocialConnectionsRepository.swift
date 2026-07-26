@@ -43,6 +43,31 @@ public protocol SuggestionsProviding: Sendable {
     func unfollow(_ profileID: ProfileID) async throws
 }
 
+extension SuggestionsProviding {
+    /// One page of suggestions, `offset` accounts in.
+    ///
+    /// Ranking-then-dropping rather than a cursor, because there is no cursor
+    /// to have: `social_graph.v1` exposes follow edges and nothing else, so the
+    /// ordering is produced client-side by `SuggestionRanker` — which is
+    /// deterministic and tie-broken on profile id precisely so that it is
+    /// stable across calls. A prefix of page *n+1* is therefore exactly page
+    /// *n*, and dropping it is a correct page boundary rather than an
+    /// approximation.
+    ///
+    /// The re-rank is cheap after the first page: `SocialConnectionsRepository`
+    /// caches the viewer's follow edges and every profile it has hydrated, so a
+    /// later page costs the ranking pass plus the profiles it newly reveals.
+    /// A real `ListSuggestions` RPC would replace this whole extension.
+    public func suggestions(limit: Int, offset: Int) async throws -> [SuggestedAccount] {
+        guard offset > 0 else { return try await suggestions(limit: limit) }
+        let ranked = try await suggestions(limit: offset + limit)
+        // Fewer than `offset` in hand means the graph ran out behind us; the
+        // caller reads the empty page as "no more".
+        guard ranked.count > offset else { return [] }
+        return Array(ranked.dropFirst(offset))
+    }
+}
+
 public enum SuggestionsError: Error, Equatable, Sendable {
     case transport(message: String)
 }

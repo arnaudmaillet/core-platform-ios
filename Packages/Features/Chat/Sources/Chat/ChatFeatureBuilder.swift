@@ -10,6 +10,10 @@ import UIKit
 public struct ChatFeatureBuilder: ChatFeatureBuilding {
     private let repository: any ChatProviding
     private let connections: (any SuggestionsProviding & PeerRelationProviding)?
+    /// The compose picker's search backing. Optional like `connections`: a
+    /// composition without it still opens the picker, which then browses
+    /// recents and suggestions and simply finds nothing when typed into.
+    private let people: (any PeopleDirectoryProviding)?
     private let imagePipeline: ImagePipeline?
     private let router: (any Router)?
     /// Shared list→thread warm-start context (the builder is a long-lived
@@ -24,6 +28,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     public init(
         repository: any ChatProviding,
         connections: (any SuggestionsProviding & PeerRelationProviding)? = nil,
+        people: (any PeopleDirectoryProviding)? = nil,
         imagePipeline: ImagePipeline? = nil,
         router: (any Router)? = nil
     ) {
@@ -32,6 +37,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         catalog = InboxCatalog(repository: repository, relations: connections, directory: directory)
         self.repository = repository
         self.connections = connections
+        self.people = people
         self.imagePipeline = imagePipeline
         self.router = router
     }
@@ -78,8 +84,12 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     }
 
     public func makeConversationViewController(for conversationID: ConversationID) -> UIViewController {
+        makeConversationViewController(target: .existing(conversationID))
+    }
+
+    private func makeConversationViewController(target: ConversationTarget) -> UIViewController {
         let viewModel = ConversationViewModel(
-            conversationID: conversationID,
+            target: target,
             repository: repository,
             directory: directory,
             router: router
@@ -95,12 +105,62 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         viewModel.onDidSendMessage = { [catalog] id, message in
             catalog.recordSentMessage(message, in: id)
         }
+        // A draft that just became real: the inbox has never heard of it, so
+        // the viewer would otherwise swipe back from a thread they started to
+        // a list without it.
+        viewModel.onDidResolveConversation = { [catalog] _ in catalog.refresh() }
         return ConversationViewController(viewModel: viewModel)
     }
 
-    public func makeDirectMessageViewController(with profileID: ProfileID) async -> UIViewController? {
-        guard let conversationID = try? await repository.directConversation(with: profileID) else { return nil }
-        return makeConversationViewController(for: conversationID)
+    /// A thread with `profileID`, opened before anyone knows whether one
+    /// exists. Synchronous by design — see `ConversationTarget.draft`.
+    public func makeDraftConversationViewController(
+        with profileID: ProfileID,
+        displayName: String
+    ) -> UIViewController {
+        makeConversationViewController(target: .draft(peer: profileID, displayName: displayName))
+    }
+
+    /// Suggestions per page. `-new-message-page-size <n>` shrinks it in DEBUG:
+    /// the mock social graph yields only a handful of candidates, so at the
+    /// shipping page size the first page is also the last and the pagination
+    /// path is unreachable in the simulator.
+    private static var suggestionPageSize: Int {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "-new-message-page-size"),
+           index + 1 < arguments.count,
+           let size = Int(arguments[index + 1]), size > 0 {
+            return size
+        }
+        #endif
+        return 20
+    }
+
+    /// The compose picker, pushed onto whatever stack it was opened from.
+    public func makeNewMessageViewController() -> UIViewController {
+        let viewModel = NewMessageViewModel(
+            catalog: catalog,
+            viewer: repository,
+            suggestions: connections,
+            people: people,
+            suggestionPageSize: Self.suggestionPageSize
+        )
+        let picker = NewMessageViewController(viewModel: viewModel)
+        // A target, not a conversation: the pick is resolved and the push
+        // begins in the same runloop turn, and whether the thread has to be
+        // created is the thread's own problem once it is on screen.
+        viewModel.onOpenConversation = { [router] target in
+            switch target {
+            case .existing(let conversationID):
+                router?.route(to: .conversation(conversationID))
+            case .draft(let peer, let displayName):
+                router?.route(to: .messageUser(peer, stub: ProfileIdentityStub(
+                    handle: "", displayName: displayName
+                )))
+            }
+        }
+        return picker
     }
 }
 

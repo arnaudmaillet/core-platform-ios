@@ -19,6 +19,14 @@ public struct Conversation: Equatable, Sendable, Identifiable {
     /// The non-viewer member(s). Exactly one for a DM — the identity the
     /// thread header shows and links to.
     public let otherMemberIDs: [ProfileID]
+    /// The DM correspondent's handle, when hydration resolved one.
+    ///
+    /// Carried because the compose picker lists recent correspondents beside
+    /// suggestions and search hits, which both have handles: without it those
+    /// rows were name-only and the section read as a different, poorer kind of
+    /// row. Free to collect — the same `GetProfileById` that resolves the
+    /// title already returns it.
+    public let directPeerHandle: String?
     /// Whether `lastMessage` is the viewer's own. Free at hydration time (the
     /// sender is already in hand) and the signal `MessageRequestPolicy` reads
     /// to tell a pending request from a conversation the viewer answered.
@@ -42,6 +50,7 @@ public struct Conversation: Equatable, Sendable, Identifiable {
         lastMessage: String,
         lastActivityAt: Date?,
         otherMemberIDs: [ProfileID] = [],
+        directPeerHandle: String? = nil,
         lastMessageIsMine: Bool = false,
         lastMessageID: String = "",
         isUnread: Bool = false
@@ -51,6 +60,7 @@ public struct Conversation: Equatable, Sendable, Identifiable {
         self.lastMessage = lastMessage
         self.lastActivityAt = lastActivityAt
         self.otherMemberIDs = otherMemberIDs
+        self.directPeerHandle = directPeerHandle
         self.lastMessageIsMine = lastMessageIsMine
         self.lastMessageID = lastMessageID
         self.isUnread = isUnread
@@ -155,6 +165,7 @@ public actor ChatRepository: ChatProviding {
 
     private var viewerProfileID: ProfileID?
     private var nameCache: [ProfileID: String] = [:]
+    private var handleCache: [ProfileID: String] = [:]
 
     public init(
         chatClient: any Chat_V1_ChatServiceClientInterface,
@@ -238,6 +249,7 @@ public actor ChatRepository: ChatProviding {
             lastMessage: latest?.body ?? "",
             lastActivityAt: latest.map { Date(timeIntervalSince1970: TimeInterval($0.createdAtMs) / 1000) },
             otherMemberIDs: otherIDs,
+            directPeerHandle: otherIDs.count == 1 ? handleCache[otherIDs[0]] : nil,
             lastMessageIsMine: latestIsMine,
             lastMessageID: latest?.messageID ?? "",
             isUnread: Self.isUnread(latest: latest, viewerLastRead: viewerLastRead, latestIsMine: latestIsMine)
@@ -362,21 +374,24 @@ public actor ChatRepository: ChatProviding {
         let missing = Set(ids).filter { nameCache[$0] == nil && !$0.rawValue.isEmpty }
         guard !missing.isEmpty else { return }
         let client = profileClient
-        let fetched = await withTaskGroup(of: (ProfileID, String)?.self) { group in
+        let fetched = await withTaskGroup(of: (ProfileID, String, String)?.self) { group in
             for id in missing {
                 group.addTask {
                     var request = Profile_V1_GetProfileByIdRequest()
                     request.profileID = id.rawValue
                     let response = await client.getProfileByID(request: request, headers: [:])
                     guard let view = response.message else { return nil }
-                    return (id, view.displayName)
+                    return (id, view.displayName, view.handle)
                 }
             }
-            return await group.reduce(into: [(ProfileID, String)]()) { partial, pair in
-                if let pair { partial.append(pair) }
+            return await group.reduce(into: [(ProfileID, String, String)]()) { partial, triple in
+                if let triple { partial.append(triple) }
             }
         }
-        for (id, name) in fetched { nameCache[id] = name }
+        for (id, name, handle) in fetched {
+            nameCache[id] = name
+            if !handle.isEmpty { handleCache[id] = handle }
+        }
     }
 
     /// A conversation is unread when its newest message is someone else's and

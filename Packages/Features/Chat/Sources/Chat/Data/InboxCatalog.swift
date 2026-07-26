@@ -201,6 +201,39 @@ final class InboxCatalog {
         }
     }
 
+    // MARK: - Correspondents
+
+    /// The viewer's one-to-one conversations, most recent first.
+    ///
+    /// Explicitly re-sorted rather than taken from `snapshot.active`, whose
+    /// order is pin-hoisted: pinning is an inbox affordance, and a list titled
+    /// "Recent" that opens with a months-old pinned thread is simply wrong.
+    /// Group shapes are dropped — "the peer" is not a meaningful concept there.
+    func directConversations() -> [Conversation] {
+        snapshot.active
+            .filter { $0.directPeerID != nil }
+            .sorted(by: Conversation.isOrderedBefore)
+    }
+
+    /// The existing DM with `peer`, if the inbox has already loaded one.
+    ///
+    /// A hit here is what lets the compose picker open a known correspondent
+    /// with no round trip at all — `directConversation(with:)` costs a
+    /// `ListSubscriptions` plus a `ListMembers` per conversation to rediscover
+    /// what this list already knows.
+    ///
+    /// Searched over every conversation the load returned, NOT `snapshot.active`.
+    /// The projection is about what the inbox *displays*: an unfollowed peer
+    /// whose message the viewer hasn't answered sits in Requests, and a
+    /// conversation deleted or declined this session is hidden entirely — but
+    /// all three still exist, still have history, and are exactly what
+    /// find-or-create would hand back. Asking the projection instead was why
+    /// picking someone with a real thread opened a blank draft and then made
+    /// their history appear a moment later.
+    func directConversationID(with peer: ProfileID) -> ConversationID? {
+        conversations.first { $0.directPeerID == peer }?.id
+    }
+
     // MARK: - Management
 
     func isPinned(_ id: ConversationID) -> Bool { pinned.contains(id) }

@@ -242,7 +242,12 @@ struct ProfileViewModelTests {
         await settle()
 
         viewModel.messageTapped()
-        #expect(router.routes == [.messageUser(ProfileID("prof-1"))])
+        // The profile's identity rides the route: the thread opens before its
+        // conversation is known to exist, so this is what titles its header.
+        #expect(router.routes == [.messageUser(
+            ProfileID("prof-1"),
+            stub: ProfileIdentityStub(handle: "ada", displayName: "Ada Lovelace")
+        )])
     }
 
     @Test func messageTappedIsANoOpOnOwnProfile() async {

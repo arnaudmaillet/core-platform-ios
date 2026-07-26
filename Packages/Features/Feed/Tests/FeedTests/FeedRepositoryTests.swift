@@ -89,19 +89,27 @@ struct FeedRepositoryTests {
     @Test func authorHydrationIsDeduplicatedAndCachedAcrossPages() async throws {
         let (repository, bff) = makeRepository()
 
-        _ = try await repository.loadFirstPage()
-        let profileCallsAfterFirstPage = bff.recordedRequests.filter {
-            $0.path == "/profile.v1.ProfileService/GetProfileById"
-        }.count
-        // 20 items but only 8 distinct authors in the dataset.
-        #expect(profileCallsAfterFirstPage == 8)
+        func profileCalls() -> [String] {
+            bff.recordedRequests
+                .filter { $0.path == "/profile.v1.ProfileService/GetProfileById" }
+                .map(\.path)
+        }
 
-        _ = try await repository.loadPage(afterToken: "20")
-        let profileCallsAfterSecondPage = bff.recordedRequests.filter {
-            $0.path == "/profile.v1.ProfileService/GetProfileById"
-        }.count
-        // Second page reuses the author cache: zero additional profile calls.
-        #expect(profileCallsAfterSecondPage == profileCallsAfterFirstPage)
+        let first = try await repository.loadFirstPage()
+        let callsAfterFirst = profileCalls().count
+        // One call per DISTINCT author on the page, never one per item —
+        // expressed against the page itself so it holds at any dataset size.
+        let authorsOnFirstPage = Set(first.entries.map(\.post.authorID))
+        #expect(callsAfterFirst == authorsOnFirstPage.count)
+
+        let second = try await repository.loadPage(afterToken: "20")
+        let callsAfterSecond = profileCalls().count
+        // The cache holds across pages: the only new calls are for authors the
+        // first page never showed. Repeat authors cost nothing — which is what
+        // carries the deduplication claim now that the roster is larger than a
+        // page and the first page has no repeats of its own to prove it.
+        let newAuthors = Set(second.entries.map(\.post.authorID)).subtracting(authorsOnFirstPage)
+        #expect(callsAfterSecond - callsAfterFirst == newAuthors.count)
     }
 
     @Test func pagesHydrateLikeCountsWithOneBatchedCounterRead() async throws {

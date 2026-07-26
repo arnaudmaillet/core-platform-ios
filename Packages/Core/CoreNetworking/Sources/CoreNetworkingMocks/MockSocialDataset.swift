@@ -78,7 +78,50 @@ public struct MockSocialDataset: Sendable {
             ("sofia.reyes", "Sofía Reyes", "Cocino, viajo, repito.", "https://sofia.example/blog"),
             ("tom.okafor", "Tom Okafor", "Bass, mostly.", ""),
             ("yuki.snow", "Yuki Shirakawa", "Snow reports and mountain film.\nSee you in Hakuba.", ""),
-            ("zed.aldrin", "Zed Aldrin", "", "https://zed.example")
+            ("zed.aldrin", "Zed Aldrin", "", "https://zed.example"),
+            ("nina.varga", "Nina Varga", "Ceramics, badly. Improving.", ""),
+            ("olu.adeyemi", "Olu Adeyemi", "Backend by day, bread by night.", "https://olu.example"),
+            ("priya.raman", "Priya Raman", "Long runs and longer playlists.", ""),
+            ("quentin.dubois", "Quentin Dubois", "", ""),
+            ("rosa.iglesias", "Rosa Iglesias", "Archivist. Ask me about microfilm.", ""),
+            ("sam.whitfield", "Sam Whitfield", "Boats, mostly small ones.", "https://sam.example"),
+            ("tara.nkemelu", "Tara Nkemelu", "Illustration + risograph.", ""),
+            ("umar.qadir", "Umar Qadir", "Teaching maths, learning guitar.", ""),
+            ("vera.lindqvist", "Vera Lindqvist", "Cold water swimmer.\nYes, year round.", ""),
+            ("wes.bramley", "Wes Bramley", "", ""),
+            ("xiomara.cruz", "Xiomara Cruz", "Salsa on Tuesdays.", "https://xio.example"),
+            ("yannis.papas", "Yannis Papas", "Olive groves and old engines.", ""),
+            ("zara.hadid", "Zara Hadid", "Drawing buildings that won't stand up.", ""),
+            ("aiko.tanabe", "Aiko Tanabe", "Tea, type, and terrible puns.", ""),
+            ("bruno.costa", "Bruno Costa", "", ""),
+            ("chloe.baptiste", "Chloé Baptiste", "Sound design for small films.", "https://chloe.example"),
+            ("dmitri.orlov", "Dmitri Orlov", "Chess clocks and film cameras.", ""),
+            ("elif.demir", "Elif Demir", "Rooftop gardener.", ""),
+            ("finn.oleary", "Finn O'Leary", "Sea swimming, poorly.", ""),
+            ("greta.hansen", "Greta Hansen", "Maps, always maps.", "https://greta.example"),
+            ("hugo.martel", "Hugo Martel", "", ""),
+            ("ines.ferreira", "Inês Ferreira", "Botanical prints.", ""),
+            ("jonas.weber", "Jonas Weber", "Cycling the long way round.", ""),
+            ("kaia.lindgren", "Kaia Lindgren", "Ceramicist. Kiln #3.", ""),
+            ("leo.marchetti", "Leo Marchetti", "Espresso and edge cases.", ""),
+            ("mira.solberg", "Mira Solberg", "Field recordings.", "https://mira.example"),
+            ("noah.brandt", "Noah Brandt", "", ""),
+            ("orla.kavanagh", "Orla Kavanagh", "Sea glass and short stories.", ""),
+            ("pavel.novak", "Pavel Novák", "Trams, timetables, trivia.", ""),
+            ("quinn.abara", "Quinn Abara", "", "https://quinn.example"),
+            ("rita.moreno", "Rita Moreno", "Weaving on a very old loom.", ""),
+            ("stefan.ilic", "Stefan Ilić", "Mountains before breakfast.", ""),
+            ("tessa.okonkwo", "Tessa Okonkwo", "Type design, slowly.", ""),
+            ("ulf.johansson", "Ulf Johansson", "", ""),
+            ("valeria.rossi", "Valeria Rossi", "Pasta, patiently.", "https://valeria.example"),
+            ("wren.mackay", "Wren MacKay", "Birds, bothies, bad weather.", ""),
+            ("xander.pike", "Xander Pike", "Restoring one motorbike forever.", ""),
+            ("yara.haddad", "Yara Haddad", "Murals and mosaics.", ""),
+            ("zeke.turner", "Zeke Turner", "", ""),
+            ("amara.diallo", "Amara Diallo", "Documentary sound.", "https://amara.example"),
+            ("bo.lindholm", "Bo Lindholm", "Woodcut prints.", ""),
+            ("celia.marsh", "Celia Marsh", "Rock pools and field notes.", ""),
+            ("dara.singh", "Dara Singh", "Kites, mostly homemade.", "")
         ]
         authors = names.enumerated().map { index, name in
             Author(
@@ -139,9 +182,20 @@ public struct MockSocialDataset: Sendable {
         }
         posts = records
 
-        followedProfileIDs = Set(authors.prefix(4).map(\.profileID))
+        // Twelve follows, not four: the compose picker expands the viewer's
+        // first eight follows into friend-of-friend candidates
+        // (`SocialConnectionsRepository.connectorExpansionLimit`), so a
+        // four-follow graph could never produce more than a handful of
+        // suggestions — far too few to reach a second page.
+        followedProfileIDs = Set(authors.prefix(12).map(\.profileID))
         mutualProfileIDs = Set(authors.prefix(2).map(\.profileID))
-        followerProfileIDs = mutualProfileIDs.union([authors[4].profileID])
+        // Unrequited followers are the STRONGEST suggestion tier ("follows
+        // you"), and the compose picker filters out anyone already in Recent —
+        // so they are drawn from the far end of the roster, clear of the
+        // authors the seeded conversations use. A pool that overlapped Recent
+        // collapsed to a handful of suggestions after deduplication, far too
+        // few to page.
+        followerProfileIDs = mutualProfileIDs.union(authors[18...].map(\.profileID))
 
         var followingGraph: [String: Set<String>] = [
             MockSocialDataset.viewerProfileID: followedProfileIDs

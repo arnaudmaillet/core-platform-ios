@@ -1064,7 +1064,13 @@ struct SuggestionsViewModelTests {
 
         viewModel.message(ProfileID("p1"))
         viewModel.didSelect(ProfileID("p1"))
-        #expect(router.routes == [.messageUser(ProfileID("p1")), .profile(ProfileID("p1"), stub: nil)])
+        // The DM route carries the row's identity: the thread is pushed before
+        // its conversation is known to exist, so the header has nothing else to
+        // render from until the find-or-create lands.
+        #expect(router.routes == [
+            .messageUser(ProfileID("p1"), stub: ProfileIdentityStub(handle: "p1", displayName: "Name p1")),
+            .profile(ProfileID("p1"), stub: nil)
+        ])
     }
 }
 

@@ -23,8 +23,12 @@ public enum AppRoute: Equatable, Sendable {
     case comments(PostID)
     case upload
     case conversation(ConversationID)
-    /// Open (find-or-create) a direct-message thread with a profile.
-    case messageUser(ProfileID)
+    /// Open a direct-message thread with a profile, finding or creating the
+    /// conversation as needed. The stub carries whatever identity the origin
+    /// was already rendering — a picker row, a suggestion, a map pin — so the
+    /// thread's header is correct on the push's first frame instead of after a
+    /// lookup; `nil` when the origin knows only the id (deep links, debug args).
+    case messageUser(ProfileID, stub: ProfileIdentityStub?)
     /// Compose a new message: the contact-selection flow. The inbox's compose
     /// button emits this; the resolver owns what it presents.
     case newMessage

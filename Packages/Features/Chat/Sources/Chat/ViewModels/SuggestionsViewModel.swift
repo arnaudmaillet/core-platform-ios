@@ -80,8 +80,14 @@ public final class SuggestionsViewModel {
     }
 
     /// The Messages-tab-native quick action: skip the profile and open a DM.
+    ///
+    /// The row's identity rides along, so the thread opens already titled
+    /// rather than resolving its header after the push has finished.
     public func message(_ id: ProfileID) {
-        router?.route(to: .messageUser(id))
+        let account = accounts.first { $0.id == id }
+        router?.route(to: .messageUser(id, stub: account.map {
+            ProfileIdentityStub(handle: $0.handle, displayName: $0.displayName)
+        }))
     }
 
     /// Optimistic follow/unfollow: the row flips immediately and rolls back if
