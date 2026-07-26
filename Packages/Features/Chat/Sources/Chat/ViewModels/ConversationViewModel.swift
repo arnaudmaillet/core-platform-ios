@@ -2,6 +2,21 @@ import CoreModels
 import CoreNavigation
 import Foundation
 
+/// What thread a screen is showing.
+///
+/// `.draft` is the compose path: the viewer picked a person, and whether a
+/// conversation with them exists is a question the *network* answers. Finding
+/// out costs a `ListSubscriptions` plus a `ListMembers` per conversation, which
+/// is far too much to spend between a finger going down and a screen appearing
+/// — so the thread opens on the identity alone and resolves underneath itself.
+public enum ConversationTarget: Equatable, Sendable {
+    case existing(ConversationID)
+    /// A conversation with `peer`, to be found-or-created. `displayName` is
+    /// whatever the origin already knew; empty means "look it up once there is
+    /// a conversation to look it up from".
+    case draft(peer: ProfileID, displayName: String)
+}
+
 @MainActor
 public final class ConversationViewModel {
     public nonisolated enum Phase: Equatable, Sendable {
@@ -47,11 +62,23 @@ public final class ConversationViewModel {
     /// Transient user-facing notice `(title, message)` — the view presents it
     /// modally (same honest-seam surface as the compose bar's media stub).
     public var onActionNotice: ((String, String) -> Void)?
+    /// A draft's conversation now exists. The inbox listens so a thread the
+    /// viewer started from the compose picker appears in the list behind them.
+    public var onDidResolveConversation: ((ConversationID) -> Void)?
 
-    private let conversationID: ConversationID
+    private let target: ConversationTarget
     private let repository: any ChatProviding
     private let directory: ConversationDirectory?
     private let router: (any Router)?
+
+    /// `nil` for a draft until its conversation resolves. Everything that
+    /// writes — sending, marking read — goes through `resolveConversation()`
+    /// rather than reading this, so none of them can act on a half-open thread.
+    private var conversationID: ConversationID?
+    /// Single-flight find-or-create. Started when the screen loads and awaited
+    /// again by the first send, so a viewer who types faster than the network
+    /// waits exactly once and nobody creates two conversations.
+    private var resolution: Task<ConversationID?, Never>?
 
     private var messages: [ChatMessage] = []
     private var phase: Phase = .loading { didSet { onPhaseChange?(phase) } }
@@ -69,24 +96,107 @@ public final class ConversationViewModel {
     private var deletedMessageIDs: Set<String> = []
 
     public init(
+        target: ConversationTarget,
+        repository: any ChatProviding,
+        directory: ConversationDirectory? = nil,
+        router: (any Router)? = nil
+    ) {
+        self.target = target
+        self.repository = repository
+        self.directory = directory
+        self.router = router
+        if case .existing(let id) = target { conversationID = id }
+    }
+
+    /// The ordinary entry: a thread that already exists.
+    public convenience init(
         conversationID: ConversationID,
         repository: any ChatProviding,
         directory: ConversationDirectory? = nil,
         router: (any Router)? = nil
     ) {
-        self.conversationID = conversationID
-        self.repository = repository
-        self.directory = directory
-        self.router = router
+        self.init(
+            target: .existing(conversationID),
+            repository: repository,
+            directory: directory,
+            router: router
+        )
     }
 
     public func viewDidLoad() {
-        reload()
         loadTitle()
+        switch target {
+        case .existing:
+            reload()
+        case .draft:
+            // Stay on the skeleton until the resolution answers. Publishing an
+            // empty transcript here would be asserting something not yet known
+            // — and when the peer turns out to have history (a thread sitting
+            // in Requests, or an inbox that hadn't finished loading when they
+            // were picked) the screen said "No messages yet" and then filled
+            // itself in, which reads as a glitch. The clean empty state is
+            // still what a genuinely new contact lands on; it just waits until
+            // that is true.
+            phase = .loading
+            _ = resolveConversation()
+        }
     }
 
     public func refresh() {
-        guard load == nil else { return }
+        guard load == nil, conversationID != nil else { return }
+        reload()
+    }
+
+    /// Finds-or-creates this thread's conversation, exactly once.
+    ///
+    /// Returns the same task to every caller, so the screen's own resolution
+    /// and a send racing it converge on one id — two `directConversation`
+    /// calls would create two conversations, and `chat.v1` cannot merge them.
+    @discardableResult
+    private func resolveConversation() -> Task<ConversationID?, Never> {
+        if let resolution { return resolution }
+        let task = Task<ConversationID?, Never> { [weak self] in
+            guard let self else { return nil }
+            guard case .draft(let peer, _) = self.target else { return self.conversationID }
+            guard let id = try? await self.repository.directConversation(with: peer) else {
+                // Drop the cached task so a later send can try again rather
+                // than inheriting this failure forever, and let the viewer type
+                // into an empty thread in the meantime.
+                self.resolution = nil
+                if case .loading = self.phase { self.emit() }
+                return nil
+            }
+            self.adopt(id, peer: peer)
+            return id
+        }
+        resolution = task
+        return task
+    }
+
+    /// Binds a freshly resolved conversation to this screen.
+    private func adopt(_ id: ConversationID, peer: ProfileID) {
+        conversationID = id
+        // Only when nothing better is known: an existing conversation the
+        // inbox has already summarised carries a real preview and timestamp,
+        // and overwriting that with a blank draft would degrade the list.
+        if directory?.summary(for: id) == nil {
+            directory?.remember([
+                Conversation(
+                    id: id,
+                    title: peerName,
+                    lastMessage: "",
+                    lastActivityAt: nil,
+                    otherMemberIDs: [peer]
+                )
+            ])
+        }
+        onDidResolveConversation?(id)
+        // The origin may not have known who this is (a deep link, a map pin);
+        // now that there is a conversation, its summary can say.
+        if peerName.isEmpty { loadTitle() }
+        // Adopt whatever history the peer already had. Failures stay silent —
+        // `reload` only reports one when there is no content, and the empty
+        // transcript published at load counts.
         reload()
     }
 
@@ -101,14 +211,26 @@ public final class ConversationViewModel {
         setSending(true)
         Task { [weak self] in
             guard let self else { return }
-            if let message = try? await self.repository.send(body, to: self.conversationID, replyingTo: replyTo) {
+            // A draft's conversation may still be being created. The send joins
+            // the resolution the screen already started rather than beginning
+            // one of its own — the wait lands here, on a message the viewer has
+            // committed to, instead of on the tap that opened the screen.
+            guard let id = await self.resolveConversation().value else {
+                self.setSending(false)
+                self.onActionNotice?(
+                    "Couldn't send",
+                    "This conversation couldn't be started. Please try again."
+                )
+                return
+            }
+            if let message = try? await self.repository.send(body, to: id, replyingTo: replyTo) {
                 self.messages.append(message)
                 self.emit()
                 // Only reached when the send succeeded, so there is nothing to
                 // roll back — an optimistic bubble the server rejected never
                 // gets this far.
-                self.onDidSendMessage?(self.conversationID, message)
-                await self.markRead(upTo: message.id)
+                self.onDidSendMessage?(id, message)
+                await self.markRead(id, upTo: message.id)
             }
             self.setSending(false)
         }
@@ -169,25 +291,26 @@ public final class ConversationViewModel {
     ///
     /// The write can still fail, so it reports that too and the inbox rolls
     /// the row back.
-    private func markRead(upTo messageID: String) async {
-        onDidMarkRead?(conversationID)
+    private func markRead(_ id: ConversationID, upTo messageID: String) async {
+        onDidMarkRead?(id)
         do {
-            try await repository.markRead(conversationID, upTo: messageID)
+            try await repository.markRead(id, upTo: messageID)
         } catch {
-            onMarkReadDidFail?(conversationID)
+            onMarkReadDidFail?(id)
         }
     }
 
     private func reload() {
+        guard let conversationID else { return }
         load?.cancel()
         load = Task { [weak self] in
             guard let self else { return }
             do {
-                let loaded = try await self.repository.loadMessages(in: self.conversationID)
+                let loaded = try await self.repository.loadMessages(in: conversationID)
                 self.messages = loaded
                 self.emit()
                 if let last = loaded.last {
-                    await self.markRead(upTo: last.id)
+                    await self.markRead(conversationID, upTo: last.id)
                 }
             } catch is CancellationError {
                 // Superseded.
@@ -212,6 +335,17 @@ public final class ConversationViewModel {
     }
 
     private func loadTitle() {
+        // A draft arrives with the identity the origin was already rendering —
+        // the picker row, the suggestion, the map pin — so the header is right
+        // at frame zero without consulting anything. This is what lets the
+        // whole screen open instantly rather than assembling itself on screen.
+        if case .draft(let peer, let displayName) = target, !displayName.isEmpty {
+            peerProfileID = peer
+            peerName = displayName
+            onTitleChange?(displayName)
+            return
+        }
+        guard let conversationID else { return }
         // Cache hit binds SYNCHRONOUSLY inside the view's `viewDidLoad`, i.e.
         // before the push transition's first frame — the list-tap path shows
         // the header identity throughout the animation. Any async hop, even a
@@ -226,7 +360,7 @@ public final class ConversationViewModel {
         // in — the data genuinely doesn't exist yet.
         Task { [weak self] in
             guard let self else { return }
-            if let summary = try? await self.repository.conversationSummary(for: self.conversationID),
+            if let summary = try? await self.repository.conversationSummary(for: conversationID),
                !summary.title.isEmpty {
                 self.peerProfileID = summary.directPeerID
                 self.peerName = summary.title

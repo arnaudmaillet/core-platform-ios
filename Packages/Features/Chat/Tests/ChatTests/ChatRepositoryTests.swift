@@ -34,14 +34,31 @@ struct ChatRepositoryTests {
 
         let conversations = try await repository.loadConversations()
 
-        // Three active threads (one answered, two ending on an inbound
-        // message) plus the two inbound-only request seeds.
-        #expect(conversations.count == 5)
-        let first = try #require(conversations.first)
-        #expect(!first.title.isEmpty)
-        #expect(first.title != first.id.rawValue) // hydrated name, not an id
-        #expect(!first.lastMessage.isEmpty)       // preview from getHistory
-        #expect(first.lastActivityAt != nil)
+        // Asserted as a shape, not a tally: the seed exists to populate a
+        // screen, so its size is expected to move as that screen's needs do.
+        // What must hold is that EVERY row hydrated — a count would have
+        // passed just as happily with half of them blank.
+        #expect(conversations.count > 5)
+        #expect(conversations.contains { $0.id == ConversationID("conv-req-0") })
+        for conversation in conversations {
+            #expect(!conversation.title.isEmpty)
+            #expect(conversation.title != conversation.id.rawValue) // name, not an id
+            #expect(!conversation.lastMessage.isEmpty)              // preview from getHistory
+            #expect(conversation.lastActivityAt != nil)
+        }
+    }
+
+    /// The peer's handle rides along from the same `GetProfileById` that
+    /// resolves the title. The compose picker's Recent rows are the only
+    /// consumer, and without it they render name-only beside sections that
+    /// show a handle.
+    @Test func hydrationCarriesThePeerHandle() async throws {
+        let conversations = try await makeRepository().loadConversations()
+
+        let direct = try #require(conversations.first { $0.directPeerID != nil })
+        let handle = try #require(direct.directPeerHandle)
+        #expect(!handle.isEmpty)
+        #expect(!handle.hasPrefix("@"))
     }
 
     /// `lastMessageIsMine` is what tells an unanswered request from a

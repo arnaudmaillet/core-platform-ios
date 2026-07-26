@@ -13,9 +13,22 @@ public protocol ChatFeatureBuilding {
     /// `.conversation` route.
     func makeConversationViewController(for conversationID: ConversationID) -> UIViewController
 
-    /// Opens (find-or-create) a DM thread with `profileID`. Async because it may
-    /// create the conversation; `nil` if that fails.
-    func makeDirectMessageViewController(with profileID: ProfileID) async -> UIViewController?
+    /// A DM thread with `profileID`, opened *before* it is known whether a
+    /// conversation exists — the thread finds or creates one underneath itself
+    /// once on screen. Synchronous on purpose: finding out first costs a
+    /// `ListSubscriptions` plus a `ListMembers` per conversation, which is far
+    /// more than a tap can spend before something appears. `displayName` is
+    /// whatever the origin already knew; empty is allowed, and the header then
+    /// fills in once there is a conversation to read it from.
+    func makeDraftConversationViewController(
+        with profileID: ProfileID,
+        displayName: String
+    ) -> UIViewController
+
+    /// The compose flow — pick someone, land in a thread with them. Pushed
+    /// onto the caller's stack like any other destination; picking a row emits
+    /// a route, so the caller arranges nothing.
+    func makeNewMessageViewController() -> UIViewController
 }
 
 extension ChatFeatureBuilding {

@@ -1,4 +1,5 @@
 import ChatInterface
+import CoreModels
 import CoreNavigation
 import FeedInterface
 import OSLog
@@ -80,27 +81,20 @@ final class RouteResolver: Router {
             let thread = chatFeature().makeConversationViewController(for: conversationID)
             navigator.activeNavigationController?.pushViewController(thread, animated: true)
 
-        case .messageUser(let profileID):
-            // Creating/finding the DM is async; capture the destination stack now.
-            let chatFeature = chatFeature
-            let nav = navigator.activeNavigationController
-            Task {
-                if let thread = await chatFeature().makeDirectMessageViewController(with: profileID) {
-                    nav?.pushViewController(thread, animated: true)
-                }
-            }
+        case .messageUser(let profileID, let stub):
+            // Pushed immediately, with whatever identity the origin knew. The
+            // thread finds-or-creates its conversation once it is on screen —
+            // previously this awaited that call before pushing anything, which
+            // is exactly as slow as it sounds from a tap.
+            let thread = chatFeature().makeDraftConversationViewController(
+                with: profileID,
+                displayName: stub?.displayName ?? ""
+            )
+            navigator.activeNavigationController?.pushViewController(thread, animated: true)
 
         case .newMessage:
-            // Interim: the contact-selection flow doesn't exist yet. This is
-            // its one landing site — swap the alert for the picker (which
-            // then emits `.messageUser`) without touching any emitter.
-            let alert = UIAlertController(
-                title: "New Message",
-                message: "Contact selection is on its way. Until then, open someone's profile and tap Message.",
-                preferredStyle: .alert
-            )
-            alert.addAction(UIAlertAction(title: "OK", style: .default))
-            navigator.activeNavigationController?.present(alert, animated: true)
+            let picker = chatFeature().makeNewMessageViewController()
+            navigator.activeNavigationController?.pushViewController(picker, animated: true)
         }
     }
 }

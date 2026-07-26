@@ -25,9 +25,11 @@ struct MapFavoritesRepositoryTests {
 
         let favorites = await makeRepository(bff: bff).following()
 
-        // The mock's following set (dataset.followedProfileIDs = prof-0…3),
-        // hydrated with display names and avatars.
-        #expect(favorites.count == 4)
+        // Derived from the dataset rather than pinned to a literal: the seeded
+        // follow set is sized for whatever the app's screens need to show, and
+        // what this test is actually about is that every followed profile
+        // comes back hydrated.
+        #expect(favorites.count == dataset.followedProfileIDs.count)
         #expect(Set(favorites.map(\.profileID.rawValue)) == dataset.followedProfileIDs)
         #expect(favorites.allSatisfy { !$0.title.isEmpty })
         #expect(favorites.allSatisfy { $0.avatarURL != nil })

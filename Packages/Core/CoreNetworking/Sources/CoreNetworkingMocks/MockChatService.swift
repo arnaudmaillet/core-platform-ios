@@ -27,14 +27,25 @@ public final class MockChatService: @unchecked Sendable {
     /// `conv-req-0`/`conv-req-1` are with authors the viewer does NOT follow
     /// and has never answered, which is exactly what `MessageRequestPolicy`
     /// partitions into the Requests tab.
+    /// Sixteen active conversations, so the compose picker's Recent section is
+    /// full enough to hit its fifteen-row cap and the inbox itself scrolls.
+    /// `conv-0`..`conv-11` are with authors the viewer follows; `conv-12`..
+    /// `conv-15` are with authors they do NOT follow but HAVE answered, which
+    /// keeps them out of Requests by the other half of the partition rule.
     private var otherMember: [String: String] {
-        [
-            "conv-0": dataset.authors[0].profileID,
-            "conv-1": dataset.authors[1].profileID,
-            "conv-2": dataset.authors[2].profileID,
-            "conv-req-0": dataset.authors[5].profileID,
-            "conv-req-1": dataset.authors[6].profileID
+        var members: [String: String] = [
+            "conv-req-0": dataset.authors[16].profileID,
+            "conv-req-1": dataset.authors[17].profileID
         ]
+        for index in 0..<16 {
+            members["conv-\(index)"] = dataset.authors[index].profileID
+        }
+        return members
+    }
+
+    /// Every seeded conversation id, newest activity first.
+    private var conversationIDs: [String] {
+        (0..<16).map { "conv-\($0)" } + ["conv-req-0", "conv-req-1"]
     }
     private let viewer = MockSocialDataset.viewerProfileID
 
@@ -45,7 +56,7 @@ public final class MockChatService: @unchecked Sendable {
     public func register(on bff: MockBFF) {
         bff.register(path: "/chat.v1.ChatService/ListSubscriptions") { [self] (_: Chat_V1_ListSubscriptionsRequest) in
             var response = Chat_V1_ListSubscriptionsResponse()
-            response.conversationIds = ["conv-0", "conv-1", "conv-2", "conv-req-0", "conv-req-1"]
+            response.conversationIds = conversationIDs
             return .success(response)
         }
         bff.register(path: "/chat.v1.ChatService/ListMembers") { [self] (request: Chat_V1_ListMembersRequest) in
@@ -135,6 +146,46 @@ public final class MockChatService: @unchecked Sendable {
             return inbound.enumerated().map { index, spec in
                 var view = Chat_V1_MessageView()
                 view.messageID = "\(conversationID)-m\(index)"
+                view.senderID = spec.0
+                view.body = spec.1
+                view.createdAtMs = nowMs - spec.2 * minute
+                return view
+            }
+        }
+        // `conv-3`..`conv-15`: short, varied threads. Those with a peer the
+        // viewer does not follow end on the VIEWER's message, which is what
+        // keeps them in the active inbox rather than Requests.
+        if let index = Int(conversationID.dropFirst("conv-".count)), index >= 3 {
+            let answered = index >= 12
+            let openers = [
+                "Are we still on for Thursday?",
+                "Sent you the files 👍",
+                "That place you mentioned — what was it called?",
+                "Congrats on the launch!",
+                "Any chance you're free later this week?",
+                "Just saw your post, that light is unreal",
+                "Thanks again for yesterday"
+            ]
+            let replies = [
+                "Yep, works for me",
+                "Got them, thanks!",
+                "I'll dig out the link",
+                "Appreciate it 🙏",
+                "Let me check and come back to you"
+            ]
+            // Staggered so the inbox (and Recent) has a real recency order
+            // rather than a block of identical timestamps.
+            let base = Int64(index) * 37 + 20
+            var thread: [(String, String, Int64)] = [
+                (other, openers[index % openers.count], base + 12),
+                (viewer, replies[index % replies.count], base + 6)
+            ]
+            if !answered {
+                thread.append((other, "👍", base))
+            }
+            return thread.enumerated().map { position, spec in
+                var view = Chat_V1_MessageView()
+                view.messageID = "\(conversationID)-m\(position)"
                 view.senderID = spec.0
                 view.body = spec.1
                 view.createdAtMs = nowMs - spec.2 * minute

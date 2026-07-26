@@ -162,7 +162,9 @@ public final class ProfileViewModel {
     /// imports Chat; it only emits a route.
     public func messageTapped() {
         guard canMessage, let profile else { return }
-        router?.route(to: .messageUser(profile.id))
+        router?.route(to: .messageUser(profile.id, stub: ProfileIdentityStub(
+            handle: profile.handle, displayName: profile.displayName
+        )))
     }
 
     // MARK: - Gallery
