@@ -153,6 +153,31 @@ public final class ProfileViewModel {
     /// menu opened mid-load offers sharing only rather than guessing.
     public var canModerate: Bool { followButton == .follow || followButton == .following }
 
+    /// Everything the share sheet renders, resolved together so the QR code,
+    /// the card, and the system share sheet's link preview cannot disagree
+    /// about who is being shared.
+    public nonisolated struct ShareCard: Equatable, Sendable {
+        public let displayName: String
+        /// Includes the leading `@`.
+        public let handle: String
+        public let avatarURL: URL?
+        public let url: URL
+    }
+
+    /// The share payload, once the profile has loaded. `nil` before then —
+    /// every share affordance is gated on it rather than rendering a card
+    /// with a placeholder identity.
+    public var shareCard: ShareCard? {
+        profile.map {
+            ShareCard(
+                displayName: $0.displayName,
+                handle: "@" + $0.handle,
+                avatarURL: $0.avatarURL,
+                url: ProfileShareLink.url(handle: $0.handle)
+            )
+        }
+    }
+
     /// The profile's shareable link, once the handle is known.
     public var shareLink: URL? {
         profile.map { ProfileShareLink.url(handle: $0.handle) }

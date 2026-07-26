@@ -19,6 +19,9 @@ final class ProfileViewController: UIViewController {
     private let switcherFactory: ProfileSwitcherMenuFactory?
 
     private let scrollView = UIScrollView()
+    /// Retained for the share sheet, which builds its own QR card (and a
+    /// throwaway one to rasterize) and needs the same avatar cache.
+    private let imagePipeline: ImagePipeline
     private let headerView: ProfileHeaderView
     private let galleryPager: ProfileGalleryPagerView
     /// The filter tray's two selectors, hosted as custom bar items in the
@@ -129,6 +132,7 @@ final class ProfileViewController: UIViewController {
         self.makeEditViewController = makeEditViewController
         self.makeSettingsViewController = makeSettingsViewController
         self.switcherFactory = switcherFactory
+        self.imagePipeline = imagePipeline
         headerView = ProfileHeaderView(imagePipeline: imagePipeline)
         galleryPager = ProfileGalleryPagerView(imagePipeline: imagePipeline)
         super.init(nibName: nil, bundle: nil)
@@ -194,6 +198,9 @@ final class ProfileViewController: UIViewController {
         }
         headerView.onWebsiteTapped = { url in
             UIApplication.shared.open(url)
+        }
+        headerView.onQRCodeTapped = { [weak self] in
+            self?.presentShareSheet()
         }
         configureMoreMenu()
         viewModel.onActionResult = { [weak self] result in
@@ -291,12 +298,27 @@ final class ProfileViewController: UIViewController {
                 self.copyProfileLink()
             }
         }
+        let arguments = ProcessInfo.processInfo.arguments
+        // Dev convenience: `-profile-share-demo [activity]` opens the QR share sheet once
+        // the profile has loaded — the sheet is behind a tap on the header's
+        // QR bubble, which the sim can't deliver.
+        if let index = arguments.firstIndex(of: "-profile-share-demo") {
+            let alsoOpenActivity = arguments.dropFirst(index + 1).first == "activity"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.presentShareSheet()
+                guard alsoOpenActivity else { return }
+                // Chains into the system share sheet, so the whole handoff —
+                // card rasterization included — is screenshottable.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                    (self?.presentedViewController as? ProfileShareViewController)?.qaPresentActivitySheet()
+                }
+            }
+        }
         // Dev convenience: `-profile-block-demo [account]` runs the block
         // command for real (mock `social_graph.v1/Block`, then the
         // confirmation toast and the pop), skipping only the confirmation
         // sheet — which needs a tap the simulator can't deliver. Pass
         // `account` to exercise the account-wide fan-out.
-        let arguments = ProcessInfo.processInfo.arguments
         if let index = arguments.firstIndex(of: "-profile-block-demo") {
             let scope: ProfileBlockScope =
                 arguments.dropFirst(index + 1).first == "account" ? .account : .profile
@@ -367,7 +389,7 @@ final class ProfileViewController: UIViewController {
         // Sharing needs a loaded handle; until then the menu is honestly empty
         // rather than offering an action that would no-op.
         var groups: [UIMenuElement] = []
-        if viewModel.shareLink != nil {
+        if viewModel.shareCard != nil {
             groups.append(UIMenu(options: .displayInline, children: [
                 UIAction(title: "Share", image: UIImage(systemName: "square.and.arrow.up")) {
                     [weak self] _ in self?.presentShareSheet()
@@ -409,13 +431,16 @@ final class ProfileViewController: UIViewController {
         return groups
     }
 
-    /// Shares the profile's web link. The BFF returns no canonical URL, so the
-    /// link is synthesized from the handle — see `ProfileShareLink`.
+    /// Opens the unified share surface — the QR sheet — rather than jumping
+    /// straight to the system share sheet. Both the header's QR bubble and the
+    /// menu's Share land here, so there is exactly one answer to "share this
+    /// profile"; the system sheet is reachable from inside it.
     private func presentShareSheet() {
-        guard let link = viewModel.shareLink else { return }
-        let activity = UIActivityViewController(activityItems: [link], applicationActivities: nil)
-        activity.popoverPresentationController?.sourceView = headerView.moreButtonAnchor
-        present(activity, animated: true)
+        guard let card = viewModel.shareCard else { return }
+        present(
+            ProfileShareViewController(card: card, imagePipeline: imagePipeline),
+            animated: true
+        )
     }
 
     private func copyProfileLink() {
