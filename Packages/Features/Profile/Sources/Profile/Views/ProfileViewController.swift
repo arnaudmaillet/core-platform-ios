@@ -1,5 +1,6 @@
 import MediaCore
 import CoreModels
+import CoreNavigation
 import DesignSystem
 import UIKit
 
@@ -314,7 +315,9 @@ final class ProfileViewController: UIViewController {
             let chained = arguments.dropFirst(index + 1).first
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                 self?.presentShareSheet()
-                let chainedActions = ["activity", "send", "search", "search-cancel", "search-send"]
+                let chainedActions = [
+                    "activity", "send", "search", "search-empty", "search-cancel", "search-send"
+                ]
                 guard chainedActions.contains(chained ?? "") else { return }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                     let sheet = self?.presentedViewController as? ProfileShareViewController
@@ -322,7 +325,9 @@ final class ProfileViewController: UIViewController {
                     case "activity": sheet?.qaHandOffToSystemShare()
                     case "send": sheet?.qaSendToFirstTarget()
                     default:
-                        sheet?.qaBeginSearch("a")
+                        // `search-empty` opens search WITHOUT typing, which is
+                        // the suggestions-on-entry state.
+                        sheet?.qaBeginSearch(chained == "search-empty" ? "" : "a")
                         // `search-cancel` also backs out again, so the
                         // restored state is screenshottable.
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
@@ -460,7 +465,13 @@ final class ProfileViewController: UIViewController {
     private func presentShareSheet() {
         guard let card = viewModel.shareCard else { return }
         let sheet = ProfileShareViewController(
-            card: card, imagePipeline: imagePipeline, targeting: shareTargeting
+            card: card,
+            imagePipeline: imagePipeline,
+            targeting: shareTargeting,
+            // Read HERE, where there is a window: the sheet has none until it
+            // is already on screen, and reading it there made the corners snap
+            // after the presentation animation instead of riding it.
+            deviceCornerRadius: ScreenGeometry.cornerRadius(behind: view)
         )
         // Both escape hatches come back HERE, after the sheet has dismissed
         // itself: the system sheet would otherwise stack on top of this one,

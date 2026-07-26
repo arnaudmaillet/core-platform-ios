@@ -32,6 +32,7 @@ final class ProfileShareViewController: UIViewController {
     private let card: ProfileViewModel.ShareCard
     private let imagePipeline: ImagePipeline
     private let targeting: (any ProfileShareTargeting)?
+    private let deviceCornerRadius: CGFloat
 
     /// The sheet's own Liquid Glass surface. UIKit gives a `.pageSheet` an
     /// opaque background; this replaces it, so the profile underneath stays
@@ -94,20 +95,42 @@ final class ProfileShareViewController: UIViewController {
     }()
     private lazy var resultsSource = makeResultsSource()
     private let emptyResultsLabel = UILabel()
+    private let resultsSpinner = UIActivityIndicatorView(style: .medium)
+    /// The suggestion set, retained so entering search can show it instantly.
+    /// An empty list behind a blinking cursor reads as "no one to send to";
+    /// the people you'd most likely pick are already in hand.
+    private var suggestedTargets: [ProfileShareTarget] = []
 
+    /// - Parameter deviceCornerRadius: the physical display's corner radius,
+    ///   read by the PRESENTER (which has a window) and handed in.
+    ///
+    ///   This used to be read here, in `viewDidAppear`, from
+    ///   `ScreenGeometry.cornerRadius(behind: view)` — and that is too late by
+    ///   construction: the sheet has no window until it is on screen, so the
+    ///   whole presentation animated with UIKit's default radius and the
+    ///   corners snapped to the device's the instant it finished. Taking it as
+    ///   an input means `preferredCornerRadius` is set before the first frame.
     init(
         card: ProfileViewModel.ShareCard,
         imagePipeline: ImagePipeline,
-        targeting: (any ProfileShareTargeting)?
+        targeting: (any ProfileShareTargeting)?,
+        deviceCornerRadius: CGFloat
     ) {
         self.card = card
         self.imagePipeline = imagePipeline
         self.targeting = targeting
+        self.deviceCornerRadius = deviceCornerRadius
         cardView = ProfileQRCardView(imagePipeline: imagePipeline)
         targetsView = ProfileShareTargetsView(imagePipeline: imagePipeline, inset: Self.margin)
         super.init(nibName: nil, bundle: nil)
         modalPresentationStyle = .pageSheet
         configureDetent()
+        // Concentric by construction, and settled before presentation for the
+        // same reason: a shape inset by `margin` inside a rounded rect keeps a
+        // curve parallel to it when its radius is reduced by exactly that.
+        if deviceCornerRadius > 0 {
+            cardView.setCornerRadius(max(deviceCornerRadius - Self.margin, 8))
+        }
     }
 
     @available(*, unavailable)
@@ -132,6 +155,10 @@ final class ProfileShareViewController: UIViewController {
         ]
         sheet.selectedDetentIdentifier = Self.detentIdentifier
         sheet.prefersGrabberVisible = true
+        // Set HERE, from init — not in `viewDidAppear`. See the initializer.
+        if deviceCornerRadius > 0 {
+            sheet.preferredCornerRadius = deviceCornerRadius
+        }
     }
 
     override func viewDidLoad() {
@@ -151,7 +178,6 @@ final class ProfileShareViewController: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         materializeGlass()
-        matchSheetCornersToDevice()
     }
 
     /// Materialized on window attach, never in init: building a real effect
@@ -161,23 +187,6 @@ final class ProfileShareViewController: UIViewController {
     private func materializeGlass() {
         guard view.window != nil, glassBackdrop.effect == nil else { return }
         glassBackdrop.effect = UIGlassEffect(style: .regular)
-    }
-
-    /// Rounds the sheet to the physical display's own corner radius, so its
-    /// shoulders sit concentric with the bezel rather than close-but-not-quite.
-    /// Reading the radius needs a window, hence `viewDidAppear`.
-    private func matchSheetCornersToDevice() {
-        let radius = ScreenGeometry.cornerRadius(behind: view)
-        guard radius > 0, sheetPresentationController?.preferredCornerRadius != radius else { return }
-        sheetPresentationController?.animateChanges {
-            sheetPresentationController?.preferredCornerRadius = radius
-        }
-        // Concentric by construction: a shape inset by `margin` inside a
-        // rounded rect keeps a curve parallel to it when its own radius is
-        // reduced by exactly that inset. The card is inset by `margin` on
-        // every visible side, so this is the radius that makes its corners
-        // follow the sheet's rather than merely resemble them.
-        cardView.setCornerRadius(max(radius - Self.margin, 8))
     }
 
     override func viewDidLayoutSubviews() {
@@ -380,7 +389,14 @@ final class ProfileShareViewController: UIViewController {
         }
         Task { [weak self] in
             let targets = await targeting.shareTargets(limit: Self.targetLimit)
-            guard let self, !self.isSearching else { return }
+            guard let self else { return }
+            self.suggestedTargets = targets
+            // If search opened before the graph answered, its list is waiting
+            // on exactly these.
+            if self.isSearching, self.searchBar.text?.isEmpty != false {
+                self.showSuggestionsInResults()
+            }
+            guard !self.isSearching else { return }
             // Renders even when empty: the row keeps its Search bubble, which
             // is the whole point of it leading the row.
             self.targetsView.render(targets)
@@ -407,8 +423,10 @@ final class ProfileShareViewController: UIViewController {
         for section in nonSearchSections {
             section.isHidden = searching
         }
-        resultsView.isHidden = !searching
         emptyResultsLabel.isHidden = true
+        // `setSpinning` owns the list's visibility, so it runs after
+        // `isSearching` has been updated above.
+        setSpinning(false)
         if !searching {
             applyResults([])
         }
@@ -419,6 +437,7 @@ final class ProfileShareViewController: UIViewController {
         }
 
         if searching {
+            showSuggestionsInResults()
             searchBar.becomeFirstResponder()
         } else {
             searchBar.text = nil
@@ -430,14 +449,40 @@ final class ProfileShareViewController: UIViewController {
         }
     }
 
+    /// The list's resting content in search mode: the same people the
+    /// horizontal row suggests, or a spinner if they haven't landed yet.
+    private func showSuggestionsInResults() {
+        searchTask?.cancel()
+        searchTask = nil
+        emptyResultsLabel.isHidden = true
+        applyResults(suggestedTargets)
+        setSpinning(suggestedTargets.isEmpty && targeting != nil)
+    }
+
+    /// The spinner REPLACES the list rather than floating over it: an
+    /// indicator laid on top of the previous query's rows reads as "these
+    /// results are loading", which is the one thing it doesn't mean. The
+    /// 250ms debounce keeps the blank beat short.
+    private func setSpinning(_ spinning: Bool) {
+        if spinning {
+            resultsSpinner.startAnimating()
+        } else {
+            resultsSpinner.stopAnimating()
+        }
+        resultsView.isHidden = spinning || !isSearching
+    }
+
     private func runSearch(_ query: String) {
         searchTask?.cancel()
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard let targeting, !trimmed.isEmpty else {
-            applyResults([])
-            emptyResultsLabel.isHidden = true
+            // Cleared back to empty: the suggestions are the right resting
+            // state, not a blank list.
+            showSuggestionsInResults()
             return
         }
+        emptyResultsLabel.isHidden = true
+        setSpinning(true)
         searchTask = Task { [weak self] in
             // Debounce: a keystroke every ~50ms would otherwise put a search
             // per character on the wire, and the answers would land out of
@@ -448,6 +493,7 @@ final class ProfileShareViewController: UIViewController {
             guard !Task.isCancelled else { return }
             let results = await targeting.searchTargets(query: trimmed, limit: Self.searchResultLimit)
             guard let self, !Task.isCancelled, self.isSearching else { return }
+            self.setSpinning(false)
             self.applyResults(results)
             self.emptyResultsLabel.isHidden = !results.isEmpty
         }
@@ -471,6 +517,13 @@ final class ProfileShareViewController: UIViewController {
             resultsView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
             resultsView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
             resultsView.bottomAnchor.constraint(equalTo: parent.keyboardLayoutGuide.topAnchor)
+        }
+        // Centred on the list rather than pinned under the field: it marks
+        // "the answer is coming", and the answer fills the list.
+        resultsSpinner.hidesWhenStopped = true
+        resultsSpinner.constrain(in: view) { _ in
+            resultsSpinner.centerXAnchor.constraint(equalTo: resultsView.centerXAnchor)
+            resultsSpinner.topAnchor.constraint(equalTo: resultsView.topAnchor, constant: Spacing.xxl)
         }
         emptyResultsLabel.constrain(in: view) { parent in
             emptyResultsLabel.topAnchor.constraint(equalTo: resultsView.topAnchor, constant: Spacing.xxl)
