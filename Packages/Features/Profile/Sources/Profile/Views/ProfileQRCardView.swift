@@ -121,6 +121,14 @@ final class ProfileQRCardView: UIView {
         identity.axis = .vertical
         identity.alignment = .fill
         identity.spacing = 2
+        // The card's height is quiet zone + code + identity, and the identity
+        // block is the only part of it a shortfall could squeeze — a label's
+        // default vertical compression resistance is only 750. Raised to
+        // required, the card has no give at all, so a sheet drag can translate
+        // it but never re-proportion it.
+        for view in [nameLabel, handleLabel, identity] {
+            view.setContentCompressionResistancePriority(.required, for: .vertical)
+        }
 
         qrImageView.constrain(in: self) { parent in
             qrImageView.topAnchor.constraint(equalTo: parent.topAnchor, constant: Metrics.quietZone)
