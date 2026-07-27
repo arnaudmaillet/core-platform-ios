@@ -89,7 +89,12 @@ final class ProfileShareViewController: UIViewController {
             collectionViewLayout: UICollectionViewCompositionalLayout.list(using: configuration)
         )
         list.backgroundColor = .clear
-        list.keyboardDismissMode = .onDrag
+        // `.interactive`, not `.onDrag`: dragging the results carries the
+        // keyboard down with the finger instead of snapping it away. It is the
+        // gesture people actually reach for, and it lets them clear the
+        // keyboard WITHOUT leaving search — which matters more now that the
+        // sheet itself is locked while searching.
+        list.keyboardDismissMode = .interactive
         list.delegate = self
         list.isHidden = true
         return list
@@ -147,19 +152,25 @@ final class ProfileShareViewController: UIViewController {
     /// fraction of the screen and would park a fixed-height card above a dead
     /// gap. Nothing here scrolls vertically or expands, so a second detent
     /// would only offer the user a worse version of this one.
+    /// The content-sized detent. Rebuilt per install because changing modes
+    /// replaces the whole `detents` array.
+    private func contentDetent() -> UISheetPresentationController.Detent {
+        .custom(identifier: Self.detentIdentifier) { [weak self] context in
+            guard let self else { return context.maximumDetentValue * 0.7 }
+            return min(self.fittedContentHeight(), context.maximumDetentValue)
+        }
+    }
+
     private func configureDetent() {
         guard let sheet = sheetPresentationController else { return }
-        // Two detents, but only one is ever *offered*: the content-sized one
-        // the sheet lives at, and `.large()` it moves to while searching —
-        // where the keyboard has somewhere to go. Switching between them is
-        // driven by `setSearching`, never by the user dragging.
-        sheet.detents = [
-            .custom(identifier: Self.detentIdentifier) { [weak self] context in
-                guard let self else { return context.maximumDetentValue * 0.7 }
-                return min(self.fittedContentHeight(), context.maximumDetentValue)
-            },
-            .large()
-        ]
+        // EXACTLY ONE detent is installed at a time — see `applySheetMode`.
+        //
+        // This used to install both the content-sized detent and `.large()`
+        // together, with a comment claiming the user could not drag between
+        // them. That was simply untrue: a sheet holding two detents is always
+        // draggable between them, which is how the sheet came to slide down
+        // behind an open keyboard during search.
+        sheet.detents = [contentDetent()]
         sheet.selectedDetentIdentifier = Self.detentIdentifier
         sheet.prefersGrabberVisible = true
         // Set HERE, from init — not in `viewDidAppear`. See the initializer.
@@ -460,18 +471,18 @@ final class ProfileShareViewController: UIViewController {
         if !searching {
             applyResults([])
         }
-        sheetPresentationController?.animateChanges {
-            sheetPresentationController?.selectedDetentIdentifier = searching
-                ? .large
-                : Self.detentIdentifier
-        }
-
+        // Grow before raising the keyboard, and dismiss the keyboard before
+        // shrinking — so the sheet is never asked to resize around a keyboard
+        // that is about to move. A precaution rather than a fix for anything
+        // observed: the reverse order also worked in the simulator.
         if searching {
+            applySheetMode(searching: true)
             showSuggestionsInResults()
             searchBar.becomeFirstResponder()
         } else {
             searchBar.text = nil
             searchBar.resignFirstResponder()
+            applySheetMode(searching: false)
             restoreSuggestionsRow()
         }
     }
@@ -492,6 +503,40 @@ final class ProfileShareViewController: UIViewController {
         guard suggestionsAwaitingRender else { return }
         suggestionsAwaitingRender = false
         targetsView.render(suggestedTargets)
+    }
+
+    /// Swaps the sheet between its two modes, and LOCKS it while searching.
+    ///
+    /// Only one detent is offered at a time, so there is nothing to drag
+    /// between; and `isModalInPresentation` withholds the pull-to-dismiss
+    /// gesture, so the sheet cannot travel downward at all while the keyboard
+    /// is up. Together those make the sheet-behind-keyboard overlap impossible
+    /// by construction rather than something to race against.
+    ///
+    /// ⚠️ The pull-down is genuinely GONE while searching, not re-purposed.
+    /// `presentationControllerDidAttemptToDismiss` was wired here first, on the
+    /// assumption UIKit would report the swipe — it does not. With one detent
+    /// and `isModalInPresentation` there is nothing to resize and nothing to
+    /// dismiss, so the sheet's pan recognizer is never armed and the delegate
+    /// never fires (verified across five drag origins). Cancel is the exit;
+    /// the list's `.interactive` keyboard dismissal is how the keyboard is
+    /// cleared without leaving search.
+    private func applySheetMode(searching: Bool) {
+        guard let sheet = sheetPresentationController else { return }
+        isModalInPresentation = searching
+        sheet.animateChanges {
+            sheet.detents = searching ? [.large()] : [contentDetent()]
+            sheet.selectedDetentIdentifier = searching ? .large : Self.detentIdentifier
+        }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-profile-share-demo") {
+            print("SHEET-MODE searching=\(searching) "
+                + "detents=\(sheet.detents.count) "
+                + "selected=\(sheet.selectedDetentIdentifier?.rawValue ?? "nil") "
+                + "fitted=\(Int(fittedContentHeight())) "
+                + "viewH=\(Int(view.bounds.height))")
+        }
+        #endif
     }
 
     /// The list's resting content in search mode: the same people the
