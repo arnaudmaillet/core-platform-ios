@@ -5,10 +5,10 @@ import UIKit
 /// The compose picker: search the directory, or pick someone off the two lists
 /// the app already knows about.
 ///
-/// Search results replace the browsing sections *in the same collection view*
-/// rather than arriving in a `searchResultsController`. One data source means
-/// the transition between "who you talk to" and "who you searched for" is a
-/// diffable apply — rows animate into place — instead of a second controller
+/// Search narrows and extends the browsing sections *in the same collection
+/// view* rather than arriving in a `searchResultsController`. One data source
+/// means the transition between "who you talk to" and "who you searched for" is
+/// a diffable apply — rows animate into place — instead of a second controller
 /// sliding over the first, which is the seam that makes most search screens
 /// feel bolted together.
 final class NewMessageViewController: UIViewController {
@@ -41,7 +41,12 @@ final class NewMessageViewController: UIViewController {
 
     private let viewModel: NewMessageViewModel
 
-    private let searchDock = SearchDockView()
+    /// Search, collapsed to a magnifier in the bar's trailing slot until
+    /// tapped — `.integratedButton`, which is UIKit's own name for exactly that
+    /// behaviour. The same arrangement the profile's relationship lists landed
+    /// on, and for the same reason: it is the platform's answer for a *pushed*
+    /// screen, where the alternatives all cost a transition artefact.
+    private let searchController = UISearchController(searchResultsController: nil)
     private var collectionView: UICollectionView!
     private let statusView = InboxStatusView()
 
@@ -53,6 +58,8 @@ final class NewMessageViewController: UIViewController {
     #if DEBUG
     /// `-new-message-pick`'s target, fired on the first render that contains it.
     private var pendingDebugPick: ProfileID?
+    /// Latches the QA sequence to one run per screen.
+    private var hasRunDebugSequence = false
     #endif
 
     init(viewModel: NewMessageViewModel) {
@@ -79,8 +86,12 @@ final class NewMessageViewController: UIViewController {
         // header, which then squeezes bar items into an overflow "•••" menu.)
         navigationItem.largeTitleDisplayMode = .never
 
+        // Installed before anything else lays out. The search bar is part of the
+        // navigation item, so the bar it produces has to be settled BEFORE the
+        // push begins — assigning it later is what makes a search affordance
+        // flash into an already-animating navigation bar.
+        configureSearch()
         configureCollectionView()
-        configureSearchDock()
         configureStatusViews()
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
@@ -88,13 +99,6 @@ final class NewMessageViewController: UIViewController {
         viewModel.load()
 
         #if DEBUG
-        // Dev convenience, mirroring `-search-query` on the people-search tab:
-        // seeds the field on launch so the results path is reachable without
-        // driving the simulator's keyboard.
-        if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-new-message-query"),
-           index + 1 < ProcessInfo.processInfo.arguments.count {
-            searchDock.text = ProcessInfo.processInfo.arguments[index + 1]
-        }
         // `-new-message-pick <profile-id>` picks a row as soon as one showing
         // that person renders. Row taps can't be injected in-sim, and this is
         // the seam worth driving end to end: pick → push the thread →
@@ -119,45 +123,114 @@ final class NewMessageViewController: UIViewController {
         collectionView.allowsSelection = true
     }
 
-    override func viewWillDisappear(_ animated: Bool) {
-        super.viewWillDisappear(animated)
-        // The keyboard belongs to a screen that is leaving. The field itself
-        // needs no handling: it is a subview of this screen, so it travels with
-        // the transition like everything else on it — which is what a
-        // navigation-bar search palette could never do.
-        searchDock.resignFirstResponder()
+    #if DEBUG
+    /// Runs the QA sequence this launch asked for: type, cancel, pop — each
+    /// step optional, each anchored to the one before it.
+    ///
+    /// Anchored to appearance rather than `viewDidLoad`: activating a search
+    /// controller mid-push fights the transition. And driven through `isActive`
+    /// + the real updater rather than by poking the view model, so it exercises
+    /// the same path a tap on the magnifier takes.
+    ///
+    /// One-shot. Activating the search controller presents over this screen and
+    /// lands a SECOND `viewDidAppear` here when it settles; without the latch
+    /// the sequence re-arms itself and every step fires twice.
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard !hasRunDebugSequence else { return }
+        hasRunDebugSequence = true
+        let arguments = ProcessInfo.processInfo.arguments
+
+        // `-new-message-query <text>` mirrors `-search-query` on the
+        // people-search tab: seeds the field so the results path is reachable
+        // without driving the simulator's keyboard.
+        guard let index = arguments.firstIndex(of: "-new-message-query"),
+              let text = arguments.dropFirst(index + 1).first, !text.hasPrefix("-")
+        else {
+            qaPopIfRequested(arguments, after: 2)
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self else { return }
+            self.searchController.isActive = true
+            self.searchController.searchBar.text = text
+            self.updateSearchResults(for: self.searchController)
+
+            // `-new-message-search-cancel` collapses the field back to the
+            // magnifier two seconds later, so the collapse is recordable.
+            guard arguments.contains("-new-message-search-cancel") else {
+                self.qaPopIfRequested(arguments, after: 2)
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.searchController.isActive = false
+                self?.qaPopIfRequested(arguments, after: 2)
+            }
+        }
     }
 
-    /// Keeps the list clear of the docked field.
-    ///
-    /// Derived from where the dock actually IS rather than from its height, so
-    /// one expression covers both resting and keyboard-raised: the dock rides
-    /// `keyboardLayoutGuide`, and this measures the gap it leaves behind it.
-    /// The safe-area part is subtracted because `adjustedContentInset` already
-    /// counts it.
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        let clearance = view.bounds.maxY - searchDock.frame.minY + Spacing.sm
-        let inset = max(0, clearance - view.safeAreaInsets.bottom)
-        guard abs(collectionView.contentInset.bottom - inset) > 0.5 else { return }
-        collectionView.contentInset.bottom = inset
-        collectionView.verticalScrollIndicatorInsets.bottom = inset
+    /// `-new-message-pop` pops back to the inbox. The app-level `-auto-pop`
+    /// fires at a fixed 2.5s after launch, which races the 2.0s route that
+    /// pushes this screen in the first place; this one is anchored to the step
+    /// before it, so the pop transition is reliably recordable.
+    private func qaPopIfRequested(_ arguments: [String], after delay: TimeInterval) {
+        guard arguments.contains("-new-message-pop") else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.navigationController?.popViewController(animated: true)
+        }
+    }
+    #endif
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        // The keyboard belongs to a screen that is leaving, and an expanded
+        // search field belongs to a navigation bar that is about to carry
+        // someone else's items. Resigning is enough — the bar itself is the
+        // navigation controller's to collapse, and `definesPresentationContext`
+        // keeps the collapse scoped to this screen.
+        searchController.searchBar.resignFirstResponder()
     }
 
     // MARK: - Setup
 
-    private func configureSearchDock() {
-        searchDock.onQueryChange = { [weak self] query in self?.viewModel.queryChanged(query) }
-        searchDock.constrain(in: view) { parent in
-            searchDock.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor)
-            searchDock.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor)
-            // The guide tracks the keyboard, including interactive dismissal
-            // scrubs, so the field rides it with no keyboard math — the same
-            // dock `ChatInputBar` uses one screen further along.
-            searchDock.bottomAnchor.constraint(
-                equalTo: parent.keyboardLayoutGuide.topAnchor, constant: -Spacing.sm
-            )
-        }
+    /// The one canonical search surface: a magnifier in the navigation bar's
+    /// trailing slot that expands into a field in place.
+    ///
+    /// This replaced a bottom-docked glass capsule. The dock existed because an
+    /// earlier attempt at a *stacked* search bar flashed during the push — but
+    /// `.integratedButton` is not that shape: the resting state is a bar button,
+    /// which the navigation bar already knows how to carry through a transition,
+    /// so there is nothing to choreograph and nothing to strand.
+    private func configureSearch() {
+        searchController.searchResultsUpdater = self
+        // No dimming: the results land in THIS collection view, so there is
+        // nothing above to obscure and a scrim would only grey out the answer.
+        searchController.obscuresBackgroundDuringPresentation = false
+        searchController.searchBar.placeholder = "Search"
+        searchController.searchBar.autocapitalizationType = .none
+        searchController.searchBar.autocorrectionType = .no
+        searchController.searchBar.returnKeyType = .search
+        // The bar stays put while the field is active. Hiding it would take the
+        // Back button with it, and this screen is a dead end without one.
+        searchController.hidesNavigationBarDuringPresentation = false
+        // Stated rather than inherited: clearing through the system glyph routes
+        // back out via `updateSearchResults`, so an emptied field restores the
+        // browsing sections by the same path typing narrowed them.
+        searchController.searchBar.searchTextField.clearButtonMode = .whileEditing
+        // Left to UIKit deliberately — touching `showsCancelButton` would flip
+        // this to NO and hand us the job of showing and hiding it. Under
+        // `.integratedButton` the affordance renders as an ✕ glyph rather than
+        // the word "Cancel"; that is the native look, not a missing button.
+        searchController.automaticallyShowsCancelButton = true
+
+        navigationItem.searchController = searchController
+        navigationItem.preferredSearchBarPlacement = .integratedButton
+        // No toolbar hand-off. `UINavigationController` transfers a screen's
+        // toolbar items at transition *completion*, so letting UIKit relocate
+        // the field into the toolbar drops it into place after the push has
+        // already finished — visible as a late jump.
+        navigationItem.searchBarPlacementAllowsToolbarIntegration = false
+        definesPresentationContext = true
     }
 
     private func configureCollectionView() {
@@ -240,20 +313,19 @@ final class NewMessageViewController: UIViewController {
 
     private func configureStatusViews() {
         statusView.isHidden = true
-        // Bounded by the DOCK, not the safe area. `InboxStatusView` centres its
-        // column in whatever space it is given, so pinning it to the safe area
-        // centred "No people found" in the whole screen — behind the search
-        // field, and behind the keyboard above it. The dock rides
-        // `keyboardLayoutGuide`, so bounding the status view by its top edge
-        // makes the message centre in the space actually left over, and follow
-        // the keyboard up and down for free.
+        // Bounded below by the KEYBOARD rather than the safe area. The field now
+        // lives in the navigation bar, so nothing covers the bottom of the
+        // screen at rest — but the keyboard still does while the viewer is
+        // typing, and `InboxStatusView` centres its column in whatever space it
+        // is given. Riding `keyboardLayoutGuide` centres "No people found" in
+        // the space actually left over, and follows the keyboard up and down for
+        // free; with the keyboard down the guide sits on the bottom edge, which
+        // is the plain full-screen centring this state wants at rest.
         statusView.constrain(in: view) { parent in
             statusView.topAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.topAnchor)
             statusView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
             statusView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
-            statusView.bottomAnchor.constraint(
-                equalTo: searchDock.dockTopAnchor, constant: -Spacing.sm
-            )
+            statusView.bottomAnchor.constraint(equalTo: parent.keyboardLayoutGuide.topAnchor)
         }
     }
 
@@ -426,6 +498,15 @@ extension NewMessageViewController: UICollectionViewDelegate {
         guard case .person(_, let id) = dataSource.itemIdentifier(for: indexPath) else { return }
         collectionView.allowsSelection = false
         viewModel.didSelect(id)
+    }
+}
+
+extension NewMessageViewController: UISearchResultsUpdating {
+    /// Every keystroke, plus the system's own clear glyph and the cancel that
+    /// collapses the field. The view model owns trimming and debouncing, so this
+    /// stays a pass-through.
+    func updateSearchResults(for searchController: UISearchController) {
+        viewModel.queryChanged(searchController.searchBar.text ?? "")
     }
 }
 

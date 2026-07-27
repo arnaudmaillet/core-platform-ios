@@ -20,6 +20,10 @@ final class AppCoordinator: Coordinator {
     private let container: AppContainer
     private var stateObservation: Task<Void, Never>?
     private var mainTabCoordinator: MainTabCoordinator?
+    #if DEBUG
+    /// Latches the launch-argument deep links to one application per process.
+    private var hasAppliedLaunchArguments = false
+    #endif
 
     init(window: UIWindow, container: AppContainer) {
         self.window = window
@@ -30,6 +34,26 @@ final class AppCoordinator: Coordinator {
         window.rootViewController = LaunchViewController()
         window.makeKeyAndVisible()
 
+        #if DEBUG
+        // Dev convenience: `-mock-auto-login` signs into the mock BFF fixture
+        // account, skipping the login form on every run/screenshot cycle. It
+        // owns the whole startup sequence, because WHEN the observation starts
+        // decides how many shells get built — see `startWithMockAutoLogin`.
+        if ProcessInfo.processInfo.arguments.contains("-mock-auto-login") {
+            startWithMockAutoLogin()
+            return
+        }
+        #endif
+
+        observeAuthState()
+    }
+
+    /// Subscribes to the auth-state stream and renders every state it carries.
+    ///
+    /// `stateUpdates()` yields the CURRENT state on subscribe and then each
+    /// change, so the moment this is called is itself a decision about what gets
+    /// rendered — not merely when.
+    private func observeAuthState() {
         stateObservation = Task { [weak self] in
             guard let container = self?.container else { return }
             let realtimeClient = container.realtimeClient
@@ -45,49 +69,62 @@ final class AppCoordinator: Coordinator {
                 }
             }
         }
+    }
 
-        #if DEBUG
-        // Dev convenience: `-mock-auto-login` signs into the mock BFF fixture
-        // account, skipping the login form on every run/screenshot cycle.
-        // Logout first: a keychain session persisted from a previous run is
-        // always stale against the fresh in-process mock BFF.
-        if ProcessInfo.processInfo.arguments.contains("-mock-auto-login") {
-            let sessionManager = container.sessionManager
-            let credentials = container.environment.demoCredentials
-            let composeDemo = ProcessInfo.processInfo.arguments.contains("-mock-compose-demo")
-            let composeVideoDemo = ProcessInfo.processInfo.arguments.contains("-mock-compose-video-demo")
-            let composer = container.postComposer
-            Task {
-                await sessionManager.logout()
-                try? await sessionManager.login(
-                    username: credentials.username,
-                    password: credentials.password
+    #if DEBUG
+    /// Signs into the mock BFF fixture account, then starts observing.
+    ///
+    /// **The order is the point.** Logout has to come first — a keychain session
+    /// persisted from a previous run is always stale against the fresh
+    /// in-process mock BFF — and observing before it produced
+    /// `.authenticated` → `.unauthenticated` → `.authenticated`: the app built
+    /// an ENTIRE tab shell for the stale session, tore it down, and built a
+    /// second one. Two authenticated renders meant the launch-argument deep
+    /// links below fired twice and pushed two identical screens, which made
+    /// every transition recording unreadable (a pop revealed the duplicate
+    /// underneath and read as the pop reverting).
+    ///
+    /// Subscribing after the login resolves collapses that to a single render:
+    /// `stateUpdates()` replays the current state on subscribe, so nothing is
+    /// missed by arriving late, and the launch screen stays up for the round
+    /// trip instead of flashing the login form on the way past.
+    private func startWithMockAutoLogin() {
+        let sessionManager = container.sessionManager
+        let credentials = container.environment.demoCredentials
+        let composeDemo = ProcessInfo.processInfo.arguments.contains("-mock-compose-demo")
+        let composeVideoDemo = ProcessInfo.processInfo.arguments.contains("-mock-compose-video-demo")
+        let composer = container.postComposer
+        Task { [weak self] in
+            await sessionManager.logout()
+            try? await sessionManager.login(
+                username: credentials.username,
+                password: credentials.password
+            )
+            self?.observeAuthState()
+            // Exercises the real upload+create+publish flow so the compose
+            // wiring is verifiable without driving the picker UI.
+            if composeDemo {
+                try? await Task.sleep(for: .seconds(2))
+                try? await composer.publish(
+                    media: .image(PickedImage(Self.demoImage())),
+                    caption: "Shipped M4: photo upload + compose 🚀"
                 )
-                // Exercises the real upload+create+publish flow so the compose
-                // wiring is verifiable without driving the picker UI.
-                if composeDemo {
-                    try? await Task.sleep(for: .seconds(2))
+            }
+            // Same, for the video path: synthesize a source clip and run it
+            // through export → upload → publish → optimistic local playback.
+            if composeVideoDemo {
+                try? await Task.sleep(for: .seconds(2))
+                if let source = try? await PlaceholderVideoFetcher()
+                    .playableURL(for: URL(string: "mock://video/demo?w=720&h=1280")!) {
                     try? await composer.publish(
-                        media: .image(PickedImage(Self.demoImage())),
-                        caption: "Shipped M4: photo upload + compose 🚀"
+                        media: .video(PickedVideo(sourceURL: source)),
+                        caption: "My first video post 🎬"
                     )
-                }
-                // Same, for the video path: synthesize a source clip and run it
-                // through export → upload → publish → optimistic local playback.
-                if composeVideoDemo {
-                    try? await Task.sleep(for: .seconds(2))
-                    if let source = try? await PlaceholderVideoFetcher()
-                        .playableURL(for: URL(string: "mock://video/demo?w=720&h=1280")!) {
-                        try? await composer.publish(
-                            media: .video(PickedVideo(sourceURL: source)),
-                            caption: "My first video post 🎬"
-                        )
-                    }
                 }
             }
         }
-        #endif
     }
+    #endif
 
     deinit {
         stateObservation?.cancel()
@@ -138,6 +175,13 @@ final class AppCoordinator: Coordinator {
             setRoot(tabCoordinator.tabBarController)
 
             #if DEBUG
+            // Launch arguments describe how this PROCESS was started, so they
+            // are applied once and never replayed — a mid-session logout→login
+            // builds a second shell, and re-firing the original deep links into
+            // it would push screens the user never asked for.
+            guard !hasAppliedLaunchArguments else { return }
+            hasAppliedLaunchArguments = true
+
             // Dev convenience: `-open-profile <id>` fires a profile route once
             // the shell is up — the same code path universal links and taps use
             // — so cross-tab routing is testable without driving the UI.
@@ -236,7 +280,9 @@ final class AppCoordinator: Coordinator {
 }
 
 /// Shown only for the instant between scene connection and the first auth
-/// state emission (a local keychain read).
+/// state emission (a local keychain read) — or, under `-mock-auto-login`, for
+/// the fixture login round trip, which it covers rather than flashing the login
+/// form on the way past.
 private final class LaunchViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()

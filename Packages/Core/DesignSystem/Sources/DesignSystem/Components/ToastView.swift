@@ -159,8 +159,8 @@ public final class ToastView: UIView {
         super.didMoveToWindow()
         // Materialized on window attach, never in init: building a real effect
         // off-screen contacts the render server and stalls the main actor for
-        // tens of seconds on headless CI simulators (the rule `ChatInputBar`,
-        // `SearchDockView`, and `InboxCategoryBar` all follow).
+        // tens of seconds on headless CI simulators (the rule `ChatInputBar`
+        // and `InboxCategoryBar` both follow).
         //
         // Only the FIRST attach seeds it; from then on `animateIn`/`dismiss`
         // own the effect, and re-seeding here would refill a capsule that is
