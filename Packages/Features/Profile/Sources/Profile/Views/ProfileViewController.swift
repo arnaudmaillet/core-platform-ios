@@ -338,7 +338,11 @@ final class ProfileViewController: UIViewController {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                             sheet?.qaLowerKeyboard()
                             DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                                print("CANCEL-USABLE \(sheet?.qaCancelIsUsable ?? false)")
+                                // Reported separately: a missing sheet and an
+                                // unusable button are different failures, and
+                                // `?? false` conflated them.
+                                print("CANCEL-USABLE sheet=\(sheet != nil) "
+                                    + "usable=\(sheet.map(\.qaCancelIsUsable).map(String.init) ?? "n/a")")
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                                     sheet?.qaTapCancel()
                                 }

@@ -48,7 +48,11 @@ final class ProfileShareViewController: UIViewController {
     /// `setShowsCancelButton` controls visibility, not enablement. Lowering the
     /// keyboard interactively therefore left the only exit from search dead.
     /// A button we own cannot be disabled behind our back.
-    private let cancelSearchButton = UIButton(configuration: .filled())
+    private let cancelSearchButton = UIButton(type: .system)
+    /// The Close button's Liquid Glass lens. A real `UIGlassEffect` rather than
+    /// `UIButton.Configuration.glass()`, so its tint can be set — see
+    /// `materializeGlass`.
+    private let cancelGlass = UIVisualEffectView(effect: nil)
     /// Debounces keystrokes into one query, and lets a superseded search be
     /// cancelled rather than racing the one the user is actually typing.
     private var searchTask: Task<Void, Never>?
@@ -77,6 +81,7 @@ final class ProfileShareViewController: UIViewController {
     /// top inset a constant the view controller can set declaratively, instead
     /// of a measurement taken during layout.
     private static let searchRowHeight: CGFloat = 44
+    private static let cancelDiameter: CGFloat = 34
     /// The search bar's row, hidden until search is entered.
     private var searchBarSection: UIView?
     /// Everything search mode puts away: the card, the horizontal row, the
@@ -219,8 +224,18 @@ final class ProfileShareViewController: UIViewController {
     /// tens of seconds on headless CI simulators (the rule `ChatInputBar`,
     /// `SearchDockView`, and `ToastView` all follow).
     private func materializeGlass() {
-        guard view.window != nil, glassBackdrop.effect == nil else { return }
-        glassBackdrop.effect = UIGlassEffect(style: .regular)
+        guard view.window != nil else { return }
+        if glassBackdrop.effect == nil {
+            glassBackdrop.effect = UIGlassEffect(style: .regular)
+        }
+        if cancelGlass.effect == nil {
+            let glass = UIGlassEffect(style: .regular)
+            // The native press response — the lens flexes under a touch rather
+            // than sitting inert. It IS a touch target, so it should answer to
+            // being pressed (the same call `SearchDockView` makes).
+            glass.isInteractive = true
+            cancelGlass.effect = glass
+        }
     }
 
     /// The sheet's height, resolved on demand by the detent itself.
@@ -309,27 +324,28 @@ final class ProfileShareViewController: UIViewController {
         searchBar.delegate = self
         searchBar.isHidden = true
 
-        cancelSearchButton.configuration?.image = UIImage(
-            systemName: "xmark",
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+        cancelSearchButton.setImage(
+            UIImage(
+                systemName: "xmark",
+                withConfiguration: UIImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
+            ),
+            for: .normal
         )
-        cancelSearchButton.configuration?.contentInsets = .zero
-        cancelSearchButton.configuration?.cornerStyle = .capsule
-        // Opaque, like every other control on this glass sheet — a `.glass()`
-        // button here has nothing to refract and renders as a bare glyph.
-        cancelSearchButton.configuration?.baseBackgroundColor =
-            UIColor.secondarySystemBackground.withAlphaComponent(1)
-        cancelSearchButton.configuration?.baseForegroundColor = .label
+        cancelSearchButton.tintColor = .label
         cancelSearchButton.accessibilityLabel = "Cancel search"
         cancelSearchButton.addAction(
             UIAction { [weak self] _ in self?.setSearching(false) }, for: .primaryActionTriggered
         )
+        // The lens is the chrome; the button is just the glyph and the target.
+        cancelGlass.clipsToBounds = true
+        cancelGlass.cornerConfiguration = .capsule()
+        cancelSearchButton.pin(to: cancelGlass.contentView)
         NSLayoutConstraint.activate([
-            cancelSearchButton.widthAnchor.constraint(equalToConstant: 34),
-            cancelSearchButton.heightAnchor.constraint(equalToConstant: 34)
+            cancelGlass.widthAnchor.constraint(equalToConstant: Self.cancelDiameter),
+            cancelGlass.heightAnchor.constraint(equalToConstant: Self.cancelDiameter)
         ])
 
-        let searchRow = UIStackView(arrangedSubviews: [searchBar, cancelSearchButton])
+        let searchRow = UIStackView(arrangedSubviews: [searchBar, cancelGlass])
         searchRow.axis = .horizontal
         searchRow.alignment = .center
         searchRow.spacing = Spacing.sm
