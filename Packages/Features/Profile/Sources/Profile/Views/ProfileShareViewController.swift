@@ -80,8 +80,14 @@ final class ProfileShareViewController: UIViewController {
     /// The search row's fixed height. Fixed on purpose: it makes the list's
     /// top inset a constant the view controller can set declaratively, instead
     /// of a measurement taken during layout.
-    private static let searchRowHeight: CGFloat = 44
-    private static let cancelDiameter: CGFloat = 34
+    private static let searchRowHeight: CGFloat = 52
+    /// `UISearchBar` (`.minimal`) insets its text field horizontally inside
+    /// itself. Cancelling that on the leading edge is what lands the FIELD on
+    /// the sheet's margin instead of 8pt inboard of it — otherwise the row sits
+    /// visibly right-heavy, with 24pt to the left of the field and 16pt to the
+    /// right of the Close lens. Asserted rather than trusted: the
+    /// `SEARCH-ROW` audit prints `fieldL` and `lensR`, which must match.
+    private static let searchBarFieldInset: CGFloat = 8
     /// The search bar's row, hidden until search is entered.
     private var searchBarSection: UIView?
     /// Everything search mode puts away: the card, the horizontal row, the
@@ -281,6 +287,15 @@ final class ProfileShareViewController: UIViewController {
         super.viewDidLayoutSubviews()
         #if DEBUG
         guard ProcessInfo.processInfo.arguments.contains("-profile-share-demo") else { return }
+        let field = searchBar.searchTextField
+        print("SEARCH-ROW bar=\(Int(searchBar.bounds.height)) "
+            + "field=\(Int(field.bounds.height)) "
+            + "fieldCY=\(Int(field.convert(field.bounds, to: view).midY)) "
+            + "lens=\(Int(cancelGlass.bounds.height)) "
+            + "lensCY=\(Int(cancelGlass.convert(cancelGlass.bounds, to: view).midY)) "
+            + "gap=\(Int(cancelGlass.convert(cancelGlass.bounds, to: view).minX - field.convert(field.bounds, to: view).maxX)) "
+            + "fieldL=\(Int(field.convert(field.bounds, to: view).minX)) "
+            + "lensR=\(Int(view.bounds.maxX - cancelGlass.convert(cancelGlass.bounds, to: view).maxX))")
         print("RIGID-AUDIT view=\(Int(view.bounds.width))x\(Int(view.bounds.height)) "
             + "column=\(Int(column.bounds.width))x\(Int(column.bounds.height)) "
             + "card=\(Int(cardView.bounds.width))x\(Int(cardView.bounds.height)) "
@@ -340,22 +355,21 @@ final class ProfileShareViewController: UIViewController {
         cancelGlass.clipsToBounds = true
         cancelGlass.cornerConfiguration = .capsule()
         cancelSearchButton.pin(to: cancelGlass.contentView)
-        NSLayoutConstraint.activate([
-            cancelGlass.widthAnchor.constraint(equalToConstant: Self.cancelDiameter),
-            cancelGlass.heightAnchor.constraint(equalToConstant: Self.cancelDiameter)
-        ])
 
         let searchRow = UIStackView(arrangedSubviews: [searchBar, cancelGlass])
         searchRow.axis = .horizontal
         searchRow.alignment = .center
-        searchRow.spacing = Spacing.sm
+        // Zero, because the bar already carries its own trailing inset: the
+        // visible gap is that inset, so the field and the lens are spaced the
+        // same way the field's contents are spaced inside it.
+        searchRow.spacing = 0
         // Fixed, so the list's top inset is a constant rather than something
         // measured during layout — see `Metrics.searchRowHeight`.
         searchRow.heightAnchor.constraint(equalToConstant: Self.searchRowHeight).isActive = true
 
         let cardSection = makeCardSection()
         let topDivider = makeDivider()
-        let searchSection = inset(searchRow)
+        let searchSection = inset(searchRow, leading: Self.margin - Self.searchBarFieldInset)
         let bottomDivider = makeDivider()
         let actions = makeActionsTray()
         for section in [cardSection, topDivider, searchSection, targetsView, bottomDivider, actions] {
@@ -367,6 +381,7 @@ final class ProfileShareViewController: UIViewController {
         // The card, the quick-send row, the actions tray, their containers, and
         // the column itself: none of them may give up height.
         makeContentRigid([cardView, cardSection, targetsView, actions, column])
+        alignCancelLensToSearchField()
         column.axis = .vertical
         column.alignment = .fill
         column.spacing = Spacing.md
@@ -393,6 +408,29 @@ final class ProfileShareViewController: UIViewController {
         }
     }
 
+    /// Sizes and centres the Close lens against the FIELD — not against the
+    /// search bar, and not against a constant.
+    ///
+    /// `UISearchBar` is taller than the field it contains and insets it
+    /// horizontally, so anything measured from the bar inherits padding that is
+    /// not visible: the lens read 34pt beside a 44pt field, and the gap between
+    /// them came out 16pt against the 8pt the stack was asked for.
+    /// `searchTextField` is public API, so the visible field is the reference
+    /// directly — equal heights give equal capsule radii, and a shared centre
+    /// line needs no arithmetic.
+    ///
+    /// ⚠️ Called only once the column is in the view hierarchy. Activating
+    /// these at construction throws "no common ancestor": the lens is not yet
+    /// in a superview at that point, and the field lives inside the search bar.
+    private func alignCancelLensToSearchField() {
+        let field = searchBar.searchTextField
+        NSLayoutConstraint.activate([
+            cancelGlass.heightAnchor.constraint(equalTo: field.heightAnchor),
+            cancelGlass.widthAnchor.constraint(equalTo: cancelGlass.heightAnchor),
+            cancelGlass.centerYAnchor.constraint(equalTo: field.centerYAnchor)
+        ])
+    }
+
     /// A native hairline: one physical pixel in the system separator colour,
     /// inset by the sheet's margin so it floats between sections rather than
     /// cutting the sheet in half edge to edge. The scrolling rows still bleed
@@ -408,12 +446,14 @@ final class ProfileShareViewController: UIViewController {
 
     /// Wraps a view in the sheet's horizontal margin, for sections that don't
     /// bleed to the edges.
-    private func inset(_ content: UIView) -> UIView {
+    private func inset(_ content: UIView, leading: CGFloat? = nil) -> UIView {
         let container = UIView()
         content.constrain(in: container) { parent in
             content.topAnchor.constraint(equalTo: parent.topAnchor)
             content.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
-            content.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Self.margin)
+            content.leadingAnchor.constraint(
+                equalTo: parent.leadingAnchor, constant: leading ?? Self.margin
+            )
             content.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Self.margin)
         }
         return container
