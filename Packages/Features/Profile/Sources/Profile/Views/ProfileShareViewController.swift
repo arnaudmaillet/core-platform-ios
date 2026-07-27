@@ -80,7 +80,13 @@ final class ProfileShareViewController: UIViewController {
     /// The search row's fixed height. Fixed on purpose: it makes the list's
     /// top inset a constant the view controller can set declaratively, instead
     /// of a measurement taken during layout.
-    private static let searchRowHeight: CGFloat = 52
+    /// Matches `UISearchBar`'s own text-field height, so the row adds no
+    /// vertical padding around it and the field's inset from the sheet's top
+    /// equals its inset from the sides. That equality is what makes a single
+    /// concentric radius possible at all — see `searchCornerRadius`. A system
+    /// value rather than ours, so the `SEARCH-ROW` audit prints `field` to
+    /// check it still holds.
+    private static let searchRowHeight: CGFloat = 44
     /// `UISearchBar` (`.minimal`) insets its text field horizontally inside
     /// itself. Cancelling that on the leading edge is what lands the FIELD on
     /// the sheet's margin instead of 8pt inboard of it — otherwise the row sits
@@ -88,14 +94,20 @@ final class ProfileShareViewController: UIViewController {
     /// right of the Close lens. Asserted rather than trusted: the
     /// `SEARCH-ROW` audit prints `fieldL` and `lensR`, which must match.
     private static let searchBarFieldInset: CGFloat = 8
-    /// The sheet's radius while searching.
+    /// The sheet's radius while searching — CONCENTRIC with the search field.
     ///
-    /// The device radius is right for the content-sized sheet — a small card
-    /// floating clear of the screen edges, whose shoulders should echo the
-    /// bezel. At `.large()` the sheet is nearly the screen, and a ~60pt radius
-    /// on something that tall reads as a mistake rather than a curve; a
-    /// standard modal radius is what the system itself uses at that size.
-    private static let searchCornerRadius: CGFloat = 20
+    /// The device radius is right for the content-sized sheet, whose shoulders
+    /// should echo the bezel. At `.large()` the sheet is nearly the screen and
+    /// that curve reads as a mistake; but a flat modal radius clashes with the
+    /// capsule sitting a few points below it, which is the same corner drawn
+    /// twice at unrelated curvatures.
+    ///
+    /// So it is derived, not picked: a shape inset by `d` inside a rounded rect
+    /// stays parallel to it when the outer radius is the inner radius plus `d`.
+    /// The field is a capsule — radius half its height — inset by `margin` on
+    /// every side, so the sheet's corner shares its centre exactly. The same
+    /// rule the QR card already follows one level down.
+    private static var searchCornerRadius: CGFloat { searchRowHeight / 2 + margin }
     /// The search bar's row, hidden until search is entered.
     private var searchBarSection: UIView?
     /// Everything search mode puts away: the card, the horizontal row, the
