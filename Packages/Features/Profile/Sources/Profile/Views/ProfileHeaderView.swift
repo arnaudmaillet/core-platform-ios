@@ -93,6 +93,10 @@ final class ProfileHeaderView: UIView {
     var moreButtonAnchor: UIView { moreButton }
     /// Invoked with the profile's website URL when the link row is tapped.
     var onWebsiteTapped: ((URL) -> Void)?
+    /// Invoked when the Followers or Following counter is tapped — the two
+    /// columns that lead somewhere. Reactions and Views are read-only totals
+    /// with no list behind them, and stay inert.
+    var onRelationshipsTapped: ((RelationshipDirection) -> Void)?
 
     private let imagePipeline: ImagePipeline
     private var avatarTask: Task<Void, Never>?
@@ -375,6 +379,19 @@ final class ProfileHeaderView: UIView {
             if abs(self.monogramLabel.font.pointSize - monogramSize) > 0.5 {
                 self.monogramLabel.font = .systemFont(ofSize: monogramSize, weight: .semibold)
             }
+        }
+
+        // Followers and Following open the relationship lists; the other two
+        // columns are totals with nothing behind them.
+        for (stat, direction) in [
+            (followersStat, RelationshipDirection.followers),
+            (followingStat, RelationshipDirection.following)
+        ] {
+            stat.isTappable = true
+            stat.addAction(
+                UIAction { [weak self] _ in self?.onRelationshipsTapped?(direction) },
+                for: .touchUpInside
+            )
         }
 
         // The 4-metric counter row, last element of the header: equal cells

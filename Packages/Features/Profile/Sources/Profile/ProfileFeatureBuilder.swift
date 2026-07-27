@@ -16,6 +16,10 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// Supplies the share sheet's quick-send row. Nil simply hides the row.
     private let shareTargeting: (any ProfileShareTargeting)?
     private let gallery: (any ProfileGalleryProviding)?
+    /// Serves the followers / following lists. Nil leaves the header's
+    /// counters inert — the screen is a destination, not a decoration, and a
+    /// tap that opens an unfillable list is worse than no tap.
+    private let relationships: (any ProfileRelationshipsProviding)?
     /// One store for every profile screen: the gallery filter is a GLOBAL
     /// user preference, so all view models read and write the same place.
     private let galleryPreferences = GalleryPreferences()
@@ -31,6 +35,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         reporting: (any ProfileReporting)? = nil,
         shareTargeting: (any ProfileShareTargeting)? = nil,
         gallery: (any ProfileGalleryProviding)? = nil,
+        relationships: (any ProfileRelationshipsProviding)? = nil,
         imagePipeline: ImagePipeline,
         router: (any Router)? = nil,
         account: (any AccountProviding)? = nil,
@@ -40,6 +45,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         self.reporting = reporting
         self.shareTargeting = shareTargeting
         self.gallery = gallery
+        self.relationships = relationships
         self.imagePipeline = imagePipeline
         self.router = router
         self.account = account
@@ -50,11 +56,33 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         switching.map { ProfileSwitcherMenuFactory(switching: $0, imagePipeline: imagePipeline) }
     }
 
+    /// The counter row's destination, shared by both profile entry points —
+    /// the viewer's own profile and any routed-to one — so the two can't drift.
+    private func makeRelationshipsFactory() -> (
+        (ProfileRelationshipsViewModel.Subject, RelationshipDirection) -> UIViewController
+    )? {
+        guard let relationships else { return nil }
+        return { [imagePipeline, router] subject, direction in
+            ProfileRelationshipsViewController(
+                viewModel: ProfileRelationshipsViewModel(
+                    subject: subject,
+                    repository: relationships,
+                    router: router,
+                    direction: direction
+                ),
+                imagePipeline: imagePipeline
+            )
+        }
+    }
+
     public func makeProfileSwitcher() -> ProfileSwitcherPresenting? {
         makeSwitcherFactory()
     }
 
-    public func makeCurrentUserProfileViewController(onLogout: @escaping () -> Void) -> UIViewController {
+    public func makeCurrentUserProfileViewController(
+        onLogout: (() -> Void)?,
+        identityStub: ProfileIdentityStub?
+    ) -> UIViewController {
         let repository = repository
         return ProfileViewController(
             viewModel: ProfileViewModel(
@@ -74,10 +102,18 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                     imagePipeline: imagePipeline
                 )
             },
-            makeSettingsViewController: account.map { account in
-                { AccountSettingsViewController(account: account, onLogout: onLogout) }
+            // Both are account management, so both ride on `onLogout`: a
+            // routed arrival gets the profile without the global actions. Edit
+            // Profile is deliberately NOT gated — editing your own bio is a
+            // profile action, and it is safe at any stack depth.
+            makeSettingsViewController: onLogout.flatMap { onLogout in
+                account.map { account in
+                    { AccountSettingsViewController(account: account, onLogout: onLogout) }
+                }
             },
-            switcherFactory: makeSwitcherFactory()
+            switcherFactory: onLogout == nil ? nil : makeSwitcherFactory(),
+            makeRelationshipsViewController: makeRelationshipsFactory(),
+            identityStub: identityStub
         )
     }
 
@@ -94,6 +130,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             imagePipeline: imagePipeline,
             shareTargeting: shareTargeting,
             onLogout: nil,
+            makeRelationshipsViewController: makeRelationshipsFactory(),
             identityStub: identityStub
         )
     }

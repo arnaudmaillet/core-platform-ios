@@ -229,6 +229,12 @@ public final class MockSocialServices: @unchecked Sendable {
         view.avatarURL = author.avatarURL
         view.bio = author.bio
         view.websiteURL = author.websiteURL
+        // Relationship-list privacy, carried on the whole-profile flag because
+        // it is the only privacy field `profile.v1` has. Roughly half the
+        // roster is restricted — see `MockSocialDataset.isRelationshipsPrivate`
+        // for the pattern and `dev/BACKEND_GAPS.md` §13 for the contract this
+        // is standing in for.
+        view.visibility = dataset.isRelationshipsPrivate(author.profileID) ? .private : .public
         return .success(view)
     }
 

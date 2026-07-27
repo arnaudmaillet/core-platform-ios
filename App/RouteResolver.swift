@@ -17,7 +17,6 @@ import UploadInterface
 @MainActor
 final class RouteResolver: Router {
     weak var navigator: AppNavigating?
-
     private let uploadFeature: any UploadFeatureBuilding
     /// Feature builders are resolved lazily: each one depends on this resolver
     /// (as its router), so injecting them directly would be a construction
@@ -62,7 +61,29 @@ final class RouteResolver: Router {
                 .setCategory(category, animated: false)
 
         case .profile(let profileID, let stub):
-            let profile = profileFeature().makeProfileViewController(for: profileID, identityStub: stub)
+            // Your own profile is a different screen, not a differently
+            // labelled one: it carries Edit Profile, the settings gear and the
+            // profile switcher. Deciding here — synchronously, from what the
+            // origin already knew — is what makes the push land on the finished
+            // personal profile instead of a stranger profile that discovers it
+            // is you a round trip later and relabels itself.
+            //
+            // `makeCurrentUserProfileViewController` resolves the viewer from
+            // the auth session, so `profileID` is not needed on this branch.
+            //
+            // `onLogout: nil` is the point, not an omission: a routed arrival
+            // gets the personal profile *without* the settings gear and the
+            // account switcher. Logging out or switching identity from inside a
+            // deep stack would strand every screen beneath it on an identity
+            // that no longer applies — those actions belong at the canonical
+            // entry point only.
+            let profile: UIViewController = if stub?.isSelf == true {
+                profileFeature().makeCurrentUserProfileViewController(
+                    onLogout: nil, identityStub: stub
+                )
+            } else {
+                profileFeature().makeProfileViewController(for: profileID, identityStub: stub)
+            }
             navigator.activeNavigationController?.pushViewController(profile, animated: true)
 
         case .upload:

@@ -133,6 +133,11 @@ public struct MockSocialDataset: Sendable {
                 websiteURL: name.3
             )
         }
+        relationshipsPrivateProfileIDs = Set(
+            names.indices
+                .filter { Self.isRelationshipsPrivate(profileIndex: $0) }
+                .map { "prof-\($0)" }
+        )
 
         let captionBank = [
             "Golden hour at the pier.",
@@ -230,6 +235,46 @@ public struct MockSocialDataset: Sendable {
 
     public func author(for profileID: String) -> Author? {
         authors.first { $0.profileID == profileID }
+    }
+
+    // MARK: - Visibility
+
+    /// Whether author `index` restricts its **relationship lists**.
+    ///
+    /// `index % 9 < 4` — a fixed 4-in-9 pattern, so a little under half the
+    /// roster is restricted (23 of 48 authors, 48%) and the split is
+    /// deterministic rather than sampled. The stride matters as much as the
+    /// ratio: 9 is coprime with the viewer's twelve follows
+    /// (`prof-0…prof-11`), so the pattern straddles that boundary instead of
+    /// aligning with it, and **both** sides of the privacy rule are reachable
+    /// without a launch argument:
+    ///
+    /// - restricted *and inside* the viewer's follow set (prof-0/1/2/3/9/10/11)
+    ///   → the lists open normally, because a private profile is not private
+    ///   to the people already in its graph;
+    /// - restricted *and outside* it (prof-18/19/20/21/27/…) → the restricted
+    ///   state renders and the client issues no edge request at all;
+    /// - unrestricted (25 authors, prof-4 among them) → the ordinary path.
+    ///
+    /// Named for the *relationship lists* because that is the permission being
+    /// modelled — matching the `follower_list_visibility` /
+    /// `following_list_visibility` fields proposed in
+    /// `BACKEND_RELATIONSHIP_LISTS.md`. It has to travel on `ProfileView`'s
+    /// whole-profile `visibility` today only because that is the sole privacy
+    /// field the contracts actually have; when the per-surface fields land,
+    /// this seed moves onto them and nothing else changes. See
+    /// `dev/BACKEND_GAPS.md` §13.
+    public static func isRelationshipsPrivate(profileIndex: Int) -> Bool {
+        profileIndex % 9 < 4
+    }
+
+    /// Every author whose relationship lists are restricted. The viewer is
+    /// never in here: their own lists are always their own to see, so seeding
+    /// it would model nothing.
+    public let relationshipsPrivateProfileIDs: Set<String>
+
+    public func isRelationshipsPrivate(_ profileID: String) -> Bool {
+        relationshipsPrivateProfileIDs.contains(profileID)
     }
 
     // MARK: - Accounts

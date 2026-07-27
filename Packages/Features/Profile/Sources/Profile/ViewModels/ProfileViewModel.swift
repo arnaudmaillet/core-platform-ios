@@ -190,6 +190,34 @@ public final class ProfileViewModel {
     /// existence, not just its state.
     public var hasGallery: Bool { gallery != nil }
 
+    /// Everything the followers / following screen needs to open, or `nil`
+    /// until the profile has loaded (the counters read "—" until then, so
+    /// there is nothing to tap).
+    ///
+    /// Handed over rather than re-fetched: this screen has already paid for the
+    /// profile view *and* the relationship read, which between them carry both
+    /// halves of the privacy decision. Making the destination ask again would
+    /// put two round trips in front of a state it can otherwise render on the
+    /// push's first frame.
+    public var relationshipsSubject: ProfileRelationshipsViewModel.Subject? {
+        guard let profile else { return nil }
+        return ProfileRelationshipsViewModel.Subject(
+            id: profile.id,
+            handle: profile.handle,
+            visibility: profile.visibility,
+            viewerFollowsSubject: isFollowing,
+            // `.currentUser` is self by construction, before any relationship
+            // read has resolved; a routed-to profile becomes self only once
+            // the read says so.
+            isSelf: source == .currentUser || followButton == .edit,
+            // The same counters the header is rendering — so the destination's
+            // segmented control shows them without re-reading counter.v1, and
+            // an optimistic follow nudge is already reflected in both places.
+            followerCount: profile.followerCount,
+            followingCount: profile.followingCount
+        )
+    }
+
     // MARK: - Inputs
 
     public func viewDidLoad() {
@@ -514,11 +542,13 @@ public final class ProfileViewModel {
             bio: profile.bio,
             avatarURL: profile.avatarURL,
             websiteURL: profile.websiteURL,
-            // Carried through explicitly: the initializer defaults links to
-            // empty, so omitting them here would drop the profile's custom
-            // links on every optimistic follow toggle.
+            // Carried through explicitly: the initializer defaults links and
+            // visibility, so omitting them here would drop the profile's custom
+            // links — and silently re-open a private profile — on every
+            // optimistic follow toggle.
             customLinks: profile.customLinks,
             isVerified: profile.isVerified,
+            visibility: profile.visibility,
             followerCount: profile.followerCount.adjusted(by: following ? 1 : -1),
             followingCount: profile.followingCount,
             reactionCount: profile.reactionCount,
