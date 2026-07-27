@@ -316,7 +316,8 @@ final class ProfileViewController: UIViewController {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                 self?.presentShareSheet()
                 let chainedActions = [
-                    "activity", "send", "search", "search-empty", "search-cancel", "search-send"
+                    "activity", "send", "search", "search-empty", "search-cancel",
+                    "search-send", "search-scroll", "search-lower"
                 ]
                 guard chainedActions.contains(chained ?? "") else { return }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
@@ -324,6 +325,25 @@ final class ProfileViewController: UIViewController {
                     switch chained {
                     case "activity": sheet?.qaHandOffToSystemShare()
                     case "send": sheet?.qaSendToFirstTarget()
+                    case "search-scroll":
+                        sheet?.qaBeginSearch("a")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                            sheet?.qaScrollResults(by: 90)
+                        }
+                    case "search-lower":
+                        // Lower the keyboard, then report whether Cancel is
+                        // still usable and fire it — the exact sequence that
+                        // used to strand the user in search.
+                        sheet?.qaBeginSearch("a")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                            sheet?.qaLowerKeyboard()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                print("CANCEL-USABLE \(sheet?.qaCancelIsUsable ?? false)")
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                    sheet?.qaTapCancel()
+                                }
+                            }
+                        }
                     default:
                         // `search-empty` opens search WITHOUT typing, which is
                         // the suggestions-on-entry state.

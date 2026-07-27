@@ -41,6 +41,14 @@ final class ProfileShareViewController: UIViewController {
     private let cardView: ProfileQRCardView
     private let targetsView: ProfileShareTargetsView
     private let searchBar = UISearchBar()
+    /// Our own Cancel, not `UISearchBar.showsCancelButton`.
+    ///
+    /// ⚠️ UIKit DISABLES the built-in cancel button whenever the search bar is
+    /// not first responder, and there is no public API to override it —
+    /// `setShowsCancelButton` controls visibility, not enablement. Lowering the
+    /// keyboard interactively therefore left the only exit from search dead.
+    /// A button we own cannot be disabled behind our back.
+    private let cancelSearchButton = UIButton(configuration: .filled())
     /// Debounces keystrokes into one query, and lets a superseded search be
     /// cancelled rather than racing the one the user is actually typing.
     private var searchTask: Task<Void, Never>?
@@ -65,6 +73,10 @@ final class ProfileShareViewController: UIViewController {
     /// gaps symmetric and its corner radius derivable (`sheetRadius - margin`),
     /// and what keeps the card's edge aligned with the "Send to" heading's.
     private static let margin = Spacing.lg
+    /// The search row's fixed height. Fixed on purpose: it makes the list's
+    /// top inset a constant the view controller can set declaratively, instead
+    /// of a measurement taken during layout.
+    private static let searchRowHeight: CGFloat = 44
     /// The search bar's row, hidden until search is entered.
     private var searchBarSection: UIView?
     /// Everything search mode puts away: the card, the horizontal row, the
@@ -74,11 +86,11 @@ final class ProfileShareViewController: UIViewController {
 
     /// Search results, as a standard vertical list.
     ///
-    /// Lives OUTSIDE the content column and fills the space beneath it, rather
-    /// than being another arranged subview: the column is sized to its content
-    /// (that is what drives the detent), and a list wants the opposite — every
-    /// point that is left. Its bottom rides `keyboardLayoutGuide`, so the last
-    /// row always clears the keyboard.
+    /// Lives OUTSIDE the content column and fills the WHOLE sheet, rather than
+    /// being another arranged subview: the column is sized to its content (that
+    /// is what drives the detent), and a list wants the opposite — every point
+    /// there is. The search row floats over it; insets, not constraints, keep
+    /// the rows clear of that row and of the keyboard.
     private lazy var resultsView: UICollectionView = {
         var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
         // The sheet's glass is the background; a list appearance colour here
@@ -100,6 +112,9 @@ final class ProfileShareViewController: UIViewController {
         return list
     }()
     private lazy var resultsSource = makeResultsSource()
+    /// Keyboard overlap, in this view's coordinates. Applied as the list's
+    /// bottom content inset rather than a constraint — see `configureResultsList`.
+    private var keyboardOverlap: CGFloat = 0
     private let emptyResultsLabel = UILabel()
     private let resultsSpinner = UIActivityIndicatorView(style: .medium)
     /// The suggestion set, retained so entering search can show it instantly.
@@ -189,6 +204,7 @@ final class ProfileShareViewController: UIViewController {
         glassBackdrop.pin(to: view)
         configureViews()
         configureResultsList()
+        observeKeyboard()
         cardView.configure(with: card)
         loadTargets()
     }
@@ -241,18 +257,21 @@ final class ProfileShareViewController: UIViewController {
         return Self.margin + columnHeight + Self.margin
     }
 
-    #if DEBUG
-    /// READ-ONLY diagnostic. Mutating anything here is what caused the layout
-    /// loop; this only reports, and only under the demo argument.
+    /// READ-ONLY. ⚠️ Mutating layout here is what caused the crash: measuring
+    /// the content and pushing it back with `invalidateDetents()` re-entered
+    /// layout and recursed until the stack blew. Nothing that can dirty layout
+    /// belongs in this method — the list's insets are set declaratively from
+    /// `setSearching` for exactly that reason.
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        #if DEBUG
         guard ProcessInfo.processInfo.arguments.contains("-profile-share-demo") else { return }
         print("RIGID-AUDIT view=\(Int(view.bounds.width))x\(Int(view.bounds.height)) "
             + "column=\(Int(column.bounds.width))x\(Int(column.bounds.height)) "
             + "card=\(Int(cardView.bounds.width))x\(Int(cardView.bounds.height)) "
-            + "xform=\(view.transform == .identity ? "identity" : "\(view.transform.a),\(view.transform.d)")")
+            + "inset=\(Int(resultsView.contentInset.top))/\(Int(resultsView.contentInset.bottom))")
+        #endif
     }
-    #endif
 
     // MARK: - Layout
 
@@ -288,12 +307,39 @@ final class ProfileShareViewController: UIViewController {
         searchBar.placeholder = "Search profiles"
         searchBar.searchBarStyle = .minimal
         searchBar.delegate = self
-        searchBar.showsCancelButton = true
         searchBar.isHidden = true
+
+        cancelSearchButton.configuration?.image = UIImage(
+            systemName: "xmark",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+        )
+        cancelSearchButton.configuration?.contentInsets = .zero
+        cancelSearchButton.configuration?.cornerStyle = .capsule
+        // Opaque, like every other control on this glass sheet — a `.glass()`
+        // button here has nothing to refract and renders as a bare glyph.
+        cancelSearchButton.configuration?.baseBackgroundColor =
+            UIColor.secondarySystemBackground.withAlphaComponent(1)
+        cancelSearchButton.configuration?.baseForegroundColor = .label
+        cancelSearchButton.accessibilityLabel = "Cancel search"
+        cancelSearchButton.addAction(
+            UIAction { [weak self] _ in self?.setSearching(false) }, for: .primaryActionTriggered
+        )
+        NSLayoutConstraint.activate([
+            cancelSearchButton.widthAnchor.constraint(equalToConstant: 34),
+            cancelSearchButton.heightAnchor.constraint(equalToConstant: 34)
+        ])
+
+        let searchRow = UIStackView(arrangedSubviews: [searchBar, cancelSearchButton])
+        searchRow.axis = .horizontal
+        searchRow.alignment = .center
+        searchRow.spacing = Spacing.sm
+        // Fixed, so the list's top inset is a constant rather than something
+        // measured during layout — see `Metrics.searchRowHeight`.
+        searchRow.heightAnchor.constraint(equalToConstant: Self.searchRowHeight).isActive = true
 
         let cardSection = makeCardSection()
         let topDivider = makeDivider()
-        let searchSection = inset(searchBar)
+        let searchSection = inset(searchRow)
         let bottomDivider = makeDivider()
         let actions = makeActionsTray()
         for section in [cardSection, topDivider, searchSection, targetsView, bottomDivider, actions] {
@@ -416,6 +462,66 @@ final class ProfileShareViewController: UIViewController {
         return scrollView
     }
 
+    // MARK: - Result list insets
+
+    /// Holds the rows clear of the floating search row.
+    ///
+    /// `additionalSafeAreaInsets`, NOT `contentInset` — and the difference is
+    /// the whole point. `UIScrollEdgeEffect` anchors its fade to the scroll
+    /// view's SAFE AREA edge, so a content inset left the soft fade stranded at
+    /// the sheet's top while rows slid sharply under a bar 88pt lower. Insetting
+    /// the safe area puts the fade exactly where the bar is, which is how the
+    /// system's own bars do it.
+    ///
+    /// Set from `setSearching`, never from a layout callback: the row's height
+    /// is a constant, so there is nothing to measure.
+    private func applyResultsInset(searching: Bool) {
+        additionalSafeAreaInsets.top = searching
+            ? Self.margin + Self.searchRowHeight + Spacing.sm
+            : 0
+    }
+
+    /// Tracks the keyboard so the list can inset around it.
+    ///
+    /// Notifications rather than a `keyboardLayoutGuide` constraint: the guide
+    /// is window-relative, and tying the list's frame to it is exactly what
+    /// crushed the card during a drag. An inset changes only what the scroll
+    /// view considers reachable, so it cannot resize anything.
+    private func observeKeyboard() {
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(keyboardFrameWillChange(_:)),
+            name: UIResponder.keyboardWillChangeFrameNotification, object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(keyboardWillHide(_:)),
+            name: UIResponder.keyboardWillHideNotification, object: nil
+        )
+    }
+
+    @objc private func keyboardFrameWillChange(_ note: Notification) {
+        guard let end = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+              let window = view.window else { return }
+        // The keyboard frame is in screen coordinates; the overlap that matters
+        // is with THIS view, which on a floating sheet does not reach the
+        // screen's bottom.
+        let inView = view.convert(window.convert(end, from: nil), from: window)
+        applyKeyboardOverlap(max(0, view.bounds.maxY - inView.minY), note: note)
+    }
+
+    @objc private func keyboardWillHide(_ note: Notification) {
+        applyKeyboardOverlap(0, note: note)
+    }
+
+    private func applyKeyboardOverlap(_ overlap: CGFloat, note: Notification) {
+        guard abs(keyboardOverlap - overlap) > 0.5 else { return }
+        keyboardOverlap = overlap
+        let duration = note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.25
+        UIView.animate(withDuration: duration) {
+            self.resultsView.contentInset.bottom = overlap
+            self.resultsView.verticalScrollIndicatorInsets.bottom = overlap
+        }
+    }
+
     // MARK: - Targets
 
     private func loadTargets() {
@@ -475,6 +581,7 @@ final class ProfileShareViewController: UIViewController {
         // shrinking — so the sheet is never asked to resize around a keyboard
         // that is about to move. A precaution rather than a fix for anything
         // observed: the reverse order also worked in the simulator.
+        applyResultsInset(searching: searching)
         if searching {
             applySheetMode(searching: true)
             showSuggestionsInResults()
@@ -599,45 +706,46 @@ final class ProfileShareViewController: UIViewController {
         emptyResultsLabel.textAlignment = .center
         emptyResultsLabel.isHidden = true
 
-        // ⚠️ The bottom pin is DELIBERATELY breakable, and this is the fix for
-        // the sheet squashing its own content on a drag.
+        // The list runs the FULL height of the sheet and the search row floats
+        // over it — the iOS 26 composition. Its top inset holds the rows clear
+        // of the row at rest (see `applyResultsInset`), and `.soft` fades
+        // them out as they pass beneath it instead of clipping at a hard line.
+        resultsView.topEdgeEffect.style = .soft
+
+        // Bottom pinned to the VIEW at required priority, which is the whole
+        // point of this layout.
         //
-        // `keyboardLayoutGuide` is a WINDOW-relative guide. As the sheet is
-        // dragged down it translates while its bounds stay put, so the guide's
-        // top marches upward in this view's coordinate space. At required
-        // priority that pulls the list's bottom above its top, the list is
-        // crushed to nothing, and the deficit passes straight up into the
-        // column — the QR card was measured shrinking 426pt → 236pt mid-drag.
+        // It used to be pinned to `keyboardLayoutGuide` — a WINDOW-relative
+        // guide — so as the sheet translated the guide's top marched up in this
+        // view's coordinate space, crushing the list and passing the deficit
+        // into the QR card. That needed a `.defaultLow` priority to defuse,
+        // which in turn meant the list never reliably filled the sheet when the
+        // keyboard went away, leaving dead space at the bottom.
         //
-        // Priority `.defaultLow`, and the exact number matters: at
-        // `.defaultHigh` it TIES with `UILabel`'s own 750 compression
-        // resistance, Auto Layout broke the tie by squeezing the card's name
-        // and handle, and the card still lost 38pt on a drag. Below every
-        // content priority, it yields to all of them — the list stops at zero
-        // and everything above it is untouched.
-        let listBottom = resultsView.bottomAnchor.constraint(
-            equalTo: view.keyboardLayoutGuide.topAnchor
-        )
-        listBottom.priority = .defaultLow
+        // View-relative, the guide can no longer reach in: the list always
+        // fills the sheet, and the keyboard is handled where a scroll view
+        // expects it — as a content inset.
         resultsView.constrain(in: view) { parent in
-            // Directly under the column, which in search mode holds only the
-            // search field — so the field stays pinned at the top and the list
-            // owns everything below it.
-            resultsView.topAnchor.constraint(equalTo: column.bottomAnchor, constant: Spacing.sm)
+            resultsView.topAnchor.constraint(equalTo: parent.topAnchor)
             resultsView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
             resultsView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
-            resultsView.heightAnchor.constraint(greaterThanOrEqualToConstant: 0)
-            listBottom
+            resultsView.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
         }
+        // Beneath the column, so the search row floats above the rows it
+        // fades. `constrain(in:)` appends, which would put it on top.
+        view.insertSubview(resultsView, aboveSubview: glassBackdrop)
+
         // Centred on the list rather than pinned under the field: it marks
         // "the answer is coming", and the answer fills the list.
         resultsSpinner.hidesWhenStopped = true
         resultsSpinner.constrain(in: view) { _ in
             resultsSpinner.centerXAnchor.constraint(equalTo: resultsView.centerXAnchor)
-            resultsSpinner.topAnchor.constraint(equalTo: resultsView.topAnchor, constant: Spacing.xxl)
+            // Below the floating search row, not the list's top edge — which
+            // now runs behind that row.
+            resultsSpinner.topAnchor.constraint(equalTo: column.bottomAnchor, constant: Spacing.xxl)
         }
         emptyResultsLabel.constrain(in: view) { parent in
-            emptyResultsLabel.topAnchor.constraint(equalTo: resultsView.topAnchor, constant: Spacing.xxl)
+            emptyResultsLabel.topAnchor.constraint(equalTo: column.bottomAnchor, constant: Spacing.xxl)
             emptyResultsLabel.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Self.margin)
             emptyResultsLabel.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Self.margin)
         }
@@ -707,6 +815,22 @@ final class ProfileShareViewController: UIViewController {
     /// Test hooks — these actions are behind taps the simulator can't inject.
     func qaHandOffToSystemShare() { handOffToSystemShare() }
     func qaCancelSearch() { setSearching(false) }
+    /// Scrolls the results so rows pass beneath the floating search row.
+    func qaScrollResults(by offset: CGFloat) {
+        resultsView.setContentOffset(
+            CGPoint(x: 0, y: resultsView.contentOffset.y + offset), animated: false
+        )
+    }
+    /// Lowers the keyboard WITHOUT leaving search — the state in which the
+    /// built-in cancel button used to go dead.
+    func qaLowerKeyboard() { searchBar.resignFirstResponder() }
+    /// Whether our Cancel is genuinely tappable in the current state.
+    var qaCancelIsUsable: Bool {
+        cancelSearchButton.isEnabled && cancelSearchButton.isUserInteractionEnabled
+            && !cancelSearchButton.isHidden
+    }
+    /// Fires Cancel the way a tap would.
+    func qaTapCancel() { cancelSearchButton.sendActions(for: .primaryActionTriggered) }
     /// Goes through the real delegate + data-source lookup, not a shortcut
     /// around them — selecting a row is the path under test.
     func qaSelectFirstResult() {
@@ -741,10 +865,6 @@ private extension ProfileQRCardView {
 extension ProfileShareViewController: UISearchBarDelegate {
     func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
         runSearch(searchText)
-    }
-
-    func searchBarCancelButtonClicked(_ searchBar: UISearchBar) {
-        setSearching(false)
     }
 
     func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
