@@ -230,6 +230,19 @@ final class ProfileShareViewController: UIViewController {
         return Self.margin + columnHeight + Self.margin
     }
 
+    #if DEBUG
+    /// READ-ONLY diagnostic. Mutating anything here is what caused the layout
+    /// loop; this only reports, and only under the demo argument.
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        guard ProcessInfo.processInfo.arguments.contains("-profile-share-demo") else { return }
+        print("RIGID-AUDIT view=\(Int(view.bounds.width))x\(Int(view.bounds.height)) "
+            + "column=\(Int(column.bounds.width))x\(Int(column.bounds.height)) "
+            + "card=\(Int(cardView.bounds.width))x\(Int(cardView.bounds.height)) "
+            + "xform=\(view.transform == .identity ? "identity" : "\(view.transform.a),\(view.transform.d)")")
+    }
+    #endif
+
     // MARK: - Layout
 
     /// Three sections separated by hairlines, in a column pinned EDGE TO EDGE.
@@ -239,6 +252,20 @@ final class ProfileShareViewController: UIViewController {
     /// insets do the visual indenting, so an avatar or a chip scrolls in from
     /// under the corner instead of being clipped against a margin. Sections
     /// that don't scroll inset themselves.
+    /// Pins every band of the sheet at `.required` on the vertical axis.
+    ///
+    /// Auto Layout resolves a shortfall by squeezing whatever is cheapest, and
+    /// the QR card — a code whose whole job is to be a fixed grid of squares —
+    /// was the cheapest thing in the column. With these set there is nothing in
+    /// the stack that can absorb a shortfall, so a drag can only ever translate
+    /// the sheet; it cannot re-proportion what is inside it.
+    private func makeContentRigid(_ views: [UIView]) {
+        for view in views {
+            view.setContentCompressionResistancePriority(.required, for: .vertical)
+            view.setContentHuggingPriority(.required, for: .vertical)
+        }
+    }
+
     private func configureViews() {
         targetsView.onSelect = { [weak self] target in self?.send(to: target) }
         targetsView.onSearch = { [weak self] in self?.setSearching(true) }
@@ -264,6 +291,9 @@ final class ProfileShareViewController: UIViewController {
         searchBarSection = searchSection
         searchSection.isHidden = true
         nonSearchSections = [cardSection, topDivider, targetsView, bottomDivider, actions]
+        // The card, the quick-send row, the actions tray, their containers, and
+        // the column itself: none of them may give up height.
+        makeContentRigid([cardView, cardSection, targetsView, actions, column])
         column.axis = .vertical
         column.alignment = .fill
         column.spacing = Spacing.md
@@ -328,12 +358,8 @@ final class ProfileShareViewController: UIViewController {
     /// and section spacing rather than by shrinking the code.
     private func makeCardSection() -> UIView {
         let container = UIView()
-        // Rigid under a drag. While the sheet is being pulled down its height
-        // shrinks every frame, and anything compressible in the column gets
-        // squeezed — on the card that showed as the QR visibly resizing, which
-        // is both ugly and (being a scannable code) wrong.
-        cardView.setContentCompressionResistancePriority(.required, for: .vertical)
-        cardView.setContentHuggingPriority(.required, for: .vertical)
+        // Rigidity for the card and its container is set together with every
+        // other band in `makeContentRigid`.
         cardView.constrain(in: container) { parent in
             cardView.topAnchor.constraint(equalTo: parent.topAnchor)
             cardView.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
@@ -528,6 +554,26 @@ final class ProfileShareViewController: UIViewController {
         emptyResultsLabel.textAlignment = .center
         emptyResultsLabel.isHidden = true
 
+        // ⚠️ The bottom pin is DELIBERATELY breakable, and this is the fix for
+        // the sheet squashing its own content on a drag.
+        //
+        // `keyboardLayoutGuide` is a WINDOW-relative guide. As the sheet is
+        // dragged down it translates while its bounds stay put, so the guide's
+        // top marches upward in this view's coordinate space. At required
+        // priority that pulls the list's bottom above its top, the list is
+        // crushed to nothing, and the deficit passes straight up into the
+        // column — the QR card was measured shrinking 426pt → 236pt mid-drag.
+        //
+        // Priority `.defaultLow`, and the exact number matters: at
+        // `.defaultHigh` it TIES with `UILabel`'s own 750 compression
+        // resistance, Auto Layout broke the tie by squeezing the card's name
+        // and handle, and the card still lost 38pt on a drag. Below every
+        // content priority, it yields to all of them — the list stops at zero
+        // and everything above it is untouched.
+        let listBottom = resultsView.bottomAnchor.constraint(
+            equalTo: view.keyboardLayoutGuide.topAnchor
+        )
+        listBottom.priority = .defaultLow
         resultsView.constrain(in: view) { parent in
             // Directly under the column, which in search mode holds only the
             // search field — so the field stays pinned at the top and the list
@@ -535,7 +581,8 @@ final class ProfileShareViewController: UIViewController {
             resultsView.topAnchor.constraint(equalTo: column.bottomAnchor, constant: Spacing.sm)
             resultsView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
             resultsView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
-            resultsView.bottomAnchor.constraint(equalTo: parent.keyboardLayoutGuide.topAnchor)
+            resultsView.heightAnchor.constraint(greaterThanOrEqualToConstant: 0)
+            listBottom
         }
         // Centred on the list rather than pinned under the field: it marks
         // "the answer is coming", and the answer fills the list.
