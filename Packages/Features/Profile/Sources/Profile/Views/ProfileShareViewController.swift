@@ -49,10 +49,11 @@ final class ProfileShareViewController: UIViewController {
     /// rather than from `view` — see `viewDidLayoutSubviews`.
     private let column = UIStackView()
 
-    /// The measured content height the custom detent resolves to. Seeded with
-    /// an estimate so the sheet has a sane height for its very first frame,
-    /// then replaced by the real measurement (see `viewDidLayoutSubviews`).
-    private var contentHeight: CGFloat = 640
+    /// Fallback used only before the content can be measured — see
+    /// `fittedContentHeight`.
+    private let contentHeight: CGFloat = 640
+    /// The presenter's width, for the same frames.
+    private let fallbackWidth: CGFloat
     private static let detentIdentifier = UISheetPresentationController.Detent.Identifier("profileShare")
     /// How many people the quick-send row asks for.
     private static let targetLimit = 12
@@ -118,12 +119,14 @@ final class ProfileShareViewController: UIViewController {
         card: ProfileViewModel.ShareCard,
         imagePipeline: ImagePipeline,
         targeting: (any ProfileShareTargeting)?,
-        deviceCornerRadius: CGFloat
+        deviceCornerRadius: CGFloat,
+        fallbackWidth: CGFloat
     ) {
         self.card = card
         self.imagePipeline = imagePipeline
         self.targeting = targeting
         self.deviceCornerRadius = deviceCornerRadius
+        self.fallbackWidth = fallbackWidth
         cardView = ProfileQRCardView(imagePipeline: imagePipeline)
         targetsView = ProfileShareTargetsView(imagePipeline: imagePipeline, inset: Self.margin)
         super.init(nibName: nil, bundle: nil)
@@ -153,7 +156,7 @@ final class ProfileShareViewController: UIViewController {
         sheet.detents = [
             .custom(identifier: Self.detentIdentifier) { [weak self] context in
                 guard let self else { return context.maximumDetentValue * 0.7 }
-                return min(self.contentHeight, context.maximumDetentValue)
+                return min(self.fittedContentHeight(), context.maximumDetentValue)
             },
             .large()
         ]
@@ -193,52 +196,38 @@ final class ProfileShareViewController: UIViewController {
         glassBackdrop.effect = UIGlassEffect(style: .regular)
     }
 
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        // Measured from the COLUMN, not from `view`.
+    /// The sheet's height, resolved on demand by the detent itself.
+    ///
+    /// ⚠️ This is deliberately NOT measured in `viewDidLayoutSubviews` and
+    /// pushed with `invalidateDetents()`. That is a layout loop and it
+    /// crashed: invalidating asks this resolver, the answer resizes the sheet,
+    /// the resize lays out again, and dragging the sheet — which changes its
+    /// height every frame — recursed until the stack blew (`EXC_BAD_ACCESS`).
+    /// `animateChanges` around it made it worse by fighting the drag.
+    ///
+    /// Nothing needs to push a height any more: the content is static by
+    /// construction. The card's height follows its width (fixed by the sheet's
+    /// margins), the quick-send row has a fixed height and shows skeletons from
+    /// its first frame, and the tray is a row of fixed chips. So the detent can
+    /// simply ASK, and gets the same answer every time it does.
+    private func fittedContentHeight() -> CGFloat {
+        // The sheet is full-width on iPhone, so the presenter's width is the
+        // right fallback for the frames before this view has been sized.
+        let width = view.bounds.width > 0 ? view.bounds.width : fallbackWidth
+        guard width > 0 else { return contentHeight }
+        let columnHeight = column.systemLayoutSizeFitting(
+            CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        ).height
+        guard columnHeight > 0 else { return contentHeight }
+        // Symmetric: the same `margin` above the card and below the tray.
         //
-        // The column is pinned to the view's top AND bottom, which means any
-        // height ≥ the content satisfies the constraints — so asking `view`
-        // for its fitting size returns whatever height it currently has, not
-        // the smallest that would work. The detent therefore never tightened:
-        // it sat at its seeded estimate, the stack stretched to fill, and the
-        // slack surfaced as dead space under the action tray. Asking the
-        // column (whose height is genuinely content-driven) and re-adding the
-        // insets by hand gives the minimum the sheet can actually be.
-        guard view.bounds.width > 0 else { return }
-        // The column's LAID-OUT height, not a fitting estimate. Now that it is
-        // top-anchored only, its frame is exactly its content — and the
-        // estimate ran ~16pt high, which the sheet then had to park somewhere
-        // (under the tray, naturally).
-        let columnHeight = column.bounds.height
-        // Symmetric: the same `margin` above the card and below the tray, and
-        // nothing else.
-        //
-        // The safe-area inset used to be added here, and it was the dead space
-        // under the chips. A content-sized detent makes this a FLOATING sheet
-        // — its bottom edge sits above the screen's, so the home indicator is
-        // outside it entirely — while `view.safeAreaInsets.bottom` still
-        // reports the window's 34pt. Reserving that inside the sheet paid for
-        // the indicator twice.
-        let fitted = Self.margin + columnHeight + Self.margin
-        guard columnHeight > 0, abs(fitted - contentHeight) > 1 else { return }
-        contentHeight = fitted
-        #if DEBUG
-        // Dev convenience: the sheet's height is derived, not authored, so the
-        // numbers behind it are worth being able to read. Sizing bugs here are
-        // invisible in a screenshot — the dead space under the tray was two
-        // separate ones (a stretched stack, then a double-counted safe area),
-        // and both were only obvious from these figures.
-        if ProcessInfo.processInfo.arguments.contains("-profile-share-demo") {
-            print("SHARE-SHEET-AUDIT column=\(Int(columnHeight)) detent=\(Int(fitted)) "
-                + "sheet=\(Int(view.bounds.height)) "
-                + "belowColumn=\(Int(view.bounds.height - column.frame.maxY)) "
-                + "sections=\(column.arrangedSubviews.map { Int($0.bounds.height.rounded()) })")
-        }
-        #endif
-        sheetPresentationController?.animateChanges {
-            sheetPresentationController?.invalidateDetents()
-        }
+        // No safe-area inset. A content-sized detent makes this a FLOATING
+        // sheet — its bottom edge sits above the screen's, so the home
+        // indicator is outside it entirely — while `safeAreaInsets.bottom`
+        // still reports the window's. Adding it paid for the indicator twice.
+        return Self.margin + columnHeight + Self.margin
     }
 
     // MARK: - Layout
@@ -339,6 +328,12 @@ final class ProfileShareViewController: UIViewController {
     /// and section spacing rather than by shrinking the code.
     private func makeCardSection() -> UIView {
         let container = UIView()
+        // Rigid under a drag. While the sheet is being pulled down its height
+        // shrinks every frame, and anything compressible in the column gets
+        // squeezed — on the card that showed as the QR visibly resizing, which
+        // is both ugly and (being a scannable code) wrong.
+        cardView.setContentCompressionResistancePriority(.required, for: .vertical)
+        cardView.setContentHuggingPriority(.required, for: .vertical)
         cardView.constrain(in: container) { parent in
             cardView.topAnchor.constraint(equalTo: parent.topAnchor)
             cardView.bottomAnchor.constraint(equalTo: parent.bottomAnchor)

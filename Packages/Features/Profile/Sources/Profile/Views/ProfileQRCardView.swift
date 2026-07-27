@@ -84,6 +84,10 @@ final class ProfileQRCardView: UIView {
 
     private func configureSubviews() {
         qrImageView.contentMode = .scaleAspectFit
+        // Nearest-neighbour, so a code scaled by the sheet's rubber-band keeps
+        // hard module edges instead of blurring into something unscannable.
+        qrImageView.layer.magnificationFilter = .nearest
+        qrImageView.layer.minificationFilter = .trilinear
         qrImageView.backgroundColor = .white
         qrImageView.clipsToBounds = true
         // The code is a link, and VoiceOver users cannot scan it — the label
@@ -183,6 +187,7 @@ final class ProfileQRCardView: UIView {
         renderedURL = card.url
         // Force a re-render: the payload changed even if the side did not.
         renderedSide = 0
+        qrImageView.image = nil
         setNeedsLayout()
         loadAvatar(card.avatarURL)
     }
@@ -190,9 +195,23 @@ final class ProfileQRCardView: UIView {
     /// The QR is generated at the resolved pixel size rather than a guessed
     /// one, and only when that size actually changes — regenerating on every
     /// layout pass would re-run CoreImage during the sheet's entrance.
+    /// Rasterizes the code ONCE, at the first size the layout resolves, and
+    /// never again for that URL.
+    ///
+    /// ⚠️ It used to regenerate whenever the resolved width changed, which is
+    /// every frame of a sheet drag: UIKit rubber-bands a sheet dragged below
+    /// its detent by genuinely NARROWING it, so the card re-lays-out
+    /// continuously and CoreImage was re-run under the user's thumb — the
+    /// visible "resizing" artifact, and expensive enough to cost frames.
+    ///
+    /// The image view scales the finished bitmap instead (`.scaleAspectFit`
+    /// with nearest-neighbour magnification, so module edges stay hard however
+    /// far the rubber-band stretches it). A QR is a bitmap of hard-edged
+    /// squares; there is nothing to gain by re-rendering it at every
+    /// intermediate size.
     private func renderCodeIfNeeded() {
-        let side = qrImageView.bounds.width
-        guard side > 0, let url = renderedURL, side != renderedSide else { return }
+        let side = qrImageView.bounds.width.rounded()
+        guard side > 0, let url = renderedURL, qrImageView.image == nil else { return }
         renderedSide = side
         qrImageView.image = ProfileQRCode.makeImage(
             for: url, side: side, scale: traitCollection.displayScale

@@ -471,7 +471,10 @@ final class ProfileViewController: UIViewController {
             // Read HERE, where there is a window: the sheet has none until it
             // is already on screen, and reading it there made the corners snap
             // after the presentation animation instead of riding it.
-            deviceCornerRadius: ScreenGeometry.cornerRadius(behind: view)
+            deviceCornerRadius: ScreenGeometry.cornerRadius(behind: view),
+            // The sheet is full-width on iPhone, so this is its width for the
+            // frames before it has been laid out.
+            fallbackWidth: view.bounds.width
         )
         // Both escape hatches come back HERE, after the sheet has dismissed
         // itself: the system sheet would otherwise stack on top of this one,
