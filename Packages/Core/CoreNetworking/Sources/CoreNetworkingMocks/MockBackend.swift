@@ -12,6 +12,9 @@ public struct MockBackend: Sendable {
     public let counterStore: MockCounterStore
     public let blobStore: MockBlobStore
     public let postStore: MockPostStore
+    /// Held (not just registered) so tests can read back the cases the
+    /// profile's Report action filed.
+    public let moderationService: MockModerationService
     public let bff: MockBFF
 
     public init(conditions: SimulatedConditions = .none) {
@@ -19,6 +22,7 @@ public struct MockBackend: Sendable {
         let counterStore = MockCounterStore(dataset: dataset)
         let blobStore = MockBlobStore()
         let postStore = MockPostStore()
+        let moderationService = MockModerationService()
 
         let bff = MockBFF()
         bff.simulatedConditions = conditions
@@ -35,11 +39,13 @@ public struct MockBackend: Sendable {
         MockChatService(dataset: dataset).register(on: bff)
         MockSocialGraphService(dataset: dataset).register(on: bff)
         MockGeoDiscoveryService(dataset: dataset).register(on: bff)
+        moderationService.register(on: bff)
 
         self.dataset = dataset
         self.counterStore = counterStore
         self.blobStore = blobStore
         self.postStore = postStore
+        self.moderationService = moderationService
         self.bff = bff
     }
 

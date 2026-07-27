@@ -193,4 +193,62 @@ struct CoreNetworkingTests {
         #expect(body.accountID == MockAuthService.accountID)
         #expect(!backend.dataset.posts.isEmpty)
     }
+
+    /// The profile's "..." menu decides between Block and Unblock by reading
+    /// the relation status back, so the mock must REMEMBER a block — unlike
+    /// follow/unfollow, which it acknowledges and forgets.
+    @Test func mockSocialGraphRemembersBlocks() async throws {
+        let backend = MockBackend()
+        let client = SocialGraph_V1_SocialGraphServiceClient(client: backend.makeRPCClient())
+        let viewer = MockSocialDataset.viewerProfileID
+        let target = backend.dataset.authors[0].profileID
+
+        func status() async throws -> SocialGraph_V1_RelationStatus {
+            var request = SocialGraph_V1_GetRelationStatusRequest()
+            request.actorID = viewer
+            request.targetID = target
+            return try await client.getRelationStatus(request: request, headers: [:]).result.get().status
+        }
+
+        // The seeded graph has the viewer following author 0.
+        #expect(try await status() == .mutual)
+
+        var block = SocialGraph_V1_BlockRequest()
+        block.actorID = viewer
+        block.targetID = target
+        #expect(try await client.block(request: block, headers: [:]).result.get().success)
+        // Blocking outranks the follow state it replaced.
+        #expect(try await status() == .blocking)
+
+        var unblock = SocialGraph_V1_UnblockRequest()
+        unblock.actorID = viewer
+        unblock.targetID = target
+        #expect(try await client.unblock(request: unblock, headers: [:]).result.get().success)
+        #expect(try await status() == .mutual)
+    }
+
+    /// `OpenCase` is idempotent per the contract: reporting the same subject
+    /// twice returns the first case rather than stacking duplicates.
+    @Test func mockModerationOpensCasesIdempotently() async throws {
+        let backend = MockBackend()
+        let client = Moderation_V1_ModerationServiceClient(client: backend.makeRPCClient())
+
+        var subject = Moderation_V1_SubjectRef()
+        subject.entityType = .profile
+        subject.entityID = "prof-5"
+        subject.actorID = MockAuthService.accountID
+        var request = Moderation_V1_OpenCaseRequest()
+        request.subject = subject
+        request.category = .harassment
+
+        let first = try await client.openCase(request: request, headers: [:]).result.get()
+        #expect(first.created)
+        #expect(!first.case.caseID.isEmpty)
+        #expect(first.case.category == .harassment)
+
+        let second = try await client.openCase(request: request, headers: [:]).result.get()
+        #expect(!second.created)
+        #expect(second.case.caseID == first.case.caseID)
+        #expect(backend.moderationService.openedCases.count == 1)
+    }
 }

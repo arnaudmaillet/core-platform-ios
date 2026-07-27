@@ -9,6 +9,12 @@ import UIKit
 @MainActor
 public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     private let repository: any ProfileProviding
+    /// Files moderation reports from the profile's overflow menu. Optional:
+    /// nil hides nothing, but a Report tap then reports the feature as
+    /// unavailable rather than silently succeeding.
+    private let reporting: (any ProfileReporting)?
+    /// Supplies the share sheet's quick-send row. Nil simply hides the row.
+    private let shareTargeting: (any ProfileShareTargeting)?
     private let gallery: (any ProfileGalleryProviding)?
     /// One store for every profile screen: the gallery filter is a GLOBAL
     /// user preference, so all view models read and write the same place.
@@ -22,6 +28,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
 
     public init(
         repository: any ProfileProviding,
+        reporting: (any ProfileReporting)? = nil,
+        shareTargeting: (any ProfileShareTargeting)? = nil,
         gallery: (any ProfileGalleryProviding)? = nil,
         imagePipeline: ImagePipeline,
         router: (any Router)? = nil,
@@ -29,6 +37,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         switching: (any ProfileSwitching)? = nil
     ) {
         self.repository = repository
+        self.reporting = reporting
+        self.shareTargeting = shareTargeting
         self.gallery = gallery
         self.imagePipeline = imagePipeline
         self.router = router
@@ -49,12 +59,14 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         return ProfileViewController(
             viewModel: ProfileViewModel(
                 repository: repository,
+                reporting: reporting,
                 gallery: gallery,
                 galleryPreferences: galleryPreferences,
                 source: .currentUser,
                 router: router
             ),
             imagePipeline: imagePipeline,
+            shareTargeting: shareTargeting,
             onLogout: onLogout,
             makeEditViewController: { [imagePipeline] onSaved in
                 EditProfileViewController(
@@ -73,12 +85,14 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         ProfileViewController(
             viewModel: ProfileViewModel(
                 repository: repository,
+                reporting: reporting,
                 gallery: gallery,
                 galleryPreferences: galleryPreferences,
                 source: .profile(profileID),
                 router: router
             ),
             imagePipeline: imagePipeline,
+            shareTargeting: shareTargeting,
             onLogout: nil,
             identityStub: identityStub
         )

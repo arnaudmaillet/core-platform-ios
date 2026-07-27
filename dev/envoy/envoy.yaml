@@ -62,6 +62,12 @@ static_resources:
                           route: { cluster: comment, timeout: 30s }
                         - match: { prefix: "/search.v1.SearchService/" }
                           route: { cluster: search, timeout: 30s }
+                        # Profile "Report User" calls moderation.v1/OpenCase.
+                        # NOTE: the upstream port below is UNCONFIRMED — see
+                        # dev/BACKEND_GAPS.md §11. Verify it against the fleet's
+                        # compose file before relying on this route.
+                        - match: { prefix: "/moderation.v1.ModerationService/" }
+                          route: { cluster: moderation, timeout: 30s }
                 http_filters:
                   - name: envoy.filters.http.grpc_web
                     typed_config:
@@ -243,3 +249,20 @@ static_resources:
         endpoints:
           - lb_endpoints:
               - endpoint: { address: { socket_address: { address: search-server, port_value: 50062 } } }
+    # UNCONFIRMED upstream: no moderation-server port is documented anywhere in
+    # this repo, and the fleet's port assignments are not contiguous (50051-50070
+    # with gaps), so this is a placeholder to be verified — not a working route.
+    # See dev/BACKEND_GAPS.md §11.
+    - name: moderation
+      type: STRICT_DNS
+      lb_policy: ROUND_ROBIN
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          explicit_http_config:
+            http2_protocol_options: {}
+      load_assignment:
+        cluster_name: moderation
+        endpoints:
+          - lb_endpoints:
+              - endpoint: { address: { socket_address: { address: moderation-server, port_value: 50054 } } }

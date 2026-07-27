@@ -53,11 +53,34 @@ public final class ProfileViewModel {
         }
     }
 
+    /// The outcome of an overflow-menu command, for the view to surface. The
+    /// view model never presents anything itself — it names what happened and
+    /// the controller chooses the alert/toast.
+    public nonisolated enum ActionResult: Equatable, Sendable {
+        /// `profileCount` is how many profiles the block actually covered — 1
+        /// for a profile-scoped block, and for an account-scoped one however
+        /// many aliases were reachable (which can also be 1; see
+        /// `ProfileBlockScope`). Reported rather than assumed, so the
+        /// confirmation can't overstate what happened.
+        case blocked(handle: String, profileCount: Int)
+        case unblocked(handle: String)
+        case reported
+        case failed(message: String)
+    }
+
     public var onPhaseChange: ((Phase) -> Void)?
     public var onFollowButtonChange: ((FollowButton) -> Void)?
     public var onGalleryChange: ((GallerySnapshot) -> Void)?
+    /// Fires when an overflow-menu command settles. Paired with
+    /// `onDismissRequested` for block, which both reports and leaves.
+    public var onActionResult: ((ActionResult) -> Void)?
+    /// Fires after a successful block: the screen should leave (pop to the
+    /// origin, or dismiss if it was presented). Never fires for the viewer's
+    /// own profile, which cannot be blocked.
+    public var onDismissRequested: (() -> Void)?
 
     private let repository: any ProfileProviding
+    private let reporting: (any ProfileReporting)?
     private let gallery: (any ProfileGalleryProviding)?
     /// The global gallery-filter preference. nil (tests, minimal setups)
     /// means "session-local": the filter starts at the default and isn't
@@ -78,6 +101,12 @@ public final class ProfileViewModel {
     private var profile: UserProfile?
     private var isFollowing = false
     private var followInFlight = false
+    /// The viewer's outbound block on this profile, from the relationship read
+    /// and kept current by `setBlocked`. Drives which of Block / Unblock the
+    /// overflow menu offers.
+    public private(set) var isBlocked = false
+    private var blockInFlight = false
+    private var reportInFlight = false
 
     private var load: Task<Void, Never>?
     private var relationshipLoad: Task<Void, Never>?
@@ -96,12 +125,14 @@ public final class ProfileViewModel {
 
     public init(
         repository: any ProfileProviding,
+        reporting: (any ProfileReporting)? = nil,
         gallery: (any ProfileGalleryProviding)? = nil,
         galleryPreferences: GalleryPreferences? = nil,
         source: Source = .currentUser,
         router: (any Router)? = nil
     ) {
         self.repository = repository
+        self.reporting = reporting
         self.gallery = gallery
         self.galleryPreferences = galleryPreferences
         self.source = source
@@ -116,6 +147,44 @@ public final class ProfileViewModel {
 
     /// Whether the "Message" action applies (another user's profile).
     public var canMessage: Bool { followButton == .follow || followButton == .following }
+
+    /// Whether the moderation actions (Block / Report) apply. False for the
+    /// viewer's own profile, and false until the relationship is known — a
+    /// menu opened mid-load offers sharing only rather than guessing.
+    public var canModerate: Bool { followButton == .follow || followButton == .following }
+
+    /// Everything the share sheet renders, resolved together so the QR code,
+    /// the card, and the system share sheet's link preview cannot disagree
+    /// about who is being shared.
+    public nonisolated struct ShareCard: Equatable, Sendable {
+        public let displayName: String
+        /// Includes the leading `@`.
+        public let handle: String
+        public let avatarURL: URL?
+        public let url: URL
+    }
+
+    /// The share payload, once the profile has loaded. `nil` before then —
+    /// every share affordance is gated on it rather than rendering a card
+    /// with a placeholder identity.
+    public var shareCard: ShareCard? {
+        profile.map {
+            ShareCard(
+                displayName: $0.displayName,
+                handle: "@" + $0.handle,
+                avatarURL: $0.avatarURL,
+                url: ProfileShareLink.url(handle: $0.handle)
+            )
+        }
+    }
+
+    /// The profile's shareable link, once the handle is known.
+    public var shareLink: URL? {
+        profile.map { ProfileShareLink.url(handle: $0.handle) }
+    }
+
+    /// The loaded profile's `@handle`, for naming it in confirmations.
+    public var handle: String? { profile.map { "@" + $0.handle } }
 
     /// Whether this screen shows a gallery at all — drives the filter tray's
     /// existence, not just its state.
@@ -165,6 +234,97 @@ public final class ProfileViewModel {
         router?.route(to: .messageUser(profile.id, stub: ProfileIdentityStub(
             handle: profile.handle, displayName: profile.displayName
         )))
+    }
+
+    /// Send this profile to someone as a DM, with the link pre-typed in their
+    /// composer. Route-only, like `messageTapped` — Profile emits the intent
+    /// and Chat owns the destination.
+    public func sendProfile(_ card: ShareCard, to target: ProfileShareTarget) {
+        router?.route(to: .sendLink(card.url.absoluteString, to: target.id, stub: ProfileIdentityStub(
+            handle: target.handle, displayName: target.displayName
+        )))
+    }
+
+    // MARK: - Overflow menu
+
+    /// Block this profile, or the whole account behind it.
+    ///
+    /// Unlike follow, this is NOT optimistic: a block is a safety action whose
+    /// UI consequence is leaving the screen, so it must not be shown as done
+    /// and then silently rolled back. The state changes only once the server
+    /// accepts. One mutation in flight at a time.
+    public func block(_ scope: ProfileBlockScope) {
+        guard let profile, canModerate, !blockInFlight, !isBlocked else { return }
+        blockInFlight = true
+
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let count: Int
+                switch scope {
+                case .profile:
+                    try await self.repository.setBlocked(true, for: profile.id)
+                    count = 1
+                case .account:
+                    count = try await self.repository.blockAccount(behind: profile.id).count
+                }
+                self.isBlocked = true
+                // Blocking severs the follow edge server-side; mirror that so
+                // a re-entry before the next relationship read agrees.
+                self.isFollowing = false
+                self.followButton = .follow
+                self.onActionResult?(.blocked(handle: "@" + profile.handle, profileCount: count))
+                self.onDismissRequested?()
+            } catch {
+                self.onActionResult?(.failed(message: "Couldn't block this profile."))
+            }
+            self.blockInFlight = false
+        }
+    }
+
+    /// Lift a block on this profile. Account-scoped blocks are NOT undone as a
+    /// set: the viewer unblocks whichever profile they navigated to, because
+    /// the client can't tell which of the account's profiles were blocked
+    /// together versus individually — and silently unblocking aliases the user
+    /// never asked about is the wrong way to be wrong about a safety action.
+    public func unblock() {
+        guard let profile, canModerate, !blockInFlight, isBlocked else { return }
+        blockInFlight = true
+
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.repository.setBlocked(false, for: profile.id)
+                self.isBlocked = false
+                self.onActionResult?(.unblocked(handle: "@" + profile.handle))
+            } catch {
+                self.onActionResult?(.failed(message: "Couldn't unblock this profile."))
+            }
+            self.blockInFlight = false
+        }
+    }
+
+    /// File a moderation report against this profile. Reports are fire-and-
+    /// confirm: the result is reported either way, because a report the user
+    /// believes was filed but wasn't is the worst outcome here.
+    public func report(_ reason: ProfileReportReason) {
+        guard let profile, canModerate, !reportInFlight else { return }
+        guard let reporting else {
+            onActionResult?(.failed(message: "Reporting isn't available right now."))
+            return
+        }
+        reportInFlight = true
+
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await reporting.reportProfile(profile.id, reason: reason)
+                self.onActionResult?(.reported)
+            } catch {
+                self.onActionResult?(.failed(message: "Couldn't send this report. Try again."))
+            }
+            self.reportInFlight = false
+        }
     }
 
     // MARK: - Gallery
@@ -330,9 +490,11 @@ public final class ProfileViewModel {
             switch relationship {
             case .me:
                 self.isFollowing = false
+                self.isBlocked = false
                 self.followButton = .edit
-            case .other(let following):
+            case .other(let following, let blocked):
                 self.isFollowing = following
+                self.isBlocked = blocked
                 self.followButton = following ? .following : .follow
             }
             self.relationshipLoad = nil
@@ -352,6 +514,10 @@ public final class ProfileViewModel {
             bio: profile.bio,
             avatarURL: profile.avatarURL,
             websiteURL: profile.websiteURL,
+            // Carried through explicitly: the initializer defaults links to
+            // empty, so omitting them here would drop the profile's custom
+            // links on every optimistic follow toggle.
+            customLinks: profile.customLinks,
             isVerified: profile.isVerified,
             followerCount: profile.followerCount.adjusted(by: following ? 1 : -1),
             followingCount: profile.followingCount,

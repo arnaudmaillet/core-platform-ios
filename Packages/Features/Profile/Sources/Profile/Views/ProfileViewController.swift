@@ -1,5 +1,6 @@
 import MediaCore
 import CoreModels
+import CoreNavigation
 import DesignSystem
 import UIKit
 
@@ -19,6 +20,11 @@ final class ProfileViewController: UIViewController {
     private let switcherFactory: ProfileSwitcherMenuFactory?
 
     private let scrollView = UIScrollView()
+    /// Retained for the share sheet, which builds its own QR card (and a
+    /// throwaway one to rasterize) and needs the same avatar cache.
+    private let imagePipeline: ImagePipeline
+    /// Supplies the share sheet's quick-send row; nil hides it.
+    private let shareTargeting: (any ProfileShareTargeting)?
     private let headerView: ProfileHeaderView
     private let galleryPager: ProfileGalleryPagerView
     /// The filter tray's two selectors, hosted as custom bar items in the
@@ -118,6 +124,7 @@ final class ProfileViewController: UIViewController {
     init(
         viewModel: ProfileViewModel,
         imagePipeline: ImagePipeline,
+        shareTargeting: (any ProfileShareTargeting)? = nil,
         onLogout: (() -> Void)?,
         makeEditViewController: ((@escaping () -> Void) -> UIViewController)? = nil,
         makeSettingsViewController: (() -> UIViewController)? = nil,
@@ -129,6 +136,8 @@ final class ProfileViewController: UIViewController {
         self.makeEditViewController = makeEditViewController
         self.makeSettingsViewController = makeSettingsViewController
         self.switcherFactory = switcherFactory
+        self.imagePipeline = imagePipeline
+        self.shareTargeting = shareTargeting
         headerView = ProfileHeaderView(imagePipeline: imagePipeline)
         galleryPager = ProfileGalleryPagerView(imagePipeline: imagePipeline)
         super.init(nibName: nil, bundle: nil)
@@ -194,6 +203,16 @@ final class ProfileViewController: UIViewController {
         }
         headerView.onWebsiteTapped = { url in
             UIApplication.shared.open(url)
+        }
+        headerView.onQRCodeTapped = { [weak self] in
+            self?.presentShareSheet()
+        }
+        configureMoreMenu()
+        viewModel.onActionResult = { [weak self] result in
+            self?.render(result)
+        }
+        viewModel.onDismissRequested = { [weak self] in
+            self?.leaveAfterBlock()
         }
         viewModel.onGalleryChange = { [weak self] snapshot in
             self?.galleryPager.render(snapshot)
@@ -267,6 +286,73 @@ final class ProfileViewController: UIViewController {
                 print("PROFILE-LAYOUT-AUDIT\n\(description.map(String.init(describing:)) ?? "unavailable")")
             }
         }
+        // Dev convenience: `-profile-menu-audit` prints the "..." menu the
+        // current state resolves to, and fires the copy action so the toast is
+        // screenshottable. The menu is the one thing on this screen no launch
+        // argument can otherwise reach — it opens on a tap, and the sim has no
+        // touch injection.
+        if ProcessInfo.processInfo.arguments.contains("-profile-menu-audit") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                guard let self else { return }
+                let titles = self.moreMenuElements().flatMap { element -> [String] in
+                    guard let group = element as? UIMenu else { return [element.title] }
+                    return ["—"] + group.children.map(\.title)
+                }
+                print("PROFILE-MENU-AUDIT canModerate=\(self.viewModel.canModerate) "
+                    + "isBlocked=\(self.viewModel.isBlocked) items=\(titles)")
+                self.copyProfileLink()
+            }
+        }
+        let arguments = ProcessInfo.processInfo.arguments
+        // Dev convenience: `-profile-share-demo [activity]` opens the QR share sheet once
+        // the profile has loaded — the sheet is behind a tap on the header's
+        // QR bubble, which the sim can't deliver.
+        if let index = arguments.firstIndex(of: "-profile-share-demo") {
+            // `activity` chains into the system share sheet and `send` into a
+            // DM with the first quick-send target — both go through the real
+            // dismiss-then-hand-off path, so the handoff itself is what gets
+            // screenshotted, not a shortcut around it.
+            let chained = arguments.dropFirst(index + 1).first
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.presentShareSheet()
+                let chainedActions = [
+                    "activity", "send", "search", "search-empty", "search-cancel", "search-send"
+                ]
+                guard chainedActions.contains(chained ?? "") else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                    let sheet = self?.presentedViewController as? ProfileShareViewController
+                    switch chained {
+                    case "activity": sheet?.qaHandOffToSystemShare()
+                    case "send": sheet?.qaSendToFirstTarget()
+                    default:
+                        // `search-empty` opens search WITHOUT typing, which is
+                        // the suggestions-on-entry state.
+                        sheet?.qaBeginSearch(chained == "search-empty" ? "" : "a")
+                        // `search-cancel` also backs out again, so the
+                        // restored state is screenshottable.
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                            switch chained {
+                            case "search-cancel": sheet?.qaCancelSearch()
+                            case "search-send": sheet?.qaSelectFirstResult()
+                            default: break
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Dev convenience: `-profile-block-demo [account]` runs the block
+        // command for real (mock `social_graph.v1/Block`, then the
+        // confirmation toast and the pop), skipping only the confirmation
+        // sheet — which needs a tap the simulator can't deliver. Pass
+        // `account` to exercise the account-wide fan-out.
+        if let index = arguments.firstIndex(of: "-profile-block-demo") {
+            let scope: ProfileBlockScope =
+                arguments.dropFirst(index + 1).first == "account" ? .account : .profile
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.viewModel.block(scope)
+            }
+        }
         #endif
     }
 
@@ -309,6 +395,210 @@ final class ProfileViewController: UIViewController {
             self?.viewModel.refresh()
         }
         navigationController?.pushViewController(editViewController, animated: true)
+    }
+
+    // MARK: - Overflow menu
+
+    /// Installs the see-more bubble's menu. The children are built at OPEN
+    /// time through an uncached deferred element (the feed's "..." precedent),
+    /// not at wiring time: whether the moderation group belongs, and whether it
+    /// reads Block or Unblock, depends on a relationship that usually resolves
+    /// after this runs and can change while the screen is up.
+    private func configureMoreMenu() {
+        headerView.setMoreMenu(UIMenu(children: [
+            UIDeferredMenuElement.uncached { [weak self] completion in
+                completion(self?.moreMenuElements() ?? [])
+            }
+        ]))
+    }
+
+    private func moreMenuElements() -> [UIMenuElement] {
+        // Sharing needs a loaded handle; until then the menu is honestly empty
+        // rather than offering an action that would no-op.
+        var groups: [UIMenuElement] = []
+        if viewModel.shareCard != nil {
+            groups.append(UIMenu(options: .displayInline, children: [
+                UIAction(title: "Share", image: UIImage(systemName: "square.and.arrow.up")) {
+                    [weak self] _ in self?.presentShareSheet()
+                },
+                UIAction(title: "Copy Link", image: UIImage(systemName: "link")) {
+                    [weak self] _ in self?.copyProfileLink()
+                }
+            ]))
+        }
+        // Own profile (and the pre-relationship window) offers no moderation:
+        // you cannot block or report yourself, and guessing is worse than
+        // waiting — the menu is rebuilt on the next open either way.
+        guard viewModel.canModerate else { return groups }
+
+        let blocked = viewModel.isBlocked
+        groups.append(UIMenu(options: .displayInline, children: [
+            UIAction(
+                title: blocked ? "Unblock" : "Block",
+                image: UIImage(systemName: blocked ? "hand.raised.slash" : "hand.raised"),
+                // Unblocking is a restorative action, so it sheds the
+                // destructive red that blocking earns.
+                attributes: blocked ? [] : .destructive
+            ) { [weak self] _ in
+                guard let self else { return }
+                // Unblocking is harmless and reversible — it goes straight
+                // through; blocking asks first, and asks how far it reaches.
+                if blocked {
+                    self.viewModel.unblock()
+                } else {
+                    self.confirmBlock()
+                }
+            },
+            UIAction(
+                title: "Report",
+                image: UIImage(systemName: "flag"),
+                attributes: .destructive
+            ) { [weak self] _ in self?.presentReportReasons() }
+        ]))
+        return groups
+    }
+
+    /// Opens the unified share surface — the QR sheet — rather than jumping
+    /// straight to the system share sheet. Both the header's QR bubble and the
+    /// menu's Share land here, so there is exactly one answer to "share this
+    /// profile"; the system sheet is reachable from inside it.
+    private func presentShareSheet() {
+        guard let card = viewModel.shareCard else { return }
+        let sheet = ProfileShareViewController(
+            card: card,
+            imagePipeline: imagePipeline,
+            targeting: shareTargeting,
+            // Read HERE, where there is a window: the sheet has none until it
+            // is already on screen, and reading it there made the corners snap
+            // after the presentation animation instead of riding it.
+            deviceCornerRadius: ScreenGeometry.cornerRadius(behind: view),
+            // The sheet is full-width on iPhone, so this is its width for the
+            // frames before it has been laid out.
+            fallbackWidth: view.bounds.width
+        )
+        // Both escape hatches come back HERE, after the sheet has dismissed
+        // itself: the system sheet would otherwise stack on top of this one,
+        // and a pushed thread would land behind it.
+        sheet.onSystemShare = { [weak self] card, image in
+            self?.presentActivitySheet(for: card, image: image)
+        }
+        sheet.onSendToTarget = { [weak self] target, card in
+            self?.viewModel.sendProfile(card, to: target)
+        }
+        present(sheet, animated: true)
+    }
+
+    /// The system share sheet, opened once the QR sheet is gone. Two items:
+    /// the link (carrying the metadata that gives the sheet a branded header)
+    /// and the rendered card — the image is what makes Save Image and image
+    /// targets work, which is why this feature needs no photo-library
+    /// permission of its own.
+    private func presentActivitySheet(for card: ProfileViewModel.ShareCard, image: UIImage) {
+        let source = ProfileShareItemSource(card: card, icon: image)
+        let activity = UIActivityViewController(activityItems: [source, image], applicationActivities: nil)
+        activity.popoverPresentationController?.sourceView = headerView.moreButtonAnchor
+        present(activity, animated: true)
+    }
+
+    private func copyProfileLink() {
+        guard let link = viewModel.shareLink else { return }
+        // Both slots: `.url` is what other apps paste as a rich link, `.string`
+        // is what plain-text fields read. Setting only the former leaves a
+        // Notes paste empty.
+        UIPasteboard.general.url = link
+        UIPasteboard.general.string = link.absoluteString
+        ToastView.present("Link copied", symbol: "link", in: view)
+    }
+
+    /// Block is destructive and, here, one-way out of the screen — so it asks
+    /// first. Named with the handle so it can't be answered on autopilot.
+    ///
+    /// An action sheet rather than an alert, because the question is not
+    /// yes/no but *how far*: this app treats one account as owning several
+    /// profiles (the switcher is a first-class affordance), so blocking one
+    /// handle can leave the same person reaching the viewer from an alias.
+    /// Two destructive options read as a scope choice; an alert's OK/Cancel
+    /// shape would have to hide one of them behind a second step.
+    private func confirmBlock() {
+        let handle = viewModel.handle ?? "this user"
+        let sheet = UIAlertController(
+            title: "Block \(handle)?",
+            message: "They won't be able to find your profile or message you, and you'll stop seeing their posts. They aren't notified.\n\nBlocking the account also blocks any other profiles it owns.",
+            preferredStyle: .actionSheet
+        )
+        // The narrow, predictable action leads: it is what "Block" meant
+        // before this choice existed, and it is the one that can't overreach.
+        sheet.addAction(UIAlertAction(title: "Block \(handle)", style: .destructive) { [weak self] _ in
+            self?.viewModel.block(.profile)
+        })
+        sheet.addAction(UIAlertAction(title: "Block Account & All Profiles", style: .destructive) { [weak self] _ in
+            self?.viewModel.block(.account)
+        })
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        sheet.popoverPresentationController?.sourceView = headerView.moreButtonAnchor
+        present(sheet, animated: true)
+    }
+
+    /// `moderation.v1.OpenCase` carries a policy category, so the report asks
+    /// for one rather than filing everything as "other" — a category-less
+    /// report is near-useless to the moderation queue.
+    private func presentReportReasons() {
+        let handle = viewModel.handle ?? "this profile"
+        let sheet = UIAlertController(
+            title: "Report \(handle)",
+            message: "Why are you reporting this profile?",
+            preferredStyle: .actionSheet
+        )
+        for reason in ProfileReportReason.allCases {
+            sheet.addAction(UIAlertAction(title: reason.title, style: .default) { [weak self] _ in
+                self?.viewModel.report(reason)
+            })
+        }
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        sheet.popoverPresentationController?.sourceView = headerView.moreButtonAnchor
+        present(sheet, animated: true)
+    }
+
+    /// Reports the outcome of a menu command. Confirmations are toasts (the
+    /// action is already done — an alert would only demand a second tap);
+    /// failures are alerts, because a failed block or report is something the
+    /// user must know to retry.
+    private func render(_ result: ProfileViewModel.ActionResult) {
+        switch result {
+        case .blocked(let handle, let profileCount):
+            // Says what was actually blocked, not what was asked for: an
+            // account-scoped block can only reach the aliases the fleet let us
+            // see, so claiming "and all their profiles" would be a promise the
+            // client can't keep (see `ProfileBlockScope`).
+            let message = profileCount > 1
+                ? "Blocked \(handle) and \(profileCount - 1) more"
+                : "Blocked \(handle)"
+            // Hosted on the navigation controller's view, not this screen's:
+            // the block pops this view controller in the same turn, and a toast
+            // parented here would leave with it.
+            ToastView.present(message, symbol: "hand.raised.fill", in: navigationController?.view ?? view)
+        case .unblocked(let handle):
+            ToastView.present("Unblocked \(handle)", symbol: "hand.raised.slash.fill", in: view)
+        case .reported:
+            ToastView.present("Report sent", in: view)
+        case .failed(let message):
+            let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            present(alert, animated: true)
+        }
+    }
+
+    /// Leaves the blocked profile: pop when pushed (the common case — a profile
+    /// reached by routing), dismiss when presented. A tab-root profile is left
+    /// standing, but it can't get here: own profiles can't be blocked.
+    private func leaveAfterBlock() {
+        // An open menu-spawned alert would otherwise ride out the pop.
+        presentedViewController?.dismiss(animated: false)
+        if let nav = navigationController, nav.viewControllers.count > 1 {
+            nav.popViewController(animated: true)
+        } else if presentingViewController != nil {
+            dismiss(animated: true)
+        }
     }
 
     // MARK: - Setup

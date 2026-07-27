@@ -45,12 +45,33 @@ public enum CountEstimate: Equatable, Sendable {
     }
 }
 
+/// How wide a block reaches.
+///
+/// The wire has no notion of this: `social_graph.v1.Block` takes a *profile*
+/// id and nothing else, so `.account` is a client-side fan-out over the
+/// account's profiles rather than one atomic command. Two consequences the UI
+/// has to live with, both recorded in `dev/BACKEND_GAPS.md` §12:
+/// - it is a **snapshot** — a profile created on that account afterwards is
+///   not covered, where a server-side account block would be;
+/// - it is **not transactional** — a partial failure blocks some and not
+///   others, so the repository reports what it actually managed to block
+///   rather than claiming the whole set.
+public enum ProfileBlockScope: Equatable, Sendable {
+    /// Just this profile.
+    case profile
+    /// This profile and every other profile on the same account.
+    case account
+}
+
 /// The viewer's relationship to a profile, driving the header's action button.
 public enum ProfileRelationship: Equatable, Sendable {
     /// The profile belongs to the signed-in viewer → "Edit Profile".
     case me
-    /// Someone else's profile → Follow / Following toggle.
-    case other(isFollowing: Bool)
+    /// Someone else's profile → Follow / Following toggle. `isBlocked` is the
+    /// viewer's *outbound* block (`RelationStatus.blocking`), which the "..."
+    /// menu reads to offer Block or Unblock. Being blocked BY the target
+    /// (`blockedBy`) is deliberately not surfaced — platforms don't tell you.
+    case other(isFollowing: Bool, isBlocked: Bool)
 }
 
 /// A labelled external link on a profile (`custom_links`) — a second site, a
@@ -127,6 +148,13 @@ public protocol ProfileProviding: Sendable {
     func relationship(for profileID: ProfileID) async throws -> ProfileRelationship
     /// Follow (`true`) or unfollow (`false`) `profileID` as the viewer.
     func setFollowing(_ following: Bool, for profileID: ProfileID) async throws
+    /// Block (`true`) or unblock (`false`) `profileID` as the viewer.
+    func setBlocked(_ blocked: Bool, for profileID: ProfileID) async throws
+    /// Blocks `profileID` and every other profile on the same account,
+    /// returning the ids actually blocked (always including `profileID` on
+    /// success). Best-effort by construction — see `ProfileBlockScope`.
+    /// Throws only when nothing at all could be blocked.
+    func blockAccount(behind profileID: ProfileID) async throws -> [ProfileID]
     /// Edits the viewer's own mutable profile metadata via `UpdateProfile`,
     /// returning the refreshed profile. Fields not exposed here (avatar, banner,
     /// locale, visibility) are preserved; the handle is changed separately via
@@ -179,7 +207,7 @@ public protocol ProfileSwitching: Sendable {
 /// counting `social_graph.v1` edges so real counts still render today; the fast
 /// path takes over automatically once the backend projects. See
 /// `dev/BACKEND_GAPS.md` §7.
-public actor ProfileRepository: ProfileProviding, ProfileSwitching {
+public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileViewerResolving {
     private let profileClient: any Profile_V1_ProfileServiceClientInterface
     private let counterClient: any Counter_V1_CounterServiceClientInterface
     private let socialGraphClient: any SocialGraph_V1_SocialGraphServiceClientInterface
@@ -230,9 +258,12 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching {
         let response = await socialGraphClient.getRelationStatus(request: request, headers: [:])
         switch response.result {
         case .success(let view):
-            // `.mutual` also means the viewer follows the target.
+            // `.mutual` also means the viewer follows the target. `.blocking`
+            // is exclusive with the follow states on the wire (blocking tears
+            // the edges down), so a blocked profile reports isFollowing false —
+            // which is also what the UI wants: Unblock, not Unfollow.
             let isFollowing = view.status == .following || view.status == .mutual
-            return .other(isFollowing: isFollowing)
+            return .other(isFollowing: isFollowing, isBlocked: view.status == .blocking)
         case .failure(let error):
             throw ProfileError.transport(message: error.message ?? "code \(error.code)")
         }
@@ -253,6 +284,82 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching {
             request.targetID = profileID.rawValue
             try Self.ensureAccepted(await socialGraphClient.unfollow(request: request, headers: [:]))
         }
+    }
+
+    public func setBlocked(_ blocked: Bool, for profileID: ProfileID) async throws {
+        let viewer = try await resolveViewerProfileID()
+        guard viewer != profileID else { return } // no-op: can't block yourself
+
+        if blocked {
+            var request = SocialGraph_V1_BlockRequest()
+            request.actorID = viewer.rawValue
+            request.targetID = profileID.rawValue
+            try Self.ensureAccepted(await socialGraphClient.block(request: request, headers: [:]))
+        } else {
+            var request = SocialGraph_V1_UnblockRequest()
+            request.actorID = viewer.rawValue
+            request.targetID = profileID.rawValue
+            try Self.ensureAccepted(await socialGraphClient.unblock(request: request, headers: [:]))
+        }
+    }
+
+    /// Fans a block out across the account behind `profileID`.
+    ///
+    /// Degrades in one direction only — toward blocking *less*, never toward
+    /// claiming more than it did. If the account can't be resolved, or the
+    /// account's profile list is unreadable (it may well be: enumerating
+    /// another account's profiles is a privacy-sensitive read the fleet is
+    /// entitled to refuse), this falls back to blocking the one profile the
+    /// viewer actually asked about, and says so by returning just that id.
+    public func blockAccount(behind profileID: ProfileID) async throws -> [ProfileID] {
+        let viewer = try await resolveViewerProfileID()
+        let targets = await accountSiblings(of: profileID, viewer: viewer)
+
+        // Concurrent, and INDEPENDENT: one rejected block must not strand the
+        // rest — the whole point of the scope is to catch every alias.
+        var blocked: [ProfileID] = []
+        await withTaskGroup(of: ProfileID?.self) { group in
+            for target in targets {
+                group.addTask { [weak self] in
+                    guard let self else { return nil }
+                    do {
+                        try await self.setBlocked(true, for: target)
+                        return target
+                    } catch {
+                        return nil
+                    }
+                }
+            }
+            for await result in group {
+                if let result { blocked.append(result) }
+            }
+        }
+
+        guard !blocked.isEmpty else {
+            throw ProfileError.transport(message: "no profile could be blocked")
+        }
+        // Stable order for callers that show the list; the set itself is what
+        // matters, but a shuffling result reads as nondeterminism.
+        return blocked.sorted { $0.rawValue < $1.rawValue }
+    }
+
+    /// Every profile the block should cover: the target plus its account
+    /// siblings, minus the viewer's own (blocking yourself is a no-op the
+    /// command layer would reject anyway).
+    private func accountSiblings(of profileID: ProfileID, viewer: ProfileID) async -> [ProfileID] {
+        var ids: Set<ProfileID> = [profileID]
+        if let accountID = try? await fetchProfileView(id: profileID).accountID, !accountID.isEmpty {
+            var request = Profile_V1_ListProfilesByAccountRequest()
+            request.accountID = accountID
+            let response = await profileClient.listProfilesByAccount(request: request, headers: [:])
+            if let body = response.message {
+                ids.formUnion(body.profiles.map { ProfileID($0.profileID) })
+            } else {
+                logger.info("account profiles unreadable for \(profileID.rawValue, privacy: .public); blocking that profile only")
+            }
+        }
+        ids.remove(viewer)
+        return Array(ids)
     }
 
     /// Throws unless the command round-tripped and the server accepted it.
@@ -387,6 +494,16 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching {
     }
 
     public func activeProfileID() async -> ProfileID? {
+        try? await resolveViewerProfileID()
+    }
+
+    // MARK: - ProfileViewerResolving
+
+    /// Same answer as `activeProfileID`, under the name the share-targets
+    /// repository depends on — so that repository never re-derives (or
+    /// re-caches) an identity this actor already owns, and a profile switch
+    /// reaches it for free.
+    public func viewerProfileID() async -> ProfileID? {
         try? await resolveViewerProfileID()
     }
 

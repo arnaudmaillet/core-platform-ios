@@ -81,6 +81,15 @@ final class RouteResolver: Router {
             let thread = chatFeature().makeConversationViewController(for: conversationID)
             navigator.activeNavigationController?.pushViewController(thread, animated: true)
 
+        case .sendLink(let text, let profileID, let stub):
+            // Same destination as `.messageUser`, with the composer seeded.
+            let thread = chatFeature().makeDraftConversationViewController(
+                with: profileID,
+                displayName: stub?.displayName ?? "",
+                prefill: text
+            )
+            navigator.activeNavigationController?.pushViewController(thread, animated: true)
+
         case .messageUser(let profileID, let stub):
             // Pushed immediately, with whatever identity the origin knew. The
             // thread finds-or-creates its conversation once it is on screen —

@@ -8,6 +8,13 @@ import Foundation
 /// numbers rather than "—").
 public final class MockSocialGraphService: @unchecked Sendable {
     private let dataset: MockSocialDataset
+    /// Blocks the viewer has placed this session, keyed actor → targets. The
+    /// dataset seeds none (a profile screen must open on the ordinary Follow
+    /// path), so this exists purely so a block placed from the "..." menu is
+    /// visible to the next `GetRelationStatus` — the state the overflow menu
+    /// reads to offer Unblock instead of Block.
+    private let lock = NSLock()
+    private var blocksByActorID: [String: Set<String>] = [:]
 
     public init(dataset: MockSocialDataset) {
         self.dataset = dataset
@@ -32,6 +39,22 @@ public final class MockSocialGraphService: @unchecked Sendable {
             return .success(response)
         }
         bff.register(path: "/social_graph.v1.SocialGraphService/Unfollow") { (_: SocialGraph_V1_UnfollowRequest) in
+            var response = SocialGraph_V1_CommandResponse()
+            response.success = true
+            return .success(response)
+        }
+        // Block/Unblock DO persist, unlike follow/unfollow: the profile's
+        // overflow menu reads the resulting relation status back to decide
+        // which of Block / Unblock it offers, so a mock that forgot the block
+        // would keep offering Block on a profile the viewer just blocked.
+        bff.register(path: "/social_graph.v1.SocialGraphService/Block") { [self] (request: SocialGraph_V1_BlockRequest) in
+            setBlocked(true, actorID: request.actorID, targetID: request.targetID)
+            var response = SocialGraph_V1_CommandResponse()
+            response.success = true
+            return .success(response)
+        }
+        bff.register(path: "/social_graph.v1.SocialGraphService/Unblock") { [self] (request: SocialGraph_V1_UnblockRequest) in
+            setBlocked(false, actorID: request.actorID, targetID: request.targetID)
             var response = SocialGraph_V1_CommandResponse()
             response.success = true
             return .success(response)
@@ -67,7 +90,25 @@ public final class MockSocialGraphService: @unchecked Sendable {
         profileID.isEmpty ? MockSocialDataset.viewerProfileID : profileID
     }
 
+    private func setBlocked(_ blocked: Bool, actorID: String, targetID: String) {
+        lock.withLock {
+            if blocked {
+                blocksByActorID[actorID, default: []].insert(targetID)
+            } else {
+                blocksByActorID[actorID]?.remove(targetID)
+            }
+        }
+    }
+
+    private func isBlocking(actorID: String, targetID: String) -> Bool {
+        lock.withLock { blocksByActorID[actorID]?.contains(targetID) ?? false }
+    }
+
     private func relationStatus(from actorID: String, to targetID: String) -> SocialGraph_V1_RelationStatus {
+        // Blocking outranks the follow states, matching the contract: a block
+        // tears the edges down, so the wire never reports both.
+        if isBlocking(actorID: actorID, targetID: targetID) { return .blocking }
+        if isBlocking(actorID: targetID, targetID: actorID) { return .blockedBy }
         let follows = dataset.followingByProfileID[actorID]?.contains(targetID) ?? false
         let followedBy = dataset.followingByProfileID[targetID]?.contains(actorID) ?? false
         switch (follows, followedBy) {

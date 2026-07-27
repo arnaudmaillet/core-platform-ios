@@ -88,8 +88,9 @@ final class ProfileHeaderView: UIView {
     var onEditTapped: (() -> Void)?
     /// Invoked when the QR-code bubble is tapped.
     var onQRCodeTapped: (() -> Void)?
-    /// Invoked when the see-more (ellipsis) bubble is tapped.
-    var onMoreTapped: (() -> Void)?
+    /// The see-more (ellipsis) bubble's anchor, for popover-style presentations
+    /// the controller puts on it (the share sheet on iPad, the report picker).
+    var moreButtonAnchor: UIView { moreButton }
     /// Invoked with the profile's website URL when the link row is tapped.
     var onWebsiteTapped: ((URL) -> Void)?
 
@@ -134,6 +135,13 @@ final class ProfileHeaderView: UIView {
 
         bannerView.setImageURL(model.bannerImageURL)
         loadAvatar(model.avatarURL)
+    }
+
+    /// Installs the see-more bubble's overflow menu. Set once with a menu whose
+    /// children are resolved lazily (`UIDeferredMenuElement`), so the tray never
+    /// holds a stale copy of state the controller owns.
+    func setMoreMenu(_ menu: UIMenu) {
+        moreButton.menu = menu
     }
 
     /// Adjusts the tray's leading capsule to the viewer's relationship: Message
@@ -437,10 +445,10 @@ final class ProfileHeaderView: UIView {
             for: .primaryActionTriggered
         )
         moreButton.configuration = Self.glassBubble(systemImage: "ellipsis")
-        moreButton.addAction(
-            UIAction { [weak self] _ in self?.onMoreTapped?() },
-            for: .primaryActionTriggered
-        )
+        moreButton.accessibilityLabel = "More actions"
+        // The menu IS the primary action — one tap opens it, no intermediate
+        // callback. The controller supplies the content (see `setMoreMenu`).
+        moreButton.showsMenuAsPrimaryAction = true
 
         // The Liquid Glass tray, split composition: the leading capsule
         // (Message for others, Edit Profile for the viewer) leads the identity

@@ -204,6 +204,7 @@ public final class MockSocialServices: @unchecked Sendable {
             }
             var view = Profile_V1_ProfileView()
             view.profileID = MockPostStore.viewer.profileID
+            view.accountID = dataset.accountID(for: MockPostStore.viewer.profileID)
             view.handle = snapshot.handle
             view.displayName = snapshot.name
             view.avatarURL = MockPostStore.viewer.avatarURL
@@ -222,6 +223,7 @@ public final class MockSocialServices: @unchecked Sendable {
         }
         var view = Profile_V1_ProfileView()
         view.profileID = author.profileID
+        view.accountID = dataset.accountID(for: author.profileID)
         view.handle = author.handle
         view.displayName = author.displayName
         view.avatarURL = author.avatarURL
@@ -232,9 +234,6 @@ public final class MockSocialServices: @unchecked Sendable {
 
     private func listProfilesByAccount(_ request: Profile_V1_ListProfilesByAccountRequest) -> Result<Profile_V1_ListProfilesByAccountResponse, ConnectError> {
         var response = Profile_V1_ListProfilesByAccountResponse()
-        guard request.accountID == MockAuthService.accountID else {
-            return .success(response) // no profiles for unknown accounts
-        }
         func summary(id: String, handle: String, name: String, avatar: String) -> Profile_V1_ProfileSummaryView {
             var summary = Profile_V1_ProfileSummaryView()
             summary.profileID = id
@@ -243,23 +242,25 @@ public final class MockSocialServices: @unchecked Sendable {
             summary.avatarURL = avatar
             return summary
         }
-        // The viewer stays FIRST — every viewer-id resolver takes `.first`, so
-        // this keeps existing behavior. Two seeded authors ride along as extra
-        // profiles on the account, giving the profile switcher real multi-profile
-        // data to list and switch between.
-        var summaries = [summary(
-            id: MockSocialDataset.viewerProfileID, handle: "you",
-            name: "Demo Viewer", avatar: "mock://avatar/viewer?w=128&h=128"
-        )]
-        for id in ["prof-0", "prof-2"] {
-            if let author = dataset.author(for: id) {
-                summaries.append(summary(
-                    id: author.profileID, handle: author.handle,
-                    name: author.displayName, avatar: author.avatarURL
-                ))
+        // Answers for ANY seeded account, not just the viewer's: the profile
+        // screen's account-wide block resolves a stranger's aliases through
+        // this route. (Whether the real fleet should expose that to an
+        // arbitrary viewer is an open question — see dev/BACKEND_GAPS.md §12.)
+        // The viewer's own account keeps its exact previous answer, viewer
+        // first, because every viewer-id resolver takes `.first`.
+        response.profiles = dataset.profileIDs(inAccount: request.accountID).compactMap { id in
+            if id == MockSocialDataset.viewerProfileID {
+                return summary(
+                    id: id, handle: "you",
+                    name: "Demo Viewer", avatar: "mock://avatar/viewer?w=128&h=128"
+                )
             }
+            guard let author = dataset.author(for: id) else { return nil }
+            return summary(
+                id: author.profileID, handle: author.handle,
+                name: author.displayName, avatar: author.avatarURL
+            )
         }
-        response.profiles = summaries
         return .success(response)
     }
 

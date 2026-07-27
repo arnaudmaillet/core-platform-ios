@@ -132,7 +132,9 @@ struct ProfileRepositoryTests {
     /// and a capture box that records follow/unfollow commands.
     private func makeRepositoryWithGraph(
         status: SocialGraph_V1_RelationStatus = .none,
-        followSucceeds: Bool = true
+        followSucceeds: Bool = true,
+        blockSucceeds: Bool = true,
+        blockRejects: Set<String> = []
     ) -> (ProfileRepository, GraphCapture) {
         let capture = GraphCapture()
         let bff = MockBFF()
@@ -158,6 +160,18 @@ struct ProfileRepositoryTests {
             response.success = true
             return .success(response)
         }
+        bff.register(path: "/social_graph.v1.SocialGraphService/Block") { (request: SocialGraph_V1_BlockRequest) in
+            capture.record(blocked: true, actor: request.actorID, target: request.targetID)
+            var response = SocialGraph_V1_CommandResponse()
+            response.success = blockSucceeds && !blockRejects.contains(request.targetID)
+            return .success(response)
+        }
+        bff.register(path: "/social_graph.v1.SocialGraphService/Unblock") { (request: SocialGraph_V1_UnblockRequest) in
+            capture.record(blocked: false, actor: request.actorID, target: request.targetID)
+            var response = SocialGraph_V1_CommandResponse()
+            response.success = true
+            return .success(response)
+        }
 
         let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
         let repository = ProfileRepository(
@@ -179,15 +193,113 @@ struct ProfileRepositoryTests {
 
     @Test func readsFollowStatusForOthers() async throws {
         let (following, _) = makeRepositoryWithGraph(status: .following)
-        #expect(try await following.relationship(for: ProfileID("prof-3")) == .other(isFollowing: true))
+        #expect(try await following.relationship(for: ProfileID("prof-3")) == .other(isFollowing: true, isBlocked: false))
 
         // `.mutual` also counts as "the viewer follows them".
         let (mutual, _) = makeRepositoryWithGraph(status: .mutual)
-        #expect(try await mutual.relationship(for: ProfileID("prof-3")) == .other(isFollowing: true))
+        #expect(try await mutual.relationship(for: ProfileID("prof-3")) == .other(isFollowing: true, isBlocked: false))
 
         // `.followedBy` means they follow the viewer, not the other way around.
         let (followedBy, _) = makeRepositoryWithGraph(status: .followedBy)
-        #expect(try await followedBy.relationship(for: ProfileID("prof-3")) == .other(isFollowing: false))
+        #expect(try await followedBy.relationship(for: ProfileID("prof-3")) == .other(isFollowing: false, isBlocked: false))
+    }
+
+    @Test func readsBlockStatus() async throws {
+        // `.blocking` is the viewer's OUTBOUND block — the state the overflow
+        // menu reads to offer Unblock.
+        let (blocking, _) = makeRepositoryWithGraph(status: .blocking)
+        #expect(try await blocking.relationship(for: ProfileID("prof-3")) == .other(isFollowing: false, isBlocked: true))
+
+        // `.blockedBy` is the inbound direction and is deliberately NOT
+        // surfaced: the viewer must not learn they were blocked.
+        let (blockedBy, _) = makeRepositoryWithGraph(status: .blockedBy)
+        #expect(try await blockedBy.relationship(for: ProfileID("prof-3")) == .other(isFollowing: false, isBlocked: false))
+    }
+
+    @Test func blockSendsViewerAsActorAndTargetProfile() async throws {
+        let (repository, capture) = makeRepositoryWithGraph()
+
+        try await repository.setBlocked(true, for: ProfileID("prof-3"))
+
+        let call = capture.lastBlock
+        #expect(call?.blocked == true)
+        #expect(call?.actor == MockSocialDataset.viewerProfileID)
+        #expect(call?.target == "prof-3")
+    }
+
+    @Test func unblockSendsTheUnblockCommand() async throws {
+        let (repository, capture) = makeRepositoryWithGraph()
+
+        try await repository.setBlocked(false, for: ProfileID("prof-3"))
+
+        #expect(capture.lastBlock?.blocked == false)
+    }
+
+    @Test func blockingYourselfIsANoOp() async throws {
+        let (repository, capture) = makeRepositoryWithGraph()
+
+        try await repository.setBlocked(true, for: ProfileID(MockSocialDataset.viewerProfileID))
+
+        #expect(capture.lastBlock == nil)
+    }
+
+    @Test func accountBlockCoversEveryProfileOnTheAccount() async throws {
+        // prof-5 and prof-6 are seeded as aliases of ONE stranger's account.
+        let (repository, capture) = makeRepositoryWithGraph()
+
+        let blocked = try await repository.blockAccount(behind: ProfileID("prof-5"))
+
+        #expect(blocked == [ProfileID("prof-5"), ProfileID("prof-6")])
+        #expect(Set(capture.blockTargets) == ["prof-5", "prof-6"])
+    }
+
+    /// A single-profile account degrades to exactly the profile asked about —
+    /// no phantom aliases, no failure.
+    @Test func accountBlockOnASoloAccountBlocksJustThatProfile() async throws {
+        let (repository, capture) = makeRepositoryWithGraph()
+
+        let blocked = try await repository.blockAccount(behind: ProfileID("prof-3"))
+
+        #expect(blocked == [ProfileID("prof-3")])
+        #expect(capture.blockTargets == ["prof-3"])
+    }
+
+    /// The viewer's own profiles are never blocked, even when the target
+    /// shares an account with them — the command layer would reject it, and
+    /// self-blocking is nonsense to attempt.
+    @Test func accountBlockNeverTargetsTheViewersOwnProfile() async throws {
+        // prof-0 sits on the VIEWER's account in the seeded data.
+        let (repository, capture) = makeRepositoryWithGraph()
+
+        _ = try? await repository.blockAccount(behind: ProfileID("prof-0"))
+
+        #expect(!capture.blockTargets.contains(MockSocialDataset.viewerProfileID))
+    }
+
+    /// Partial failure blocks what it can and reports only that — it must not
+    /// claim the whole account when one command was rejected.
+    @Test func accountBlockReportsOnlyWhatSucceeded() async throws {
+        let (repository, _) = makeRepositoryWithGraph(blockRejects: ["prof-6"])
+
+        let blocked = try await repository.blockAccount(behind: ProfileID("prof-5"))
+
+        #expect(blocked == [ProfileID("prof-5")])
+    }
+
+    @Test func accountBlockThrowsWhenNothingCouldBeBlocked() async {
+        let (repository, _) = makeRepositoryWithGraph(blockRejects: ["prof-5", "prof-6"])
+
+        await #expect(throws: ProfileError.self) {
+            _ = try await repository.blockAccount(behind: ProfileID("prof-5"))
+        }
+    }
+
+    @Test func rejectedBlockThrows() async {
+        let (repository, _) = makeRepositoryWithGraph(blockSucceeds: false)
+
+        await #expect(throws: ProfileError.self) {
+            try await repository.setBlocked(true, for: ProfileID("prof-3"))
+        }
     }
 
     @Test func followSendsViewerAsActorAndTargetProfile() async throws {
@@ -255,10 +367,18 @@ private final class UpdateCapture: @unchecked Sendable {
 /// Records the follow/unfollow commands the repository issues over the wire.
 private final class GraphCapture: @unchecked Sendable {
     struct Call: Sendable { let following: Bool; let actor: String; let target: String }
+    struct BlockCall: Sendable { let blocked: Bool; let actor: String; let target: String }
     private let lock = NSLock()
     private var calls: [Call] = []
+    private var blockCalls: [BlockCall] = []
     func record(following: Bool, actor: String, target: String) {
         lock.withLock { calls.append(Call(following: following, actor: actor, target: target)) }
     }
+    func record(blocked: Bool, actor: String, target: String) {
+        lock.withLock { blockCalls.append(BlockCall(blocked: blocked, actor: actor, target: target)) }
+    }
     var last: Call? { lock.withLock { calls.last } }
+    var lastBlock: BlockCall? { lock.withLock { blockCalls.last } }
+    /// Every profile a Block command was aimed at, for asserting fan-out.
+    var blockTargets: [String] { lock.withLock { blockCalls.filter(\.blocked).map(\.target) } }
 }
