@@ -251,4 +251,49 @@ struct CoreNetworkingTests {
         #expect(second.case.caseID == first.case.caseID)
         #expect(backend.moderationService.openedCases.count == 1)
     }
+
+    // MARK: - Relationship-list privacy seeds
+
+    /// The restricted share is a *fixture property* the profile's followers /
+    /// following screen is demoed against, so it is pinned rather than left to
+    /// drift with the roster size.
+    @Test func aboutHalfTheRosterRestrictsItsRelationshipLists() {
+        let dataset = MockSocialDataset()
+        let restricted = dataset.authors.count(where: { dataset.isRelationshipsPrivate($0.profileID) })
+        let share = Double(restricted) / Double(dataset.authors.count)
+        #expect(share > 0.4 && share < 0.5, "expected 40–50% restricted, got \(share)")
+    }
+
+    /// Both branches of the client's privacy rule have to be reachable in mock
+    /// mode, or half of it is undemonstrable: a restricted profile the viewer
+    /// follows (lists open) and one it doesn't (lists withheld).
+    @Test func restrictedProfilesStraddleTheViewersFollowSet() {
+        let dataset = MockSocialDataset()
+        let restricted = dataset.authors.filter { dataset.isRelationshipsPrivate($0.profileID) }
+        #expect(restricted.contains { dataset.followedProfileIDs.contains($0.profileID) })
+        #expect(restricted.contains { !dataset.followedProfileIDs.contains($0.profileID) })
+        // And an unrestricted profile still exists, so the ordinary path is
+        // still the one most profiles take.
+        #expect(dataset.authors.contains { !dataset.isRelationshipsPrivate($0.profileID) })
+    }
+
+    /// The seed has to reach the wire, not just the fixture: the client reads
+    /// privacy off `ProfileView.visibility`, which is the only field that
+    /// carries it today.
+    @Test func restrictedProfilesReportPrivateVisibilityOverTheWire() async throws {
+        let backend = MockBackend()
+        let client = Profile_V1_ProfileServiceClient(client: backend.makeRPCClient())
+        let dataset = MockSocialDataset()
+
+        func visibility(of profileID: String) async throws -> Profile_V1_ProfileVisibility {
+            var request = Profile_V1_GetProfileByIdRequest()
+            request.profileID = profileID
+            return try await client.getProfileByID(request: request, headers: [:]).result.get().visibility
+        }
+
+        let restricted = try #require(dataset.authors.first { dataset.isRelationshipsPrivate($0.profileID) })
+        let open = try #require(dataset.authors.first { !dataset.isRelationshipsPrivate($0.profileID) })
+        #expect(try await visibility(of: restricted.profileID) == .private)
+        #expect(try await visibility(of: open.profileID) == .public)
+    }
 }

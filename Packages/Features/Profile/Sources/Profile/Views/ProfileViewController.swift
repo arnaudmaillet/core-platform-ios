@@ -18,6 +18,12 @@ final class ProfileViewController: UIViewController {
     /// Builds the reusable profile-switcher menu (own profile only). Nil for
     /// other users — switching is a viewer affordance.
     private let switcherFactory: ProfileSwitcherMenuFactory?
+    /// Builds the followers / following screen for a subject and a starting
+    /// tab. Nil when the app wasn't wired with a relationships repository, in
+    /// which case the counters stay inert rather than opening an empty screen.
+    private let makeRelationshipsViewController: (
+        (ProfileRelationshipsViewModel.Subject, RelationshipDirection) -> UIViewController
+    )?
 
     private let scrollView = UIScrollView()
     /// Retained for the share sheet, which builds its own QR card (and a
@@ -81,39 +87,57 @@ final class ProfileViewController: UIViewController {
     /// real-width pass), cropping the skeleton to a row and a half.
     private var skeletonViewportFill: NSLayoutConstraint?
     private var didSubordinatePagerToPop = false
+    #if DEBUG
+    /// Latches the `-profile-relationships` QA push to a single firing.
+    private var didPushRelationshipsForQA = false
+    #endif
 
     /// The own-profile settings gear; pushes `AccountSettingsViewController`.
     private var settingsItem: UIBarButtonItem?
     /// The own-profile switcher; taps present the profile-switcher menu.
     private var switcherItem: UIBarButtonItem?
-    /// Defensive rendering for a `.hidden` relationship state. In practice the
-    /// slot always has a concrete default from init ("Follow" / "Edit
-    /// Profile"), so this skeleton only shows if a future code path ever
-    /// emits `.hidden` — the slot must still never be empty. A bare,
-    /// non-interactive custom view on purpose: the iOS 26 bar wraps every
-    /// item in its own neutral glass capsule, so an empty view reads as a
-    /// quiet placeholder pill in native chrome (a titled item can't be
-    /// textless, and any material of our own would stack a second
-    /// background).
-    private lazy var actionPlaceholderItem: UIBarButtonItem = {
-        let skeleton = UIView()
-        let bone = UIView()
-        bone.backgroundColor = .tertiarySystemFill
-        bone.layer.cornerRadius = 4
-        bone.constrain(in: skeleton) { parent in
-            bone.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-            bone.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
-            bone.widthAnchor.constraint(equalToConstant: 44)
-            bone.heightAnchor.constraint(equalToConstant: 8)
-        }
-        NSLayoutConstraint.activate([
-            skeleton.widthAnchor.constraint(equalToConstant: 56),
-            skeleton.heightAnchor.constraint(equalToConstant: 22)
-        ])
-        let item = UIBarButtonItem(customView: skeleton)
-        item.isEnabled = false
-        return item
-    }()
+    /// The relationship capsule: Follow / Following.
+    ///
+    /// **A stock titled item — deliberately not `UIBarButtonItem(customView:)`,
+    /// and not a `UIButton` of any kind.** Two independent reasons, and both
+    /// have bitten this screen:
+    ///
+    /// 1. *Rendering.* The iOS 26 bar wraps every item in its own Liquid Glass
+    ///    capsule. A glass-configured button hosted as a custom view stacks a
+    ///    second material inside that capsule — a visible double-background
+    ///    bleed — and `.done`/prominent styling floods the capsule with tint.
+    ///    Handing UIKit a title and letting it draw the chrome is the only way
+    ///    to get exactly one capsule.
+    /// 2. *Transitions.* A custom view is opaque to the bar's push/pop
+    ///    choreography: UIKit can cross-fade and slide items it owns, but a
+    ///    hosted view is just a subview it has to carry, which is what makes
+    ///    custom bar items snap while native ones interpolate.
+    ///
+    /// Identity matters as much as nativeness. `applyNavigationState` runs on
+    /// every `viewWillAppear`, including the one a *pop* delivers — and a fresh
+    /// `UIBarButtonItem` handed to the bar mid-transition is not a state change
+    /// UIKit can animate either: it discards the outgoing item's rendered
+    /// content and lays the replacement out from scratch, so the capsule
+    /// arrives empty and its title fades in after the transition settles.
+    /// Recorded at 30fps on the pop back from the relationships screen: six
+    /// frames of a blank glass pill, then a late text fade. So this item is
+    /// created once and only ever retitled.
+    ///
+    /// The tap is a `UIAction` primary action rather than a target/selector —
+    /// same native item, no `@objc` shim.
+    private lazy var followActionItem = UIBarButtonItem(
+        title: "Follow",
+        image: nil,
+        primaryAction: UIAction { [weak self] _ in self?.viewModel.toggleFollow() },
+        menu: nil
+    )
+
+    /// The item set last handed to the navigation item, so a re-entrant apply
+    /// that resolves to the same items touches nothing. `UIBarButtonItem`
+    /// inherits `NSObject`'s identity equality, so this compares by reference —
+    /// exactly the question being asked ("are these the same items?").
+    private var appliedBarItems: [UIBarButtonItem]?
+
     /// The loaded profile's @handle — the screen title once known. Stashed so
     /// `viewWillAppear` can bind the bar from current state before the push
     /// animation starts, whenever the data beat the transition.
@@ -129,6 +153,9 @@ final class ProfileViewController: UIViewController {
         makeEditViewController: ((@escaping () -> Void) -> UIViewController)? = nil,
         makeSettingsViewController: (() -> UIViewController)? = nil,
         switcherFactory: ProfileSwitcherMenuFactory? = nil,
+        makeRelationshipsViewController: (
+            (ProfileRelationshipsViewModel.Subject, RelationshipDirection) -> UIViewController
+        )? = nil,
         identityStub: ProfileIdentityStub? = nil
     ) {
         self.viewModel = viewModel
@@ -136,6 +163,7 @@ final class ProfileViewController: UIViewController {
         self.makeEditViewController = makeEditViewController
         self.makeSettingsViewController = makeSettingsViewController
         self.switcherFactory = switcherFactory
+        self.makeRelationshipsViewController = makeRelationshipsViewController
         self.imagePipeline = imagePipeline
         self.shareTargeting = shareTargeting
         headerView = ProfileHeaderView(imagePipeline: imagePipeline)
@@ -161,7 +189,12 @@ final class ProfileViewController: UIViewController {
         // statistical prior — most viewed profiles aren't followed), "Edit
         // Profile" on surfaces that are the viewer's own by construction. If
         // the relationship read disagrees, the capsule cross-fades in place.
-        if let isFollowing = identityStub?.isFollowing {
+        if identityStub?.isSelf == true || makeEditViewController != nil {
+            // Own profile: Edit from frame 1. Checked BEFORE any follow hint,
+            // because "do I follow myself" is not a question — a stub that
+            // carried one anyway must not seed a Follow capsule here.
+            followButtonState = .edit
+        } else if let isFollowing = identityStub?.isFollowing {
             followButtonState = isFollowing ? .following : .follow
         } else if makeEditViewController != nil {
             followButtonState = .edit
@@ -206,6 +239,9 @@ final class ProfileViewController: UIViewController {
         }
         headerView.onQRCodeTapped = { [weak self] in
             self?.presentShareSheet()
+        }
+        headerView.onRelationshipsTapped = { [weak self] direction in
+            self?.pushRelationships(direction)
         }
         configureMoreMenu()
         viewModel.onActionResult = { [weak self] result in
@@ -304,6 +340,49 @@ final class ProfileViewController: UIViewController {
             }
         }
         let arguments = ProcessInfo.processInfo.arguments
+        // Dev convenience: `-profile-follow-tap` fires the nav-bar Follow /
+        // Following item through its own primary action ~2s in, and prints the
+        // state either side. A bar item takes no simulated touch, so this is
+        // how the item's wiring is verified at all.
+        if arguments.contains("-profile-follow-tap") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.qaTapFollowItem()
+            }
+        }
+        // Dev convenience: `-profile-relationships [following]` opens the
+        // followers / following screen once the profile has loaded — it lives
+        // behind a tap on the counter row, which the simulator can't deliver.
+        // Combine with `-profile-relationships-tab` / `-...-action` (read by
+        // the destination) to drive the tab switch and a row's button.
+        // Once per screen, not once per appearance: `viewDidAppear` fires again
+        // when the relationships screen pops back, and re-pushing there made
+        // the QA run loop between the two forever.
+        if let index = arguments.firstIndex(of: "-profile-relationships"), !didPushRelationshipsForQA {
+            didPushRelationshipsForQA = true
+            let direction: RelationshipDirection =
+                arguments.dropFirst(index + 1).first == "following" ? .following : .followers
+            // Polled, not a single fixed delay: the push needs a loaded
+            // profile (it hands the subject's privacy state over), and under
+            // `-mock-latency` — the very flag you'd combine this with to
+            // screenshot the destination's skeleton — the profile isn't loaded
+            // a second and a half in, so a one-shot attempt silently no-ops.
+            func attempt(_ remaining: Int) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    guard let self else { return }
+                    // Retry rather than bail on a transient miss: this used to
+                    // `return` whenever the profile wasn't topmost at that exact
+                    // instant, which killed the whole chain if the tick landed
+                    // mid-transition — an intermittently empty recording.
+                    let isTop = self.navigationController?.topViewController === self
+                    if isTop, self.viewModel.relationshipsSubject != nil {
+                        self.pushRelationships(direction)
+                    } else if remaining > 0 {
+                        attempt(remaining - 1)
+                    }
+                }
+            }
+            attempt(30)
+        }
         // Dev convenience: `-profile-share-demo [activity]` opens the QR share sheet once
         // the profile has loaded — the sheet is behind a tap on the header's
         // QR bubble, which the sim can't deliver.
@@ -402,11 +481,20 @@ final class ProfileViewController: UIViewController {
         }
     }
 
-    /// The nav-bar relationship action toggles Follow / Following. Edit is not
-    /// a bar item — it's the header tray's own capsule (`onEditTapped`), so it
-    /// never routes through here.
-    private func handleActionTapped() {
-        viewModel.toggleFollow()
+    /// Opens the followers / following lists on the tapped counter's tab.
+    ///
+    /// Pushed onto this screen's own stack rather than routed: the destination
+    /// is another Profile surface, and `AppRoute` exists for *cross-feature*
+    /// navigation (the rows inside it do route — each one opens someone else's
+    /// profile). Gated on a loaded profile, because the subject it hands over
+    /// carries the privacy state.
+    private func pushRelationships(_ direction: RelationshipDirection) {
+        guard let makeRelationshipsViewController,
+              let subject = viewModel.relationshipsSubject
+        else { return }
+        navigationController?.pushViewController(
+            makeRelationshipsViewController(subject, direction), animated: true
+        )
     }
 
     private func pushEditProfile() {
@@ -710,7 +798,13 @@ final class ProfileViewController: UIViewController {
     /// composition), viewWillAppear (synchronous pre-transition bind), and the
     /// async data callbacks (via `alongsideTransition`).
     private func applyNavigationState() {
-        title = currentHandle ?? "Profile"
+        // Guarded, like the bar items below: re-assigning an identical title
+        // still asks the bar to re-lay-out its centre, which during a pop is a
+        // change it has to animate from nothing.
+        let resolvedTitle = currentHandle ?? "Profile"
+        if title != resolvedTitle {
+            title = resolvedTitle
+        }
         updateActionBarItem(followButtonState)
     }
 
@@ -754,11 +848,25 @@ final class ProfileViewController: UIViewController {
         // Edit is no longer a bar item — it lives in the header tray beside the
         // avatar (see `ProfileHeaderView.configureAction`), so own-profile keeps
         // only its account overflow menu here.
+        // One item, retitled — never a new one. See `followActionItem`.
+        //
+        // `.hidden` yields no item at all. It used to install a bare custom
+        // view as a placeholder pill, which was both unreachable — every path
+        // into `followButtonState` sets a concrete state, the view model never
+        // assigns `.hidden`, and the audit only ever logs `follow`/`following`
+        // — and the one thing in this slot that UIKit could not animate across
+        // a transition. An absent item is the honest native answer for "no
+        // relationship applies".
         let action: UIBarButtonItem? = switch state {
-        case .hidden: actionPlaceholderItem
-        case .follow: makeActionItem(title: "Follow")
-        case .following: makeActionItem(title: "Following")
+        case .hidden: nil
+        case .follow, .following: followActionItem
         case .edit: nil
+        }
+        if state == .follow || state == .following {
+            let resolvedTitle = state == .follow ? "Follow" : "Following"
+            if followActionItem.title != resolvedTitle {
+                followActionItem.title = resolvedTitle
+            }
         }
         // Relationship action for other users; the gear + switcher for own
         // profile (where `action` is nil). Trailing-to-leading: gear rightmost,
@@ -771,16 +879,51 @@ final class ProfileViewController: UIViewController {
             if !items.isEmpty { items.append(.fixedSpace(8)) }
             items.append(switcherItem)
         }
+        // The load-bearing guard. A pop's `viewWillAppear` resolves to exactly
+        // the item set already on the bar, and handing that same set back is
+        // what used to tear the capsule down and rebuild it mid-transition.
+        // Nothing changed, so nothing is said.
+        guard items != appliedBarItems else { return }
+        appliedBarItems = items
+        #if DEBUG
+        // Dev convenience: `-profile-navbar-audit` prints every *actual* bar
+        // rebuild with the transition state it happened in. A rebuild logged
+        // during a pop is the bug this guard exists to prevent, so the audit
+        // is the regression test a recording can't be.
+        if ProcessInfo.processInfo.arguments.contains("-profile-navbar-audit") {
+            let phase = transitionCoordinator != nil ? "DURING-TRANSITION" : "idle"
+            // `custom=` is the audit's other job: it names any item in this
+            // slot that is a hosted view rather than one UIKit draws itself —
+            // the shape that cannot interpolate across a bar transition. It
+            // must stay 0.
+            let custom = items.count(where: { $0.customView != nil })
+            print("PROFILE-NAVBAR-AUDIT rebuild items=\(items.count) custom=\(custom) "
+                + "state=\(followButtonState) \(phase)")
+        }
+        #endif
         navigationItem.rightBarButtonItems = items
     }
 
-    private func makeActionItem(title: String) -> UIBarButtonItem {
-        UIBarButtonItem(title: title, style: .plain, target: self, action: #selector(actionBarItemTapped))
+    #if DEBUG
+    /// Fires the relationship item through its own primary action — the same
+    /// closure UIKit invokes on a tap, reached from the item rather than from
+    /// a copy of the call. The Follow capsule is a bar item, which the
+    /// simulator cannot tap, so this is the only way to prove the wiring
+    /// survived the conversion off target/action.
+    private func qaTapFollowItem() {
+        guard let action = followActionItem.primaryAction else {
+            print("PROFILE-FOLLOW-TAP no primary action on the item")
+            return
+        }
+        print("PROFILE-FOLLOW-TAP before=\(followButtonState) customView=\(followActionItem.customView != nil)")
+        action.performWithSender(followActionItem, target: nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self else { return }
+            print("PROFILE-FOLLOW-TAP after=\(self.followButtonState) title=\(self.followActionItem.title ?? "nil")")
+        }
     }
+    #endif
 
-    @objc private func actionBarItemTapped() {
-        handleActionTapped()
-    }
 
     private func configureViews() {
         scrollView.alwaysBounceVertical = true

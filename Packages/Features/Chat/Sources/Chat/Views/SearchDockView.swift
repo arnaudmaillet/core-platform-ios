@@ -1,25 +1,33 @@
 import DesignSystem
 import UIKit
 
-/// The compose picker's search field, docked at the bottom of the screen.
+/// The compose picker's search field, docked at the bottom of the screen,
+/// under the thumb.
 ///
 /// A floating glass capsule rather than `navigationItem.searchController`,
-/// because the placement is the point: on a screen whose primary action is
-/// search, the field belongs under the thumb. iOS 26 *does* dock a search
+/// because the placement is the point. iOS 26 *does* dock a search
 /// controller's field at the bottom by itself — but only when its view
 /// controller is the ROOT of its navigation stack (the Search tab, a sheet's
-/// root). The picker is pushed, and for a pushed screen `.automatic` resolves
-/// to the navigation bar, with no explicit "bottom" placement to ask for.
+/// root). For a pushed screen `.automatic` resolves to the navigation bar, and
+/// asking for `.integrated` + toolbar integration only half-helps: UIKit
+/// relocates the field into the toolbar once the toolbar carries that screen's
+/// items, which `UINavigationController` transfers at transition *completion*.
+/// So the field either flashes in the navigation bar for the length of the push
+/// (assigned early) or drops into the toolbar after it (assigned late) — both
+/// measured at 30fps while building the profile's relationship lists, which
+/// ultimately took the other native route and put its search bar in the
+/// navigation item (`.automatic`, which resolves to `.stacked` there).
 ///
-/// Owning the field has a second payoff. A `UISearchController`'s bar lives in
-/// the navigation bar, which does not travel with a push or pop — that is what
-/// left it stranded across the destination's chrome mid-transition, and what
-/// the transition-coordinator choreography existed to paper over. This is an
-/// ordinary subview of the screen it belongs to, so it slides with it for free.
+/// Owning the field dissolves the dilemma rather than timing around it. A
+/// `UISearchController`'s bar lives in the navigation bar, which does not
+/// travel with a push or pop — that is what left it stranded across the
+/// destination's chrome mid-transition, and what the transition-coordinator
+/// choreography existed to paper over. This is an ordinary subview of the
+/// screen it belongs to, so it slides with it for free.
 ///
 /// Built to match `ChatInputBar`: same glass, same capsule, same dock against
-/// `keyboardLayoutGuide` — the two screens are one step apart in the same flow
-/// and their bottom bars should read as the same object.
+/// `keyboardLayoutGuide` — screens one step apart in a flow should have bottom
+/// bars that read as the same object.
 final class SearchDockView: UIView {
     /// What the trailing button does right now. Mirrors `ChatInputBar`'s
     /// send/dismiss split one screen along: the same control changes job with

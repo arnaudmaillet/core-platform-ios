@@ -20,6 +20,7 @@ full functionality.
 | 10 | No seeded conversations | Messages list shows empty against the fleet | Low |
 | 11 | `moderation.v1` unrouted + upstream port unknown | Profile "Report User" against the fleet | Medium |
 | 12 | No account-level block RPC; alias enumeration is client-side | Profile "Block Account & All Profiles" is best-effort | Medium |
+| 13 | Relationship lists: no privacy contract, no `RemoveFollower`, id-only edges | Followers/Following screen — privacy is client-inferred, Remove is mock-only, hydration is N+1 | **High** (privacy) |
 
 ---
 
@@ -335,6 +336,141 @@ caller, that is worth a look on its own merits, independent of this feature.**
 (or an `account_scope` flag on `BlockRequest`) and enforce it server-side on
 profile creation. Then the client drops the fan-out entirely and the alias
 enumeration goes away with it.
+
+---
+
+## 13. Relationship lists: no privacy contract, no follower removal, id-only edges
+
+The profile's **Followers / Following** screen is built and works end to end.
+Three things it needs do not exist on the wire. The first is a privacy gap and
+is the one that matters.
+
+Full contract proposal: **`BACKEND_RELATIONSHIP_LISTS.md`** (repo root).
+
+### 13a. Nothing in the contracts describes relationship-list privacy
+
+**Symptom.** `social_graph.v1.ListFollowers` / `ListFollowing` take
+`(subject_id, limit, page_token)` and return edges. There is no permission
+field on the request, no access field on the response, and no documented
+`PERMISSION_DENIED` — so a client cannot tell "this person has no followers"
+from "you may not see them", and the service appears to serve any list to any
+caller.
+
+Nor is the flag anywhere else:
+
+| Where we looked | What is there |
+|---|---|
+| `profile.v1.ProfileView` | `visibility: {UNSPECIFIED, PUBLIC, PRIVATE}` — **whole-profile**, not per-surface |
+| `profile.v1` RPCs | `SetVisibility` (same whole-profile flag) |
+| `account.v1` (22 RPCs) | no settings or privacy surface of any kind |
+| `chat.v1` | `ToggleVisibility` — conversation archiving, unrelated |
+| `social_graph.v1` | follow/block edges only |
+
+**What the client does today.** `RelationshipListAccess` infers the rule the
+platforms converge on, from the one signal that exists:
+
+```
+self                                    → visible
+subject.visibility != PRIVATE           → visible
+subject.visibility == PRIVATE
+    and viewer follows subject          → visible
+    otherwise                           → PRIVATE state, and no RPC is issued
+```
+
+It is deliberately one-directional: it can hide a list the backend would have
+served, never show one it refuses. A `PERMISSION_DENIED` from either list RPC
+is also mapped to the private state rather than a retryable error, so the day
+the fleet enforces this the client already behaves correctly.
+
+**Why this is the high-severity item.** The inference is *approximate*, and it
+is approximating a privacy boundary. A profile that is PUBLIC but wants its
+follower list private cannot express that, and the client will show the list.
+Right now the fleet will serve those edges to anyone who asks — the client's
+restraint is the only thing in the way, and a client is not an enforcement
+point.
+
+**Required.** Enforce server-side, and say so on the wire:
+
+```proto
+// social_graph.v1 — on both list responses
+enum ListAccess { LIST_ACCESS_UNSPECIFIED = 0; ALLOWED = 1; RESTRICTED = 2; }
+message ListFollowersResponse {
+  repeated EdgeSummary followers = 1;
+  string next_page_token = 2;
+  ListAccess access = 3;   // RESTRICTED ⇒ `followers` is empty by policy, not by fact
+}
+```
+
+plus per-surface flags the user can actually set, and an account-level settings
+surface to set them through:
+
+```proto
+// profile.v1.ProfileView
+enum AudienceScope { AUDIENCE_UNSPECIFIED = 0; EVERYONE = 1; FOLLOWERS = 2; NOBODY = 3; }
+AudienceScope follower_list_visibility  = 20;
+AudienceScope following_list_visibility = 21;
+
+// account.v1 — does not exist at all today
+rpc GetPrivacySettings(GetPrivacySettingsRequest) returns (PrivacySettingsView);
+rpc UpdatePrivacySettings(UpdatePrivacySettingsRequest) returns (CommandResponse);
+```
+
+Until then the client keeps inferring, and the inference is documented in
+`RelationshipListAccess` so it is not mistaken for a contract.
+
+### 13b. No `RemoveFollower` RPC
+
+**Symptom.** A user cannot drop someone from their own follower list.
+`social_graph.v1` offers `Follow`, `Unfollow`, `Block`, `Unblock` — and
+`Unfollow(actor, target)` is authorized *as the actor*, which the viewer is not
+in this case. The action cannot be spelled with what exists.
+
+Block-then-unblock would sever the edge as a side effect, and is **not** done:
+it drops the reverse edge too, and writes a moderation event for something that
+is not a moderation action.
+
+**Client behaviour.** `ProfileRelationshipsProviding.supportsFollowerRemoval`
+is a deployment capability. The mock implements removal (it owns its graph), so
+the flow is verifiable in the simulator; against the fleet the row does not
+offer the action at all, rather than offering a button that cannot work. Adding
+the RPC lights it up with no client UI change.
+
+**Required.** `rpc RemoveFollower(RemoveFollowerRequest) returns (CommandResponse)`
+with `{actor_id, follower_id}`, authorized as the *followee*. Semantics: drop
+the follower→actor edge, do not notify, do not prevent re-following.
+
+### 13c. `EdgeSummary` is id-only and there is no batch profile read
+
+**Symptom.** `EdgeSummary { profile_id, followed_at }` carries no identity, and
+`profile.v1` exposes only singular `GetProfileById`. Rendering a page of N rows
+therefore costs **N + 1** requests (the edge page plus one profile read each),
+issued as a concurrent fan-out. At the default page size of 24 that is 25
+requests per screenful.
+
+A second N is avoided only by a trick: row follow-state ("do I follow this
+person") would be one `GetRelationStatus` per row, so the client instead reads
+the viewer's own follow list **once** and intersects it. That is correct but
+bounded — a viewer with more follows than the sample limit (500) can see a row
+render "Follow" for someone they already follow.
+
+**Also unpopulated:** `EdgeSummary.followed_at` is never set (mock or fleet), so
+the lists cannot be sorted by, or show, when the follow happened.
+
+**Required**, either:
+
+```proto
+// preferred — one request, no fan-out
+message EdgeSummary {
+  string profile_id = 1;
+  google.protobuf.Timestamp followed_at = 2;
+  ProfileSummary profile = 3;      // handle, display_name, avatar_url, verified
+  ViewerContext viewer_context = 4; // see BACKEND_OPTIMIZATION_FOLLOW_STATE.md
+}
+```
+
+or, failing that, `profile.v1.BatchGetProfiles(repeated profile_id)` — which
+would also serve the inbox, the compose picker, and the share sheet, all three
+of which run the same fan-out today.
 
 ---
 

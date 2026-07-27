@@ -74,6 +74,34 @@ public enum ProfileRelationship: Equatable, Sendable {
     case other(isFollowing: Bool, isBlocked: Bool)
 }
 
+/// How widely a profile is exposed, mirroring `profile.v1.ProfileVisibility`.
+///
+/// The contract's flag is **whole-profile**: there is no per-surface privacy
+/// anywhere in `profile.v1`, `social_graph.v1`, or `account.v1`, so this is the
+/// only signal the client has about whether a profile's follower / following
+/// lists should be shown to a stranger. `RelationshipListAccess` is where that
+/// (approximate) inference is made and documented; see
+/// `dev/BACKEND_GAPS.md` §13 for the contract this should become.
+///
+/// `unspecified` is treated as public everywhere — an unset enum on the wire
+/// must not silently lock a profile down.
+public enum ProfileVisibility: Equatable, Sendable {
+    case unspecified
+    case `public`
+    case `private`
+
+    /// Whether this value withholds anything. `unspecified` does not.
+    public var isPrivate: Bool { self == .private }
+
+    init(_ proto: Profile_V1_ProfileVisibility) {
+        switch proto {
+        case .private: self = .private
+        case .public: self = .public
+        default: self = .unspecified
+        }
+    }
+}
+
 /// A labelled external link on a profile (`custom_links`) — a second site, a
 /// storefront, a social handle. Order is meaningful: it's the display order.
 public struct ProfileLink: Equatable, Sendable {
@@ -99,6 +127,10 @@ public struct UserProfile: Equatable, Sendable {
     /// same `UpdateProfile` RPC as bio/name/website.
     public let customLinks: [ProfileLink]
     public let isVerified: Bool
+    /// The profile's `profile.v1` visibility. Read by the follower / following
+    /// lists to decide whether a stranger may see them — the closest thing the
+    /// contracts offer to relationship-list privacy.
+    public let visibility: ProfileVisibility
     public let followerCount: CountEstimate
     public let followingCount: CountEstimate
     /// Total reactions received across the profile's posts (counter.v1 LIKE,
@@ -117,6 +149,9 @@ public struct UserProfile: Equatable, Sendable {
         websiteURL: URL?,
         customLinks: [ProfileLink] = [],
         isVerified: Bool,
+        // Defaulted: a profile the wire didn't describe is not a private one,
+        // and every existing call site predates the field.
+        visibility: ProfileVisibility = .unspecified,
         followerCount: CountEstimate,
         followingCount: CountEstimate,
         reactionCount: CountEstimate,
@@ -130,6 +165,7 @@ public struct UserProfile: Equatable, Sendable {
         self.websiteURL = websiteURL
         self.customLinks = customLinks
         self.isVerified = isVerified
+        self.visibility = visibility
         self.followerCount = followerCount
         self.followingCount = followingCount
         self.reactionCount = reactionCount
@@ -608,6 +644,7 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileViewe
             websiteURL: URL(string: view.websiteURL),
             customLinks: view.customLinks.map { ProfileLink(label: $0.label, url: $0.url) },
             isVerified: view.verified,
+            visibility: ProfileVisibility(view.visibility),
             followerCount: counts.followers,
             followingCount: counts.following,
             reactionCount: counts.reactions,

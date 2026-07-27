@@ -8,9 +8,30 @@ import UIKit
 @MainActor
 public protocol ProfileFeatureBuilding {
     /// The signed-in viewer's own profile, resolved from the active auth
-    /// session. `onLogout` is invoked when the user taps Log Out; the shell
-    /// owns what that means (tearing down the authenticated scene).
-    func makeCurrentUserProfileViewController(onLogout: @escaping () -> Void) -> UIViewController
+    /// session.
+    ///
+    /// **`onLogout` doubles as the account-chrome switch.** Non-nil is the
+    /// canonical entry point (the Maps avatar): the screen carries the settings
+    /// gear and the profile switcher, and Log Out means what the shell says it
+    /// means. Nil is a *routed* arrival — the "(Me)" row in a relationship list,
+    /// a deep link — where the screen is the same profile but the account
+    /// actions are withheld: switching accounts or logging out from inside a
+    /// deep stack strands every screen below it on an identity that no longer
+    /// applies. Those belong at one entry point, not wherever the graph
+    /// happens to lead.
+    ///
+    /// Note this cannot be inferred from `navigationController.viewControllers`:
+    /// the canonical entry point is itself *pushed* (onto the Maps stack — the
+    /// Profile tab no longer exists), so stack depth cannot tell the two apart.
+    /// The builder is told.
+    ///
+    /// `identityStub` serves the same purpose here as on `makeProfileViewController`
+    /// — letting the screen title itself before the profile load returns — and
+    /// matters for routed arrivals, where the origin already has the handle.
+    func makeCurrentUserProfileViewController(
+        onLogout: (() -> Void)?,
+        identityStub: ProfileIdentityStub?
+    ) -> UIViewController
 
     /// Any user's profile by id — the destination the router pushes when a
     /// profile route fires (e.g. tapping a post author). Carries no account
@@ -31,6 +52,14 @@ public protocol ProfileFeatureBuilding {
     /// multi-profile switching isn't available. Call `reload()` up front so
     /// `makeMenu()` is synchronous when the menu is requested.
     func makeProfileSwitcher() -> ProfileSwitcherPresenting?
+}
+
+public extension ProfileFeatureBuilding {
+    /// Convenience for callers with nothing to seed — protocols can't carry
+    /// default arguments, so the default lives here.
+    func makeCurrentUserProfileViewController(onLogout: @escaping () -> Void) -> UIViewController {
+        makeCurrentUserProfileViewController(onLogout: onLogout, identityStub: nil)
+    }
 }
 
 /// Vends the switcher `UIMenu`. `reload()` pre-fetches + pre-formats the account
