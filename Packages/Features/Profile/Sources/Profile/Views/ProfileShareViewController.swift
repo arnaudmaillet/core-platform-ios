@@ -88,6 +88,14 @@ final class ProfileShareViewController: UIViewController {
     /// right of the Close lens. Asserted rather than trusted: the
     /// `SEARCH-ROW` audit prints `fieldL` and `lensR`, which must match.
     private static let searchBarFieldInset: CGFloat = 8
+    /// The sheet's radius while searching.
+    ///
+    /// The device radius is right for the content-sized sheet — a small card
+    /// floating clear of the screen edges, whose shoulders should echo the
+    /// bezel. At `.large()` the sheet is nearly the screen, and a ~60pt radius
+    /// on something that tall reads as a mistake rather than a curve; a
+    /// standard modal radius is what the system itself uses at that size.
+    private static let searchCornerRadius: CGFloat = 20
     /// The search bar's row, hidden until search is entered.
     private var searchBarSection: UIView?
     /// Everything search mode puts away: the card, the horizontal row, the
@@ -690,6 +698,13 @@ final class ProfileShareViewController: UIViewController {
         sheet.animateChanges {
             sheet.detents = searching ? [.large()] : [contentDetent()]
             sheet.selectedDetentIdentifier = searching ? .large : Self.detentIdentifier
+            // Inside the SAME block as the detent, so the corners morph with
+            // the expansion instead of snapping once it lands. `nil` restores
+            // the system default on the way back, for the case where the
+            // device radius was unreadable and was never set to begin with.
+            sheet.preferredCornerRadius = searching
+                ? Self.searchCornerRadius
+                : (deviceCornerRadius > 0 ? deviceCornerRadius : nil)
         }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-profile-share-demo") {
