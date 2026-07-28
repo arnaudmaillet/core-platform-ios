@@ -5,10 +5,21 @@ import UIKit
 /// The inbox's category header: a floating Liquid Glass capsule under the
 /// navigation bar, with a lens that slides between segments.
 ///
-/// **Anatomy.** A content-hugging capsule of `UIGlassEffect`, its own soft
-/// shadow, and a tinted overlay marking the active segment. The capsule floats
-/// — it has no hairline, and it spans the width only if its segments demand it
-/// — so the lists scroll *beneath* it and are seen through the glass.
+/// **Anatomy.** A full-width capsule of `UIGlassEffect` inset by the standard
+/// margin, its own soft shadow, and a tinted overlay marking the active
+/// segment. The capsule floats and has no hairline, so the lists scroll
+/// *beneath* it and are seen through the glass. Segments share the width
+/// equally, so the bar reads the same on every screen.
+///
+/// **A control, not a view.** The bar is a `UIControl` carrying
+/// `selectedIndex` and announcing `.valueChanged`, and each segment is a
+/// `UIButton` sending `.primaryActionTriggered` — so the owner wires this the
+/// way it would wire a `UISegmentedControl`, and UIKit owns the whole touch
+/// state machine: what counts as a press, when a drag outside cancels it, when
+/// the highlight comes back. Pressed appearance is expressed in
+/// `configurationUpdateHandler`, which is where UIKit asks for it; there is no
+/// `isHighlighted` observer and no animation of ours. The container's own
+/// pressed feedback is the system's, via `UIGlassEffect.isInteractive`.
 ///
 /// **ONE material, not two.** The lens is a plain tinted `UIView`
 /// (`label` at 18% — a darkening in light mode, a lightening in dark), NOT a
@@ -48,12 +59,17 @@ import UIKit
 /// widths are pinned to their SEMIBOLD size up front, the reflow trap
 /// `GlassSegmentRow` calls out.
 ///
-/// The lens tracks progress LINEARLY and rigidly. A spring-driven elastic
-/// variant (stretch on velocity, squash on settle) was built and rejected —
-/// see [[messages-inbox-paged]]; if it is ever revisited, note that the lens
-/// must still be driven by its `frame`, never a `CGAffineTransform`, which
-/// scales the rendered corner radius and turns the capsule into an ellipse.
-final class InboxCategoryBar: UIView {
+/// The lens tracks progress LINEARLY and rigidly, and there is no physics of
+/// any kind in this file. Elasticity has now been built and removed TWICE — a
+/// spring-driven version in 2026-07, and a velocity-derived stretch after it —
+/// so treat a third attempt as a decision to be made deliberately rather than a
+/// gap to be filled. Both are recorded in [[messages-inbox-paged]]. If it ever
+/// does return: the lens must be driven by its `frame`, never a
+/// `CGAffineTransform`, which scales the rendered corner radius and degrades
+/// the capsule into an ellipse; and any decay must have a tick source that
+/// outlives the last progress change, because `setProgress` early-returns on an
+/// unchanged position and will otherwise freeze the effect mid-stretch.
+final class InboxCategoryBar: UIControl {
     private enum Metrics {
         /// The floating capsule's own height.
         static let capsuleHeight: CGFloat = 42
@@ -64,27 +80,17 @@ final class InboxCategoryBar: UIView {
         /// Inset of the lens inside the capsule.
         static let lensInset: CGFloat = 4
         static let interSegmentSpacing: CGFloat = 2
-
-        /// Below this much movement per frame (in pages) the lens is rigid.
-        /// A slow, deliberate drag should not wobble.
-        static let elasticThreshold: CGFloat = 0.003
-        /// Points of stretch per page-per-frame of smoothed travel.
-        static let elasticGain: CGFloat = 520
-        /// Hard cap, as a FRACTION of the lens's own width rather than a fixed
-        /// number of points — the stretch should read the same on a 375pt phone
-        /// and a 440pt one, and a segment slot differs by a third between them.
-        static let elasticMaximumFraction: CGFloat = 0.30
-        /// How much of the previous frame's travel carries into this one. The
-        /// higher this is, the longer the lens keeps giving after the finger
-        /// slows — which is most of what reads as "liquid" rather than "wide".
-        static let elasticSmoothing: CGFloat = 0.82
     }
 
     /// Total height the container reserves as safe area, margins included.
     static let height: CGFloat = Metrics.capsuleHeight + Metrics.topMargin + Metrics.bottomMargin
 
-    /// A segment was tapped. Swipes report through the pager, not here.
-    var onSelect: ((Int) -> Void)?
+    /// The segment the bar is reporting — updated by taps AND by the pages
+    /// moving under it, so it is never stale. Reading it is how a
+    /// `.valueChanged` handler learns WHICH segment — the same shape
+    /// `UISegmentedControl` has, so the owner registers a `UIAction` rather
+    /// than being handed a closure to store.
+    private(set) var selectedIndex: Int = 0
     /// A drag on the capsule itself, as a fractional page position. Fires every
     /// frame of the finger; the owner scrubs the pager to it.
     var onScrub: ((CGFloat) -> Void)?
@@ -97,9 +103,8 @@ final class InboxCategoryBar: UIView {
     /// which would clip a shadow set on the same layer.
     private let shadowHost = UIView()
     private let capsule = UIVisualEffectView(effect: nil)
-    /// Scrolls the segments when they out-measure the capsule's ceiling. Below
-    /// that width it never scrolls and is invisible in every sense — the
-    /// capsule still hugs its content and still floats centred.
+    /// Scrolls the segments when they out-measure the capsule. Below that
+    /// width it never scrolls and is invisible in every sense.
     private let scroller = UIScrollView()
     /// The scroll view's content: the lens and the row, in one coordinate
     /// space. The lens lives HERE rather than in the capsule so it travels with
@@ -219,7 +224,13 @@ final class InboxCategoryBar: UIView {
     private func materializeEffects() {
         guard window != nil else { return }
         if capsule.effect == nil {
-            capsule.effect = UIGlassEffect(style: .regular)
+            let glass = UIGlassEffect(style: .regular)
+            // The system's own press response for glass: the material flexes
+            // under a touch instead of sitting inert. This is the whole of the
+            // container's pressed feedback — there is no scale math or spring
+            // of ours anywhere near it.
+            glass.isInteractive = true
+            capsule.effect = glass
         }
     }
 
@@ -258,75 +269,14 @@ final class InboxCategoryBar: UIView {
     /// every frame of a tap-driven scroll animation.
     func setProgress(_ progress: CGFloat) {
         guard progress != self.progress else { return }
-        // Travel is accumulated HERE and not in `applyProgress`, which also
-        // runs from `layoutSubviews` — a re-layout is not motion, and counting
-        // it would stretch the lens for a rotation or a badge arriving.
-        let delta = progress - self.progress
-        travel = travel * Metrics.elasticSmoothing + delta * (1 - Metrics.elasticSmoothing)
         self.progress = progress
+        // The value tracks the pages, not just taps. Without this a swipe would
+        // leave `selectedIndex` stale, and the next tap on the segment the
+        // viewer had swiped away from would be read as "no change" and do
+        // nothing. Silent — the pages are already where this says they are, so
+        // announcing it would tell the owner something it just told us.
+        selectedIndex = Int(progress.rounded())
         applyProgress()
-        scheduleRelease()
-    }
-
-    /// Unwinds the stretch once the pages stop moving.
-    ///
-    /// The decay cannot ride on `setProgress` alone: that early-returns when
-    /// the position is unchanged, so the last frame of a drag would freeze
-    /// `travel` at whatever it held and the lens would stay stretched for good.
-    /// (It didn't at a smoothing of 0.72 only because the residual happened to
-    /// fall under the threshold before the pager settled — luck, not design.)
-    ///
-    /// A chained hop rather than a `CADisplayLink`: it exists for the six or so
-    /// frames of the tail and then stops, where a display link would retain
-    /// this view and need tearing down in `didMoveToWindow` — Swift 6 gives no
-    /// `deinit` hook that can touch one.
-    private func scheduleRelease() {
-        releaseToken &+= 1
-        guard abs(travel) > Metrics.elasticThreshold else {
-            // Land exactly on the resting frame; a residue below the threshold
-            // still reads as a lens that is a pixel too wide.
-            guard travel != 0 else { return }
-            travel = 0
-            applyProgress()
-            return
-        }
-        let token = releaseToken
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60.0) { [weak self] in
-            // A real page movement in the meantime bumped the token and owns
-            // the stretch now; this hop is stale.
-            guard let self, self.releaseToken == token else { return }
-            self.travel *= Metrics.elasticSmoothing
-            self.applyProgress()
-            self.scheduleRelease()
-        }
-    }
-
-    private var releaseToken = 0
-
-    /// Smoothed per-frame travel, in pages. Drives the lens's stretch, and
-    /// decays to nothing on its own the moment the finger stops — which is why
-    /// the effect needs no display link, no spring model, and no settle
-    /// animation to unwind it.
-    private var travel: CGFloat = 0
-
-    /// How far the lens overshoots its segment right now, and in which
-    /// direction. Zero unless the viewer is actually dragging.
-    ///
-    /// The cap is relative to the segment being stretched, so the effect is the
-    /// same *gesture* on every screen size rather than the same number of
-    /// points. Eased rather than linear: the first part of a drag gives
-    /// readily and the last part resists, which is what a stretched thing does
-    /// and what keeps a fast flick from simply pinning to the cap and sitting
-    /// there.
-    private func elasticOverhang(forWidth width: CGFloat) -> CGFloat {
-        guard !UIAccessibility.isReduceMotionEnabled else { return 0 }
-        guard abs(travel) > Metrics.elasticThreshold else { return 0 }
-        let limit = width * Metrics.elasticMaximumFraction
-        let demand = abs(travel) * Metrics.elasticGain
-        // Asymptotic: approaches `limit` but never reaches it, so there is no
-        // point at which the stretch visibly stops responding to the finger.
-        let magnitude = limit * (1 - exp(-demand / max(limit, 1)))
-        return travel < 0 ? -magnitude : magnitude
     }
 
     func setBadge(_ count: Int, for category: MessagesCategory) {
@@ -337,6 +287,15 @@ final class InboxCategoryBar: UIView {
         setNeedsLayout()
         layoutIfNeeded()
         applyProgress()
+    }
+
+    /// A segment was chosen. Publishes through `.valueChanged` rather than a
+    /// stored closure, so the owner wires this the way it would wire any
+    /// system control.
+    private func selectSegment(_ index: Int) {
+        guard index != selectedIndex else { return }
+        selectedIndex = index
+        sendActions(for: .valueChanged)
     }
 
     // MARK: - Grab
@@ -386,11 +345,11 @@ final class InboxCategoryBar: UIView {
         segments = categories.enumerated().map { index, category in
             let segment = SegmentView(title: category.title)
             segment.addAction(
-                UIAction { [weak self] _ in self?.onSelect?(index) },
-                // NOT `.primaryActionTriggered`: only UIButton synthesizes
-                // that. A bare UIControl sends touch events, so a segment
-                // registered for the primary action never fires at all.
-                for: .touchUpInside
+                UIAction { [weak self] _ in self?.selectSegment(index) },
+                // `.primaryActionTriggered` now that the segment is a real
+                // `UIButton` — UIButton synthesizes it, where the bare
+                // `UIControl` this used to be never fired it at all.
+                for: .primaryActionTriggered
             )
             row.addArrangedSubview(segment)
             return segment
@@ -415,30 +374,12 @@ final class InboxCategoryBar: UIView {
 
         let from = lensFrame(for: lower)
         let to = lensFrame(for: upper)
-        var rect = CGRect(
+        let rect = CGRect(
             x: from.minX + (to.minX - from.minX) * t,
             y: from.minY,
             width: from.width + (to.width - from.width) * t,
             height: from.height
         )
-
-        // Elasticity: the lens's LEADING edge keeps up with the finger and its
-        // trailing edge lags, so the pill stretches in the direction of travel
-        // and recovers as the travel decays. Only the trailing edge moves —
-        // stretching both would just make a wider pill in the same place, which
-        // reads as a size change rather than as give.
-        let overhang = elasticOverhang(forWidth: rect.width)
-        if overhang > 0 {
-            rect.origin.x -= overhang
-            rect.size.width += overhang
-        } else if overhang < 0 {
-            rect.size.width -= overhang
-        }
-        // Never let the stretch reach past the capsule's own inset, or the pill
-        // visibly clips against the glass edge at the first and last segment.
-        let limit = content.bounds.width - Metrics.capsulePadding
-        rect.origin.x = max(Metrics.capsulePadding, rect.origin.x)
-        rect.size.width = max(0, min(rect.width, limit - rect.minX))
 
         lens.frame = rect
         lens.layer.cornerRadius = lens.bounds.height / 2
@@ -497,7 +438,7 @@ extension InboxCategoryBar: UIGestureRecognizerDelegate {}
 /// One category segment: a stacked pair of labels (regular and semibold) that
 /// crossfade, plus an optional count badge. Its width is pinned to the
 /// SEMIBOLD measurement so selection can never reflow the row.
-private final class SegmentView: UIControl {
+private final class SegmentView: UIButton {
     /// Titles scale with Dynamic Type up to here, then stop — four segments
     /// have to stay side by side in one fixed-height capsule.
     static let maximumTitlePointSize: CGFloat = 19
@@ -547,6 +488,24 @@ private final class SegmentView: UIControl {
         accessibilityLabel = title
         accessibilityTraits = .button
 
+        // A real button with a real configuration, so UIKit owns the control
+        // state machine: when a touch is a press, when it is cancelled, when a
+        // drag outside un-highlights. Pressed feedback lives on the CONTENT,
+        // never on the lens — the lens belongs to the selection, not the touch.
+        //
+        // `.plain()` carries no title of its own: the regular/semibold pair
+        // above is what renders, because selection here is FRACTIONAL and a
+        // configuration title can only be one weight at a time. The handler is
+        // UIKit's designated place to express appearance per state, which is
+        // what replaces the hand-rolled `isHighlighted` observer this had.
+        configuration = .plain()
+        configurationUpdateHandler = { [weak self] button in
+            guard let self else { return }
+            let dimmed = button.isHighlighted ? 0.55 : 1
+            self.content.alpha = dimmed
+            self.plainLabel.alpha = dimmed * (1 - self.strength)
+        }
+
         // A MINIMUM, not an exact width: `fillEqually` on the row hands every
         // segment the same slot, and this only states how narrow that slot is
         // allowed to get before the row has to overflow and scroll.
@@ -564,18 +523,6 @@ private final class SegmentView: UIControl {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    /// Pressed feedback lives on the CONTENT, never on the lens — the lens
-    /// belongs to the selection, not to the touch.
-    override var isHighlighted: Bool {
-        didSet {
-            guard isHighlighted != oldValue else { return }
-            UIView.animate(withDuration: 0.12, delay: 0, options: [.beginFromCurrentState]) {
-                self.content.alpha = self.isHighlighted ? 0.55 : 1
-                self.plainLabel.alpha = self.isHighlighted ? 0.55 * (1 - self.strength) : (1 - self.strength)
-            }
-        }
-    }
 
     private var strength: CGFloat = 0
 

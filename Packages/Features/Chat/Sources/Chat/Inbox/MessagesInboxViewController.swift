@@ -101,7 +101,15 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
             categoryBar.heightAnchor.constraint(equalToConstant: InboxCategoryBar.height)
         ])
 
-        categoryBar.onSelect = { [weak self] index in self?.select(index: index, animated: true) }
+        // Wired like any system control: the bar carries the chosen segment as
+        // its value and announces it, rather than handing back a closure.
+        categoryBar.addAction(
+            UIAction { [weak self] _ in
+                guard let self else { return }
+                self.select(index: self.categoryBar.selectedIndex, animated: true)
+            },
+            for: .valueChanged
+        )
         // Dragging the header IS dragging the pages. The bar reports a
         // fractional page position and the pager is scrubbed to it, so the same
         // `onProgress` loop that answers a content swipe answers this too — the
