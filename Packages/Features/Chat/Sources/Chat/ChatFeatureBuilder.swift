@@ -75,8 +75,32 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             imagePipeline: imagePipeline
         )
 
+        // Global search over the same catalog the surfaces share, so a query
+        // costs no fetch for its two conversation sections — the inbox is
+        // already in memory and is simply narrowed.
+        let searchViewModel = InboxSearchViewModel(
+            catalog: catalog,
+            viewer: repository,
+            people: people
+        )
+        let searchResults = InboxSearchResultsViewController(viewModel: searchViewModel)
+        // A target, not a conversation — the same seam the compose picker rides,
+        // so a result opens by exactly the path a picked contact does and neither
+        // waits on a round trip.
+        searchViewModel.onOpenConversation = { [router] target in
+            switch target {
+            case .existing(let conversationID):
+                router?.route(to: .conversation(conversationID))
+            case .draft(let peer, let displayName):
+                router?.route(to: .messageUser(peer, stub: ProfileIdentityStub(
+                    handle: "", displayName: displayName
+                )))
+            }
+        }
+
         let inbox = MessagesInboxViewController(
             surfaces: [conversations, requests, suggestions],
+            searchResults: searchResults,
             initialCategory: initialCategory
         )
         inbox.onCompose = { [router] in router?.route(to: .newMessage) }

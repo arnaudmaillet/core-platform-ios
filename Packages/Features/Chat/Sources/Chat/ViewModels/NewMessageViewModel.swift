@@ -419,15 +419,10 @@ public final class NewMessageViewModel {
         return sections
     }
 
-    /// Case- and diacritic-insensitive match on display name or handle — so
-    /// "sofia" finds "Sofía Reyes" and "AVA" finds "Ava Moreau", neither of
-    /// which an exact match would. Substring rather than prefix: the viewer
-    /// types the part of the name they remember, which is often the surname.
+    /// Name or handle, on the shared rule — see `TextMatch` for why it is
+    /// shared with the inbox's global search rather than restated here.
     private func matches(_ person: PersonDisplayModel, _ query: String) -> Bool {
-        guard !query.isEmpty else { return true }
-        let options: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
-        return person.displayName.range(of: query, options: options) != nil
-            || person.handle.range(of: query, options: options) != nil
+        TextMatch.matchesAny([person.displayName, person.handle], query: query)
     }
 
     /// Search results are never capped: the viewer typed a query to narrow the

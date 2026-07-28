@@ -54,7 +54,12 @@ public actor PeopleDirectoryRepository: PeopleDirectoryProviding {
     }
 
     public func searchPeople(matching query: String, limit: Int32) async throws -> [DirectoryPerson] {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        // The sigil is stripped HERE, at the adapter, because it is a fact about
+        // the index rather than about any one screen: `search.v1` stores handles
+        // bare, so "@sofia" is a term that matches nothing. Doing it here also
+        // keeps it off every caller — the inbox's search and the compose picker
+        // both get it, and neither has to remember to.
+        let trimmed = TextMatch.normalize(query)
         guard !trimmed.isEmpty else { return [] }
 
         var request = Search_V1_SearchRequest()

@@ -27,6 +27,10 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     private var pagerView: InboxPagerView!
     private var didSubordinatePagerToPop = false
     private var hasActivatedInitialSurface = false
+    #if DEBUG
+    /// Latches the launch-argument QA sequence to one run per screen.
+    private var hasRunDebugSequence = false
+    #endif
     /// Whose chrome the navigation bar is currently showing.
     ///
     /// This tracks the pager's DOMINANT page — the one a drag is more than
@@ -53,9 +57,28 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// never navigates.
     var onCompose: (() -> Void)?
 
-    init(surfaces: [any InboxSurface], initialCategory: MessagesCategory = .all) {
+    /// Global search across every category, or `nil` in a composition without
+    /// it (the surfaces still page, and no magnifier appears).
+    ///
+    /// It belongs to the container for the same reason the bar items do: a
+    /// paged child has no navigation bar, so the only `navigationItem` on
+    /// screen is this one. Scoping the query to a page would be the wrong
+    /// answer anyway — see `InboxSearchViewModel`.
+    private let searchResults: InboxSearchResultsViewController?
+    private lazy var searchController: UISearchController = {
+        let controller = UISearchController(searchResultsController: searchResults)
+        controller.searchResultsUpdater = searchResults
+        return controller
+    }()
+
+    init(
+        surfaces: [any InboxSurface],
+        searchResults: InboxSearchResultsViewController? = nil,
+        initialCategory: MessagesCategory = .all
+    ) {
         precondition(!surfaces.isEmpty, "The inbox needs at least one surface")
         self.surfaces = surfaces
+        self.searchResults = searchResults
         categoryBar = InboxCategoryBar(categories: surfaces.map(\.category))
         initialIndex = surfaces.firstIndex { $0.category == initialCategory } ?? 0
         super.init(nibName: nil, bundle: nil)
@@ -73,6 +96,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         super.viewDidLoad()
         title = "Messages"
         view.backgroundColor = .systemBackground
+        configureSearch()
 
         // Loaded up front, not lazily: a surface has to be able to publish its
         // chrome — the All tab's unread count, the Requests badge — before it
@@ -175,11 +199,17 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
             activeSurface?.surfaceDidBecomeActive()
         }
         #if DEBUG
+        // One-shot. Activating the search controller presents over this screen
+        // and lands a SECOND `viewDidAppear` here when it is dismissed; without
+        // the latch every step below re-arms and fires twice.
+        guard !hasRunDebugSequence else { return }
+        hasRunDebugSequence = true
+        let arguments = ProcessInfo.processInfo.arguments
+
         // `-inbox-page-to <category>` animates to another tab ~2s in, through
         // the SAME path a segment tap takes (`setActivePage(animated:)`, which
         // reports fractional progress every frame). Taps can't be injected
         // headlessly, and this is the transition worth recording.
-        let arguments = ProcessInfo.processInfo.arguments
         if let index = arguments.firstIndex(of: "-inbox-page-to"),
            let name = arguments.dropFirst(index + 1).first,
            let category = MessagesCategory(rawValue: name),
@@ -188,7 +218,125 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
                 self?.select(index: target, animated: true)
             }
         }
+        runSearchDebugSequence(arguments)
+
+        // `-inbox-edit` puts the active surface into multi-selection editing ~2s
+        // in, through the surface's own `setEditing` — the same path its Edit
+        // item takes. Bar items can't be tapped headlessly, and this is the one
+        // state where the container has to WITHDRAW the magnifier rather than
+        // just redraw around it.
+        if arguments.contains("-inbox-edit") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.activeSurface?.setEditing(true, animated: true)
+            }
+        }
         #endif
+    }
+
+    #if DEBUG
+    /// `-inbox-search-query <text>` opens search and seeds the field, and
+    /// `-inbox-search-cancel` collapses it again two seconds later.
+    ///
+    /// Driven through `isActive` plus the real updater rather than by poking the
+    /// view model, so it exercises the same path a tap on the magnifier takes —
+    /// the presentation over the pager, the covered category bar, and the
+    /// sectioned results are the whole point of the seam and all three are
+    /// unreachable from a view-model call. The simulator's keyboard is not
+    /// scriptable, so this is the only way to reach the results layout headlessly.
+    private func runSearchDebugSequence(_ arguments: [String]) {
+        guard let index = arguments.firstIndex(of: "-inbox-search-query"),
+              let text = arguments.dropFirst(index + 1).first, !text.hasPrefix("-")
+        else { return }
+        // Anchored a beat after appearance: activating a search controller while
+        // the tab's own first layout is still settling fights the presentation.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self, let results = self.searchResults else { return }
+            self.searchController.isActive = true
+            self.searchController.searchBar.text = text
+            results.updateSearchResults(for: self.searchController)
+
+            guard arguments.contains("-inbox-search-cancel") else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.searchController.isActive = false
+            }
+        }
+    }
+    #endif
+
+    // MARK: - Search
+
+    /// Global search, collapsed to a magnifier in the bar's trailing slot until
+    /// tapped — `.integratedButton`, which is UIKit's own name for exactly that
+    /// behaviour.
+    ///
+    /// The placement is chosen for this screen specifically. A `.stacked` field
+    /// would be the obvious pick on a plain list root, but its collapse is driven
+    /// by the navigation controller's tracked scroll view — and the first one
+    /// UIKit finds here is the PAGER's, whose vertical offset never moves. The
+    /// field would sit permanently expanded, costing ~52pt on top of the 54pt
+    /// the glass header already reserves. `.integratedButton` has no relationship
+    /// to any scroll view, so the pager is simply irrelevant to it, and it costs
+    /// nothing at rest.
+    private func configureSearch() {
+        guard let searchResults else { return }
+        searchController.searchBar.placeholder = "Search"
+        searchController.searchBar.autocapitalizationType = .none
+        searchController.searchBar.autocorrectionType = .no
+        searchController.searchBar.returnKeyType = .search
+        // Stated rather than inherited: clearing through the system glyph routes
+        // back out via `updateSearchResults`, so an emptied field returns to the
+        // prompt by the same path typing narrowed it.
+        searchController.searchBar.searchTextField.clearButtonMode = .whileEditing
+        // The bar stays put while the field is active — under `.integratedButton`
+        // the field expands INSIDE it, so hiding the bar would take the field
+        // being typed into with it.
+        searchController.hidesNavigationBarDuringPresentation = false
+        // Left to UIKit deliberately: touching `showsCancelButton` flips this to
+        // NO and hands us the job of showing and hiding it. Under
+        // `.integratedButton` the affordance renders as an ✕ glyph rather than
+        // the word "Cancel"; that is the native look, not a missing button.
+        searchController.automaticallyShowsCancelButton = true
+        // The empty-query state is the system's dim over the inbox — the native
+        // "search is open, type something" affordance, and a better answer than
+        // any placeholder screen of ours.
+        searchController.obscuresBackgroundDuringPresentation = true
+
+        // A picked row must bring the search UI down BEFORE the thread goes up.
+        // The results controller is *presented* over this one, so a push landing
+        // while it is still up would arrive underneath it — the thread would be
+        // on the stack and invisible.
+        searchResults.onWillOpenResult = { [weak self] in self?.searchController.isActive = false }
+
+        // Presented in THIS view controller's context, which is what puts the
+        // results over the pager and the floating category bar both, rather than
+        // over the window. Nothing has to hide the header: it is simply covered,
+        // and with it every suggestion that the query has a tab-shaped scope.
+        definesPresentationContext = true
+        setSearchAvailable(true)
+    }
+
+    /// Shows or withholds the magnifier. Idempotent; re-run on every chrome change.
+    ///
+    /// Withheld while a surface is editing. That surface publishes two batch
+    /// actions into the trailing slot, and a magnifier beside them makes three
+    /// items plus a title — which truncates on a 402pt bar, the same crowding
+    /// `InboxSurfaceChrome.title` was shaped around. Editing is also a mode about
+    /// the rows in front of you, so a global search is the wrong offer to make.
+    private func setSearchAvailable(_ available: Bool) {
+        guard searchResults != nil else { return }
+        guard available else {
+            guard navigationItem.searchController != nil else { return }
+            searchController.isActive = false
+            navigationItem.searchController = nil
+            return
+        }
+        guard navigationItem.searchController == nil else { return }
+        navigationItem.searchController = searchController
+        navigationItem.preferredSearchBarPlacement = .integratedButton
+        // No toolbar hand-off: `UINavigationController` transfers a screen's
+        // toolbar items at transition *completion*, so letting UIKit relocate the
+        // field there drops it into place after a push has already finished.
+        navigationItem.searchBarPlacementAllowsToolbarIntegration = false
     }
 
     // MARK: - Category selection
@@ -263,6 +411,11 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
             self.navigationItem.rightBarButtonItems = chrome.trailingBarItems.isEmpty
                 ? [self.composeItem]
                 : chrome.trailingBarItems
+            // Inside the crossfade with everything else in the bar: the
+            // magnifier arriving or leaving is the same kind of change as
+            // Edit becoming Cancel, and animating it separately would put two
+            // animations on one bar in one frame.
+            self.setSearchAvailable(!chrome.locksPaging)
         }
         // Editing freezes paging: a half-made selection has no good outcome if
         // the page slides away under it, and the batch actions on screen
