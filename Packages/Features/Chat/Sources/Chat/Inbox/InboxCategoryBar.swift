@@ -120,15 +120,6 @@ final class InboxCategoryBar: UIControl {
     private var scrubPan: UIPanGestureRecognizer!
     /// Where `progress` stood when the current capsule drag began.
     private var scrubOrigin: CGFloat = 0
-    /// Raised across the one `setProgress` that a tap causes, so the lens
-    /// glides to the tapped segment instead of being placed there.
-    private var animatesNextSelection = false
-    /// True for the length of the tap glide. `layoutSubviews` re-derives the
-    /// lens from the segment frames, and doing that mid-flight writes the final
-    /// frame straight onto the layer and CANCELS the animation — measured: the
-    /// lens jumped the whole distance in one frame and only the spring's
-    /// overshoot was left to see.
-    private var isAnimatingLens = false
 
     init(categories: [MessagesCategory]) {
         self.categories = categories
@@ -263,9 +254,6 @@ final class InboxCategoryBar: UIControl {
             roundedRect: shadowHost.bounds,
             cornerRadius: shadowHost.bounds.height / 2
         ).cgPath
-        // Skipped mid-glide: the animation already knows where the lens is
-        // going, and re-deriving it here would land the final frame instantly.
-        guard !isAnimatingLens else { return }
         applyProgress()
     }
 
@@ -282,32 +270,6 @@ final class InboxCategoryBar: UIControl {
     func setProgress(_ progress: CGFloat) {
         guard progress != self.progress else { return }
         self.progress = progress
-        // A tap gives the lens its own glide; a drag does not, because a drag
-        // is already being animated by the finger. Consumed here rather than
-        // passed in, because the owner is only relaying what the PAGER said and
-        // has no idea whether a tap or a thumb is behind it — the bar does, it
-        // raised the tap itself.
-        if consumeAnimatedSelection() {
-            selectedIndex = Int(progress.rounded())
-            // The system spring, not a hand-tuned curve. A little bounce so it
-            // arrives with some life; `allowUserInteraction` so a viewer who
-            // changes their mind mid-glide can grab it, and
-            // `beginFromCurrentState` so that grab starts from where the lens
-            // actually is rather than snapping to where it was headed.
-            isAnimatingLens = true
-            UIView.animate(springDuration: 0.34, bounce: 0.16, initialSpringVelocity: 0,
-                           delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
-                self.applyProgress()
-            } completion: { [weak self] _ in
-                guard let self else { return }
-                self.isAnimatingLens = false
-                // Anything that wanted the lens re-derived mid-glide was made
-                // to wait; settle the true geometry now. Usually identical, so
-                // usually invisible.
-                self.applyProgress()
-            }
-            return
-        }
         // The value tracks the pages, not just taps. Without this a swipe would
         // leave `selectedIndex` stale, and the next tap on the segment the
         // viewer had swiped away from would be read as "no change" and do
@@ -324,12 +286,6 @@ final class InboxCategoryBar: UIControl {
         // re-derive its geometry from the new frames.
         setNeedsLayout()
         layoutIfNeeded()
-        // NOT mid-glide. A tap settles the page, the surface republishes its
-        // chrome, and the badge lands right inside the lens's animation — this
-        // re-derive was writing the final frame straight onto the layer and
-        // cancelling it, which is why the lens appeared to teleport and only
-        // its overshoot was visible. The completion re-applies.
-        guard !isAnimatingLens else { return }
         applyProgress()
     }
 
@@ -339,20 +295,7 @@ final class InboxCategoryBar: UIControl {
     private func selectSegment(_ index: Int) {
         guard index != selectedIndex else { return }
         selectedIndex = index
-        // The owner pages synchronously inside this call, which lands back in
-        // `setProgress` — the flag is how that arrival is recognised as this
-        // tap rather than as a drag frame.
-        animatesNextSelection = true
         sendActions(for: .valueChanged)
-        // Nothing consumed it (no owner, or the pager refused): don't leave it
-        // armed for whatever moves the pages next.
-        animatesNextSelection = false
-    }
-
-    private func consumeAnimatedSelection() -> Bool {
-        guard animatesNextSelection else { return false }
-        animatesNextSelection = false
-        return true
     }
 
     // MARK: - Grab
