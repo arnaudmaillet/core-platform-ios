@@ -247,8 +247,8 @@ final class ProfileShareViewController: UIViewController {
 
     /// Materialized on window attach, never in init: building a real effect
     /// off-screen contacts the render server and stalls the main actor for
-    /// tens of seconds on headless CI simulators (the rule `ChatInputBar`,
-    /// `SearchDockView`, and `ToastView` all follow).
+    /// tens of seconds on headless CI simulators (the rule `ChatInputBar` and
+    /// `ToastView` both follow).
     private func materializeGlass() {
         guard view.window != nil else { return }
         if glassBackdrop.effect == nil {
@@ -258,7 +258,7 @@ final class ProfileShareViewController: UIViewController {
             let glass = UIGlassEffect(style: .regular)
             // The native press response — the lens flexes under a touch rather
             // than sitting inert. It IS a touch target, so it should answer to
-            // being pressed (the same call `SearchDockView` makes).
+            // being pressed.
             glass.isInteractive = true
             cancelGlass.effect = glass
         }

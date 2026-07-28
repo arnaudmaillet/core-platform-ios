@@ -10,6 +10,11 @@ import Foundation
 /// fan-out the Suggestions tab pays for. Only **search** spends a request, and
 /// only per debounced query.
 ///
+/// A query narrows all three, but not on the same clock: the two in-memory
+/// sources are filtered synchronously on the keystroke, and the directory
+/// extends that list when it answers. Typing therefore never leaves the screen
+/// blank waiting on the network.
+///
 /// Picking, by contrast, is uniformly free: it resolves a *destination*, never
 /// a conversation. A known correspondent yields their id outright and anyone
 /// else yields a draft the thread screen finds-or-creates once it is already
@@ -310,47 +315,23 @@ public final class NewMessageViewModel {
         switch searchState {
         case .idle:
             emitBrowsing()
-        case .loading:
-            // Hold the previous rows steady through the debounce; only a search
-            // with nothing behind it shows a spinner. Typing a fourth letter
-            // should refine a list, not strobe it.
-            // Not "loading more": the rows on screen are the answer to a
-            // previous keystroke, and shimmering under them on every letter
-            // typed would strobe the whole screen.
-            phase = lastResults.isEmpty ? .loading : .content([resultsSection(lastResults)], loading: .none)
+        case .loading(let query):
+            // Hold the previous DIRECTORY rows steady through the debounce; only
+            // a search with nothing behind it shows a spinner. Typing a fourth
+            // letter should refine a list, not strobe it. The local matches
+            // beside them are recomputed per keystroke and cost nothing.
+            emitSearching(query: query, directory: lastResults)
         case .results(let query, let found):
             let visible = found.filter { $0.id != viewerID }
             lastResults = visible
-            phase = visible.isEmpty
-                ? .noResults(query: query)
-                : .content([resultsSection(visible)], loading: .none)
+            emitSearching(query: query, directory: visible)
         case .failed(let message):
             phase = .failed(message: message)
         }
     }
 
     private func emitBrowsing() {
-        let recentPeople = recents
-            .compactMap(PersonDisplayModel.init(recent:))
-            .filter { $0.id != viewerID }
-            .prefix(recentLimit)
-        // Recent wins over Suggested for anyone in both: the row carries a
-        // conversation id (so it opens instantly), and a duplicate identifier
-        // across sections would trap the diffable data source besides. Matched
-        // against the rows Recent actually SHOWS — someone past the cap is not
-        // in the list, so suggesting them is not a duplicate.
-        let recentIDs = Set(recentPeople.map(\.id))
-        let suggestedPeople = suggestions
-            .filter { $0.id != viewerID && !recentIDs.contains($0.id) }
-            .map { PersonDisplayModel(account: $0, existingConversationID: nil) }
-
-        var sections: [Section] = []
-        if !recentPeople.isEmpty {
-            sections.append(Section(kind: .recent, title: "Recent", people: Array(recentPeople)))
-        }
-        if !suggestedPeople.isEmpty {
-            sections.append(Section(kind: .suggested, title: "Suggested", people: suggestedPeople))
-        }
+        let sections = browsingSections()
 
         // Either source still in flight on FIRST load leaves the rest of the
         // screen shimmering rather than blank — the catalog can be mid-load
@@ -371,13 +352,94 @@ public final class NewMessageViewModel {
         phase = .content(sections, loading: loading)
     }
 
+    /// The query-active projection: what the app ALREADY holds, narrowed on the
+    /// spot, plus whatever the directory has to add.
+    ///
+    /// The local pass is what makes typing feel immediate. Recents and
+    /// suggestions are in memory, so they can be narrowed on the keystroke
+    /// itself — no debounce, no round trip — while `search.v1` is still being
+    /// asked about everyone else. The directory then *extends* that list rather
+    /// than replacing it, so the rows that appeared instantly don't jump out
+    /// from under the finger a third of a second later.
+    private func emitSearching(query: String, directory: [DirectoryPerson]) {
+        var sections = browsingSections(matching: query)
+        // Someone can be a recent correspondent AND a directory hit. Local wins:
+        // that copy carries a conversation id, so the row opens instantly — and
+        // a duplicate identifier across sections would trap the diffable data
+        // source besides.
+        let alreadyShown = Set(sections.lazy.flatMap(\.people).map(\.id))
+        let extra = directory.filter { $0.id != viewerID && !alreadyShown.contains($0.id) }
+        if !extra.isEmpty {
+            sections.append(resultsSection(extra, isAccompanied: !sections.isEmpty))
+        }
+
+        guard sections.isEmpty else {
+            phase = .content(sections, loading: .none)
+            return
+        }
+        // Nothing local, nothing from the directory. Which empty state this is
+        // depends on whether the directory has actually answered yet: calling it
+        // "no results" mid-flight would flash a verdict the search hasn't
+        // reached.
+        if case .loading = searchState {
+            phase = .loading
+        } else {
+            phase = .noResults(query: query)
+        }
+    }
+
+    /// Recent and Suggested, optionally narrowed to `query`.
+    ///
+    /// One builder for both the browsing list and the local half of search, so
+    /// the two can't drift on capping, viewer exclusion, or cross-section
+    /// dedupe — all three of which have already had a bug in them.
+    private func browsingSections(matching query: String = "") -> [Section] {
+        let recentPeople = recents
+            .compactMap(PersonDisplayModel.init(recent:))
+            .filter { $0.id != viewerID && matches($0, query) }
+            .prefix(recentLimit)
+        // Recent wins over Suggested for anyone in both: the row carries a
+        // conversation id (so it opens instantly), and a duplicate identifier
+        // across sections would trap the diffable data source besides. Matched
+        // against the rows Recent actually SHOWS — someone past the cap is not
+        // in the list, so suggesting them is not a duplicate.
+        let recentIDs = Set(recentPeople.map(\.id))
+        let suggestedPeople = suggestions
+            .filter { $0.id != viewerID && !recentIDs.contains($0.id) }
+            .map { PersonDisplayModel(account: $0, existingConversationID: nil) }
+            .filter { matches($0, query) }
+
+        var sections: [Section] = []
+        if !recentPeople.isEmpty {
+            sections.append(Section(kind: .recent, title: "Recent", people: Array(recentPeople)))
+        }
+        if !suggestedPeople.isEmpty {
+            sections.append(Section(kind: .suggested, title: "Suggested", people: suggestedPeople))
+        }
+        return sections
+    }
+
+    /// Case- and diacritic-insensitive match on display name or handle — so
+    /// "sofia" finds "Sofía Reyes" and "AVA" finds "Ava Moreau", neither of
+    /// which an exact match would. Substring rather than prefix: the viewer
+    /// types the part of the name they remember, which is often the surname.
+    private func matches(_ person: PersonDisplayModel, _ query: String) -> Bool {
+        guard !query.isEmpty else { return true }
+        let options: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
+        return person.displayName.range(of: query, options: options) != nil
+            || person.handle.range(of: query, options: options) != nil
+    }
+
     /// Search results are never capped: the viewer typed a query to narrow the
     /// field themselves, and trimming matches after they did that is answering
     /// a question they already answered.
-    private func resultsSection(_ found: [DirectoryPerson]) -> Section {
+    private func resultsSection(_ found: [DirectoryPerson], isAccompanied: Bool) -> Section {
         Section(
             kind: .results,
-            title: nil,
+            // No header when this is the only thing on screen: the search field
+            // above it is already the label. When locally-matched sections sit
+            // above, the third one has to say what distinguishes it.
+            title: isAccompanied ? "More People" : nil,
             people: found.map {
                 PersonDisplayModel(
                     person: $0,

@@ -288,6 +288,8 @@ struct NewMessageViewModelTests {
         #expect(sections(phase)[0].people.map(\.id) == [ProfileID("peer-new"), ProfileID("peer-old")])
     }
 
+    /// A query nothing in memory matches leaves the directory hits alone on
+    /// screen, and unlabelled — the search field above them is already the label.
     @Test func searchReplacesBrowsingWithResults() async {
         let repository = StubChatProvider(conversations: [
             conversation("conv-1", peer: "peer-1", title: "Ava")
@@ -345,6 +347,156 @@ struct NewMessageViewModelTests {
         }
 
         #expect(sections(phase).map(\.kind) == [.recent])
+    }
+
+    // MARK: - Local filtering
+
+    /// The point of filtering in memory: the rows that are already loaded narrow
+    /// on the KEYSTROKE, with no debounce and no round trip. Asserted with a
+    /// ten-second debounce and not a single `await` after the query — if the
+    /// local pass ever moves behind the network, this sees nothing.
+    @Test func localMatchesAppearWithoutWaitingForTheDirectory() async {
+        let repository = StubChatProvider(conversations: [
+            conversation("conv-1", peer: "peer-1", title: "Ava Moreau"),
+            conversation("conv-2", peer: "peer-2", title: "Noor Haddad")
+        ])
+        let catalog = await makeCatalog(repository: repository)
+        let viewModel = NewMessageViewModel(
+            catalog: catalog,
+            viewer: repository,
+            people: StubPeopleDirectory([person("peer-9", handle: "zoe")]),
+            debounce: .seconds(10)
+        )
+        let box = PhaseBox()
+        viewModel.onPhaseChange = { [box] in box.append($0) }
+
+        viewModel.load()
+        _ = await settle(box) { phase in
+            if case .content(let sections, _) = phase { return !sections.isEmpty }
+            return false
+        }
+
+        viewModel.queryChanged("ava")
+
+        let sections = sections(box.phases.last)
+        #expect(sections.map(\.kind) == [.recent])
+        #expect(sections[0].people.map(\.id) == [ProfileID("peer-1")])
+    }
+
+    /// "sofia" finds "Sofía Reyes" and "MOREAU" finds "Ava Moreau" — an exact
+    /// match would find neither, and a viewer typing a name they remember is not
+    /// going to reproduce its accents.
+    @Test func localMatchingIsCaseAndDiacriticInsensitive() async {
+        let repository = StubChatProvider(conversations: [
+            conversation("conv-1", peer: "peer-1", title: "Sofía Reyes"),
+            conversation("conv-2", peer: "peer-2", title: "Ava Moreau")
+        ])
+        let catalog = await makeCatalog(repository: repository)
+        let viewModel = NewMessageViewModel(
+            catalog: catalog, viewer: repository, debounce: .seconds(10)
+        )
+        let box = PhaseBox()
+        viewModel.onPhaseChange = { [box] in box.append($0) }
+
+        viewModel.load()
+        _ = await settle(box) { phase in
+            if case .content(let sections, _) = phase { return !sections.isEmpty }
+            return false
+        }
+
+        viewModel.queryChanged("sofia")
+        #expect(sections(box.phases.last)[0].people.map(\.id) == [ProfileID("peer-1")])
+
+        // And case-folded, on a substring rather than a prefix: the part of a
+        // name people remember is often the surname.
+        viewModel.queryChanged("MOREAU")
+        #expect(sections(box.phases.last)[0].people.map(\.id) == [ProfileID("peer-2")])
+    }
+
+    /// Suggestions narrow too, not just recents.
+    @Test func localFilteringNarrowsSuggestionsAsWell() async {
+        let repository = StubChatProvider()
+        let catalog = await makeCatalog(repository: repository)
+        let (viewModel, box) = makeViewModel(
+            repository: repository,
+            catalog: catalog,
+            suggestions: [suggestion("peer-1", handle: "noor"), suggestion("peer-2", handle: "zed")]
+        )
+
+        viewModel.load()
+        _ = await settle(box) { phase in
+            if case .content(let sections, _) = phase { return !sections.isEmpty }
+            return false
+        }
+
+        viewModel.queryChanged("noo")
+        let sections = sections(box.phases.last)
+        #expect(sections.map(\.kind) == [.suggested])
+        #expect(sections[0].people.map(\.id) == [ProfileID("peer-1")])
+    }
+
+    /// The directory EXTENDS the local matches rather than replacing them — so
+    /// the rows that appeared instantly don't jump out from under the finger
+    /// when the request lands. Once it has company, the results section is
+    /// labelled.
+    @Test func directoryResultsExtendLocalMatches() async {
+        let repository = StubChatProvider(conversations: [
+            conversation("conv-1", peer: "peer-1", title: "Ava Moreau")
+        ])
+        let catalog = await makeCatalog(repository: repository)
+        let (viewModel, box) = makeViewModel(
+            repository: repository,
+            catalog: catalog,
+            people: [person("peer-9", handle: "avalon")]
+        )
+
+        viewModel.load()
+        _ = await settle(box) { phase in
+            if case .content(let sections, _) = phase { return !sections.isEmpty }
+            return false
+        }
+
+        viewModel.queryChanged("ava")
+        let phase = await settle(box) { phase in
+            if case .content(let sections, _) = phase { return sections.count == 2 }
+            return false
+        }
+
+        let sections = sections(phase)
+        #expect(sections.map(\.kind) == [.recent, .results])
+        #expect(sections[0].people.map(\.id) == [ProfileID("peer-1")])
+        #expect(sections[1].people.map(\.id) == [ProfileID("peer-9")])
+        #expect(sections[1].title == "More People")
+    }
+
+    /// A person who is both a local match and a directory hit appears once,
+    /// under the local section — that copy carries the conversation id, and a
+    /// duplicate identifier across sections would trap the diffable data source.
+    @Test func aDirectoryHitAlreadyShownLocallyIsNotRepeated() async {
+        let repository = StubChatProvider(conversations: [
+            conversation("conv-1", peer: "peer-9", title: "Zoe Aldrin")
+        ])
+        let catalog = await makeCatalog(repository: repository)
+        let (viewModel, box) = makeViewModel(
+            repository: repository,
+            catalog: catalog,
+            people: [person("peer-9", handle: "zoe")]
+        )
+
+        viewModel.load()
+        viewModel.queryChanged("zoe")
+        // Give the (zero-debounce) directory round trip room to land and be
+        // folded in; the assertion is that it added nothing.
+        try? await Task.sleep(for: .milliseconds(120))
+
+        let sections = sections(box.phases.last)
+        #expect(sections.map(\.kind) == [.recent])
+        let everyID = sections.flatMap { $0.people.map(\.id) }
+        #expect(everyID == [ProfileID("peer-9")])
+
+        // And the row that survived is the one that opens instantly.
+        viewModel.didSelect(ProfileID("peer-9"))
+        #expect(box.opened == [.existing(ConversationID("conv-1"))])
     }
 
     @Test func matchlessQueryReportsNoResults() async {
@@ -437,9 +589,14 @@ struct NewMessageViewModelTests {
 
     /// Search hits are matched against the inbox, so someone found by typing
     /// who is also a correspondent still takes the instant existing path.
+    ///
+    /// The conversation is titled so it does NOT match the query — otherwise the
+    /// local filter would surface this peer under Recent and the directory row
+    /// would be deduped away, which is a different (also correct) path. This
+    /// test is about the directory row itself carrying the conversation id.
     @Test func aSearchHitCarriesAnExistingConversation() async {
         let repository = StubChatProvider(conversations: [
-            conversation("conv-1", peer: "peer-9", title: "Zoe")
+            conversation("conv-1", peer: "peer-9", title: "Old Thread")
         ])
         let catalog = await makeCatalog(repository: repository)
         let (viewModel, box) = makeViewModel(

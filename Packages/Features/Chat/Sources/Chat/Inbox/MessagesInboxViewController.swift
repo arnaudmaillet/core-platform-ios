@@ -101,7 +101,28 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
             categoryBar.heightAnchor.constraint(equalToConstant: InboxCategoryBar.height)
         ])
 
-        categoryBar.onSelect = { [weak self] index in self?.select(index: index, animated: true) }
+        // Wired like any system control: the bar carries the chosen segment as
+        // its value and announces it, rather than handing back a closure.
+        categoryBar.addAction(
+            UIAction { [weak self] _ in
+                guard let self else { return }
+                // ONE animation drives both. The pager scrolls to the target
+                // and reports fractional progress every frame; the lens
+                // interpolates off that, so page and lens cannot disagree and
+                // there is nothing to keep in sync. The bar runs no animation
+                // of its own — a second one on the same frame would fight this.
+                self.select(index: self.categoryBar.selectedIndex, animated: true)
+            },
+            for: .valueChanged
+        )
+        // Dragging the header IS dragging the pages. The bar reports a
+        // fractional page position and the pager is scrubbed to it, so the same
+        // `onProgress` loop that answers a content swipe answers this too — the
+        // lens and the bar items need no separate path.
+        categoryBar.onScrub = { [weak self] progress in self?.pagerView.scrub(to: progress) }
+        categoryBar.onScrubEnd = { [weak self] velocity in
+            self?.pagerView.settleAfterScrub(velocityInPages: velocity)
+        }
         pagerView.onProgress = { [weak self] progress in
             self?.categoryBar.setProgress(progress)
             self?.updateBarOwner(forProgress: progress)
@@ -153,6 +174,21 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
             hasActivatedInitialSurface = true
             activeSurface?.surfaceDidBecomeActive()
         }
+        #if DEBUG
+        // `-inbox-page-to <category>` animates to another tab ~2s in, through
+        // the SAME path a segment tap takes (`setActivePage(animated:)`, which
+        // reports fractional progress every frame). Taps can't be injected
+        // headlessly, and this is the transition worth recording.
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "-inbox-page-to"),
+           let name = arguments.dropFirst(index + 1).first,
+           let category = MessagesCategory(rawValue: name),
+           let target = surfaces.firstIndex(where: { $0.category == category }) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.select(index: target, animated: true)
+            }
+        }
+        #endif
     }
 
     // MARK: - Category selection

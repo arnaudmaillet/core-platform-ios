@@ -5,18 +5,50 @@ import UIKit
 /// The inbox's category header: a floating Liquid Glass capsule under the
 /// navigation bar, with a lens that slides between segments.
 ///
-/// **Anatomy.** A content-hugging capsule of `.systemUltraThinMaterial`, its
-/// own soft shadow, and one `UIGlassEffect` lens marking the active segment.
-/// The capsule floats — it does not span the width and it has no hairline —
-/// so the lists scroll *beneath* it and are seen through the material. Both
-/// materials are semantic, so light and dark come free.
+/// **Anatomy.** A full-width capsule of `UIGlassEffect` inset by the standard
+/// margin, its own soft shadow, and a tinted overlay marking the active
+/// segment. The capsule floats and has no hairline, so the lists scroll
+/// *beneath* it and are seen through the glass. Segments share the width
+/// equally, so the bar reads the same on every screen.
 ///
-/// **Why two materials here, when the house rule says one.** The rule
-/// `GlassSegmentRow` documents is about putting a material inside a material
-/// the *system* already supplies (a toolbar item's capsule). Here we own both
-/// layers deliberately: a bar-like backdrop and a lens moving across it, which
-/// is the Telegram/iOS-26 segmented idiom. Nothing else in the bar carries a
-/// material — segments are text only.
+/// **A control, not a view.** The bar is a `UIControl` carrying
+/// `selectedIndex` and announcing `.valueChanged`, and each segment is a
+/// `UIButton` sending `.primaryActionTriggered` — so the owner wires this the
+/// way it would wire a `UISegmentedControl`, and UIKit owns the whole touch
+/// state machine: what counts as a press, when a drag outside cancels it, when
+/// the highlight comes back. Pressed appearance is expressed in
+/// `configurationUpdateHandler`, which is where UIKit asks for it; there is no
+/// `isHighlighted` observer and no animation of ours. The container's own
+/// pressed feedback is the system's, via `UIGlassEffect.isInteractive`.
+///
+/// **ONE material, not two.** The lens is a plain tinted `UIView`
+/// (`label` at 18% — a darkening in light mode, a lightening in dark), NOT a
+/// second `UIVisualEffectView`. That is the whole trick: an earlier build put a
+/// glass lens inside a glass capsule and the lens lost its edge entirely — the
+/// selected segment stopped reading as selected, which is the one thing this
+/// control exists to say. A tint has nothing to refract, so it separates
+/// cleanly from the glass behind it at any position. It also honours the house
+/// rule `GlassSegmentRow` documents, which the old blur-plus-glass pairing had
+/// to argue its way around.
+///
+/// `UIGlassContainerEffect` is NOT the backdrop to reach for: it is a
+/// *grouping* effect for sibling glass elements that should merge, and used as
+/// the capsule's own effect it renders no backdrop whatsoever — message
+/// previews behind the bar collide with the segment titles at full contrast.
+///
+/// ⚠️ **Semantic colours do not survive inside the glass content view.** The
+/// badge's `.systemBackground` text resolved to WHITE in dark mode, on a badge
+/// whose fill had correctly resolved to white — an invisible count, on a
+/// control whose whole job is to show counts. `BadgeView` therefore states its
+/// text colour as an explicit dynamic colour. Anything added inside this
+/// capsule needs checking in BOTH appearances, not reasoned about.
+///
+/// **Overflow.** The segments live in a scroll view. Below the capsule's width
+/// ceiling it never scrolls and is inert in every sense; past it — a fourth
+/// category, a three-digit badge, a large Dynamic Type size — the capsule stops
+/// growing and the strip scrolls, with the active segment kept in view. The
+/// margin was thin without it: three segments with two badges need 331pt of the
+/// 343pt a 375pt screen offers at XL text.
 ///
 /// **Tracking.** `setProgress` takes the pager's *fractional* page position
 /// and interpolates the lens's frame between the two neighbouring segments
@@ -27,12 +59,17 @@ import UIKit
 /// widths are pinned to their SEMIBOLD size up front, the reflow trap
 /// `GlassSegmentRow` calls out.
 ///
-/// The lens tracks progress LINEARLY and rigidly. A spring-driven elastic
-/// variant (stretch on velocity, squash on settle) was built and rejected —
-/// see [[messages-inbox-paged]]; if it is ever revisited, note that the lens
-/// must still be driven by its `frame`, never a `CGAffineTransform`, which
-/// scales the rendered corner radius and turns the capsule into an ellipse.
-final class InboxCategoryBar: UIView {
+/// The lens tracks progress LINEARLY and rigidly, and there is no physics of
+/// any kind in this file. Elasticity has now been built and removed TWICE — a
+/// spring-driven version in 2026-07, and a velocity-derived stretch after it —
+/// so treat a third attempt as a decision to be made deliberately rather than a
+/// gap to be filled. Both are recorded in [[messages-inbox-paged]]. If it ever
+/// does return: the lens must be driven by its `frame`, never a
+/// `CGAffineTransform`, which scales the rendered corner radius and degrades
+/// the capsule into an ellipse; and any decay must have a tick source that
+/// outlives the last progress change, because `setProgress` early-returns on an
+/// unchanged position and will otherwise freeze the effect mid-stretch.
+final class InboxCategoryBar: UIControl {
     private enum Metrics {
         /// The floating capsule's own height.
         static let capsuleHeight: CGFloat = 42
@@ -48,18 +85,41 @@ final class InboxCategoryBar: UIView {
     /// Total height the container reserves as safe area, margins included.
     static let height: CGFloat = Metrics.capsuleHeight + Metrics.topMargin + Metrics.bottomMargin
 
-    /// A segment was tapped. Swipes report through the pager, not here.
-    var onSelect: ((Int) -> Void)?
+    /// The segment the bar is reporting — updated by taps AND by the pages
+    /// moving under it, so it is never stale. Reading it is how a
+    /// `.valueChanged` handler learns WHICH segment — the same shape
+    /// `UISegmentedControl` has, so the owner registers a `UIAction` rather
+    /// than being handed a closure to store.
+    private(set) var selectedIndex: Int = 0
+    /// A drag on the capsule itself, as a fractional page position. Fires every
+    /// frame of the finger; the owner scrubs the pager to it.
+    var onScrub: ((CGFloat) -> Void)?
+    /// That drag ended, with its velocity in pages per second, so the owner can
+    /// let a flick carry to the next page instead of snapping back.
+    var onScrubEnd: ((CGFloat) -> Void)?
 
     private let categories: [MessagesCategory]
     /// Carries the shadow; the capsule itself clips to its corner radius,
     /// which would clip a shadow set on the same layer.
     private let shadowHost = UIView()
     private let capsule = UIVisualEffectView(effect: nil)
-    private let lens = UIVisualEffectView(effect: nil)
+    /// Scrolls the segments when they out-measure the capsule. Below that
+    /// width it never scrolls and is invisible in every sense.
+    private let scroller = UIScrollView()
+    /// The scroll view's content: the lens and the row, in one coordinate
+    /// space. The lens lives HERE rather than in the capsule so it travels with
+    /// the segments for free — a lens pinned outside would need the content
+    /// offset subtracted out of it on every frame of both gestures.
+    private let content = UIView()
+    /// The active-segment marker. A tinted overlay, NOT a second material —
+    /// see the type comment on why glass-inside-glass cost the lens its edge.
+    private let lens = UIView()
     private let row = UIStackView()
     private var segments: [SegmentView] = []
     private var progress: CGFloat = 0
+    private var scrubPan: UIPanGestureRecognizer!
+    /// Where `progress` stood when the current capsule drag began.
+    private var scrubOrigin: CGFloat = 0
 
     init(categories: [MessagesCategory]) {
         self.categories = categories
@@ -69,33 +129,79 @@ final class InboxCategoryBar: UIView {
         shadowHost.layer.shadowOpacity = 0.12
         shadowHost.layer.shadowRadius = 10
         shadowHost.layer.shadowOffset = CGSize(width: 0, height: 3)
+        // Full width, standard margins — the capsule is a bar, not a badge, so
+        // it reads the same on every screen instead of growing and shrinking
+        // with whatever the segment titles happen to measure.
         shadowHost.constrain(in: self) { parent in
             shadowHost.topAnchor.constraint(equalTo: parent.topAnchor, constant: Metrics.topMargin)
             shadowHost.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Metrics.bottomMargin)
-            shadowHost.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-            shadowHost.leadingAnchor.constraint(greaterThanOrEqualTo: parent.leadingAnchor, constant: Spacing.lg)
+            shadowHost.leadingAnchor.constraint(
+                equalTo: parent.safeAreaLayoutGuide.leadingAnchor, constant: Spacing.lg
+            )
+            shadowHost.trailingAnchor.constraint(
+                equalTo: parent.safeAreaLayoutGuide.trailingAnchor, constant: -Spacing.lg
+            )
         }
 
         capsule.clipsToBounds = true
         capsule.pin(to: shadowHost)
 
+        scroller.showsHorizontalScrollIndicator = false
+        scroller.showsVerticalScrollIndicator = false
+        // Segments are buttons: without this the scroll view swallows the first
+        // touch and a tap only registers after a perceptible delay.
+        scroller.delaysContentTouches = false
+        scroller.pin(to: capsule.contentView)
+
+        content.constrain(in: scroller) { _ in
+            content.topAnchor.constraint(equalTo: scroller.contentLayoutGuide.topAnchor)
+            content.bottomAnchor.constraint(equalTo: scroller.contentLayoutGuide.bottomAnchor)
+            content.leadingAnchor.constraint(equalTo: scroller.contentLayoutGuide.leadingAnchor)
+            content.trailingAnchor.constraint(equalTo: scroller.contentLayoutGuide.trailingAnchor)
+            // The scroll view has no intrinsic size, so the content's height is
+            // tied to the frame — this axis must never scroll.
+            content.heightAnchor.constraint(equalTo: scroller.frameLayoutGuide.heightAnchor)
+        }
+
         // The lens goes in before the row so it sits behind the labels; it is
         // frame-driven (not constrained) because it has to land on fractional
         // positions between two segments every frame.
-        capsule.contentView.addSubview(lens)
+        content.addSubview(lens)
         lens.clipsToBounds = true
         lens.isUserInteractionEnabled = false
+        lens.backgroundColor = Self.lensTint
 
         row.axis = .horizontal
         row.spacing = Metrics.interSegmentSpacing
         row.alignment = .fill
+        // Equal slots, so the bar looks balanced at any width and a short title
+        // gets the same target as a long one. Segment widths are minimums
+        // (`>=`) rather than exact, which is what lets this distribute the
+        // slack — and what still lets the row out-measure the capsule and
+        // scroll when the titles genuinely need more room than the screen has.
+        row.distribution = .fillEqually
         buildSegments()
-        row.constrain(in: capsule.contentView) { parent in
+        row.constrain(in: content) { parent in
             row.topAnchor.constraint(equalTo: parent.topAnchor)
             row.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
             row.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Metrics.capsulePadding)
             row.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Metrics.capsulePadding)
         }
+
+        // Fill the capsule, and overflow it when the titles demand more. Only a
+        // `>=` — the row's own minimums push `content` wider than this when
+        // they have to, and the scroll view takes it from there. An `==` would
+        // forbid that and clip instead.
+        content.widthAnchor.constraint(
+            greaterThanOrEqualTo: scroller.frameLayoutGuide.widthAnchor
+        ).isActive = true
+
+        // Grab anywhere. The capsule is one physical object, so dragging it
+        // should move the pages whether the finger happens to land on a title,
+        // on a badge, or on the glass between them.
+        scrubPan = UIPanGestureRecognizer(target: self, action: #selector(handleScrub))
+        scrubPan.delegate = self
+        capsule.contentView.addGestureRecognizer(scrubPan)
 
         // The whole capsule reads as one tab bar to VoiceOver; each segment is
         // a button reporting its own selected state.
@@ -118,14 +224,27 @@ final class InboxCategoryBar: UIView {
     private func materializeEffects() {
         guard window != nil else { return }
         if capsule.effect == nil {
-            capsule.effect = UIBlurEffect(style: .systemUltraThinMaterial)
-        }
-        if lens.effect == nil {
-            let glass = UIGlassEffect()
+            let glass = UIGlassEffect(style: .regular)
+            // The system's own press response for glass: the material flexes
+            // under a touch instead of sitting inert. This is the whole of the
+            // container's pressed feedback — there is no scale math or spring
+            // of ours anywhere near it.
             glass.isInteractive = true
-            lens.effect = glass
+            capsule.effect = glass
         }
     }
+
+    /// The active segment's fill. Adaptive by construction: `label` is near
+    /// black in light mode and near white in dark, so one constant reads as a
+    /// darkening in one and a lightening in the other, over a backdrop that is
+    /// itself taking its cue from the content behind it.
+    ///
+    /// 0.18 rather than 0.12, chosen by comparison over scrolled list rows —
+    /// which is the hard case, because the glass backdrop passes more of the
+    /// content through than the thin material did. At 0.12 the pill reads as
+    /// soft shading; at 0.18 it is unambiguous and still subtle.
+    /// `.quaternarySystemFill` was fainter than either and was discarded.
+    private static let lensTint = UIColor.label.withAlphaComponent(0.18)
 
     override func layoutSubviews() {
         super.layoutSubviews()
@@ -143,6 +262,7 @@ final class InboxCategoryBar: UIView {
         materializeEffects()
     }
 
+
     // MARK: - Driven state
 
     /// The pager's fractional page position. Called every frame of a drag and
@@ -150,6 +270,12 @@ final class InboxCategoryBar: UIView {
     func setProgress(_ progress: CGFloat) {
         guard progress != self.progress else { return }
         self.progress = progress
+        // The value tracks the pages, not just taps. Without this a swipe would
+        // leave `selectedIndex` stale, and the next tap on the segment the
+        // viewer had swiped away from would be read as "no change" and do
+        // nothing. Silent — the pages are already where this says they are, so
+        // announcing it would tell the owner something it just told us.
+        selectedIndex = Int(progress.rounded())
         applyProgress()
     }
 
@@ -163,15 +289,67 @@ final class InboxCategoryBar: UIView {
         applyProgress()
     }
 
+    /// A segment was chosen. Publishes through `.valueChanged` rather than a
+    /// stored closure, so the owner wires this the way it would wire any
+    /// system control.
+    private func selectSegment(_ index: Int) {
+        guard index != selectedIndex else { return }
+        selectedIndex = index
+        sendActions(for: .valueChanged)
+    }
+
+    // MARK: - Grab
+
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === scrubPan else {
+            return super.gestureRecognizerShouldBegin(gestureRecognizer)
+        }
+        // When the strip itself has somewhere to scroll, the finger belongs to
+        // it — moving the tabs and moving the pages at once would be two
+        // answers to one gesture.
+        guard scroller.contentSize.width <= scroller.bounds.width + 0.5 else { return false }
+        // Horizontal intent only. A vertical drag that starts on the bar is
+        // someone reaching for the list underneath it.
+        let velocity = scrubPan.velocity(in: capsule)
+        return abs(velocity.x) > abs(velocity.y)
+    }
+
+    /// Translates a drag on the capsule into pages.
+    ///
+    /// One segment's width dragged = one page, so the lens keeps pace with the
+    /// finger rather than sliding at some other rate.
+    ///
+    /// **The sign follows the LENS, not the pages.** Dragging left moves the
+    /// selection left: the capsule behaves like a strip of tabs being slid
+    /// under the finger, which is what grabbing a physical object implies.
+    /// That is deliberately the OPPOSITE of dragging the page content, where
+    /// pulling left brings the next page in from the right — the two gestures
+    /// act on different objects, and each follows the one being touched.
+    @objc private func handleScrub(_ pan: UIPanGestureRecognizer) {
+        guard segments.count > 1 else { return }
+        let slot = max(1, segments[0].bounds.width + Metrics.interSegmentSpacing)
+        switch pan.state {
+        case .began:
+            scrubOrigin = progress
+        case .changed:
+            let delta = pan.translation(in: capsule).x / slot
+            onScrub?(scrubOrigin + delta)
+        case .ended, .cancelled, .failed:
+            onScrubEnd?(pan.velocity(in: capsule).x / slot)
+        default:
+            break
+        }
+    }
+
     private func buildSegments() {
         segments = categories.enumerated().map { index, category in
             let segment = SegmentView(title: category.title)
             segment.addAction(
-                UIAction { [weak self] _ in self?.onSelect?(index) },
-                // NOT `.primaryActionTriggered`: only UIButton synthesizes
-                // that. A bare UIControl sends touch events, so a segment
-                // registered for the primary action never fires at all.
-                for: .touchUpInside
+                UIAction { [weak self] _ in self?.selectSegment(index) },
+                // `.primaryActionTriggered` now that the segment is a real
+                // `UIButton` — UIButton synthesizes it, where the bare
+                // `UIControl` this used to be never fired it at all.
+                for: .primaryActionTriggered
             )
             row.addArrangedSubview(segment)
             return segment
@@ -196,20 +374,48 @@ final class InboxCategoryBar: UIView {
 
         let from = lensFrame(for: lower)
         let to = lensFrame(for: upper)
-        lens.frame = CGRect(
+        let rect = CGRect(
             x: from.minX + (to.minX - from.minX) * t,
             y: from.minY,
             width: from.width + (to.width - from.width) * t,
             height: from.height
         )
+
+        lens.frame = rect
         lens.layer.cornerRadius = lens.bounds.height / 2
         lens.layer.cornerCurve = .continuous
+        keepLensVisible()
+    }
+
+    /// Follows the lens with the scroll offset when the row is wider than the
+    /// capsule — the "active tab scrolls itself into view" half of the pattern.
+    ///
+    /// `scrollRectToVisible` unanimated is exactly right here: it scrolls the
+    /// MINIMUM distance needed and no-ops when the rect is already visible, so
+    /// the bar sits still through the middle of a drag and only creeps at the
+    /// ends. Animating instead would queue a 0.3s animation on every one of the
+    /// ~18 frames a page change emits, and they would fight each other.
+    ///
+    /// Skipped while the viewer is scrolling the bar by hand — otherwise their
+    /// own drag would be yanked back to the selection under their finger.
+    private func keepLensVisible() {
+        guard scroller.contentSize.width > scroller.bounds.width,
+              !scroller.isDragging, !scroller.isDecelerating
+        else { return }
+        scroller.scrollRectToVisible(
+            lens.frame.insetBy(dx: -Metrics.capsulePadding, dy: 0), animated: false
+        )
     }
 
     /// Built by hand rather than with `insetBy`: insetting a rect past its own
     /// size yields `CGRect.null`, whose infinite origin turns the frame
     /// interpolation into NaN and takes CALayer down with it. Segments start
     /// at zero height, so that path is not hypothetical.
+    ///
+    /// Coordinates are the SCROLL CONTENT's, not the capsule's — `row.frame` is
+    /// already expressed in `content`, and the lens is a sibling there, so the
+    /// arithmetic is unchanged by the scroll view and no content offset has to
+    /// be subtracted anywhere.
     private func lensFrame(for index: Int) -> CGRect {
         let segment = segments[index].frame
         return CGRect(
@@ -222,12 +428,17 @@ final class InboxCategoryBar: UIView {
 
 }
 
+/// Conformance only — the policy is an `override` in the class body, because
+/// `UIView` already declares `gestureRecognizerShouldBegin(_:)` and Swift will
+/// not let an extension override it.
+extension InboxCategoryBar: UIGestureRecognizerDelegate {}
+
 // MARK: - Segment
 
 /// One category segment: a stacked pair of labels (regular and semibold) that
 /// crossfade, plus an optional count badge. Its width is pinned to the
 /// SEMIBOLD measurement so selection can never reflow the row.
-private final class SegmentView: UIControl {
+private final class SegmentView: UIButton {
     /// Titles scale with Dynamic Type up to here, then stop — four segments
     /// have to stay side by side in one fixed-height capsule.
     static let maximumTitlePointSize: CGFloat = 19
@@ -277,7 +488,28 @@ private final class SegmentView: UIControl {
         accessibilityLabel = title
         accessibilityTraits = .button
 
-        pinnedWidth = widthAnchor.constraint(equalToConstant: 0)
+        // A real button with a real configuration, so UIKit owns the control
+        // state machine: when a touch is a press, when it is cancelled, when a
+        // drag outside un-highlights. Pressed feedback lives on the CONTENT,
+        // never on the lens — the lens belongs to the selection, not the touch.
+        //
+        // `.plain()` carries no title of its own: the regular/semibold pair
+        // above is what renders, because selection here is FRACTIONAL and a
+        // configuration title can only be one weight at a time. The handler is
+        // UIKit's designated place to express appearance per state, which is
+        // what replaces the hand-rolled `isHighlighted` observer this had.
+        configuration = .plain()
+        configurationUpdateHandler = { [weak self] button in
+            guard let self else { return }
+            let dimmed = button.isHighlighted ? 0.55 : 1
+            self.content.alpha = dimmed
+            self.plainLabel.alpha = dimmed * (1 - self.strength)
+        }
+
+        // A MINIMUM, not an exact width: `fillEqually` on the row hands every
+        // segment the same slot, and this only states how narrow that slot is
+        // allowed to get before the row has to overflow and scroll.
+        pinnedWidth = widthAnchor.constraint(greaterThanOrEqualToConstant: 0)
         pinnedWidth.isActive = true
         updatePinnedWidth()
 
@@ -291,18 +523,6 @@ private final class SegmentView: UIControl {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    /// Pressed feedback lives on the CONTENT, never on the lens — the lens
-    /// belongs to the selection, not to the touch.
-    override var isHighlighted: Bool {
-        didSet {
-            guard isHighlighted != oldValue else { return }
-            UIView.animate(withDuration: 0.12, delay: 0, options: [.beginFromCurrentState]) {
-                self.content.alpha = self.isHighlighted ? 0.55 : 1
-                self.plainLabel.alpha = self.isHighlighted ? 0.55 * (1 - self.strength) : (1 - self.strength)
-            }
-        }
-    }
 
     private var strength: CGFloat = 0
 
@@ -351,7 +571,16 @@ private final class BadgeView: UIView {
         super.init(frame: .zero)
         label.font = .preferredFont(forTextStyle: .caption2, weight: .semibold, maximumPointSize: 15)
         label.adjustsFontForContentSizeCategory = true
-        label.textColor = .systemBackground
+        // `.systemBackground` does NOT survive inside a `UIGlassEffect` content
+        // view — it resolved to white in dark mode, on a badge whose fill had
+        // correctly resolved to white, erasing the count. An explicit dynamic
+        // colour carries the same intent (the inverse of `.label`) in values
+        // the effect can't reinterpret.
+        label.textColor = UIColor { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor(white: 0.06, alpha: 1)
+                : UIColor(white: 1, alpha: 1)
+        }
         label.textAlignment = .center
         label.pin(to: self, insets: NSDirectionalEdgeInsets(top: 2, leading: 5, bottom: 2, trailing: 5))
         backgroundColor = .secondaryLabel
