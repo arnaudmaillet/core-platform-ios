@@ -5,18 +5,39 @@ import UIKit
 /// The inbox's category header: a floating Liquid Glass capsule under the
 /// navigation bar, with a lens that slides between segments.
 ///
-/// **Anatomy.** A content-hugging capsule of `.systemUltraThinMaterial`, its
-/// own soft shadow, and one `UIGlassEffect` lens marking the active segment.
-/// The capsule floats — it does not span the width and it has no hairline —
-/// so the lists scroll *beneath* it and are seen through the material. Both
-/// materials are semantic, so light and dark come free.
+/// **Anatomy.** A content-hugging capsule of `UIGlassEffect`, its own soft
+/// shadow, and a tinted overlay marking the active segment. The capsule floats
+/// — it has no hairline, and it spans the width only if its segments demand it
+/// — so the lists scroll *beneath* it and are seen through the glass.
 ///
-/// **Why two materials here, when the house rule says one.** The rule
-/// `GlassSegmentRow` documents is about putting a material inside a material
-/// the *system* already supplies (a toolbar item's capsule). Here we own both
-/// layers deliberately: a bar-like backdrop and a lens moving across it, which
-/// is the Telegram/iOS-26 segmented idiom. Nothing else in the bar carries a
-/// material — segments are text only.
+/// **ONE material, not two.** The lens is a plain tinted `UIView`
+/// (`label` at 18% — a darkening in light mode, a lightening in dark), NOT a
+/// second `UIVisualEffectView`. That is the whole trick: an earlier build put a
+/// glass lens inside a glass capsule and the lens lost its edge entirely — the
+/// selected segment stopped reading as selected, which is the one thing this
+/// control exists to say. A tint has nothing to refract, so it separates
+/// cleanly from the glass behind it at any position. It also honours the house
+/// rule `GlassSegmentRow` documents, which the old blur-plus-glass pairing had
+/// to argue its way around.
+///
+/// `UIGlassContainerEffect` is NOT the backdrop to reach for: it is a
+/// *grouping* effect for sibling glass elements that should merge, and used as
+/// the capsule's own effect it renders no backdrop whatsoever — message
+/// previews behind the bar collide with the segment titles at full contrast.
+///
+/// ⚠️ **Semantic colours do not survive inside the glass content view.** The
+/// badge's `.systemBackground` text resolved to WHITE in dark mode, on a badge
+/// whose fill had correctly resolved to white — an invisible count, on a
+/// control whose whole job is to show counts. `BadgeView` therefore states its
+/// text colour as an explicit dynamic colour. Anything added inside this
+/// capsule needs checking in BOTH appearances, not reasoned about.
+///
+/// **Overflow.** The segments live in a scroll view. Below the capsule's width
+/// ceiling it never scrolls and is inert in every sense; past it — a fourth
+/// category, a three-digit badge, a large Dynamic Type size — the capsule stops
+/// growing and the strip scrolls, with the active segment kept in view. The
+/// margin was thin without it: three segments with two badges need 331pt of the
+/// 343pt a 375pt screen offers at XL text.
 ///
 /// **Tracking.** `setProgress` takes the pager's *fractional* page position
 /// and interpolates the lens's frame between the two neighbouring segments
@@ -56,7 +77,18 @@ final class InboxCategoryBar: UIView {
     /// which would clip a shadow set on the same layer.
     private let shadowHost = UIView()
     private let capsule = UIVisualEffectView(effect: nil)
-    private let lens = UIVisualEffectView(effect: nil)
+    /// Scrolls the segments when they out-measure the capsule's ceiling. Below
+    /// that width it never scrolls and is invisible in every sense — the
+    /// capsule still hugs its content and still floats centred.
+    private let scroller = UIScrollView()
+    /// The scroll view's content: the lens and the row, in one coordinate
+    /// space. The lens lives HERE rather than in the capsule so it travels with
+    /// the segments for free — a lens pinned outside would need the content
+    /// offset subtracted out of it on every frame of both gestures.
+    private let content = UIView()
+    /// The active-segment marker. A tinted overlay, NOT a second material —
+    /// see the type comment on why glass-inside-glass cost the lens its edge.
+    private let lens = UIView()
     private let row = UIStackView()
     private var segments: [SegmentView] = []
     private var progress: CGFloat = 0
@@ -73,29 +105,60 @@ final class InboxCategoryBar: UIView {
             shadowHost.topAnchor.constraint(equalTo: parent.topAnchor, constant: Metrics.topMargin)
             shadowHost.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Metrics.bottomMargin)
             shadowHost.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-            shadowHost.leadingAnchor.constraint(greaterThanOrEqualTo: parent.leadingAnchor, constant: Spacing.lg)
+            // The ceiling. Below it the capsule hugs its content (the `equalTo`
+            // below, one priority step down); at it the capsule stops growing
+            // and the scroll view starts earning its keep.
+            shadowHost.widthAnchor.constraint(
+                lessThanOrEqualTo: parent.widthAnchor, constant: -Spacing.lg * 2
+            )
         }
 
         capsule.clipsToBounds = true
         capsule.pin(to: shadowHost)
 
+        scroller.showsHorizontalScrollIndicator = false
+        scroller.showsVerticalScrollIndicator = false
+        // Segments are buttons: without this the scroll view swallows the first
+        // touch and a tap only registers after a perceptible delay.
+        scroller.delaysContentTouches = false
+        scroller.pin(to: capsule.contentView)
+
+        content.constrain(in: scroller) { _ in
+            content.topAnchor.constraint(equalTo: scroller.contentLayoutGuide.topAnchor)
+            content.bottomAnchor.constraint(equalTo: scroller.contentLayoutGuide.bottomAnchor)
+            content.leadingAnchor.constraint(equalTo: scroller.contentLayoutGuide.leadingAnchor)
+            content.trailingAnchor.constraint(equalTo: scroller.contentLayoutGuide.trailingAnchor)
+            // The scroll view has no intrinsic size, so the content's height is
+            // tied to the frame — this axis must never scroll.
+            content.heightAnchor.constraint(equalTo: scroller.frameLayoutGuide.heightAnchor)
+        }
+
         // The lens goes in before the row so it sits behind the labels; it is
         // frame-driven (not constrained) because it has to land on fractional
         // positions between two segments every frame.
-        capsule.contentView.addSubview(lens)
+        content.addSubview(lens)
         lens.clipsToBounds = true
         lens.isUserInteractionEnabled = false
+        lens.backgroundColor = Self.lensTint
 
         row.axis = .horizontal
         row.spacing = Metrics.interSegmentSpacing
         row.alignment = .fill
         buildSegments()
-        row.constrain(in: capsule.contentView) { parent in
+        row.constrain(in: content) { parent in
             row.topAnchor.constraint(equalTo: parent.topAnchor)
             row.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
             row.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Metrics.capsulePadding)
             row.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Metrics.capsulePadding)
         }
+
+        // Hugging, one step below required: the capsule matches its content
+        // until the ceiling above forbids it, and then this yields rather than
+        // conflicting. This pair IS the "hug until you can't, then scroll"
+        // behaviour — there is no code path for it, only these two constraints.
+        let hug = shadowHost.widthAnchor.constraint(equalTo: content.widthAnchor)
+        hug.priority = .required - 1
+        hug.isActive = true
 
         // The whole capsule reads as one tab bar to VoiceOver; each segment is
         // a button reporting its own selected state.
@@ -118,14 +181,21 @@ final class InboxCategoryBar: UIView {
     private func materializeEffects() {
         guard window != nil else { return }
         if capsule.effect == nil {
-            capsule.effect = UIBlurEffect(style: .systemUltraThinMaterial)
-        }
-        if lens.effect == nil {
-            let glass = UIGlassEffect()
-            glass.isInteractive = true
-            lens.effect = glass
+            capsule.effect = UIGlassEffect(style: .regular)
         }
     }
+
+    /// The active segment's fill. Adaptive by construction: `label` is near
+    /// black in light mode and near white in dark, so one constant reads as a
+    /// darkening in one and a lightening in the other, over a backdrop that is
+    /// itself taking its cue from the content behind it.
+    ///
+    /// 0.18 rather than 0.12, chosen by comparison over scrolled list rows —
+    /// which is the hard case, because the glass backdrop passes more of the
+    /// content through than the thin material did. At 0.12 the pill reads as
+    /// soft shading; at 0.18 it is unambiguous and still subtle.
+    /// `.quaternarySystemFill` was fainter than either and was discarded.
+    private static let lensTint = UIColor.label.withAlphaComponent(0.18)
 
     override func layoutSubviews() {
         super.layoutSubviews()
@@ -142,6 +212,7 @@ final class InboxCategoryBar: UIView {
         super.didMoveToWindow()
         materializeEffects()
     }
+
 
     // MARK: - Driven state
 
@@ -204,12 +275,38 @@ final class InboxCategoryBar: UIView {
         )
         lens.layer.cornerRadius = lens.bounds.height / 2
         lens.layer.cornerCurve = .continuous
+        keepLensVisible()
+    }
+
+    /// Follows the lens with the scroll offset when the row is wider than the
+    /// capsule — the "active tab scrolls itself into view" half of the pattern.
+    ///
+    /// `scrollRectToVisible` unanimated is exactly right here: it scrolls the
+    /// MINIMUM distance needed and no-ops when the rect is already visible, so
+    /// the bar sits still through the middle of a drag and only creeps at the
+    /// ends. Animating instead would queue a 0.3s animation on every one of the
+    /// ~18 frames a page change emits, and they would fight each other.
+    ///
+    /// Skipped while the viewer is scrolling the bar by hand — otherwise their
+    /// own drag would be yanked back to the selection under their finger.
+    private func keepLensVisible() {
+        guard scroller.contentSize.width > scroller.bounds.width,
+              !scroller.isDragging, !scroller.isDecelerating
+        else { return }
+        scroller.scrollRectToVisible(
+            lens.frame.insetBy(dx: -Metrics.capsulePadding, dy: 0), animated: false
+        )
     }
 
     /// Built by hand rather than with `insetBy`: insetting a rect past its own
     /// size yields `CGRect.null`, whose infinite origin turns the frame
     /// interpolation into NaN and takes CALayer down with it. Segments start
     /// at zero height, so that path is not hypothetical.
+    ///
+    /// Coordinates are the SCROLL CONTENT's, not the capsule's — `row.frame` is
+    /// already expressed in `content`, and the lens is a sibling there, so the
+    /// arithmetic is unchanged by the scroll view and no content offset has to
+    /// be subtracted anywhere.
     private func lensFrame(for index: Int) -> CGRect {
         let segment = segments[index].frame
         return CGRect(
@@ -351,7 +448,16 @@ private final class BadgeView: UIView {
         super.init(frame: .zero)
         label.font = .preferredFont(forTextStyle: .caption2, weight: .semibold, maximumPointSize: 15)
         label.adjustsFontForContentSizeCategory = true
-        label.textColor = .systemBackground
+        // `.systemBackground` does NOT survive inside a `UIGlassEffect` content
+        // view — it resolved to white in dark mode, on a badge whose fill had
+        // correctly resolved to white, erasing the count. An explicit dynamic
+        // colour carries the same intent (the inverse of `.label`) in values
+        // the effect can't reinterpret.
+        label.textColor = UIColor { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor(white: 0.06, alpha: 1)
+                : UIColor(white: 1, alpha: 1)
+        }
         label.textAlignment = .center
         label.pin(to: self, insets: NSDirectionalEdgeInsets(top: 2, leading: 5, bottom: 2, trailing: 5))
         backgroundColor = .secondaryLabel

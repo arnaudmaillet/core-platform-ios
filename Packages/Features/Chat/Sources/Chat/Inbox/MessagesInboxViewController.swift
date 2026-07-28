@@ -153,6 +153,21 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
             hasActivatedInitialSurface = true
             activeSurface?.surfaceDidBecomeActive()
         }
+        #if DEBUG
+        // `-inbox-page-to <category>` animates to another tab ~2s in, through
+        // the SAME path a segment tap takes (`setActivePage(animated:)`, which
+        // reports fractional progress every frame). Taps can't be injected
+        // headlessly, and this is the transition worth recording.
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "-inbox-page-to"),
+           let name = arguments.dropFirst(index + 1).first,
+           let category = MessagesCategory(rawValue: name),
+           let target = surfaces.firstIndex(where: { $0.category == category }) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.select(index: target, animated: true)
+            }
+        }
+        #endif
     }
 
     // MARK: - Category selection
