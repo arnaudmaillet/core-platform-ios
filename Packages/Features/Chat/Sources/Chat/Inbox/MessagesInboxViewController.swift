@@ -106,7 +106,12 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         categoryBar.addAction(
             UIAction { [weak self] _ in
                 guard let self else { return }
-                self.select(index: self.categoryBar.selectedIndex, animated: true)
+                // The PAGES land directly; the LENS is what glides, on its own
+                // spring inside the bar. Animating the pager instead would
+                // scroll the intervening pages past at speed AND drive the
+                // lens frame every frame, which cannot coexist with the bar
+                // animating that same frame — the two would fight.
+                self.select(index: self.categoryBar.selectedIndex, animated: false)
             },
             for: .valueChanged
         )
