@@ -67,15 +67,17 @@ final class InboxCategoryBar: UIView {
 
         /// Below this much movement per frame (in pages) the lens is rigid.
         /// A slow, deliberate drag should not wobble.
-        static let elasticThreshold: CGFloat = 0.004
+        static let elasticThreshold: CGFloat = 0.003
         /// Points of stretch per page-per-frame of smoothed travel.
-        static let elasticGain: CGFloat = 260
-        /// Hard cap. The whole effect has to stay at the edge of noticeable —
-        /// an earlier, much springier version of this was built and rejected.
-        static let elasticMaximum: CGFloat = 9
-        /// How much of the previous frame's travel carries into this one.
-        /// Raw per-frame deltas are too noisy to drive geometry directly.
-        static let elasticSmoothing: CGFloat = 0.72
+        static let elasticGain: CGFloat = 520
+        /// Hard cap, as a FRACTION of the lens's own width rather than a fixed
+        /// number of points — the stretch should read the same on a 375pt phone
+        /// and a 440pt one, and a segment slot differs by a third between them.
+        static let elasticMaximumFraction: CGFloat = 0.30
+        /// How much of the previous frame's travel carries into this one. The
+        /// higher this is, the longer the lens keeps giving after the finger
+        /// slows — which is most of what reads as "liquid" rather than "wide".
+        static let elasticSmoothing: CGFloat = 0.82
     }
 
     /// Total height the container reserves as safe area, margins included.
@@ -263,7 +265,43 @@ final class InboxCategoryBar: UIView {
         travel = travel * Metrics.elasticSmoothing + delta * (1 - Metrics.elasticSmoothing)
         self.progress = progress
         applyProgress()
+        scheduleRelease()
     }
+
+    /// Unwinds the stretch once the pages stop moving.
+    ///
+    /// The decay cannot ride on `setProgress` alone: that early-returns when
+    /// the position is unchanged, so the last frame of a drag would freeze
+    /// `travel` at whatever it held and the lens would stay stretched for good.
+    /// (It didn't at a smoothing of 0.72 only because the residual happened to
+    /// fall under the threshold before the pager settled — luck, not design.)
+    ///
+    /// A chained hop rather than a `CADisplayLink`: it exists for the six or so
+    /// frames of the tail and then stops, where a display link would retain
+    /// this view and need tearing down in `didMoveToWindow` — Swift 6 gives no
+    /// `deinit` hook that can touch one.
+    private func scheduleRelease() {
+        releaseToken &+= 1
+        guard abs(travel) > Metrics.elasticThreshold else {
+            // Land exactly on the resting frame; a residue below the threshold
+            // still reads as a lens that is a pixel too wide.
+            guard travel != 0 else { return }
+            travel = 0
+            applyProgress()
+            return
+        }
+        let token = releaseToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60.0) { [weak self] in
+            // A real page movement in the meantime bumped the token and owns
+            // the stretch now; this hop is stale.
+            guard let self, self.releaseToken == token else { return }
+            self.travel *= Metrics.elasticSmoothing
+            self.applyProgress()
+            self.scheduleRelease()
+        }
+    }
+
+    private var releaseToken = 0
 
     /// Smoothed per-frame travel, in pages. Drives the lens's stretch, and
     /// decays to nothing on its own the moment the finger stops — which is why
@@ -273,10 +311,21 @@ final class InboxCategoryBar: UIView {
 
     /// How far the lens overshoots its segment right now, and in which
     /// direction. Zero unless the viewer is actually dragging.
-    private var elasticOverhang: CGFloat {
+    ///
+    /// The cap is relative to the segment being stretched, so the effect is the
+    /// same *gesture* on every screen size rather than the same number of
+    /// points. Eased rather than linear: the first part of a drag gives
+    /// readily and the last part resists, which is what a stretched thing does
+    /// and what keeps a fast flick from simply pinning to the cap and sitting
+    /// there.
+    private func elasticOverhang(forWidth width: CGFloat) -> CGFloat {
         guard !UIAccessibility.isReduceMotionEnabled else { return 0 }
         guard abs(travel) > Metrics.elasticThreshold else { return 0 }
-        let magnitude = min(abs(travel) * Metrics.elasticGain, Metrics.elasticMaximum)
+        let limit = width * Metrics.elasticMaximumFraction
+        let demand = abs(travel) * Metrics.elasticGain
+        // Asymptotic: approaches `limit` but never reaches it, so there is no
+        // point at which the stretch visibly stops responding to the finger.
+        let magnitude = limit * (1 - exp(-demand / max(limit, 1)))
         return travel < 0 ? -magnitude : magnitude
     }
 
@@ -292,12 +341,6 @@ final class InboxCategoryBar: UIView {
 
     // MARK: - Grab
 
-    /// Translates a drag on the capsule into pages.
-    ///
-    /// One segment's width dragged = one page, so the tab under the finger
-    /// keeps pace with the content behind it rather than running ahead of it.
-    /// The sign is inverted because dragging the bar LEFT should bring the next
-    /// page in from the right, exactly as dragging the page itself would.
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         guard gestureRecognizer === scrubPan else {
             return super.gestureRecognizerShouldBegin(gestureRecognizer)
@@ -312,6 +355,17 @@ final class InboxCategoryBar: UIView {
         return abs(velocity.x) > abs(velocity.y)
     }
 
+    /// Translates a drag on the capsule into pages.
+    ///
+    /// One segment's width dragged = one page, so the lens keeps pace with the
+    /// finger rather than sliding at some other rate.
+    ///
+    /// **The sign follows the LENS, not the pages.** Dragging left moves the
+    /// selection left: the capsule behaves like a strip of tabs being slid
+    /// under the finger, which is what grabbing a physical object implies.
+    /// That is deliberately the OPPOSITE of dragging the page content, where
+    /// pulling left brings the next page in from the right — the two gestures
+    /// act on different objects, and each follows the one being touched.
     @objc private func handleScrub(_ pan: UIPanGestureRecognizer) {
         guard segments.count > 1 else { return }
         let slot = max(1, segments[0].bounds.width + Metrics.interSegmentSpacing)
@@ -319,10 +373,10 @@ final class InboxCategoryBar: UIView {
         case .began:
             scrubOrigin = progress
         case .changed:
-            let delta = -pan.translation(in: capsule).x / slot
+            let delta = pan.translation(in: capsule).x / slot
             onScrub?(scrubOrigin + delta)
         case .ended, .cancelled, .failed:
-            onScrubEnd?(-pan.velocity(in: capsule).x / slot)
+            onScrubEnd?(pan.velocity(in: capsule).x / slot)
         default:
             break
         }
@@ -373,7 +427,7 @@ final class InboxCategoryBar: UIView {
         // and recovers as the travel decays. Only the trailing edge moves —
         // stretching both would just make a wider pill in the same place, which
         // reads as a size change rather than as give.
-        let overhang = elasticOverhang
+        let overhang = elasticOverhang(forWidth: rect.width)
         if overhang > 0 {
             rect.origin.x -= overhang
             rect.size.width += overhang
