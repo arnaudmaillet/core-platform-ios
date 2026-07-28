@@ -64,6 +64,18 @@ final class InboxCategoryBar: UIView {
         /// Inset of the lens inside the capsule.
         static let lensInset: CGFloat = 4
         static let interSegmentSpacing: CGFloat = 2
+
+        /// Below this much movement per frame (in pages) the lens is rigid.
+        /// A slow, deliberate drag should not wobble.
+        static let elasticThreshold: CGFloat = 0.004
+        /// Points of stretch per page-per-frame of smoothed travel.
+        static let elasticGain: CGFloat = 260
+        /// Hard cap. The whole effect has to stay at the edge of noticeable —
+        /// an earlier, much springier version of this was built and rejected.
+        static let elasticMaximum: CGFloat = 9
+        /// How much of the previous frame's travel carries into this one.
+        /// Raw per-frame deltas are too noisy to drive geometry directly.
+        static let elasticSmoothing: CGFloat = 0.72
     }
 
     /// Total height the container reserves as safe area, margins included.
@@ -71,6 +83,12 @@ final class InboxCategoryBar: UIView {
 
     /// A segment was tapped. Swipes report through the pager, not here.
     var onSelect: ((Int) -> Void)?
+    /// A drag on the capsule itself, as a fractional page position. Fires every
+    /// frame of the finger; the owner scrubs the pager to it.
+    var onScrub: ((CGFloat) -> Void)?
+    /// That drag ended, with its velocity in pages per second, so the owner can
+    /// let a flick carry to the next page instead of snapping back.
+    var onScrubEnd: ((CGFloat) -> Void)?
 
     private let categories: [MessagesCategory]
     /// Carries the shadow; the capsule itself clips to its corner radius,
@@ -92,6 +110,9 @@ final class InboxCategoryBar: UIView {
     private let row = UIStackView()
     private var segments: [SegmentView] = []
     private var progress: CGFloat = 0
+    private var scrubPan: UIPanGestureRecognizer!
+    /// Where `progress` stood when the current capsule drag began.
+    private var scrubOrigin: CGFloat = 0
 
     init(categories: [MessagesCategory]) {
         self.categories = categories
@@ -101,15 +122,17 @@ final class InboxCategoryBar: UIView {
         shadowHost.layer.shadowOpacity = 0.12
         shadowHost.layer.shadowRadius = 10
         shadowHost.layer.shadowOffset = CGSize(width: 0, height: 3)
+        // Full width, standard margins — the capsule is a bar, not a badge, so
+        // it reads the same on every screen instead of growing and shrinking
+        // with whatever the segment titles happen to measure.
         shadowHost.constrain(in: self) { parent in
             shadowHost.topAnchor.constraint(equalTo: parent.topAnchor, constant: Metrics.topMargin)
             shadowHost.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Metrics.bottomMargin)
-            shadowHost.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-            // The ceiling. Below it the capsule hugs its content (the `equalTo`
-            // below, one priority step down); at it the capsule stops growing
-            // and the scroll view starts earning its keep.
-            shadowHost.widthAnchor.constraint(
-                lessThanOrEqualTo: parent.widthAnchor, constant: -Spacing.lg * 2
+            shadowHost.leadingAnchor.constraint(
+                equalTo: parent.safeAreaLayoutGuide.leadingAnchor, constant: Spacing.lg
+            )
+            shadowHost.trailingAnchor.constraint(
+                equalTo: parent.safeAreaLayoutGuide.trailingAnchor, constant: -Spacing.lg
             )
         }
 
@@ -144,6 +167,12 @@ final class InboxCategoryBar: UIView {
         row.axis = .horizontal
         row.spacing = Metrics.interSegmentSpacing
         row.alignment = .fill
+        // Equal slots, so the bar looks balanced at any width and a short title
+        // gets the same target as a long one. Segment widths are minimums
+        // (`>=`) rather than exact, which is what lets this distribute the
+        // slack — and what still lets the row out-measure the capsule and
+        // scroll when the titles genuinely need more room than the screen has.
+        row.distribution = .fillEqually
         buildSegments()
         row.constrain(in: content) { parent in
             row.topAnchor.constraint(equalTo: parent.topAnchor)
@@ -152,13 +181,20 @@ final class InboxCategoryBar: UIView {
             row.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Metrics.capsulePadding)
         }
 
-        // Hugging, one step below required: the capsule matches its content
-        // until the ceiling above forbids it, and then this yields rather than
-        // conflicting. This pair IS the "hug until you can't, then scroll"
-        // behaviour — there is no code path for it, only these two constraints.
-        let hug = shadowHost.widthAnchor.constraint(equalTo: content.widthAnchor)
-        hug.priority = .required - 1
-        hug.isActive = true
+        // Fill the capsule, and overflow it when the titles demand more. Only a
+        // `>=` — the row's own minimums push `content` wider than this when
+        // they have to, and the scroll view takes it from there. An `==` would
+        // forbid that and clip instead.
+        content.widthAnchor.constraint(
+            greaterThanOrEqualTo: scroller.frameLayoutGuide.widthAnchor
+        ).isActive = true
+
+        // Grab anywhere. The capsule is one physical object, so dragging it
+        // should move the pages whether the finger happens to land on a title,
+        // on a badge, or on the glass between them.
+        scrubPan = UIPanGestureRecognizer(target: self, action: #selector(handleScrub))
+        scrubPan.delegate = self
+        capsule.contentView.addGestureRecognizer(scrubPan)
 
         // The whole capsule reads as one tab bar to VoiceOver; each segment is
         // a button reporting its own selected state.
@@ -220,8 +256,28 @@ final class InboxCategoryBar: UIView {
     /// every frame of a tap-driven scroll animation.
     func setProgress(_ progress: CGFloat) {
         guard progress != self.progress else { return }
+        // Travel is accumulated HERE and not in `applyProgress`, which also
+        // runs from `layoutSubviews` — a re-layout is not motion, and counting
+        // it would stretch the lens for a rotation or a badge arriving.
+        let delta = progress - self.progress
+        travel = travel * Metrics.elasticSmoothing + delta * (1 - Metrics.elasticSmoothing)
         self.progress = progress
         applyProgress()
+    }
+
+    /// Smoothed per-frame travel, in pages. Drives the lens's stretch, and
+    /// decays to nothing on its own the moment the finger stops — which is why
+    /// the effect needs no display link, no spring model, and no settle
+    /// animation to unwind it.
+    private var travel: CGFloat = 0
+
+    /// How far the lens overshoots its segment right now, and in which
+    /// direction. Zero unless the viewer is actually dragging.
+    private var elasticOverhang: CGFloat {
+        guard !UIAccessibility.isReduceMotionEnabled else { return 0 }
+        guard abs(travel) > Metrics.elasticThreshold else { return 0 }
+        let magnitude = min(abs(travel) * Metrics.elasticGain, Metrics.elasticMaximum)
+        return travel < 0 ? -magnitude : magnitude
     }
 
     func setBadge(_ count: Int, for category: MessagesCategory) {
@@ -232,6 +288,44 @@ final class InboxCategoryBar: UIView {
         setNeedsLayout()
         layoutIfNeeded()
         applyProgress()
+    }
+
+    // MARK: - Grab
+
+    /// Translates a drag on the capsule into pages.
+    ///
+    /// One segment's width dragged = one page, so the tab under the finger
+    /// keeps pace with the content behind it rather than running ahead of it.
+    /// The sign is inverted because dragging the bar LEFT should bring the next
+    /// page in from the right, exactly as dragging the page itself would.
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === scrubPan else {
+            return super.gestureRecognizerShouldBegin(gestureRecognizer)
+        }
+        // When the strip itself has somewhere to scroll, the finger belongs to
+        // it — moving the tabs and moving the pages at once would be two
+        // answers to one gesture.
+        guard scroller.contentSize.width <= scroller.bounds.width + 0.5 else { return false }
+        // Horizontal intent only. A vertical drag that starts on the bar is
+        // someone reaching for the list underneath it.
+        let velocity = scrubPan.velocity(in: capsule)
+        return abs(velocity.x) > abs(velocity.y)
+    }
+
+    @objc private func handleScrub(_ pan: UIPanGestureRecognizer) {
+        guard segments.count > 1 else { return }
+        let slot = max(1, segments[0].bounds.width + Metrics.interSegmentSpacing)
+        switch pan.state {
+        case .began:
+            scrubOrigin = progress
+        case .changed:
+            let delta = -pan.translation(in: capsule).x / slot
+            onScrub?(scrubOrigin + delta)
+        case .ended, .cancelled, .failed:
+            onScrubEnd?(-pan.velocity(in: capsule).x / slot)
+        default:
+            break
+        }
     }
 
     private func buildSegments() {
@@ -267,12 +361,32 @@ final class InboxCategoryBar: UIView {
 
         let from = lensFrame(for: lower)
         let to = lensFrame(for: upper)
-        lens.frame = CGRect(
+        var rect = CGRect(
             x: from.minX + (to.minX - from.minX) * t,
             y: from.minY,
             width: from.width + (to.width - from.width) * t,
             height: from.height
         )
+
+        // Elasticity: the lens's LEADING edge keeps up with the finger and its
+        // trailing edge lags, so the pill stretches in the direction of travel
+        // and recovers as the travel decays. Only the trailing edge moves —
+        // stretching both would just make a wider pill in the same place, which
+        // reads as a size change rather than as give.
+        let overhang = elasticOverhang
+        if overhang > 0 {
+            rect.origin.x -= overhang
+            rect.size.width += overhang
+        } else if overhang < 0 {
+            rect.size.width -= overhang
+        }
+        // Never let the stretch reach past the capsule's own inset, or the pill
+        // visibly clips against the glass edge at the first and last segment.
+        let limit = content.bounds.width - Metrics.capsulePadding
+        rect.origin.x = max(Metrics.capsulePadding, rect.origin.x)
+        rect.size.width = max(0, min(rect.width, limit - rect.minX))
+
+        lens.frame = rect
         lens.layer.cornerRadius = lens.bounds.height / 2
         lens.layer.cornerCurve = .continuous
         keepLensVisible()
@@ -318,6 +432,11 @@ final class InboxCategoryBar: UIView {
     }
 
 }
+
+/// Conformance only — the policy is an `override` in the class body, because
+/// `UIView` already declares `gestureRecognizerShouldBegin(_:)` and Swift will
+/// not let an extension override it.
+extension InboxCategoryBar: UIGestureRecognizerDelegate {}
 
 // MARK: - Segment
 
@@ -374,7 +493,10 @@ private final class SegmentView: UIControl {
         accessibilityLabel = title
         accessibilityTraits = .button
 
-        pinnedWidth = widthAnchor.constraint(equalToConstant: 0)
+        // A MINIMUM, not an exact width: `fillEqually` on the row hands every
+        // segment the same slot, and this only states how narrow that slot is
+        // allowed to get before the row has to overflow and scroll.
+        pinnedWidth = widthAnchor.constraint(greaterThanOrEqualToConstant: 0)
         pinnedWidth.isActive = true
         updatePinnedWidth()
 
