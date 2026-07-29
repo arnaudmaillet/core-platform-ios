@@ -36,10 +36,20 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     /// settle with identical physics.
     private let duration = ZoomFlight.springDuration
 
-    init(isPresenting: Bool, source: any ZoomTransitionSource, destination: any ZoomTransitionDestination) {
+    /// Source chrome that fades in over the dismiss spring; see
+    /// `ZoomTransitionController.returningSourceChrome`.
+    private weak var returningChrome: UIView?
+
+    init(
+        isPresenting: Bool,
+        source: any ZoomTransitionSource,
+        destination: any ZoomTransitionDestination,
+        returningChrome: UIView? = nil
+    ) {
         self.isPresenting = isPresenting
         self.source = source
         self.destination = destination
+        self.returningChrome = returningChrome
     }
 
     func transitionDuration(using transitionContext: (any UIViewControllerContextTransitioning)?) -> TimeInterval {
@@ -203,6 +213,9 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                        initialSpringVelocity: ZoomFlight.springVelocity, options: []) {
             flight.poseAtSource()
             dim.alpha = 0
+            // Arrives on the flight's own spring rather than after it, so a
+            // tap-back and a released grab reveal the bar the same way.
+            self.returningChrome?.alpha = 1
             presentingView?.transform = .identity
         } completion: { _ in
             let cancelled = context.transitionWasCancelled

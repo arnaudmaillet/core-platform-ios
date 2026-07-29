@@ -227,21 +227,45 @@ final class ForYouViewController: UIViewController {
         )
         let transition = ZoomTransitionController(source: source, destination: destination)
         activeTransition = transition
+        // The bar's alpha is driven 1:1 by the grab (and by the flight's spring
+        // on a tap-back), so it is revealed by the hand instead of appearing
+        // after the card has already landed.
+        transition.returningSourceChrome = tabBarController?.tabBar
         transition.onSourceReturned = { [weak self] in
-            // Completed pop only — a cancelled grab reports nothing, so the
-            // transition (and future grabs) survives it by construction.
+            // Completed pop only — a cancelled grab reports through
+            // `onDismissalCancelled`, so the transition (and future grabs)
+            // survives it by construction.
             self?.navigationController?.delegate = nil
             self?.activeTransition = nil
-            // The bar comes back HERE, on the completed pop, and only here —
-            // the same point the map's pin flight restores it, and the only
-            // point at which it paints correctly (see `viewWillAppear`). A
-            // cancelled grab reports nothing, so the bar correctly stays down
-            // under the feed that is still up.
-            self?.tabBarController?.setTabBarHidden(false, animated: true)
+            // Idempotent close-out: the state and the alpha are already correct
+            // by now, this just guarantees it if a leg was skipped.
+            self?.showTabBar(alpha: 1)
+        }
+        transition.onDismissalCancelled = { [weak self] in
+            // The feed is staying up, so put the bar back down — it is behind
+            // the restored page by now, so nothing renders the change.
+            self?.tabBarController?.setTabBarHidden(true, animated: false)
+            self?.tabBarController?.tabBar.alpha = 1
         }
         // Accessing `view` loads it so the grab-to-dismiss pan can attach.
-        transition.attachInteractiveDismissal(to: feed.view) { [weak navigationController] in
-            navigationController?.popViewController(animated: true)
+        transition.attachInteractiveDismissal(to: feed.view) { [weak self] in
+            // Restore the bar's hidden STATE here, at grab-begin — before the
+            // pop and therefore before any transition is in flight.
+            //
+            // Both halves of that matter. Doing it inside the transition
+            // permanently breaks the bar's rendering: the frame returns and
+            // `isTabBarHidden` reads false, but the buttons never paint, leaving
+            // a row of empty glass capsules (measured; the map's grab, which
+            // restores outside the transition, paints correctly). And doing it
+            // BEFORE the pop is what settles the grid's layout — its cells live
+            // inside the bar's safe area — so every landing rect the flight
+            // reads is already the rect the tile will still occupy.
+            //
+            // It goes back at alpha 0 so the drag can fade it in; the bar is a
+            // sibling of the navigation controller's view and renders above the
+            // transition's dim, which is why the dim cannot veil it for us.
+            self?.showTabBar(alpha: 0)
+            self?.navigationController?.popViewController(animated: true)
         }
         navigationController.delegate = transition
         navigationController.pushViewController(feed, animated: true)
@@ -265,18 +289,33 @@ final class ForYouViewController: UIViewController {
         super.viewWillAppear(animated)
         // Coming back from the feed: this screen owns the bottom again.
         guard navigationController?.topViewController === self else { return }
-        // A hero return restores the bar at COMPLETION instead — see
-        // `openFeed`'s `onSourceReturned`. Showing it here, while an
-        // interactive transition is still in flight, permanently breaks its
-        // rendering: the frame comes back and `isTabBarHidden` reads false, but
-        // the buttons never paint — a row of empty glass capsules with no icons
-        // or titles. Measured, and measured against the map's grab, which
-        // restores only at completion and paints correctly; neither an animated
-        // show, a deferred layout pass, nor a hide/show toggle afterwards
-        // repairs it. This path is for the returns that have no hero: the
-        // plain-push fallback for a text-only row, and a tab switch back.
+        // A hero return owns the bar itself — restored at grab-begin, faded in
+        // with the drag (see `openFeed`). This path is only for returns with no
+        // hero: the plain-push fallback for a text-only row, and a tab switch
+        // back.
         guard activeTransition == nil else { return }
         tabBarController?.setTabBarHidden(false, animated: animated)
+        tabBarController?.tabBar.alpha = 1
+    }
+
+    /// Puts the tab bar back, at a given opacity, and settles the layout it
+    /// changes.
+    ///
+    /// The alpha is separate from the hidden state on purpose: the STATE is what
+    /// the grid's safe area (and therefore every tile's frame) depends on, so it
+    /// has to be final before a flight measures anything, while the OPACITY is
+    /// what the viewer reads and belongs on the gesture's clock. Splitting them
+    /// is what lets the bar be geometrically present and visually absent for the
+    /// length of a drag.
+    private func showTabBar(alpha: CGFloat) {
+        guard let tabBarController else { return }
+        tabBarController.tabBar.alpha = alpha
+        guard tabBarController.isTabBarHidden else { return }
+        tabBarController.setTabBarHidden(false, animated: false)
+        // Force the layout the change implies now, so nothing downstream reads
+        // a stale cell rect.
+        tabBarController.view.layoutIfNeeded()
+        view.layoutIfNeeded()
     }
 
     /// Warms the top of the corpus into the feed's post cache so a tile tap

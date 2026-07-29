@@ -62,6 +62,11 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
 
     func setZoomSourceHidden(_ hidden: Bool) {
         page?.setHeroHidden(hidden, for: anchorID)
+        // Restoring the source is the end of the flight, whichever way it went:
+        // hand the grid's inset back so it tracks the safe area again.
+        if !hidden {
+            page?.endHeroFreeze()
+        }
     }
 
     /// Re-point at the post the feed ended on, then make sure its cell exists
@@ -74,6 +79,10 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// dequeued) cell, because a scroll can realize a *new* cell that never saw
     /// the earlier hide.
     func zoomSourceWillStageDismissal() {
+        // Pin the grid's inset first, before anything reads a rect from it: the
+        // pop animates the safe area, and an unpinned grid keeps drifting under
+        // the flight. See `ForYouGridPage.beginHeroFreeze`.
+        page?.beginHeroFreeze()
         if let landed = activePostID() {
             anchorID = landed
         }

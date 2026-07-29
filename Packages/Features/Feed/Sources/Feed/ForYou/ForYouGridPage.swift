@@ -35,6 +35,11 @@ final class ForYouGridPage: UIView {
     private let statusLabel = UILabel()
     private let refreshControl = UIRefreshControl()
     private var showsSkeleton = false
+    /// The post whose cell is standing in for a flight card and must stay
+    /// invisible until the card lands. See `setHeroHidden`.
+    private var heroHiddenPostID: PostID?
+    /// The inset to hand back when a flight ends; non-nil means frozen.
+    private var frozenContentInset: UIEdgeInsets?
     /// Suppresses prefetch while the page repositions itself.
     ///
     /// Pagination is a response to the VIEWER reaching the end, not to the code
@@ -163,6 +168,38 @@ final class ForYouGridPage: UIView {
         return collectionView.bounds.intersects(cell.frame)
     }
 
+    /// Pins the content inset the grid is currently laid out with, so nothing
+    /// can move the cells for the duration of a flight.
+    ///
+    /// **This is what makes a single landing measurement valid.** A pop animates
+    /// the safe area — the navigation bar's height interpolates as the pop
+    /// scrubs — and this collection view adds that safe area to its own inset,
+    /// which drags `contentOffset` along with it. Measured: `adjustedContentInset
+    /// .top` crept 102 → 106 across one drag and settled at 116, while the cell's
+    /// frame *within the content* never moved at all. The card was therefore
+    /// aimed at a tile that was still travelling, and landed ~21pt high.
+    ///
+    /// Freezing converts the inset from "safe area plus mine" to a constant
+    /// equal to whatever it resolved to at freeze time, so the cells hold still
+    /// through the whole transition and one rect is the truth. The caller freezes
+    /// only after forcing a layout with the tab bar restored, so the value
+    /// captured is the RESTING one — the same inset the grid will still have
+    /// when the pop finishes, which is why thawing cannot move anything either.
+    func beginHeroFreeze() {
+        guard frozenContentInset == nil else { return }
+        frozenContentInset = collectionView.contentInset
+        let resolved = collectionView.adjustedContentInset
+        collectionView.contentInsetAdjustmentBehavior = .never
+        collectionView.contentInset = resolved
+    }
+
+    func endHeroFreeze() {
+        guard let frozenContentInset else { return }
+        self.frozenContentInset = nil
+        collectionView.contentInsetAdjustmentBehavior = .automatic
+        collectionView.contentInset = frozenContentInset
+    }
+
     /// Brings the post fully into view without animation, so a dismissal can
     /// land on a cell the viewer had scrolled past — or only half scrolled to.
     ///
@@ -189,8 +226,22 @@ final class ForYouGridPage: UIView {
     }
 
     /// Hides the real cell while its twin is flying.
+    /// Hides the real cell while its twin is flying, and keeps it hidden.
+    ///
+    /// The flag lives on the PAGE, keyed by post, and is re-applied at every
+    /// dequeue — it is not enough to set `isHidden` on the cell that happens to
+    /// be realized now. Two things break that: a `reloadData` (a page landing
+    /// mid-flight) hands back a fresh, VISIBLE cell, so the tile reappears
+    /// under the card and the viewer sees it twice; and a recycled cell carries
+    /// the stale `isHidden` to whatever index it is next used for, leaving an
+    /// invisible tile somewhere else in the grid.
     func setHeroHidden(_ hidden: Bool, for postID: PostID) {
-        cell(for: postID)?.isHidden = hidden
+        heroHiddenPostID = hidden ? postID : nil
+        // Apply to whatever is on screen right now; `cellForItemAt` covers
+        // everything realized from here on.
+        if let cell = cell(for: postID) {
+            cell.isHidden = hidden
+        }
     }
 
     /// The post behind an id, for a flight card that must configure itself
@@ -264,18 +315,24 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             }
         }
         let post = posts[indexPath.item]
+        // Set on EVERY dequeue, both ways: the flight's stand-in stays hidden
+        // across reloads, and a recycled cell can never carry a stale hide to
+        // another tile.
+        let isFlying = post.id == heroHiddenPostID
         switch style {
         case .list:
             let cell = collectionView.dequeueReusableCell(
                 withReuseIdentifier: PostGridListRowCell.reuseID, for: indexPath
             ) as! PostGridListRowCell
             cell.configure(with: post, imagePipeline: imagePipeline)
+            cell.isHidden = isFlying
             return cell
         case .grid:
             let cell = collectionView.dequeueReusableCell(
                 withReuseIdentifier: PostGridTileCell.reuseID, for: indexPath
             ) as! PostGridTileCell
             cell.configure(with: post, imagePipeline: imagePipeline)
+            cell.isHidden = isFlying
             return cell
         }
     }

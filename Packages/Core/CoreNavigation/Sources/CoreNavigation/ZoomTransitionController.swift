@@ -30,6 +30,23 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
     public var onDestinationShown: (() -> Void)?
     public var onSourceReturned: (() -> Void)?
 
+    /// Chrome of the SOURCE screen that is down while the destination is up and
+    /// must come back with the return — the app's tab bar. Assign it and the
+    /// grab drives its alpha 1:1 with the drag, and the non-interactive pop
+    /// fades it in on the flight's own spring, so it is never seen to pop in
+    /// after the card has landed. The owner is responsible for its hidden
+    /// state; this only drives alpha.
+    public var returningSourceChrome: UIView? {
+        didSet { interaction.setReturningChrome(returningSourceChrome) }
+    }
+
+    /// Fires when an interactive grab is CANCELLED — the destination stays up,
+    /// so anything the owner undid at grab-begin (the tab bar's hidden state)
+    /// has to go back. A completed return reports through `onSourceReturned`.
+    public var onDismissalCancelled: (() -> Void)? {
+        didSet { interaction.onCancelled = onDismissalCancelled }
+    }
+
     public init(source: any ZoomTransitionSource, destination: any ZoomTransitionDestination) {
         self.source = source
         self.destination = destination
@@ -72,7 +89,10 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         case .push where toVC === feed:
             return ZoomAnimator(isPresenting: true, source: source, destination: destination)
         case .pop where fromVC === feed:
-            return ZoomAnimator(isPresenting: false, source: source, destination: destination)
+            return ZoomAnimator(
+                isPresenting: false, source: source, destination: destination,
+                returningChrome: returningSourceChrome
+            )
         default:
             return nil // e.g. comments detail above the feed — native
         }

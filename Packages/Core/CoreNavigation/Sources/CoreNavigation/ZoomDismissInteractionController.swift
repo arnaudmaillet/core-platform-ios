@@ -52,12 +52,24 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// finger like the dim does. The feed's own coordinator choreography
     /// settles the hidden state after completion; this only drives alpha.
     private weak var toolbar: UIToolbar?
+    /// Chrome belonging to the SOURCE screen that is down while the destination
+    /// is up and has to come back with the return — the app's tab bar.
+    ///
+    /// It is driven here, on the progress channel, for a structural reason: the
+    /// tab bar is a sibling of the navigation controller's view inside the tab
+    /// bar controller, so it renders ABOVE the transition container and the dim
+    /// cannot veil it. Left to a completion handler it snaps in at full opacity
+    /// after the card has already landed. Its alpha instead tracks the finger,
+    /// which is the same thing the dim does, so the bar is revealed by the hand.
+    private weak var returningChrome: UIView?
     private weak var presentingView: UIView?
     private var screenRadius: CGFloat = 0
     private var pageCenter: CGPoint = .zero
-    /// The rect the card is flying at, resolved once the source has settled
-    /// (see `startInteractiveTransition`). The drag interpolates toward it, so
-    /// the card is always exactly as far home as the finger has taken it.
+    /// The rect the card is flying at, re-read on every pan event (see
+    /// `currentLanding`). The drag interpolates toward it, so the card is always
+    /// exactly as far home as the finger has taken it — and because release
+    /// reads the same function, there is nothing left to correct when the spring
+    /// takes over.
     private var stagedLanding: CGRect = .zero
     /// The card's size at zero progress — the page after the detach dip. The
     /// interpolation's other endpoint.
@@ -74,6 +86,16 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
 
     /// Installs the pan on the presented feed's view. `onBeginDismiss` should
     /// call `dismiss(animated: true)` on the presented view controller.
+    /// Set by the owner alongside `attach`; see `returningChrome`.
+    func setReturningChrome(_ chrome: UIView?) {
+        returningChrome = chrome
+    }
+
+    /// Reports a cancelled grab, so the owner can put back whatever it undid
+    /// when the grab began (the tab bar's hidden state). Completed grabs are
+    /// reported by the navigation controller's `didShow` instead.
+    var onCancelled: (() -> Void)?
+
     func attach(
         to view: UIView,
         source: any ZoomTransitionSource,
@@ -225,11 +247,37 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
 
     // MARK: - Drag
 
+    /// The source's rect in the container, read with the presenter momentarily
+    /// at IDENTITY — which is the space the card's own frame lives in.
+    ///
+    /// The presenter is part-way through its depth recede for most of a grab, and
+    /// converting through that transform would hand back a rect skewed by
+    /// whatever scale the finger happens to be at; the spring returns the
+    /// presenter to identity by landing time, so identity is the only frame of
+    /// reference that is true at the end. The toggle is confined to one
+    /// transaction, so nothing can render it. Falls back to the last known rect
+    /// when the source has scrolled out of sight, where a real rect does not
+    /// exist and `zoomHeroFrame` would answer with a centred collapse.
+    private func currentLanding(in container: UIView) -> CGRect {
+        guard let source, source.zoomSourceIsOnScreen else { return stagedLanding }
+        let recede = presentingView?.transform ?? .identity
+        presentingView?.transform = .identity
+        let rect = source.zoomHeroFrame(in: container)
+        presentingView?.transform = recede
+        return rect
+    }
+
     private func updateDrag(translation: CGPoint, in view: UIView) {
         guard isInteracting, let flight, let context else { return }
         let progress = ZoomTransitionGeometry.dismissProgress(
             translation: translation.x, span: view.bounds.width
         )
+        // Re-read the target every event rather than trusting the stage-time
+        // snapshot. It is one rect conversion per pan, and it means anything
+        // that moves the source mid-grab — a page landing and reloading the
+        // grid, a late layout pass — is absorbed continuously instead of
+        // surfacing as a correction the moment the finger lifts.
+        stagedLanding = currentLanding(in: context.containerView)
 
         // Position channel: free 2D float. Horizontal 1:1 (it is also the
         // progress axis); vertical and back-drag rubber-band so the card
@@ -253,6 +301,8 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // The toolbar recedes on the same channel as the dim: pure function
         // of progress, tracking the finger frame-by-frame.
         toolbar?.alpha = 1 - progress
+        // And the source's own chrome arrives on the mirror of it.
+        returningChrome?.alpha = progress
         let mapScale = ZoomFlight.presenterDepthScale + (1 - ZoomFlight.presenterDepthScale) * progress
         presentingView?.transform = CGAffineTransform(scaleX: mapScale, y: mapScale)
         context.updateInteractiveTransition(progress)
@@ -284,22 +334,13 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // stale completion tore down the NEW grab's transition.
         commit ? context.finishInteractiveTransition() : context.cancelInteractiveTransition()
 
-        // The landing rect is recomputed NOW, not reused from grab-begin: the
-        // stage-time value was taken on a map view freshly re-attached after
-        // the navigation controller unloaded it, before its restored camera
-        // fully settled — and a grab can hold for seconds. The programmatic
-        // pop lands pixel-perfect precisely because it converts the pin rect
-        // milliseconds before flying; this matches it. Converted at map
-        // *identity* (the partial recede would skew the rect, and the spring
-        // returns the map to identity by landing time); the toggle is within
-        // one transaction, so nothing renders it.
-        var landing = flight.sourceFrame
-        if commit, let source, source.zoomSourceIsOnScreen {
-            let recede = presentingView?.transform ?? .identity
-            presentingView?.transform = .identity
-            landing = source.zoomHeroFrame(in: context.containerView)
-            presentingView?.transform = recede
-        }
+        // Read once more at release, through the same function the drag used, so
+        // the spring starts from the card's current shape and ends on the rect
+        // the drag was already aiming at — nothing to correct. It matters that
+        // this is not the stage-time value: a grab can hold for seconds, and on
+        // the map it is taken on a view freshly re-attached after the navigation
+        // controller unloaded it, before its restored camera settled.
+        let landing = commit ? currentLanding(in: context.containerView) : flight.sourceFrame
 
         // The drag set model values directly, so "current state" needs no
         // presentation-layer capture: the spring starts from the card's exact
@@ -313,6 +354,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         )
         let dim = dim
         let toolbar = toolbar
+        let returningChrome = returningChrome
         let presentingView = presentingView
         let screenRadius = screenRadius
         // The SAME spring as the tap-back dismissal (`ZoomFlight.spring*`), so a
@@ -331,11 +373,13 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
                 flight.poseAtSource(at: landing)
                 dim?.alpha = 0
                 toolbar?.alpha = 0
+                returningChrome?.alpha = 1
                 presentingView?.transform = .identity
             } else {
                 flight.poseAsPage(cornerRadius: screenRadius)
                 dim?.alpha = 1
                 toolbar?.alpha = 1
+                returningChrome?.alpha = 0
                 presentingView?.transform = CGAffineTransform(
                     scaleX: ZoomFlight.presenterDepthScale, y: ZoomFlight.presenterDepthScale
                 )
@@ -374,6 +418,11 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // would ever restore it if the feed then left by some other route. On
         // the cancel path this is covered by the restored page anyway.
         source?.setZoomSourceHidden(false)
+        // A cancelled grab has to hand back the hidden state the owner undid
+        // when the grab began; a completed one is reported through `didShow`.
+        if cancelled {
+            onCancelled?()
+        }
         context?.completeTransition(!cancelled)
         context = nil
         flight = nil
