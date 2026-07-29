@@ -289,13 +289,25 @@ final class ForYouViewController: UIViewController {
         super.viewWillAppear(animated)
         // Coming back from the feed: this screen owns the bottom again.
         guard navigationController?.topViewController === self else { return }
-        // A hero return owns the bar itself — restored at grab-begin, faded in
-        // with the drag (see `openFeed`). This path is only for returns with no
-        // hero: the plain-push fallback for a text-only row, and a tab switch
-        // back.
-        guard activeTransition == nil else { return }
-        tabBarController?.setTabBarHidden(false, animated: animated)
-        tabBarController?.tabBar.alpha = 1
+        guard activeTransition != nil else {
+            // No hero in play: the plain-push fallback for a text-only row, and
+            // a tab switch back. Nothing is animating the bar, so show it
+            // outright.
+            tabBarController?.setTabBarHidden(false, animated: animated)
+            tabBarController?.tabBar.alpha = 1
+            return
+        }
+        // A hero return: put the bar back INVISIBLE so the flight has something
+        // to fade in, and so the grid's inset freeze captures the resting
+        // layout (see `showTabBar`).
+        //
+        // This is the only chance the *back-button* pop gets — there is no
+        // grab-begin on that path, and leaving the state to the transition's
+        // completion is exactly what made the bar snap in after the card had
+        // already landed. On an interactive grab the state was restored at
+        // grab-begin, before this ran, so this is a no-op there. Either way the
+        // opacity is the flight's to drive, never this method's.
+        showTabBar(alpha: 0)
     }
 
     /// Puts the tab bar back, at a given opacity, and settles the layout it
