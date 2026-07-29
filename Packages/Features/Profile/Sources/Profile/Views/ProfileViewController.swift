@@ -350,8 +350,7 @@ final class ProfileViewController: UIViewController {
             self?.leaveAfterBlock()
         }
         viewModel.onGalleryChange = { [weak self] snapshot in
-            guard let self else { return }
-            self.applySwitchable(on: self.galleryPager) { self.galleryPager.render(snapshot) }
+            self?.galleryPager.render(snapshot)
         }
         galleryPager.onItemTapped = { [weak self] post in
             self?.viewModel.galleryItemTapped(post.id)
@@ -1290,10 +1289,6 @@ final class ProfileViewController: UIViewController {
     private func render(_ phase: ProfileViewModel.Phase) {
         switch phase {
         case .loading:
-            // A switch keeps the outgoing profile up instead of redacting —
-            // see `beginProfileSwitchTransition` for why the skeleton's
-            // shimmer is the artifact being avoided.
-            guard !isSwitchingProfile else { return }
             // First load renders the REAL screen in skeleton state: the
             // header redacts in place (same views, same constraints — see
             // `ProfileHeaderView.setRedacted`), and the gallery pages shimmer
@@ -1302,7 +1297,12 @@ final class ProfileViewController: UIViewController {
             // frames the content will occupy — nothing can shift.
             statusLabel.isHidden = true
             scrollView.isHidden = false
-            headerView.setRedacted(true)
+            // The HEADER is held on a switch rather than redacted: its bones'
+            // shimmer sweeps left to right, and over a fast load that sweep
+            // became the transition — a diagonal wipe across the identity.
+            // The GALLERY still redacts, because its rows are genuinely
+            // unknown until the fetch lands and bones are the honest answer.
+            if !isSwitchingProfile { headerView.setRedacted(true) }
             if viewModel.hasGallery {
                 skeletonViewportFill?.isActive = true
                 galleryPager.render(ProfileViewModel.GallerySnapshot(
@@ -1325,10 +1325,11 @@ final class ProfileViewController: UIViewController {
             alongsideTransition { $0.applyNavigationState() }
             // Content first — the labels adopt their text while still
             // invisible under the bones — then the alpha-only reveal.
-            applySwitchable(on: headerView) {
-                self.headerView.configure(with: model)
-                self.headerView.setRedacted(false, animated: self.view.window != nil)
-            }
+            // Granular on a switch: each header group dissolves on its own,
+            // lightly staggered, so one identity becomes another rather than
+            // the whole screen blinking over at once.
+            headerView.configure(with: model, staggered: isSwitchingProfile)
+            headerView.setRedacted(false, animated: view.window != nil)
             endProfileSwitchTransition()
 
         case .failed(let message):
