@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// A row of equal-weight selectable segments with **no track, no dividers,
@@ -5,31 +6,34 @@ import UIKit
 /// weight and tint alone (filled symbol variants for icon segments, bold
 /// labels for text ones).
 ///
-/// Lives inside the navigation controller's native toolbar as a bar item's
-/// custom view (the profile's filter tray). The Liquid Glass capsule around
-/// it belongs to the BAR: the iOS 26 toolbar composites every item through
-/// its visual provider (`ToolbarVisualProvider.RootView`) with the system's
-/// own neutral glass capsule — adding a `UIGlassEffect` here stacks a second
-/// material inside that capsule and renders as a dark "double bubble" ring
-/// (the same trap `ProfileViewController.updateActionBarItem` documents for
-/// nav-bar items). Bar items size custom views by intrinsic content size, so
-/// the row reports its fitted size and invalidates it when a selection
+/// Designed to live inside the navigation controller's native toolbar as a bar
+/// item's custom view (the profile's filter tray). The Liquid Glass capsule
+/// around it belongs to the BAR: the iOS 26 toolbar composites every item
+/// through its visual provider (`ToolbarVisualProvider.RootView`) with the
+/// system's own neutral glass capsule — adding a `UIGlassEffect` here stacks a
+/// second material inside that capsule and renders as a dark "double bubble"
+/// ring (the same trap `ProfileViewController.updateActionBarItem` documents
+/// for nav-bar items). Bar items size custom views by intrinsic content size,
+/// so the row reports its fitted size and invalidates it when a selection
 /// changes label weight.
-final class GlassSegmentRow: UIView {
-    enum Segment {
+///
+/// Outside a bar there is no such capsule and the row renders bare — that host
+/// must supply exactly one, via `GlassCapsule.wrap(_:)`.
+public final class GlassSegmentRow: UIView {
+    public enum Segment {
         case title(String)
         case symbol(name: String, accessibilityLabel: String)
     }
 
-    var onSelect: ((Int) -> Void)?
-    private(set) var selectedIndex = 0
+    public var onSelect: ((Int) -> Void)?
+    public private(set) var selectedIndex = 0
     private let segments: [Segment]
     private var buttons: [UIButton] = []
     private let row = UIStackView()
     /// The stack's 6pt insets inside the glass capsule, both sides.
     private static let contentPadding: CGFloat = 12
 
-    init(segments: [Segment]) {
+    public init(segments: [Segment]) {
         self.segments = segments
         super.init(frame: .zero)
 
@@ -80,9 +84,9 @@ final class GlassSegmentRow: UIView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override var intrinsicContentSize: CGSize {
+    override public var intrinsicContentSize: CGSize {
         // Measured off the inner stack — fitting `self` would consult this
         // very property and recurse.
         let fitted = row.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
@@ -91,7 +95,7 @@ final class GlassSegmentRow: UIView {
 
     /// `notify: false` mirrors external state (a settled swipe) without
     /// echoing the change back.
-    func select(_ index: Int, notify: Bool) {
+    public func select(_ index: Int, notify: Bool) {
         guard buttons.indices.contains(index) else { return }
         let changed = index != selectedIndex
         selectedIndex = index
@@ -134,15 +138,15 @@ final class GlassSegmentRow: UIView {
 /// A circular drop-down bubble reduced to its icon: the `UIMenu` is the whole
 /// selector (single-selection, system checkmark on the active option —
 /// `.singleSelection` manages that state, no button mirroring involved), and
-/// the bubble shows only the active option's glyph, dead-centered. The owner
-/// swaps that glyph in the action handler.
+/// the bubble shows only the active option's glyph. The owner swaps that glyph
+/// in the action handler.
 ///
 /// Like `GlassSegmentRow`, this view carries NO material of its own: the
 /// toolbar's visual provider wraps the item in the system's Liquid Glass
 /// capsule, and a square item's capsule IS a circle. A `UIGlassEffect` here
 /// renders a second lens inside that capsule — the dark "double bubble" ring.
-final class GlassMenuButton: UIView {
-    let button = UIButton(type: .system)
+public final class GlassMenuButton: UIView {
+    public let button = UIButton(type: .system)
     /// The bubble's diameter: fixed at init from the LARGEST glyph plus the
     /// tray's 12pt breathing room per side — the same vertical rhythm as
     /// `GlassSegmentRow`'s rows, so the bubble matches the capsule's height.
@@ -152,7 +156,7 @@ final class GlassMenuButton: UIView {
 
     /// `menu` should carry `.singleSelection` and one `.on` action — the
     /// button seeds its glyph from it.
-    init(menu: UIMenu, accessibilityLabel: String) {
+    public init(menu: UIMenu, accessibilityLabel: String) {
         // The glyph is the button's whole content (no insets), so the fitted
         // size is the raw symbol; measure every option before super.init.
         let probe = UIButton(type: .system)
@@ -203,9 +207,9 @@ final class GlassMenuButton: UIView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override var intrinsicContentSize: CGSize {
+    override public var intrinsicContentSize: CGSize {
         CGSize(width: diameter, height: diameter)
     }
 }

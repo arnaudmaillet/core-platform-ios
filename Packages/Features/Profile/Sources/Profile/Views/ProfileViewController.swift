@@ -3,6 +3,7 @@ import CoreModels
 import ProfileInterface
 import CoreNavigation
 import DesignSystem
+import PostGrid
 import UIKit
 
 final class ProfileViewController: UIViewController {
@@ -157,73 +158,20 @@ final class ProfileViewController: UIViewController {
 
     private enum Metrics {
         /// `GlassSegmentRow`'s resting height — the inline tray's own height.
-        static let inlineTrayHeight: CGFloat = 42
+        static let inlineTrayHeight = InlineFilterTrayView.height
         /// How long the outgoing profile takes to dissolve into the new one.
         static let switchCrossfade: TimeInterval = 0.28
         /// Between the tray and the bar beneath it, so the two glass rows read
         /// as separate objects rather than one stack.
-        static let inlineTraySpacing: CGFloat = 8
+        static let inlineTraySpacing = InlineFilterTrayView.spacingBelow
     }
 
-    /// Hosts the tray under `.aboveBottomSafeArea`.
-    ///
-    /// **The capsules are supplied here, and only here.** `GlassSegmentRow` and
-    /// `GlassMenuButton` deliberately carry no material of their own because the
-    /// iOS 26 toolbar composites every bar item through its own neutral glass —
-    /// both types document that adding an effect inside that capsule renders as
-    /// a dark "double bubble". Outside the toolbar there is no such capsule, and
-    /// the items render bare (verified: flat text on the background), so each
-    /// gets exactly ONE `UIGlassEffect` host. One material, never two — the same
-    /// rule `InboxCategoryBar` and `GlassSegmentRow` both spell out.
-    private lazy var inlineTrayView: UIView = {
-        let container = UIView()
-        container.translatesAutoresizingMaskIntoConstraints = false
-        let formatCapsule = Self.glassCapsule(around: formatRow)
-        let sourceCapsule = Self.glassCapsule(around: sourceMenuButton)
-        container.addSubview(formatCapsule)
-        container.addSubview(sourceCapsule)
-        NSLayoutConstraint.activate([
-            formatCapsule.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            formatCapsule.topAnchor.constraint(equalTo: container.topAnchor),
-            formatCapsule.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            sourceCapsule.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            sourceCapsule.topAnchor.constraint(equalTo: container.topAnchor),
-            sourceCapsule.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            sourceCapsule.widthAnchor.constraint(equalTo: sourceCapsule.heightAnchor),
-            sourceCapsule.leadingAnchor.constraint(
-                greaterThanOrEqualTo: formatCapsule.trailingAnchor, constant: Spacing.sm
-            )
-        ])
-        return container
-    }()
-
-    /// One glass capsule around one bare control. `isInteractive` is what gives
-    /// the system's press response — the same reason `InboxCategoryBar` sets it
-    /// rather than animating a highlight by hand.
-    ///
-    /// The corner shape is `cornerConfiguration`, NOT `clipsToBounds` plus a
-    /// layer radius. Those are not equivalent under a context menu: the source
-    /// menu button presents a `UIMenu`, and UIKit morphs a portal of this view
-    /// out and back for that. A layer-masked radius is not part of what it
-    /// interpolates, so the capsule dismissed as a hard SQUARE for a frame
-    /// before snapping back to a bubble. `cornerConfiguration` is a property
-    /// UIKit owns and animates with the view, so the shape survives the morph —
-    /// the same reason `ToastView` and `ChatInputBar` state it this way.
-    private static func glassCapsule(around content: UIView) -> UIVisualEffectView {
-        let effect = UIGlassEffect()
-        effect.isInteractive = true
-        let host = UIVisualEffectView(effect: effect)
-        host.translatesAutoresizingMaskIntoConstraints = false
-        host.cornerConfiguration = .capsule()
-        content.translatesAutoresizingMaskIntoConstraints = false
-        host.contentView.addSubview(content)
-        NSLayoutConstraint.activate([
-            content.leadingAnchor.constraint(equalTo: host.contentView.leadingAnchor),
-            content.trailingAnchor.constraint(equalTo: host.contentView.trailingAnchor),
-            content.centerYAnchor.constraint(equalTo: host.contentView.centerYAnchor)
-        ])
-        return host
-    }
+    /// Hosts the tray under `.aboveBottomSafeArea`. `InlineFilterTrayView`
+    /// supplies the one `UIGlassEffect` per control that the bare
+    /// `GlassSegmentRow`/`GlassMenuButton` need outside a toolbar — see its
+    /// doc for why that material must never be doubled.
+    private lazy var inlineTrayView: UIView =
+        InlineFilterTrayView(leading: formatRow, trailing: sourceMenuButton)
 
     init(
         viewModel: ProfileViewModel,

@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNavigation
 import Foundation
+import PostGrid
 
 @MainActor
 public final class ProfileViewModel {

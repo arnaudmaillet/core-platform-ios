@@ -1,5 +1,6 @@
 import CoreModels
 import Foundation
+import PostGrid
 
 /// View-ready projection of a `UserProfile`: everything the header renders,
 /// pre-formatted so the view does zero business logic.
@@ -83,25 +84,12 @@ public struct ProfileDisplayModel: Equatable, Sendable {
     }
 
     /// 1234 → "1.2K", 1_500_000 → "1.5M".
+    ///
+    /// Delegates to `PostGridCount` so the header's counter row and the grid
+    /// cells' metadata line cannot disagree about how a number is spelled —
+    /// they render the same counters side by side on this screen.
     static func abbreviate(_ value: Int64) -> String {
-        let absValue = abs(value)
-        switch absValue {
-        case 1_000_000...:
-            return trimmed(Double(value) / 1_000_000) + "M"
-        case 1_000...:
-            return trimmed(Double(value) / 1_000) + "K"
-        default:
-            return String(value)
-        }
-    }
-
-    private static func trimmed(_ value: Double) -> String {
-        // One decimal place, but drop a trailing ".0" (1.0K → "1K").
-        let rounded = (value * 10).rounded() / 10
-        if rounded == rounded.rounded() {
-            return String(Int(rounded))
-        }
-        return String(format: "%.1f", rounded)
+        PostGridCount.abbreviate(value)
     }
 }
 

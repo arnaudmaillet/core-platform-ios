@@ -1,42 +1,41 @@
 import DesignSystem
-import MediaCore
 import UIKit
 
-// The gallery's loading placeholders: shimmering stand-ins that borrow the
+// The grid's loading placeholders: shimmering stand-ins that borrow the
 // real cells' geometry — same cards, same corners, same margins — so hydration
 // swaps content into a frame the eye has already accepted, instead of
 // replacing a spinner with a different screen.
 
 // MARK: - Timeline row skeleton
 
-/// The `GalleryListRowCell` mimic: the same soft 18pt card, holding stacked
+/// The `PostGridListRowCell` mimic: the same soft 18pt card, holding stacked
 /// caption lines over the quiet metadata row (counter cluster leading, age
 /// trailing). Two- and three-line variants alternate so a column of them
 /// reads as text, not as a pattern.
-final class GallerySkeletonListCell: UICollectionViewCell {
-    static let reuseID = "GallerySkeletonListCell"
+public final class PostGridSkeletonListCell: UICollectionViewCell {
+    public static let reuseID = "PostGridSkeletonListCell"
 
-    private let card = GallerySkeletonCard()
+    private let card = PostGridSkeletonCard()
 
-    override init(frame: CGRect) {
+    override public init(frame: CGRect) {
         super.init(frame: frame)
         card.pin(to: contentView)
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func configure(variant: Int) {
+    public func configure(variant: Int) {
         card.setLines(variant.isMultiple(of: 2) ? 3 : 2)
     }
 }
 
 /// The card body of a timeline-row skeleton, reusable outside a collection
-/// view (the first-load screen skeleton stacks these directly).
-final class GallerySkeletonCard: UIView {
+/// view (a first-load screen skeleton stacks these directly).
+public final class PostGridSkeletonCard: UIView {
     private let thirdLine = SkeletonBoneView()
 
-    init() {
+    public init() {
         super.init(frame: .zero)
         backgroundColor = .secondarySystemBackground
         layer.cornerRadius = 18
@@ -90,26 +89,26 @@ final class GallerySkeletonCard: UIView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func setLines(_ count: Int) {
+    public func setLines(_ count: Int) {
         thirdLine.isHidden = count < 3
     }
 }
 
 // MARK: - Mosaic tile skeleton
 
-/// The `GalleryTileCell` mimic: one full-bleed bone with the mosaic's 10pt
+/// The `PostGridTileCell` mimic: one full-bleed bone with the mosaic's 10pt
 /// continuous rounding. The mosaic layout itself supplies the brick shapes —
 /// squares, landscapes, portraits — so the skeleton page IS the real pattern.
-final class GallerySkeletonTileCell: UICollectionViewCell {
-    static let reuseID = "GallerySkeletonTileCell"
+public final class PostGridSkeletonTileCell: UICollectionViewCell {
+    public static let reuseID = "PostGridSkeletonTileCell"
 
-    override init(frame: CGRect) {
+    override public init(frame: CGRect) {
         super.init(frame: frame)
         SkeletonBoneView(rounding: .fixed(10)).pin(to: contentView)
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }

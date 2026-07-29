@@ -1,4 +1,5 @@
 import MediaCore
+import PostGrid
 import UIKit
 
 /// The gallery's horizontal pager: three format pages (Activity / Media /

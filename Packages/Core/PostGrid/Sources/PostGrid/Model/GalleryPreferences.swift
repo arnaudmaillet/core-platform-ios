@@ -8,28 +8,35 @@ import Foundation
 /// mapping lives here so the pure filter model stays storage-agnostic, and
 /// unknown stored values degrade to the defaults rather than crashing a
 /// downgrade.
+///
+/// `keyPrefix` namespaces the pair so two grid surfaces can each remember
+/// their own landing tab. It defaults to the profile gallery's original keys
+/// (`profile.gallery.format` / `profile.gallery.source`) — that default is
+/// load-bearing, not cosmetic: it is what every already-installed app has
+/// written, and what the `-profile.gallery.format <value>` launch argument
+/// addresses. A second surface must pass its own prefix or the two will yank
+/// each other's active tab.
 public final class GalleryPreferences: @unchecked Sendable {
-    private enum Keys {
-        static let format = "profile.gallery.format"
-        static let source = "profile.gallery.source"
-    }
-
     private let defaults: UserDefaults
+    private let formatKey: String
+    private let sourceKey: String
 
-    public init(defaults: UserDefaults = .standard) {
+    public init(defaults: UserDefaults = .standard, keyPrefix: String = "profile.gallery") {
         self.defaults = defaults
+        formatKey = keyPrefix + ".format"
+        sourceKey = keyPrefix + ".source"
     }
 
     public var filter: GalleryFilter {
         get {
             GalleryFilter(
-                format: Self.format(from: defaults.string(forKey: Keys.format)),
-                source: Self.source(from: defaults.string(forKey: Keys.source))
+                format: Self.format(from: defaults.string(forKey: formatKey)),
+                source: Self.source(from: defaults.string(forKey: sourceKey))
             )
         }
         set {
-            defaults.set(Self.key(for: newValue.format), forKey: Keys.format)
-            defaults.set(Self.key(for: newValue.source), forKey: Keys.source)
+            defaults.set(Self.key(for: newValue.format), forKey: formatKey)
+            defaults.set(Self.key(for: newValue.source), forKey: sourceKey)
         }
     }
 
