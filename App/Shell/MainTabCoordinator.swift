@@ -390,23 +390,46 @@ extension MainTabCoordinator: UIContextMenuInteractionDelegate {
         }
     }
 
-    /// Targets the highlight at the tab button. Without this UIKit lifts the
-    /// ENTIRE bar — the interaction's view — which reads as the whole bar being
-    /// long-pressed rather than one tab.
+    /// Targets the highlight at the tab button, and narrows what actually lifts
+    /// to the **avatar disc alone**.
+    ///
+    /// A context menu always lifts its source and there is no way to opt out —
+    /// handing it an invisible stand-in instead makes UIKit decline to present
+    /// at all (measured three ways). What IS controllable is how much of the
+    /// source is drawn: `visiblePath` clips the lifted copy. Scoped to the icon's
+    /// circle, the label and the tab's whole rectangle stay out of it, so what
+    /// rises is a small disc rather than a slab of the bar.
+    ///
+    /// The disc is found as the button's image view rather than assumed from
+    /// numbers, so it tracks whatever size UIKit gives the icon. Falling back to
+    /// the button's bounds keeps the menu working if that ever stops being an
+    /// image view — the lift just gets bigger again.
     func contextMenuInteraction(
         _ interaction: UIContextMenuInteraction,
         configuration: UIContextMenuConfiguration,
         highlightPreviewForItemWithIdentifier identifier: any NSCopying
     ) -> UITargetedPreview? {
+        groundedPreview()
+    }
+
+    /// The same preview on the way out, so the menu collapses back onto the same
+    /// disc. Without it UIKit falls back to the full source for the return leg
+    /// only — the big lift reappearing at the end instead of the start.
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        configuration: UIContextMenuConfiguration,
+        dismissalPreviewForItemWithIdentifier identifier: any NSCopying
+    ) -> UITargetedPreview? {
+        groundedPreview()
+    }
+
+    private func groundedPreview() -> UITargetedPreview? {
         guard let button = pressedProfileTabButton else { return nil }
         let parameters = UIPreviewParameters()
         parameters.backgroundColor = .clear
-        // Rounded to match the bar's own selection lens rather than lifting a
-        // hard rectangle out of a capsule-shaped bar.
-        parameters.visiblePath = UIBezierPath(
-            roundedRect: button.bounds,
-            cornerRadius: min(button.bounds.height, button.bounds.width) / 3
-        )
+        let disc = button.subviews.compactMap { $0 as? UIImageView }.first
+        let bounds = disc.map { $0.convert($0.bounds, to: button) } ?? button.bounds
+        parameters.visiblePath = UIBezierPath(ovalIn: bounds)
         return UITargetedPreview(view: button, parameters: parameters)
     }
 

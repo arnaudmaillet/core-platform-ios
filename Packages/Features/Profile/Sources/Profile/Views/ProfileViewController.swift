@@ -292,6 +292,12 @@ final class ProfileViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
+        // Selector-based, so UIKit drops it with this object — no token to hold
+        // and no `deinit` to remember.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(activeProfileDidChange),
+            name: .activeProfileDidChange, object: nil
+        )
         configureNavigationBar()
         // Compose the bar before first layout so the push animation carries a
         // finished toolbar (the title and action slot fill in when the data
@@ -836,9 +842,11 @@ final class ProfileViewController: UIViewController {
         settings.accessibilityLabel = "Settings"
         settingsItem = settings
 
-        // Profile switcher — a standalone item beside the gear. Tapping presents
-        // the shared switcher menu; a switch refreshes this screen to the new
-        // active profile (the map avatar refreshes via `.activeProfileDidChange`).
+        // Profile switcher — the leading item, opposite the gear (see
+        // `applyNavigationState` for why the leading slot is free here).
+        // Tapping presents the shared switcher menu; the switch itself is
+        // picked up through `.activeProfileDidChange`, so this screen refreshes
+        // whichever switcher was used.
         if switcherFactory != nil {
             let switcher = UIBarButtonItem(image: UIImage(systemName: "person.2"), menu: UIMenu(children: []))
             switcher.tintColor = .label
@@ -852,18 +860,33 @@ final class ProfileViewController: UIViewController {
 
     /// Pre-fetches the switcher snapshot and installs a synchronous menu on the
     /// switcher item. Re-run after a switch so the active marker updates.
+    ///
+    /// `onSwitch` is empty on purpose. Refreshing is driven by
+    /// `.activeProfileDidChange` instead, so it happens no matter WHICH switcher
+    /// was used — this screen's own, or the Profile tab's long-press menu, which
+    /// is built by the shell and cannot call back into here.
     private func reloadSwitcherMenu() {
         guard let switcherFactory, let switcherItem else { return }
         Task { [weak self] in
             await switcherFactory.reload()
             switcherItem.menu = switcherFactory.makeMenu(
-                onSwitch: { [weak self] in
-                    self?.viewModel.refresh()
-                    self?.reloadSwitcherMenu()
-                },
+                onSwitch: {},
                 onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
             )
         }
+    }
+
+    /// The active profile changed — from any switcher anywhere.
+    ///
+    /// Refetches unconditionally, including on someone ELSE's profile: the
+    /// viewer changed, so the follow state and relationship button this screen
+    /// shows are now answers to a different question, not just the identity at
+    /// the top.
+    @objc private func activeProfileDidChange() {
+        viewModel.refresh()
+        // Re-read the snapshot so the menu's active marker moves to the profile
+        // just switched to.
+        reloadSwitcherMenu()
     }
 
     private func presentAddProfilePlaceholder() {
@@ -957,17 +980,25 @@ final class ProfileViewController: UIViewController {
                 followActionItem.title = resolvedTitle
             }
         }
-        // Relationship action for other users; the gear + switcher for own
-        // profile (where `action` is nil). Trailing-to-leading: gear rightmost,
-        // switcher to its left, with a fixedSpace so they read as two distinct
-        // glass bubbles rather than one grouped capsule.
+        // The switcher sits in the LEADING slot, opposite the gear.
+        //
+        // Safe here and only here: the item exists solely on the canonical own
+        // profile, which is a tab ROOT — so there is no back button to displace
+        // and no interactive pop for a leading item to interfere with. A pushed
+        // profile never has one (see `ProfileFeatureBuilding.onLogout`).
+        //
+        // Written through the same "say nothing unless it changed" guard as the
+        // trailing items: handing UIKit the identical item mid-transition is
+        // what tears a capsule down and rebuilds it empty.
+        if navigationItem.leftBarButtonItem !== switcherItem {
+            navigationItem.leftBarButtonItem = switcherItem
+        }
+
+        // Relationship action for other users; the gear for own profile (where
+        // `action` is nil).
         var items: [UIBarButtonItem] = []
         if let action { items.append(action) }
         if let settingsItem { items.append(settingsItem) }
-        if let switcherItem {
-            if !items.isEmpty { items.append(.fixedSpace(8)) }
-            items.append(switcherItem)
-        }
         // The load-bearing guard. A pop's `viewWillAppear` resolves to exactly
         // the item set already on the bar, and handing that same set back is
         // what used to tear the capsule down and rebuild it mid-transition.
