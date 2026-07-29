@@ -12,16 +12,18 @@ import UploadInterface
 ///
 /// Tabs are set via the modern `UITabBarController.tabs` API. The Search tab is
 /// a `UISearchTab`, which the system detaches to the trailing edge, producing
-/// the grouped bar `| Maps  Feed  Messages |  Search |` natively.
+/// the grouped bar `| Maps  Feed  Messages  Profile |  Search |` natively.
 ///
-/// Two bar buttons are not tabs. Profile pushes onto the Maps stack from the
-/// avatar button in the Maps nav bar (see `ProfileFlowCoordinator`), and
-/// Notifications pushes from a bell item seated directly to the avatar's left;
-/// the unread-notifications badge the Profile tab used to carry now lives on
-/// that bell. Feed keeps its bar button, but selecting it is vetoed
-/// (`shouldSelectTab`) and the timeline is *pushed* onto the current tab's
-/// stack instead (see `FeedFlowCoordinator`) — back returns to where the user
-/// was, and no tab switch occurs.
+/// Profile is a root tab, carrying the viewer's own avatar as its icon
+/// (`ProfileTabCoordinator`) — it is the canonical entry point, so it is the one
+/// place the settings gear, the profile switcher and Log Out belong. It replaced
+/// the avatar button that used to sit in the Maps nav bar; the map header now
+/// carries only the "+" and the notifications bell.
+///
+/// One bar button is not a tab: Feed. Selecting it is vetoed
+/// (`shouldSelectTab`) and the timeline is *pushed* onto the current tab's stack
+/// instead (see `FeedFlowCoordinator`) — back returns to where the user was, and
+/// no tab switch occurs.
 @MainActor
 final class MainTabCoordinator: NSObject, Coordinator {
     var childCoordinators: [Coordinator] = []
@@ -29,26 +31,6 @@ final class MainTabCoordinator: NSObject, Coordinator {
 
     private let container: AppContainer
     private let onLogout: () -> Void
-    /// The Maps nav-bar Profile entry point: a standard bar item showing the
-    /// viewer's circular avatar. Short tap opens Profile (its `primaryAction`);
-    /// long-press shows the switcher menu — UIKit drives both natively from
-    /// `UIBarButtonItem.menu` (with a primary action present, the menu appears on
-    /// long-press), so there's no custom gesture, interaction, or lift glitch.
-    private lazy var avatarBarItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(
-            title: nil,
-            image: Self.avatarPlaceholder,
-            primaryAction: UIAction { [weak self] _ in self?.openProfileFromAvatar() },
-            menu: nil
-        )
-        item.changesSelectionAsPrimaryAction = false
-        item.accessibilityLabel = "Profile"
-        return item
-    }()
-    /// The profile switcher whose menu the avatar item presents on long-press.
-    private lazy var profileSwitcher = container.profileFeature.makeProfileSwitcher()
-
-    private static let avatarPlaceholder = UIImage(systemName: "person.crop.circle")
     /// The Notifications entry point: a plain bar item like the map's "+", tinted
     /// `.label` so it renders dark in the glass bubble (not system blue). The
     /// unread badge is a clean image swap — `bell` ↔ `bell.badge` (a red badge
@@ -74,8 +56,10 @@ final class MainTabCoordinator: NSObject, Coordinator {
         return UIImage(systemName: "bell.badge", withConfiguration: config)?
             .withRenderingMode(.alwaysOriginal)
     }
-    private var profileFlow: ProfileFlowCoordinator?
     private var feedFlow: FeedFlowCoordinator?
+    /// The Profile root. Held so the viewer's avatar can be pushed onto its tab
+    /// image as it loads, and again whenever the active profile changes.
+    private var profileTab: ProfileTabCoordinator?
     /// Tabs paired with their `AppTab`, in bar order — the lookup `selectTab`
     /// resolves against. Feed is absent: it contributes `feedActionTab` to the
     /// bar but owns no root stack.
@@ -111,15 +95,8 @@ final class MainTabCoordinator: NSObject, Coordinator {
     }
 
     func start() {
-        let profileFlow = ProfileFlowCoordinator(container: container, onLogout: onLogout)
-        addChild(profileFlow)
-        self.profileFlow = profileFlow
-
-        // Build the avatar item's switcher menu up front (and keep it fresh on
-        // profile switches). Tap / long-press are handled natively by the item.
-        rebuildSwitcherMenu()
-        // A switch (from either entry point) broadcasts this; reload the avatar
-        // and the switcher snapshot so the map chrome reflects the new profile.
+        // A switch broadcasts this; reload the avatar so the Profile tab's icon
+        // reflects whoever is now active.
         NotificationCenter.default.addObserver(
             self, selector: #selector(activeProfileChanged),
             name: .activeProfileDidChange, object: nil
@@ -130,13 +107,18 @@ final class MainTabCoordinator: NSObject, Coordinator {
         addChild(feedFlow)
         self.feedFlow = feedFlow
 
+        let profileTab = ProfileTabCoordinator(container: container, onLogout: onLogout)
+        self.profileTab = profileTab
+        // Ordered before Search deliberately: `UISearchTab` is pinned to the
+        // trailing edge by the system, so this array reads as bar order rather
+        // than relying on that.
         orderedTabs = [
             (.maps, MapsTabCoordinator(
                 container: container,
-                profileButtonItem: avatarBarItem,
                 notificationsButtonItem: notificationsBarItem
             )),
             (.messages, MessagesTabCoordinator(container: container)),
+            (.profile, profileTab),
             (.search, SearchTabCoordinator(container: container))
         ]
         for (_, tab) in orderedTabs {
@@ -169,14 +151,12 @@ final class MainTabCoordinator: NSObject, Coordinator {
                 selectTab(tab)
             }
         }
-        // `-open-my-profile` pushes the viewer's profile on launch — the avatar
-        // tap's code path — so the push flow is testable without driving the
-        // UI. Deferred a tick: at `start()` the shell isn't the window root yet.
+        // `-open-my-profile` selects the Profile tab on launch. It used to push
+        // the avatar's destination; the destination is now a root, so the intent
+        // "show me my profile" is a selection. Deferred a tick: at `start()` the
+        // shell isn't the window root yet.
         if arguments.contains("-open-my-profile") {
-            DispatchQueue.main.async { [weak self] in
-                guard let self, let navigationController = mapsNavigationController else { return }
-                self.profileFlow?.push(onto: navigationController)
-            }
+            DispatchQueue.main.async { [weak self] in self?.selectTab(.profile) }
         }
         // `-tab-round-trip` leaves the current tab and comes back ~1.5s apart.
         // Pair with any push that hides the bar (`-open-my-profile`,
@@ -252,46 +232,20 @@ final class MainTabCoordinator: NSObject, Coordinator {
 
     @objc private func activeProfileChanged() {
         loadAvatar()
-        rebuildSwitcherMenu()
     }
 
-    /// Re-fetches the switcher snapshot and installs the (synchronous) menu on
-    /// the avatar bar item, which UIKit presents natively on long-press.
-    private func rebuildSwitcherMenu() {
-        Task { @MainActor in
-            await profileSwitcher?.reload()
-            avatarBarItem.menu = profileSwitcher?.makeMenu(
-                onSwitch: {},
-                onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
-            )
-        }
-    }
-
-    /// The avatar item's short-tap: push the viewer's profile onto the Maps
-    /// stack (back / edge-swipe returns to the map) and refresh the unread badge.
-    private func openProfileFromAvatar() {
-        guard let navigationController = mapsNavigationController else { return }
-        profileFlow?.push(onto: navigationController)
-        refreshUnreadBadge()
-    }
-
-    private func presentAddProfilePlaceholder() {
-        let alert = UIAlertController(
-            title: "Add Profile",
-            message: "Creating a new profile isn't available yet.",
-            preferredStyle: .alert
-        )
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
-        tabBarController.present(alert, animated: true)
-    }
-
-    /// Resolves the viewer's avatar into the bar item as a circular image; the
-    /// placeholder glyph stays if there is none (or it can't be fetched).
+    /// Resolves the viewer's avatar into the Profile tab's icon; the placeholder
+    /// glyph stays if there is none (or it can't be fetched).
+    ///
+    /// The switcher menu that used to be rebuilt alongside this is gone with the
+    /// avatar bar item. It was a long-press *shortcut*, not the only path: a
+    /// profile built as the canonical entry point carries its own switcher in
+    /// the header, which the Profile tab root now is.
     private func loadAvatar() {
         Task { [weak self] in
             guard let self else { return }
             let image = await container.profileFeature.viewerAvatarImage()
-            avatarBarItem.image = image.map(Self.circularBarImage) ?? Self.avatarPlaceholder
+            profileTab?.setAvatar(image.map(Self.circularBarImage))
         }
     }
 

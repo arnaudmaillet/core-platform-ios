@@ -75,13 +75,10 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         }
     }
 
-    public func makeProfileSwitcher() -> ProfileSwitcherPresenting? {
-        makeSwitcherFactory()
-    }
-
     public func makeCurrentUserProfileViewController(
         onLogout: (() -> Void)?,
-        identityStub: ProfileIdentityStub?
+        identityStub: ProfileIdentityStub?,
+        trayPlacement: ProfileTrayPlacement
     ) -> UIViewController {
         let repository = repository
         return ProfileViewController(
@@ -113,7 +110,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             },
             switcherFactory: onLogout == nil ? nil : makeSwitcherFactory(),
             makeRelationshipsViewController: makeRelationshipsFactory(),
-            identityStub: identityStub
+            identityStub: identityStub,
+            trayPlacement: trayPlacement
         )
     }
 

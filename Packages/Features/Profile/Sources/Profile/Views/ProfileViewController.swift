@@ -1,5 +1,6 @@
 import MediaCore
 import CoreModels
+import ProfileInterface
 import CoreNavigation
 import DesignSystem
 import UIKit
@@ -145,6 +146,74 @@ final class ProfileViewController: UIViewController {
 
     private var followButtonState: ProfileViewModel.FollowButton = .hidden
 
+    /// Where the filter tray lives, and with it whether a bottom bar survives
+    /// below this screen. Fixed at construction — the host knows, and the screen
+    /// cannot work it out for itself (a nav root inside a tab bar and a pushed
+    /// screen look identical from in here).
+    private let trayPlacement: ProfileTrayPlacement
+
+    private enum Metrics {
+        /// `GlassSegmentRow`'s resting height — the inline tray's own height.
+        static let inlineTrayHeight: CGFloat = 42
+        /// Between the tray and the bar beneath it, so the two glass rows read
+        /// as separate objects rather than one stack.
+        static let inlineTraySpacing: CGFloat = 8
+    }
+
+    /// Hosts the tray under `.aboveBottomSafeArea`.
+    ///
+    /// **The capsules are supplied here, and only here.** `GlassSegmentRow` and
+    /// `GlassMenuButton` deliberately carry no material of their own because the
+    /// iOS 26 toolbar composites every bar item through its own neutral glass —
+    /// both types document that adding an effect inside that capsule renders as
+    /// a dark "double bubble". Outside the toolbar there is no such capsule, and
+    /// the items render bare (verified: flat text on the background), so each
+    /// gets exactly ONE `UIGlassEffect` host. One material, never two — the same
+    /// rule `InboxCategoryBar` and `GlassSegmentRow` both spell out.
+    private lazy var inlineTrayView: UIView = {
+        let container = UIView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        let formatCapsule = Self.glassCapsule(around: formatRow)
+        let sourceCapsule = Self.glassCapsule(around: sourceMenuButton)
+        container.addSubview(formatCapsule)
+        container.addSubview(sourceCapsule)
+        NSLayoutConstraint.activate([
+            formatCapsule.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            formatCapsule.topAnchor.constraint(equalTo: container.topAnchor),
+            formatCapsule.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            sourceCapsule.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            sourceCapsule.topAnchor.constraint(equalTo: container.topAnchor),
+            sourceCapsule.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            sourceCapsule.widthAnchor.constraint(equalTo: sourceCapsule.heightAnchor),
+            sourceCapsule.leadingAnchor.constraint(
+                greaterThanOrEqualTo: formatCapsule.trailingAnchor, constant: Spacing.sm
+            )
+        ])
+        return container
+    }()
+
+    /// One glass capsule around one bare control, inset so the content clears
+    /// the corner curve. `isInteractive` is what gives the system's press
+    /// response — the same reason `InboxCategoryBar` sets it rather than
+    /// animating a highlight by hand.
+    private static func glassCapsule(around content: UIView) -> UIVisualEffectView {
+        let effect = UIGlassEffect()
+        effect.isInteractive = true
+        let host = UIVisualEffectView(effect: effect)
+        host.translatesAutoresizingMaskIntoConstraints = false
+        host.clipsToBounds = true
+        host.layer.cornerRadius = Metrics.inlineTrayHeight / 2
+        host.layer.cornerCurve = .continuous
+        content.translatesAutoresizingMaskIntoConstraints = false
+        host.contentView.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: host.contentView.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: host.contentView.trailingAnchor),
+            content.centerYAnchor.constraint(equalTo: host.contentView.centerYAnchor)
+        ])
+        return host
+    }
+
     init(
         viewModel: ProfileViewModel,
         imagePipeline: ImagePipeline,
@@ -156,8 +225,10 @@ final class ProfileViewController: UIViewController {
         makeRelationshipsViewController: (
             (ProfileRelationshipsViewModel.Subject, RelationshipDirection) -> UIViewController
         )? = nil,
-        identityStub: ProfileIdentityStub? = nil
+        identityStub: ProfileIdentityStub? = nil,
+        trayPlacement: ProfileTrayPlacement = .navigationToolbar
     ) {
+        self.trayPlacement = trayPlacement
         self.viewModel = viewModel
         self.onLogout = onLogout
         self.makeEditViewController = makeEditViewController
@@ -170,11 +241,17 @@ final class ProfileViewController: UIViewController {
         galleryPager = ProfileGalleryPagerView(imagePipeline: imagePipeline)
         super.init(nibName: nil, bundle: nil)
 
-        // The gallery's filter tray floats at the screen bottom; the tab bar
-        // would stack underneath it. Safe with the standard pop gesture (chat
-        // thread precedent); the feed-pushed contexts hide the bar manually
-        // anyway, where this flag is a no-op.
-        hidesBottomBarWhenPushed = true
+        // Only for the toolbar-hosted tray, which owns the bottom of the screen
+        // and would otherwise stack with the tab bar. Safe with the standard pop
+        // gesture (chat thread precedent); the feed-pushed contexts hide the bar
+        // manually anyway, where this flag is a no-op.
+        //
+        // A tab root asks for `.aboveBottomSafeArea` instead, and must NOT hide
+        // the bar — that bar is how the viewer leaves. Deciding it from the same
+        // value that decides the tray keeps the two facts from drifting apart:
+        // hiding the bar and hosting the tray in the toolbar are the same
+        // statement about what owns the bottom of the screen.
+        hidesBottomBarWhenPushed = trayPlacement == .navigationToolbar
 
         // Seed the navigation chrome from the origin's synchronous identity
         // slice: the title and relationship button are populated from the
@@ -474,7 +551,13 @@ final class ProfileViewController: UIViewController {
         // toolbar while it shows — is re-added by hand, plus breathing room
         // so the grid's last row scrolls clear of the transparent bar's glass
         // capsules.
-        let bottom = view.safeAreaInsets.bottom + (viewModel.hasGallery ? 8 : 0)
+        // Inline placement puts the tray inside this view rather than in the
+        // navigation toolbar, so its height is ours to clear as well — the
+        // toolbar's was already folded into `safeAreaInsets.bottom` by UIKit.
+        let trayClearance = trayPlacement == .aboveBottomSafeArea && viewModel.hasGallery
+            ? Metrics.inlineTrayHeight + Metrics.inlineTraySpacing
+            : 0
+        let bottom = view.safeAreaInsets.bottom + (viewModel.hasGallery ? 8 : 0) + trayClearance
         if scrollView.contentInset.bottom != bottom {
             scrollView.contentInset.bottom = bottom
             scrollView.verticalScrollIndicatorInsets.bottom = bottom
@@ -1006,6 +1089,25 @@ final class ProfileViewController: UIViewController {
             formatRow.select(index, notify: false)
         }
         galleryPager.setActivePage(format, animated: false)
+
+        // Inline: the tray is ours to place, above the bottom safe area — which
+        // inside a tab bar controller is the top of the tab bar, so the two sit
+        // flush without either knowing the other's height. Same idiom as the
+        // map's filter bars.
+        guard trayPlacement == .navigationToolbar else {
+            view.addSubview(inlineTrayView)
+            NSLayoutConstraint.activate([
+                inlineTrayView.leadingAnchor.constraint(equalTo: view.layoutMarginsGuide.leadingAnchor),
+                inlineTrayView.trailingAnchor.constraint(equalTo: view.layoutMarginsGuide.trailingAnchor),
+                inlineTrayView.heightAnchor.constraint(equalToConstant: Metrics.inlineTrayHeight),
+                inlineTrayView.bottomAnchor.constraint(
+                    equalTo: view.safeAreaLayoutGuide.bottomAnchor,
+                    constant: -Metrics.inlineTraySpacing
+                )
+            ])
+            return
+        }
+
         toolbarItems = [
             UIBarButtonItem(customView: formatRow),
             .flexibleSpace(),
@@ -1020,6 +1122,9 @@ final class ProfileViewController: UIViewController {
     /// it arrives from another toolbar owner (pushed from the feed), the bar
     /// is already up and UIKit cross-fades the items natively.
     private func presentFilterToolbar() {
+        // Inline trays are not the shared toolbar's business: nothing to show,
+        // and nothing to hand off to or take from the feed.
+        guard trayPlacement == .navigationToolbar else { return }
         guard viewModel.hasGallery, let nav = navigationController else { return }
         // Transparent BAR background (exactly what the feed's toolbar uses,
         // so handoffs between the two never restyle a visible bar); the
@@ -1050,6 +1155,9 @@ final class ProfileViewController: UIViewController {
     /// successor's own presentation reconfigures it. A cancelled interactive
     /// pop restores the alpha and keeps the bar.
     private func concealFilterToolbar() {
+        // Never ours to conceal under inline placement — the bar we would be
+        // hiding belongs to whichever screen actually put it up.
+        guard trayPlacement == .navigationToolbar else { return }
         guard viewModel.hasGallery, let nav = navigationController, !nav.isToolbarHidden else { return }
         if let successor = nav.topViewController, successor !== self,
            successor.toolbarItems?.isEmpty == false {
