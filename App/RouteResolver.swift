@@ -38,6 +38,47 @@ final class RouteResolver: Router {
         self.chatFeature = chatFeature
     }
 
+    /// Pushes a destination, dropping any picker it is arriving *from*.
+    ///
+    /// Behaves as a plain push whenever no picker is on the stack, which is
+    /// every route except the ones the compose flow emits.
+    ///
+    /// Every push goes through here rather than calling `pushViewController`
+    /// directly, so the rule is a property of "the resolver pushed something"
+    /// instead of a thing each new route has to remember. A screen that
+    /// conforms to `TransientDestinationPicking` exists only to choose a
+    /// destination; once one is on screen it would otherwise sit wedged
+    /// underneath, and backing out of a thread you just opened would return you
+    /// to a contact list rather than to Messages.
+    ///
+    /// When there IS one, it is replaced in a single `setViewControllers`
+    /// rather than pushed-then-pruned: UIKit animates a stack whose last element
+    /// is new exactly like a push, so this is the same transition with the
+    /// picker simply absent from the result. Pruning afterwards would either
+    /// fight the in-flight animation or have to be deferred into its completion,
+    /// where an interactive pop can interleave.
+    private func push(_ destination: UIViewController, using navigator: AppNavigating) {
+        guard let navigation = navigator.activeNavigationController else { return }
+        // The overwhelmingly common case takes the plain path, untouched. This
+        // app drives pushes through custom navigation delegates — zoom
+        // transitions, the pop-gesture enabler — and `setViewControllers` is a
+        // different enough entry point that routing every ordinary push through
+        // it would be a wide change to buy a narrow fix.
+        guard navigation.viewControllers.contains(where: { $0 is TransientDestinationPicking }) else {
+            navigation.pushViewController(destination, animated: true)
+            return
+        }
+        var stack = navigation.viewControllers
+        // Filtered across the WHOLE stack, not just the top: a picker is only
+        // ever reached from a destination already on it, so one cannot
+        // legitimately be buried deeper. Sweeping is what keeps repeated
+        // compose → thread → compose round trips from stacking pickers the
+        // viewer can never see but must swipe back through.
+        stack.removeAll { $0 is TransientDestinationPicking }
+        stack.append(destination)
+        navigation.setViewControllers(stack, animated: true)
+    }
+
     func route(to route: AppRoute) {
         guard let navigator else {
             logger.debug("No navigator; dropping route: \(String(describing: route))")
@@ -84,7 +125,7 @@ final class RouteResolver: Router {
             } else {
                 profileFeature().makeProfileViewController(for: profileID, identityStub: stub)
             }
-            navigator.activeNavigationController?.pushViewController(profile, animated: true)
+            push(profile, using: navigator)
 
         case .upload:
             let compose = uploadFeature.makeComposeViewController()
@@ -92,15 +133,15 @@ final class RouteResolver: Router {
 
         case .post(let postID):
             let detail = feedFeature().makePostDetailViewController(for: postID, mode: .full)
-            navigator.activeNavigationController?.pushViewController(detail, animated: true)
+            push(detail, using: navigator)
 
         case .comments(let postID):
             let comments = feedFeature().makePostDetailViewController(for: postID, mode: .commentsOnly)
-            navigator.activeNavigationController?.pushViewController(comments, animated: true)
+            push(comments, using: navigator)
 
         case .conversation(let conversationID):
             let thread = chatFeature().makeConversationViewController(for: conversationID)
-            navigator.activeNavigationController?.pushViewController(thread, animated: true)
+            push(thread, using: navigator)
 
         case .sendLink(let text, let profileID, let stub):
             // Same destination as `.messageUser`, with the composer seeded.
@@ -109,7 +150,7 @@ final class RouteResolver: Router {
                 displayName: stub?.displayName ?? "",
                 prefill: text
             )
-            navigator.activeNavigationController?.pushViewController(thread, animated: true)
+            push(thread, using: navigator)
 
         case .messageUser(let profileID, let stub):
             // Pushed immediately, with whatever identity the origin knew. The
@@ -120,11 +161,11 @@ final class RouteResolver: Router {
                 with: profileID,
                 displayName: stub?.displayName ?? ""
             )
-            navigator.activeNavigationController?.pushViewController(thread, animated: true)
+            push(thread, using: navigator)
 
         case .newMessage:
             let picker = chatFeature().makeNewMessageViewController()
-            navigator.activeNavigationController?.pushViewController(picker, animated: true)
+            push(picker, using: navigator)
         }
     }
 }

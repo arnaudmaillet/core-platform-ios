@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNavigation
 import DesignSystem
 import UIKit
 
@@ -11,7 +12,12 @@ import UIKit
 /// a diffable apply — rows animate into place — instead of a second controller
 /// sliding over the first, which is the seam that makes most search screens
 /// feel bolted together.
-final class NewMessageViewController: UIViewController {
+///
+/// `TransientDestinationPicking`: the screen answers "who?" and is finished.
+/// Once the thread is on screen this one should not be behind it, so the
+/// navigation layer drops it as it pushes past — see the protocol for why the
+/// rule lives there rather than here.
+final class NewMessageViewController: UIViewController, TransientDestinationPicking {
     private typealias SectionKind = NewMessageViewModel.Section.Kind
 
     /// Section-scoped, because a diffable data source requires item identifiers
