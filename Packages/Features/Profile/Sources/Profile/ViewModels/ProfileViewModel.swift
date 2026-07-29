@@ -71,6 +71,11 @@ public final class ProfileViewModel {
     public var onPhaseChange: ((Phase) -> Void)?
     public var onFollowButtonChange: ((FollowButton) -> Void)?
     public var onGalleryChange: ((GallerySnapshot) -> Void)?
+    /// Fired when a load finishes, however it finished — new data, identical
+    /// data, or a failure. The view uses it to close out a switch, which it
+    /// cannot infer from `onPhaseChange`: a revalidation that agrees with the
+    /// cache publishes no phase at all.
+    public var onLoadSettled: (() -> Void)?
     /// Fires when an overflow-menu command settles. Paired with
     /// `onDismissRequested` for block, which both reports and leaves.
     public var onActionResult: ((ActionResult) -> Void)?
@@ -88,6 +93,9 @@ public final class ProfileViewModel {
     private let galleryPreferences: GalleryPreferences?
     private let source: Source
     private let router: (any Router)?
+    /// Last-known profiles, shared app-wide. Nil in compositions without one
+    /// (tests), which simply never seed.
+    private let cache: ProfileCache?
 
     private var phase: Phase = .loading {
         didSet { onPhaseChange?(phase) }
@@ -129,7 +137,8 @@ public final class ProfileViewModel {
         gallery: (any ProfileGalleryProviding)? = nil,
         galleryPreferences: GalleryPreferences? = nil,
         source: Source = .currentUser,
-        router: (any Router)? = nil
+        router: (any Router)? = nil,
+        cache: ProfileCache? = nil
     ) {
         self.repository = repository
         self.reporting = reporting
@@ -137,6 +146,7 @@ public final class ProfileViewModel {
         self.galleryPreferences = galleryPreferences
         self.source = source
         self.router = router
+        self.cache = cache
         // The gallery opens on the user's last GLOBAL choice, not a per-
         // profile default — the tray, pager, and menu all read this filter
         // as their initial truth.
@@ -228,6 +238,32 @@ public final class ProfileViewModel {
     public func refresh() {
         guard load == nil else { return }
         reload()
+    }
+
+    /// Revalidates after an account switch, rendering `id` from cache first
+    /// if it is known — the stale half of stale-while-revalidate.
+    ///
+    /// Returns whether anything was seeded, so the view can choose its
+    /// treatment: a hit cross-fades from a real profile to a real profile,
+    /// while a miss has nothing truthful to show and wants the skeleton.
+    ///
+    /// The fetch is NOT coalesced away here. `refresh()` ignores a call while
+    /// one is in flight, which is right for a pull-to-refresh but wrong for a
+    /// switch: the load already running is for the profile just left, and its
+    /// answer is about to be the wrong person.
+    @discardableResult
+    public func revalidate(after switchedTo: ProfileID?) -> Bool {
+        var seeded = false
+        if let switchedTo, let cached = cache?.profile(for: switchedTo) {
+            profile = cached
+            phase = .content(ProfileDisplayModel(profile: cached))
+            // The grid is per-profile too, so it starts over for the new one —
+            // its skeleton is the honest state until those pages land.
+            loadGallery(for: cached, reset: true)
+            seeded = true
+        }
+        reload()
+        return seeded
     }
 
     /// Follow-button tapped. No-op for the viewer's own profile ("Edit"); an
@@ -474,8 +510,17 @@ public final class ProfileViewModel {
             guard let self else { return }
             do {
                 let profile = try await self.fetch()
+                self.cache?.store(profile)
+                // Revalidation that agrees with what is already on screen
+                // publishes NOTHING. Re-emitting an identical model would run
+                // the header's switch transition a second time over unchanged
+                // text — a visible flicker whose only cause is that the
+                // network confirmed the cache.
+                let unchanged = self.profile == profile
                 self.profile = profile
-                self.phase = .content(ProfileDisplayModel(profile: profile))
+                if !unchanged {
+                    self.phase = .content(ProfileDisplayModel(profile: profile))
+                }
                 self.loadRelationship(for: profile.id)
                 // Every (re)load refreshes the grid too: the caches reset so
                 // pull-to-refresh picks up new posts alongside the header.
@@ -490,6 +535,7 @@ public final class ProfileViewModel {
                 }
             }
             self.load = nil
+            self.onLoadSettled?()
         }
     }
 

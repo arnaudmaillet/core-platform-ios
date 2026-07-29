@@ -23,6 +23,9 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// One store for every profile screen: the gallery filter is a GLOBAL
     /// user preference, so all view models read and write the same place.
     private let galleryPreferences = GalleryPreferences()
+    /// Last-known profiles, shared by every profile screen so a switch to one
+    /// already seen renders instantly. One per app, like the preferences.
+    private let cache = ProfileCache()
     private let imagePipeline: ImagePipeline
     private let router: (any Router)?
     /// Reads the viewer's account for the settings screen (own profile only).
@@ -81,7 +84,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
 
     public func makeCurrentUserProfileViewController(
         onLogout: (() -> Void)?,
-        identityStub: ProfileIdentityStub?
+        identityStub: ProfileIdentityStub?,
+        trayPlacement: ProfileTrayPlacement
     ) -> UIViewController {
         let repository = repository
         return ProfileViewController(
@@ -91,7 +95,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                 gallery: gallery,
                 galleryPreferences: galleryPreferences,
                 source: .currentUser,
-                router: router
+                router: router,
+                cache: cache
             ),
             imagePipeline: imagePipeline,
             shareTargeting: shareTargeting,
@@ -113,7 +118,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             },
             switcherFactory: onLogout == nil ? nil : makeSwitcherFactory(),
             makeRelationshipsViewController: makeRelationshipsFactory(),
-            identityStub: identityStub
+            identityStub: identityStub,
+            trayPlacement: trayPlacement
         )
     }
 
@@ -125,7 +131,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                 gallery: gallery,
                 galleryPreferences: galleryPreferences,
                 source: .profile(profileID),
-                router: router
+                router: router,
+                cache: cache
             ),
             imagePipeline: imagePipeline,
             shareTargeting: shareTargeting,

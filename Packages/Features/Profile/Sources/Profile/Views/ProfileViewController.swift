@@ -1,5 +1,6 @@
 import MediaCore
 import CoreModels
+import ProfileInterface
 import CoreNavigation
 import DesignSystem
 import UIKit
@@ -145,6 +146,85 @@ final class ProfileViewController: UIViewController {
 
     private var followButtonState: ProfileViewModel.FollowButton = .hidden
 
+    /// Where the filter tray lives, and with it whether a bottom bar survives
+    /// below this screen. Fixed at construction — the host knows, and the screen
+    /// cannot work it out for itself (a nav root inside a tab bar and a pushed
+    /// screen look identical from in here).
+    private let trayPlacement: ProfileTrayPlacement
+    /// True between an account switch and the incoming profile landing. While
+    /// set, the skeleton is withheld and updates cross-dissolve.
+    private var isSwitchingProfile = false
+
+    private enum Metrics {
+        /// `GlassSegmentRow`'s resting height — the inline tray's own height.
+        static let inlineTrayHeight: CGFloat = 42
+        /// How long the outgoing profile takes to dissolve into the new one.
+        static let switchCrossfade: TimeInterval = 0.28
+        /// Between the tray and the bar beneath it, so the two glass rows read
+        /// as separate objects rather than one stack.
+        static let inlineTraySpacing: CGFloat = 8
+    }
+
+    /// Hosts the tray under `.aboveBottomSafeArea`.
+    ///
+    /// **The capsules are supplied here, and only here.** `GlassSegmentRow` and
+    /// `GlassMenuButton` deliberately carry no material of their own because the
+    /// iOS 26 toolbar composites every bar item through its own neutral glass —
+    /// both types document that adding an effect inside that capsule renders as
+    /// a dark "double bubble". Outside the toolbar there is no such capsule, and
+    /// the items render bare (verified: flat text on the background), so each
+    /// gets exactly ONE `UIGlassEffect` host. One material, never two — the same
+    /// rule `InboxCategoryBar` and `GlassSegmentRow` both spell out.
+    private lazy var inlineTrayView: UIView = {
+        let container = UIView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        let formatCapsule = Self.glassCapsule(around: formatRow)
+        let sourceCapsule = Self.glassCapsule(around: sourceMenuButton)
+        container.addSubview(formatCapsule)
+        container.addSubview(sourceCapsule)
+        NSLayoutConstraint.activate([
+            formatCapsule.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            formatCapsule.topAnchor.constraint(equalTo: container.topAnchor),
+            formatCapsule.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            sourceCapsule.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            sourceCapsule.topAnchor.constraint(equalTo: container.topAnchor),
+            sourceCapsule.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            sourceCapsule.widthAnchor.constraint(equalTo: sourceCapsule.heightAnchor),
+            sourceCapsule.leadingAnchor.constraint(
+                greaterThanOrEqualTo: formatCapsule.trailingAnchor, constant: Spacing.sm
+            )
+        ])
+        return container
+    }()
+
+    /// One glass capsule around one bare control. `isInteractive` is what gives
+    /// the system's press response — the same reason `InboxCategoryBar` sets it
+    /// rather than animating a highlight by hand.
+    ///
+    /// The corner shape is `cornerConfiguration`, NOT `clipsToBounds` plus a
+    /// layer radius. Those are not equivalent under a context menu: the source
+    /// menu button presents a `UIMenu`, and UIKit morphs a portal of this view
+    /// out and back for that. A layer-masked radius is not part of what it
+    /// interpolates, so the capsule dismissed as a hard SQUARE for a frame
+    /// before snapping back to a bubble. `cornerConfiguration` is a property
+    /// UIKit owns and animates with the view, so the shape survives the morph —
+    /// the same reason `ToastView` and `ChatInputBar` state it this way.
+    private static func glassCapsule(around content: UIView) -> UIVisualEffectView {
+        let effect = UIGlassEffect()
+        effect.isInteractive = true
+        let host = UIVisualEffectView(effect: effect)
+        host.translatesAutoresizingMaskIntoConstraints = false
+        host.cornerConfiguration = .capsule()
+        content.translatesAutoresizingMaskIntoConstraints = false
+        host.contentView.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: host.contentView.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: host.contentView.trailingAnchor),
+            content.centerYAnchor.constraint(equalTo: host.contentView.centerYAnchor)
+        ])
+        return host
+    }
+
     init(
         viewModel: ProfileViewModel,
         imagePipeline: ImagePipeline,
@@ -156,8 +236,10 @@ final class ProfileViewController: UIViewController {
         makeRelationshipsViewController: (
             (ProfileRelationshipsViewModel.Subject, RelationshipDirection) -> UIViewController
         )? = nil,
-        identityStub: ProfileIdentityStub? = nil
+        identityStub: ProfileIdentityStub? = nil,
+        trayPlacement: ProfileTrayPlacement = .navigationToolbar
     ) {
+        self.trayPlacement = trayPlacement
         self.viewModel = viewModel
         self.onLogout = onLogout
         self.makeEditViewController = makeEditViewController
@@ -170,11 +252,17 @@ final class ProfileViewController: UIViewController {
         galleryPager = ProfileGalleryPagerView(imagePipeline: imagePipeline)
         super.init(nibName: nil, bundle: nil)
 
-        // The gallery's filter tray floats at the screen bottom; the tab bar
-        // would stack underneath it. Safe with the standard pop gesture (chat
-        // thread precedent); the feed-pushed contexts hide the bar manually
-        // anyway, where this flag is a no-op.
-        hidesBottomBarWhenPushed = true
+        // Only for the toolbar-hosted tray, which owns the bottom of the screen
+        // and would otherwise stack with the tab bar. Safe with the standard pop
+        // gesture (chat thread precedent); the feed-pushed contexts hide the bar
+        // manually anyway, where this flag is a no-op.
+        //
+        // A tab root asks for `.aboveBottomSafeArea` instead, and must NOT hide
+        // the bar — that bar is how the viewer leaves. Deciding it from the same
+        // value that decides the tray keeps the two facts from drifting apart:
+        // hiding the bar and hosting the tray in the toolbar are the same
+        // statement about what owns the bottom of the screen.
+        hidesBottomBarWhenPushed = trayPlacement == .navigationToolbar
 
         // Seed the navigation chrome from the origin's synchronous identity
         // slice: the title and relationship button are populated from the
@@ -209,6 +297,12 @@ final class ProfileViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
+        // Selector-based, so UIKit drops it with this object — no token to hold
+        // and no `deinit` to remember.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(activeProfileDidChange(_:)),
+            name: .activeProfileDidChange, object: nil
+        )
         configureNavigationBar()
         // Compose the bar before first layout so the push animation carries a
         // finished toolbar (the title and action slot fill in when the data
@@ -250,6 +344,7 @@ final class ProfileViewController: UIViewController {
         viewModel.onDismissRequested = { [weak self] in
             self?.leaveAfterBlock()
         }
+        viewModel.onLoadSettled = { [weak self] in self?.isSwitchingProfile = false }
         viewModel.onGalleryChange = { [weak self] snapshot in
             self?.galleryPager.render(snapshot)
         }
@@ -474,7 +569,13 @@ final class ProfileViewController: UIViewController {
         // toolbar while it shows — is re-added by hand, plus breathing room
         // so the grid's last row scrolls clear of the transparent bar's glass
         // capsules.
-        let bottom = view.safeAreaInsets.bottom + (viewModel.hasGallery ? 8 : 0)
+        // Inline placement puts the tray inside this view rather than in the
+        // navigation toolbar, so its height is ours to clear as well — the
+        // toolbar's was already folded into `safeAreaInsets.bottom` by UIKit.
+        let trayClearance = trayPlacement == .aboveBottomSafeArea && viewModel.hasGallery
+            ? Metrics.inlineTrayHeight + Metrics.inlineTraySpacing
+            : 0
+        let bottom = view.safeAreaInsets.bottom + (viewModel.hasGallery ? 8 : 0) + trayClearance
         if scrollView.contentInset.bottom != bottom {
             scrollView.contentInset.bottom = bottom
             scrollView.verticalScrollIndicatorInsets.bottom = bottom
@@ -747,9 +848,11 @@ final class ProfileViewController: UIViewController {
         settings.accessibilityLabel = "Settings"
         settingsItem = settings
 
-        // Profile switcher — a standalone item beside the gear. Tapping presents
-        // the shared switcher menu; a switch refreshes this screen to the new
-        // active profile (the map avatar refreshes via `.activeProfileDidChange`).
+        // Profile switcher — the leading item, opposite the gear (see
+        // `applyNavigationState` for why the leading slot is free here).
+        // Tapping presents the shared switcher menu; the switch itself is
+        // picked up through `.activeProfileDidChange`, so this screen refreshes
+        // whichever switcher was used.
         if switcherFactory != nil {
             let switcher = UIBarButtonItem(image: UIImage(systemName: "person.2"), menu: UIMenu(children: []))
             switcher.tintColor = .label
@@ -763,18 +866,66 @@ final class ProfileViewController: UIViewController {
 
     /// Pre-fetches the switcher snapshot and installs a synchronous menu on the
     /// switcher item. Re-run after a switch so the active marker updates.
+    ///
+    /// `onSwitch` is empty on purpose. Refreshing is driven by
+    /// `.activeProfileDidChange` instead, so it happens no matter WHICH switcher
+    /// was used — this screen's own, or the Profile tab's long-press menu, which
+    /// is built by the shell and cannot call back into here.
     private func reloadSwitcherMenu() {
         guard let switcherFactory, let switcherItem else { return }
         Task { [weak self] in
             await switcherFactory.reload()
             switcherItem.menu = switcherFactory.makeMenu(
-                onSwitch: { [weak self] in
-                    self?.viewModel.refresh()
-                    self?.reloadSwitcherMenu()
-                },
+                onSwitch: {},
                 onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
             )
         }
+    }
+
+    /// The active profile changed — from any switcher anywhere.
+    ///
+    /// Refetches unconditionally, including on someone ELSE's profile: the
+    /// viewer changed, so the follow state and relationship button this screen
+    /// shows are now answers to a different question, not just the identity at
+    /// the top.
+    @objc private func activeProfileDidChange(_ notification: Notification) {
+        // Cache-first: a profile already seen renders on THIS turn, and the
+        // fetch behind it becomes a silent revalidation. A miss has nothing
+        // truthful to show for the new identity, so it redacts rather than
+        // leaving the previous profile's name and numbers on screen.
+        // Armed BEFORE the seed: `revalidate` publishes cached content on this
+        // same turn, so the stagger has to be in place already or the cached
+        // profile snaps in. It is closed out by `onLoadSettled`, NOT by a
+        // phase arriving — a revalidation that agrees with the cache publishes
+        // no phase at all, and hanging the reset off one that may never come
+        // is what stranded this screen in a skeleton.
+        isSwitchingProfile = true
+        if !viewModel.revalidate(after: ActiveProfileChange.profileID(from: notification)) {
+            // Nothing known about the new identity: bones are the honest state,
+            // and their un-redact reveal is the animation — no stagger over it.
+            isSwitchingProfile = false
+            headerView.setRedacted(true)
+        }
+        // Re-read the snapshot so the menu's active marker moves to the profile
+        // just switched to.
+        reloadSwitcherMenu()
+    }
+
+    /// Runs `changes` as a cross-dissolve while a switch is in flight, and
+    /// plainly otherwise. Used for both halves of the incoming profile — the
+    /// header and the gallery arrive on separate callbacks, and each dissolves
+    /// over whatever it is replacing.
+    private func applySwitchable(on target: UIView, _ changes: @escaping () -> Void) {
+        guard isSwitchingProfile, view.window != nil else {
+            changes()
+            return
+        }
+        UIView.transition(
+            with: target,
+            duration: Metrics.switchCrossfade,
+            options: [.transitionCrossDissolve, .allowUserInteraction, .beginFromCurrentState],
+            animations: changes
+        )
     }
 
     private func presentAddProfilePlaceholder() {
@@ -868,17 +1019,25 @@ final class ProfileViewController: UIViewController {
                 followActionItem.title = resolvedTitle
             }
         }
-        // Relationship action for other users; the gear + switcher for own
-        // profile (where `action` is nil). Trailing-to-leading: gear rightmost,
-        // switcher to its left, with a fixedSpace so they read as two distinct
-        // glass bubbles rather than one grouped capsule.
+        // The switcher sits in the LEADING slot, opposite the gear.
+        //
+        // Safe here and only here: the item exists solely on the canonical own
+        // profile, which is a tab ROOT — so there is no back button to displace
+        // and no interactive pop for a leading item to interfere with. A pushed
+        // profile never has one (see `ProfileFeatureBuilding.onLogout`).
+        //
+        // Written through the same "say nothing unless it changed" guard as the
+        // trailing items: handing UIKit the identical item mid-transition is
+        // what tears a capsule down and rebuilds it empty.
+        if navigationItem.leftBarButtonItem !== switcherItem {
+            navigationItem.leftBarButtonItem = switcherItem
+        }
+
+        // Relationship action for other users; the gear for own profile (where
+        // `action` is nil).
         var items: [UIBarButtonItem] = []
         if let action { items.append(action) }
         if let settingsItem { items.append(settingsItem) }
-        if let switcherItem {
-            if !items.isEmpty { items.append(.fixedSpace(8)) }
-            items.append(switcherItem)
-        }
         // The load-bearing guard. A pop's `viewWillAppear` resolves to exactly
         // the item set already on the bar, and handing that same set back is
         // what used to tear the capsule down and rebuild it mid-transition.
@@ -1006,6 +1165,25 @@ final class ProfileViewController: UIViewController {
             formatRow.select(index, notify: false)
         }
         galleryPager.setActivePage(format, animated: false)
+
+        // Inline: the tray is ours to place, above the bottom safe area — which
+        // inside a tab bar controller is the top of the tab bar, so the two sit
+        // flush without either knowing the other's height. Same idiom as the
+        // map's filter bars.
+        guard trayPlacement == .navigationToolbar else {
+            view.addSubview(inlineTrayView)
+            NSLayoutConstraint.activate([
+                inlineTrayView.leadingAnchor.constraint(equalTo: view.layoutMarginsGuide.leadingAnchor),
+                inlineTrayView.trailingAnchor.constraint(equalTo: view.layoutMarginsGuide.trailingAnchor),
+                inlineTrayView.heightAnchor.constraint(equalToConstant: Metrics.inlineTrayHeight),
+                inlineTrayView.bottomAnchor.constraint(
+                    equalTo: view.safeAreaLayoutGuide.bottomAnchor,
+                    constant: -Metrics.inlineTraySpacing
+                )
+            ])
+            return
+        }
+
         toolbarItems = [
             UIBarButtonItem(customView: formatRow),
             .flexibleSpace(),
@@ -1020,6 +1198,9 @@ final class ProfileViewController: UIViewController {
     /// it arrives from another toolbar owner (pushed from the feed), the bar
     /// is already up and UIKit cross-fades the items natively.
     private func presentFilterToolbar() {
+        // Inline trays are not the shared toolbar's business: nothing to show,
+        // and nothing to hand off to or take from the feed.
+        guard trayPlacement == .navigationToolbar else { return }
         guard viewModel.hasGallery, let nav = navigationController else { return }
         // Transparent BAR background (exactly what the feed's toolbar uses,
         // so handoffs between the two never restyle a visible bar); the
@@ -1050,6 +1231,9 @@ final class ProfileViewController: UIViewController {
     /// successor's own presentation reconfigures it. A cancelled interactive
     /// pop restores the alpha and keeps the bar.
     private func concealFilterToolbar() {
+        // Never ours to conceal under inline placement — the bar we would be
+        // hiding belongs to whichever screen actually put it up.
+        guard trayPlacement == .navigationToolbar else { return }
         guard viewModel.hasGallery, let nav = navigationController, !nav.isToolbarHidden else { return }
         if let successor = nav.topViewController, successor !== self,
            successor.toolbarItems?.isEmpty == false {
@@ -1084,7 +1268,12 @@ final class ProfileViewController: UIViewController {
             // frames the content will occupy — nothing can shift.
             statusLabel.isHidden = true
             scrollView.isHidden = false
-            headerView.setRedacted(true)
+            // The HEADER is held on a switch rather than redacted: its bones'
+            // shimmer sweeps left to right, and over a fast load that sweep
+            // became the transition — a diagonal wipe across the identity.
+            // The GALLERY still redacts, because its rows are genuinely
+            // unknown until the fetch lands and bones are the honest answer.
+            if !isSwitchingProfile { headerView.setRedacted(true) }
             if viewModel.hasGallery {
                 skeletonViewportFill?.isActive = true
                 galleryPager.render(ProfileViewModel.GallerySnapshot(
@@ -1107,11 +1296,15 @@ final class ProfileViewController: UIViewController {
             alongsideTransition { $0.applyNavigationState() }
             // Content first — the labels adopt their text while still
             // invisible under the bones — then the alpha-only reveal.
-            headerView.configure(with: model)
+            // Granular on a switch: each header group dissolves on its own,
+            // lightly staggered, so one identity becomes another rather than
+            // the whole screen blinking over at once.
+            headerView.configure(with: model, staggered: isSwitchingProfile)
             headerView.setRedacted(false, animated: view.window != nil)
 
         case .failed(let message):
             refreshControl.endRefreshing()
+            // Never leave the previous profile held over an error.
             scrollView.isHidden = true
             skeletonViewportFill?.isActive = false
             headerView.setRedacted(false)

@@ -3,18 +3,23 @@ import UIKit
 /// The buttons of the app shell's bar, in bar order. The search tab is rendered
 /// detached at the trailing edge by the system (see `SearchTabCoordinator`'s
 /// `UISearchTab`), giving the grouped layout `| Maps  Feed  Messages |  Search |`
-/// with no custom bar. Profile is not a tab — it opens as a sheet from the Maps
-/// nav-bar avatar (with Activity folded inside it, behind the bell). Feed is a
-/// bar button but not a *place*: selecting it is vetoed and the timeline is
-/// pushed onto the current tab's stack instead (see `FeedFlowCoordinator`), so
-/// `.feed` here names the bar slot, never a selectable root.
+/// with no custom bar, giving `| Maps  Feed  Messages  Profile |  Search |`.
+/// Feed is a bar button but not a *place*: selecting it is vetoed and the
+/// timeline is pushed onto the current tab's stack instead (see
+/// `FeedFlowCoordinator`), so `.feed` here names the bar slot, never a
+/// selectable root.
 ///
 /// Backed by a stable string identifier (not an ordinal), so reordering the bar
 /// never silently repoints a route.
+///
+/// ⚠️ Declaration order IS bar order, and `-select-tab <n>` indexes
+/// `allCases` — so adding `.profile` in its bar position shifted Search from
+/// index 3 to 4. Any note or script pinned to the old numbering needs updating.
 enum AppTab: String, CaseIterable {
     case maps
     case feed
     case messages
+    case profile
     case search
 }
 

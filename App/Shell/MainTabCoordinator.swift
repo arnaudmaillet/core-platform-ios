@@ -12,43 +12,25 @@ import UploadInterface
 ///
 /// Tabs are set via the modern `UITabBarController.tabs` API. The Search tab is
 /// a `UISearchTab`, which the system detaches to the trailing edge, producing
-/// the grouped bar `| Maps  Feed  Messages |  Search |` natively.
+/// the grouped bar `| Maps  Feed  Messages  Profile |  Search |` natively.
 ///
-/// Two bar buttons are not tabs. Profile pushes onto the Maps stack from the
-/// avatar button in the Maps nav bar (see `ProfileFlowCoordinator`), and
-/// Notifications pushes from a bell item seated directly to the avatar's left;
-/// the unread-notifications badge the Profile tab used to carry now lives on
-/// that bell. Feed keeps its bar button, but selecting it is vetoed
-/// (`shouldSelectTab`) and the timeline is *pushed* onto the current tab's
-/// stack instead (see `FeedFlowCoordinator`) — back returns to where the user
-/// was, and no tab switch occurs.
+/// Profile is a root tab, carrying the viewer's own avatar as its icon
+/// (`ProfileTabCoordinator`) — it is the canonical entry point, so it is the one
+/// place the settings gear, the profile switcher and Log Out belong. It replaced
+/// the avatar button that used to sit in the Maps nav bar; the map header now
+/// carries only the "+" and the notifications bell.
+///
+/// One bar button is not a tab: Feed. Selecting it is vetoed
+/// (`shouldSelectTab`) and the timeline is *pushed* onto the current tab's stack
+/// instead (see `FeedFlowCoordinator`) — back returns to where the user was, and
+/// no tab switch occurs.
 @MainActor
 final class MainTabCoordinator: NSObject, Coordinator {
     var childCoordinators: [Coordinator] = []
-    let tabBarController = UITabBarController()
+    let tabBarController = ShellTabBarController()
 
     private let container: AppContainer
     private let onLogout: () -> Void
-    /// The Maps nav-bar Profile entry point: a standard bar item showing the
-    /// viewer's circular avatar. Short tap opens Profile (its `primaryAction`);
-    /// long-press shows the switcher menu — UIKit drives both natively from
-    /// `UIBarButtonItem.menu` (with a primary action present, the menu appears on
-    /// long-press), so there's no custom gesture, interaction, or lift glitch.
-    private lazy var avatarBarItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(
-            title: nil,
-            image: Self.avatarPlaceholder,
-            primaryAction: UIAction { [weak self] _ in self?.openProfileFromAvatar() },
-            menu: nil
-        )
-        item.changesSelectionAsPrimaryAction = false
-        item.accessibilityLabel = "Profile"
-        return item
-    }()
-    /// The profile switcher whose menu the avatar item presents on long-press.
-    private lazy var profileSwitcher = container.profileFeature.makeProfileSwitcher()
-
-    private static let avatarPlaceholder = UIImage(systemName: "person.crop.circle")
     /// The Notifications entry point: a plain bar item like the map's "+", tinted
     /// `.label` so it renders dark in the glass bubble (not system blue). The
     /// unread badge is a clean image swap — `bell` ↔ `bell.badge` (a red badge
@@ -74,8 +56,45 @@ final class MainTabCoordinator: NSObject, Coordinator {
         return UIImage(systemName: "bell.badge", withConfiguration: config)?
             .withRenderingMode(.alwaysOriginal)
     }
-    private var profileFlow: ProfileFlowCoordinator?
     private var feedFlow: FeedFlowCoordinator?
+    /// The Profile root. Held so the viewer's avatar can be pushed onto its tab
+    /// image as it loads, and again whenever the active profile changes.
+    private var profileTab: ProfileTabCoordinator?
+    /// Backs the Profile tab's long-press switcher menu.
+    private lazy var profileSwitcher = container.profileFeature.makeProfileSwitcher()
+
+    /// An invisible button laid over the Profile tab, carrying the switcher as
+    /// its `menu`.
+    ///
+    /// **Why a control and not a `UIContextMenuInteraction`.** A context menu
+    /// always LIFTS its source: it hides the original, floats a scaled copy and
+    /// dims everything behind. On a tab that produced a second avatar hovering
+    /// over the bar, clipped to whatever `visiblePath` allowed — an artifact
+    /// with no place on fixed chrome, and one the interaction offers no way to
+    /// switch off. Narrowing the path only makes the floating copy smaller.
+    ///
+    /// A `UIControl` presents the same `UIMenu` anchored to itself without any
+    /// of that, which is exactly how the map avatar's `UIBarButtonItem.menu`
+    /// behaved before Profile became a tab. Because this button is invisible and
+    /// is a *different view* from the tab, UIKit never touches the real icon:
+    /// not hidden, not snapshotted, not moved.
+    ///
+    /// Two properties, neither of them the default, are what make it long-press:
+    /// `UIControl` ships with `isContextMenuInteractionEnabled == false`, so a
+    /// `menu` alone is inert; and `showsMenuAsPrimaryAction` must stay FALSE, or
+    /// the menu opens on tap and swallows tab selection.
+    private lazy var profileMenuOverlay: UIButton = {
+        let button = UIButton(type: .custom)
+        button.backgroundColor = .clear
+        button.isContextMenuInteractionEnabled = true
+        button.showsMenuAsPrimaryAction = false
+        button.accessibilityLabel = "Profile"
+        button.accessibilityHint = "Double tap and hold to switch profile"
+        // The overlay covers the real tab button, so a plain tap has to be
+        // forwarded or it would be swallowed.
+        button.addAction(UIAction { [weak self] _ in self?.selectTab(.profile) }, for: .primaryActionTriggered)
+        return button
+    }()
     /// Tabs paired with their `AppTab`, in bar order — the lookup `selectTab`
     /// resolves against. Feed is absent: it contributes `feedActionTab` to the
     /// bar but owns no root stack.
@@ -111,32 +130,38 @@ final class MainTabCoordinator: NSObject, Coordinator {
     }
 
     func start() {
-        let profileFlow = ProfileFlowCoordinator(container: container, onLogout: onLogout)
-        addChild(profileFlow)
-        self.profileFlow = profileFlow
-
-        // Build the avatar item's switcher menu up front (and keep it fresh on
-        // profile switches). Tap / long-press are handled natively by the item.
-        rebuildSwitcherMenu()
-        // A switch (from either entry point) broadcasts this; reload the avatar
-        // and the switcher snapshot so the map chrome reflects the new profile.
+        // A switch broadcasts this; reload the avatar so the Profile tab's icon
+        // reflects whoever is now active.
         NotificationCenter.default.addObserver(
             self, selector: #selector(activeProfileChanged),
             name: .activeProfileDidChange, object: nil
         )
+        // Warm the switcher up front. `makeMenu` is synchronous by design — it
+        // reads the last `reload` — so without this the first long-press builds
+        // its menu from an empty snapshot and offers only "Add Profile", with
+        // the viewer's own profiles missing.
+        Task { [weak self] in
+            await self?.profileSwitcher?.reload()
+            self?.rebuildSwitcherMenu()
+        }
 
         let feedFlow = FeedFlowCoordinator(container: container)
         feedFlow.start()
         addChild(feedFlow)
         self.feedFlow = feedFlow
 
+        let profileTab = ProfileTabCoordinator(container: container, onLogout: onLogout)
+        self.profileTab = profileTab
+        // Ordered before Search deliberately: `UISearchTab` is pinned to the
+        // trailing edge by the system, so this array reads as bar order rather
+        // than relying on that.
         orderedTabs = [
             (.maps, MapsTabCoordinator(
                 container: container,
-                profileButtonItem: avatarBarItem,
                 notificationsButtonItem: notificationsBarItem
             )),
             (.messages, MessagesTabCoordinator(container: container)),
+            (.profile, profileTab),
             (.search, SearchTabCoordinator(container: container))
         ]
         for (_, tab) in orderedTabs {
@@ -150,6 +175,19 @@ final class MainTabCoordinator: NSObject, Coordinator {
         tabs.insert(feedActionTab, at: 1)
         tabBarController.tabs = tabs
         tabBarController.delegate = self
+        // The Profile tab's long-press switcher. `UITab` carries no menu of its
+        // own — `UITab`, `UITabBar`, `UITabBarItem` and the controller delegate
+        // were all checked against the iOS 26 SDK and expose nothing — so the
+        // menu rides an invisible button kept aligned over the tab.
+        tabBarController.onLayout = { [weak self] in
+            self?.alignProfileMenuOverlay()
+            // The CONTROLLER lays out before the bar has placed its own buttons,
+            // and then does not lay out again — measured: one call, reading a
+            // zero frame. One hop to the next runloop turn catches the settled
+            // geometry, and alignment ignores a zero frame rather than caching
+            // it, so the early pass costs nothing.
+            DispatchQueue.main.async { self?.alignProfileMenuOverlay() }
+        }
 
         loadAvatar()
         refreshUnreadBadge()
@@ -169,14 +207,12 @@ final class MainTabCoordinator: NSObject, Coordinator {
                 selectTab(tab)
             }
         }
-        // `-open-my-profile` pushes the viewer's profile on launch — the avatar
-        // tap's code path — so the push flow is testable without driving the
-        // UI. Deferred a tick: at `start()` the shell isn't the window root yet.
+        // `-open-my-profile` selects the Profile tab on launch. It used to push
+        // the avatar's destination; the destination is now a root, so the intent
+        // "show me my profile" is a selection. Deferred a tick: at `start()` the
+        // shell isn't the window root yet.
         if arguments.contains("-open-my-profile") {
-            DispatchQueue.main.async { [weak self] in
-                guard let self, let navigationController = mapsNavigationController else { return }
-                self.profileFlow?.push(onto: navigationController)
-            }
+            DispatchQueue.main.async { [weak self] in self?.selectTab(.profile) }
         }
         // `-tab-round-trip` leaves the current tab and comes back ~1.5s apart.
         // Pair with any push that hides the bar (`-open-my-profile`,
@@ -252,27 +288,12 @@ final class MainTabCoordinator: NSObject, Coordinator {
 
     @objc private func activeProfileChanged() {
         loadAvatar()
-        rebuildSwitcherMenu()
-    }
-
-    /// Re-fetches the switcher snapshot and installs the (synchronous) menu on
-    /// the avatar bar item, which UIKit presents natively on long-press.
-    private func rebuildSwitcherMenu() {
-        Task { @MainActor in
-            await profileSwitcher?.reload()
-            avatarBarItem.menu = profileSwitcher?.makeMenu(
-                onSwitch: {},
-                onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
-            )
+        // The menu is built on demand from the last `reload`, so refresh the
+        // snapshot rather than the menu — there is no menu object to replace.
+        Task { [weak self] in
+            await self?.profileSwitcher?.reload()
+            self?.rebuildSwitcherMenu()
         }
-    }
-
-    /// The avatar item's short-tap: push the viewer's profile onto the Maps
-    /// stack (back / edge-swipe returns to the map) and refresh the unread badge.
-    private func openProfileFromAvatar() {
-        guard let navigationController = mapsNavigationController else { return }
-        profileFlow?.push(onto: navigationController)
-        refreshUnreadBadge()
     }
 
     private func presentAddProfilePlaceholder() {
@@ -285,13 +306,18 @@ final class MainTabCoordinator: NSObject, Coordinator {
         tabBarController.present(alert, animated: true)
     }
 
-    /// Resolves the viewer's avatar into the bar item as a circular image; the
-    /// placeholder glyph stays if there is none (or it can't be fetched).
+    /// Resolves the viewer's avatar into the Profile tab's icon; the placeholder
+    /// glyph stays if there is none (or it can't be fetched).
+    ///
+    /// The switcher menu that used to be rebuilt alongside this is gone with the
+    /// avatar bar item. It was a long-press *shortcut*, not the only path: a
+    /// profile built as the canonical entry point carries its own switcher in
+    /// the header, which the Profile tab root now is.
     private func loadAvatar() {
         Task { [weak self] in
             guard let self else { return }
             let image = await container.profileFeature.viewerAvatarImage()
-            avatarBarItem.image = image.map(Self.circularBarImage) ?? Self.avatarPlaceholder
+            profileTab?.setAvatar(image.map(Self.circularBarImage))
         }
     }
 
@@ -338,6 +364,9 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     func tabBarController(_ tabBarController: UITabBarController, didSelect viewController: UIViewController) {
         refreshUnreadBadge()
         syncTabBarVisibility()
+        // Selection resizes the tab buttons (the selected one carries the
+        // lens), so the overlay has to follow.
+        alignProfileMenuOverlay()
     }
 
     /// The bar is managed by hand around full-bleed snap surfaces (the pushed
@@ -364,6 +393,59 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
         let hidesForPush = stack.viewControllers.dropFirst().contains { $0.hidesBottomBarWhenPushed }
         let isSnapSurface = stack.topViewController is any ZoomTransitionDestination
         tabBarController.setTabBarHidden(isSnapSurface || hidesForPush, animated: false)
+    }
+}
+
+// MARK: - Profile tab long-press
+
+extension MainTabCoordinator {
+    /// Keeps the switcher overlay exactly over the Profile tab's button.
+    ///
+    /// Runs on every layout pass, so it is cheap and idempotent: it re-adds
+    /// nothing already added and writes the frame only when it moved.
+    fileprivate func alignProfileMenuOverlay() {
+        let bar = tabBarController.tabBar
+        guard let title = profileTab?.tab.title,
+              let button = tabButton(labelled: title, in: bar)
+        else { return }
+        let frame = button.convert(button.bounds, to: bar)
+        // A zero frame means the bar has not placed its buttons yet; leaving the
+        // overlay unplaced is right, and a later pass will catch it.
+        guard !frame.isEmpty else { return }
+        if profileMenuOverlay.superview !== bar { bar.addSubview(profileMenuOverlay) }
+        if profileMenuOverlay.frame != frame { profileMenuOverlay.frame = frame }
+        // Keep it topmost: UIKit re-adds its own subviews during a layout pass
+        // and would otherwise bury the overlay, which silently costs the
+        // long-press with nothing on screen to explain why.
+        bar.bringSubviewToFront(profileMenuOverlay)
+    }
+
+    /// Installs the switcher menu from the factory's current snapshot.
+    fileprivate func rebuildSwitcherMenu() {
+        profileMenuOverlay.menu = profileSwitcher?.makeMenu(
+            onSwitch: {},
+            onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
+        )
+    }
+
+    /// The tab bar's button for the tab titled `title`.
+    ///
+    /// Breadth-first, and matched on `accessibilityLabel` rather than on the
+    /// private button classes it walks past: a tab button is labelled with its
+    /// own title, and breadth-first reaches the button before the label nested
+    /// inside it — so this never has to name `_UITabButton`. A future iOS
+    /// re-shuffling that hierarchy costs the menu, not a crash.
+    private func tabButton(labelled title: String, in bar: UIView) -> UIView? {
+        var queue = bar.subviews
+        while !queue.isEmpty {
+            let view = queue.removeFirst()
+            // The overlay carries the same label by design; skip it or it would
+            // match itself and pin its own frame.
+            if view === profileMenuOverlay { continue }
+            if view.accessibilityLabel == title { return view }
+            queue.append(contentsOf: view.subviews)
+        }
+        return nil
     }
 }
 

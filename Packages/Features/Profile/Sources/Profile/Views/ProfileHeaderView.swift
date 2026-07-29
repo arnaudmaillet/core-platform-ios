@@ -26,6 +26,11 @@ import UIKit
 /// `ImagePipeline`; it owns no data.
 final class ProfileHeaderView: UIView {
     private enum Metrics {
+        /// One element group's cross-dissolve on an account switch.
+        static let dissolve: TimeInterval = 0.24
+        /// Gap between groups. Small enough to read as one flowing change
+        /// rather than three separate ones.
+        static let stagger: TimeInterval = 0.05
         /// Dynamic-Type ceiling for the avatar (it normally tracks the
         /// identity column's height, ~95pt at default sizes).
         static let avatarMaxSize: CGFloat = 110
@@ -139,6 +144,89 @@ final class ProfileHeaderView: UIView {
 
         bannerView.setImageURL(model.bannerImageURL)
         loadAvatar(model.avatarURL)
+    }
+
+    /// Applies `model` as a set of small, lightly staggered cross-dissolves —
+    /// one per element group — instead of one transition over the whole header.
+    ///
+    /// A single dissolve across the header is uniform but flat: everything
+    /// blinks over at once, so a switch reads as the screen being replaced
+    /// rather than as one identity becoming another. Grouping lets the parts
+    /// that answer "who is this" resolve first, with the numbers and the prose
+    /// following a beat later.
+    ///
+    /// Each group is a real `UIView.transition`, so its OWN old content is what
+    /// dissolves away. That is why the stagger is a delayed transition rather
+    /// than an alpha ramp: fading a group in from zero would blank every group
+    /// at t=0 and then bring them back in sequence, which flickers.
+    ///
+    /// Falls back to a plain apply when the view is off screen — an animation
+    /// nobody can see is a frame cost and a chance for the snapshot to land at
+    /// the wrong size.
+    func configure(with model: ProfileDisplayModel, staggered: Bool) {
+        guard staggered, window != nil else {
+            configure(with: model)
+            return
+        }
+        // Identity first: the banner's colour field and the avatar carry most of
+        // the "this is someone else now" signal, and the name says it outright.
+        dissolve([bannerView, avatarView, nameLabel, handleLabel, verifiedBadge], after: 0) {
+            self.monogramLabel.text = model.avatarMonogram
+            self.nameLabel.text = model.displayName
+            self.handleLabel.text = model.handle
+            self.verifiedBadge.isHidden = !model.isVerified
+            self.bannerView.setImageURL(model.bannerImageURL)
+            self.loadAvatar(model.avatarURL)
+        }
+        dissolve([followersStat, followingStat, reactionsStat, viewsStat], after: Metrics.stagger) {
+            self.followersStat.setValue(model.followerText)
+            self.followingStat.setValue(model.followingText)
+            self.reactionsStat.setValue(model.reactionsText)
+            self.viewsStat.setValue(model.viewsText)
+        }
+        dissolve([bioLabel, websiteButton], after: Metrics.stagger * 2) {
+            self.bioLabel.text = model.bio
+            self.bioLabel.isHidden = !model.hasBio
+            self.websiteURL = model.websiteURL
+            self.websiteButton.configuration?.title = model.websiteText
+            self.websiteButton.isHidden = model.websiteText == nil
+        }
+    }
+
+    /// Cross-dissolves `views` around `changes`, optionally after a delay.
+    ///
+    /// The delay is a dispatch hop rather than an animation delay because
+    /// `UIView.transition` takes none — and a transition is what is needed here,
+    /// not an alpha animation (see `configure(with:staggered:)`).
+    ///
+    /// Structural changes (a bio appearing, a website row going away) are made
+    /// inside the transition on purpose: they alter this group's own height, and
+    /// letting them ride the dissolve is what stops the column below from
+    /// jumping while the text is still half faded.
+    private func dissolve(_ views: [UIView], after delay: TimeInterval, _ changes: @escaping () -> Void) {
+        let run = {
+            var pending = views
+            guard let first = pending.popLast() else { return changes() }
+            // Nested so every view dissolves within ONE animation block: separate
+            // transitions on siblings drift apart under load, and these are
+            // meant to read as a single group changing together.
+            let inner: () -> Void = pending.reduce(changes) { accumulated, view in
+                {
+                    UIView.transition(
+                        with: view, duration: Metrics.dissolve,
+                        options: [.transitionCrossDissolve, .allowUserInteraction, .beginFromCurrentState],
+                        animations: accumulated
+                    )
+                }
+            }
+            UIView.transition(
+                with: first, duration: Metrics.dissolve,
+                options: [.transitionCrossDissolve, .allowUserInteraction, .beginFromCurrentState],
+                animations: inner
+            )
+        }
+        guard delay > 0 else { return run() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: run)
     }
 
     /// Installs the see-more bubble's overflow menu. Set once with a menu whose

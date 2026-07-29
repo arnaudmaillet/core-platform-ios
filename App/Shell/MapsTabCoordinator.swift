@@ -11,7 +11,6 @@ final class MapsTabCoordinator: TabCoordinator {
     let navigationController = UINavigationController()
 
     private let container: AppContainer
-    private let profileButtonItem: UIBarButtonItem
     private let notificationsButtonItem: UIBarButtonItem
 
     private(set) lazy var tab = UITab(
@@ -38,29 +37,26 @@ final class MapsTabCoordinator: TabCoordinator {
         return item
     }()
 
-    init(container: AppContainer, profileButtonItem: UIBarButtonItem, notificationsButtonItem: UIBarButtonItem) {
+    init(container: AppContainer, notificationsButtonItem: UIBarButtonItem) {
         self.container = container
-        self.profileButtonItem = profileButtonItem
         self.notificationsButtonItem = notificationsButtonItem
     }
 
     func start() {
         let mapViewController = container.mapsFeature.makeMapViewController()
-        // The Profile (avatar) and Notifications (bell) entry points live here —
-        // and only here: a navigationItem belongs to this one view controller,
-        // so no other tab can show them and nothing needs conditional hiding.
-        // Both are injected by the shell (they carry avatar image / unread
-        // state) so the Maps package stays Profile- and Notifications-agnostic.
-        // `rightBarButtonItems` fills trailing-to-leading, so the avatar sits at
-        // the far right with the bell directly to its left. A fixedSpace between
-        // them breaks iOS 26's automatic grouping, so each gets its own
-        // standalone glass bubble instead of sharing one capsule.
-        mapViewController.navigationItem.rightBarButtonItems = [
-            profileButtonItem,
-            UIBarButtonItem.fixedSpace(8),
-            notificationsButtonItem
-        ]
-        // The post-creation "+" sits opposite the avatar, top-left.
+        // The Notifications (bell) entry point lives here — and only here: a
+        // navigationItem belongs to this one view controller, so no other tab
+        // can show it and nothing needs conditional hiding. It is injected by
+        // the shell (it carries unread state) so the Maps package stays
+        // Notifications-agnostic.
+        //
+        // The avatar that used to sit to its right is gone: Profile is a root
+        // tab now, and two entry points to one destination is one too many. The
+        // bell is alone in the trailing slot, so the fixedSpace that used to
+        // keep the two in separate glass bubbles went with it — on its own it
+        // would only push the bell inboard.
+        mapViewController.navigationItem.rightBarButtonItems = [notificationsButtonItem]
+        // The post-creation "+" sits opposite the bell, top-left.
         mapViewController.navigationItem.leftBarButtonItem = createPostButtonItem
         navigationController.viewControllers = [mapViewController]
     }
