@@ -71,6 +71,11 @@ public final class ProfileViewModel {
     public var onPhaseChange: ((Phase) -> Void)?
     public var onFollowButtonChange: ((FollowButton) -> Void)?
     public var onGalleryChange: ((GallerySnapshot) -> Void)?
+    /// Fired when a load finishes, however it finished — new data, identical
+    /// data, or a failure. The view uses it to close out a switch, which it
+    /// cannot infer from `onPhaseChange`: a revalidation that agrees with the
+    /// cache publishes no phase at all.
+    public var onLoadSettled: (() -> Void)?
     /// Fires when an overflow-menu command settles. Paired with
     /// `onDismissRequested` for block, which both reports and leaves.
     public var onActionResult: ((ActionResult) -> Void)?
@@ -530,6 +535,7 @@ public final class ProfileViewModel {
                 }
             }
             self.load = nil
+            self.onLoadSettled?()
         }
     }
 
