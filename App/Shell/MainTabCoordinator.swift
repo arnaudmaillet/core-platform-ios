@@ -27,7 +27,7 @@ import UploadInterface
 @MainActor
 final class MainTabCoordinator: NSObject, Coordinator {
     var childCoordinators: [Coordinator] = []
-    let tabBarController = UITabBarController()
+    let tabBarController = ShellTabBarController()
 
     private let container: AppContainer
     private let onLogout: () -> Void
@@ -62,13 +62,39 @@ final class MainTabCoordinator: NSObject, Coordinator {
     private var profileTab: ProfileTabCoordinator?
     /// Backs the Profile tab's long-press switcher menu.
     private lazy var profileSwitcher = container.profileFeature.makeProfileSwitcher()
-    /// Long-press → switcher, hosted on the bar itself (see the delegate for
-    /// why it cannot hang off the tab).
-    private lazy var tabBarMenuInteraction = UIContextMenuInteraction(delegate: self)
-    /// The Profile tab's button view, resolved on the press that opened the
-    /// menu. Held so the highlight preview can target the button rather than
-    /// the whole bar; cleared when the menu goes away.
-    private weak var pressedProfileTabButton: UIView?
+
+    /// An invisible button laid over the Profile tab, carrying the switcher as
+    /// its `menu`.
+    ///
+    /// **Why a control and not a `UIContextMenuInteraction`.** A context menu
+    /// always LIFTS its source: it hides the original, floats a scaled copy and
+    /// dims everything behind. On a tab that produced a second avatar hovering
+    /// over the bar, clipped to whatever `visiblePath` allowed — an artifact
+    /// with no place on fixed chrome, and one the interaction offers no way to
+    /// switch off. Narrowing the path only makes the floating copy smaller.
+    ///
+    /// A `UIControl` presents the same `UIMenu` anchored to itself without any
+    /// of that, which is exactly how the map avatar's `UIBarButtonItem.menu`
+    /// behaved before Profile became a tab. Because this button is invisible and
+    /// is a *different view* from the tab, UIKit never touches the real icon:
+    /// not hidden, not snapshotted, not moved.
+    ///
+    /// Two properties, neither of them the default, are what make it long-press:
+    /// `UIControl` ships with `isContextMenuInteractionEnabled == false`, so a
+    /// `menu` alone is inert; and `showsMenuAsPrimaryAction` must stay FALSE, or
+    /// the menu opens on tap and swallows tab selection.
+    private lazy var profileMenuOverlay: UIButton = {
+        let button = UIButton(type: .custom)
+        button.backgroundColor = .clear
+        button.isContextMenuInteractionEnabled = true
+        button.showsMenuAsPrimaryAction = false
+        button.accessibilityLabel = "Profile"
+        button.accessibilityHint = "Double tap and hold to switch profile"
+        // The overlay covers the real tab button, so a plain tap has to be
+        // forwarded or it would be swallowed.
+        button.addAction(UIAction { [weak self] _ in self?.selectTab(.profile) }, for: .primaryActionTriggered)
+        return button
+    }()
     /// Tabs paired with their `AppTab`, in bar order — the lookup `selectTab`
     /// resolves against. Feed is absent: it contributes `feedActionTab` to the
     /// bar but owns no root stack.
@@ -114,7 +140,10 @@ final class MainTabCoordinator: NSObject, Coordinator {
         // reads the last `reload` — so without this the first long-press builds
         // its menu from an empty snapshot and offers only "Add Profile", with
         // the viewer's own profiles missing.
-        Task { await profileSwitcher?.reload() }
+        Task { [weak self] in
+            await self?.profileSwitcher?.reload()
+            self?.rebuildSwitcherMenu()
+        }
 
         let feedFlow = FeedFlowCoordinator(container: container)
         feedFlow.start()
@@ -146,16 +175,19 @@ final class MainTabCoordinator: NSObject, Coordinator {
         tabs.insert(feedActionTab, at: 1)
         tabBarController.tabs = tabs
         tabBarController.delegate = self
-        // Long-press the Profile tab for the switcher — the shortcut the map
-        // avatar used to carry on its `UIBarButtonItem.menu`.
-        //
-        // Hosted on the BAR, not the tab: `UITab` has no menu or interaction of
-        // its own (checked against the iOS 26 SDK — `UITab`, `UITabBar`,
-        // `UITabBarItem` and the controller delegate expose nothing), and the
-        // button views are UIKit's private business. So the interaction covers
-        // the whole bar and the delegate decides, per press, whether the press
-        // landed on Profile.
-        tabBarController.tabBar.addInteraction(tabBarMenuInteraction)
+        // The Profile tab's long-press switcher. `UITab` carries no menu of its
+        // own — `UITab`, `UITabBar`, `UITabBarItem` and the controller delegate
+        // were all checked against the iOS 26 SDK and expose nothing — so the
+        // menu rides an invisible button kept aligned over the tab.
+        tabBarController.onLayout = { [weak self] in
+            self?.alignProfileMenuOverlay()
+            // The CONTROLLER lays out before the bar has placed its own buttons,
+            // and then does not lay out again — measured: one call, reading a
+            // zero frame. One hop to the next runloop turn catches the settled
+            // geometry, and alignment ignores a zero frame rather than caching
+            // it, so the early pass costs nothing.
+            DispatchQueue.main.async { self?.alignProfileMenuOverlay() }
+        }
 
         loadAvatar()
         refreshUnreadBadge()
@@ -258,7 +290,10 @@ final class MainTabCoordinator: NSObject, Coordinator {
         loadAvatar()
         // The menu is built on demand from the last `reload`, so refresh the
         // snapshot rather than the menu — there is no menu object to replace.
-        Task { await profileSwitcher?.reload() }
+        Task { [weak self] in
+            await self?.profileSwitcher?.reload()
+            self?.rebuildSwitcherMenu()
+        }
     }
 
     private func presentAddProfilePlaceholder() {
@@ -329,6 +364,9 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     func tabBarController(_ tabBarController: UITabBarController, didSelect viewController: UIViewController) {
         refreshUnreadBadge()
         syncTabBarVisibility()
+        // Selection resizes the tab buttons (the selected one carries the
+        // lens), so the overlay has to follow.
+        alignProfileMenuOverlay()
     }
 
     /// The bar is managed by hand around full-bleed snap surfaces (the pushed
@@ -360,105 +398,54 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
 
 // MARK: - Profile tab long-press
 
-/// The switcher shortcut, restored onto the Profile tab.
-///
-/// UIKit offers no per-tab menu: `UITab` carries no `menu`, `UITabBar` and
-/// `UITabBarItem` expose none, and `UITabBarControllerDelegate` has no hook.
-/// The interaction therefore sits on the whole bar and this delegate answers
-/// "did that press land on Profile?" per press — returning nil everywhere else,
-/// so every other tab keeps its stock behaviour and a plain tap is untouched.
-///
-/// The press is resolved through `accessibilityLabel`, not through the private
-/// button classes it walks past. A tab button is labelled with its own title, so
-/// matching the Profile tab's title finds it without this file ever naming
-/// `_UITabButton` — the hierarchy underneath can be re-shuffled by a future iOS
-/// and this keeps working, or degrades to no menu rather than to a crash.
-extension MainTabCoordinator: UIContextMenuInteractionDelegate {
-    func contextMenuInteraction(
-        _ interaction: UIContextMenuInteraction,
-        configurationForMenuAtLocation location: CGPoint
-    ) -> UIContextMenuConfiguration? {
-        guard let switcher = profileSwitcher,
-              let button = profileTabButton(at: location)
-        else { return nil }
-        pressedProfileTabButton = button
-        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
-            switcher.makeMenu(
-                onSwitch: {},
-                onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
-            )
-        }
-    }
-
-    /// Targets the highlight at the tab button, and narrows what actually lifts
-    /// to the **avatar disc alone**.
+extension MainTabCoordinator {
+    /// Keeps the switcher overlay exactly over the Profile tab's button.
     ///
-    /// A context menu always lifts its source and there is no way to opt out —
-    /// handing it an invisible stand-in instead makes UIKit decline to present
-    /// at all (measured three ways). What IS controllable is how much of the
-    /// source is drawn: `visiblePath` clips the lifted copy. Scoped to the icon's
-    /// circle, the label and the tab's whole rectangle stay out of it, so what
-    /// rises is a small disc rather than a slab of the bar.
-    ///
-    /// The disc is found as the button's image view rather than assumed from
-    /// numbers, so it tracks whatever size UIKit gives the icon. Falling back to
-    /// the button's bounds keeps the menu working if that ever stops being an
-    /// image view — the lift just gets bigger again.
-    func contextMenuInteraction(
-        _ interaction: UIContextMenuInteraction,
-        configuration: UIContextMenuConfiguration,
-        highlightPreviewForItemWithIdentifier identifier: any NSCopying
-    ) -> UITargetedPreview? {
-        groundedPreview()
-    }
-
-    /// The same preview on the way out, so the menu collapses back onto the same
-    /// disc. Without it UIKit falls back to the full source for the return leg
-    /// only — the big lift reappearing at the end instead of the start.
-    func contextMenuInteraction(
-        _ interaction: UIContextMenuInteraction,
-        configuration: UIContextMenuConfiguration,
-        dismissalPreviewForItemWithIdentifier identifier: any NSCopying
-    ) -> UITargetedPreview? {
-        groundedPreview()
-    }
-
-    private func groundedPreview() -> UITargetedPreview? {
-        guard let button = pressedProfileTabButton else { return nil }
-        let parameters = UIPreviewParameters()
-        parameters.backgroundColor = .clear
-        let disc = button.subviews.compactMap { $0 as? UIImageView }.first
-        let bounds = disc.map { $0.convert($0.bounds, to: button) } ?? button.bounds
-        parameters.visiblePath = UIBezierPath(ovalIn: bounds)
-        return UITargetedPreview(view: button, parameters: parameters)
-    }
-
-    func contextMenuInteraction(
-        _ interaction: UIContextMenuInteraction,
-        willEndFor configuration: UIContextMenuConfiguration,
-        animator: (any UIContextMenuInteractionAnimating)?
-    ) {
-        animator?.addCompletion { [weak self] in self?.pressedProfileTabButton = nil }
-    }
-
-    /// The Profile tab's button at `location`, or nil if the press landed
-    /// elsewhere.
-    ///
-    /// Walks to the OUTERMOST match rather than stopping at the first: a tab
-    /// button and the label inside it are both labelled "Profile", and the
-    /// button is what the highlight should lift.
-    private func profileTabButton(at location: CGPoint) -> UIView? {
+    /// Runs on every layout pass, so it is cheap and idempotent: it re-adds
+    /// nothing already added and writes the frame only when it moved.
+    fileprivate func alignProfileMenuOverlay() {
         let bar = tabBarController.tabBar
         guard let title = profileTab?.tab.title,
-              let hit = bar.hitTest(location, with: nil)
-        else { return nil }
-        var match: UIView?
-        var view: UIView? = hit
-        while let current = view, current !== bar {
-            if current.accessibilityLabel == title { match = current }
-            view = current.superview
+              let button = tabButton(labelled: title, in: bar)
+        else { return }
+        let frame = button.convert(button.bounds, to: bar)
+        // A zero frame means the bar has not placed its buttons yet; leaving the
+        // overlay unplaced is right, and a later pass will catch it.
+        guard !frame.isEmpty else { return }
+        if profileMenuOverlay.superview !== bar { bar.addSubview(profileMenuOverlay) }
+        if profileMenuOverlay.frame != frame { profileMenuOverlay.frame = frame }
+        // Keep it topmost: UIKit re-adds its own subviews during a layout pass
+        // and would otherwise bury the overlay, which silently costs the
+        // long-press with nothing on screen to explain why.
+        bar.bringSubviewToFront(profileMenuOverlay)
+    }
+
+    /// Installs the switcher menu from the factory's current snapshot.
+    fileprivate func rebuildSwitcherMenu() {
+        profileMenuOverlay.menu = profileSwitcher?.makeMenu(
+            onSwitch: {},
+            onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
+        )
+    }
+
+    /// The tab bar's button for the tab titled `title`.
+    ///
+    /// Breadth-first, and matched on `accessibilityLabel` rather than on the
+    /// private button classes it walks past: a tab button is labelled with its
+    /// own title, and breadth-first reaches the button before the label nested
+    /// inside it — so this never has to name `_UITabButton`. A future iOS
+    /// re-shuffling that hierarchy costs the menu, not a crash.
+    private func tabButton(labelled title: String, in bar: UIView) -> UIView? {
+        var queue = bar.subviews
+        while !queue.isEmpty {
+            let view = queue.removeFirst()
+            // The overlay carries the same label by design; skip it or it would
+            // match itself and pin its own frame.
+            if view === profileMenuOverlay { continue }
+            if view.accessibilityLabel == title { return view }
+            queue.append(contentsOf: view.subviews)
         }
-        return match
+        return nil
     }
 }
 
