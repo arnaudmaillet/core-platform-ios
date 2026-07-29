@@ -1,0 +1,255 @@
+import CoreModels
+import DesignSystem
+import MediaCore
+import PostGrid
+import UIKit
+
+/// The For You tab root: curated content in the shared three-format grid, with
+/// a discovery filter tray, and a tile tap opening the full-screen feed.
+///
+/// This is a **tab root**, which settles two things that would otherwise be
+/// style choices. The filter tray is hosted in this screen's own view above the
+/// bottom safe area — the navigation toolbar cannot be made to clear a tab bar
+/// (measured three ways; see `InlineFilterTrayView`) — and the tab bar stays,
+/// because it is how the viewer leaves.
+final class ForYouViewController: UIViewController {
+    private let viewModel: ForYouViewModel
+    private let pager: ForYouPagerView
+    private let makeSnapFeed: ([PostID]) -> UIViewController
+    private let prewarm: ([PostID]) async -> Void
+
+    /// The format tabs. Bare by design — `InlineFilterTrayView` supplies the
+    /// one glass capsule each control gets outside a toolbar.
+    private let formatRow = GlassSegmentRow(segments: [
+        .title("Activity"), .title("Media"), .title("Short")
+    ])
+
+    /// The discovery axis's options, in menu order. One table so the menu, the
+    /// bubble's glyph and any programmatic selection cannot disagree about
+    /// what a source looks like.
+    private struct SourceOption {
+        let source: DiscoverySource
+        let title: String
+        let symbol: String
+    }
+
+    private static let sourceOptions: [SourceOption] = [
+        SourceOption(source: .trending, title: "Trending", symbol: "flame"),
+        SourceOption(source: .recent, title: "Recent", symbol: "clock"),
+        SourceOption(source: .following, title: "Following", symbol: "person.2")
+    ]
+
+    /// The discovery axis: one drop-down whose native single-selection menu
+    /// carries the options and whose bubble shows the active one's glyph.
+    /// Lazy — the menu actions capture self.
+    private lazy var sourceMenuButton = GlassMenuButton(
+        // Closure form, not a bare `map(makeSourceAction)`: passing a
+        // MainActor-isolated method as a function value strips its isolation
+        // and Swift 6 rejects it.
+        menu: UIMenu(options: .singleSelection, children: Self.sourceOptions.map { makeSourceAction($0) }),
+        accessibilityLabel: "Discovery filter"
+    )
+
+    private lazy var trayView = InlineFilterTrayView(leading: formatRow, trailing: sourceMenuButton)
+
+    /// How many posts a tile tap hands the feed, counting from the tapped one.
+    ///
+    /// `FixedPostsFeedProvider` hydrates its whole set in ONE concurrent
+    /// fan-out, so an uncapped deep grid would fire hundreds of `GetPost`
+    /// calls on a single tap. The consequence is stated rather than hidden:
+    /// one feed session reaches at most this many posts, and paging on through
+    /// the grid's own cursor is a follow-up.
+    private static let seedWindow = 40
+
+    init(
+        viewModel: ForYouViewModel,
+        imagePipeline: ImagePipeline,
+        makeSnapFeed: @escaping ([PostID]) -> UIViewController,
+        prewarm: @escaping ([PostID]) async -> Void
+    ) {
+        self.viewModel = viewModel
+        self.makeSnapFeed = makeSnapFeed
+        self.prewarm = prewarm
+        pager = ForYouPagerView(imagePipeline: imagePipeline)
+        super.init(nibName: nil, bundle: nil)
+        // NOT hidesBottomBarWhenPushed: this is a tab root, and the bar is how
+        // the viewer leaves it.
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground
+        navigationItem.title = "For You"
+        // The big left-aligned title, which is the convention for a root tab.
+        //
+        // `.inline` is genuinely the mode that produces it here, however
+        // backwards that reads. This stack leaves `prefersLargeTitles` at its
+        // default of false, and under iOS 26 that makes `.always` and `.never`
+        // BOTH resolve to the small centred bar title, while `.inline` renders
+        // the large one in the content area. All three were measured in-sim
+        // before this line was settled; don't "fix" it to `.always` without
+        // re-measuring. Verified not to leak into the pushed feed, whose bar
+        // keeps just its back item and author pill.
+        navigationItem.largeTitleDisplayMode = .inline
+
+        pager.pin(to: view)
+        // The tray floats over the pages, so they must be able to scroll their
+        // last row clear of it.
+        pager.trayClearance = InlineFilterTrayView.height + InlineFilterTrayView.spacingBelow * 2
+
+        view.addSubview(trayView)
+        NSLayoutConstraint.activate([
+            trayView.leadingAnchor.constraint(equalTo: view.layoutMarginsGuide.leadingAnchor),
+            trayView.trailingAnchor.constraint(equalTo: view.layoutMarginsGuide.trailingAnchor),
+            trayView.heightAnchor.constraint(equalToConstant: InlineFilterTrayView.height),
+            trayView.bottomAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.bottomAnchor,
+                constant: -InlineFilterTrayView.spacingBelow
+            )
+        ])
+
+        formatRow.onSelect = { [weak self] index in
+            guard let self else { return }
+            let format = ForYouPagerView.pageOrder[index]
+            viewModel.setFormat(format)
+            pager.setActivePage(format, animated: true)
+        }
+        pager.onPageSettled = { [weak self] format in
+            guard let self else { return }
+            viewModel.setFormat(format)
+            if let index = ForYouPagerView.pageOrder.firstIndex(of: format) {
+                formatRow.select(index, notify: false)
+            }
+        }
+        pager.onItemTapped = { [weak self] format, index in
+            self?.openFeed(from: format, at: index)
+        }
+        pager.onNearEnd = { [weak self] in self?.viewModel.loadNextPageIfNeeded() }
+        pager.onRefresh = { [weak self] in self?.viewModel.refresh() }
+
+        viewModel.onSnapshotChange = { [weak self] snapshot in
+            guard let self else { return }
+            pager.render(snapshot)
+            prewarmVisible()
+        }
+        viewModel.onLoadSettled = { [weak self] in self?.pager.endRefreshing() }
+
+        // Land on the stored format before first layout, so the screen OPENS
+        // there with no visible jump.
+        let format = viewModel.format
+        if let index = ForYouPagerView.pageOrder.firstIndex(of: format) {
+            formatRow.select(index, notify: false)
+        }
+        pager.setActivePage(format, animated: false)
+
+        viewModel.viewDidLoad()
+
+        #if DEBUG
+        installDebugHooks()
+        #endif
+    }
+
+    private func makeSourceAction(_ option: SourceOption) -> UIAction {
+        UIAction(
+            title: option.title,
+            image: UIImage(systemName: option.symbol),
+            state: option.source == viewModel.source ? .on : .off
+        ) { [weak self] _ in
+            self?.applySource(option.source)
+        }
+    }
+
+    /// Adopts a source everywhere it shows. The icon-only bubble carries no
+    /// system mirroring, so the glyph and the VoiceOver value are set by hand —
+    /// and they are set HERE rather than in the menu action so that every path
+    /// that changes the source (including the debug hook) moves the bubble too.
+    /// A menu tap additionally moves its own checkmark, which `.singleSelection`
+    /// owns; a programmatic change cannot, so the checkmark can lag until the
+    /// menu is next rebuilt. That is a debug-only discrepancy — the bubble,
+    /// which is what's on screen, is always right.
+    private func applySource(_ source: DiscoverySource) {
+        guard let option = Self.sourceOptions.first(where: { $0.source == source }) else { return }
+        viewModel.setSource(source)
+        sourceMenuButton.button.configuration?.image = UIImage(systemName: option.symbol)
+        sourceMenuButton.button.accessibilityValue = option.title
+    }
+
+    /// Opens the full-screen feed on the tapped post.
+    ///
+    /// The feed is seeded from the page's own ordered ids as a SUFFIX starting
+    /// at the tap, so swiping down in the feed continues through the grid in
+    /// the order the viewer was reading it. This is the Maps pin path's
+    /// mechanism (`makeSnapFeedViewController(postIDs:)` over
+    /// `FixedPostsFeedProvider`) with a tile as the source instead of a pin.
+    private func openFeed(from format: GalleryFilter.Format, at index: Int) {
+        let posts = pager.posts(for: format)
+        guard posts.indices.contains(index), let navigationController else { return }
+        let ids = posts[index...].prefix(Self.seedWindow).map(\.id)
+        let feed = makeSnapFeed(Array(ids))
+        // The feed owns the whole screen: hide the bar with the push. Managed
+        // by hand rather than via `hidesBottomBarWhenPushed` so that Phase 2's
+        // interactive grab can scrub it — the flag's choreography does not
+        // (measured on both the pin and timeline paths).
+        tabBarController?.setTabBarHidden(true, animated: true)
+        navigationController.pushViewController(feed, animated: true)
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        // Coming back from the feed: this screen owns the bottom again.
+        if navigationController?.topViewController === self {
+            tabBarController?.setTabBarHidden(false, animated: animated)
+        }
+    }
+
+    /// Warms the top of the corpus into the feed's post cache so a tile tap
+    /// opens from memory instead of the network — the same trick Maps uses on
+    /// viewport settle.
+    private func prewarmVisible() {
+        let ids = viewModel.posts(for: viewModel.format).prefix(12).map(\.id)
+        guard !ids.isEmpty else { return }
+        Task { [prewarm] in await prewarm(Array(ids)) }
+    }
+
+    #if DEBUG
+    /// `-foryou-open <index>` taps a tile once content has landed (the sim
+    /// injects no taps), and `-foryou-source <trending|recent|following>`
+    /// drives the drop-down — a `UIMenu` needs a real tap to open.
+    private func installDebugHooks() {
+        let arguments = ProcessInfo.processInfo.arguments
+        if let position = arguments.firstIndex(of: "-foryou-source"), position + 1 < arguments.count {
+            let source: DiscoverySource? = switch arguments[position + 1] {
+            case "trending": .trending
+            case "recent": .recent
+            case "following": .following
+            default: nil
+            }
+            if let source {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                    self?.applySource(source)
+                }
+            }
+        }
+        guard let position = arguments.firstIndex(of: "-foryou-open"), position + 1 < arguments.count,
+              let index = Int(arguments[position + 1])
+        else { return }
+        // Polls rather than firing on a fixed delay: the tap needs landed
+        // content, and a fixed delay silently no-ops under `-mock-latency`.
+        var attempts = 0
+        func attempt() {
+            attempts += 1
+            guard attempts < 40 else { return }
+            let format = viewModel.format
+            if pager.posts(for: format).indices.contains(index) {
+                openFeed(from: format, at: index)
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: attempt)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: attempt)
+    }
+    #endif
+}

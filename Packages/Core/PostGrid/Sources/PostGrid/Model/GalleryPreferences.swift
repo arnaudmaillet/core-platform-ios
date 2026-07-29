@@ -27,6 +27,15 @@ public final class GalleryPreferences: @unchecked Sendable {
         sourceKey = keyPrefix + ".source"
     }
 
+    /// The format tab alone, for a surface whose *source* axis is its own enum
+    /// and cannot round-trip through `GalleryFilter.Source`. Reads and writes
+    /// only the format key, so it can share a store with `filter` without one
+    /// clobbering the other's source.
+    public var format: GalleryFilter.Format {
+        get { Self.format(from: defaults.string(forKey: formatKey)) }
+        set { defaults.set(Self.key(for: newValue), forKey: formatKey) }
+    }
+
     public var filter: GalleryFilter {
         get {
             GalleryFilter(

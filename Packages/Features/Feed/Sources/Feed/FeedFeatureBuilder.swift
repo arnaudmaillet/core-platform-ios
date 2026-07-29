@@ -3,6 +3,7 @@ import CoreModels
 import CoreNavigation
 import FeedInterface
 import MediaPlayback
+import PostGrid
 import UIKit
 
 /// The feed feature's entry point, resolved by the composition root and
@@ -54,6 +55,23 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
 
     public func prewarmPosts(_ ids: [PostID]) async {
         await repository.prewarm(ids)
+    }
+
+    public func makeForYouViewController() -> UIViewController {
+        let repository = repository
+        return ForYouViewController(
+            viewModel: ForYouViewModel(
+                repository: ForYouRepository(feed: repository),
+                // Its OWN namespace. The profile gallery persists the same
+                // format axis under `profile.gallery.*`; sharing the keys would
+                // make each surface yank the other's landing tab.
+                preferences: GalleryPreferences(keyPrefix: "foryou.gallery")
+            ),
+            imagePipeline: imagePipeline,
+            // The same seeded surface a Maps pin opens, from a tile instead.
+            makeSnapFeed: { postIDs in makeSnapFeedViewController(postIDs: postIDs) },
+            prewarm: { ids in await repository.prewarm(ids) }
+        )
     }
 
     public func makeSnapFeedViewController(postIDs: [PostID]) -> UIViewController {

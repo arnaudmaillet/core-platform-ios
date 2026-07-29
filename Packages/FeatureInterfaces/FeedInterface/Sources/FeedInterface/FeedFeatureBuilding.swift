@@ -21,6 +21,15 @@ public enum PostDetailMode: Sendable, Equatable {
 @MainActor
 public protocol FeedFeatureBuilding {
     func makeFeedViewController() -> UIViewController
+    /// The For You discovery tab's root: curated content in a three-format
+    /// grid (Activity / Media / Short), where tapping a tile opens the
+    /// full-screen feed seeded from that page's ordered posts.
+    ///
+    /// It lives behind the *feed* builder rather than a feature of its own
+    /// because the destination it opens (`makeSnapFeedViewController`) and the
+    /// read path it shares are both here — one repository, one post cache, so
+    /// a tapped tile is already warm in the feed it expands into.
+    func makeForYouViewController() -> UIViewController
     /// The detail screen for a single post. `.full` for the `.post` route (e.g.
     /// from a notification); `.commentsOnly` for the `.comments` route (the snap
     /// feed's comment button).

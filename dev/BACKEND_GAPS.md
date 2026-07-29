@@ -474,6 +474,49 @@ of which run the same fan-out today.
 
 ---
 
+## 14. No discovery / recommendation feed for the "For You" tab
+
+The app's slot-1 tab is now **For You**, a curated discovery grid. Nothing in
+the contracts can serve it. `timeline.v1` exposes exactly two RPCs:
+
+```
+timeline.v1.TimelineService/GetFollowingFeed
+timeline.v1.TimelineService/GetAudioFeed
+```
+
+Neither is a discovery feed — the first is the viewer's own follow graph, the
+second is a different medium. There is no ranking, trending, topic, or
+"suggested for you" endpoint anywhere in the generated contracts (checked
+across all 20 services in `Packages/Kit/CoreContracts/Sources/CoreContracts/Generated/`).
+
+**What the client does meanwhile.** `ForYouRepository` reads
+`GetFollowingFeed` through the existing `FeedRepository`, and the tab's source
+filter (Trending / Recent / Following) is three **orderings of that one
+corpus**, applied client-side: `.following` is the server's order, `.recent`
+sorts by `published_at`, `.trending` by the like counter. This is honest but
+thin, and it has two consequences worth naming:
+
+1. **"Trending" ranks only what has been loaded.** Ordering happens over the
+   accumulated pages, not globally, so it is really "most-reacted among the
+   posts you have scrolled to" — it will disagree with any server-side notion
+   of trending.
+2. **A viewer who follows nobody sees an empty For You tab**, which is exactly
+   the audience a discovery surface exists for. There is no cold-start path.
+
+**What we need.** A ranked feed endpoint, e.g.
+
+```
+timeline.v1.GetDiscoveryFeed(viewer_id, ranking, page_token, limit)
+  ranking: RANKING_TRENDING | RANKING_RECENT | RANKING_FOR_YOU
+```
+
+returning the same `(post_id, author_id)` tuples `GetFollowingFeed` does, so
+the client's hydration path is unchanged and only the corpus differs. Until
+then `DiscoverySource` is the seam that will pick between corpora, and the
+client-side ordering falls away.
+
+---
+
 ## Resolved
 
 - **`ProfileService.ListProfilesByAccount` ScyllaDB CQL type bug** (`limit`
