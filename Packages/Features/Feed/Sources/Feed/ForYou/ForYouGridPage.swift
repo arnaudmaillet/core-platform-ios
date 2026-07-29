@@ -1,3 +1,4 @@
+import CoreModels
 import DesignSystem
 import MediaCore
 import PostGrid
@@ -95,6 +96,87 @@ final class ForYouGridPage: UIView {
 
     func endRefreshing() {
         refreshControl.endRefreshing()
+    }
+
+    // MARK: - Hero geometry
+
+    // What the zoom transition needs to fly a post's media: where it is, what
+    // it looks like, and the ability to hide it while its twin is in the air.
+    // All of it is asked of the *page* rather than of a cell, because cells are
+    // recycled — the page resolves an id to whatever cell is showing it now, or
+    // reports that none is.
+
+    /// Everything a flight needs from a realized cell, resolved together so the
+    /// rect, the cover and the style cannot describe different objects.
+    struct Hero {
+        let frame: CGRect
+        let cover: UIImage?
+        let style: PostGridFlightCard.Style
+    }
+
+    /// The post's flyable media in `space`, or nil when there is nothing to
+    /// fly: no realized cell (scrolled out), or a text-only row, which has no
+    /// media surface at all. The caller pushes plainly in that case.
+    func hero(for postID: PostID, in space: UICoordinateSpace) -> Hero? {
+        guard let cell = cell(for: postID), let appearance = heroAppearance(for: postID) else {
+            return nil
+        }
+        let rect: CGRect = switch cell {
+        // A brick IS its media, edge to edge; a row is a card of which the
+        // media is one part, so fly that part.
+        case let tile as PostGridTileCell: tile.bounds
+        case let row as PostGridListRowCell: row.mediaHeroRect ?? .zero
+        default: .zero
+        }
+        guard rect != .zero else { return nil }
+        return Hero(frame: cell.convert(rect, to: space), cover: appearance.cover, style: appearance.style)
+    }
+
+    /// What the flight card should *look* like, without needing a coordinate
+    /// space — the card is built before anyone knows the container, and asking
+    /// for a frame there would mean inventing one.
+    func heroAppearance(for postID: PostID) -> (cover: UIImage?, style: PostGridFlightCard.Style)? {
+        switch cell(for: postID) {
+        case let tile as PostGridTileCell:
+            (cover: tile.renderedCover, style: .tile)
+        case let row as PostGridListRowCell:
+            row.mediaHeroRect == nil ? nil : (cover: row.renderedCover, style: .listMedia)
+        default:
+            nil
+        }
+    }
+
+    /// Whether a realized cell for the post is currently within the viewport —
+    /// the hero falls back to a centered collapse when it isn't.
+    func isPostVisible(_ postID: PostID) -> Bool {
+        guard let cell = cell(for: postID) else { return false }
+        return collectionView.bounds.intersects(cell.frame)
+    }
+
+    /// Brings the post into view without animation, so a dismissal can land on
+    /// a cell the viewer had scrolled past.
+    func scrollPostIntoView(_ postID: PostID) {
+        guard let index = posts.firstIndex(where: { $0.id == postID }) else { return }
+        collectionView.scrollToItem(
+            at: IndexPath(item: index, section: 0), at: .centeredVertically, animated: false
+        )
+        collectionView.layoutIfNeeded()
+    }
+
+    /// Hides the real cell while its twin is flying.
+    func setHeroHidden(_ hidden: Bool, for postID: PostID) {
+        cell(for: postID)?.isHidden = hidden
+    }
+
+    /// The post behind an id, for a flight card that must configure itself
+    /// from the model rather than from a cell that may not be realized.
+    func post(for postID: PostID) -> GalleryPost? {
+        posts.first { $0.id == postID }
+    }
+
+    private func cell(for postID: PostID) -> UICollectionViewCell? {
+        guard let index = posts.firstIndex(where: { $0.id == postID }) else { return nil }
+        return collectionView.cellForItem(at: IndexPath(item: index, section: 0))
     }
 
     func render(_ state: ForYouViewModel.PageState) {

@@ -4,22 +4,43 @@ import UIKit
 /// expands to fill another, and drags back into the exact same spot on dismiss.
 ///
 /// It lives in CoreNavigation — a module both the source and destination
-/// features already depend on — so neither feature imports the other. The Maps
-/// pin is the `ZoomTransitionSource`; the snap feed is the
-/// `ZoomTransitionDestination`. The animator (owned by the presenting side)
-/// reads geometry from both and never needs their concrete types.
+/// features already depend on — so neither feature imports the other. Two pairs
+/// use it today: a Maps pin and a For You grid tile are both
+/// `ZoomTransitionSource`s, and the snap feed is the
+/// `ZoomTransitionDestination` for each. The animator reads geometry from both
+/// sides and never needs their concrete types.
 @MainActor
 public protocol ZoomTransitionSource: AnyObject {
     /// The on-screen rect the hero starts from (present) / returns to (dismiss),
     /// in `container`'s coordinate space. Recomputed at dismiss time, since the
-    /// source may have moved (a panned map).
+    /// source may have moved (a panned map, a scrolled grid).
     func zoomHeroFrame(in container: UICoordinateSpace) -> CGRect
+
     /// `true` when the source is currently on screen; a dismiss to an off-screen
     /// source falls back to a centered shrink-and-fade instead of flying to a
     /// rect that isn't visible.
     var zoomSourceIsOnScreen: Bool { get }
-    /// The transition finished returning; un-hide the source view.
-    func zoomSourceDidReturn()
+
+    /// The flying card: normally the same component the source renders at rest,
+    /// configured from the same data, so the handshake is exact by
+    /// construction rather than by agreement.
+    func makeZoomFlightCard() -> any ZoomFlightCard
+
+    /// Hide (`true`) the real source view while its twin is flying, and restore
+    /// it (`false`) when the flight is over. Called inside the same transaction
+    /// that installs or retires the card, so no frame can render both — or
+    /// neither.
+    func setZoomSourceHidden(_ hidden: Bool)
+
+    /// Last chance to move before a *dismissal* stages: the source may need to
+    /// bring the landing target on screen (a grid scrolling a tile into view)
+    /// or re-point at what the destination ended on. Called before the landing
+    /// rect is read. Defaults to nothing — a map pin is wherever the map left it.
+    func zoomSourceWillStageDismissal()
+}
+
+public extension ZoomTransitionSource {
+    func zoomSourceWillStageDismissal() {}
 }
 
 @MainActor

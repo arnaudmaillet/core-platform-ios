@@ -12,6 +12,24 @@ import UIKit
 /// media, so their rows are text + metadata.
 public final class PostGridListRowCell: UICollectionViewCell {
     public static let reuseID = "PostGridListRowCell"
+    /// The inner preview's rounding — the radius a hero flying from this row
+    /// must start at, so the card is the preview's twin rather than its
+    /// approximation.
+    public static let mediaCornerRadius: CGFloat = 12
+
+    /// The preview's rect in this cell's own space, or nil for a text-only row
+    /// (which has no media to fly). A hero source reads this to decide whether
+    /// a row can host a flight at all.
+    public var mediaHeroRect: CGRect? {
+        guard !mediaView.isHidden else { return nil }
+        layoutIfNeeded()
+        return mediaView.frame
+    }
+
+    /// The image the preview is currently showing — the exact pixels the
+    /// viewer is looking at, so a flight starts from them rather than from a
+    /// cache lookup that could miss.
+    public var renderedCover: UIImage? { mediaView.image }
 
     private let card = UIView()
     private let captionLabel = UILabel()
@@ -142,6 +160,10 @@ public final class PostGridListRowCell: UICollectionViewCell {
 /// caption2 over a soft shadow, no scrim, so the preview stays the star.
 public final class PostGridTileCell: UICollectionViewCell {
     public static let reuseID = "PostGridTileCell"
+
+    /// The image the brick is currently showing — see `PostGridListRowCell`'s
+    /// note for why a hero reads this rather than the image pipeline.
+    public var renderedCover: UIImage? { imageView.image }
 
     private let imageView = UIImageView()
     private let playBadge = UIImageView(image: UIImage(systemName: "play.fill"))

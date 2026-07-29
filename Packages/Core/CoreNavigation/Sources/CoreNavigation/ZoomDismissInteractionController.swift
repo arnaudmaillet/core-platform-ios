@@ -1,4 +1,4 @@
-import CoreNavigation
+
 import UIKit
 
 /// Turns a rightward drag on the snap feed into a *free-floating* interactive
@@ -19,7 +19,7 @@ import UIKit
 ///
 /// Because the drag phase sets *model* values with no animation in flight,
 /// release simply springs from the card's exact current 2D coordinate to
-/// `poseAsPin` (commit: the same clip-morph home the button dismiss flies)
+/// `poseAtSource` (commit: the same clip-morph home the button dismiss flies)
 /// or `poseAsPage` (cancel), seeding the spring with the gesture's release
 /// velocity so the card is visibly "caught". The horizontal axis is chosen
 /// deliberately: the feed pages and pulls-to-refresh vertically, so a
@@ -32,7 +32,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// delegate returns this controller only while true.
     private(set) var isInteracting = false
 
-    private var source: MapPinZoomSource?
+    private var source: (any ZoomTransitionSource)?
     private weak var destination: (any ZoomTransitionDestination)?
     /// Kicks off `dismiss(animated:)` on the presented feed when a grab begins.
     private var onBeginDismiss: (() -> Void)?
@@ -70,7 +70,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// call `dismiss(animated: true)` on the presented view controller.
     func attach(
         to view: UIView,
-        source: MapPinZoomSource,
+        source: any ZoomTransitionSource,
         destination: any ZoomTransitionDestination,
         onBeginDismiss: @escaping () -> Void
     ) {
@@ -142,16 +142,23 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         }
 
         let pageFrame = destination?.zoomTargetFrame(in: container) ?? container.bounds
-        // The map can't move while the feed covers it, so the pin rect is
-        // stable for the lifetime of the grab.
-        let pinFrame = source.zoomHeroFrame(in: container)
+        // Let the source move before its rect is read — a grid may need to
+        // scroll its landing tile into view, and the presenter was only just
+        // reinstalled above, so this is the one correct place for it.
+        source.zoomSourceWillStageDismissal()
+        container.layoutIfNeeded()
+        // The presenter can't move under the user while the feed covers it, so
+        // this rect is stable for the grab's lifetime — but it is recomputed at
+        // release anyway (see `releaseGrab`), because staging can be seconds
+        // earlier on a view that had not settled.
+        let sourceFrame = source.zoomHeroFrame(in: container)
 
         let dim = ZoomFlight.makeDimView(frame: container.bounds)
         dim.alpha = 1
         container.insertSubview(dim, belowSubview: fromView)
 
         let flight = ZoomFlight.build(
-            source: source, destination: destination, pinFrame: pinFrame, pageFrame: pageFrame
+            source: source, destination: destination, sourceFrame: sourceFrame, pageFrame: pageFrame
         )
         container.insertSubview(flight.card, belowSubview: fromView)
         container.insertSubview(flight.shadow, belowSubview: flight.card)
@@ -163,7 +170,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         let presentingView = context.viewController(forKey: .to)?.view
         ZoomFlight.applyRecededChrome(to: presentingView, radius: screenRadius)
         presentingView?.transform = CGAffineTransform(
-            scaleX: ZoomFlight.mapDepthScale, y: ZoomFlight.mapDepthScale
+            scaleX: ZoomFlight.presenterDepthScale, y: ZoomFlight.presenterDepthScale
         )
 
         self.context = context
@@ -233,7 +240,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // The toolbar recedes on the same channel as the dim: pure function
         // of progress, tracking the finger frame-by-frame.
         toolbar?.alpha = 1 - progress
-        let mapScale = ZoomFlight.mapDepthScale + (1 - ZoomFlight.mapDepthScale) * progress
+        let mapScale = ZoomFlight.presenterDepthScale + (1 - ZoomFlight.presenterDepthScale) * progress
         presentingView?.transform = CGAffineTransform(scaleX: mapScale, y: mapScale)
         context.updateInteractiveTransition(progress)
     }
@@ -273,7 +280,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // *identity* (the partial recede would skew the rect, and the spring
         // returns the map to identity by landing time); the toggle is within
         // one transaction, so nothing renders it.
-        var landing = flight.pinFrame
+        var landing = flight.sourceFrame
         if commit, let source, source.zoomSourceIsOnScreen {
             let recede = presentingView?.transform ?? .identity
             presentingView?.transform = .identity
@@ -308,7 +315,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
             options: [.beginFromCurrentState, .allowUserInteraction]
         ) {
             if commit {
-                flight.poseAsPin(at: landing)
+                flight.poseAtSource(at: landing)
                 dim?.alpha = 0
                 toolbar?.alpha = 0
                 presentingView?.transform = .identity
@@ -317,7 +324,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
                 dim?.alpha = 1
                 toolbar?.alpha = 1
                 presentingView?.transform = CGAffineTransform(
-                    scaleX: ZoomFlight.mapDepthScale, y: ZoomFlight.mapDepthScale
+                    scaleX: ZoomFlight.presenterDepthScale, y: ZoomFlight.presenterDepthScale
                 )
             }
         }
@@ -350,7 +357,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         destination?.setZoomContentHidden(false)
         destination?.zoomTransitionDidEnd()
         if !cancelled {
-            source?.zoomSourceDidReturn()
+            source?.setZoomSourceHidden(false)
         }
         context?.completeTransition(!cancelled)
         context = nil

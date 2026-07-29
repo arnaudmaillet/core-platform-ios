@@ -1,3 +1,4 @@
+import CoreNavigation
 import MediaPlayback
 import UIKit
 
@@ -96,10 +97,39 @@ final class PinCardView: UIView {
         videoRenderView.bounds = CGRect(origin: .zero, size: destinationSize)
     }
 
-    /// The uniform scale that makes a `surface`-sized video layer cover a
-    /// `size`-sized card — the flight-video analog of `scaleAspectFill`.
-    static func videoFlightScale(covering size: CGSize, surface: CGSize) -> CGFloat {
-        guard surface.width > 0, surface.height > 0 else { return 1 }
-        return max(size.width / surface.width, size.height / surface.height)
+}
+
+// MARK: - ZoomFlightCard
+
+/// The pin's face IS the hero's flying card, which is what makes the frame-0
+/// handshake exact rather than agreed. The shared machinery poses it through
+/// this conformance and never names `PinCardView`.
+extension PinCardView: ZoomFlightCard {
+    var zoomRestingCornerRadius: CGFloat { Self.cornerRadius }
+
+    /// The pin's border, which must not survive into the page pose.
+    var zoomRestingChrome: UIView? { ringView }
+
+    var zoomLiveMediaSurface: UIView? { videoRenderView.isHidden ? nil : videoRenderView }
+
+    func adoptZoomLiveMedia(_ mirror: (UIView) -> Bool) {
+        guard mirror(videoRenderView) else { return }
+        // Poster covers the (usually sub-frame) gap until the mirrored layer
+        // reports its first frame.
+        videoRenderView.setPoster(imageView.image)
+        videoRenderView.isHidden = false
+    }
+
+    func setZoomCornerRadius(_ radius: CGFloat) {
+        setCornerRadius(radius)
+    }
+
+    func prepareZoomLiveMediaForFlight(destinationSize: CGSize) {
+        prepareVideoForFlight(destinationSize: destinationSize)
+    }
+
+    /// A pin lifts off the map, so its flight carries the same drop shadow.
+    func applyZoomRestingShadow(to layer: CALayer) {
+        Self.applyPinShadow(to: layer)
     }
 }

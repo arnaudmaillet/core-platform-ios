@@ -49,7 +49,7 @@ final class MapsViewController: UIViewController {
     /// cap the sweep in case it runs during a pre-cluster frame.
     private static let prewarmCap = 16
     /// Retains the transitioning delegate for the life of a presentation.
-    private var activeTransition: MapsZoomTransition?
+    private var activeTransition: ZoomTransitionController?
     /// Chooses which ≤3 visible video pins autoplay.
     private let videoCoordinator: MapVideoPlaybackCoordinator
     /// Runs the pins' staggered pop-in/pop-out and owns the in-flight
@@ -259,7 +259,7 @@ final class MapsViewController: UIViewController {
         // Tab became frontmost: resume previews. NOT while a hero transition
         // is alive — under a push, this fires the moment a pop *begins*, and
         // an interactive grab can cancel; the completed return resumes via
-        // the transition's onMapReturned instead.
+        // the transition's onSourceReturned instead.
         guard activeTransition == nil else { return }
         videoCoordinator.setSurfaceVisible(true)
         refreshVideoPlayback()
@@ -1065,11 +1065,11 @@ extension MapsViewController: MKMapViewDelegate {
         // navigation bar cross-fades "Maps" into the feed's back item + author
         // capsule natively — no second bar to pop in over the first. The
         // transition object is the stack's delegate for the feed's lifetime.
-        let transition = MapsZoomTransition(source: source, destination: destination)
+        let transition = ZoomTransitionController(source: source, destination: destination)
         activeTransition = transition
 
         var didLand = false
-        transition.onFeedShown = { [weak self, weak transition] in
+        transition.onDestinationShown = { [weak self, weak transition] in
             // Landed (fires again if a detail above the feed pops back — the
             // flight-scoped work must run once): release the donor player.
             guard !didLand else { return }
@@ -1083,7 +1083,7 @@ extension MapsViewController: MKMapViewDelegate {
             }
             #endif
         }
-        transition.onMapReturned = { [weak self, weak nav] in
+        transition.onSourceReturned = { [weak self, weak nav] in
             // Completed pop only — a cancelled grab reports nothing, so the
             // transition (and future grabs) survives it by construction.
             nav?.delegate = nil
@@ -1108,7 +1108,7 @@ extension MapsViewController: MKMapViewDelegate {
         // (the bar snaps in at pop-begin and flashes over the feed when a grab
         // cancels). Manually it slides away with the lift-off, stays hidden
         // through cancelled grabs, and returns only on the completed pop
-        // (onMapReturned above). Constraint: a programmatic cross-tab route
+        // (onSourceReturned above). Constraint: a programmatic cross-tab route
         // while the feed is pushed would find the bar hidden — today no such
         // route fires from inside the feed.
         tabBarController?.setTabBarHidden(true, animated: true)

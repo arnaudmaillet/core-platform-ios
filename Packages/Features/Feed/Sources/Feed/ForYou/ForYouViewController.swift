@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNavigation
 import DesignSystem
 import MediaCore
 import PostGrid
@@ -51,6 +52,10 @@ final class ForYouViewController: UIViewController {
     )
 
     private lazy var trayView = InlineFilterTrayView(leading: formatRow, trailing: sourceMenuButton)
+
+    /// Retains the navigation-controller delegate for the life of a flight —
+    /// the stack holds its delegate weakly.
+    private var activeTransition: ZoomTransitionController?
 
     /// How many posts a tile tap hands the feed, counting from the tapped one.
     ///
@@ -177,24 +182,77 @@ final class ForYouViewController: UIViewController {
         sourceMenuButton.button.accessibilityValue = option.title
     }
 
-    /// Opens the full-screen feed on the tapped post.
+    /// Opens the full-screen feed on the tapped post, with the hero zoom.
     ///
     /// The feed is seeded from the page's own ordered ids as a SUFFIX starting
     /// at the tap, so swiping down in the feed continues through the grid in
     /// the order the viewer was reading it. This is the Maps pin path's
-    /// mechanism (`makeSnapFeedViewController(postIDs:)` over
-    /// `FixedPostsFeedProvider`) with a tile as the source instead of a pin.
+    /// mechanism end to end — `makeSnapFeedViewController(postIDs:)` over
+    /// `FixedPostsFeedProvider`, pushed under a `ZoomTransitionController` —
+    /// with a tile as the source instead of a pin.
     private func openFeed(from format: GalleryFilter.Format, at index: Int) {
+        // One flight at a time: a second tap while a card is in the air would
+        // stage a transition over a live one. Same guard as the map's.
+        guard activeTransition == nil else { return }
         let posts = pager.posts(for: format)
         guard posts.indices.contains(index), let navigationController else { return }
+        let tapped = posts[index]
         let ids = posts[index...].prefix(Self.seedWindow).map(\.id)
         let feed = makeSnapFeed(Array(ids))
+
         // The feed owns the whole screen: hide the bar with the push. Managed
-        // by hand rather than via `hidesBottomBarWhenPushed` so that Phase 2's
-        // interactive grab can scrub it — the flag's choreography does not
-        // (measured on both the pin and timeline paths).
+        // by hand rather than via `hidesBottomBarWhenPushed`, because that
+        // flag's choreography doesn't scrub with a custom interactive pop —
+        // the bar snaps in at pop-begin and flashes over the feed when a grab
+        // cancels (measured on both the pin and timeline paths).
         tabBarController?.setTabBarHidden(true, animated: true)
+
+        guard let page = pager.page(for: format),
+              let destination = feed as? any ZoomTransitionDestination,
+              page.hero(for: tapped.id, in: view) != nil
+        else {
+            // No hero available — a text-only row has no media to fly, and a
+            // destination without the seam can't be flown to. A plain push is
+            // the honest fallback; it is still the same feed.
+            navigationController.pushViewController(feed, animated: true)
+            return
+        }
+
+        let source = ForYouGridZoomSource(
+            page: page,
+            tappedID: tapped.id,
+            // Injected rather than imported: the source stays a grid concept
+            // and never learns what a feed is.
+            activePostID: { [weak feed] in (feed as? SnapFeedViewController)?.activePostID }
+        )
+        let transition = ZoomTransitionController(source: source, destination: destination)
+        activeTransition = transition
+        transition.onSourceReturned = { [weak self, weak navigationController] in
+            // Completed pop only — a cancelled grab reports nothing, so the
+            // transition (and future grabs) survives it by construction.
+            navigationController?.delegate = nil
+            self?.activeTransition = nil
+        }
+        // Accessing `view` loads it so the grab-to-dismiss pan can attach.
+        transition.attachInteractiveDismissal(to: feed.view) { [weak navigationController] in
+            navigationController?.popViewController(animated: true)
+        }
+        navigationController.delegate = transition
         navigationController.pushViewController(feed, animated: true)
+
+        #if DEBUG
+        // `-foryou-demo-grab`: once the feed has landed, drive the grab twice —
+        // below the completion threshold (springs back to full screen) and past
+        // it (flies home to the tile). The sim injects no pans, so this is the
+        // only way to exercise the release contract here.
+        if ProcessInfo.processInfo.arguments.contains("-foryou-demo-grab") {
+            transition.onDestinationShown = { [weak transition] in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    transition?.debugScriptedGrab()
+                }
+            }
+        }
+        #endif
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -238,16 +296,29 @@ final class ForYouViewController: UIViewController {
         else { return }
         // Polls rather than firing on a fixed delay: the tap needs landed
         // content, and a fixed delay silently no-ops under `-mock-latency`.
+        //
+        // It waits for the tile's COVER, not just the model. A person taps a
+        // tile they can see, and the hero card is built from the pixels that
+        // tile is rendering — firing the instant the model lands flies a blank
+        // card and misreports the transition as broken. (It is not: an
+        // unloaded tile and its card are both the same empty placeholder. But
+        // the capture is worthless.) Text-only rows never get a cover, so the
+        // attempt budget is the backstop that still lets them through.
         var attempts = 0
         func attempt() {
             attempts += 1
-            guard attempts < 40 else { return }
             let format = viewModel.format
-            if pager.posts(for: format).indices.contains(index) {
-                openFeed(from: format, at: index)
+            let posts = pager.posts(for: format)
+            guard posts.indices.contains(index) else {
+                if attempts < 60 { DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: attempt) }
                 return
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: attempt)
+            let ready = pager.page(for: format)?.heroAppearance(for: posts[index].id)?.cover != nil
+            guard ready || attempts >= 60 else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: attempt)
+                return
+            }
+            openFeed(from: format, at: index)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: attempt)
     }

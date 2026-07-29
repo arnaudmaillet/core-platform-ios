@@ -30,10 +30,15 @@ final class ForYouPagerView: UIView {
     private let pages: [ForYouGridPage]
     private var activeIndex = 0
 
-    /// The posts the active page is showing — what a tile tap seeds from.
+    /// The posts a page is showing — what a tile tap seeds from.
     func posts(for format: GalleryFilter.Format) -> [GalleryPost] {
-        guard let index = Self.pageOrder.firstIndex(of: format) else { return [] }
-        return pages[index].posts
+        page(for: format)?.posts ?? []
+    }
+
+    /// The page itself, for a hero source that needs its geometry.
+    func page(for format: GalleryFilter.Format) -> ForYouGridPage? {
+        guard let index = Self.pageOrder.firstIndex(of: format) else { return nil }
+        return pages[index]
     }
 
     /// Bottom inset every page keeps clear for the filter tray floating over it.
