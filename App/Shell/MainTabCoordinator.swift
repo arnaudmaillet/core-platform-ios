@@ -178,6 +178,21 @@ final class MainTabCoordinator: NSObject, Coordinator {
                 self.profileFlow?.push(onto: navigationController)
             }
         }
+        // `-tab-round-trip` leaves the current tab and comes back ~1.5s apart.
+        // Pair with any push that hides the bar (`-open-my-profile`,
+        // `-open-conversation`): the round trip is the only way to reach
+        // `syncTabBarVisibility` with a pushed screen on top, and the simulator
+        // injects no taps. What it watches for is the bar reappearing over a
+        // screen that had hidden it. NOTE the frame right after each switch is
+        // mid-crossfade — content lags the bar — so judge the settled state.
+        if arguments.contains("-tab-round-trip") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.selectTab(.messages)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                    self?.selectTab(.maps)
+                }
+            }
+        }
         // `-open-notifications` pushes the notifications feed on launch — the
         // map bell's exact code path — so it's screenshottable without a tap
         // (the sim injects none). Deferred a tick, as above.
@@ -331,8 +346,24 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     /// whatever the newly selected tab has on top: hidden over a snap
     /// surface, visible otherwise.
     private func syncTabBarVisibility() {
-        let top = (tabBarController.selectedViewController as? UINavigationController)?.topViewController
-        tabBarController.setTabBarHidden(top is any ZoomTransitionDestination, animated: false)
+        guard let stack = tabBarController.selectedViewController as? UINavigationController else { return }
+        // Two things hide the bar, and this has to honour BOTH. The snap
+        // surfaces do it by hand, which is what this reconciliation was written
+        // for. But `hidesBottomBarWhenPushed` hides it too — a pushed profile, a
+        // chat thread, the compose picker, a relationship list — and those own
+        // the bottom of the screen while they are up. Reading only the first
+        // rule forced the bar back over them on the next tab switch: caught in a
+        // mid-switch frame as the bar sliding in over a pushed profile, its
+        // filter tray underneath.
+        //
+        // Mirrors UIKit's own rule rather than approximating it: the flag keeps
+        // the bar hidden while ANY *pushed* controller on the stack asked for
+        // it, not just whichever is on top — push a flagged screen, then an
+        // unflagged one above it, and the bar stays down. `dropFirst` because a
+        // stack ROOT is never pushed, so its flag says nothing about this.
+        let hidesForPush = stack.viewControllers.dropFirst().contains { $0.hidesBottomBarWhenPushed }
+        let isSnapSurface = stack.topViewController is any ZoomTransitionDestination
+        tabBarController.setTabBarHidden(isSnapSurface || hidesForPush, animated: false)
     }
 }
 
