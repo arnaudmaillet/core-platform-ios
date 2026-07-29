@@ -80,7 +80,14 @@ final class ProfileSwitcherMenuFactory: ProfileSwitcherPresenting {
     private func commitSwitch(to id: ProfileID, then onSwitch: @escaping () -> Void) {
         Task { @MainActor in
             await switching.setActiveProfile(id)
-            NotificationCenter.default.post(name: .activeProfileDidChange, object: nil)
+            // The id rides along so observers can render that profile from
+            // cache on this very turn, rather than waiting to be told who it
+            // is by a round trip.
+            NotificationCenter.default.post(
+                name: .activeProfileDidChange,
+                object: nil,
+                userInfo: [ActiveProfileChange.profileIDKey: id]
+            )
             onSwitch()
         }
     }

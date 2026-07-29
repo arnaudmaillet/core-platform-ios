@@ -305,7 +305,7 @@ final class ProfileViewController: UIViewController {
         // Selector-based, so UIKit drops it with this object — no token to hold
         // and no `deinit` to remember.
         NotificationCenter.default.addObserver(
-            self, selector: #selector(activeProfileDidChange),
+            self, selector: #selector(activeProfileDidChange(_:)),
             name: .activeProfileDidChange, object: nil
         )
         configureNavigationBar()
@@ -892,9 +892,17 @@ final class ProfileViewController: UIViewController {
     /// viewer changed, so the follow state and relationship button this screen
     /// shows are now answers to a different question, not just the identity at
     /// the top.
-    @objc private func activeProfileDidChange() {
-        beginProfileSwitchTransition()
-        viewModel.refresh()
+    @objc private func activeProfileDidChange(_ notification: Notification) {
+        // Cache-first: a profile already seen renders on THIS turn, and the
+        // fetch behind it becomes a silent revalidation. A miss has nothing
+        // truthful to show for the new identity, so it redacts rather than
+        // leaving the previous profile's name and numbers on screen.
+        let seeded = viewModel.revalidate(after: ActiveProfileChange.profileID(from: notification))
+        if seeded {
+            beginProfileSwitchTransition()
+        } else {
+            headerView.setRedacted(true)
+        }
         // Re-read the snapshot so the menu's active marker moves to the profile
         // just switched to.
         reloadSwitcherMenu()
