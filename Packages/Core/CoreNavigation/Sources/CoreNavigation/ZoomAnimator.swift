@@ -154,12 +154,13 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         }
 
         let pageFrame = destination?.zoomTargetFrame(in: container) ?? container.bounds
-        // Let the source move before its rect is read — a grid may need to
-        // scroll the landing tile into view. Must precede `zoomHeroFrame`, and
-        // the view it may scroll was only just reinstalled above, so this is
-        // the one correct place for it.
-        source.zoomSourceWillStageDismissal()
+        // Settle the presenter's own layout FIRST — it was only just
+        // reinstalled above — and only then let the source move within it. The
+        // order matters: a grid asked to scroll a tile into view against stale
+        // bounds computes the wrong offset, and every rect read afterwards
+        // inherits the error.
         container.layoutIfNeeded()
+        source.zoomSourceWillStageDismissal()
         let sourceFrame = source.zoomHeroFrame(in: container)
 
         // Dim starts opaque (fully presented) and lifts to reveal the map as

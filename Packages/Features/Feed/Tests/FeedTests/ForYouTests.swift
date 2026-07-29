@@ -255,7 +255,11 @@ struct ForYouViewModelTests {
         #expect(snapshots().count == landed)
     }
 
-    @Test func nextPageAppendsAndStopsWhenExhausted() async {
+    /// A page APPENDS. It must never renumber what is already on screen, even
+    /// when the new post outranks everything loaded — a grid that reshuffles
+    /// under the viewer is worse than one whose ranking is per-page, and it
+    /// broke the hero outright (the landing tile moved out from under the card).
+    @Test func nextPageAppendsWithoutRenumberingWhatIsAlreadyShown() async {
         let provider = StubForYouProvider(first: ForYouPage(posts: mixed, nextPageToken: "p2"))
         provider.pages["p2"] = ForYouPage(
             posts: [tile("m3", kind: .photo, publishedAtMS: 50, reactions: 99)],
@@ -264,15 +268,44 @@ struct ForYouViewModelTests {
         let (viewModel, _) = makeViewModel(provider)
         viewModel.viewDidLoad()
         await settle()
+        let before = viewModel.posts(for: .activity).map(\.id.rawValue)
 
         viewModel.loadNextPageIfNeeded()
         await settle()
-        #expect(viewModel.posts(for: .activity).map(\.id.rawValue) == ["m3", "m2", "t1", "m1"])
+
+        let after = viewModel.posts(for: .activity).map(\.id.rawValue)
+        // m3 has the highest reaction count of anything loaded, and STILL goes
+        // last: the first page's order is preserved exactly.
+        #expect(Array(after.prefix(before.count)) == before)
+        #expect(after == before + ["m3"])
 
         // The corpus is exhausted; further requests must not hit the network.
         viewModel.loadNextPageIfNeeded()
         await settle()
         #expect(provider.pagedLoads == 1)
+    }
+
+    /// Changing the source is the one action that may reorder everything,
+    /// because the viewer asked for it.
+    @Test func changingSourceReordersTheWholeLoadedCorpus() async {
+        let provider = StubForYouProvider(first: ForYouPage(posts: mixed, nextPageToken: "p2"))
+        provider.pages["p2"] = ForYouPage(
+            posts: [tile("m3", kind: .photo, publishedAtMS: 50, reactions: 99)],
+            nextPageToken: nil
+        )
+        let (viewModel, _) = makeViewModel(provider)
+        viewModel.viewDidLoad()
+        await settle()
+        viewModel.loadNextPageIfNeeded()
+        await settle()
+
+        viewModel.setSource(.recent)
+        await settle()
+
+        // Across BOTH pages, newest first. m3 was appended LAST under
+        // `.trending`; it is the newest of the four, so switching to `.recent`
+        // lifts it to the front — the reorder a source change is allowed to do.
+        #expect(viewModel.posts(for: .activity).map(\.id.rawValue) == ["m3", "m1", "m2", "t1"])
     }
 
     @Test func pagingIsIgnoredBeforeTheFirstPageLands() async {

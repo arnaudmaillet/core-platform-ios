@@ -13,7 +13,8 @@ import UIKit
 /// - **Position** (2D, free): `card.center` is set directly on every pan
 ///   event — horizontal 1:1, vertical and back-drag through a rubber-band
 ///   curve — so the card floats under the finger with zero lag.
-/// - **Morph** (progress-driven): scale, dim, and map depth are pure
+/// - **Morph** (progress-driven): the card's size and radius interpolate
+///   toward the rect it will land on, and dim and presenter depth are pure
 ///   functions of `translation.x / width`. The 0.95 detach dip fires as a
 ///   real spring at `.began` — instant, independent of drag distance.
 ///
@@ -54,13 +55,18 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     private weak var presentingView: UIView?
     private var screenRadius: CGFloat = 0
     private var pageCenter: CGPoint = .zero
+    /// The rect the card is flying at, resolved once the source has settled
+    /// (see `startInteractiveTransition`). The drag interpolates toward it, so
+    /// the card is always exactly as far home as the finger has taken it.
+    private var stagedLanding: CGRect = .zero
+    /// The card's size at zero progress — the page after the detach dip. The
+    /// interpolation's other endpoint.
+    private var detachedSize: CGSize = .zero
     /// True while the detach spring is settling; pose sets wait for it so a
     /// direct set doesn't stomp the dip mid-flight (position is unaffected —
     /// the dip animates bounds and subviews only).
     private var isDetachSettling = false
 
-    /// The card keeps shrinking gently past the detach as progress grows.
-    private let floatShrink: CGFloat = 0.08
     /// Rubber-band caps: generous vertically (the float), tight against
     /// dragging backwards past the origin.
     private let verticalDriftLimit: CGFloat = 140
@@ -142,11 +148,13 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         }
 
         let pageFrame = destination?.zoomTargetFrame(in: container) ?? container.bounds
-        // Let the source move before its rect is read — a grid may need to
-        // scroll its landing tile into view, and the presenter was only just
-        // reinstalled above, so this is the one correct place for it.
-        source.zoomSourceWillStageDismissal()
+        // Settle the presenter's own layout FIRST — it was only just
+        // reinstalled above — and only then let the source move within it. The
+        // order matters: a grid asked to scroll a tile into view against stale
+        // bounds computes the wrong offset, and every rect read afterwards
+        // inherits the error.
         container.layoutIfNeeded()
+        source.zoomSourceWillStageDismissal()
         // The presenter can't move under the user while the feed covers it, so
         // this rect is stable for the grab's lifetime — but it is recomputed at
         // release anyway (see `releaseGrab`), because staging can be seconds
@@ -183,6 +191,11 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         self.presentingView = presentingView
         self.screenRadius = screenRadius
         self.pageCenter = CGPoint(x: pageFrame.midX, y: pageFrame.midY)
+        stagedLanding = sourceFrame
+        detachedSize = CGSize(
+            width: pageFrame.width * ZoomFlight.detachScale,
+            height: pageFrame.height * ZoomFlight.detachScale
+        )
 
         // The detach: a real spring, not a scrubbed keyframe — it registers
         // the instant the grab starts, however slowly the finger then moves.
@@ -227,13 +240,13 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         let dy = ZoomTransitionGeometry.rubberBand(translation.y, limit: verticalDriftLimit)
         flight.card.center = CGPoint(x: pageCenter.x + dx, y: pageCenter.y + dy)
 
-        // Morph channel: pure functions of progress. Skipped while the detach
-        // spring settles (its endpoint differs from these by well under a
-        // point at small progress, so the handoff is invisible).
+        // Morph channel: pure functions of progress, interpolating the card's
+        // size and radius toward the rect it will actually land on. Skipped
+        // while the detach spring settles (its endpoint is this function at
+        // progress 0, so the handoff is invisible).
         if !isDetachSettling {
-            flight.poseFloating(
-                scale: ZoomFlight.detachScale - floatShrink * progress,
-                cornerRadius: screenRadius
+            flight.poseInterpolated(
+                progress, from: detachedSize, to: stagedLanding, startCornerRadius: screenRadius
             )
         }
         dim?.alpha = 1 - progress
@@ -356,9 +369,11 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // Restore the feed content for the cancel path; moot when finished.
         destination?.setZoomContentHidden(false)
         destination?.zoomTransitionDidEnd()
-        if !cancelled {
-            source?.setZoomSourceHidden(false)
-        }
+        // Unconditional, cancel included: a cancelled grab that left the source
+        // hidden strands an invisible tile behind the page, and nothing else
+        // would ever restore it if the feed then left by some other route. On
+        // the cancel path this is covered by the restored page anyway.
+        source?.setZoomSourceHidden(false)
         context?.completeTransition(!cancelled)
         context = nil
         flight = nil

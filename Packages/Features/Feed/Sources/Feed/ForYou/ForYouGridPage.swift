@@ -35,6 +35,16 @@ final class ForYouGridPage: UIView {
     private let statusLabel = UILabel()
     private let refreshControl = UIRefreshControl()
     private var showsSkeleton = false
+    /// Suppresses prefetch while the page repositions itself.
+    ///
+    /// Pagination is a response to the VIEWER reaching the end, not to the code
+    /// moving the content. Without this, the hero's staging scroll
+    /// (`scrollPostIntoView`) reports as an ordinary scroll, asks for the next
+    /// page, and the corpus re-sorts under the active ordering — so every tile
+    /// reshuffles at the exact moment the flight is landing on one of them.
+    /// Caught in-sim as the grid visibly rearranging just after the card set
+    /// down on the right tile.
+    private var isRepositioning = false
 
     /// List pages show a column of placeholder cards; the mosaic shows two
     /// full 8-brick patterns — a scrolling page has a whole viewport to fill,
@@ -153,13 +163,28 @@ final class ForYouGridPage: UIView {
         return collectionView.bounds.intersects(cell.frame)
     }
 
-    /// Brings the post into view without animation, so a dismissal can land on
-    /// a cell the viewer had scrolled past.
+    /// Brings the post fully into view without animation, so a dismissal can
+    /// land on a cell the viewer had scrolled past — or only half scrolled to.
+    ///
+    /// "Fully" is measured against the *inset* viewport, not the raw bounds: a
+    /// cell tucked under the filter tray or the tab bar passes an intersection
+    /// test while being somewhere no card should land. A cell already clear of
+    /// the insets is left exactly where it is, so a dismissal to something the
+    /// viewer can already see never jerks the grid under them.
     func scrollPostIntoView(_ postID: PostID) {
-        guard let index = posts.firstIndex(where: { $0.id == postID }) else { return }
+        guard let index = posts.firstIndex(where: { $0.id == postID }),
+              let attributes = collectionView.layoutAttributesForItem(
+                  at: IndexPath(item: index, section: 0)
+              )
+        else { return }
+        let viewport = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
+        guard !viewport.contains(attributes.frame) else { return }
+        isRepositioning = true
+        defer { isRepositioning = false }
         collectionView.scrollToItem(
             at: IndexPath(item: index, section: 0), at: .centeredVertically, animated: false
         )
+        // The rect the caller is about to read must reflect the new offset.
         collectionView.layoutIfNeeded()
     }
 
@@ -262,7 +287,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        guard !showsSkeleton, !posts.isEmpty else { return }
+        guard !showsSkeleton, !posts.isEmpty, !isRepositioning else { return }
         let remaining = scrollView.contentSize.height
             - (scrollView.contentOffset.y + scrollView.bounds.height)
         guard remaining < Self.prefetchDistance else { return }

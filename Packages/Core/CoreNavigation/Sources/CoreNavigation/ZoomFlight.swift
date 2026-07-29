@@ -181,6 +181,50 @@ struct ZoomFlight {
         }
     }
 
+    /// The card partway home: size and corner radius interpolated between the
+    /// detached page (`t == 0`) and the landing rect (`t == 1`), with the
+    /// chrome and video layers re-fitted to the morphing bounds on every step.
+    /// Position is excluded — the interactive driver owns that channel.
+    ///
+    /// This is what keeps a grab honest. Scaling the page rect uniformly and
+    /// only adopting the target's shape at release means the card spends the
+    /// whole drag as the wrong shape and then snaps into the right one: barely
+    /// noticeable flying to a 56pt square pin, glaring flying to a mosaic brick
+    /// that may be portrait, landscape or square. Interpolating the size
+    /// directly means the card is always exactly as far home as the finger has
+    /// taken it, and the release spring is a short continuation rather than a
+    /// correction.
+    ///
+    /// The two chrome ALPHAS deliberately do not interpolate here: cross-fading
+    /// the page's caption against the tile's counters mid-drag reads as two
+    /// half-drawn overlays. They swap inside the release spring
+    /// (`poseAtSource`/`poseAsPage`), where one of them is always the answer.
+    func poseInterpolated(
+        _ progress: CGFloat, from startSize: CGSize, to landing: CGRect, startCornerRadius: CGFloat
+    ) {
+        let t = min(max(progress, 0), 1)
+        let size = CGSize(
+            width: startSize.width + (landing.width - startSize.width) * t,
+            height: startSize.height + (landing.height - startSize.height) * t
+        )
+        card.bounds = CGRect(origin: .zero, size: size)
+        card.setZoomCornerRadius(
+            startCornerRadius + (card.zoomRestingCornerRadius - startCornerRadius) * t
+        )
+        let center = CGPoint(x: size.width / 2, y: size.height / 2)
+        if let surface = card.zoomLiveMediaSurface {
+            let scale = Self.liveMediaScale(covering: size, surface: pageFrame.size)
+            surface.transform = CGAffineTransform(scaleX: scale, y: scale)
+            surface.center = center
+        }
+        if let chrome {
+            chrome.transform = CGAffineTransform(
+                scaleX: size.width / pageFrame.width, y: size.height / pageFrame.height
+            )
+            chrome.center = center
+        }
+    }
+
     // MARK: - Stage dressing
 
     /// The uniform scale that makes a `surface`-sized video layer cover a

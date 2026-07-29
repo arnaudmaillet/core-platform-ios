@@ -227,11 +227,17 @@ final class ForYouViewController: UIViewController {
         )
         let transition = ZoomTransitionController(source: source, destination: destination)
         activeTransition = transition
-        transition.onSourceReturned = { [weak self, weak navigationController] in
+        transition.onSourceReturned = { [weak self] in
             // Completed pop only — a cancelled grab reports nothing, so the
             // transition (and future grabs) survives it by construction.
-            navigationController?.delegate = nil
+            self?.navigationController?.delegate = nil
             self?.activeTransition = nil
+            // The bar comes back HERE, on the completed pop, and only here —
+            // the same point the map's pin flight restores it, and the only
+            // point at which it paints correctly (see `viewWillAppear`). A
+            // cancelled grab reports nothing, so the bar correctly stays down
+            // under the feed that is still up.
+            self?.tabBarController?.setTabBarHidden(false, animated: true)
         }
         // Accessing `view` loads it so the grab-to-dismiss pan can attach.
         transition.attachInteractiveDismissal(to: feed.view) { [weak navigationController] in
@@ -258,9 +264,19 @@ final class ForYouViewController: UIViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         // Coming back from the feed: this screen owns the bottom again.
-        if navigationController?.topViewController === self {
-            tabBarController?.setTabBarHidden(false, animated: animated)
-        }
+        guard navigationController?.topViewController === self else { return }
+        // A hero return restores the bar at COMPLETION instead — see
+        // `openFeed`'s `onSourceReturned`. Showing it here, while an
+        // interactive transition is still in flight, permanently breaks its
+        // rendering: the frame comes back and `isTabBarHidden` reads false, but
+        // the buttons never paint — a row of empty glass capsules with no icons
+        // or titles. Measured, and measured against the map's grab, which
+        // restores only at completion and paints correctly; neither an animated
+        // show, a deferred layout pass, nor a hide/show toggle afterwards
+        // repairs it. This path is for the returns that have no hero: the
+        // plain-push fallback for a text-only row, and a tab switch back.
+        guard activeTransition == nil else { return }
+        tabBarController?.setTabBarHidden(false, animated: animated)
     }
 
     /// Warms the top of the corpus into the feed's post cache so a tile tap

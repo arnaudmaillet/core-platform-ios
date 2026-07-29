@@ -47,8 +47,23 @@ public final class ForYouViewModel {
     public private(set) var format: GalleryFilter.Format = .activity
     public private(set) var source: DiscoverySource = .trending
 
-    /// Everything loaded so far, in server order. nil = the first page is
-    /// still in flight (pages report loading); a failure records instead.
+    /// Everything loaded so far, **in the order it is displayed**. nil = the
+    /// first page is still in flight (pages report loading); a failure records
+    /// instead.
+    ///
+    /// The ordering is applied when content ARRIVES, not on every read, and an
+    /// appended page is ordered among itself and added to the end. Re-sorting
+    /// the whole corpus on every page would renumber tiles the viewer is
+    /// already looking at — caught in-sim as the grid visibly rearranging half
+    /// a second after a hero had landed on one of them, because the tab bar
+    /// coming back nudged the scroll view and that asked for the next page.
+    ///
+    /// The cost is stated plainly: "trending" ranks within each page rather
+    /// than across the whole loaded corpus, so a later page's runaway hit sits
+    /// below an earlier page's modest one. That is the honest trade for a grid
+    /// that holds still, and it is moot once ranking is the server's job (see
+    /// `dev/BACKEND_GAPS.md` §14). A source change re-sorts everything, because
+    /// there the viewer asked for exactly that.
     private var corpus: [GalleryPost]?
     private var failure: String?
     private var nextPageToken: String?
@@ -83,6 +98,8 @@ public final class ForYouViewModel {
     public func setSource(_ source: DiscoverySource) {
         guard self.source != source else { return }
         self.source = source
+        // The one place the whole corpus legitimately reorders.
+        corpus = corpus.map(source.ordering)
         publish()
     }
 
@@ -95,10 +112,10 @@ public final class ForYouViewModel {
             guard let self else { return }
             defer { self.pageLoad = nil }
             guard let page = try? await repository.page(after: token), !Task.isCancelled else { return }
-            // Append, never reorder: the ordering is applied at publish time,
-            // so the corpus stays in the server's order and a page landing
-            // cannot renumber what is already loaded.
-            corpus = (corpus ?? []) + page.posts
+            // Append, never reorder: the new page is ranked among ITSELF and
+            // added to the end, so a page landing cannot renumber what is
+            // already on screen.
+            corpus = (corpus ?? []) + source.ordering(page.posts)
             nextPageToken = page.nextPageToken
             publish()
             onLoadSettled?()
@@ -122,7 +139,7 @@ public final class ForYouViewModel {
             do {
                 let page = try await repository.firstPage()
                 guard !Task.isCancelled else { return }
-                corpus = page.posts
+                corpus = source.ordering(page.posts)
                 failure = nil
                 nextPageToken = page.nextPageToken
             } catch {
@@ -137,7 +154,9 @@ public final class ForYouViewModel {
     /// The corpus under the active ordering and a given format — what a page
     /// renders, and the ordered set a tile tap seeds its feed from.
     public func posts(for format: GalleryFilter.Format) -> [GalleryPost] {
-        format.filtering(source.ordering(corpus ?? []))
+        // `corpus` is already in display order — see its note. Reading is a
+        // pure filter, so nothing can reorder behind the viewer's back.
+        format.filtering(corpus ?? [])
     }
 
     private func publish() {

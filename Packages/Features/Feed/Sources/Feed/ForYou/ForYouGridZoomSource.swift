@@ -77,9 +77,11 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         if let landed = activePostID() {
             anchorID = landed
         }
-        if !(page?.isPostVisible(anchorID) ?? false) {
-            page?.scrollPostIntoView(anchorID)
-        }
+        // Always, not only when off-screen: a *partially* visible cell is
+        // "visible" by the intersection test but would have the card land
+        // half under the tray or the tab bar. Centring it is idempotent when
+        // it is already centred, and this runs behind the dim either way.
+        page?.scrollPostIntoView(anchorID)
         page?.setHeroHidden(true, for: anchorID)
     }
 
