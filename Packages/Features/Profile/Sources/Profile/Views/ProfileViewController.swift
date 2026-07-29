@@ -151,10 +151,20 @@ final class ProfileViewController: UIViewController {
     /// cannot work it out for itself (a nav root inside a tab bar and a pushed
     /// screen look identical from in here).
     private let trayPlacement: ProfileTrayPlacement
+    /// True between an account switch and the incoming profile landing. While
+    /// set, the skeleton is withheld and updates cross-dissolve.
+    private var isSwitchingProfile = false
+    private var switchFreezeTimeout: DispatchWorkItem?
 
     private enum Metrics {
         /// `GlassSegmentRow`'s resting height — the inline tray's own height.
         static let inlineTrayHeight: CGFloat = 42
+        /// How long the outgoing profile takes to dissolve into the new one.
+        static let switchCrossfade: TimeInterval = 0.28
+        /// Past this, holding the previous profile on screen stops reading as
+        /// a transition and starts reading as stale data — so the still goes
+        /// and the skeleton underneath takes over.
+        static let switchFreezeTimeout: TimeInterval = 1.2
         /// Between the tray and the bar beneath it, so the two glass rows read
         /// as separate objects rather than one stack.
         static let inlineTraySpacing: CGFloat = 8
@@ -340,7 +350,8 @@ final class ProfileViewController: UIViewController {
             self?.leaveAfterBlock()
         }
         viewModel.onGalleryChange = { [weak self] snapshot in
-            self?.galleryPager.render(snapshot)
+            guard let self else { return }
+            self.applySwitchable(on: self.galleryPager) { self.galleryPager.render(snapshot) }
         }
         galleryPager.onItemTapped = { [weak self] post in
             self?.viewModel.galleryItemTapped(post.id)
@@ -883,10 +894,68 @@ final class ProfileViewController: UIViewController {
     /// shows are now answers to a different question, not just the identity at
     /// the top.
     @objc private func activeProfileDidChange() {
+        beginProfileSwitchTransition()
         viewModel.refresh()
         // Re-read the snapshot so the menu's active marker moves to the profile
         // just switched to.
         reloadSwitcherMenu()
+    }
+
+    /// Holds the outgoing profile on screen until the incoming one lands, then
+    /// cross-fades between them.
+    ///
+    /// **What this replaces.** A refresh drops the screen through `.loading` on
+    /// its way to `.content`, so a switch flashed the skeleton — and the bones
+    /// carry a shimmer that sweeps left to right. Over a fast load that sweep
+    /// WAS the transition: a diagonal wipe across the header and the activity
+    /// cards, caught mid-travel. Fading the content could not fix it, because
+    /// the wipe was underneath.
+    ///
+    /// Snapshotting the outgoing screen does not work either: the switch is
+    /// chosen from a context menu, and while that menu dismisses UIKit has the
+    /// presenting hierarchy relocated, so `snapshotView` comes back with
+    /// nothing to show. So nothing is captured — the real views simply keep the
+    /// old profile until there is a new one to dissolve into.
+    ///
+    /// The skeleton is not removed, only deferred: a load slower than
+    /// `Metrics.switchFreezeTimeout` gives up and redacts, because holding a
+    /// previous profile indefinitely stops reading as a transition and starts
+    /// reading as stale data.
+    private func beginProfileSwitchTransition() {
+        guard view.window != nil else { return }
+        isSwitchingProfile = true
+        switchFreezeTimeout?.cancel()
+        let timeout = DispatchWorkItem { [weak self] in
+            guard let self, isSwitchingProfile else { return }
+            isSwitchingProfile = false
+            // Nothing arrived in time; show the honest loading state.
+            headerView.setRedacted(true)
+        }
+        switchFreezeTimeout = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + Metrics.switchFreezeTimeout, execute: timeout)
+    }
+
+    /// Runs `changes` as a cross-dissolve while a switch is in flight, and
+    /// plainly otherwise. Used for both halves of the incoming profile — the
+    /// header and the gallery arrive on separate callbacks, and each dissolves
+    /// over whatever it is replacing.
+    private func applySwitchable(on target: UIView, _ changes: @escaping () -> Void) {
+        guard isSwitchingProfile, view.window != nil else {
+            changes()
+            return
+        }
+        UIView.transition(
+            with: target,
+            duration: Metrics.switchCrossfade,
+            options: [.transitionCrossDissolve, .allowUserInteraction, .beginFromCurrentState],
+            animations: changes
+        )
+    }
+
+    private func endProfileSwitchTransition() {
+        switchFreezeTimeout?.cancel()
+        switchFreezeTimeout = nil
+        isSwitchingProfile = false
     }
 
     private func presentAddProfilePlaceholder() {
@@ -1221,6 +1290,10 @@ final class ProfileViewController: UIViewController {
     private func render(_ phase: ProfileViewModel.Phase) {
         switch phase {
         case .loading:
+            // A switch keeps the outgoing profile up instead of redacting —
+            // see `beginProfileSwitchTransition` for why the skeleton's
+            // shimmer is the artifact being avoided.
+            guard !isSwitchingProfile else { return }
             // First load renders the REAL screen in skeleton state: the
             // header redacts in place (same views, same constraints — see
             // `ProfileHeaderView.setRedacted`), and the gallery pages shimmer
@@ -1252,11 +1325,16 @@ final class ProfileViewController: UIViewController {
             alongsideTransition { $0.applyNavigationState() }
             // Content first — the labels adopt their text while still
             // invisible under the bones — then the alpha-only reveal.
-            headerView.configure(with: model)
-            headerView.setRedacted(false, animated: view.window != nil)
+            applySwitchable(on: headerView) {
+                self.headerView.configure(with: model)
+                self.headerView.setRedacted(false, animated: self.view.window != nil)
+            }
+            endProfileSwitchTransition()
 
         case .failed(let message):
             refreshControl.endRefreshing()
+            // Never leave the previous profile held over an error.
+            endProfileSwitchTransition()
             scrollView.isHidden = true
             skeletonViewportFill?.isActive = false
             headerView.setRedacted(false)
