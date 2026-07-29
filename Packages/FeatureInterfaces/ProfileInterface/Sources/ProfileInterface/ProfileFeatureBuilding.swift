@@ -72,6 +72,12 @@ public protocol ProfileFeatureBuilding {
     /// (the Profile tab's icon). Best-effort: `nil` when the viewer has no
     /// avatar or it can't be fetched; callers render a placeholder glyph.
     func viewerAvatarImage() async -> UIImage?
+
+    /// The reusable profile switcher. The shell holds one for the Profile tab's
+    /// long-press menu; the profile header builds its own. Nil when
+    /// multi-profile switching isn't available. Call `reload()` up front so
+    /// `makeMenu()` is synchronous when the menu is requested.
+    func makeProfileSwitcher() -> ProfileSwitcherPresenting?
 }
 
 public extension ProfileFeatureBuilding {

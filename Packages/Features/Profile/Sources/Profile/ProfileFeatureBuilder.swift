@@ -75,6 +75,10 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         }
     }
 
+    public func makeProfileSwitcher() -> ProfileSwitcherPresenting? {
+        makeSwitcherFactory()
+    }
+
     public func makeCurrentUserProfileViewController(
         onLogout: (() -> Void)?,
         identityStub: ProfileIdentityStub?,

@@ -192,18 +192,24 @@ final class ProfileViewController: UIViewController {
         return container
     }()
 
-    /// One glass capsule around one bare control, inset so the content clears
-    /// the corner curve. `isInteractive` is what gives the system's press
-    /// response — the same reason `InboxCategoryBar` sets it rather than
-    /// animating a highlight by hand.
+    /// One glass capsule around one bare control. `isInteractive` is what gives
+    /// the system's press response — the same reason `InboxCategoryBar` sets it
+    /// rather than animating a highlight by hand.
+    ///
+    /// The corner shape is `cornerConfiguration`, NOT `clipsToBounds` plus a
+    /// layer radius. Those are not equivalent under a context menu: the source
+    /// menu button presents a `UIMenu`, and UIKit morphs a portal of this view
+    /// out and back for that. A layer-masked radius is not part of what it
+    /// interpolates, so the capsule dismissed as a hard SQUARE for a frame
+    /// before snapping back to a bubble. `cornerConfiguration` is a property
+    /// UIKit owns and animates with the view, so the shape survives the morph —
+    /// the same reason `ToastView` and `ChatInputBar` state it this way.
     private static func glassCapsule(around content: UIView) -> UIVisualEffectView {
         let effect = UIGlassEffect()
         effect.isInteractive = true
         let host = UIVisualEffectView(effect: effect)
         host.translatesAutoresizingMaskIntoConstraints = false
-        host.clipsToBounds = true
-        host.layer.cornerRadius = Metrics.inlineTrayHeight / 2
-        host.layer.cornerCurve = .continuous
+        host.cornerConfiguration = .capsule()
         content.translatesAutoresizingMaskIntoConstraints = false
         host.contentView.addSubview(content)
         NSLayoutConstraint.activate([
