@@ -55,11 +55,21 @@ public protocol ZoomTransitionSource: AnyObject {
     /// or re-point at what the destination ended on. Called before the landing
     /// rect is read. Defaults to nothing — a map pin is wherever the map left it.
     func zoomSourceWillStageDismissal()
+
+    /// Takes the flight card's live media view at LANDING, so this side is
+    /// already rendering before the card is removed.
+    ///
+    /// Without it the card disappears and the target starts its own player,
+    /// whose fresh layer is blank for ~100ms — the flash at the END of the
+    /// flight. The view travels source -> card -> destination (and back on a
+    /// dismissal) and is never re-created, so there is nothing to wait for.
+    func zoomAdoptLiveMediaView(_ view: UIView)
 }
 
 public extension ZoomTransitionSource {
     var zoomPresenterDepthView: UIView? { nil }
     func zoomSourceWillStageDismissal() {}
+    func zoomAdoptLiveMediaView(_ view: UIView) {}
 }
 
 @MainActor
@@ -128,6 +138,15 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// dismissal, where the destination stays on screen and must look untouched.
     func zoomReclaimLiveMediaView(_ view: UIView)
 
+    /// Takes the flight card's live media view at LANDING, so this side is
+    /// already rendering before the card is removed.
+    ///
+    /// Without it the card disappears and the target starts its own player,
+    /// whose fresh layer is blank for ~100ms — the flash at the END of the
+    /// flight. The view travels source -> card -> destination (and back on a
+    /// dismissal) and is never re-created, so there is nothing to wait for.
+    func zoomAdoptLiveMediaView(_ view: UIView)
+
     /// Attaches the destination's live media player — if its active page is
     /// playing one — onto `surface` as an additional render layer, so a
     /// dismissal flight carries the live video rather than a frozen cover.
@@ -149,6 +168,7 @@ public extension ZoomTransitionDestination {
     func zoomMirrorLiveMedia(onto surface: UIView) -> Bool { false }
     func zoomDonateLiveMediaView() -> UIView? { nil }
     func zoomReclaimLiveMediaView(_ view: UIView) {}
+    func zoomAdoptLiveMediaView(_ view: UIView) {}
     func zoomTransitionWillBegin() {}
     @discardableResult
     func zoomParkLiveMediaForHandoff() -> Bool { false }

@@ -136,6 +136,14 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                 scaleX: ZoomFlight.presenterDepthScale, y: ZoomFlight.presenterDepthScale
             )
         } completion: { _ in
+            // Hand the live surface to the page BEFORE revealing it. The page
+            // has no player of its own (it deferred for the flight), so
+            // revealing first would show a blank surface until its own layer
+            // rendered — the flash at the END of the flight. Passing the view
+            // on means the page is already displaying the frame the card was.
+            if let surface = flight.card.zoomLiveMediaSurface {
+                self.destination?.zoomAdoptLiveMediaView(surface)
+            }
             self.destination?.setZoomContentHidden(false)
             flight.card.removeFromSuperview()
             flight.shadow.removeFromSuperview()
@@ -235,6 +243,12 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             // there would steal it back and restart the video at zero.
             if cancelled, let surface = flight.card.zoomLiveMediaSurface {
                 self.destination?.zoomReclaimLiveMediaView(surface)
+            }
+            // Same handshake in reverse: the landing tile takes the surface
+            // the card was flying, so it renders immediately instead of
+            // starting a fresh layer that is blank for ~100ms.
+            if !cancelled, let surface = flight.card.zoomLiveMediaSurface {
+                self.source.zoomAdoptLiveMediaView(surface)
             }
             flight.card.removeFromSuperview()
             flight.shadow.removeFromSuperview()

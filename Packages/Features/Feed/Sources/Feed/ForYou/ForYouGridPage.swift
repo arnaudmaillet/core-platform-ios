@@ -235,6 +235,19 @@ final class ForYouGridPage: UIView {
         playback?.donateLiveSurface(of: postID)
     }
 
+    /// Installs the flight card's live surface on the landing tile, so it is
+    /// rendering before the card is removed.
+    func adoptLivePlayback(_ view: VideoRenderView, for postID: PostID) {
+        guard let playback,
+              let index = posts.firstIndex(where: { $0.id == postID }),
+              let url = posts[index].videoURL,
+              let cell = collectionView.cellForItem(
+                  at: IndexPath(item: index, section: 0)
+              ) as? PostGridTileCell
+        else { return }
+        playback.adoptLiveSurface(view, for: postID, url: url, cell: cell)
+    }
+
     /// The destination never adopted the parked player — a cancelled flight, or
     /// a plain push. Retires it rather than leaving it decoding unseen.
     func discardPlaybackHandoff() {

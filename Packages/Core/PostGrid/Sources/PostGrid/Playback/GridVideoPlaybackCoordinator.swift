@@ -191,6 +191,21 @@ public final class GridVideoPlaybackCoordinator {
         return parked
     }
 
+    /// Installs the flight card's live surface on the landing tile and claims
+    /// the player parked behind it, so the tile keeps rendering the frame the
+    /// card was showing.
+    public func adoptLiveSurface(_ view: VideoRenderView, for id: PostID, url: URL, cell: PostGridTileCell) {
+        cell.adoptVideoRenderView(view)
+        cell.beginVideoPreview()
+        guard pool.unparkPlayback(to: view, mediaURL: url) else { return }
+        pool.setPeakBitRate(Self.tileBitRateCap, in: view)
+        playing[id] = cell
+        cell.onReuse = { [weak self] in
+            guard let self, let cell = playing[id] else { return }
+            stop(id: id, cell: cell)
+        }
+    }
+
     /// Retires a parked player nobody adopted — a cancelled flight, or a
     /// destination that never played it.
     ///

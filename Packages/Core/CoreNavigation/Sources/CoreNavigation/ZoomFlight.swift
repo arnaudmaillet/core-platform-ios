@@ -137,7 +137,7 @@ struct ZoomFlight {
         shadow.frame = CGRect(origin: landing.origin, size: shadow.frame.size)
         shadow.alpha = 1
         let center = CGPoint(x: landing.width / 2, y: landing.height / 2)
-        if let surface = card.zoomLiveMediaSurface {
+        if let surface = card.zoomLiveMediaSurface, !card.zoomLiveMediaTracksCardBounds {
             let scale = Self.liveMediaScale(covering: landing.size, surface: pageFrame.size)
             surface.transform = CGAffineTransform(scaleX: scale, y: scale)
             surface.center = center
@@ -160,7 +160,7 @@ struct ZoomFlight {
         card.zoomRestingChrome?.alpha = 0
         shadow.alpha = 0
         let center = CGPoint(x: pageFrame.width / 2, y: pageFrame.height / 2)
-        if let surface = card.zoomLiveMediaSurface {
+        if let surface = card.zoomLiveMediaSurface, !card.zoomLiveMediaTracksCardBounds {
             surface.transform = .identity
             surface.center = center
         }
@@ -228,6 +228,7 @@ struct ZoomFlight {
         )
         let center = CGPoint(x: size.width / 2, y: size.height / 2)
         if let surface = card.zoomLiveMediaSurface {
+            guard !card.zoomLiveMediaTracksCardBounds else { return }
             let scale = Self.liveMediaScale(covering: size, surface: pageFrame.size)
             surface.transform = CGAffineTransform(scaleX: scale, y: scale)
             surface.center = center

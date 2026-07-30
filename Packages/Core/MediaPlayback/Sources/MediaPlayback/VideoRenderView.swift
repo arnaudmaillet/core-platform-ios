@@ -59,7 +59,28 @@ public final class VideoRenderView: UIView {
 
     // MARK: - Controller seam
 
-    func attach(_ player: AVPlayer) { playerLayer.player = player }
+    /// Releases this surface when a host swaps it out for a donated one. The
+    /// controller keeps no loan for a view that is being discarded, so this
+    /// only has to stop it rendering.
+    public func detachForReplacement() {
+        playerLayer.player = nil
+    }
+
+    /// The player currently bound to this layer, for callers that must avoid
+    /// re-assigning the same one — see `attach`.
+    var attachedPlayer: AVPlayer? { playerLayer.player }
+
+    /// Binds `player`, skipping the assignment when it is already bound.
+    ///
+    /// Re-assigning an identical player RESETS the layer: `isReadyForDisplay`
+    /// drops back to false and the surface is blank until it decodes again —
+    /// measured at 150ms, landing exactly on the flight's completion frame.
+    /// That was the flash at the END of the zoom once the surface itself was
+    /// being handed along instead of re-created.
+    func attach(_ player: AVPlayer) {
+        guard playerLayer.player !== player else { return }
+        playerLayer.player = player
+    }
     func detach() {
         playerLayer.player = nil
         // No player → nothing to display → the poster comes back.

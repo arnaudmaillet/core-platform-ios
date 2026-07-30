@@ -189,6 +189,25 @@ public final class PostGridTileCell: UICollectionViewCell {
     /// The video surface if one was ever built, else nil — never allocates.
     public private(set) var loadedVideoRenderView: VideoRenderView?
 
+    /// Installs a flight card's live surface as this tile's own, at landing.
+    ///
+    /// The view arrives already rendering, so the tile has nothing to wait for
+    /// — the alternative is starting a fresh layer that is blank for ~100ms
+    /// just as the card is removed, which is the flash at the end of a
+    /// dismissal.
+    public func adoptVideoRenderView(_ view: VideoRenderView) {
+        if let existing = loadedVideoRenderView, existing !== view {
+            existing.detachForReplacement()
+            existing.removeFromSuperview()
+        }
+        view.transform = .identity
+        view.frame = contentView.bounds
+        view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.isHidden = false
+        contentView.insertSubview(view, aboveSubview: imageView)
+        loadedVideoRenderView = view
+    }
+
     /// Gives up the live surface so a hero flight can fly the *same* layer.
     ///
     /// Mirroring — attaching the player to a second `AVPlayerLayer` — cannot be

@@ -610,6 +610,19 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         return view
     }
 
+    /// Installs the flight card's live surface as this page's own, at landing.
+    ///
+    /// The view arrives already rendering the frame the card was showing, so
+    /// the page has nothing to wait for. The parked player is claimed here too,
+    /// which is what makes the deferred start unnecessary — there is no
+    /// separate `play` to blank the screen.
+    func adoptLiveRenderView(_ view: VideoRenderView) {
+        defersPlaybackForFlight = false
+        mediaCard.restoreRenderView(view)
+        guard let url = mediaURL, let videoPlayback else { return }
+        videoPlayback.unparkPlayback(to: view, mediaURL: url)
+    }
+
     /// Puts a donated surface back and un-parks its player — the abandoned
     /// dismissal. No-op when the park was already claimed.
     func reclaimDonatedPlayback(_ view: VideoRenderView) {

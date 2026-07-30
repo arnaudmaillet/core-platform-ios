@@ -100,6 +100,13 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         return card
     }
 
+    /// Takes the card's live surface at landing, so the tile renders the frame
+    /// the card was showing instead of starting a blank layer.
+    func zoomAdoptLiveMediaView(_ view: UIView) {
+        guard let view = view as? VideoRenderView else { return }
+        page?.adoptLivePlayback(view, for: anchorID)
+    }
+
     func setZoomSourceHidden(_ hidden: Bool) {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {

@@ -186,11 +186,22 @@ extension PostGridFlightCard: ZoomFlightCard {
         layer.cornerRadius = radius
     }
 
-    /// An `AVPlayerLayer` whose bounds animate doesn't track smoothly, so the
-    /// surface is laid out once at page size and driven by a scale transform.
+    /// The surface fills the card and resizes with it, so `resizeAspectFill`
+    /// recomputes the crop on every frame of the morph.
+    ///
+    /// This replaces a page-sized surface driven by a uniform scale. That
+    /// approach renders the PAGE's crop no matter what shape the card currently
+    /// is: against a 402x874 page, a 2:1 landscape brick showed only 22.9% of
+    /// the surface vertically, so takeoff jumped from the tile's wide
+    /// aspect-fill to a thin band of a page-shaped video. A 1:2 portrait brick
+    /// showed 92.3% and looked fine — which is why the jump read as
+    /// landscape-only.
+    var zoomLiveMediaTracksCardBounds: Bool { true }
+
     func prepareZoomLiveMediaForFlight(destinationSize: CGSize) {
-        videoRenderView.autoresizingMask = []
-        videoRenderView.bounds = CGRect(origin: .zero, size: destinationSize)
+        videoRenderView.transform = .identity
+        videoRenderView.frame = bounds
+        videoRenderView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     }
 
     // `applyZoomRestingShadow` is left at its default no-op: mosaic bricks rest

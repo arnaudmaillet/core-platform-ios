@@ -1406,6 +1406,14 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         return donated
     }
 
+    /// Takes the card's live surface at landing, so the page renders the frame
+    /// the card was showing rather than starting a layer of its own.
+    public func zoomAdoptLiveMediaView(_ view: UIView) {
+        guard let view = view as? VideoRenderView else { return }
+        donatedLiveView = nil
+        activeSnapCell?.adoptLiveRenderView(view)
+    }
+
     /// Puts a donated surface back — the abandoned grab, where this page stays
     /// on screen and has to look untouched.
     public func zoomReclaimLiveMediaView(_ view: UIView) {

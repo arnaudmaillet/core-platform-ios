@@ -24,7 +24,7 @@ final class SnapMediaCardView: UIView {
     /// The video playback surface — the caller drives its external
     /// `VideoPlaybackController` into this (playback ownership stays out
     /// of the card by construction).
-    let renderView = VideoRenderView()
+    private(set) var renderView = VideoRenderView()
 
     /// One center-crop mask per surface (a view masks only one other view);
     /// attached lazily on the first dock, animated full-bounds ↔ centered
@@ -58,7 +58,17 @@ final class SnapMediaCardView: UIView {
     /// has to re-pin rather than just re-add. Ordering matters as much: it goes
     /// back above the photo surface, where it started.
     func restoreRenderView(_ view: VideoRenderView) {
-        guard view === renderView, view.superview !== self else { return }
+        guard view.superview !== self else { return }
+        // A LANDING hands over the other side's surface, not the one this card
+        // started with — the view travels tile -> flight card -> page (and back
+        // on a dismissal) so the layer is never re-created. Adopt it as this
+        // card's own and drop the surface it replaces.
+        if view !== renderView {
+            renderView.detachForReplacement()
+            renderView.removeFromSuperview()
+            renderView = view
+        }
+        view.transform = .identity
         insertSubview(view, aboveSubview: imageView)
         view.pin(to: self)
     }

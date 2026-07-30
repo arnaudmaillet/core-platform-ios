@@ -50,6 +50,22 @@ public protocol ZoomFlightCard: UIView {
     /// recognise.
     func adoptZoomLiveMediaView(_ view: UIView)
 
+    /// When true the card sizes its own live surface to its bounds, and the
+    /// flight leaves the surface's transform alone.
+    ///
+    /// The alternative — a surface laid out at PAGE size and driven by a
+    /// uniform scale — always renders the page's crop, whatever shape the card
+    /// currently is. Measured against a 402x874 page: a 2:1 landscape brick
+    /// shows only 22.9% of that surface vertically, so takeoff jumps from the
+    /// tile's wide aspect-fill to a thin band of a page-shaped video. A 1:2
+    /// portrait brick shows 92.3% and looks fine, which is exactly why the
+    /// artifact reads as "landscape only".
+    ///
+    /// Tracking the card's bounds lets `resizeAspectFill` recompute the crop at
+    /// every instant, so the morph is continuous at any aspect. Default false
+    /// keeps the uniform-scale behaviour for cards that rely on it.
+    var zoomLiveMediaTracksCardBounds: Bool { get }
+
     /// Rounds the card and any furniture that must round with it. Animatable:
     /// called inside an animation block, it sweeps.
     func setZoomCornerRadius(_ radius: CGFloat)
@@ -72,6 +88,7 @@ public extension ZoomFlightCard {
     var zoomLiveMediaSurface: UIView? { nil }
     func adoptZoomLiveMedia(_ mirror: (UIView) -> Bool) {}
     func adoptZoomLiveMediaView(_ view: UIView) {}
+    var zoomLiveMediaTracksCardBounds: Bool { false }
     func prepareZoomLiveMediaForFlight(destinationSize: CGSize) {}
     func applyZoomRestingShadow(to layer: CALayer) {}
 }
