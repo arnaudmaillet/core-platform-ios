@@ -10,6 +10,21 @@ import UIKit
 /// a dark "double bubble". Outside the toolbar there is no such capsule, and
 /// the items render bare (verified: flat text on the background), so each
 /// gets exactly ONE `UIGlassEffect` host. One material, never two.
+/// A control that can be told to re-assert its appearance after a transition.
+///
+/// Interactive transitions rasterise and re-parent the views they carry, and
+/// glass-hosted controls do not always come back whole: the observed failure is a
+/// segment row whose capsule returns at full width with only the SELECTED title
+/// drawn, the other two simply absent. Nothing in this app's own code clears
+/// them, so the repair cannot be "stop doing that" — it has to be "rebuild the
+/// appearance once the transition is over", which is what this is for.
+@MainActor
+public protocol TransitionRestorable {
+    /// Re-assert visibility, geometry and content. Must be idempotent and cheap:
+    /// it runs on every transition completion, including ones that were fine.
+    func restoreAfterTransition()
+}
+
 public enum GlassCapsule {
     /// `isInteractive` is what gives the system's press response — the same
     /// reason `InboxCategoryBar` sets it rather than animating a highlight by
@@ -66,11 +81,16 @@ public final class InlineFilterTrayView: UIView {
     /// as separate objects rather than one stack.
     public nonisolated static let spacingBelow: CGFloat = 8
 
+    private let contents: [UIView]
+    private var capsules: [UIVisualEffectView] = []
+
     public init(leading: UIView, trailing: UIView) {
+        contents = [leading, trailing]
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         let leadingCapsule = GlassCapsule.wrap(leading)
         let trailingCapsule = GlassCapsule.wrap(trailing)
+        capsules = [leadingCapsule, trailingCapsule]
         addSubview(leadingCapsule)
         addSubview(trailingCapsule)
         NSLayoutConstraint.activate([
@@ -89,4 +109,41 @@ public final class InlineFilterTrayView: UIView {
 
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+}
+
+// MARK: - TransitionRestorable
+
+extension InlineFilterTrayView: TransitionRestorable {
+    /// Rebuilds the tray's appearance from the top down after a transition.
+    ///
+    /// Three layers each get their own treatment because each can be left in a
+    /// different broken state: the tray itself, the two glass capsules, and the
+    /// bare controls inside them.
+    ///
+    /// The capsules also have their `clipsToBounds` re-cleared. They are shaped
+    /// with `cornerConfiguration` precisely so nothing has to clip — a masked
+    /// radius does not survive a `UIMenu`'s portal morph — so a capsule that
+    /// comes back clipping is a leak, and a clipping capsule is exactly what cuts
+    /// the outer segments off.
+    public func restoreAfterTransition() {
+        alpha = 1
+        isHidden = false
+        transform = .identity
+        for capsule in capsules {
+            capsule.alpha = 1
+            capsule.isHidden = false
+            capsule.transform = .identity
+            capsule.clipsToBounds = false
+            capsule.contentView.alpha = 1
+            capsule.contentView.isHidden = false
+        }
+        for content in contents {
+            content.alpha = 1
+            content.isHidden = false
+            content.transform = .identity
+            (content as? TransitionRestorable)?.restoreAfterTransition()
+        }
+        setNeedsLayout()
+        layoutIfNeeded()
+    }
 }

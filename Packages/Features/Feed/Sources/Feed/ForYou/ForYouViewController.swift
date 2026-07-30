@@ -255,6 +255,7 @@ final class ForYouViewController: UIViewController {
             // Idempotent close-out: the state and the alpha are already correct
             // by now, this just guarantees it if a leg was skipped.
             self?.showTabBar(alpha: 1)
+            self?.restoreTrayAfterTransition()
             #if DEBUG
             self?.debugAuditTray("returned")
             self?.debugAdvanceGrabCycleIfNeeded()
@@ -265,6 +266,7 @@ final class ForYouViewController: UIViewController {
             // the restored page by now, so nothing renders the change.
             self?.tabBarController?.setTabBarHidden(true, animated: false)
             self?.tabBarController?.tabBar.alpha = 1
+            self?.restoreTrayAfterTransition()
             #if DEBUG
             self?.debugAuditTray("cancelled")
             #endif
@@ -328,6 +330,17 @@ final class ForYouViewController: UIViewController {
     /// nothing left to correct at teardown. The tray is then immune to the
     /// transition by construction rather than by having its own animation
     /// cancelled.
+    /// Rebuilds the tray's appearance after any transition ends.
+    ///
+    /// Called on a completed hero return, a cancelled grab, and every appearance
+    /// — all three, because the failure it repairs has been seen after an
+    /// interactive dismissal and a cancelled grab reaches none of the completion
+    /// callbacks. It is idempotent and costs a layout pass, so running it when
+    /// nothing was wrong is not worth guarding against.
+    private func restoreTrayAfterTransition() {
+        (trayView as? TransitionRestorable)?.restoreAfterTransition()
+    }
+
     /// Points the segment row at the view model's format, without echoing the
     /// change back out as a user selection.
     private func syncFormatRowSelection() {
@@ -354,6 +367,7 @@ final class ForYouViewController: UIViewController {
         // view model on every appearance makes the model the single authority and
         // costs nothing when they already agree.
         syncFormatRowSelection()
+        restoreTrayAfterTransition()
         // Coming back from the feed: this screen owns the bottom again.
         guard navigationController?.topViewController === self else { return }
         guard activeTransition != nil else {
@@ -460,6 +474,15 @@ final class ForYouViewController: UIViewController {
             v.subviews.forEach(collectLabels)
         }
         collectLabels(trayView)
+        // A clipping ancestor is exactly what would cut the outer segments off,
+        // and none of them has any business clipping: the capsules are shaped
+        // with `cornerConfiguration` precisely so they never need to.
+        var node: UIView? = trayView
+        while let current = node, current !== view {
+            if current.clipsToBounds { offenders.append("\(type(of: current)) clipsToBounds") }
+            if current.layer.mask != nil { offenders.append("\(type(of: current)) masked") }
+            node = current.superview
+        }
         if labels.count != 3 { offenders.append("label count \(labels.count) != 3") }
         for expected in ["Activity", "Gallery", "Short"] where !labels.contains(where: { $0.hasPrefix(expected) }) {
             offenders.append("missing '\(expected)'")

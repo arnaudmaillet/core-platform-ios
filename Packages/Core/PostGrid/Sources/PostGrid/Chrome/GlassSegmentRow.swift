@@ -19,7 +19,7 @@ import UIKit
 ///
 /// Outside a bar there is no such capsule and the row renders bare — that host
 /// must supply exactly one, via `GlassCapsule.wrap(_:)`.
-public final class GlassSegmentRow: UIView {
+public final class GlassSegmentRow: UIView, TransitionRestorable {
     public enum Segment {
         case title(String)
         case symbol(name: String, accessibilityLabel: String)
@@ -155,6 +155,33 @@ public final class GlassSegmentRow: UIView {
         if notify, changed { onSelect?(index) }
     }
 
+    /// Rebuilds every segment after a transition.
+    ///
+    /// The failure this exists for: after an interactive grab dismissal the
+    /// capsule returns at full width with only the SELECTED title drawn and the
+    /// other two gone. Nothing in this codebase clears them, so the cause is in
+    /// how the transition rasterises and re-parents the glass-hosted row — which
+    /// makes "rebuild it afterwards" the honest repair rather than "stop clearing
+    /// it". `applySelection` is the important half: it re-creates all three
+    /// `attributedTitle`s from scratch, so a title that was dropped comes back
+    /// whether it was the alpha, the colour, or the string itself that went.
+    public func restoreAfterTransition() {
+        for button in buttons {
+            button.isHidden = false
+            button.alpha = 1
+            button.transform = .identity
+            button.titleLabel?.isHidden = false
+            button.titleLabel?.alpha = 1
+        }
+        row.isHidden = false
+        row.alpha = 1
+        row.transform = .identity
+        resizeTitles()
+        applySelection()
+        setNeedsLayout()
+        layoutIfNeeded()
+    }
+
     private func applySelection() {
         for (index, button) in buttons.enumerated() {
             let isSelected = index == selectedIndex
@@ -205,7 +232,7 @@ public final class GlassSegmentRow: UIView {
 /// toolbar's visual provider wraps the item in the system's Liquid Glass
 /// capsule, and a square item's capsule IS a circle. A `UIGlassEffect` here
 /// renders a second lens inside that capsule — the dark "double bubble" ring.
-public final class GlassMenuButton: UIView {
+public final class GlassMenuButton: UIView, TransitionRestorable {
     public let button = UIButton(type: .system)
     /// The bubble's diameter: fixed at init from the LARGEST glyph plus the
     /// tray's 12pt breathing room per side — the same vertical rhythm as
@@ -271,6 +298,21 @@ public final class GlassMenuButton: UIView {
 
     override public var intrinsicContentSize: CGSize {
         CGSize(width: diameter, height: diameter)
+    }
+
+    /// Same contract as the segment row's — see `GlassSegmentRow`. The bubble is
+    /// one button, so there is only its own visibility and its glyph to reassert.
+    public func restoreAfterTransition() {
+        isHidden = false
+        alpha = 1
+        transform = .identity
+        button.isHidden = false
+        button.alpha = 1
+        button.transform = .identity
+        button.imageView?.isHidden = false
+        button.imageView?.alpha = 1
+        setNeedsLayout()
+        layoutIfNeeded()
     }
 }
 
