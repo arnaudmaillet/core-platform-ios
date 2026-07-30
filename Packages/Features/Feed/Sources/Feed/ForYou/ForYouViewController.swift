@@ -214,23 +214,11 @@ final class ForYouViewController: UIViewController {
         let tapped = posts[index]
         let ids = posts[index...].prefix(Self.seedWindow).map(\.id)
 
-        // Hand the tile's running player over BEFORE the feed exists: the feed's
-        // first active cell adopts it by playing the same URL, so the page opens
-        // on the frame the tile was showing instead of restarting at 0:00 — and
-        // because the page plays uncapped, that same adoption is what lifts the
-        // tile's bit-rate cap and lets ABR climb the ladder.
-        let handedOff = pager.page(for: format)?.parkPlaybackForHandoff(of: tapped.id) ?? false
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-grid-playback-log") {
-            print("[grid-playback] tap \(tapped.id.rawValue) handoff=\(handedOff)")
-        }
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-            print(String(format: "[zoom-live] %.3f PARKED handoff=%@",
-                         CACurrentMediaTime(), handedOff ? "true" : "false"))
-        }
-        #endif
         // Everything else stops: the grid is about to be covered, and its slots
-        // are the ones the feed needs.
+        // are the ones the feed needs. The tapped tile keeps playing — its
+        // player is what the flight card will mirror, and the handoff happens
+        // inside `makeZoomFlightCard` so that mirroring strictly precedes
+        // parking.
         pager.setAutoplayActive(false, keeping: tapped.id)
         let feed = makeSnapFeed(Array(ids))
 
@@ -251,8 +239,6 @@ final class ForYouViewController: UIViewController {
             navigationController.pushViewController(feed, animated: true)
             return
         }
-        _ = handedOff // claimed by the feed as it activates; swept on return
-
         let source = ForYouGridZoomSource(
             page: page,
             tappedID: tapped.id,
@@ -260,7 +246,19 @@ final class ForYouViewController: UIViewController {
             // and never learns what a feed is.
             activePostID: { [weak feed] in (feed as? SnapFeedViewController)?.activePostID },
             // The gallery recedes; the tray and the title stay grounded.
-            depthView: pager
+            depthView: pager,
+            // Mirror-then-park, run at card-build time so the card is live from
+            // its first frame.
+            mirrorLive: { [weak page] surface in
+                let handed = page?.handOffLivePlayback(of: tapped.id, to: surface) ?? false
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                    print(String(format: "[zoom-live] %.3f source mirror+park -> %@",
+                                 CACurrentMediaTime(), handed ? "true" : "false"))
+                }
+                #endif
+                return handed
+            }
         )
         let transition = ZoomTransitionController(source: source, destination: destination)
         activeTransition = transition
@@ -278,6 +276,10 @@ final class ForYouViewController: UIViewController {
             // by now, this just guarantees it if a leg was skipped.
             self?.showTabBar(alpha: 1)
             self?.restoreTrayAfterTransition()
+            // The landing tile has had its chance to adopt the parked player by
+            // now (`setHeroHidden(false)` reconciles). Anything still parked
+            // was never claimed.
+            self?.pager.discardPlaybackHandoff()
             #if DEBUG
             self?.debugAuditTray("returned")
             self?.debugAdvanceGrabCycleIfNeeded()
@@ -413,11 +415,16 @@ final class ForYouViewController: UIViewController {
         // before the topViewController guard below: a tab switch back lands
         // here too, and autoplay should resume on either path.
         //
-        // The sweep first: a player parked for a handoff the feed never took
-        // (a plain push, a post that turned out not to be video) would sit
-        // decoding with nothing on screen. A no-op once the feed adopted it,
-        // which is the normal case.
-        pager.discardPlaybackHandoff()
+        // The sweep: a player parked for a handoff nobody took (a plain push,
+        // a post that turned out not to be video) would sit decoding with
+        // nothing on screen.
+        //
+        // Skipped while a transition is live, because a DISMISSAL parks
+        // deliberately — the feed hands its player back for the landing tile to
+        // adopt — and sweeping here would destroy exactly the thing that keeps
+        // the return leg continuous. `onSourceReturned` sweeps whatever is left
+        // once the flight is over.
+        if activeTransition == nil { pager.discardPlaybackHandoff() }
         pager.setAutoplayActive(true)
         // Coming back from the feed: this screen owns the bottom again.
         guard navigationController?.topViewController === self else { return }

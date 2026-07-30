@@ -547,11 +547,51 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         switch mediaKind {
         case .video:
             guard let url = mediaURL, let videoPlayback else { return }
+            // A hero card may be flying this post's player right now. Starting
+            // here would attach a NEWER layer to the same player and blank the
+            // card mid-flight, so the start waits for the flight to land — see
+            // `startDeferredPlayback`.
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                print(String(format: "[zoom-live] %.3f cell activate defers=%@",
+                             CACurrentMediaTime(), defersPlaybackForFlight ? "true" : "false"))
+            }
+            #endif
+            guard !defersPlaybackForFlight else {
+                hasDeferredPlayback = true
+                return
+            }
             let view = mediaCard.renderView
             Task { await videoPlayback.play(url, in: view) }
         case .image:
             startKenBurns()
         }
+    }
+
+    /// Set while a presenting hero flight is staging, so this page's first
+    /// activation does not steal the render slot from the flying card.
+    var defersPlaybackForFlight = false
+    private var hasDeferredPlayback = false
+
+    /// Starts the playback that activation held back, once the flight is over.
+    /// The pool hands back the player the card was flying — same item, same
+    /// playhead — so the page continues rather than restarting.
+    func startDeferredPlayback() {
+        defersPlaybackForFlight = false
+        guard hasDeferredPlayback, isActive, mediaKind == .video,
+              let url = mediaURL, let videoPlayback
+        else { return }
+        hasDeferredPlayback = false
+        let view = mediaCard.renderView
+        Task { await videoPlayback.play(url, in: view) }
+    }
+
+    /// Detaches this page's player and parks it for the next play of the same
+    /// asset — the grid tile a dismissal is flying home to.
+    @discardableResult
+    func parkPlayback() -> Bool {
+        guard mediaKind == .video, let videoPlayback else { return false }
+        return videoPlayback.parkPlayback(from: mediaCard.renderView)
     }
 
     // MARK: - Play/pause toggle

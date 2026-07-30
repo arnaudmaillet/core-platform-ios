@@ -174,7 +174,14 @@ public final class GridVideoPlaybackCoordinator {
 
     /// Retires a parked player nobody adopted — a cancelled flight, or a
     /// destination that never played it.
+    ///
+    /// Held off while a start is in flight, because that start is very likely
+    /// the claimant. `play` resolves asynchronously, so on a dismissal the
+    /// landing tile's start is still queued when the transition's clean-up
+    /// runs; sweeping there destroyed the very player the tile was about to
+    /// adopt, and the video restarted from zero on every return.
     public func discardHandoff() {
+        guard startTasks.isEmpty else { return }
         pool.discardParkedPlayback()
     }
 

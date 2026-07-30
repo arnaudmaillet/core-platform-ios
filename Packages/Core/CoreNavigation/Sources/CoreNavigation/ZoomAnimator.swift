@@ -184,6 +184,14 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let flight = ZoomFlight.build(
             source: source, destination: destination, sourceFrame: sourceFrame, pageFrame: pageFrame
         )
+        // The card now renders the destination's player. Hand that player over
+        // to whoever plays the same asset next — the source it is flying home
+        // to — so the landing adopts a running item instead of starting a fresh
+        // one at zero. Strictly after `build`, or the card would have nothing
+        // left to mirror.
+        if flight.card.zoomLiveMediaSurface != nil {
+            destination?.zoomParkLiveMediaForHandoff()
+        }
         container.insertSubview(flight.card, belowSubview: fromView)
         container.insertSubview(flight.shadow, belowSubview: flight.card)
         container.layoutIfNeeded()

@@ -218,16 +218,24 @@ final class ForYouGridPage: UIView {
 
     // MARK: - Hero handoff
 
-    /// Hands a playing tile's player to the full-screen page the viewer just
-    /// tapped into, so the video continues from where the tile had it rather
-    /// than restarting.
+    /// Mirrors a playing tile's player onto the flight card and then parks it.
     ///
-    /// Called BEFORE the destination is built: the destination adopts by
-    /// playing the same URL, and it plays uncapped, which is what lifts the
-    /// tile's bit-rate cap. Returns whether anything was handed over.
+    /// Order is the whole point, and it is why both steps live here rather than
+    /// at the call site. Mirroring first attaches the card's layer while the
+    /// tile still owns the player, so the card renders live from frame 0 and,
+    /// being the most recently attached layer, is the one that displays.
+    /// Parking second releases the tile without interrupting the player, so the
+    /// destination can adopt it — same item, same playhead — when the flight
+    /// lands.
+    ///
+    /// Parking first, which is what this used to do, left nothing to mirror:
+    /// the card flew a static cover for the whole 420ms zoom while the player
+    /// sat parked, and the live frame only reappeared after landing.
     @discardableResult
-    func parkPlaybackForHandoff(of postID: PostID) -> Bool {
-        playback?.parkForHandoff(postID) ?? false
+    func handOffLivePlayback(of postID: PostID, to surface: VideoRenderView) -> Bool {
+        guard let playback, playback.mirrorLivePlayback(of: postID, to: surface) else { return false }
+        playback.parkForHandoff(postID)
+        return true
     }
 
     /// The destination never adopted the parked player — a cancelled flight, or
@@ -365,6 +373,11 @@ final class ForYouGridPage: UIView {
         if let cell = cell(for: postID) {
             cell.isHidden = hidden
         }
+        // Unhiding is the end of a flight. The tile is excluded from
+        // candidates while its twin is in the air (or it would adopt the
+        // player mid-flight and blank the card), so this is the first moment
+        // it may claim the player the destination parked for it.
+        if !hidden { updateAutoplay() }
     }
 
     /// The post behind an id, for a flight card that must configure itself

@@ -57,6 +57,10 @@ final class SnapFeedViewController: UIViewController {
     private var orderedIDs: [PostID] = []
 
     private var lifecycle = SnapLifecycleDispatcher()
+    /// True between `zoomTransitionWillBegin` and `zoomTransitionDidEnd`. Cells
+    /// realized inside that window inherit the playback deferral, so a page
+    /// activating mid-flight cannot steal the render slot from the flying card.
+    private var isAwaitingZoomPresentation = false
     /// The two facts whose AND is the surface's visibility.
     private var isOnScreen = false
     private var isForeground = true
@@ -1144,6 +1148,15 @@ final class SnapFeedViewController: UIViewController {
             }
         }
         if let activate = transition.activate {
+            // The cell that will be active almost never exists yet when
+            // `zoomTransitionWillBegin` fires — it is realized by the layout
+            // pass the presentation itself triggers — so the deferral is
+            // stamped here, at the moment it is about to start playing.
+            if let snapCell = collectionView.cellForItem(
+                at: IndexPath(item: activate, section: 0)
+            ) as? SnapFeedCell {
+                snapCell.defersPlaybackForFlight = isAwaitingZoomPresentation
+            }
             lifecycleCell(at: activate)?.willBecomeActive()
             // Same settle-quantized seam that drives playback: both bar
             // surfaces (identity pill above, media attribution below) follow
@@ -1243,6 +1256,13 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // loads, which can be before the cell exists; without this net that
         // activation would be lost, since the index never changes again.
         updateActiveItem()
+        // Stamp the flight deferral BEFORE any activation on this path. There
+        // are two activation sites — the settle-quantized one in `apply` and
+        // this net for cells that did not exist at settle time — and a present
+        // leg always takes THIS one, because the cell is realized by the very
+        // layout pass the presentation triggers. Stamping only in `apply` left
+        // the flag false exactly when it mattered.
+        (cell as? SnapFeedCell)?.defersPlaybackForFlight = isAwaitingZoomPresentation
         if lifecycle.activeIndex == indexPath.item {
             (cell as? SnapCellLifecycle)?.willBecomeActive()
         }
@@ -1359,13 +1379,32 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         view.alpha = hidden ? 0 : 1
     }
 
+    /// A presenting flight is staging. The active page must not start its own
+    /// playback while the card is flying that player, so the flag is set before
+    /// this controller lays out and activates anything.
+    public func zoomTransitionWillBegin() {
+        isAwaitingZoomPresentation = true
+        activeSnapCell?.defersPlaybackForFlight = true
+    }
+
+    /// Parks the active page's player for the source it is flying home to.
+    @discardableResult
+    public func zoomParkLiveMediaForHandoff() -> Bool {
+        activeSnapCell?.parkPlayback() ?? false
+    }
+
     public func zoomTransitionDidEnd() {
         flightChrome = nil
+        isAwaitingZoomPresentation = false
         // A flight card may have mirrored the active cell's player; with the
         // card gone, the cell reclaims the render slot (only the most
         // recently attached layer of a shared player is guaranteed to
         // display). Harmless when nothing was mirrored.
         activeSnapCell?.reclaimPlayback()
+        // And the presenting leg's held-back start runs now: the card is gone,
+        // so attaching here is the hand-off rather than a theft. Adopts the
+        // parked player, so the page resumes instead of restarting.
+        activeSnapCell?.startDeferredPlayback()
     }
 
     /// The hero transition's dismiss-leg live seam: mirrors the active cell's

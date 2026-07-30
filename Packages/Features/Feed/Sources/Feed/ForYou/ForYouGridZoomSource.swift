@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import MediaPlayback
 import PostGrid
 import UIKit
 
@@ -33,16 +34,22 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// `zoomPresenterDepthView`.
     private weak var depthView: UIView?
 
+    /// Attaches the tapped tile's live player to the flight card's surface and
+    /// parks it for the destination. `nil` when the tile was not playing.
+    private let mirrorLive: ((VideoRenderView) -> Bool)?
+
     init(
         page: ForYouGridPage,
         tappedID: PostID,
         activePostID: @escaping () -> PostID?,
-        depthView: UIView?
+        depthView: UIView?,
+        mirrorLive: ((VideoRenderView) -> Bool)? = nil
     ) {
         self.page = page
         anchorID = tappedID
         self.activePostID = activePostID
         self.depthView = depthView
+        self.mirrorLive = mirrorLive
     }
 
     /// The pager, not the whole screen.
@@ -77,11 +84,22 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// preview round differently and carry different furniture).
     func makeZoomFlightCard() -> any ZoomFlightCard {
         let appearance = page?.heroAppearance(for: anchorID)
-        return PostGridFlightCard(
+        let card = PostGridFlightCard(
             post: page?.post(for: anchorID) ?? Self.placeholder(id: anchorID),
             cover: appearance?.cover,
             style: appearance?.style ?? .tile
         )
+        // An autoplaying tile hands its RUNNING player to the card, exactly as
+        // a live-previewing map pin does. Without this the card can only ask
+        // the destination, which on a present has not begun playing yet — so it
+        // flew a frozen cover for the entire zoom.
+        if let mirrorLive {
+            card.adoptZoomLiveMedia { surface in
+                guard let renderView = surface as? VideoRenderView else { return false }
+                return mirrorLive(renderView)
+            }
+        }
+        return card
     }
 
     func setZoomSourceHidden(_ hidden: Bool) {

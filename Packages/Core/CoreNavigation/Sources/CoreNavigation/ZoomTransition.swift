@@ -92,6 +92,28 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// chrome reference and any transition-scoped state.
     func zoomTransitionDidEnd()
 
+    /// A presentation is about to stage. Called before the destination is laid
+    /// out, which is the only moment early enough to matter.
+    ///
+    /// The destination must not begin rendering media of its own while a card
+    /// is flying its player: with several layers on one player, whichever
+    /// attaches last is the one that displays, so a destination that starts
+    /// playing mid-flight silently blanks the card. Implementations defer
+    /// their own playback until `zoomTransitionDidEnd`.
+    ///
+    /// Default is nothing — a destination with no media has nothing to defer.
+    func zoomTransitionWillBegin()
+
+    /// Detaches the destination's live player and parks it for whoever plays
+    /// the same asset next — the source it is flying home to. Called on the
+    /// DISMISS leg once the card has taken over rendering.
+    ///
+    /// Without this the source starts a fresh item on landing and the video
+    /// jumps back to zero exactly as the card settles. Returns whether
+    /// anything was parked. Default is "nothing to hand over".
+    @discardableResult
+    func zoomParkLiveMediaForHandoff() -> Bool
+
     /// Attaches the destination's live media player — if its active page is
     /// playing one — onto `surface` as an additional render layer, so a
     /// dismissal flight carries the live video rather than a frozen cover.
@@ -111,4 +133,7 @@ public protocol ZoomTransitionDestination: AnyObject {
 
 public extension ZoomTransitionDestination {
     func zoomMirrorLiveMedia(onto surface: UIView) -> Bool { false }
+    func zoomTransitionWillBegin() {}
+    @discardableResult
+    func zoomParkLiveMediaForHandoff() -> Bool { false }
 }

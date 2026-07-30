@@ -52,6 +52,10 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         self.destination = destination
         self.feedViewController = destination as? UIViewController
         super.init()
+        // Before the destination is pushed, and so before it lays out and
+        // activates its first page — the only point early enough for it to
+        // suppress its own playback for the duration of the flight.
+        destination.zoomTransitionWillBegin()
     }
 
     /// Installs the grab-to-dismiss gesture on the pushed feed's view. Called
