@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import DesignSystem
 import MediaCore
+import MediaPlayback
 import PostGrid
 import UIKit
 
@@ -73,13 +74,14 @@ final class ForYouViewController: UIViewController {
     init(
         viewModel: ForYouViewModel,
         imagePipeline: ImagePipeline,
+        videoPlayback: VideoPlaybackController? = nil,
         makeSnapFeed: @escaping ([PostID]) -> UIViewController,
         prewarm: @escaping ([PostID]) async -> Void
     ) {
         self.viewModel = viewModel
         self.makeSnapFeed = makeSnapFeed
         self.prewarm = prewarm
-        pager = ForYouPagerView(imagePipeline: imagePipeline)
+        pager = ForYouPagerView(imagePipeline: imagePipeline, videoPlayback: videoPlayback)
         super.init(nibName: nil, bundle: nil)
         // NOT hidesBottomBarWhenPushed: this is a tab root, and the bar is how
         // the viewer leaves it.
@@ -211,6 +213,21 @@ final class ForYouViewController: UIViewController {
         guard posts.indices.contains(index), let navigationController else { return }
         let tapped = posts[index]
         let ids = posts[index...].prefix(Self.seedWindow).map(\.id)
+
+        // Hand the tile's running player over BEFORE the feed exists: the feed's
+        // first active cell adopts it by playing the same URL, so the page opens
+        // on the frame the tile was showing instead of restarting at 0:00 — and
+        // because the page plays uncapped, that same adoption is what lifts the
+        // tile's bit-rate cap and lets ABR climb the ladder.
+        let handedOff = pager.page(for: format)?.parkPlaybackForHandoff(of: tapped.id) ?? false
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-grid-playback-log") {
+            print("[grid-playback] tap \(tapped.id.rawValue) handoff=\(handedOff)")
+        }
+        #endif
+        // Everything else stops: the grid is about to be covered, and its slots
+        // are the ones the feed needs.
+        pager.setAutoplayActive(false, keeping: tapped.id)
         let feed = makeSnapFeed(Array(ids))
 
         // The feed owns the whole screen: hide the bar with the push. Managed
@@ -230,6 +247,7 @@ final class ForYouViewController: UIViewController {
             navigationController.pushViewController(feed, animated: true)
             return
         }
+        _ = handedOff // claimed by the feed as it activates; swept on return
 
         let source = ForYouGridZoomSource(
             page: page,
@@ -368,6 +386,16 @@ final class ForYouViewController: UIViewController {
         // costs nothing when they already agree.
         syncFormatRowSelection()
         restoreTrayAfterTransition()
+        // The grid owns the screen again, so its bricks may play again. Runs
+        // before the topViewController guard below: a tab switch back lands
+        // here too, and autoplay should resume on either path.
+        //
+        // The sweep first: a player parked for a handoff the feed never took
+        // (a plain push, a post that turned out not to be video) would sit
+        // decoding with nothing on screen. A no-op once the feed adopted it,
+        // which is the normal case.
+        pager.discardPlaybackHandoff()
+        pager.setAutoplayActive(true)
         // Coming back from the feed: this screen owns the bottom again.
         guard navigationController?.topViewController === self else { return }
         guard activeTransition != nil else {

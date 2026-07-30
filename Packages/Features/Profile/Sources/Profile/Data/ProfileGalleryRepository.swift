@@ -152,6 +152,9 @@ private struct HydratedPost {
             thumbnailURL: attachment.flatMap {
                 URL(string: $0.thumbnailURL.isEmpty ? $0.cdnURL : $0.thumbnailURL)
             },
+            // The stream itself, shared with the full-screen viewer so the hero
+            // zoom keeps one item — see `GalleryPost.videoURL`.
+            videoURL: kind == .video ? attachment.flatMap { URL(string: $0.cdnURL) } : nil,
             caption: view.caption,
             publishedAtMS: view.publishedAtMs
         )

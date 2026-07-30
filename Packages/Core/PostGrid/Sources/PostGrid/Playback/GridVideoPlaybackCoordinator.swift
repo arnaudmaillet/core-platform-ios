@@ -1,0 +1,241 @@
+import CoreModels
+import MediaPlayback
+import UIKit
+
+/// Decides which visible grid tiles autoplay, and at what quality.
+///
+/// The grid analog of `MapVideoPlaybackCoordinator`, and it exists for the same
+/// reason: a mosaic can show a dozen video bricks at once, and one `AVPlayer`
+/// per brick is not affordable. At most `maxConcurrent` play, chosen by
+/// proximity to the viewport centre, through a shared pool.
+///
+/// **Where it differs from the map, and why.** A map pin plays a dedicated
+/// lightweight clip. A grid tile plays the *full stream* — the very asset the
+/// full-screen viewer will open — so that tapping a playing tile can hand the
+/// live `AVPlayerItem` to the destination and keep the playhead. Quality is
+/// therefore managed with `preferredPeakBitRate` on that one item instead of by
+/// choosing a smaller file: tiles are pinned to `tileBitRateCap` (a rung sized
+/// for a thumbnail), and the cap is lifted when a tile goes full screen.
+/// Swapping to a lighter asset would mean a new item, which resets `currentTime`
+/// to zero — the restart the hero transition exists to avoid.
+///
+/// See `dev/issues/BACKEND_MEDIA_PREVIEW_RENDITIONS.md` §0.3.
+@MainActor
+public final class GridVideoPlaybackCoordinator {
+    /// One playable tile: its post, the stream, and the cell rendering it.
+    public struct Candidate {
+        public let id: PostID
+        public let url: URL
+        public let cell: PostGridTileCell
+        /// Distance from the viewport's vertical centre, in points. Lower wins;
+        /// the caller measures it because only it knows the scroll geometry.
+        public let distanceFromCentre: CGFloat
+
+        public init(id: PostID, url: URL, cell: PostGridTileCell, distanceFromCentre: CGFloat) {
+            self.id = id
+            self.url = url
+            self.cell = cell
+            self.distanceFromCentre = distanceFromCentre
+        }
+    }
+
+    /// The rung a resting tile is held to, in bits per second.
+    ///
+    /// 600 kbps is chosen against a real ladder rather than in the abstract:
+    /// Apple's BipBop test stream rungs are 264 / 578 / 916 / 1030 / 1924 kbps,
+    /// so this admits the 640x360 rung and excludes 960x540 and everything
+    /// above. A tile is at most a third of the screen's width, so 360p is
+    /// already generous for it, and three concurrent tiles then cost roughly
+    /// one 720p stream rather than three.
+    ///
+    /// A ladder whose floor sits above this cap simply gets its lowest rung —
+    /// `preferredPeakBitRate` is a ceiling, not a filter, and AVFoundation
+    /// still plays the cheapest available variant if none fits.
+    public static let tileBitRateCap: Double = {
+        #if DEBUG
+        // `-grid-bitrate-cap <bps>` overrides the rung a resting tile is held
+        // to; `0` lifts it entirely. Exists so the cap's effect can be measured
+        // against a real ladder without a rebuild — capped and uncapped runs of
+        // the same build, same fixtures, same scroll position.
+        let arguments = ProcessInfo.processInfo.arguments
+        if let position = arguments.firstIndex(of: "-grid-bitrate-cap"),
+           position + 1 < arguments.count,
+           let override = Double(arguments[position + 1]) {
+            return override
+        }
+        #endif
+        return 600_000
+    }()
+
+    /// Lifted: the item may climb the whole ladder. What a full-screen page gets.
+    public static let uncapped: Double = 0
+
+    private let pool: VideoPlaybackController
+    private let maxConcurrent: Int
+    /// Playing posts → the cell their player is bound to.
+    private var playing: [PostID: PostGridTileCell] = [:]
+    /// Posts whose cap is currently lifted (a tile that went full screen), so a
+    /// reconcile doesn't quietly re-cap the item mid-flight.
+    private var uncappedIDs: Set<PostID> = []
+    private var isSurfaceVisible = true
+    /// In-flight `play` calls, keyed by post. Held so a stop arriving while the
+    /// URL is still resolving cancels it, rather than letting a late attach
+    /// bind a player to a tile that has already scrolled away.
+    private var startTasks: [PostID: Task<Void, Never>] = [:]
+
+    public init(pool: VideoPlaybackController, maxConcurrent: Int = 3) {
+        self.pool = pool
+        self.maxConcurrent = maxConcurrent
+    }
+
+    /// Reconciles playback against the currently visible video tiles. Stops
+    /// tiles that scrolled away or lost their slot, starts newly chosen ones.
+    /// Idempotent — safe to call on every scroll settle and every reload.
+    public func update(candidates: [Candidate]) {
+        let ranked = candidates.sorted { $0.distanceFromCentre < $1.distanceFromCentre }
+        let chosen = isSurfaceVisible ? Array(ranked.prefix(maxConcurrent)) : []
+        let chosenIDs = Set(chosen.map(\.id))
+
+        for (id, cell) in playing where !chosenIDs.contains(id) {
+            stop(id: id, cell: cell)
+        }
+        for candidate in chosen where playing[candidate.id] == nil {
+            start(candidate)
+        }
+    }
+
+    /// Stops whatever is playing in `cell` — the collection view recycled it.
+    public func stop(cell: PostGridTileCell) {
+        guard let id = playing.first(where: { $0.value === cell })?.key else { return }
+        stop(id: id, cell: cell)
+    }
+
+    /// Tab hidden, feed presented over the grid, or app backgrounded.
+    ///
+    /// `keeping` exempts one post from the sweep: the tapped tile, whose live
+    /// player the hero transition is still flying. Stopping it mid-flight is
+    /// exactly the restart the handoff exists to prevent.
+    public func setSurfaceVisible(_ visible: Bool, keeping kept: PostID? = nil) {
+        guard visible != isSurfaceVisible else { return }
+        isSurfaceVisible = visible
+        guard !visible else { return }
+        for (id, cell) in playing where id != kept {
+            stop(id: id, cell: cell)
+        }
+    }
+
+    // MARK: - Hero handoff
+
+    /// Whether `id` is playing right now — the source asks before deciding
+    /// whether a flight can carry live video at all.
+    public func isPlaying(_ id: PostID) -> Bool { playing[id] != nil }
+
+    /// Mirrors the live player of `id` onto `surface` (the flight card), so the
+    /// card carries the same item, frame-synced, rather than a frozen cover.
+    /// Returns whether there was anything to mirror.
+    public func mirrorLivePlayback(of id: PostID, to surface: VideoRenderView) -> Bool {
+        guard let cell = playing[id], let renderView = cell.loadedVideoRenderView else { return false }
+        return pool.mirror(from: renderView, to: surface)
+    }
+
+    /// Hands the tile's running player off to whatever plays the same URL next
+    /// — the full-screen page the viewer just tapped into.
+    ///
+    /// The player keeps running while parked, so the destination adopts a live
+    /// item rather than opening a second one at zero. The cap is not lifted
+    /// here: the adopting caller states its own rung when it plays, and the
+    /// full-screen page asks for uncapped, so the ladder opens up as part of the
+    /// same handoff instead of as a separate step that could disagree with it.
+    ///
+    /// Returns whether a live player was actually handed over.
+    @discardableResult
+    public func parkForHandoff(_ id: PostID) -> Bool {
+        guard let cell = playing[id], let renderView = cell.loadedVideoRenderView else { return false }
+        let parked = pool.parkPlayback(from: renderView)
+        // The tile no longer owns a player; drop the bookkeeping so a reconcile
+        // can hand it a fresh one when the viewer comes back.
+        if parked {
+            cell.endVideoPreview()
+            cell.onReuse = nil
+            playing[id] = nil
+            uncappedIDs.remove(id)
+        }
+        return parked
+    }
+
+    /// Retires a parked player nobody adopted — a cancelled flight, or a
+    /// destination that never played it.
+    public func discardHandoff() {
+        pool.discardParkedPlayback()
+    }
+
+    public func stopAll() {
+        for (id, cell) in playing { stop(id: id, cell: cell) }
+    }
+
+    // MARK: - Internals
+
+    private func start(_ candidate: Candidate) {
+        playing[candidate.id] = candidate.cell
+        candidate.cell.beginVideoPreview()
+        let renderView = candidate.cell.makeVideoRenderViewIfNeeded()
+        let id = candidate.id
+        candidate.cell.onReuse = { [weak self] in
+            guard let self, let cell = playing[id] else { return }
+            stop(id: id, cell: cell)
+        }
+        let url = candidate.url
+        // A tile that is already flying full screen keeps its lifted cap.
+        let cap = uncappedIDs.contains(id) ? Self.uncapped : Self.tileBitRateCap
+        startTasks[id] = Task { [pool] in
+            await pool.play(url, in: renderView, peakBitRate: cap)
+        }
+    }
+
+    private func stop(id: PostID, cell: PostGridTileCell) {
+        startTasks.removeValue(forKey: id)?.cancel()
+        if let renderView = cell.loadedVideoRenderView {
+            pool.stop(renderView)
+        }
+        cell.endVideoPreview()
+        cell.onReuse = nil
+        playing[id] = nil
+        uncappedIDs.remove(id)
+    }
+
+    #if DEBUG
+    /// Prints the rung each playing tile settled on. Direct evidence that the
+    /// cap bites: `preferred` is the ceiling asked for, `indicated` the variant
+    /// AVFoundation actually chose. Progressive assets report nothing — they
+    /// have no ladder to select from, so the cap is a no-op for them, which is
+    /// itself worth seeing rather than guessing at.
+    public func logPlaybackDiagnostics() {
+        guard !playing.isEmpty else {
+            print("[grid-playback] nothing playing")
+            return
+        }
+        for (id, cell) in playing.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
+            guard let renderView = cell.loadedVideoRenderView else { continue }
+            if let report = pool.debugBitRateReport(in: renderView) {
+                print(String(
+                    format: "[grid-playback] %@ preferred=%.0f indicated=%.0f observed=%.0f",
+                    id.rawValue, report.preferred, report.indicated, report.observed
+                ))
+            } else {
+                print("[grid-playback] \(id.rawValue) no access log (progressive asset)")
+            }
+        }
+    }
+
+    var playingIDs: Set<PostID> { Set(playing.keys) }
+    var uncapped: Set<PostID> { uncappedIDs }
+
+    /// Awaits every in-flight `play`, so a test can assert against attached
+    /// players without polling or sleeping.
+    func awaitPendingStarts() async {
+        let tasks = startTasks.values
+        startTasks.removeAll()
+        for task in tasks { await task.value }
+    }
+    #endif
+}

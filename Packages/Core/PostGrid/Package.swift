@@ -10,12 +10,13 @@ let package = Package(
     dependencies: [
         .package(path: "../../Kit/CoreModels"),
         .package(path: "../MediaCore"),
+        .package(path: "../MediaPlayback"),
         .package(path: "../DesignSystem")
     ],
     targets: [
         .target(
             name: "PostGrid",
-            dependencies: ["CoreModels", "MediaCore", "DesignSystem"]
+            dependencies: ["CoreModels", "MediaCore", "MediaPlayback", "DesignSystem"]
         ),
         .testTarget(name: "PostGridTests", dependencies: ["PostGrid"])
     ]

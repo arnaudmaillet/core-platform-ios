@@ -1,5 +1,6 @@
 import DesignSystem
 import MediaCore
+import MediaPlayback
 import UIKit
 
 // MARK: - Timeline row
@@ -165,6 +166,34 @@ public final class PostGridTileCell: UICollectionViewCell {
     /// note for why a hero reads this rather than the image pipeline.
     public var renderedCover: UIImage? { imageView.image }
 
+    /// The surface an autoplaying tile renders into, built on first use so a
+    /// grid of stills never allocates a player layer it will not use.
+    ///
+    /// Not a `lazy var`: the coordinator needs to ask whether a cell *could* be
+    /// playing (`loadedVideoRenderView`) without the question itself allocating
+    /// the layer, which is exactly what touching a lazy var would do.
+    public func makeVideoRenderViewIfNeeded() -> VideoRenderView {
+        if let loadedVideoRenderView { return loadedVideoRenderView }
+        let view = VideoRenderView()
+        view.isHidden = true
+        view.isUserInteractionEnabled = false
+        view.frame = contentView.bounds
+        view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        // Above the still, below the badge and counters, so the furniture keeps
+        // reading over moving video exactly as it does over a poster.
+        contentView.insertSubview(view, aboveSubview: imageView)
+        loadedVideoRenderView = view
+        return view
+    }
+
+    /// The video surface if one was ever built, else nil — never allocates.
+    public private(set) var loadedVideoRenderView: VideoRenderView?
+
+    /// Called when the collection view recycles this cell, so whoever loaned it
+    /// a player takes it back. Mirrors `MapAnnotationView.onReuse`: a recycled
+    /// cell that kept its player would render another post's video.
+    public var onReuse: (() -> Void)?
+
     private let imageView = UIImageView()
     private let playBadge = UIImageView(image: UIImage(systemName: "play.fill"))
     private static let metaFont = UIFont.postGridSystemFont(
@@ -218,9 +247,29 @@ public final class PostGridTileCell: UICollectionViewCell {
 
     override public func prepareForReuse() {
         super.prepareForReuse()
+        // Hand the player back BEFORE anything else: a recycled cell that kept
+        // its loan would show the previous post's video under the new post's
+        // still. The coordinator clears its own bookkeeping in response.
+        onReuse?()
+        onReuse = nil
+        endVideoPreview()
         loadTask?.cancel()
         loadTask = nil
         imageView.image = nil
+    }
+
+    /// Reveals the video surface once a player has been attached. The still
+    /// stays underneath as the poster, so the first frame replaces it rather
+    /// than flashing black.
+    public func beginVideoPreview() {
+        let view = makeVideoRenderViewIfNeeded()
+        view.setPoster(imageView.image)
+        view.isHidden = false
+    }
+
+    /// Back to a still tile.
+    public func endVideoPreview() {
+        loadedVideoRenderView?.isHidden = true
     }
 
     public func configure(with post: GalleryPost, imagePipeline: ImagePipeline) {

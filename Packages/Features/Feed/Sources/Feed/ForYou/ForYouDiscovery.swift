@@ -108,6 +108,9 @@ public actor ForYouRepository: ForYouProviding {
                     kind: kind,
                     isRepost: false,
                     thumbnailURL: attachment.flatMap { $0.thumbnailURL ?? $0.url },
+                    // `url` is the stream itself, so a tile and the full-screen
+                    // viewer open the same asset — see `GalleryPost.videoURL`.
+                    videoURL: kind == .video ? attachment?.url : nil,
                     caption: entry.post.caption,
                     publishedAtMS: Int64(entry.post.publishedAt.timeIntervalSince1970 * 1000),
                     reactionCount: entry.likeCount

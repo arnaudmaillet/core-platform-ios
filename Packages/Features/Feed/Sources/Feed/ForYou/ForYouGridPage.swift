@@ -1,6 +1,7 @@
 import CoreModels
 import DesignSystem
 import MediaCore
+import MediaPlayback
 import PostGrid
 import UIKit
 
@@ -30,6 +31,10 @@ final class ForYouGridPage: UIView {
     private(set) var posts: [GalleryPost] = []
 
     private let imagePipeline: ImagePipeline
+    /// Autoplay for the mosaic's video bricks. Absent on list pages — a
+    /// timeline row is a reading surface, not a viewing one — and absent
+    /// wherever the host didn't supply a player pool.
+    private let playback: GridVideoPlaybackCoordinator?
     private let style: Style
     private let collectionView: UICollectionView
     private let statusLabel = UILabel()
@@ -50,6 +55,9 @@ final class ForYouGridPage: UIView {
     /// Caught in-sim as the grid visibly rearranging just after the card set
     /// down on the right tile.
     private var isRepositioning = false
+    #if DEBUG
+    private var hasScheduledDiagnostics = false
+    #endif
 
     /// List pages show a column of placeholder cards; the mosaic shows two
     /// full 8-brick patterns — a scrolling page has a whole viewport to fill,
@@ -59,8 +67,9 @@ final class ForYouGridPage: UIView {
     /// How close to the end a scroll gets before the next page is requested.
     private static let prefetchDistance: CGFloat = 800
 
-    init(imagePipeline: ImagePipeline, style: Style) {
+    init(imagePipeline: ImagePipeline, style: Style, videoPlayback: VideoPlaybackController? = nil) {
         self.imagePipeline = imagePipeline
+        playback = style == .grid ? videoPlayback.map { GridVideoPlaybackCoordinator(pool: $0) } : nil
         self.style = style
         collectionView = UICollectionView(
             frame: .zero,
@@ -111,6 +120,98 @@ final class ForYouGridPage: UIView {
 
     func endRefreshing() {
         refreshControl.endRefreshing()
+    }
+
+    // MARK: - Autoplay
+
+    /// Minimum fraction of a tile that must be inside the inset viewport before
+    /// it may autoplay. A brick creeping in at the edge is not something the
+    /// viewer is looking at, and starting it there spends a pool slot the
+    /// centre of the screen wants.
+    private static let minimumVisibleFraction: CGFloat = 0.5
+
+    /// Reconciles autoplay against what is on screen now. Cheap and idempotent;
+    /// call it whenever the visible set or the surface's visibility can have
+    /// changed.
+    func updateAutoplay() {
+        guard let playback else { return }
+        let viewport = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
+        let centreY = viewport.midY
+        let candidates = collectionView.indexPathsForVisibleItems.compactMap {
+            indexPath -> GridVideoPlaybackCoordinator.Candidate? in
+            guard !showsSkeleton, posts.indices.contains(indexPath.item) else { return nil }
+            let post = posts[indexPath.item]
+            guard post.kind == .video, let url = post.videoURL,
+                  post.id != heroHiddenPostID, // its twin is in the air
+                  let cell = collectionView.cellForItem(at: indexPath) as? PostGridTileCell
+            else { return nil }
+
+            let frame = cell.convert(cell.bounds, to: collectionView)
+            let visible = frame.intersection(viewport)
+            guard !visible.isNull, frame.height > 0,
+                  (visible.height * visible.width) / (frame.height * frame.width)
+                      >= Self.minimumVisibleFraction
+            else { return nil }
+
+            return .init(
+                id: post.id, url: url, cell: cell,
+                distanceFromCentre: abs(frame.midY - centreY)
+            )
+        }
+        playback.update(candidates: candidates)
+    }
+
+    /// Tab left, feed presented over the grid, app backgrounded. `keeping`
+    /// exempts the post whose player a hero flight is still carrying.
+    func setAutoplayActive(_ active: Bool, keeping kept: PostID? = nil) {
+        playback?.setSurfaceVisible(active, keeping: kept)
+        if active {
+            updateAutoplay()
+            #if DEBUG
+            schedulePlaybackDiagnosticsIfNeeded()
+            #endif
+        }
+    }
+
+    #if DEBUG
+    /// `-grid-playback-log`: report which ladder rung each playing tile settled
+    /// on, once the streams have had time to choose one.
+    private func schedulePlaybackDiagnosticsIfNeeded() {
+        guard ProcessInfo.processInfo.arguments.contains("-grid-playback-log"),
+              let playback, !hasScheduledDiagnostics
+        else { return }
+        hasScheduledDiagnostics = true
+        // Sampled rather than taken once: a stream needs a few seconds to pick
+        // a rung, and the first sample often lands before content has even
+        // loaded. Three samples show the settle instead of guessing at it.
+        for delay in [8.0, 16.0, 24.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                print("[grid-playback] --- t+\(Int(delay))s ---")
+                self?.updateAutoplay()
+                playback.logPlaybackDiagnostics()
+            }
+        }
+    }
+    #endif
+
+    // MARK: - Hero handoff
+
+    /// Hands a playing tile's player to the full-screen page the viewer just
+    /// tapped into, so the video continues from where the tile had it rather
+    /// than restarting.
+    ///
+    /// Called BEFORE the destination is built: the destination adopts by
+    /// playing the same URL, and it plays uncapped, which is what lifts the
+    /// tile's bit-rate cap. Returns whether anything was handed over.
+    @discardableResult
+    func parkPlaybackForHandoff(of postID: PostID) -> Bool {
+        playback?.parkForHandoff(postID) ?? false
+    }
+
+    /// The destination never adopted the parked player — a cancelled flight, or
+    /// a plain push. Retires it rather than leaving it decoding unseen.
+    func discardPlaybackHandoff() {
+        playback?.discardHandoff()
     }
 
     // MARK: - Hero geometry
@@ -289,6 +390,9 @@ final class ForYouGridPage: UIView {
         } else {
             collectionView.reloadData()
         }
+        // New content means a new visible set. Reconcile after the reload has
+        // realized its cells, or every candidate lookup returns nil.
+        DispatchQueue.main.async { [weak self] in self?.updateAutoplay() }
     }
 }
 
@@ -349,5 +453,32 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             - (scrollView.contentOffset.y + scrollView.bounds.height)
         guard remaining < Self.prefetchDistance else { return }
         onNearEnd?()
+    }
+
+    // Autoplay reconciles when the scroll SETTLES, not on every frame: starting
+    // a stream for a brick that is about to fly past wastes a pool slot and a
+    // segment fetch. Same rule the map uses for pan.
+
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        if !decelerate { updateAutoplay() }
+    }
+
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        updateAutoplay()
+    }
+
+    func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        updateAutoplay()
+    }
+
+    /// A recycled cell hands its player back immediately rather than waiting
+    /// for the next reconcile, so it can never render the previous post.
+    func collectionView(
+        _ collectionView: UICollectionView,
+        didEndDisplaying cell: UICollectionViewCell,
+        forItemAt indexPath: IndexPath
+    ) {
+        guard let tile = cell as? PostGridTileCell else { return }
+        playback?.stop(cell: tile)
     }
 }

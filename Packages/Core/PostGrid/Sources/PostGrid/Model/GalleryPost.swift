@@ -23,6 +23,17 @@ public struct GalleryPost: Equatable, Sendable {
     /// repost of that parent — the grid's Posts/Reposts split.
     public let isRepost: Bool
     public let thumbnailURL: URL?
+    /// The playable stream for a `.video` post — an HLS manifest where the
+    /// backend serves one, else the progressive asset. `nil` for stills, and
+    /// for videos the service didn't vend a URL for.
+    ///
+    /// Deliberately the **same** URL the full-screen viewer opens, not a
+    /// lightweight preview. A tile and its full-screen destination must share
+    /// one `AVPlayerItem` for the hero zoom to keep the playhead, so quality is
+    /// moved with `preferredPeakBitRate` on that item rather than by swapping
+    /// assets. See `dev/issues/BACKEND_MEDIA_PREVIEW_RENDITIONS.md` §0.3 — this
+    /// is why the grid does not use `preview_url` while the map does.
+    public let videoURL: URL?
     public let caption: String
     public let publishedAtMS: Int64
     /// counter.v1 projections; nil when the read-model had no value (the
@@ -36,6 +47,7 @@ public struct GalleryPost: Equatable, Sendable {
         kind: Kind,
         isRepost: Bool,
         thumbnailURL: URL?,
+        videoURL: URL? = nil,
         caption: String,
         publishedAtMS: Int64,
         reactionCount: Int64? = nil,
@@ -46,6 +58,7 @@ public struct GalleryPost: Equatable, Sendable {
         self.kind = kind
         self.isRepost = isRepost
         self.thumbnailURL = thumbnailURL
+        self.videoURL = videoURL
         self.caption = caption
         self.publishedAtMS = publishedAtMS
         self.reactionCount = reactionCount
