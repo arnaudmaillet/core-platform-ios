@@ -21,6 +21,8 @@ full functionality.
 | 11 | `moderation.v1` unrouted + upstream port unknown | Profile "Report User" against the fleet | Medium |
 | 12 | No account-level block RPC; alias enumeration is client-side | Profile "Block Account & All Profiles" is best-effort | Medium |
 | 13 | Relationship lists: no privacy contract, no `RemoveFollower`, id-only edges | Followers/Following screen — privacy is client-inferred, Remove is mock-only, hydration is N+1 | **High** (privacy) |
+| 14 | No discovery / recommendation feed for the "For You" tab | For You is three client-side orderings of the following feed | Medium |
+| 15 | No lightweight-preview rendition, and `RadarPin` can't express video | Map pin live previews (**blocked**); gallery-grid autoplay at scale | **High** (map) |
 
 ---
 
@@ -514,6 +516,64 @@ returning the same `(post_id, author_id)` tuples `GetFollowingFeed` does, so
 the client's hydration path is unchanged and only the corpus differs. Until
 then `DiscoverySource` is the seam that will pick between corpora, and the
 client-side ordering falls away.
+
+---
+
+## 15. No lightweight-preview rendition; `RadarPin` cannot express video
+
+**Full issue: [`dev/issues/BACKEND_MEDIA_PREVIEW_RENDITIONS.md`](issues/BACKEND_MEDIA_PREVIEW_RENDITIONS.md).**
+Extends `dev/PHASE3_VIDEO_BACKEND.md` (which covers making video *play at all*)
+with what is needed to play it *at scale on two different surfaces*.
+
+The whole contract surface vends **one full URL + one still image** per
+attachment (`post.v1.MediaAttachmentView`: `cdn_url` + `thumbnail_url`). There
+is no light tier and no ABR ladder. Two surfaces need different things from
+that, and the distinction is the point:
+
+**a) Map pins — requires a dedicated lightweight preview loop. Hard-blocked.**
+
+`geo_discovery.v1.RadarPin` is `post_id`, `lat`, `lng`, `thumbnail_url` and
+nothing else — it cannot even say *"this pin is a video"*, let alone offer a
+cheap clip. Dozens of pins are visible during a pan and one `AVPlayer` per pin
+is impossible for memory and perf, so the map can never open the full asset.
+It needs a separate, genuinely small file: `MEDIA_RENDITION_KIND_PREVIEW_LOOP`
+(muted MP4, ~2–3 s, ≤480px short edge, ≤~300 KB, loopable), surfaced as
+`RadarPin.preview_url` alongside a `media_kind`, both denormalized into the
+Redis pin projection at index time.
+
+Client status: `MapPin.previewVideoURL` and `MapPin.mediaKind` already exist and
+are hardcoded `nil` / `.image` in production
+(`Maps/Data/GeoDiscoveryRepository.swift:96-129`), behind the `-maps-force-video`
+DEBUG arg. The pool (`MapVideoPlaybackCoordinator(maxConcurrent: 3)`) is built
+and lights up the moment the fields arrive.
+
+**b) Gallery grid (For You / Profile) — uses the FULL stream, not the preview.**
+
+The grid runs a pooled-player autoplay (`VideoPlaybackController(poolSize: 3)`,
+2–3 visible cells) *and* hands the live player into full screen across the hero
+zoom without restarting playback. What preserves the playhead is **not** reusing
+the `AVPlayer` — it is never replacing the **`AVPlayerItem`**; the transition
+attaches a second `AVPlayerLayer` to the same player
+(`VideoPlaybackController.mirror(from:to:)`) and reclaims the original surface
+on dismiss (`reclaim(_:)`, required because only the most recently attached
+layer displays video).
+
+**Therefore the grid must not play `preview_url`.** A tile on a preview asset
+and a full-screen viewer on the real asset would force an item swap mid-flight,
+which resets `CMTime` to zero — exactly the restart the transition exists to
+avoid. The grid instead opens the **same HLS manifest** the full-screen viewer
+uses and caps quality with `AVPlayerItem.preferredPeakBitRate`, lifting the cap
+on zoom. That works only if the ladder has a real bottom rung (~360–480p, 2–4 s
+segments) and `bitrate_bps` is populated per rendition.
+
+So: **the map asks for a cheaper asset; the gallery asks for a better ladder on
+the same asset.** Both are additive `media.v1` / `post.v1` /
+`geo_discovery.v1` changes — see the linked issue for the exact field list.
+
+Note also that Instagram itself does **not** use `AVPlayer` (Meta's engineering
+blog describes a decoupled lower-level decode stack rendering into
+`AVSampleBufferDisplayLayer`), so our pooling design is justified by `AVPlayer`'s
+own cost model rather than by that comparison.
 
 ---
 
