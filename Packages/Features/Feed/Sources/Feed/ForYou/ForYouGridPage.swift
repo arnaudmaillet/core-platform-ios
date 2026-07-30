@@ -28,7 +28,20 @@ final class ForYouGridPage: UIView {
     var onNearEnd: (() -> Void)?
     var onRefresh: (() -> Void)?
 
+    /// Display order — the mosaic's arrangement of `rawPosts`. What the cells,
+    /// the hero, and a tile tap all read.
     private(set) var posts: [GalleryPost] = []
+    /// The order the view model handed over, kept so an append can be
+    /// recognised as one before arrangement permutes it.
+    private var rawPosts: [GalleryPost] = []
+
+    /// Mosaic pages steer autoplaying posts into the non-square bricks; list
+    /// pages are a timeline, where order carries meaning and must not be
+    /// rearranged for looks.
+    private func arrange(_ posts: [GalleryPost], startingAt index: Int) -> [GalleryPost] {
+        guard style == .grid else { return posts }
+        return PostGridMosaic.arrangedForMotion(posts, startingAt: index)
+    }
 
     private let imagePipeline: ImagePipeline
     /// Autoplay for the mosaic's video bricks. Absent on list pages — a
@@ -395,20 +408,29 @@ final class ForYouGridPage: UIView {
         }
     }
 
-    private func apply(_ posts: [GalleryPost], skeleton: Bool) {
-        guard self.posts != posts || showsSkeleton != skeleton else { return }
+    private func apply(_ incoming: [GalleryPost], skeleton: Bool) {
+        guard rawPosts != incoming || showsSkeleton != skeleton else { return }
         // Hydration retires the skeleton with a cross-dissolve, the same
         // in-place hand-off the profile gallery uses.
-        let dissolving = showsSkeleton && !skeleton && !posts.isEmpty && window != nil
+        let dissolving = showsSkeleton && !skeleton && !incoming.isEmpty && window != nil
         // A page landing is a pure APPEND, and `reloadData` would recycle every
         // realized cell to express it. That is what made a drag stop and restart
         // all four playing tiles inside 60ms — the players were fine, the cells
         // under them were destroyed and rebuilt. Inserting only the new items
         // leaves existing cells (and their playback) untouched.
-        let appended = Self.appendedRange(from: self.posts, to: posts)
-        self.posts = posts
+        //
+        // Measured against the RAW list, not the arranged one: arrangement is a
+        // permutation, so an append upstream is still an append downstream, and
+        // comparing raw keeps that fact simple to establish.
+        let appended = Self.appendedRange(from: rawPosts, to: incoming)
+        rawPosts = incoming
         showsSkeleton = skeleton
         if let appended, !showsSkeleton, !skeleton, !dissolving {
+            // Arrange only the new tail, against the absolute slots it will
+            // occupy. Placement depends solely on the absolute index, so the
+            // items already on screen cannot move — which is what keeps this an
+            // insert rather than a reload.
+            posts += arrange(Array(incoming[appended]), startingAt: posts.count)
             collectionView.performBatchUpdates {
                 collectionView.insertItems(
                     at: appended.map { IndexPath(item: $0, section: 0) }
@@ -417,6 +439,7 @@ final class ForYouGridPage: UIView {
             DispatchQueue.main.async { [weak self] in self?.updateAutoplay() }
             return
         }
+        posts = arrange(incoming, startingAt: 0)
         if dissolving {
             UIView.transition(
                 with: collectionView, duration: 0.35,

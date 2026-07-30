@@ -17,6 +17,85 @@ public enum PostGridMosaic {
     /// loading state already has the shape content will hydrate into.
     public static let patternLength = 8
 
+    /// The shape of each brick in the repeating pattern, read off the groups
+    /// built in `layout()`. Position decides shape; the media does not.
+    public enum SlotShape: Equatable, Sendable {
+        case portrait
+        case landscape
+        case square
+
+        /// Whether a moving image reads well here. Squares are the pattern's
+        /// filler: four of the eight, the smallest bricks, and clustered — so
+        /// they carry stills and the larger bricks carry motion.
+        public var suitsMotion: Bool { self != .square }
+    }
+
+    /// Indexed by position within the pattern. Mirrors the diagram above:
+    /// half A is portrait, landscape, square, square; half B is its mirror.
+    public static let slotShapes: [SlotShape] = [
+        .portrait, .landscape, .square, .square,
+        .square, .square, .landscape, .portrait
+    ]
+
+    public static func slotShape(at index: Int) -> SlotShape {
+        slotShapes[((index % patternLength) + patternLength) % patternLength]
+    }
+
+    /// Places `posts` into the consecutive grid slots starting at
+    /// `absoluteIndex`, preferring the non-square bricks for posts that can
+    /// autoplay.
+    ///
+    /// **Why this is done here and not in the seed data.** Videos are every
+    /// third post and the pattern is eight bricks; `lcm(3, 8) = 24`, so over
+    /// any 24 posts the videos land on all eight slots equally and exactly
+    /// half of them end up in squares. Fixing that upstream is impossible
+    /// anyway: For You defaults to the `.trending` source, which re-sorts the
+    /// corpus client-side, so no dataset can predict which slot a post will
+    /// occupy. Slot shape is knowable only once the display order exists,
+    /// which is here.
+    ///
+    /// **Stability.** Placement is a pure function of the absolute slot index,
+    /// so an item never moves once placed and a later page cannot disturb an
+    /// earlier one. That is what lets the caller keep expressing a page landing
+    /// as an insert rather than a reload.
+    ///
+    /// Order is preserved within each group, so recency still reads down the
+    /// page — motion posts keep their relative order, and so do stills.
+    /// Nothing is dropped or duplicated: when motion posts outnumber the
+    /// non-square slots the surplus spills into squares, and vice versa.
+    public static func arrangedForMotion(
+        _ posts: [GalleryPost], startingAt absoluteIndex: Int
+    ) -> [GalleryPost] {
+        guard !posts.isEmpty else { return [] }
+        var motion = posts.filter(\.autoplaysInGrid)
+        var stills = posts.filter { !$0.autoplaysInGrid }
+        guard !motion.isEmpty, !stills.isEmpty else { return posts }
+        // A block that covers only squares — slots 2…5 are four in a row — has
+        // nowhere better to put a video, so leave the order alone. Without this
+        // the passes below still shuffle stills to the front, which reorders
+        // the page for no gain.
+        var placed = [GalleryPost?](repeating: nil, count: posts.count)
+        guard placed.indices.contains(where: { slotShape(at: absoluteIndex + $0).suitsMotion })
+        else { return posts }
+        // Motion first into the bricks that suit it, then stills into the
+        // squares. Two passes rather than one so an early still cannot occupy
+        // a landscape brick a later video needed.
+        for offset in placed.indices where slotShape(at: absoluteIndex + offset).suitsMotion {
+            if motion.isEmpty { break }
+            placed[offset] = motion.removeFirst()
+        }
+        for offset in placed.indices where !slotShape(at: absoluteIndex + offset).suitsMotion {
+            if stills.isEmpty { break }
+            placed[offset] = stills.removeFirst()
+        }
+        // Whatever is left over fills the holes in order — the surplus case.
+        var remainder = motion + stills
+        for offset in placed.indices where placed[offset] == nil {
+            placed[offset] = remainder.removeFirst()
+        }
+        return placed.compactMap(\.self)
+    }
+
     /// The Media mosaic: a repeating 8-item pattern on a 3-column unit grid,
     /// mixing 1×1 squares with 1×2 portrait and 2×1 landscape blocks. Two
     /// mirrored halves keep the rhythm organic instead of stripey:
