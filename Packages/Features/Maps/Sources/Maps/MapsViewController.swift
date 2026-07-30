@@ -73,6 +73,8 @@ final class MapsViewController: UIViewController {
     /// subview animates as a smooth collapse, and the main bar keeps its seat
     /// above the tab bar (it's the stack's bottom edge that is pinned).
     private let barsStack = UIStackView()
+    /// The bars' offset from the view's raw bottom edge; see `syncBarsPosition`.
+    private var barsBottomConstraint: NSLayoutConstraint!
     /// In-flight people fetch for the sub-filter row; superseded on every
     /// primary change so a slow list can't populate a stale row.
     private var subFilterLoadTask: Task<Void, Never>?
@@ -248,6 +250,21 @@ final class MapsViewController: UIViewController {
         #endif
     }
 
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        syncBarsPosition()
+    }
+
+    /// Re-pins the filter bars to the CURRENT safe area, but only while no hero
+    /// flight is in progress — see `barsBottomConstraint` for why that matters.
+    private func syncBarsPosition() {
+        guard activeTransition == nil else { return }
+        let target = -(view.safeAreaInsets.bottom + Spacing.sm)
+        // Guarded: assigning inside a layout pass schedules another one.
+        guard abs(barsBottomConstraint.constant - target) > 0.01 else { return }
+        barsBottomConstraint.constant = target
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         // Kick the first query; coalesces with any region-settle callback.
@@ -311,6 +328,9 @@ final class MapsViewController: UIViewController {
             forAnnotationViewWithReuseIdentifier: MapClusterAnnotationView.reuseIdentifier
         )
         mapView.pin(to: view)
+        #if DEBUG
+        installChromeTrace()
+        #endif
         configureFilterBar()
     }
 
@@ -320,14 +340,22 @@ final class MapsViewController: UIViewController {
         barsStack.clipsToBounds = false
         view.addSubview(barsStack)
         barsStack.translatesAutoresizingMaskIntoConstraints = false
+        // Pinned to the view's RAW bottom with a constant this screen owns, not to
+        // `safeAreaLayoutGuide.bottomAnchor`. The safe area animates through a pop
+        // — measured here climbing 34 -> 64 -> 76.33 before settling at 83 — and
+        // anything tied to it rides that animation and then corrects, which showed
+        // up as the bars landing at 741.67 and snapping to 735.00. `syncBarsPosition`
+        // tracks the safe area only while nothing is flying, so the constant in
+        // force during a gesture is always a resting measurement. The resting
+        // geometry is unchanged: the safe-area bottom still sits above the floating
+        // tab bar, which is what rests the pills directly over it.
+        barsBottomConstraint = barsStack.bottomAnchor.constraint(
+            equalTo: view.bottomAnchor, constant: -Spacing.sm
+        )
         NSLayoutConstraint.activate([
             barsStack.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             barsStack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            // The safe-area bottom already sits above the floating tab bar, so
-            // this rests the pills directly over it on every device class.
-            barsStack.bottomAnchor.constraint(
-                equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -Spacing.sm
-            ),
+            barsBottomConstraint,
             subFilterBar.heightAnchor.constraint(equalToConstant: MapSubFilterBarView.barHeight),
             filterBar.heightAnchor.constraint(equalToConstant: MapFilterBarView.barHeight)
         ])
@@ -686,6 +714,27 @@ final class MapsViewController: UIViewController {
             barsStack.alpha = hidden ? 0 : 1
         }
     }
+
+    #if DEBUG
+    /// `-maps-trace-chrome`: samples the filter bars' window position every frame,
+    /// so "do they move during the grab, and do they snap at the end?" is a number
+    /// rather than an impression. Same instrument that found both For You defects.
+    private func installChromeTrace() {
+        guard ProcessInfo.processInfo.arguments.contains("-maps-trace-chrome") else { return }
+        CADisplayLink(target: self, selector: #selector(sampleChrome)).add(to: .main, forMode: .common)
+    }
+
+    @objc private func sampleChrome() {
+        guard let window = view.window else { return }
+        let bars = barsStack.convert(barsStack.bounds, to: window)
+        print(String(
+            format: "[maps:%@] barsY=%.2f barsH=%.2f safeB=%.2f viewT=%@ mapT=%@",
+            activeTransition == nil ? "rest" : "flight",
+            bars.minY, bars.height, view.safeAreaInsets.bottom,
+            NSCoder.string(for: view.transform), NSCoder.string(for: mapView.transform)
+        ))
+    }
+    #endif
 
     /// Brings the map's bottom chrome back as the feed leaves: the app's tab bar
     /// and the map's own filter bars.
