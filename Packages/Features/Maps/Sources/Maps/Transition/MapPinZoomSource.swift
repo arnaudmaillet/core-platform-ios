@@ -71,6 +71,21 @@ final class MapPinZoomSource: ZoomTransitionSource {
         return mapView.visibleMapRect.contains(MKMapPoint(annotation.coordinate))
     }
 
+    /// The map itself, not the whole screen.
+    ///
+    /// The depth cue is a scale about the receding view's centre, so everything
+    /// inside it shrinks and drifts toward that centre. Applied to the view
+    /// controller's view that took the filter bars with it — measured at 48.00pt
+    /// tall dropping to 45.60 through a grab, while the app's tab bar, which
+    /// lives outside the presenter, did not move at all. Half the bottom
+    /// furniture receding and half of it grounded reads as a glitch, not depth.
+    ///
+    /// Naming the map puts the recede on the content, which is the only thing the
+    /// cue is about, and leaves the bars where they were laid out. They still
+    /// darken under the flight's dim — the dim covers the whole container, and
+    /// opacity moves nothing.
+    var zoomPresenterDepthView: UIView? { mapView }
+
     /// Hides the live pin while its twin is flying, and restores it when the
     /// flight is over — called by the drivers in the same transaction that
     /// installs or retires the card, so no frame can render both (or neither).
