@@ -240,12 +240,19 @@ final class ForYouViewController: UIViewController {
             // Idempotent close-out: the state and the alpha are already correct
             // by now, this just guarantees it if a leg was skipped.
             self?.showTabBar(alpha: 1)
+            #if DEBUG
+            self?.debugAuditTray("returned")
+            self?.debugAdvanceGrabCycleIfNeeded()
+            #endif
         }
         transition.onDismissalCancelled = { [weak self] in
             // The feed is staying up, so put the bar back down — it is behind
             // the restored page by now, so nothing renders the change.
             self?.tabBarController?.setTabBarHidden(true, animated: false)
             self?.tabBarController?.tabBar.alpha = 1
+            #if DEBUG
+            self?.debugAuditTray("cancelled")
+            #endif
         }
         // Accessing `view` loads it so the grab-to-dismiss pan can attach.
         transition.attachInteractiveDismissal(to: feed.view) { [weak self] in
@@ -340,11 +347,80 @@ final class ForYouViewController: UIViewController {
     }
 
     #if DEBUG
+    /// Remaining automatic open→grab→return cycles for `-foryou-grab-cycles`.
+    private static var remainingGrabCycles = 0
+
+    /// `-foryou-audit-tray`: reports any view in the tray's subtree that is not
+    /// fully visible or not reachable by a tap, at the end of every dismissal.
+    ///
+    /// "Did the transition leak a hidden state into the tray?" is answerable
+    /// exactly, so it is answered exactly instead of by squinting at a
+    /// screenshot: walk the subtree for `alpha < 1`, `isHidden` or a zero-area
+    /// frame, then hit-test each segment to prove nothing is sitting over it.
+    /// Pair with `-foryou-grab-cycles` — a leak that survives one return is one
+    /// anybody would catch, so the interesting ones need several round trips.
+    func debugAuditTray(_ label: String) {
+        guard ProcessInfo.processInfo.arguments.contains("-foryou-audit-tray") else { return }
+        var offenders: [String] = []
+        func walk(_ view: UIView, _ path: String) {
+            let name = "\(path)/\(type(of: view))"
+            if view.isHidden { offenders.append("\(name) isHidden") }
+            if view.alpha < 0.999 { offenders.append(String(format: "%@ alpha=%.3f", name, view.alpha)) }
+            if view.frame.width == 0 || view.frame.height == 0 {
+                offenders.append("\(name) zero-frame")
+            }
+            view.subviews.forEach { walk($0, name) }
+        }
+        walk(trayView, "tray")
+        // Visible is not the same as reachable: something left over the tray
+        // (an undismissed dim, a stale transition container) would pass every
+        // check above and still swallow every tap. Hit-test each segment's
+        // centre and confirm the tray is what answers.
+        for (index, segment) in ["Activity", "Media", "Short"].enumerated() {
+            let row = formatRow
+            guard index < row.subviews.first?.subviews.count ?? 0,
+                  let button = row.subviews.first?.subviews[index] as? UIButton
+            else { continue }
+            let point = button.convert(CGPoint(x: button.bounds.midX, y: button.bounds.midY), to: view)
+            let hit = view.hitTest(point, with: nil)
+            let reachable = hit.map { $0 === button || $0.isDescendant(of: button) } ?? false
+            if !reachable {
+                offenders.append("\(segment) unreachable (hit=\(hit.map { "\(type(of: $0))" } ?? "nil"))")
+            }
+        }
+        print("[trayaudit \(label)] " + (offenders.isEmpty ? "clean" : offenders.joined(separator: " | ")))
+    }
+
+    /// Re-opens the feed for the next scripted cycle, if any are left.
+    ///
+    /// Repetition is the point: a state leak that survives ONE return is a bug
+    /// anyone would catch, so the ones that reach a release are the ones that
+    /// need several round trips to show. Driven off the completed return rather
+    /// than a timer, so each cycle starts from a genuinely settled grid.
+    func debugAdvanceGrabCycleIfNeeded() {
+        guard Self.remainingGrabCycles > 0 else { return }
+        Self.remainingGrabCycles -= 1
+        let index = ProcessInfo.processInfo.arguments
+            .firstIndex(of: "-foryou-open")
+            .flatMap { $0 + 1 < ProcessInfo.processInfo.arguments.count
+                ? Int(ProcessInfo.processInfo.arguments[$0 + 1]) : nil } ?? 0
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self else { return }
+            openFeed(from: viewModel.format, at: index)
+        }
+    }
+
     /// `-foryou-open <index>` taps a tile once content has landed (the sim
-    /// injects no taps), and `-foryou-source <trending|recent|following>`
-    /// drives the drop-down — a `UIMenu` needs a real tap to open.
+    /// injects no taps); `-foryou-source <trending|recent|following>` drives the
+    /// drop-down (a `UIMenu` needs a real tap to open); and
+    /// `-foryou-grab-cycles <n>` repeats the whole open→grab→return round trip
+    /// `n` more times, for hunting state that only leaks after several returns.
     private func installDebugHooks() {
         let arguments = ProcessInfo.processInfo.arguments
+        if let position = arguments.firstIndex(of: "-foryou-grab-cycles"),
+           position + 1 < arguments.count, let count = Int(arguments[position + 1]) {
+            Self.remainingGrabCycles = count
+        }
         if let position = arguments.firstIndex(of: "-foryou-source"), position + 1 < arguments.count {
             let source: DiscoverySource? = switch arguments[position + 1] {
             case "trending": .trending
