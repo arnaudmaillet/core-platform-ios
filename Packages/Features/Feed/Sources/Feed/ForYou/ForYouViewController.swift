@@ -439,11 +439,23 @@ final class ForYouViewController: UIViewController {
         var labels: [String] = []
         func collectLabels(_ v: UIView) {
             if let label = v as? UILabel {
+                // Clipping is `laid-out width < the width the text needs`, which
+                // is the only test that distinguishes "small label" from
+                // "truncated label".
+                let needed = label.intrinsicContentSize.width
+                let clipped = label.bounds.width + 0.5 < needed
                 labels.append(String(
-                    format: "%@[w=%.1f,a=%.2f%@]",
-                    label.text ?? "nil", label.bounds.width, label.alpha,
-                    label.isHidden ? ",HIDDEN" : ""
+                    format: "%@[w=%.1f/need%.1f,a=%.2f%@%@]",
+                    label.text ?? "nil", label.bounds.width, needed, label.alpha,
+                    label.isHidden ? ",HIDDEN" : "", clipped ? ",CLIPPED" : ""
                 ))
+                if clipped {
+                    offenders.append(String(
+                        format: "'%@' clipped %.1f<%.1f", label.text ?? "nil", label.bounds.width, needed
+                    ))
+                }
+                if label.isHidden { offenders.append("'\(label.text ?? "nil")' label hidden") }
+                if label.alpha < 0.999 { offenders.append("'\(label.text ?? "nil")' label alpha") }
             }
             v.subviews.forEach(collectLabels)
         }

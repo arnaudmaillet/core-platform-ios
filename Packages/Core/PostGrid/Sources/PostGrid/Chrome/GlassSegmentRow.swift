@@ -64,6 +64,9 @@ public final class GlassSegmentRow: UIView {
                 insets.trailing = 7
             }
             button.configuration?.contentInsets = insets
+            // A title must never be the thing that yields when the row is
+            // short of space: better the capsule grows than a label truncates.
+            button.setContentCompressionResistancePriority(.required, for: .horizontal)
             button.addAction(UIAction { [weak self] _ in self?.select(index, notify: true) }, for: .primaryActionTriggered)
             row.addArrangedSubview(button)
             return button
@@ -89,23 +92,42 @@ public final class GlassSegmentRow: UIView {
         }
     }
 
-    /// Pins each title button to its SEMIBOLD measurement.
+    /// Gives each title button a width FLOOR equal to its semibold measurement,
+    /// and lets intrinsic content size take over from there.
     ///
-    /// Semibold, not the current weight: selection toggles weight, and a
-    /// re-measuring toolbar at the fitting edge would otherwise reflow (and wrap)
-    /// the whole capsule on every tap. Constraints are retained so a text-size
-    /// change can update them in place rather than stacking a second set — two
-    /// conflicting equal-width constraints on one button is an unsatisfiable
-    /// layout, and the one UIKit breaks is not yours to choose.
+    /// Two requirements pull in opposite directions here, and `>=` is what
+    /// satisfies both.
+    ///
+    /// *Stability.* Selection toggles the weight regular↔semibold, and semibold
+    /// is wider. Sizing purely on intrinsic content would therefore re-measure
+    /// the whole capsule on every tap — visible jitter, and inside the profile's
+    /// toolbar (which measures custom views by intrinsic size alone) enough to
+    /// wrap the bar. Pinning the floor to the SEMIBOLD width means the selected
+    /// and unselected states resolve to the same width, because the floor is the
+    /// larger of the two either way.
+    ///
+    /// *No clipping, ever.* An exact `==` width is a promise that the
+    /// measurement can never be short of what the label needs — and a bare
+    /// `size(withAttributes:)` against the label's real layout leaves at most a
+    /// point of slack once `ceil` has rounded, before any kerning or font
+    /// fallback is accounted for. With `>=` a label that needs more simply gets
+    /// more; the floor stops mattering and nothing truncates. Combined with
+    /// required horizontal compression resistance, no amount of pressure from
+    /// the enclosing stack can squeeze a title either.
+    ///
+    /// Constraints are retained and updated in place rather than re-created: two
+    /// width constraints on one button is an unsatisfiable layout, and which one
+    /// UIKit breaks is not yours to choose.
     private func resizeTitles() {
         let bold = UIFont.preferredFont(forTextStyle: .subheadline, weight: .semibold)
         for (index, segment) in segments.enumerated() {
             guard case .title(let title) = segment else { continue }
-            let width = ceil((title as NSString).size(withAttributes: [.font: bold]).width) + 18
+            let floorWidth = ceil((title as NSString).size(withAttributes: [.font: bold]).width) + 18
             if let existing = titleWidths[index] {
-                existing.constant = width
+                existing.constant = floorWidth
             } else {
-                let constraint = buttons[index].widthAnchor.constraint(equalToConstant: width)
+                let constraint = buttons[index].widthAnchor
+                    .constraint(greaterThanOrEqualToConstant: floorWidth)
                 constraint.isActive = true
                 titleWidths[index] = constraint
             }
@@ -156,6 +178,14 @@ public final class GlassSegmentRow: UIView {
                 button.tintColor = color
             }
             button.accessibilityTraits = isSelected ? [.button, .selected] : [.button]
+            // Asserted, not assumed. Selection is the one place that touches
+            // every segment, so it is the natural place to guarantee that no
+            // segment is left invisible by anything else — a stuck highlight, an
+            // interrupted touch, a transition that fiddled with the subtree.
+            // Cheap, idempotent, and it makes "all three are visible" a property
+            // of this method rather than a hope.
+            button.isHidden = false
+            if !button.isHighlighted { button.alpha = 1 }
         }
         // Weight changes nudge the fitted width; the bar re-measures custom
         // views through intrinsic size only.
@@ -245,9 +275,37 @@ public final class GlassMenuButton: UIView {
 }
 
 private extension UIFont {
+    /// The largest this row's titles may scale to.
+    ///
+    /// A capsule of three fixed titles sitting beside a circular menu bubble has
+    /// a hard width ceiling — the tray spans the screen's margins and no more. At
+    /// the accessibility text sizes the untruncated titles need ~170pt EACH,
+    /// roughly double what the row can offer, so something has to give and the
+    /// only thing that can is the glyph size. Capping is what iOS itself does for
+    /// bar chrome (tab bar labels and navigation titles both stop growing), and
+    /// it is strictly better than the alternative: a clipped label is unreadable,
+    /// while a capped one is merely smaller than the user asked for. Measured to
+    /// fit all three titles at every category up to and including the
+    /// accessibility sizes.
+    static let segmentTitleMaximumPointSize: CGFloat = 20
+
+    /// A weighted, Dynamic-Type-scaled font for `style`, scaled exactly ONCE and
+    /// capped.
+    ///
+    /// The `compatibleWith:` lookup is load-bearing: `preferredFont(forTextStyle:)`
+    /// on its own returns a size that is ALREADY scaled for the current category,
+    /// and handing that to `scaledFont(for:)` scales it a second time. That double
+    /// scaling is what drove the titles to ~170pt at accessibility sizes and made
+    /// them clip. Asking for the size at the `.large` (default) category gives the
+    /// unscaled baseline these metrics expect.
     static func preferredFont(forTextStyle style: TextStyle, weight: Weight) -> UIFont {
-        let metrics = UIFontMetrics(forTextStyle: style)
-        let base = UIFont.systemFont(ofSize: UIFont.preferredFont(forTextStyle: style).pointSize, weight: weight)
-        return metrics.scaledFont(for: base)
+        let unscaled = UIFont.preferredFont(
+            forTextStyle: style,
+            compatibleWith: UITraitCollection(preferredContentSizeCategory: .large)
+        ).pointSize
+        let base = UIFont.systemFont(ofSize: unscaled, weight: weight)
+        return UIFontMetrics(forTextStyle: style).scaledFont(
+            for: base, maximumPointSize: segmentTitleMaximumPointSize
+        )
     }
 }
