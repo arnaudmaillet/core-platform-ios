@@ -57,6 +57,10 @@ final class ForYouViewController: UIViewController {
     /// the stack holds its delegate weakly.
     private var activeTransition: ZoomTransitionController?
 
+    /// The tray's offset from the view's raw bottom edge. Owned rather than
+    /// delegated to the safe-area guide; see `syncTrayPosition`.
+    private var trayBottomConstraint: NSLayoutConstraint!
+
     /// How many posts a tile tap hands the feed, counting from the tapped one.
     ///
     /// `FixedPostsFeedProvider` hydrates its whole set in ONE concurrent
@@ -106,14 +110,22 @@ final class ForYouViewController: UIViewController {
         pager.trayClearance = InlineFilterTrayView.height + InlineFilterTrayView.spacingBelow * 2
 
         view.addSubview(trayView)
+        // Pinned to the view's RAW bottom with a constant this screen owns, not
+        // to `safeAreaLayoutGuide.bottomAnchor`. The safe area animates through a
+        // pop — and worse, it reads a few points off its resting value while the
+        // pop is in flight (measured: bottom inset 86 mid-flight against 83 at
+        // rest), so a tray tied to it sits 3pt high for the whole drag and snaps
+        // down when the layout finally settles. `syncTrayPosition` tracks the
+        // safe area only while nothing is flying, which makes the constant a
+        // *resting* measurement the gesture cannot disturb.
+        trayBottomConstraint = trayView.bottomAnchor.constraint(
+            equalTo: view.bottomAnchor, constant: -InlineFilterTrayView.spacingBelow
+        )
         NSLayoutConstraint.activate([
             trayView.leadingAnchor.constraint(equalTo: view.layoutMarginsGuide.leadingAnchor),
             trayView.trailingAnchor.constraint(equalTo: view.layoutMarginsGuide.trailingAnchor),
             trayView.heightAnchor.constraint(equalToConstant: InlineFilterTrayView.height),
-            trayView.bottomAnchor.constraint(
-                equalTo: view.safeAreaLayoutGuide.bottomAnchor,
-                constant: -InlineFilterTrayView.spacingBelow
-            )
+            trayBottomConstraint
         ])
 
         formatRow.onSelect = { [weak self] index in
@@ -295,6 +307,35 @@ final class ForYouViewController: UIViewController {
         #endif
     }
 
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        syncTrayPosition()
+    }
+
+    /// Re-pins the tray to the CURRENT safe area — but only while no flight is
+    /// in progress.
+    ///
+    /// This is the whole fix for the tray's landing snap. A pop animates the safe
+    /// area, and mid-flight it does not merely interpolate, it reads a few points
+    /// off its own resting value: measured at a bottom inset of 86 during the
+    /// drag against 83 once settled. Anything pinned to the safe-area guide
+    /// therefore sits 3pt out of place for the length of the gesture and corrects
+    /// the instant the layout settles — a small, very visible jump right at the
+    /// end of the hero.
+    ///
+    /// Skipping the update while a flight is alive means the constant in force
+    /// during a gesture is always the last *resting* measurement, so there is
+    /// nothing left to correct at teardown. The tray is then immune to the
+    /// transition by construction rather than by having its own animation
+    /// cancelled.
+    private func syncTrayPosition() {
+        guard activeTransition == nil else { return }
+        let target = -(view.safeAreaInsets.bottom + InlineFilterTrayView.spacingBelow)
+        // Guarded: assigning inside a layout pass schedules another one.
+        guard abs(trayBottomConstraint.constant - target) > 0.01 else { return }
+        trayBottomConstraint.constant = target
+    }
+
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         // Coming back from the feed: this screen owns the bottom again.
@@ -403,8 +444,13 @@ final class ForYouViewController: UIViewController {
     }
 
     @objc private func debugSampleChrome() {
-        guard activeTransition != nil, let window = view.window else { return }
+        // Samples ALWAYS, not only while a transition is live: the resting
+        // position is the baseline every other reading is judged against, and a
+        // snap at teardown is only visible as "settled != during the drag".
+        guard let window = view.window else { return }
+        let phase = activeTransition == nil ? "rest" : "flight"
         let tray = trayView.convert(trayView.bounds, to: window)
+        let safeBottom = view.safeAreaInsets.bottom
         let bar = navigationController?.navigationBar
         let barRect = bar.map { $0.convert($0.bounds, to: window) } ?? .zero
         // Find whatever is actually drawing the big "For You" — it is not in the
@@ -419,11 +465,24 @@ final class ForYouViewController: UIViewController {
             v.subviews.forEach(findTitle)
         }
         findTitle(window)
+        // The navigation bar's ENTIRE subtree, not just its direct children: an
+        // item that slides inside a container at a fixed position would
+        // otherwise go unseen.
+        var rows: [String] = []
+        func walkBar(_ v: UIView, _ depth: Int) {
+            guard depth < 6 else { return }
+            let r = v.convert(v.bounds, to: window)
+            if r.width > 1, r.height > 1 {
+                rows.append(String(format: "%.0f:%.1f/%.1f", Double(depth), r.minX, r.minY))
+            }
+            v.subviews.forEach { walkBar($0, depth + 1) }
+        }
+        if let bar { walkBar(bar, 0) }
+        let items = rows.joined(separator: ",")
         print(String(
-            format: "[chrome] trayY=%.2f trayH=%.2f navY=%.2f navH=%.2f titleY=%.2f titleH=%.2f in=%@ t=%@",
-            tray.minY, tray.height, barRect.minY, barRect.height,
-            titleRect.minY, titleRect.height, titleOwner,
-            NSCoder.string(for: view.transform)
+            format: "[chrome:%@] trayY=%.2f trayH=%.2f safeB=%.2f navY=%.2f titleY=%.2f t=%@ items=%@",
+            phase, tray.minY, tray.height, safeBottom, barRect.minY,
+            titleRect.minY, NSCoder.string(for: view.transform), items
         ))
     }
 
