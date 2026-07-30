@@ -260,7 +260,14 @@ final class MapsViewController: UIViewController {
         // is alive — under a push, this fires the moment a pop *begins*, and
         // an interactive grab can cancel; the completed return resumes via
         // the transition's onSourceReturned instead.
-        guard activeTransition == nil else { return }
+        guard activeTransition == nil else {
+            // A hero return, though, does need its bottom chrome put back —
+            // invisible, so the flight can fade it in. This is the only chance
+            // the back-button pop gets; a grab already did it at grab-begin, so
+            // there this is a no-op.
+            restoreBottomChromeForReturn(alpha: 0)
+            return
+        }
         videoCoordinator.setSurfaceVisible(true)
         refreshVideoPlayback()
     }
@@ -680,6 +687,32 @@ final class MapsViewController: UIViewController {
         }
     }
 
+    /// Brings the map's bottom chrome back as the feed leaves: the app's tab bar
+    /// and the map's own filter bars.
+    ///
+    /// The tab bar's hidden STATE and its OPACITY are set separately, and the
+    /// split is the point. The state has to be restored outside any transition —
+    /// done inside one, the bar's frame returns and `isTabBarHidden` reads false
+    /// while its buttons never paint, leaving a row of empty glass capsules. The
+    /// opacity then belongs to the flight, which drives it 1:1 with a grab and on
+    /// the dismiss spring for a tap-back, so the bar is never seen to pop in
+    /// after the card has landed.
+    ///
+    /// The filter bars are restored to FULL opacity regardless, and that is not
+    /// an oversight: they live inside this view controller's own view, so the
+    /// flight's dim is already over them and the presenter's recede already
+    /// carries them. Giving them an alpha ramp of their own would double the
+    /// fade. Only the tab bar, which is a sibling of the navigation controller's
+    /// view and therefore renders above the dim, needs driving by hand.
+    private func restoreBottomChromeForReturn(alpha: CGFloat) {
+        barsStack.alpha = 1
+        guard let tabBarController else { return }
+        tabBarController.tabBar.alpha = alpha
+        guard tabBarController.isTabBarHidden else { return }
+        tabBarController.setTabBarHidden(false, animated: false)
+        tabBarController.view.layoutIfNeeded()
+    }
+
     private func bindViewModel() {
         viewModel.onDiff = { [weak self] diff in self?.handleDiff(diff) }
         // `onTileCount` is a "zoom in for more" hint hook; wired to UI later.
@@ -1083,19 +1116,37 @@ extension MapsViewController: MKMapViewDelegate {
             }
             #endif
         }
+        // The bar's opacity rides the return — 1:1 with a grab, and on the
+        // flight's own spring for a tap-back — so it is revealed as the card
+        // shrinks instead of appearing once it has landed. Same mechanism the
+        // For You grid uses; the two surfaces must not diverge, since a viewer
+        // sees the same bar return from the same feed either way.
+        transition.returningSourceChrome = tabBarController?.tabBar
         transition.onSourceReturned = { [weak self, weak nav] in
-            // Completed pop only — a cancelled grab reports nothing, so the
-            // transition (and future grabs) survives it by construction.
+            // Completed pop only — a cancelled grab reports through
+            // `onDismissalCancelled`, so the transition (and future grabs)
+            // survives it by construction.
             nav?.delegate = nil
             guard let self else { return }
-            self.tabBarController?.setTabBarHidden(false, animated: true)
-            self.setFilterBar(hidden: false)
+            // Idempotent close-out: the state and the alpha are already right by
+            // now (see `restoreBottomChromeForReturn`).
+            self.restoreBottomChromeForReturn(alpha: 1)
             self.activeTransition = nil
             self.videoCoordinator.setSurfaceVisible(true)
             self.refreshVideoPlayback()
         }
+        transition.onDismissalCancelled = { [weak self] in
+            // The feed is staying up: put the bottom chrome back down behind it.
+            self?.tabBarController?.setTabBarHidden(true, animated: false)
+            self?.tabBarController?.tabBar.alpha = 1
+            self?.barsStack.alpha = 0
+        }
         // Accessing `view` loads it so the grab-to-dismiss pan can attach.
-        transition.attachInteractiveDismissal(to: feedVC.view) { [weak nav] in
+        transition.attachInteractiveDismissal(to: feedVC.view) { [weak self, weak nav] in
+            // Restore the bar's hidden STATE at grab-begin, before the pop and
+            // so outside any transition — the one point at which it paints
+            // correctly. Invisible, so the drag can fade it in.
+            self?.restoreBottomChromeForReturn(alpha: 0)
             nav?.popViewController(animated: true)
         }
         // Map is covered by the feed → stop its previews, except the tapped
@@ -1107,10 +1158,10 @@ extension MapsViewController: MKMapViewDelegate {
         // bottom-bar choreography doesn't scrub with a custom interactive pop
         // (the bar snaps in at pop-begin and flashes over the feed when a grab
         // cancels). Manually it slides away with the lift-off, stays hidden
-        // through cancelled grabs, and returns only on the completed pop
-        // (onSourceReturned above). Constraint: a programmatic cross-tab route
-        // while the feed is pushed would find the bar hidden — today no such
-        // route fires from inside the feed.
+        // through cancelled grabs, and comes back on the return with its opacity
+        // driven by the flight (`restoreBottomChromeForReturn`). Constraint: a
+        // programmatic cross-tab route while the feed is pushed would find the
+        // bar hidden — today no such route fires from inside the feed.
         tabBarController?.setTabBarHidden(true, animated: true)
         setFilterBar(hidden: true)
         nav.delegate = transition
