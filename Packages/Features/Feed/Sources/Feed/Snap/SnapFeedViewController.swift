@@ -1382,6 +1382,16 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         return collectionView.cellForItem(at: IndexPath(item: index, section: 0)) as? SnapFeedCell
     }
 
+    /// The post currently filling the screen — what a hero dismissal should
+    /// land on, which after any paging is not the post that opened the feed.
+    /// Falls back to the first post before a page has settled, matching
+    /// `configureFlightChrome`'s rule so the card's chrome and its landing
+    /// target can never describe different posts.
+    var activePostID: PostID? {
+        let index = lifecycle.activeIndex ?? 0
+        return orderedIDs.indices.contains(index) ? orderedIDs[index] : nil
+    }
+
     /// Configures the replica from the page the card flies to/from: the active
     /// page if one is settled, else the first post (a map tap's feed opens on
     /// its tapped post). No-op until that model exists.

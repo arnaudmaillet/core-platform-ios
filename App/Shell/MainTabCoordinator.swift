@@ -12,7 +12,7 @@ import UploadInterface
 ///
 /// Tabs are set via the modern `UITabBarController.tabs` API. The Search tab is
 /// a `UISearchTab`, which the system detaches to the trailing edge, producing
-/// the grouped bar `| Maps  Feed  Messages  Profile |  Search |` natively.
+/// the grouped bar `| Maps  For You  Messages  Profile |  Search |` natively.
 ///
 /// Profile is a root tab, carrying the viewer's own avatar as its icon
 /// (`ProfileTabCoordinator`) — it is the canonical entry point, so it is the one
@@ -20,10 +20,13 @@ import UploadInterface
 /// the avatar button that used to sit in the Maps nav bar; the map header now
 /// carries only the "+" and the notifications bell.
 ///
-/// One bar button is not a tab: Feed. Selecting it is vetoed
-/// (`shouldSelectTab`) and the timeline is *pushed* onto the current tab's stack
-/// instead (see `FeedFlowCoordinator`) — back returns to where the user was, and
-/// no tab switch occurs.
+/// **Every bar button is now a tab.** Slot 1 used to be a vetoed Feed action
+/// that pushed the timeline onto whatever tab you were on; it is now the For You
+/// discovery grid (`ForYouTabCoordinator`), an ordinary root. The timeline did
+/// not go away — a tile tap on that grid opens it seeded from the grid's own
+/// order, and `AppRoute.feed` still pushes the open-ended one through
+/// `FeedFlowCoordinator`. That coordinator is therefore still built and held
+/// here even though nothing in the bar reaches it.
 @MainActor
 final class MainTabCoordinator: NSObject, Coordinator {
     var childCoordinators: [Coordinator] = []
@@ -96,32 +99,12 @@ final class MainTabCoordinator: NSObject, Coordinator {
         return button
     }()
     /// Tabs paired with their `AppTab`, in bar order — the lookup `selectTab`
-    /// resolves against. Feed is absent: it contributes `feedActionTab` to the
-    /// bar but owns no root stack.
+    /// resolves against. Every bar button is in here now that the Feed action
+    /// slot has become the For You root.
     private var orderedTabs: [(AppTab, any TabCoordinator)] = []
     /// One per tab stack: keeps the native edge-swipe pop working under the
     /// feed's custom transition delegates (see `NativePopGestureEnabler`).
     private var popGestureEnablers: [NativePopGestureEnabler] = []
-
-    /// The Feed bar button. The provider must vend *something* — and the
-    /// system calls it eagerly when `tabs` is assigned, not on first selection
-    /// — but selection is always vetoed in `shouldSelectTab`, so the
-    /// placeholder is only ever *shown* if a programmatic path sets
-    /// `selectedTab` to it: a bug, made visible (and recoverable via its
-    /// button) rather than a black screen.
-    private lazy var feedActionTab = UITab(
-        title: "Feed",
-        image: UIImage(systemName: "house"),
-        identifier: AppTab.feed.rawValue
-    ) { [weak self] _ in
-        PlaceholderViewController(
-            title: "Feed",
-            systemImage: "house",
-            message: "The Feed opens as a pushed screen.",
-            actionTitle: "Open Feed",
-            action: { self?.openFeed() }
-        )
-    }
 
     init(container: AppContainer, onLogout: @escaping () -> Void) {
         self.container = container
@@ -160,6 +143,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
                 container: container,
                 notificationsButtonItem: notificationsBarItem
             )),
+            (.forYou, ForYouTabCoordinator(container: container)),
             (.messages, MessagesTabCoordinator(container: container)),
             (.profile, profileTab),
             (.search, SearchTabCoordinator(container: container))
@@ -169,11 +153,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
             addChild(tab)
         }
         popGestureEnablers = orderedTabs.map { NativePopGestureEnabler(taking: $0.1.navigationController) }
-        // Feed rides the bar at its usual slot but is not in `orderedTabs`:
-        // it has no root stack to select, only a push to trigger.
-        var tabs = orderedTabs.map { $0.1.tab }
-        tabs.insert(feedActionTab, at: 1)
-        tabBarController.tabs = tabs
+        tabBarController.tabs = orderedTabs.map { $0.1.tab }
         tabBarController.delegate = self
         // The Profile tab's long-press switcher. `UITab` carries no menu of its
         // own — `UITab`, `UITabBar`, `UITabBarItem` and the controller delegate
@@ -194,18 +174,20 @@ final class MainTabCoordinator: NSObject, Coordinator {
 
         #if DEBUG
         // Dev convenience: `-select-tab N` opens directly on a tab for testing,
-        // in bar order (0 = Maps … 3 = Search). 1 (Feed) is not a selection:
-        // it triggers the push, deferred a tick — at `start()` the shell isn't
-        // the window root yet, so an immediate push would animate off-window.
+        // in bar order (0 = Maps … 4 = Search). Every index is a plain
+        // selection now — 1 used to trigger the feed push instead, which it no
+        // longer does; use `-open-feed` for the timeline.
         let arguments = ProcessInfo.processInfo.arguments
         if let index = arguments.firstIndex(of: "-select-tab"), index + 1 < arguments.count,
            let tabIndex = Int(arguments[index + 1]), AppTab.allCases.indices.contains(tabIndex) {
-            let tab = AppTab.allCases[tabIndex]
-            if tab == .feed {
-                DispatchQueue.main.async { [weak self] in self?.openFeed() }
-            } else {
-                selectTab(tab)
-            }
+            selectTab(AppTab.allCases[tabIndex])
+        }
+        // `-open-feed` pushes the open-ended timeline — the `AppRoute.feed`
+        // path, which no longer has a bar button behind it. Deferred a tick:
+        // at `start()` the shell isn't the window root yet, so an immediate
+        // push would animate off-window.
+        if arguments.contains("-open-feed") {
+            DispatchQueue.main.async { [weak self] in self?.openFeed() }
         }
         // `-open-my-profile` selects the Profile tab on launch. It used to push
         // the avatar's destination; the destination is now a root, so the intent
@@ -349,18 +331,6 @@ final class MainTabCoordinator: NSObject, Coordinator {
 // MARK: - Tab selection
 
 extension MainTabCoordinator: UITabBarControllerDelegate {
-    /// The Feed button is an action, not a place: veto its selection (the
-    /// current tab stays selected, its stack stays put) and push the timeline
-    /// onto that stack instead.
-    func tabBarController(_ tabBarController: UITabBarController, shouldSelectTab tab: UITab) -> Bool {
-        guard tab.identifier == AppTab.feed.rawValue else { return true }
-        openFeed()
-        // Vetoed selections never reach `didSelect`; refresh the dot here so a
-        // Feed tap keeps the same badge freshness a tab switch has.
-        refreshUnreadBadge()
-        return false
-    }
-
     func tabBarController(_ tabBarController: UITabBarController, didSelect viewController: UIViewController) {
         refreshUnreadBadge()
         syncTabBarVisibility()
@@ -467,11 +437,6 @@ extension MainTabCoordinator: AppNavigating {
     }
 
     func selectTab(_ tab: AppTab) {
-        // Feed is not a selectable tab; honor the intent as the push it now is.
-        if tab == .feed {
-            openFeed()
-            return
-        }
         guard let match = orderedTabs.first(where: { $0.0 == tab }) else { return }
         // Tab-owning routes mean "take me there": anything presented over the
         // shell would keep covering the destination, so dismiss it first.

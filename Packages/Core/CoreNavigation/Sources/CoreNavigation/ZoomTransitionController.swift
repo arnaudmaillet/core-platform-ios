@@ -1,4 +1,4 @@
-import CoreNavigation
+
 import UIKit
 
 /// Wires the hero/zoom transition to a *navigation push*: it acts as the
@@ -15,8 +15,8 @@ import UIKit
 ///
 /// Owned (retained) by the map VC for the lifetime of the push.
 @MainActor
-final class MapsZoomTransition: NSObject, UINavigationControllerDelegate {
-    private let source: MapPinZoomSource
+public final class ZoomTransitionController: NSObject, UINavigationControllerDelegate {
+    private let source: any ZoomTransitionSource
     private weak var destination: (any ZoomTransitionDestination)?
     /// The pushed feed — the only view controller whose push/pop this
     /// delegate customizes.
@@ -27,10 +27,27 @@ final class MapsZoomTransition: NSObject, UINavigationControllerDelegate {
     /// *completed* transitions, so a cancelled interactive pop fires neither —
     /// exactly the teardown guard the modal path needed a
     /// `presentedViewController` check to approximate.
-    var onFeedShown: (() -> Void)?
-    var onMapReturned: (() -> Void)?
+    public var onDestinationShown: (() -> Void)?
+    public var onSourceReturned: (() -> Void)?
 
-    init(source: MapPinZoomSource, destination: any ZoomTransitionDestination) {
+    /// Chrome of the SOURCE screen that is down while the destination is up and
+    /// must come back with the return — the app's tab bar. Assign it and the
+    /// grab drives its alpha 1:1 with the drag, and the non-interactive pop
+    /// fades it in on the flight's own spring, so it is never seen to pop in
+    /// after the card has landed. The owner is responsible for its hidden
+    /// state; this only drives alpha.
+    public var returningSourceChrome: UIView? {
+        didSet { interaction.setReturningChrome(returningSourceChrome) }
+    }
+
+    /// Fires when an interactive grab is CANCELLED — the destination stays up,
+    /// so anything the owner undid at grab-begin (the tab bar's hidden state)
+    /// has to go back. A completed return reports through `onSourceReturned`.
+    public var onDismissalCancelled: (() -> Void)? {
+        didSet { interaction.onCancelled = onDismissalCancelled }
+    }
+
+    public init(source: any ZoomTransitionSource, destination: any ZoomTransitionDestination) {
         self.source = source
         self.destination = destination
         self.feedViewController = destination as? UIViewController
@@ -39,7 +56,7 @@ final class MapsZoomTransition: NSObject, UINavigationControllerDelegate {
 
     /// Installs the grab-to-dismiss gesture on the pushed feed's view. Called
     /// by the presenter once it holds the feed VC.
-    func attachInteractiveDismissal(to view: UIView, onDismiss: @escaping () -> Void) {
+    public func attachInteractiveDismissal(to view: UIView, onDismiss: @escaping () -> Void) {
         guard let destination else { return }
         interaction.attach(to: view, source: source, destination: destination, onBeginDismiss: onDismiss)
     }
@@ -50,7 +67,7 @@ final class MapsZoomTransition: NSObject, UINavigationControllerDelegate {
     /// threshold (floats down-right, then springs back to full screen from
     /// its 2D position), then one past it (completes the clip-morph home).
     /// Exercises the exact begin/update/release path a finger does.
-    func debugScriptedGrab() {
+    public func debugScriptedGrab() {
         Task { @MainActor [weak self] in
             await self?.interaction.debugPerformGrab(peakProgress: 0.22, verticalDrift: 180)
             try? await Task.sleep(nanoseconds: 1_200_000_000)
@@ -61,7 +78,7 @@ final class MapsZoomTransition: NSObject, UINavigationControllerDelegate {
 
     // MARK: - UINavigationControllerDelegate
 
-    func navigationController(
+    public func navigationController(
         _ navigationController: UINavigationController,
         animationControllerFor operation: UINavigationController.Operation,
         from fromVC: UIViewController,
@@ -70,28 +87,31 @@ final class MapsZoomTransition: NSObject, UINavigationControllerDelegate {
         guard let destination, let feed = feedViewController else { return nil }
         switch operation {
         case .push where toVC === feed:
-            return MapsZoomAnimator(isPresenting: true, source: source, destination: destination)
+            return ZoomAnimator(isPresenting: true, source: source, destination: destination)
         case .pop where fromVC === feed:
-            return MapsZoomAnimator(isPresenting: false, source: source, destination: destination)
+            return ZoomAnimator(
+                isPresenting: false, source: source, destination: destination,
+                returningChrome: returningSourceChrome
+            )
         default:
             return nil // e.g. comments detail above the feed — native
         }
     }
 
-    func navigationController(
+    public func navigationController(
         _ navigationController: UINavigationController,
         interactionControllerFor animationController: any UIViewControllerAnimatedTransitioning
     ) -> (any UIViewControllerInteractiveTransitioning)? {
         interaction.isInteracting ? interaction : nil
     }
 
-    func navigationController(
+    public func navigationController(
         _ navigationController: UINavigationController,
         didShow viewController: UIViewController,
         animated: Bool
     ) {
         if viewController === feedViewController {
-            onFeedShown?()
+            onDestinationShown?()
             return
         }
         // The feed left the stack (popped, or already deallocated): the map —
@@ -101,7 +121,7 @@ final class MapsZoomTransition: NSObject, UINavigationControllerDelegate {
             navigationController.viewControllers.contains($0)
         } ?? false
         if !feedStillOnStack {
-            onMapReturned?()
+            onSourceReturned?()
         }
     }
 }

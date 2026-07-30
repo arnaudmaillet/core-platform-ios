@@ -1,6 +1,7 @@
 import MediaCore
 import CoreModels
 import CoreNavigation
+import PostGrid
 import ProfileInterface
 import UIKit
 

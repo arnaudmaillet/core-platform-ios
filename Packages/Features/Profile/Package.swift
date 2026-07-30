@@ -15,7 +15,8 @@ let package = Package(
         .package(path: "../../Core/MediaCore"),
         .package(path: "../../Core/CoreNavigation"),
         .package(path: "../../Core/CoreNetworking"),
-        .package(path: "../../Core/DesignSystem")
+        .package(path: "../../Core/DesignSystem"),
+        .package(path: "../../Core/PostGrid")
     ],
     targets: [
         .target(
@@ -27,7 +28,8 @@ let package = Package(
                 "CoreModels",
                 "MediaCore",
                 "CoreNavigation",
-                "DesignSystem"
+                "DesignSystem",
+                "PostGrid"
             ]
         ),
         .testTarget(
@@ -36,6 +38,7 @@ let package = Package(
                 "Profile",
                 "CoreNavigation",
                 "CoreNetworking",
+                "PostGrid",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking")
             ]
         )

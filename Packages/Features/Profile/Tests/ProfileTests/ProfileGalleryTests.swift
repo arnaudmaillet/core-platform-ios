@@ -1,5 +1,6 @@
 import CoreModels
 import Foundation
+import PostGrid
 import Testing
 @testable import Profile
 

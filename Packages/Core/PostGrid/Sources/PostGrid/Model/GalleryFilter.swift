@@ -6,6 +6,14 @@ import Foundation
 /// The axes mirror timeline-first products: the horizontal PAGER moves
 /// between content *formats* (each with its own layout), while the drop-down
 /// picks the content *source* as a global modifier across all three pages.
+///
+/// **`Format` is the shared axis; `Source` is profile-flavored.** Every post
+/// grid pages between the same three formats, so `Format` belongs here. The
+/// `Source` cases (and `tiles(authored:tagged:)`) are the profile gallery's
+/// question — "whose posts am I looking at" — and a discovery surface asks a
+/// different one. They stay on this type rather than being split off because
+/// `GalleryPreferences` persists the pair; a surface with its own source axis
+/// composes `Format` with an enum of its own instead of widening this.
 public struct GalleryFilter: Equatable, Sendable {
     /// What the content is — the pager's axis. Each format owns a layout:
     /// Activity and Short read as full-width timeline rows, Media as the
@@ -51,10 +59,18 @@ public struct GalleryFilter: Equatable, Sendable {
         case .reposts: authored.filter(\.isRepost)
         case .tagged: tagged
         }
-        return switch format {
-        case .activity: sourced
-        case .media: sourced.filter { $0.kind != .text }
-        case .short: sourced.filter { $0.kind == .text }
+        return format.filtering(sourced)
+    }
+}
+
+public extension GalleryFilter.Format {
+    /// The format's kind filter, on its own — for surfaces that page between
+    /// the same three formats but resolve their corpus differently.
+    func filtering(_ posts: [GalleryPost]) -> [GalleryPost] {
+        switch self {
+        case .activity: posts
+        case .media: posts.filter { $0.kind != .text }
+        case .short: posts.filter { $0.kind == .text }
         }
     }
 }

@@ -45,14 +45,14 @@ final class MapPinZoomSource: ZoomTransitionSource {
     /// image and, when the pin was live-previewing, the *same player* mirrored
     /// onto the card's own render surface (two layers, one clock), so the
     /// flight carries the live video rather than a frozen copy of it.
-    func makeFlightCard() -> PinCardView {
+    func makeZoomFlightCard() -> any ZoomFlightCard {
         let card = PinCardView()
         card.imageView.image = thumbnail
-        if let mirrorLive, mirrorLive(card.videoRenderView) {
-            // Poster covers the (usually sub-frame) gap until the mirrored
-            // layer reports its first frame.
-            card.videoRenderView.setPoster(thumbnail)
-            card.videoRenderView.isHidden = false
+        if let mirrorLive {
+            card.adoptZoomLiveMedia { surface in
+                guard let renderView = surface as? VideoRenderView else { return false }
+                return mirrorLive(renderView)
+            }
         }
         return card
     }
@@ -71,14 +71,10 @@ final class MapPinZoomSource: ZoomTransitionSource {
         return mapView.visibleMapRect.contains(MKMapPoint(annotation.coordinate))
     }
 
-    func zoomSourceDidReturn() {
-        mapView?.view(for: annotation)?.isHidden = false
-    }
-
-    /// Hides the live pin while its twin is flying — called by the animator in
-    /// the same transaction that installs the card, so no frame can render
-    /// both (or neither).
-    func hideSourcePin() {
-        mapView?.view(for: annotation)?.isHidden = true
+    /// Hides the live pin while its twin is flying, and restores it when the
+    /// flight is over — called by the drivers in the same transaction that
+    /// installs or retires the card, so no frame can render both (or neither).
+    func setZoomSourceHidden(_ hidden: Bool) {
+        mapView?.view(for: annotation)?.isHidden = hidden
     }
 }

@@ -16,7 +16,7 @@ import UIKit
 /// — progress here is one scalar, which is exactly the rail
 /// `UIPercentDrivenInteractiveTransition` scrubs. The slide stays strictly
 /// horizontal and never touches the hero pipeline (`ZoomFlight`,
-/// `poseAsPin`, live-player mirroring).
+/// `poseAtSource`, live-player mirroring).
 ///
 /// Owned by `FeedFlowCoordinator`; installed as the stack's delegate around
 /// each push and self-uninstalled (restoring any prior delegate) when the
@@ -26,7 +26,7 @@ final class TimelineSlideDismissal: NSObject {
     private weak var feedViewController: UIViewController?
     private weak var navigationController: UINavigationController?
     /// Whatever delegate the stack had when the feed was pushed (e.g. a
-    /// dormant `MapsZoomTransition`, when a deep link pushes the timeline
+    /// dormant `ZoomTransitionController`, when a deep link pushes the timeline
     /// above a pin-opened feed) — restored on teardown.
     private weak var savedDelegate: (any UINavigationControllerDelegate)?
 
