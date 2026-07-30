@@ -43,7 +43,7 @@ final class ProfileViewController: UIViewController {
     /// over between screens by the successor rule — see
     /// `concealFilterToolbar` and `SnapFeedViewController.concealToolbar`.
     private let formatRow = GlassSegmentRow(segments: [
-        .title("Activity"), .title("Media"), .title("Short")
+        .title("Activity"), .title("Gallery"), .title("Short")
     ])
     /// The source filter: one drop-down button — the native single-selection
     /// menu carries the options (checkmark on the active one), and the button

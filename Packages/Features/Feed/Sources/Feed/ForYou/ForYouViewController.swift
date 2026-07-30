@@ -22,7 +22,7 @@ final class ForYouViewController: UIViewController {
     /// The format tabs. Bare by design — `InlineFilterTrayView` supplies the
     /// one glass capsule each control gets outside a toolbar.
     private let formatRow = GlassSegmentRow(segments: [
-        .title("Activity"), .title("Media"), .title("Short")
+        .title("Activity"), .title("Gallery"), .title("Short")
     ])
 
     /// The discovery axis's options, in menu order. One table so the menu, the
@@ -328,6 +328,14 @@ final class ForYouViewController: UIViewController {
     /// nothing left to correct at teardown. The tray is then immune to the
     /// transition by construction rather than by having its own animation
     /// cancelled.
+    /// Points the segment row at the view model's format, without echoing the
+    /// change back out as a user selection.
+    private func syncFormatRowSelection() {
+        guard let index = ForYouPagerView.pageOrder.firstIndex(of: viewModel.format) else { return }
+        formatRow.select(index, notify: false)
+        pager.setActivePage(viewModel.format, animated: false)
+    }
+
     private func syncTrayPosition() {
         guard activeTransition == nil else { return }
         let target = -(view.safeAreaInsets.bottom + InlineFilterTrayView.spacingBelow)
@@ -338,6 +346,14 @@ final class ForYouViewController: UIViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        // The segment row and the view model hold two copies of one fact — which
+        // format is active — and the row's copy is the one nothing persists. Two
+        // paths write it (a tap, and a settled pager swipe reported through
+        // `onPageSettled`), so a callback lost across a transition would leave the
+        // row highlighting a segment the pager is not on. Re-asserting from the
+        // view model on every appearance makes the model the single authority and
+        // costs nothing when they already agree.
+        syncFormatRowSelection()
         // Coming back from the feed: this screen owns the bottom again.
         guard navigationController?.topViewController === self else { return }
         guard activeTransition != nil else {
@@ -416,11 +432,31 @@ final class ForYouViewController: UIViewController {
             view.subviews.forEach { walk($0, name) }
         }
         walk(trayView, "tray")
+        // Every label the tray is drawing, with its text and width. A segment
+        // whose title has gone missing or collapsed to zero width is invisible
+        // while passing every alpha/isHidden check above, so it has to be
+        // checked as its own thing.
+        var labels: [String] = []
+        func collectLabels(_ v: UIView) {
+            if let label = v as? UILabel {
+                labels.append(String(
+                    format: "%@[w=%.1f,a=%.2f%@]",
+                    label.text ?? "nil", label.bounds.width, label.alpha,
+                    label.isHidden ? ",HIDDEN" : ""
+                ))
+            }
+            v.subviews.forEach(collectLabels)
+        }
+        collectLabels(trayView)
+        if labels.count != 3 { offenders.append("label count \(labels.count) != 3") }
+        for expected in ["Activity", "Gallery", "Short"] where !labels.contains(where: { $0.hasPrefix(expected) }) {
+            offenders.append("missing '\(expected)'")
+        }
         // Visible is not the same as reachable: something left over the tray
         // (an undismissed dim, a stale transition container) would pass every
         // check above and still swallow every tap. Hit-test each segment's
         // centre and confirm the tray is what answers.
-        for (index, segment) in ["Activity", "Media", "Short"].enumerated() {
+        for (index, segment) in ["Activity", "Gallery", "Short"].enumerated() {
             let row = formatRow
             guard index < row.subviews.first?.subviews.count ?? 0,
                   let button = row.subviews.first?.subviews[index] as? UIButton
@@ -432,7 +468,8 @@ final class ForYouViewController: UIViewController {
                 offenders.append("\(segment) unreachable (hit=\(hit.map { "\(type(of: $0))" } ?? "nil"))")
             }
         }
-        print("[trayaudit \(label)] " + (offenders.isEmpty ? "clean" : offenders.joined(separator: " | ")))
+        print("[trayaudit \(label)] sel=\(formatRow.selectedIndex) labels=\(labels.joined(separator: " ")) "
+            + (offenders.isEmpty ? "clean" : "OFFENDERS: " + offenders.joined(separator: " | ")))
     }
 
     /// `-foryou-trace-chrome`: samples the chrome's window-space position every
@@ -512,6 +549,7 @@ final class ForYouViewController: UIViewController {
     /// `n` more times, for hunting state that only leaks after several returns.
     private func installDebugHooks() {
         let arguments = ProcessInfo.processInfo.arguments
+        var openDelay = 0.5
         if let position = arguments.firstIndex(of: "-foryou-grab-cycles"),
            position + 1 < arguments.count, let count = Int(arguments[position + 1]) {
             Self.remainingGrabCycles = count
@@ -526,6 +564,29 @@ final class ForYouViewController: UIViewController {
             if let source {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                     self?.applySource(source)
+                }
+            }
+        }
+        // `-foryou-switch-format a,b,...` taps the format segments in order,
+        // ~0.8s apart, through the very path a finger drives (`select(notify:)`
+        // -> `onSelect`). The reported bug needs a *sequence* of switches before
+        // the dismissal, so the sequence has to be reproducible.
+        if let position = arguments.firstIndex(of: "-foryou-switch-format"),
+           position + 1 < arguments.count {
+            let names = arguments[position + 1].split(separator: ",").map(String.init)
+            // The tile tap must come AFTER the switches, or the repro runs out
+            // of order and proves nothing.
+            openDelay = 1.5 + 0.8 * Double(names.count)
+            for (step, name) in names.enumerated() {
+                let format: GalleryFilter.Format? = switch name {
+                case "activity": .activity
+                case "media", "gallery": .media
+                case "short": .short
+                default: nil
+                }
+                guard let format, let index = ForYouPagerView.pageOrder.firstIndex(of: format) else { continue }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5 + 0.8 * Double(step)) { [weak self] in
+                    self?.formatRow.select(index, notify: true)
                 }
             }
         }
@@ -558,7 +619,7 @@ final class ForYouViewController: UIViewController {
             }
             openFeed(from: format, at: index)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: attempt)
+        DispatchQueue.main.asyncAfter(deadline: .now() + openDelay, execute: attempt)
     }
     #endif
 }

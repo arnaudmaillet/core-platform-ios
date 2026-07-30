@@ -29,6 +29,9 @@ public final class GlassSegmentRow: UIView {
     public private(set) var selectedIndex = 0
     private let segments: [Segment]
     private var buttons: [UIButton] = []
+    /// Per-title width constraints, kept so a text-size change updates them
+    /// instead of adding a conflicting second set. Keyed by segment index.
+    private var titleWidths: [Int: NSLayoutConstraint] = [:]
     private let row = UIStackView()
     /// The stack's 6pt insets inside the glass capsule, both sides.
     private static let contentPadding: CGFloat = 12
@@ -71,16 +74,43 @@ public final class GlassSegmentRow: UIView {
             row.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: 6)
             row.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -6)
         }
-        // Title widths are pinned to their SEMIBOLD measurement: selection
-        // toggles weight, and a re-measuring toolbar at the fitting edge
-        // would otherwise reflow (and wrap) the whole capsule on every tap.
+        resizeTitles()
+        applySelection()
+
+        // A title's width is a MEASUREMENT of a font, and its `attributedTitle`
+        // bakes a resolved font — neither of which follows a text-size change on
+        // its own (`adjustsFontForContentSizeCategory` does not reach into a
+        // button configuration's attributed title). Left alone, bumping Dynamic
+        // Type rescales nothing here, and once the widths and the fonts disagree
+        // a segment clips its own label. Re-measure and re-title together.
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: Self, _) in
+            self.resizeTitles()
+            self.applySelection()
+        }
+    }
+
+    /// Pins each title button to its SEMIBOLD measurement.
+    ///
+    /// Semibold, not the current weight: selection toggles weight, and a
+    /// re-measuring toolbar at the fitting edge would otherwise reflow (and wrap)
+    /// the whole capsule on every tap. Constraints are retained so a text-size
+    /// change can update them in place rather than stacking a second set — two
+    /// conflicting equal-width constraints on one button is an unsatisfiable
+    /// layout, and the one UIKit breaks is not yours to choose.
+    private func resizeTitles() {
+        let bold = UIFont.preferredFont(forTextStyle: .subheadline, weight: .semibold)
         for (index, segment) in segments.enumerated() {
             guard case .title(let title) = segment else { continue }
-            let bold = UIFont.preferredFont(forTextStyle: .subheadline, weight: .semibold)
             let width = ceil((title as NSString).size(withAttributes: [.font: bold]).width) + 18
-            buttons[index].widthAnchor.constraint(equalToConstant: width).isActive = true
+            if let existing = titleWidths[index] {
+                existing.constant = width
+            } else {
+                let constraint = buttons[index].widthAnchor.constraint(equalToConstant: width)
+                constraint.isActive = true
+                titleWidths[index] = constraint
+            }
         }
-        applySelection()
+        invalidateIntrinsicContentSize()
     }
 
     @available(*, unavailable)
