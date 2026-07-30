@@ -30,7 +30,13 @@ public final class VideoPlaybackController {
     /// `play` of the same URL to adopt it. See `parkPlayback(from:)`.
     private var parked: (url: URL, player: AVPlayer)?
 
-    public init(source: any VideoSource, poolSize: Int = 3) {
+    /// `poolSize` is the size of the **idle-player cache**, not a concurrency
+    /// limit: `play` mints a new `AVPlayer` when the cache is empty, and the
+    /// number of simultaneous players is set by the calling surface (the grid's
+    /// `maxConcurrent`). Sizing it to match that surface is what keeps a scroll
+    /// from allocating and discarding players continuously — a cache smaller
+    /// than the working set drops every returned player on the floor.
+    public init(source: any VideoSource, poolSize: Int = 6) {
         self.source = source
         self.poolSize = poolSize
         try? AVAudioSession.sharedInstance().setCategory(.ambient, mode: .moviePlayback)

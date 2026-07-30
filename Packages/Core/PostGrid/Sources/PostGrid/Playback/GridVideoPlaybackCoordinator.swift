@@ -9,6 +9,10 @@ import UIKit
 /// per brick is not affordable. At most `maxConcurrent` play, chosen by
 /// proximity to the viewport centre, through a shared pool.
 ///
+/// Square tiles never appear among the candidates — the caller filters on
+/// `GalleryPost.autoplaysInGrid` — so only portrait and landscape bricks
+/// compete for the pool.
+///
 /// **Where it differs from the map, and why.** A map pin plays a dedicated
 /// lightweight clip. A grid tile plays the *full stream* — the very asset the
 /// full-screen viewer will open — so that tapping a playing tile can hand the
@@ -83,15 +87,19 @@ public final class GridVideoPlaybackCoordinator {
     /// bind a player to a tile that has already scrolled away.
     private var startTasks: [PostID: Task<Void, Never>] = [:]
 
-    public init(pool: VideoPlaybackController, maxConcurrent: Int = 3) {
+    public init(pool: VideoPlaybackController, maxConcurrent: Int = 6) {
         self.pool = pool
         self.maxConcurrent = maxConcurrent
     }
 
     /// Reconciles playback against the currently visible video tiles. Stops
     /// tiles that scrolled away or lost their slot, starts newly chosen ones.
-    /// Idempotent — safe to call on every scroll settle and every reload.
-    public func update(candidates: [Candidate]) {
+    /// Idempotent — safe to call continuously during a scroll.
+    ///
+    /// `allowingStarts: false` performs the stop half only. Stopping always
+    /// runs: a tile that has left the viewport must give its player back
+    /// immediately whatever the scroll is doing, or the pool starves.
+    public func update(candidates: [Candidate], allowingStarts: Bool = true) {
         let ranked = candidates.sorted { $0.distanceFromCentre < $1.distanceFromCentre }
         let chosen = isSurfaceVisible ? Array(ranked.prefix(maxConcurrent)) : []
         let chosenIDs = Set(chosen.map(\.id))
@@ -99,6 +107,7 @@ public final class GridVideoPlaybackCoordinator {
         for (id, cell) in playing where !chosenIDs.contains(id) {
             stop(id: id, cell: cell)
         }
+        guard allowingStarts else { return }
         for candidate in chosen where playing[candidate.id] == nil {
             start(candidate)
         }
@@ -176,6 +185,9 @@ public final class GridVideoPlaybackCoordinator {
     // MARK: - Internals
 
     private func start(_ candidate: Candidate) {
+        #if DEBUG
+        Self.logTransition("start", candidate.id, count: playing.count + 1)
+        #endif
         playing[candidate.id] = candidate.cell
         candidate.cell.beginVideoPreview()
         let renderView = candidate.cell.makeVideoRenderViewIfNeeded()
@@ -193,6 +205,9 @@ public final class GridVideoPlaybackCoordinator {
     }
 
     private func stop(id: PostID, cell: PostGridTileCell) {
+        #if DEBUG
+        Self.logTransition("stop ", id, count: playing.count - 1)
+        #endif
         startTasks.removeValue(forKey: id)?.cancel()
         if let renderView = cell.loadedVideoRenderView {
             pool.stop(renderView)
@@ -204,6 +219,17 @@ public final class GridVideoPlaybackCoordinator {
     }
 
     #if DEBUG
+    /// Timestamped start/stop trace under `-grid-playback-log`. Timestamps are
+    /// what show that reconciles land DURING a drag rather than only after it,
+    /// so the line is deliberately cheap enough to leave on while scrolling.
+    static let tracesTransitions = ProcessInfo.processInfo.arguments.contains("-grid-playback-log")
+
+    static func logTransition(_ verb: String, _ id: PostID, count: Int) {
+        guard tracesTransitions else { return }
+        print(String(format: "[grid-playback] %.3f %@ %@ (playing=%d)",
+                     CACurrentMediaTime(), verb, id.rawValue, count))
+    }
+
     /// Prints the rung each playing tile settled on. Direct evidence that the
     /// cap bites: `preferred` is the ceiling asked for, `indicated` the variant
     /// AVFoundation actually chose. Progressive assets report nothing — they

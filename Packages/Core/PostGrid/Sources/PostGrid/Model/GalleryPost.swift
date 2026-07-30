@@ -17,6 +17,21 @@ public struct GalleryPost: Equatable, Sendable {
         case text
     }
 
+    /// The media's own shape, which decides whether a video tile autoplays.
+    public enum Shape: Equatable, Sendable {
+        case portrait
+        case square
+        case landscape
+    }
+
+    /// How far either side of 1:1 still counts as square.
+    ///
+    /// ±12% admits the ratios a "square" crop realistically arrives as (1080x1080
+    /// exactly, but also 1080x1000 or 960x1040 after a re-encode) without
+    /// reaching 4:5 (0.8) or 5:4 (1.25), which are portrait and landscape crops
+    /// that should play.
+    static let squareToleranceFraction = 0.12
+
     public let id: PostID
     public let kind: Kind
     /// post.v1 lineage: a non-empty `parent_id` marks the author's post as a
@@ -34,6 +49,18 @@ public struct GalleryPost: Equatable, Sendable {
     /// assets. See `dev/issues/BACKEND_MEDIA_PREVIEW_RENDITIONS.md` §0.3 — this
     /// is why the grid does not use `preview_url` while the map does.
     public let videoURL: URL?
+    /// The media's pixel aspect ratio (width / height).
+    ///
+    /// **1.0 is also what "unknown" looks like**, deliberately.
+    /// `CoreModels.MediaAttachment.aspectRatio` already returns 1 when the
+    /// contract carried no dimensions, so an attachment the backend never
+    /// stamped reads as square — and a square tile does not autoplay. The
+    /// restriction is therefore fail-closed: where dimensions are missing the
+    /// grid shows a still rather than guessing. That is the safe direction for
+    /// a rule phrased as a restriction, but it does mean autoplay stays dark on
+    /// any surface whose payload omits width/height. See
+    /// `BACKEND_MEDIA_ASPECT_RATIO_SUPPORT.md` — this is that gap with teeth.
+    public let aspectRatio: Double
     public let caption: String
     public let publishedAtMS: Int64
     /// counter.v1 projections; nil when the read-model had no value (the
@@ -48,6 +75,7 @@ public struct GalleryPost: Equatable, Sendable {
         isRepost: Bool,
         thumbnailURL: URL?,
         videoURL: URL? = nil,
+        aspectRatio: Double = 1,
         caption: String,
         publishedAtMS: Int64,
         reactionCount: Int64? = nil,
@@ -59,10 +87,31 @@ public struct GalleryPost: Equatable, Sendable {
         self.isRepost = isRepost
         self.thumbnailURL = thumbnailURL
         self.videoURL = videoURL
+        self.aspectRatio = aspectRatio
         self.caption = caption
         self.publishedAtMS = publishedAtMS
         self.reactionCount = reactionCount
         self.commentCount = commentCount
         self.viewCount = viewCount
+    }
+
+    /// Portrait, square, or landscape, from the media's own pixels.
+    public var shape: Shape {
+        guard aspectRatio > 0 else { return .square }
+        let tolerance = Self.squareToleranceFraction
+        if aspectRatio < 1 - tolerance { return .portrait }
+        if aspectRatio > 1 + tolerance { return .landscape }
+        return .square
+    }
+
+    /// Whether this tile may autoplay in a grid.
+    ///
+    /// Video with a stream, and **not square**. Square tiles stay still
+    /// deliberately: they are the mosaic's filler shape, they appear in the
+    /// densest runs, and a wall of small moving squares is noise rather than
+    /// content. Portrait and landscape bricks are the ones large enough for
+    /// motion to read as something.
+    public var autoplaysInGrid: Bool {
+        kind == .video && videoURL != nil && shape != .square
     }
 }

@@ -44,6 +44,45 @@ struct GridVideoPlaybackCoordinatorTests {
         #expect(coordinator.playingIDs.count == 3)
     }
 
+    @Test func defaultsToSixConcurrentPlayers() {
+        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(poolSize: 6))
+        coordinator.update(candidates: (0..<12).map { makeCandidate($0, distance: CGFloat($0)) })
+        #expect(coordinator.playingIDs.count == 6)
+    }
+
+    // MARK: - Mid-fling gating
+
+    /// During a hard fling nothing new starts — anything started is off screen
+    /// before its first frame.
+    @Test func noStartsWhileGated() {
+        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 6)
+        coordinator.update(
+            candidates: [makeCandidate(0, distance: 10)], allowingStarts: false
+        )
+        #expect(coordinator.playingIDs.isEmpty)
+    }
+
+    /// Stopping is never gated: a tile that left must give its player back
+    /// whatever the scroll is doing, or the pool starves mid-fling.
+    @Test func stopsStillHappenWhileGated() {
+        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 6)
+        let candidate = makeCandidate(0, distance: 10)
+        coordinator.update(candidates: [candidate])
+        #expect(coordinator.playingIDs.count == 1)
+
+        coordinator.update(candidates: [], allowingStarts: false)
+        #expect(coordinator.playingIDs.isEmpty)
+    }
+
+    @Test func startsResumeOnceUngated() {
+        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 6)
+        let candidates = [makeCandidate(0, distance: 10)]
+        coordinator.update(candidates: candidates, allowingStarts: false)
+        #expect(coordinator.playingIDs.isEmpty)
+        coordinator.update(candidates: candidates)
+        #expect(coordinator.playingIDs.count == 1)
+    }
+
     /// Closest to the viewport centre wins, regardless of the order the caller
     /// happened to enumerate visible cells in.
     @Test func choosesTheTilesNearestTheViewportCentre() {

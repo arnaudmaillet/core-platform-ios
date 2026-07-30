@@ -111,6 +111,10 @@ public actor ForYouRepository: ForYouProviding {
                     // `url` is the stream itself, so a tile and the full-screen
                     // viewer open the same asset — see `GalleryPost.videoURL`.
                     videoURL: kind == .video ? attachment?.url : nil,
+                    // Already 1 when the contract carried no dimensions, which
+                    // reads as square and so withholds autoplay — see
+                    // `GalleryPost.aspectRatio`.
+                    aspectRatio: attachment?.aspectRatio ?? 1,
                     caption: entry.post.caption,
                     publishedAtMS: Int64(entry.post.publishedAt.timeIntervalSince1970 * 1000),
                     reactionCount: entry.likeCount

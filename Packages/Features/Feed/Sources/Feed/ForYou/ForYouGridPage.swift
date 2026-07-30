@@ -55,6 +55,9 @@ final class ForYouGridPage: UIView {
     /// Caught in-sim as the grid visibly rearranging just after the card set
     /// down on the right tile.
     private var isRepositioning = false
+    /// Throttle state for the during-scroll autoplay reconcile.
+    private var lastReconcileTime: CFTimeInterval = 0
+    private var lastReconcileOffset: CGFloat = 0
     #if DEBUG
     private var hasScheduledDiagnostics = false
     #endif
@@ -133,7 +136,11 @@ final class ForYouGridPage: UIView {
     /// Reconciles autoplay against what is on screen now. Cheap and idempotent;
     /// call it whenever the visible set or the surface's visibility can have
     /// changed.
-    func updateAutoplay() {
+    ///
+    /// `allowingStarts: false` still stops tiles that left, but starts nothing
+    /// new — the mid-fling case, where anything started is gone before its first
+    /// frame.
+    func updateAutoplay(allowingStarts: Bool = true) {
         guard let playback else { return }
         let viewport = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
         let centreY = viewport.midY
@@ -141,7 +148,9 @@ final class ForYouGridPage: UIView {
             indexPath -> GridVideoPlaybackCoordinator.Candidate? in
             guard !showsSkeleton, posts.indices.contains(indexPath.item) else { return nil }
             let post = posts[indexPath.item]
-            guard post.kind == .video, let url = post.videoURL,
+            // `autoplaysInGrid` is the shape rule: video, with a stream, and
+            // not square. Square bricks stay still.
+            guard post.autoplaysInGrid, let url = post.videoURL,
                   post.id != heroHiddenPostID, // its twin is in the air
                   let cell = collectionView.cellForItem(at: indexPath) as? PostGridTileCell
             else { return nil }
@@ -158,7 +167,7 @@ final class ForYouGridPage: UIView {
                 distanceFromCentre: abs(frame.midY - centreY)
             )
         }
-        playback.update(candidates: candidates)
+        playback.update(candidates: candidates, allowingStarts: allowingStarts)
     }
 
     /// Tab left, feed presented over the grid, app backgrounded. `keeping`
@@ -351,6 +360,18 @@ final class ForYouGridPage: UIView {
         posts.first { $0.id == postID }
     }
 
+    /// The indices `new` adds when it is exactly `old` plus a suffix, else nil.
+    ///
+    /// Strict: every existing element must be unchanged and in place. A reorder
+    /// (the discovery source switching between Trending and Recent) or an
+    /// in-place edit is NOT an append and has to go through a full reload, or
+    /// the cells would keep rendering stale posts.
+    static func appendedRange(from old: [GalleryPost], to new: [GalleryPost]) -> Range<Int>? {
+        guard !old.isEmpty, new.count > old.count else { return nil }
+        guard Array(new.prefix(old.count)) == old else { return nil }
+        return old.count..<new.count
+    }
+
     private func cell(for postID: PostID) -> UICollectionViewCell? {
         guard let index = posts.firstIndex(where: { $0.id == postID }) else { return nil }
         return collectionView.cellForItem(at: IndexPath(item: index, section: 0))
@@ -379,8 +400,23 @@ final class ForYouGridPage: UIView {
         // Hydration retires the skeleton with a cross-dissolve, the same
         // in-place hand-off the profile gallery uses.
         let dissolving = showsSkeleton && !skeleton && !posts.isEmpty && window != nil
+        // A page landing is a pure APPEND, and `reloadData` would recycle every
+        // realized cell to express it. That is what made a drag stop and restart
+        // all four playing tiles inside 60ms — the players were fine, the cells
+        // under them were destroyed and rebuilt. Inserting only the new items
+        // leaves existing cells (and their playback) untouched.
+        let appended = Self.appendedRange(from: self.posts, to: posts)
         self.posts = posts
         showsSkeleton = skeleton
+        if let appended, !showsSkeleton, !skeleton, !dissolving {
+            collectionView.performBatchUpdates {
+                collectionView.insertItems(
+                    at: appended.map { IndexPath(item: $0, section: 0) }
+                )
+            }
+            DispatchQueue.main.async { [weak self] in self?.updateAutoplay() }
+            return
+        }
         if dissolving {
             UIView.transition(
                 with: collectionView, duration: 0.35,
@@ -448,6 +484,13 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        // Autoplay reconciles DURING the scroll, so a brick starts playing as
+        // it slides into view rather than after the scroll has stopped.
+        // Throttled rather than run per callback: `scrollViewDidScroll` fires
+        // at the display refresh rate, and reconciling at 120 Hz spends more
+        // time diffing than the work is worth.
+        throttledAutoplayReconcile(scrollView)
+
         guard !showsSkeleton, !posts.isEmpty, !isRepositioning else { return }
         let remaining = scrollView.contentSize.height
             - (scrollView.contentOffset.y + scrollView.bounds.height)
@@ -455,10 +498,40 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         onNearEnd?()
     }
 
-    // Autoplay reconciles when the scroll SETTLES, not on every frame: starting
-    // a stream for a brick that is about to fly past wastes a pool slot and a
-    // segment fetch. Same rule the map uses for pan.
+    /// Reconcile cadence during a scroll, in seconds. ~30 Hz: fast enough that
+    /// a tile is playing by the time the eye has settled on it, slow enough
+    /// that the diff cost stays invisible next to the scroll itself.
+    private static let scrollReconcileInterval: CFTimeInterval = 1.0 / 30
 
+    /// Points-per-second past which a *new* player is not started.
+    ///
+    /// The reconcile still runs at speed — tiles that leave stop immediately —
+    /// but nothing starts during a hard fling. At 4000 pt/s a brick crosses the
+    /// viewport in about a fifth of a second, so starting it means an item
+    /// allocation and a segment fetch for something already gone. Dragging by
+    /// hand rarely exceeds ~1500 pt/s, so the behaviour the request is about —
+    /// tiles playing while the finger is still moving — sits well inside this.
+    private static let maximumStartVelocity: CGFloat = 2200
+
+    private func throttledAutoplayReconcile(_ scrollView: UIScrollView) {
+        guard playback != nil, !showsSkeleton, !isRepositioning else { return }
+        let now = CACurrentMediaTime()
+        let elapsed = now - lastReconcileTime
+        guard elapsed >= Self.scrollReconcileInterval else { return }
+
+        let offset = scrollView.contentOffset.y
+        // Velocity from the sampling interval itself; `panGestureRecognizer
+        // .velocity` reports zero once the finger lifts, which is exactly the
+        // decelerating stretch this needs to measure.
+        let velocity = elapsed > 0 ? abs(offset - lastReconcileOffset) / CGFloat(elapsed) : 0
+        lastReconcileTime = now
+        lastReconcileOffset = offset
+
+        updateAutoplay(allowingStarts: velocity <= Self.maximumStartVelocity)
+    }
+
+    /// A fling that ends without deceleration still needs a final reconcile:
+    /// the throttled pass may have been velocity-gated right up to the stop.
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         if !decelerate { updateAutoplay() }
     }
