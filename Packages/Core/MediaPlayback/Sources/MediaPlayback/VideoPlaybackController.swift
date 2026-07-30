@@ -112,8 +112,14 @@ public final class VideoPlaybackController {
     /// Only one player parks at a time: a second call returns the previous
     /// occupant to the pool, so a rapid double-tap cannot strand one. Returns
     /// whether there was anything to park.
+    /// `keepingSurfaceAttached` leaves `view` bound to the player instead of
+    /// clearing it. Used when the surface has been DONATED to a flight card:
+    /// the card is that same view, already rendering, and detaching would blank
+    /// the layer — which is the flash this exists to avoid. The surface stops
+    /// displaying naturally when the adopter attaches its own layer, since only
+    /// the most recently attached one renders.
     @discardableResult
-    public func parkPlayback(from view: VideoRenderView) -> Bool {
+    public func parkPlayback(from view: VideoRenderView, keepingSurfaceAttached: Bool = false) -> Bool {
         let key = ObjectIdentifier(view)
         guard let player = activePlayers[key], let url = playingURL[key] else { return false }
         discardParkedPlayback()
@@ -122,8 +128,26 @@ public final class VideoPlaybackController {
         generation[key] = (generation[key] ?? 0) + 1
         activePlayers[key] = nil
         playingURL[key] = nil
-        view.detach()
+        if !keepingSurfaceAttached { view.detach() }
         parked = (url, player)
+        return true
+    }
+
+    /// Cancels a park, re-registering the parked player as `view`'s active one.
+    ///
+    /// For a dismissal the viewer abandons: the surface was donated to a flight
+    /// card and its player parked, and both have to come back without the item
+    /// being touched. The view is re-attached rather than assumed still bound,
+    /// so this works whether or not the donation kept the surface attached.
+    @discardableResult
+    public func unparkPlayback(to view: VideoRenderView, mediaURL: URL) -> Bool {
+        guard let parked, parked.url == mediaURL else { return false }
+        self.parked = nil
+        let key = ObjectIdentifier(view)
+        view.attach(parked.player)
+        activePlayers[key] = parked.player
+        playingURL[key] = mediaURL
+        parked.player.play()
         return true
     }
 

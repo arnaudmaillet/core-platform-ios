@@ -51,7 +51,10 @@ final class PostGridFlightCard: UIView {
 
     private let style: Style
     private let imageView = UIImageView()
-    let videoRenderView = VideoRenderView()
+    /// The card's own surface, used when it has to mirror. Replaced by a
+    /// donated one whenever the source can hand over the layer it is already
+    /// rendering — see `adoptZoomLiveMediaView`.
+    private(set) var videoRenderView = VideoRenderView()
     /// The tile's furniture: the counter pair and the play badge, in one view
     /// so the flight can fade them as a unit.
     private let restingChromeView = UIView()
@@ -134,10 +137,49 @@ extension PostGridFlightCard: ZoomFlightCard {
     /// A grid tile never previews live, so this only ever fires on the dismiss
     /// leg — the feed's playing page mirrors its player here, and the card
     /// carries the live video home instead of a frozen cover.
+    /// Takes ownership of a surface that is ALREADY rendering, swapping it in
+    /// for the card's own.
+    ///
+    /// Preferred over `adoptZoomLiveMedia`, and the difference is the whole
+    /// point: mirroring builds a second `AVPlayerLayer`, which has no decoded
+    /// frame and stays `isReadyForDisplay == false` for ~100ms, so the card
+    /// shows its static poster while the source is already hidden. Adopting the
+    /// live view moves the layer that is mid-playback, so frame 0 of the flight
+    /// is a real video frame.
+    ///
+    /// No poster is set here: the surface is already showing video, and a
+    /// poster would only be a chance to flash.
+    func adoptZoomLiveMediaView(_ view: UIView) {
+        guard let view = view as? VideoRenderView else { return }
+        videoRenderView.removeFromSuperview()
+        videoRenderView = view
+        view.frame = bounds
+        view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.clipsToBounds = true
+        view.isHidden = false
+        insertSubview(view, aboveSubview: imageView)
+        #if DEBUG
+        view.debugLabel = "card(donated)"
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] %.3f card ADOPTED LIVE VIEW readyNow=%@",
+                         CACurrentMediaTime(), view.isReadyForDisplay ? "true" : "false"))
+        }
+        #endif
+    }
+
     func adoptZoomLiveMedia(_ mirror: (UIView) -> Bool) {
+        #if DEBUG
+        videoRenderView.debugLabel = "card"
+        #endif
         guard mirror(videoRenderView) else { return }
         videoRenderView.setPoster(imageView.image)
         videoRenderView.isHidden = false
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] %.3f card attached readyNow=%@",
+                         CACurrentMediaTime(), videoRenderView.isReadyForDisplay ? "true" : "false"))
+        }
+        #endif
     }
 
     func setZoomCornerRadius(_ radius: CGFloat) {

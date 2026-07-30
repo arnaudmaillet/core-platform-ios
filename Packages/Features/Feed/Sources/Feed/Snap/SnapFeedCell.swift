@@ -594,6 +594,30 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         return videoPlayback.parkPlayback(from: mediaCard.renderView)
     }
 
+    /// Hands the page's already-rendering surface to a dismissal's flight card,
+    /// parking the player behind it.
+    ///
+    /// The card then flies the layer that is mid-playback instead of a mirror,
+    /// which is blank for ~70ms — the flash at the start of a back-tap. The
+    /// page keeps the view in its hierarchy but hands rendering over; on a
+    /// cancelled grab `reclaimDonatedPlayback` puts everything back.
+    func donateLiveRenderView() -> VideoRenderView? {
+        guard mediaKind == .video, let videoPlayback,
+              videoPlayback.parkPlayback(from: mediaCard.renderView, keepingSurfaceAttached: true)
+        else { return nil }
+        let view = mediaCard.renderView
+        view.removeFromSuperview()
+        return view
+    }
+
+    /// Puts a donated surface back and un-parks its player — the abandoned
+    /// dismissal. No-op when the park was already claimed.
+    func reclaimDonatedPlayback(_ view: VideoRenderView) {
+        mediaCard.restoreRenderView(view)
+        guard let url = mediaURL, let videoPlayback else { return }
+        videoPlayback.unparkPlayback(to: view, mediaURL: url)
+    }
+
     // MARK: - Play/pause toggle
 
     /// Begin-time gate for the card's swipe exit, the composer bar's

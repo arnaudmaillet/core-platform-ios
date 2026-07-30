@@ -231,11 +231,8 @@ final class ForYouGridPage: UIView {
     /// Parking first, which is what this used to do, left nothing to mirror:
     /// the card flew a static cover for the whole 420ms zoom while the player
     /// sat parked, and the live frame only reappeared after landing.
-    @discardableResult
-    func handOffLivePlayback(of postID: PostID, to surface: VideoRenderView) -> Bool {
-        guard let playback, playback.mirrorLivePlayback(of: postID, to: surface) else { return false }
-        playback.parkForHandoff(postID)
-        return true
+    func donateLivePlayback(of postID: PostID) -> VideoRenderView? {
+        playback?.donateLiveSurface(of: postID)
     }
 
     /// The destination never adopted the parked player — a cancelled flight, or

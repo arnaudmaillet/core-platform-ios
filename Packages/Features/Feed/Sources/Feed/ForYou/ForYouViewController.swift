@@ -247,17 +247,17 @@ final class ForYouViewController: UIViewController {
             activePostID: { [weak feed] in (feed as? SnapFeedViewController)?.activePostID },
             // The gallery recedes; the tray and the title stay grounded.
             depthView: pager,
-            // Mirror-then-park, run at card-build time so the card is live from
-            // its first frame.
-            mirrorLive: { [weak page] surface in
-                let handed = page?.handOffLivePlayback(of: tapped.id, to: surface) ?? false
+            // Donate-then-park, run at card-build time so the card flies the
+            // very layer the tile was already rendering.
+            donateLive: { [weak page] in
+                let donated = page?.donateLivePlayback(of: tapped.id)
                 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-                    print(String(format: "[zoom-live] %.3f source mirror+park -> %@",
-                                 CACurrentMediaTime(), handed ? "true" : "false"))
+                    print(String(format: "[zoom-live] %.3f source donate+park -> %@",
+                                 CACurrentMediaTime(), donated != nil ? "true" : "false"))
                 }
                 #endif
-                return handed
+                return donated
             }
         )
         let transition = ZoomTransitionController(source: source, destination: destination)

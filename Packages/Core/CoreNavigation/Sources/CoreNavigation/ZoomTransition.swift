@@ -114,6 +114,20 @@ public protocol ZoomTransitionDestination: AnyObject {
     @discardableResult
     func zoomParkLiveMediaForHandoff() -> Bool
 
+    /// Hands over the destination's already-rendering media view, for the card
+    /// to fly directly.
+    ///
+    /// Preferred over `zoomMirrorLiveMedia`, which builds a SECOND
+    /// `AVPlayerLayer` — and a fresh layer has no decoded frame, reporting
+    /// `isReadyForDisplay == false` for ~70ms while the destination is already
+    /// hidden. That window is the flash at the start of a dismissal. Moving the
+    /// live view has no such window. `nil` when nothing is playing.
+    func zoomDonateLiveMediaView() -> UIView?
+
+    /// Puts a donated view back and resumes rendering into it — the abandoned
+    /// dismissal, where the destination stays on screen and must look untouched.
+    func zoomReclaimLiveMediaView(_ view: UIView)
+
     /// Attaches the destination's live media player — if its active page is
     /// playing one — onto `surface` as an additional render layer, so a
     /// dismissal flight carries the live video rather than a frozen cover.
@@ -133,6 +147,8 @@ public protocol ZoomTransitionDestination: AnyObject {
 
 public extension ZoomTransitionDestination {
     func zoomMirrorLiveMedia(onto surface: UIView) -> Bool { false }
+    func zoomDonateLiveMediaView() -> UIView? { nil }
+    func zoomReclaimLiveMediaView(_ view: UIView) {}
     func zoomTransitionWillBegin() {}
     @discardableResult
     func zoomParkLiveMediaForHandoff() -> Bool { false }

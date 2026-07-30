@@ -34,22 +34,22 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// `zoomPresenterDepthView`.
     private weak var depthView: UIView?
 
-    /// Attaches the tapped tile's live player to the flight card's surface and
-    /// parks it for the destination. `nil` when the tile was not playing.
-    private let mirrorLive: ((VideoRenderView) -> Bool)?
+    /// Hands over the tapped tile's already-rendering surface and parks its
+    /// player for the destination. `nil` when the tile was not playing.
+    private let donateLive: (() -> VideoRenderView?)?
 
     init(
         page: ForYouGridPage,
         tappedID: PostID,
         activePostID: @escaping () -> PostID?,
         depthView: UIView?,
-        mirrorLive: ((VideoRenderView) -> Bool)? = nil
+        donateLive: (() -> VideoRenderView?)? = nil
     ) {
         self.page = page
         anchorID = tappedID
         self.activePostID = activePostID
         self.depthView = depthView
-        self.mirrorLive = mirrorLive
+        self.donateLive = donateLive
     }
 
     /// The pager, not the whole screen.
@@ -89,20 +89,24 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
             cover: appearance?.cover,
             style: appearance?.style ?? .tile
         )
-        // An autoplaying tile hands its RUNNING player to the card, exactly as
-        // a live-previewing map pin does. Without this the card can only ask
-        // the destination, which on a present has not begun playing yet — so it
-        // flew a frozen cover for the entire zoom.
-        if let mirrorLive {
-            card.adoptZoomLiveMedia { surface in
-                guard let renderView = surface as? VideoRenderView else { return false }
-                return mirrorLive(renderView)
-            }
+        // An autoplaying tile hands its RUNNING surface to the card. Donating
+        // the live view is preferred over mirroring onto the card's own: a
+        // mirrored layer is blank for ~100ms while the source is already
+        // hidden, which is the flash at the start of the flight. Moving the
+        // layer that is mid-playback has no such window.
+        if let donateLive, let donated = donateLive() {
+            card.adoptZoomLiveMediaView(donated)
         }
         return card
     }
 
     func setZoomSourceHidden(_ hidden: Bool) {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] %.3f source hidden=%@",
+                         CACurrentMediaTime(), hidden ? "true" : "false"))
+        }
+        #endif
         page?.setHeroHidden(hidden, for: anchorID)
         // Restoring the source is the end of the flight, whichever way it went:
         // hand the grid's inset back so it tracks the safe area again.

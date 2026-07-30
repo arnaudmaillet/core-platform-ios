@@ -229,6 +229,13 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             presentingView?.transform = .identity
         } completion: { _ in
             let cancelled = context.transitionWasCancelled
+            // A donated surface goes back ONLY when the viewer abandoned the
+            // dismissal. On a completed one the destination is leaving and its
+            // parked player belongs to the source that is landing — reclaiming
+            // there would steal it back and restart the video at zero.
+            if cancelled, let surface = flight.card.zoomLiveMediaSurface {
+                self.destination?.zoomReclaimLiveMediaView(surface)
+            }
             flight.card.removeFromSuperview()
             flight.shadow.removeFromSuperview()
             dim.removeFromSuperview()

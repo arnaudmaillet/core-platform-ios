@@ -157,6 +157,25 @@ public final class GridVideoPlaybackCoordinator {
     /// same handoff instead of as a separate step that could disagree with it.
     ///
     /// Returns whether a live player was actually handed over.
+    /// Hands the tile's already-rendering surface to a flight card and parks
+    /// the player behind it.
+    ///
+    /// The surface stays attached to the player, so the card displays a live
+    /// frame from the instant it is posed — no mirror, no new layer, no
+    /// readiness gap. Returns the donated view, or nil when the tile is not
+    /// playing.
+    public func donateLiveSurface(of id: PostID) -> VideoRenderView? {
+        guard let cell = playing[id], let renderView = cell.loadedVideoRenderView,
+              pool.parkPlayback(from: renderView, keepingSurfaceAttached: true)
+        else { return nil }
+        let donated = cell.donateVideoRenderView()
+        cell.onReuse = nil
+        playing[id] = nil
+        uncappedIDs.remove(id)
+        startTasks.removeValue(forKey: id)?.cancel()
+        return donated
+    }
+
     @discardableResult
     public func parkForHandoff(_ id: PostID) -> Bool {
         guard let cell = playing[id], let renderView = cell.loadedVideoRenderView else { return false }

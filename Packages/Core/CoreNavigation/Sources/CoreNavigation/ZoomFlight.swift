@@ -63,6 +63,16 @@ struct ZoomFlight {
         // (dismiss leg) — so a playing video never freezes into a cover at
         // either handshake. On a present the destination's page isn't playing
         // yet and refuses.
+        // Donation before mirroring, both directions. A mirror is a second
+        // `AVPlayerLayer` with no decoded frame — blank for ~70-100ms while the
+        // other side is already hidden, which is the flash at the start of the
+        // flight. Moving the view that is already rendering has no such window;
+        // mirroring stays as the fallback for sources that cannot give theirs
+        // up.
+        if card.zoomLiveMediaSurface == nil, let destination,
+           let donated = destination.zoomDonateLiveMediaView() {
+            card.adoptZoomLiveMediaView(donated)
+        }
         if card.zoomLiveMediaSurface == nil, let destination {
             card.adoptZoomLiveMedia { surface in destination.zoomMirrorLiveMedia(onto: surface) }
         }

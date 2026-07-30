@@ -52,6 +52,17 @@ final class SnapMediaCardView: UIView {
         renderView.pin(to: self)
     }
 
+    /// Re-installs the video surface after a hero flight borrowed it.
+    ///
+    /// Removing the view drops its pinning constraints with it, so the restore
+    /// has to re-pin rather than just re-add. Ordering matters as much: it goes
+    /// back above the photo surface, where it started.
+    func restoreRenderView(_ view: VideoRenderView) {
+        guard view === renderView, view.superview !== self else { return }
+        insertSubview(view, aboveSubview: imageView)
+        view.pin(to: self)
+    }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 

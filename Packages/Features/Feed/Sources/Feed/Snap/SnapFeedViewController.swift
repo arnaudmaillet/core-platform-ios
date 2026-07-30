@@ -61,6 +61,9 @@ final class SnapFeedViewController: UIViewController {
     /// realized inside that window inherit the playback deferral, so a page
     /// activating mid-flight cannot steal the render slot from the flying card.
     private var isAwaitingZoomPresentation = false
+    /// The surface currently on loan to a dismissal's flight card, so a
+    /// cancelled grab can take it back.
+    private var donatedLiveView: VideoRenderView?
     /// The two facts whose AND is the surface's visibility.
     private var isOnScreen = false
     private var isForeground = true
@@ -1390,7 +1393,25 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// Parks the active page's player for the source it is flying home to.
     @discardableResult
     public func zoomParkLiveMediaForHandoff() -> Bool {
-        activeSnapCell?.parkPlayback() ?? false
+        // Already handed over as a donated view, which parks as part of the
+        // same step — parking again would retire the player the card is flying.
+        guard donatedLiveView == nil else { return true }
+        return activeSnapCell?.parkPlayback() ?? false
+    }
+
+    /// Hands the active page's rendering surface to a dismissal's flight card.
+    public func zoomDonateLiveMediaView() -> UIView? {
+        guard let donated = activeSnapCell?.donateLiveRenderView() else { return nil }
+        donatedLiveView = donated
+        return donated
+    }
+
+    /// Puts a donated surface back — the abandoned grab, where this page stays
+    /// on screen and has to look untouched.
+    public func zoomReclaimLiveMediaView(_ view: UIView) {
+        guard let view = view as? VideoRenderView else { return }
+        donatedLiveView = nil
+        activeSnapCell?.reclaimDonatedPlayback(view)
     }
 
     public func zoomTransitionDidEnd() {

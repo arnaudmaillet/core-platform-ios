@@ -189,6 +189,22 @@ public final class PostGridTileCell: UICollectionViewCell {
     /// The video surface if one was ever built, else nil — never allocates.
     public private(set) var loadedVideoRenderView: VideoRenderView?
 
+    /// Gives up the live surface so a hero flight can fly the *same* layer.
+    ///
+    /// Mirroring — attaching the player to a second `AVPlayerLayer` — cannot be
+    /// seamless, because a freshly attached layer has no decoded frame and
+    /// reports `isReadyForDisplay == false` for ~100ms. Measured. Moving the
+    /// view that is already rendering has no such window: same layer, same
+    /// player, same frame, just a different superview.
+    ///
+    /// The cell drops its reference; a later play builds a fresh surface.
+    public func donateVideoRenderView() -> VideoRenderView? {
+        guard let view = loadedVideoRenderView else { return nil }
+        loadedVideoRenderView = nil
+        view.removeFromSuperview()
+        return view
+    }
+
     /// Called when the collection view recycles this cell, so whoever loaned it
     /// a player takes it back. Mirrors `MapAnnotationView.onReuse`: a recycled
     /// cell that kept its player would render another post's video.

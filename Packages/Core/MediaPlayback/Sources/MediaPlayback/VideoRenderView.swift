@@ -34,7 +34,12 @@ public final class VideoRenderView: UIView {
         readinessObservation = playerLayer.observe(\.isReadyForDisplay, options: [.new]) { [weak self] layer, _ in
             let ready = layer.isReadyForDisplay
             DispatchQueue.main.async {
-                MainActor.assumeIsolated { self?.updatePosterVisibility(ready: ready) }
+                MainActor.assumeIsolated {
+                    #if DEBUG
+                    self?.logReadiness(ready)
+                    #endif
+                    self?.updatePosterVisibility(ready: ready)
+                }
             }
         }
     }
@@ -62,7 +67,24 @@ public final class VideoRenderView: UIView {
     }
     var isAttached: Bool { playerLayer.player != nil }
 
+    /// Whether the layer has a decoded frame on screen. A freshly attached
+    /// `AVPlayerLayer` is NOT ready even when its player is mid-playback — the
+    /// new layer needs its own render cycle — which is the whole reason a
+    /// mirrored flight card can start out blank.
+    public var isReadyForDisplay: Bool { playerLayer.isReadyForDisplay }
+
     #if DEBUG
     var isPosterVisible: Bool { !posterView.isHidden }
+
+    /// Names this surface in `-zoom-live-log` output (e.g. "tile", "card").
+    public var debugLabel: String?
+
+    private func logReadiness(_ ready: Bool) {
+        guard let debugLabel,
+              ProcessInfo.processInfo.arguments.contains("-zoom-live-log")
+        else { return }
+        print(String(format: "[zoom-live] %.3f %@ readyForDisplay=%@",
+                     CACurrentMediaTime(), debugLabel, ready ? "true" : "false"))
+    }
     #endif
 }

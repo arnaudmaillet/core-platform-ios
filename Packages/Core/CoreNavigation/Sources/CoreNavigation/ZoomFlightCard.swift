@@ -38,6 +38,18 @@ public protocol ZoomFlightCard: UIView {
     /// the flight is built, and only when the card is not already live.
     func adoptZoomLiveMedia(_ mirror: (UIView) -> Bool)
 
+    /// Takes ownership of a media view that is ALREADY rendering, in place of
+    /// the card's own surface.
+    ///
+    /// Preferred over `adoptZoomLiveMedia`, and the difference is visible: a
+    /// mirror is a second `AVPlayerLayer`, which carries no decoded frame and
+    /// reports `isReadyForDisplay == false` for ~70-100ms while the other side
+    /// is already hidden — the flash at the start of the flight. Moving a view
+    /// that is mid-playback has no such window. Typed loosely to keep this
+    /// module playback-agnostic; cards downcast and ignore what they do not
+    /// recognise.
+    func adoptZoomLiveMediaView(_ view: UIView)
+
     /// Rounds the card and any furniture that must round with it. Animatable:
     /// called inside an animation block, it sweeps.
     func setZoomCornerRadius(_ radius: CGFloat)
@@ -59,6 +71,7 @@ public protocol ZoomFlightCard: UIView {
 public extension ZoomFlightCard {
     var zoomLiveMediaSurface: UIView? { nil }
     func adoptZoomLiveMedia(_ mirror: (UIView) -> Bool) {}
+    func adoptZoomLiveMediaView(_ view: UIView) {}
     func prepareZoomLiveMediaForFlight(destinationSize: CGSize) {}
     func applyZoomRestingShadow(to layer: CALayer) {}
 }
