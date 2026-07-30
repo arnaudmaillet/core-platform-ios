@@ -154,6 +154,7 @@ final class ForYouViewController: UIViewController {
 
         #if DEBUG
         installDebugHooks()
+        debugTraceChrome()
         #endif
     }
 
@@ -223,7 +224,9 @@ final class ForYouViewController: UIViewController {
             tappedID: tapped.id,
             // Injected rather than imported: the source stays a grid concept
             // and never learns what a feed is.
-            activePostID: { [weak feed] in (feed as? SnapFeedViewController)?.activePostID }
+            activePostID: { [weak feed] in (feed as? SnapFeedViewController)?.activePostID },
+            // The gallery recedes; the tray and the title stay grounded.
+            depthView: pager
         )
         let transition = ZoomTransitionController(source: source, destination: destination)
         activeTransition = transition
@@ -389,6 +392,39 @@ final class ForYouViewController: UIViewController {
             }
         }
         print("[trayaudit \(label)] " + (offenders.isEmpty ? "clean" : offenders.joined(separator: " | ")))
+    }
+
+    /// `-foryou-trace-chrome`: samples the chrome's window-space position every
+    /// frame while a hero transition is alive, so "does it move?" is a number.
+    private func debugTraceChrome() {
+        guard ProcessInfo.processInfo.arguments.contains("-foryou-trace-chrome") else { return }
+        let link = CADisplayLink(target: self, selector: #selector(debugSampleChrome))
+        link.add(to: .main, forMode: .common)
+    }
+
+    @objc private func debugSampleChrome() {
+        guard activeTransition != nil, let window = view.window else { return }
+        let tray = trayView.convert(trayView.bounds, to: window)
+        let bar = navigationController?.navigationBar
+        let barRect = bar.map { $0.convert($0.bounds, to: window) } ?? .zero
+        // Find whatever is actually drawing the big "For You" — it is not in the
+        // 54pt compact bar, so measuring `navigationBar` alone proves nothing.
+        var titleRect = CGRect.zero
+        var titleOwner = "none"
+        func findTitle(_ v: UIView) {
+            if let label = v as? UILabel, label.text == "For You", label.bounds.height > 20 {
+                titleRect = label.convert(label.bounds, to: window)
+                titleOwner = "\(type(of: label.superview ?? label))"
+            }
+            v.subviews.forEach(findTitle)
+        }
+        findTitle(window)
+        print(String(
+            format: "[chrome] trayY=%.2f trayH=%.2f navY=%.2f navH=%.2f titleY=%.2f titleH=%.2f in=%@ t=%@",
+            tray.minY, tray.height, barRect.minY, barRect.height,
+            titleRect.minY, titleRect.height, titleOwner,
+            NSCoder.string(for: view.transform)
+        ))
     }
 
     /// Re-opens the feed for the next scripted cycle, if any are left.

@@ -115,7 +115,9 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // Depth cue: the presenting map recedes to 0.95, so the feed reads as
         // lifting off a 3D canvas. (`view(forKey:)` is nil under an
         // over-full-screen present, so reach the root via the view controller.)
-        let presentingView = context.viewController(forKey: .from)?.view
+        // The depth cue rides the source-nominated view when there is one, so a
+        // screen's own chrome stays grounded while its content recedes.
+        let presentingView = source.zoomPresenterDepthView ?? context.viewController(forKey: .from)?.view
         ZoomFlight.applyRecededChrome(to: presentingView, radius: screenRadius)
 
         // Dim fades on a plain curve — opacity should never bounce.
@@ -197,7 +199,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
 
         // Reverse depth cue: the map starts receded (0.95, covered) and scales
         // back to full as the card shrinks.
-        let presentingView = context.viewController(forKey: .to)?.view
+        let presentingView = source.zoomPresenterDepthView ?? context.viewController(forKey: .to)?.view
         ZoomFlight.applyRecededChrome(to: presentingView, radius: screenRadius)
         presentingView?.transform = CGAffineTransform(
             scaleX: ZoomFlight.presenterDepthScale, y: ZoomFlight.presenterDepthScale

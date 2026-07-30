@@ -29,11 +29,35 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// realized cell — the same rule the pin uses when it is panned off-screen.
     private let fallbackSide: CGFloat = 96
 
-    init(page: ForYouGridPage, tappedID: PostID, activePostID: @escaping () -> PostID?) {
+    /// The gallery, and ONLY the gallery, is what the depth cue recedes — see
+    /// `zoomPresenterDepthView`.
+    private weak var depthView: UIView?
+
+    init(
+        page: ForYouGridPage,
+        tappedID: PostID,
+        activePostID: @escaping () -> PostID?,
+        depthView: UIView?
+    ) {
         self.page = page
         anchorID = tappedID
         self.activePostID = activePostID
+        self.depthView = depthView
     }
+
+    /// The pager, not the whole screen.
+    ///
+    /// The cue is a scale about its view's centre, so anything inside it drifts
+    /// toward that centre as well as shrinking. Applied to the whole screen that
+    /// dragged the filter tray 17pt upward and shrank it 5% while the tab bar —
+    /// which lives outside the presenter and so never saw the transform — stayed
+    /// exactly put. Measured, both of them. Half the bottom furniture sliding and
+    /// half of it nailed down reads as a bug, not as depth.
+    ///
+    /// Naming the pager puts the recede on the content and leaves every piece of
+    /// this screen's chrome at its layout position. The chrome still darkens with
+    /// the flight's dim, which is opacity only and moves nothing.
+    var zoomPresenterDepthView: UIView? { depthView }
 
     // MARK: - ZoomTransitionSource
 

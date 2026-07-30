@@ -84,8 +84,6 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     private let verticalDriftLimit: CGFloat = 140
     private let backDragLimit: CGFloat = 60
 
-    /// Installs the pan on the presented feed's view. `onBeginDismiss` should
-    /// call `dismiss(animated: true)` on the presented view controller.
     /// Set by the owner alongside `attach`; see `returningChrome`.
     func setReturningChrome(_ chrome: UIView?) {
         returningChrome = chrome
@@ -96,6 +94,8 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// reported by the navigation controller's `didShow` instead.
     var onCancelled: (() -> Void)?
 
+    /// Installs the pan on the presented feed's view. `onBeginDismiss` should
+    /// pop (or dismiss) the presented view controller.
     func attach(
         to view: UIView,
         source: any ZoomTransitionSource,
@@ -197,7 +197,9 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         flight.poseAsPage(cornerRadius: screenRadius)
         destination?.setZoomContentHidden(true)
 
-        let presentingView = context.viewController(forKey: .to)?.view
+        // Depth rides the source-nominated view when there is one; see
+        // `ZoomTransitionSource.zoomPresenterDepthView`.
+        let presentingView = source.zoomPresenterDepthView ?? context.viewController(forKey: .to)?.view
         ZoomFlight.applyRecededChrome(to: presentingView, radius: screenRadius)
         presentingView?.transform = CGAffineTransform(
             scaleX: ZoomFlight.presenterDepthScale, y: ZoomFlight.presenterDepthScale

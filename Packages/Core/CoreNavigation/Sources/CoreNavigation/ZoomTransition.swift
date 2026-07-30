@@ -32,6 +32,24 @@ public protocol ZoomTransitionSource: AnyObject {
     /// neither.
     func setZoomSourceHidden(_ hidden: Bool)
 
+    /// The view the depth cue should recede, when it is not the presenter's
+    /// whole view.
+    ///
+    /// The cue is a scale about the receding view's centre, so *everything*
+    /// inside it both shrinks and drifts toward that centre. On a map that is
+    /// exactly right — the map IS the content. On a screen that carries its own
+    /// chrome, it is not: a filter tray pinned near the bottom edge visibly
+    /// slides up and shrinks while the app's tab bar, which lives outside the
+    /// presenter, stays nailed down — measured here at 17pt of travel and a 5%
+    /// size change, against a tab bar that moved 0. Half the furniture drifting
+    /// and half of it grounded reads as a glitch rather than as depth.
+    ///
+    /// Naming a narrower view puts the cue on the content and leaves the chrome
+    /// alone. The chrome still cross-fades under the flight's dim, which is a
+    /// pure opacity change and stays put. Default `nil` keeps the presenter's
+    /// whole view, which is what a map wants.
+    var zoomPresenterDepthView: UIView? { get }
+
     /// Last chance to move before a *dismissal* stages: the source may need to
     /// bring the landing target on screen (a grid scrolling a tile into view)
     /// or re-point at what the destination ended on. Called before the landing
@@ -40,6 +58,7 @@ public protocol ZoomTransitionSource: AnyObject {
 }
 
 public extension ZoomTransitionSource {
+    var zoomPresenterDepthView: UIView? { nil }
     func zoomSourceWillStageDismissal() {}
 }
 
