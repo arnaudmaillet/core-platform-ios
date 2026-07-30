@@ -25,6 +25,25 @@ struct PlaceholderVideoFetcherTests {
         let second = try await fetcher.playableURL(for: url)
         #expect(first == second)
     }
+
+    /// Remote assets pass straight through — the mock dataset's opt-in
+    /// real-asset catalog seeds real HLS manifests and MP4s, and synthesizing
+    /// over them would defeat the point. No request is made here: passthrough
+    /// is a pure URL decision.
+    @Test func remoteURLsPassThroughUnsynthesized() async throws {
+        let fetcher = PlaceholderVideoFetcher(durationSeconds: 0.5)
+        let manifest = URL(string: "https://example.com/stream/master.m3u8")!
+        #expect(try await fetcher.playableURL(for: manifest) == manifest)
+
+        let progressive = URL(string: "http://example.com/clip.mp4")!
+        #expect(try await fetcher.playableURL(for: progressive) == progressive)
+    }
+
+    @Test func localFilesStillPassThrough() async throws {
+        let fetcher = PlaceholderVideoFetcher(durationSeconds: 0.5)
+        let file = URL(fileURLWithPath: "/tmp/already-playable.mp4")
+        #expect(try await fetcher.playableURL(for: file) == file)
+    }
 }
 
 /// A source that hands back a fixed URL without touching the disk, so pool

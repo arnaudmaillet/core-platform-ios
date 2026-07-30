@@ -1,0 +1,65 @@
+import Foundation
+import Testing
+@testable import MediaCore
+
+/// Routing is verified against stubs, never the network: the point of the type
+/// is which fetcher gets called, and a real request would make this flaky.
+struct SchemeRoutingImageFetcherTests {
+    private actor Spy: ImageFetching {
+        private(set) var urls: [URL] = []
+        let payload: Data
+
+        init(payload: Data) { self.payload = payload }
+
+        func fetchImageData(for url: URL) async throws -> Data {
+            urls.append(url)
+            return payload
+        }
+
+        var callCount: Int { urls.count }
+    }
+
+    private func makeFetcher() -> (SchemeRoutingImageFetcher, remote: Spy, placeholder: Spy) {
+        let remote = Spy(payload: Data("remote".utf8))
+        let placeholder = Spy(payload: Data("placeholder".utf8))
+        return (SchemeRoutingImageFetcher(remote: remote, placeholder: placeholder), remote, placeholder)
+    }
+
+    @Test func httpsGoesToTheRemoteFetcher() async throws {
+        let (fetcher, remote, placeholder) = makeFetcher()
+        let data = try await fetcher.fetchImageData(for: URL(string: "https://picsum.photos/id/1/10/10")!)
+        #expect(data == Data("remote".utf8))
+        #expect(await remote.callCount == 1)
+        #expect(await placeholder.callCount == 0)
+    }
+
+    @Test func httpGoesToTheRemoteFetcher() async throws {
+        let (fetcher, remote, _) = makeFetcher()
+        _ = try await fetcher.fetchImageData(for: URL(string: "http://example.com/a.jpg")!)
+        #expect(await remote.callCount == 1)
+    }
+
+    /// The synthetic seeds must keep rendering offline even when the container
+    /// is wired for the mixed catalog.
+    @Test func mockSchemeGoesToThePlaceholderFetcher() async throws {
+        let (fetcher, remote, placeholder) = makeFetcher()
+        let data = try await fetcher.fetchImageData(for: URL(string: "mock://media/3?w=10&h=10")!)
+        #expect(data == Data("placeholder".utf8))
+        #expect(await placeholder.callCount == 1)
+        #expect(await remote.callCount == 0)
+    }
+
+    @Test func schemeMatchIsCaseInsensitive() async throws {
+        let (fetcher, remote, _) = makeFetcher()
+        _ = try await fetcher.fetchImageData(for: URL(string: "HTTPS://example.com/a.jpg")!)
+        #expect(await remote.callCount == 1)
+    }
+
+    /// A `file://` URL is not remote; it must not be sent to URLSession.
+    @Test func fileURLsGoToThePlaceholderFetcher() async throws {
+        let (fetcher, remote, placeholder) = makeFetcher()
+        _ = try await fetcher.fetchImageData(for: URL(fileURLWithPath: "/tmp/a.jpg"))
+        #expect(await placeholder.callCount == 1)
+        #expect(await remote.callCount == 0)
+    }
+}

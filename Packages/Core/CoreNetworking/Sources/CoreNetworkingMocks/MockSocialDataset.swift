@@ -5,6 +5,23 @@ import Foundation
 /// the feed exercises real layout diversity without any randomness between
 /// runs.
 public struct MockSocialDataset: Sendable {
+    /// Which media URLs the seeds carry.
+    ///
+    /// `.synthetic` is the default and must stay so: it seeds `mock://` URLs
+    /// that `PlaceholderImageFetcher`/`PlaceholderVideoFetcher` render locally,
+    /// which is what keeps the unit suite, SwiftUI previews, and CI free of any
+    /// network dependency.
+    ///
+    /// `.realAssets` swaps in the verified public fixtures in
+    /// `MockMediaFixtures` — real HLS ladders, progressive MP4s, and real
+    /// photographs at exact dimensions — for driving the app by hand against
+    /// realistic decode and streaming behaviour. Opt in with `-rich-media`.
+    /// Never select it from a test.
+    public enum MediaCatalog: Sendable {
+        case synthetic
+        case realAssets
+    }
+
     public struct Author: Sendable {
         public let profileID: String
         public let handle: String
@@ -67,7 +84,12 @@ public struct MockSocialDataset: Sendable {
     /// and restaurants a second hit when panning.
     public let pinnedPlaceCategories: [String: String]
 
-    public init(postCount: Int = 120) {
+    /// Which catalog this dataset was built with, so the mocks that need to
+    /// vary their output by it (the geo pin projection) can ask.
+    public let mediaCatalog: MediaCatalog
+
+    public init(postCount: Int = 120, mediaCatalog: MediaCatalog = .synthetic) {
+        self.mediaCatalog = mediaCatalog
         // (handle, name, bio, website) — bios vary from empty to multi-line so
         // the profile header exercises every identity-row combination.
         let names: [(String, String, String, String)] = [
@@ -123,12 +145,20 @@ public struct MockSocialDataset: Sendable {
             ("celia.marsh", "Celia Marsh", "Rock pools and field notes.", ""),
             ("dara.singh", "Dara Singh", "Kites, mostly homemade.", "")
         ]
+        // `mediaCatalog` here is the initializer parameter, not the stored
+        // property — reading `self` mid-init would not compile.
+        func avatarURL(index: Int) -> String {
+            switch mediaCatalog {
+            case .synthetic: "mock://avatar/\(index)?w=128&h=128"
+            case .realAssets: MockMediaFixtures.avatarURL(index: index)
+            }
+        }
         authors = names.enumerated().map { index, name in
             Author(
                 profileID: "prof-\(index)",
                 handle: name.0,
                 displayName: name.1,
-                avatarURL: "mock://avatar/\(index)?w=128&h=128",
+                avatarURL: avatarURL(index: index),
                 bio: name.2,
                 websiteURL: name.3
             )
@@ -172,6 +202,23 @@ public struct MockSocialDataset: Sendable {
             let isVideo = index % 3 == 0
             let mediaHost = isVideo ? "video" : "media"
             let shape = mediaShapes[index % mediaShapes.count]
+            // Under `.realAssets` a video post takes its dimensions FROM the
+            // fixture rather than from `mediaShapes`: the declared size has to
+            // match the real encode or pre-layout crops it. Image posts keep
+            // `mediaShapes`, because Picsum returns exactly the size asked for.
+            let media: (url: String, width: Int, height: Int)? = switch (hasMedia, mediaCatalog) {
+            case (false, _):
+                nil
+            case (true, .synthetic):
+                ("mock://\(mediaHost)/\(index)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
+            case (true, .realAssets):
+                if isVideo {
+                    { let fixture = MockMediaFixtures.videos[(index / 3) % MockMediaFixtures.videos.count]
+                      return (fixture.url, fixture.width, fixture.height) }()
+                } else {
+                    (MockMediaFixtures.imageURL(index: index, width: shape.0, height: shape.1), shape.0, shape.1)
+                }
+            }
             // Every fifth post is a repost of the previous same-slot post.
             // Per author that lands on one residue mod 40 → three reposts
             // each, cycling all three kinds (40 ≡ 1 mod 3).
@@ -180,7 +227,7 @@ public struct MockSocialDataset: Sendable {
                 postID: String(format: "post-%04d", index),
                 authorProfileID: author.profileID,
                 caption: caption,
-                media: hasMedia ? ("mock://\(mediaHost)/\(index)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1) : nil,
+                media: media,
                 publishedAtMS: newestMS - Int64(index) * 180_000, // 3 minutes apart, newest first
                 parentID: isRepost ? String(format: "post-%04d", index - 8) : ""
             ))

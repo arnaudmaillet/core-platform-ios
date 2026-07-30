@@ -17,8 +17,13 @@ public struct MockBackend: Sendable {
     public let moderationService: MockModerationService
     public let bff: MockBFF
 
-    public init(conditions: SimulatedConditions = .none) {
-        let dataset = MockSocialDataset()
+    /// `mediaCatalog` defaults to `.synthetic` so tests and previews stay
+    /// offline; `AppContainer` passes `.realAssets` under `-rich-media`.
+    public init(
+        conditions: SimulatedConditions = .none,
+        mediaCatalog: MockSocialDataset.MediaCatalog = .synthetic
+    ) {
+        let dataset = MockSocialDataset(mediaCatalog: mediaCatalog)
         let counterStore = MockCounterStore(dataset: dataset)
         let blobStore = MockBlobStore()
         let postStore = MockPostStore()

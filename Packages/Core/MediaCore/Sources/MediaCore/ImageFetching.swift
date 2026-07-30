@@ -38,6 +38,33 @@ public struct URLSessionImageFetcher: ImageFetching {
     }
 }
 
+/// Routes by URL scheme: `http(s)` goes to `remote`, everything else (notably
+/// mock mode's `mock://`) to `placeholder`.
+///
+/// This is what lets the mock dataset's opt-in real-asset catalog
+/// (`-rich-media`) load genuine photographs while the synthesized seeds keep
+/// rendering offline — one dataset can mix both, and neither fetcher needs to
+/// know the other exists. Without it, `PlaceholderImageFetcher` would paint a
+/// flat color over every real URL and the fixtures would prove nothing.
+public struct SchemeRoutingImageFetcher: ImageFetching {
+    private let remote: any ImageFetching
+    private let placeholder: any ImageFetching
+
+    public init(
+        remote: any ImageFetching = URLSessionImageFetcher(),
+        placeholder: any ImageFetching = PlaceholderImageFetcher()
+    ) {
+        self.remote = remote
+        self.placeholder = placeholder
+    }
+
+    public func fetchImageData(for url: URL) async throws -> Data {
+        let scheme = url.scheme?.lowercased()
+        let fetcher = scheme == "http" || scheme == "https" ? remote : placeholder
+        return try await fetcher.fetchImageData(for: url)
+    }
+}
+
 /// Deterministic offline fetcher for mock mode: renders a solid-color image
 /// derived from the URL, honoring `w`/`h` query parameters. Keeps the entire
 /// media pipeline exercised (decode, downsample, cache, prefetch) with zero

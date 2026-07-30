@@ -45,6 +45,14 @@ public struct PlaceholderVideoFetcher: VideoSource {
         // compose insert) is already playable — play the real video, don't
         // synthesize over it.
         if url.isFileURL { return url }
+        // Same for a remote asset: the mock dataset's opt-in real-asset catalog
+        // (`-rich-media`) seeds genuine HLS manifests and progressive MP4s, and
+        // AVPlayer opens both natively. Only `mock://` gets synthesized, so one
+        // dataset can mix real streams with synthetic clips for the aspect
+        // ratios no public asset covers.
+        if let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" {
+            return url
+        }
 
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         func dim(_ name: String, _ fallback: Int) -> Int {
