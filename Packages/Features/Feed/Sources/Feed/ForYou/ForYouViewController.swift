@@ -224,6 +224,10 @@ final class ForYouViewController: UIViewController {
         if ProcessInfo.processInfo.arguments.contains("-grid-playback-log") {
             print("[grid-playback] tap \(tapped.id.rawValue) handoff=\(handedOff)")
         }
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] %.3f PARKED handoff=%@",
+                         CACurrentMediaTime(), handedOff ? "true" : "false"))
+        }
         #endif
         // Everything else stops: the grid is about to be covered, and its slots
         // are the ones the feed needs.

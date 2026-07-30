@@ -1373,8 +1373,21 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// the same frames the page was showing instead of a frozen cover.
     public func zoomMirrorLiveMedia(onto surface: UIView) -> Bool {
         guard let renderView = surface as? VideoRenderView,
-              let cell = activeSnapCell else { return false }
-        return cell.mirrorPlayback(to: renderView)
+              let cell = activeSnapCell else {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                print("[zoom-live] destination mirror refused: activeCell=\(activeSnapCell != nil)")
+            }
+            #endif
+            return false
+        }
+        let mirrored = cell.mirrorPlayback(to: renderView)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print("[zoom-live] destination mirror -> \(mirrored)")
+        }
+        #endif
+        return mirrored
     }
 
     private var activeSnapCell: SnapFeedCell? {

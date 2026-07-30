@@ -69,6 +69,11 @@ struct ZoomFlight {
         if card.zoomLiveMediaSurface != nil {
             card.prepareZoomLiveMediaForFlight(destinationSize: pageFrame.size)
         }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print("[zoom-live] build live=\(card.zoomLiveMediaSurface != nil) destination=\(destination != nil)")
+        }
+        #endif
 
         let chrome = destination?.zoomFlightChrome()
         if let chrome {

@@ -63,6 +63,11 @@ public final class VideoPlaybackController {
         // is how a tile pinned to the ladder's floor becomes an uncapped
         // full-screen player without the item ever being replaced.
         if let parked, parked.url == mediaURL {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                print(String(format: "[zoom-live] %.3f ADOPTED parked player", CACurrentMediaTime()))
+            }
+            #endif
             self.parked = nil
             detach(key: key, view: view)
             parked.player.currentItem?.preferredPeakBitRate = peakBitRate
