@@ -375,6 +375,25 @@ final class ForYouViewController: UIViewController {
         trayBottomConstraint.constant = target
     }
 
+    /// Reconciles autoplay once the grid has actually laid out.
+    ///
+    /// `viewWillAppear` is too early on its own: no cell is realized yet, so
+    /// the reconcile there finds no candidates. And when content lands BEFORE
+    /// the screen appears — which is the normal case against the mock backend,
+    /// and against a warm cache on device — the post-reload reconcile runs
+    /// while the surface is still inactive and also does nothing. Between them
+    /// the grid could sit fully laid out, visible, and silent, with no further
+    /// event to retrigger it until the viewer happened to scroll.
+    ///
+    /// Caught only because a loaded machine reversed the ordering and hid it;
+    /// on an idle one the grid never started. `viewDidAppear` is the first
+    /// moment both facts are true — surface active, cells realized — so the
+    /// reconcile here is the one that cannot be raced.
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        pager.setAutoplayActive(true)
+    }
+
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         // The segment row and the view model hold two copies of one fact — which
