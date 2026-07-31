@@ -105,3 +105,93 @@ struct VideoFrameRendererTests {
         #expect(view.lastFrameHostTime == 0)
     }
 }
+
+/// A source that hands back a fixed URL without touching the disk, so surface
+/// bookkeeping is tested independently of real synthesis or playback.
+private struct FixedVideoSource: VideoSource {
+    let url: URL
+    func playableURL(for url: URL) async throws -> URL { self.url }
+}
+
+/// Phase 2 of #83: one decoder, several surfaces.
+///
+/// The assertions are backing-dependent **on purpose**. Under
+/// `AVSampleBufferDisplayLayer` a second surface genuinely joins and both draw;
+/// under `AVPlayerLayer` only one layer can render whatever is attached, and
+/// these tests say so rather than flattering it. That difference IS the
+/// feature, so a test that hid it would be measuring nothing.
+@MainActor
+struct SurfaceAttachmentTests {
+    private var stubURL: URL { FileManager.default.temporaryDirectory.appendingPathComponent("surface-stub.mp4") }
+    /// Surfaces that can concurrently render one player: N when we dispatch
+    /// frames ourselves, 1 when `AVPlayerLayer` owns the render slot.
+    private var concurrentSurfaces: Int { VideoRenderFlags.usesSampleBufferLayer ? 2 : 1 }
+
+    @Test func aSecondSurfaceJoinsWhatIsAlreadyPlaying() async {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        let url = URL(string: "mock://video/surfaces")!
+        let primary = VideoRenderView()
+        await controller.play(url, in: primary)
+        #expect(controller.surfaceCount(for: url) == 1)
+
+        let flight = VideoRenderView()
+        #expect(controller.attachSurface(flight, to: url) == true)
+        #expect(controller.surfaceCount(for: url) == concurrentSurfaces)
+        // The point of the whole pivot: attaching a second surface does not
+        // take anything away from the first.
+        #expect(primary.isAttached)
+        #expect(flight.isAttached)
+    }
+
+    @Test func attachingToSomethingNotPlayingIsRefused() {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        let url = URL(string: "mock://video/idle")!
+        #expect(controller.attachSurface(VideoRenderView(), to: url) == false)
+        #expect(controller.surfaceCount(for: url) == nil)
+    }
+
+    /// A dismissal attaches its landing surface after the page that owned the
+    /// player has already let go, so the only thing still holding the asset is
+    /// the park. Without this the landing has nothing to join and falls back to
+    /// opening a second item at zero — the restart the hero flight exists to
+    /// avoid.
+    @Test func aParkedPlayerIsStillJoinable() async {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        let url = URL(string: "mock://video/parked")!
+        let page = VideoRenderView()
+        await controller.play(url, in: page)
+        #expect(controller.parkPlayback(from: page) == true)
+
+        let landing = VideoRenderView()
+        #expect(controller.attachSurface(landing, to: url) == true)
+        #expect(landing.isAttached)
+    }
+
+    @Test func detachingASurfaceLeavesThePlaybackAndItsOwnerAlone() async {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        let url = URL(string: "mock://video/detach")!
+        let primary = VideoRenderView()
+        await controller.play(url, in: primary)
+        let flight = VideoRenderView()
+        controller.attachSurface(flight, to: url)
+
+        controller.detachSurface(flight)
+        #expect(flight.isAttached == false)
+        #expect(primary.isAttached)
+        #expect(controller.surfaceCount(for: url) == 1)
+    }
+
+    /// `detachSurface` must never return a pool loan — the owning view's player
+    /// is not its to release. Passing the owner is a caller mistake, and the
+    /// safe response is to do nothing rather than tear down playback.
+    @Test func detachingTheOwningViewIsRefusedRatherThanTearingItDown() async {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        let url = URL(string: "mock://video/owner")!
+        let primary = VideoRenderView()
+        await controller.play(url, in: primary)
+
+        controller.detachSurface(primary)
+        #expect(primary.isAttached)
+        #expect(controller.surfaceCount(for: url) == 1)
+    }
+}

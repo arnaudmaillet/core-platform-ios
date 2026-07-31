@@ -239,6 +239,79 @@ public final class VideoPlaybackController {
         bind(player, to: view)
     }
 
+    // MARK: - Surfaces
+
+    /// Makes `view` show whatever is already playing `mediaURL`, alongside the
+    /// surfaces already showing it. Returns whether anything was playing it.
+    ///
+    /// **This is the one mechanism `park` / `unpark` / `donate` / `adopt` /
+    /// `mirror` / `hold` were six approximations of** (#83, criterion 8). All
+    /// six exist because an `AVPlayer` renders into exactly one
+    /// `AVPlayerLayer`, so "show this video somewhere else" had to mean *move*
+    /// the render slot, and every move costs a decode round-trip during which
+    /// neither layer draws. Under `-avsbdl-render` there is no slot to move:
+    /// the renderer dispatches each decoded frame to every attached surface, so
+    /// a second surface is an insertion into a set and the first one never
+    /// notices.
+    ///
+    /// Keyed by URL rather than by a source view because the caller usually
+    /// does not have the source view — a flight card knows which post it is
+    /// flying, not which cell currently owns its layer. That indirection is
+    /// what let the transition stop reaching into the grid's internals.
+    ///
+    /// Passive, exactly like `mirror` was: the attached surface holds no pool
+    /// loan, so releasing it (or `stop`ping the owning view) simply ends it.
+    ///
+    /// **Degrades honestly with the flag off.** In `AVPlayerLayer` mode this
+    /// still steals the render slot, because that is all one player can do — so
+    /// call sites can be written once against this API, and the A/B measures a
+    /// real difference in behaviour rather than a difference in code paths.
+    @discardableResult
+    public func attachSurface(_ view: VideoRenderView, to mediaURL: URL) -> Bool {
+        guard let player = activePlayer(playing: mediaURL) else { return false }
+        bind(player, to: view)
+        return true
+    }
+
+    /// Releases a surface attached with `attachSurface`, leaving the playback
+    /// and every other surface untouched.
+    ///
+    /// Not `stop(_:)`: that returns a pool loan and tears the player down.
+    /// This surface never held one.
+    public func detachSurface(_ view: VideoRenderView) {
+        guard activePlayers[ObjectIdentifier(view)] == nil else { return }
+        view.detach()
+    }
+
+    /// How many surfaces are currently showing `mediaURL`.
+    ///
+    /// The direct evidence that a flight is flying live media rather than
+    /// handing it over: during a hero flight this reads 2 or 3, and at no point
+    /// does it pass through 0. `nil` when nothing is playing that URL, which is
+    /// distinct from "playing on no surfaces".
+    public func surfaceCount(for mediaURL: URL) -> Int? {
+        guard let player = activePlayer(playing: mediaURL) else { return nil }
+        guard let renderer = renderers[ObjectIdentifier(player)] else {
+            // Player-layer mode: exactly one layer can be rendering, whatever
+            // else is attached. Reporting the truth of that mode rather than a
+            // flattering count is the point of measuring it.
+            return 1
+        }
+        return renderer.surfaceCount
+    }
+
+    private func activePlayer(playing mediaURL: URL) -> AVPlayer? {
+        if let key = playingURL.first(where: { $0.value == mediaURL })?.key,
+           let player = activePlayers[key] {
+            return player
+        }
+        // A parked player is still running and still the thing showing this
+        // asset; a dismissal attaches its landing surface while the page that
+        // owned it has already let go.
+        if let parked, parked.url == mediaURL { return parked.player }
+        return nil
+    }
+
     /// Warms the source (synthesis/cache) for an upcoming page so its `play` is
     /// instant. No player is loaned.
     public func preroll(_ mediaURL: URL) {
