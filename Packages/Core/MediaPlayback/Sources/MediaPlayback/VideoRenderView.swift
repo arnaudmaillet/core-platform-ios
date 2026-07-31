@@ -239,6 +239,11 @@ public final class VideoRenderView: UIView {
         lastFrameHostTime = 0
     }
 
+    /// The layer's control timebase, if it has one. Nil is expected and correct
+    /// under `DisplayImmediately`; it only matters as the other half of the
+    /// question "is anything scheduling these frames".
+    var debugControlTimebase: CMTimebase? { sampleBufferLayer?.controlTimebase }
+
     private func logEnqueueFailure(_ error: Error?) {
         guard VideoRenderFlags.logsFrameDispatch else { return }
         print(String(format: "[avsbdl] %.3f ENQUEUE FAILED: %@",
@@ -252,7 +257,14 @@ public final class VideoRenderView: UIView {
         #else
         let name = "surface"
         #endif
-        print(String(format: "[avsbdl] %.3f %@ FIRST FRAME", CACurrentMediaTime(), name))
+        // Geometry with the first frame, because a correctly-fed layer at the
+        // wrong size draws exactly what an unfed one does: nothing.
+        print(String(format: "[avsbdl] %.3f %@ FIRST FRAME view=%@ layer=%@ gravity=%@ hidden=%@ alpha=%.2f super=%@",
+                     CACurrentMediaTime(), name,
+                     NSCoder.string(for: frame), NSCoder.string(for: layer.bounds),
+                     sampleBufferLayer?.videoGravity.rawValue ?? "-",
+                     isHidden ? "true" : "false", alpha,
+                     superview.map { "\(type(of: $0))" } ?? "nil"))
     }
 
     #if DEBUG

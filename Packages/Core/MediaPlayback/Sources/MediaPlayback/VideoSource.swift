@@ -79,6 +79,11 @@ public struct PlaceholderVideoFetcher: VideoSource {
         hasher.combine(url.absoluteString)
         hasher.combine(width)
         hasher.combine(height)
+        // Bumped when the encoder settings change, because clips are cached on
+        // disk across launches: without it, every machine that ran the old
+        // untagged encoder keeps serving those files forever and the fix looks
+        // like it did nothing.
+        hasher.combine(2) // v2: explicit Rec. 709 colour tagging
         let name = "synthvid-\(UInt(bitPattern: hasher.finalize())).mp4"
         return FileManager.default.temporaryDirectory.appendingPathComponent(name)
     }
@@ -95,7 +100,23 @@ public struct PlaceholderVideoFetcher: VideoSource {
         let settings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: width,
-            AVVideoHeightKey: height
+            AVVideoHeightKey: height,
+            // Tag the colour space explicitly. Without this the clip is written
+            // with UNSPECIFIED colour, which `AVPlayerLayer` happily guesses at
+            // and `AVSampleBufferDisplayLayer` does not — it accepts the
+            // buffers, reports no error, advances the frame count, and draws
+            // black. Every mock video tile was black under `-avsbdl-render` for
+            // exactly this reason, while the `-rich-media` assets (properly
+            // tagged) rendered fine.
+            //
+            // A fixture that is less well-formed than real content tests the
+            // wrong thing: it made the engine look broken, and would equally
+            // have hidden a real defect behind "it's just the mock".
+            AVVideoColorPropertiesKey: [
+                AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+                AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+                AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2
+            ]
         ]
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
         input.expectsMediaDataInRealTime = false

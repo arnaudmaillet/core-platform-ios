@@ -54,6 +54,7 @@ final class VideoFrameRenderer {
     /// Always <= `surfaceCount`; see the logging note in `sampleFrameRate`.
     private(set) var drawnSurfaceCount = 0
 
+    private var hasVerifiedAttachment = false
     private var lastRateSampleHostTime: CFTimeInterval = 0
     private var framesSinceRateSample = 0
 
@@ -196,6 +197,7 @@ final class VideoFrameRenderer {
                 format: format,
                 presentationTime: frame.itemTime
             ) else { continue }
+            verifyDisplayImmediately(on: sample)
             surface.enqueue(sample)
         }
         drawnSurfaceCount = drawn
@@ -347,6 +349,30 @@ final class VideoFrameRenderer {
             )
         }
         return sampleBuffer
+    }
+
+    /// Reads the `DisplayImmediately` attachment back off a finished sample
+    /// buffer, once.
+    ///
+    /// Setting it goes through `CFDictionarySetValue` on a dictionary obtained
+    /// by `unsafeBitCast` — a write that cannot fail loudly. If it silently did
+    /// nothing, every frame would be queued against a control timebase that
+    /// does not exist and never advances, so the layer would accept everything
+    /// and display nothing: exactly the symptom. Write-then-read is the only
+    /// way to know which.
+    private func verifyDisplayImmediately(on sampleBuffer: CMSampleBuffer) {
+        guard VideoRenderFlags.logsFrameDispatch, !hasVerifiedAttachment else { return }
+        hasVerifiedAttachment = true
+        let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false)
+            as? [[CFString: Any]]
+        let value = attachments?.first?[kCMSampleAttachmentKey_DisplayImmediately]
+        log("DisplayImmediately readback = \(String(describing: value)) "
+            + "(entries=\(attachments?.count ?? -1)) "
+            + "timebase=\(String(describing: firstSurfaceTimebase()))")
+    }
+
+    private func firstSurfaceTimebase() -> CMTimebase? {
+        surfaces.allObjects.first?.debugControlTimebase
     }
 
     #if DEBUG
