@@ -64,12 +64,19 @@ public protocol ZoomTransitionSource: AnyObject {
     /// flight. The view travels source -> card -> destination (and back on a
     /// dismissal) and is never re-created, so there is nothing to wait for.
     func zoomAdoptLiveMediaView(_ view: UIView)
+
+    /// A dismissal has staged and the card is flying the destination's player.
+    /// Warm this side's OWN layer now, hidden, so it decodes across the flight
+    /// and landing is a visibility flip rather than a re-parent — which resets
+    /// `isReadyForDisplay` for ~600ms, measured.
+    func zoomWarmLiveMediaForLanding()
 }
 
 public extension ZoomTransitionSource {
     var zoomPresenterDepthView: UIView? { nil }
     func zoomSourceWillStageDismissal() {}
     func zoomAdoptLiveMediaView(_ view: UIView) {}
+    func zoomWarmLiveMediaForLanding() {}
 }
 
 @MainActor

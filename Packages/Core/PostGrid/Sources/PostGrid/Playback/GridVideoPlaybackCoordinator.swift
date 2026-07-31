@@ -206,6 +206,40 @@ public final class GridVideoPlaybackCoordinator {
         }
     }
 
+    /// Attaches the parked player to the landing tile's OWN surface and keeps
+    /// it hidden, so it decodes across the dismissal flight.
+    ///
+    /// The counterpart of the destination's warm-up on the present leg, and for
+    /// the same measured reason: re-parenting the card's surface into the tile
+    /// at landing resets `isReadyForDisplay` for ~600ms. Warming here makes the
+    /// landing a visibility flip instead.
+    @discardableResult
+    public func warmLandingSurface(for id: PostID, url: URL, cell: PostGridTileCell) -> Bool {
+        let view = cell.makeVideoRenderViewIfNeeded()
+        view.isHidden = true
+        #if DEBUG
+        view.debugTracksFlight = true
+        #endif
+        guard pool.unparkPlayback(to: view, mediaURL: url) else { return false }
+        pool.setPeakBitRate(Self.tileBitRateCap, in: view)
+        playing[id] = cell
+        cell.onReuse = { [weak self] in
+            guard let self, let cell = playing[id] else { return }
+            stop(id: id, cell: cell)
+        }
+        return true
+    }
+
+    /// Reveals a surface warmed for landing. Visibility only — the layer has
+    /// been decoding the whole flight and never left the render tree.
+    @discardableResult
+    public func revealWarmedSurface(for id: PostID) -> Bool {
+        guard let cell = playing[id], let view = cell.loadedVideoRenderView, view.isHidden
+        else { return false }
+        view.isHidden = false
+        return true
+    }
+
     /// Retires a parked player nobody adopted — a cancelled flight, or a
     /// destination that never played it.
     ///

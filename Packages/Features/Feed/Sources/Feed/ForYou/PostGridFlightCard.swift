@@ -165,6 +165,7 @@ extension PostGridFlightCard: ZoomFlightCard {
         view.isHidden = false
         insertSubview(view, aboveSubview: imageView)
         #if DEBUG
+        view.debugTracksFlight = true
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
             print(String(format: "[zoom-live] %.3f card ADOPTED LIVE VIEW readyNow=%@",
                          CACurrentMediaTime(), view.isReadyForDisplay ? "true" : "false"))

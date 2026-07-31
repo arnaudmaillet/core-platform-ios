@@ -100,8 +100,13 @@ public final class VideoRenderView: UIView {
     /// Names this surface in `-zoom-live-log` output (e.g. "tile", "card").
     public var debugLabel: String?
 
+    /// Set only on the surfaces taking part in a hero flight. Background
+    /// teardowns — the other autoplaying tiles being stopped as the grid is
+    /// covered — are ordinary and drowned the signal, so they stay unlogged.
+    public var debugTracksFlight = false
+
     private func logReadiness(_ ready: Bool) {
-        guard let debugLabel,
+        guard let debugLabel, debugTracksFlight,
               ProcessInfo.processInfo.arguments.contains("-zoom-live-log")
         else { return }
         print(String(format: "[zoom-live] %.3f %@ readyForDisplay=%@",

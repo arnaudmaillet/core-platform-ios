@@ -584,6 +584,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     private func warmAttachForFlight(url: URL) {
         guard let videoPlayback else { return }
         let view = mediaCard.renderView
+        #if DEBUG
+        view.debugTracksFlight = true
+        #endif
         view.isHidden = true
         guard videoPlayback.unparkPlayback(to: view, mediaURL: url) else { return }
         hasDeferredPlayback = false

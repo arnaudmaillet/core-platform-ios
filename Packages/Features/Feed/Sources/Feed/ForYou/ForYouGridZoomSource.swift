@@ -102,8 +102,15 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
 
     /// Takes the card's live surface at landing, so the tile renders the frame
     /// the card was showing instead of starting a blank layer.
+    func zoomWarmLiveMediaForLanding() {
+        page?.warmLandingPlayback(for: anchorID)
+    }
+
     func zoomAdoptLiveMediaView(_ view: UIView) {
         guard let view = view as? VideoRenderView else { return }
+        // Warmed during the flight: landing is a visibility flip, and the
+        // card's surface is discarded rather than re-parented.
+        if page?.revealWarmedPlayback(for: anchorID) == true { return }
         page?.adoptLivePlayback(view, for: anchorID)
     }
 

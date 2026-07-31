@@ -201,6 +201,20 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // left to mirror.
         if flight.card.zoomLiveMediaSurface != nil {
             destination?.zoomParkLiveMediaForHandoff()
+            // NOT warmed here, deliberately. Warming the landing tile mid-flight
+            // works on its own terms — the tile's layer reaches ready — but it
+            // becomes the most recently attached layer for that player and
+            // blanks the CARD while it is still flying:
+            //
+            //   437.091 tile readyForDisplay=true    <- tile warmed
+            //   437.111 tile readyForDisplay=false
+            //   437.111 feed readyForDisplay=false   <- card blanked, mid-flight
+            //
+            // That trades a landing flash for a worse one during the flight.
+            // The present leg does not hit this because the destination warms a
+            // layer the card is not competing with. `zoomWarmLiveMediaForLanding`
+            // stays available for a dismissal fix that attaches inside the
+            // landing transaction instead of ahead of it.
         }
         container.insertSubview(flight.card, belowSubview: fromView)
         container.insertSubview(flight.shadow, belowSubview: flight.card)
