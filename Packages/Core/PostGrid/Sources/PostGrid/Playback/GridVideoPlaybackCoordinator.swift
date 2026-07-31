@@ -160,8 +160,14 @@ public final class GridVideoPlaybackCoordinator {
             if let surface = playing[id]?.loadedVideoRenderView {
                 surface.debugLabel = "tile"
                 surface.debugTracksFlight = true
-                print(String(format: "[zoom-live] %.3f probe armed on tile ready=%@",
-                             CACurrentMediaTime(), surface.isReadyForDisplay ? "true" : "false"))
+                // Name the post being flown. Without it there is no way to tell
+                // which fixture a flight actually carried, and a capture of a
+                // legitimately-black asset is indistinguishable from a broken
+                // renderer — which is exactly how three rounds of this were
+                // spent judging the wrong thing.
+                print(String(format: "[zoom-live] %.3f probe armed on tile post=%@ ready=%@",
+                             CACurrentMediaTime(), String(describing: id),
+                             surface.isReadyForDisplay ? "true" : "false"))
             } else {
                 print(String(format: "[zoom-live] %.3f probe NOT armed — no live surface for %@ (playing: %@)",
                              CACurrentMediaTime(), String(describing: id),
