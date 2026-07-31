@@ -203,23 +203,33 @@ public final class VideoRenderView: UIView {
         guard renderer != nil || enqueuedFrameCount > 0 else { return }
         renderer?.removeSurface(self)
         renderer = nil
-        // Hide BEFORE flushing. A flush empties the layer, so flushing a
-        // surface the viewer can see turns it black on the spot — measured as
-        // four visible tiles going black at once, every cycle, when
-        // `beginHandoff` stops the tiles that are not flying.
+        // A flush empties the layer, so it must be COVERED before it happens or
+        // the surface goes black on the spot. There are two ways to cover it
+        // and the right one depends on whether this surface owns a poster:
         //
-        // The flush itself is still needed: it is what resets the frame count
-        // so `revealOnFirstFrame` can hold a recycled surface back until it has
-        // NEW content, rather than revealing the previous post's last frame.
-        // Only the order was wrong.
+        //  - With a poster, raise it. The poster is a subview ABOVE the layer,
+        //    so the emptied layer is hidden behind the cover and the viewer
+        //    sees the still, not black. This is the full-screen feed, where
+        //    `SnapMediaCardView` puts the cover INSIDE the render view and
+        //    hides its own image view — the render view IS the cover there.
+        //  - Without one, hide the view. An empty layer with nothing over it is
+        //    a black rectangle, which is what blanked four visible tiles at
+        //    once when `beginHandoff` stopped them.
         //
-        // Hiding here is safe because a surface with no renderer has nothing to
-        // draw, and every path that resumes playback goes through
-        // `revealOnFirstFrame`, which unhides as soon as a frame lands.
-        isHidden = true
+        // Hiding unconditionally got the second case right and the first badly
+        // wrong: `play` detaches before it attaches, so tapping into a video
+        // hid the cover for the entire buffering window — cover, then black,
+        // then video.
+        //
+        // A surface the host has already hidden is left alone; un-hiding one
+        // here would undo a deliberate fade-out.
+        let wasVisible = !isHidden && alpha > 0
         isAwaitingFirstFrameToReveal = false
-        flushSampleBuffers()
         updatePosterVisibility(ready: false)
+        if wasVisible, posterView.image == nil {
+            isHidden = true
+        }
+        flushSampleBuffers()
     }
 
     var isAttached: Bool { playerLayer?.player != nil || renderer != nil }
