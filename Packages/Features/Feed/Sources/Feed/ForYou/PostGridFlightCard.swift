@@ -162,8 +162,12 @@ extension PostGridFlightCard: ZoomFlightCard {
         view.frame = bounds
         view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         view.clipsToBounds = true
-        view.isHidden = false
         insertSubview(view, aboveSubview: imageView)
+        // Not `isHidden = false`. On a cold flight this surface has no frame
+        // yet, and showing it would replace the cover — the very pixels the
+        // tile is displaying — with an empty surface for one decode interval.
+        // The cover stays until there is real video to put over it.
+        view.revealOnFirstFrame()
         #if DEBUG
         view.debugTracksFlight = true
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {

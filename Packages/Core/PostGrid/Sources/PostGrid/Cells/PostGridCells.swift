@@ -302,7 +302,11 @@ public final class PostGridTileCell: UICollectionViewCell {
     public func beginVideoPreview() {
         let view = makeVideoRenderViewIfNeeded()
         view.setPoster(imageView.image)
-        view.isHidden = false
+        // The cover keeps the tile until there is video to replace it with.
+        // Unhiding here put an empty surface over the cover for the whole
+        // decode start-up — measured at ~1.2s on a cold tile — which is a tile
+        // going dark at rest, before any transition is involved.
+        view.revealOnFirstFrame()
     }
 
     /// Back to a still tile.

@@ -122,13 +122,28 @@ final class VideoFrameRenderer {
     /// is bounded and small. The rule guards against unbounded retention
     /// starving the decoder's pool, which a single slot cannot do.
     private func primeWithLastFrame(_ surface: VideoRenderView) {
-        guard let lastFrame, let format = formatDescription else { return }
+        // COLD PATH. `lastFrame` is nil until this renderer has dispatched at
+        // least once, so on a cold flight — the first open of a tile whose
+        // playback has only just started — there is nothing to prime with and
+        // this silently does nothing. The joining surface then waits for the
+        // next decode like it always did, which is why the flash is visible on
+        // the first iteration and gone by the second: by then `lastFrame` is
+        // populated and priming actually fires.
+        //
+        // Priming cannot manufacture a frame that does not exist yet. What the
+        // caller must therefore do is not SHOW the surface until one arrives —
+        // see `VideoRenderView.revealOnFirstFrame()`.
+        guard let lastFrame, let format = formatDescription else {
+            log("prime SKIPPED — no frame decoded yet (cold)")
+            return
+        }
         guard let sample = Self.makeSampleBuffer(
             imageBuffer: lastFrame.buffer,
             format: format,
             presentationTime: lastFrame.itemTime
         ) else { return }
         surface.enqueue(sample)
+        log("prime ok")
     }
 
     func removeSurface(_ surface: VideoRenderView) {

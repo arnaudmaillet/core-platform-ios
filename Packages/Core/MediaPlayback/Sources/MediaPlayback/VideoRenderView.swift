@@ -194,6 +194,41 @@ public final class VideoRenderView: UIView {
         return playerLayer?.isReadyForDisplay ?? false
     }
 
+    // MARK: - Reveal gating
+
+    /// Set while the surface is waiting for its first frame before becoming
+    /// visible. See `revealOnFirstFrame`.
+    private var isAwaitingFirstFrameToReveal = false
+
+    /// Reveals this surface now if it already has a frame, otherwise keeps it
+    /// hidden and reveals it the instant one arrives.
+    ///
+    /// **The cold-flight fix.** A surface joining a running playback is primed
+    /// with the most recent frame — but only if one exists. On the first flight
+    /// of a tile whose playback has just started, the renderer has not
+    /// dispatched anything yet, so the new surface is empty. Unhiding it there
+    /// replaces whatever the host was showing (a cover image) with an empty
+    /// surface for one decode interval: the snap on the first iteration, gone
+    /// by the second because by then a frame exists to prime with.
+    ///
+    /// Hosts call this instead of `isHidden = false` so the rule is one line
+    /// and cannot be got wrong per site: **never show a surface that has
+    /// nothing to show.** Whatever is behind it — the tile's cover, the flight
+    /// card's cover — stays visible for those few milliseconds instead, which
+    /// is the same image the viewer was already looking at.
+    public func revealOnFirstFrame() {
+        guard enqueuedFrameCount == 0 else {
+            isAwaitingFirstFrameToReveal = false
+            isHidden = false
+            return
+        }
+        isAwaitingFirstFrameToReveal = true
+        isHidden = true
+    }
+
+    /// Whether this surface has ever displayed a frame since its last flush.
+    public var hasFrame: Bool { enqueuedFrameCount > 0 }
+
     // MARK: - Frame intake
 
     /// Displays one frame. Called by `VideoFrameRenderer` on the display link.
@@ -223,6 +258,10 @@ public final class VideoRenderView: UIView {
         let wasFirst = enqueuedFrameCount == 0
         enqueuedFrameCount += 1
         lastFrameHostTime = CACurrentMediaTime()
+        if wasFirst, isAwaitingFirstFrameToReveal {
+            isAwaitingFirstFrameToReveal = false
+            isHidden = false
+        }
         if wasFirst {
             // The poster's whole job is covering the gap before the first
             // frame, and now we know precisely when that ends — no KVO, no

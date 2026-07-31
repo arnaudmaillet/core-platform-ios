@@ -600,7 +600,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // the whole ladder. Re-capped by URL because a joined surface holds
             // no pool loan and cannot be looked up by view.
             videoPlayback.setPeakBitRate(0, for: url)
-            view.isHidden = false
+            view.revealOnFirstFrame()
             hasDeferredPlayback = false
             isWarmAttached = true
             return

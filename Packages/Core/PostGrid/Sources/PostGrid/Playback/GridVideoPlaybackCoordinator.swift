@@ -294,7 +294,7 @@ public final class GridVideoPlaybackCoordinator {
         // exposed one frame of an empty surface at the exact moment the flight
         // card is taken away, which is a flash at landing.
         guard pool.transferOwnership(of: url, to: view) else { return false }
-        view.isHidden = false
+        view.revealOnFirstFrame()
         pool.setPeakBitRate(Self.tileBitRateCap, for: url)
         playing[id] = cell
         uncappedIDs.remove(id)
