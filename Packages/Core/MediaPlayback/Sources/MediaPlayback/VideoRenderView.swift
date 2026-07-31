@@ -250,8 +250,56 @@ public final class VideoRenderView: UIView {
         guard let debugLabel, debugTracksFlight,
               ProcessInfo.processInfo.arguments.contains("-zoom-live-log")
         else { return }
-        print(String(format: "[zoom-live] %.3f %@ POSTER=%@",
-                     CACurrentMediaTime(), debugLabel, visible ? "VISIBLE" : "hidden"))
+        // A poster that becomes visible on a surface nobody can see is not a
+        // flash. Distinguishing the two needs the surface's actual on-screen
+        // state at that instant, not an inference from where it sits in the
+        // teardown — so the reachability is logged with the event and the
+        // question stops being a judgement call.
+        print(String(format: "[zoom-live] %.3f %@#%@ POSTER=%@ onScreen=%@ %@",
+                     CACurrentMediaTime(), debugLabel, debugInstanceTag,
+                     visible ? "VISIBLE" : "hidden",
+                     isEffectivelyOnScreen ? "YES" : "no", debugVisibilityDetail))
+    }
+
+    /// A short per-instance tag. The feed recycles page cells, so several
+    /// distinct surfaces all label themselves "page"; without this, four poster
+    /// events look like one surface flickering four times rather than four
+    /// separate cells each doing it once.
+    private var debugInstanceTag: String {
+        String(UInt(bitPattern: ObjectIdentifier(self).hashValue) % 0x1000, radix: 16)
+    }
+
+    /// Whether this surface could actually be seen right now: in a window, and
+    /// no ancestor hiding or fading it to nothing.
+    ///
+    /// Deliberately does NOT claim to answer "did the viewer see it" — another
+    /// view can still be drawn over the top, and a hero flight is precisely the
+    /// situation where something usually is. It answers the weaker question it
+    /// can answer honestly, which is enough to dismiss the events that are
+    /// unreachable outright.
+    private var isEffectivelyOnScreen: Bool {
+        guard window != nil else { return false }
+        var node: UIView? = self
+        var alpha: CGFloat = 1
+        while let view = node {
+            if view.isHidden { return false }
+            alpha *= view.alpha
+            node = view.superview
+        }
+        return alpha > 0.01
+    }
+
+    private var debugVisibilityDetail: String {
+        var alpha: CGFloat = 1
+        var hiddenBy = "-"
+        var node: UIView? = self
+        while let view = node {
+            alpha *= view.alpha
+            if view.isHidden, hiddenBy == "-" { hiddenBy = "\(type(of: view))" }
+            node = view.superview
+        }
+        return String(format: "window=%@ alpha=%.2f hiddenBy=%@",
+                      window == nil ? "nil" : "yes", alpha, hiddenBy)
     }
 
     private func logReadiness(_ ready: Bool) {
