@@ -92,16 +92,37 @@ struct MosaicArrangementTests {
         }
     }
 
-    @Test func relativeOrderIsPreservedWithinEachGroup() {
+    /// Stills keep their order outright. Motion does NOT, and that is the
+    /// deliberate cost of shape matching: portrait bricks are filled from the
+    /// portrait videos first, so a later portrait clip can precede an earlier
+    /// landscape one in reading order. What survives is order *within a shape*
+    /// — which is what recency means once the mosaic is permuting anyway.
+    @Test func relativeOrderIsPreservedWithinEachShape() {
         let input = [
             video("v1"), photo("p1"), video("v2"), photo("p2"),
             video("v3"), photo("p3"), video("v4"), photo("p4")
         ]
         let out = PostGridMosaic.arrangedForMotion(input, startingAt: 0)
-        let videoOrder = ids(out.filter(\.autoplaysInGrid))
-        let stillOrder = ids(out.filter { !$0.autoplaysInGrid })
-        #expect(videoOrder == ["v1", "v2", "v3", "v4"])
-        #expect(stillOrder == ["p1", "p2", "p3", "p4"])
+        #expect(ids(out.filter { !$0.autoplaysInGrid }) == ["p1", "p2", "p3", "p4"])
+        // All four videos share one shape here, so they must stay in order
+        // relative to each other within the bricks of that shape.
+        let portraitSlots = (0..<8).filter { PostGridMosaic.slotShape(at: $0) == .portrait }
+        #expect(ids(portraitSlots.map { out[$0] }) == ["v1", "v2"])
+        #expect(Set(ids(out)) == Set(ids(input)))
+    }
+
+    /// Mixed shapes: each shape's own sequence is respected.
+    @Test func eachShapeKeepsItsOwnSequence() {
+        let input = [
+            video("tall1", aspect: 0.5625), video("wide1", aspect: 1.78),
+            video("tall2", aspect: 0.5625), video("wide2", aspect: 1.78),
+            photo("p1"), photo("p2"), photo("p3"), photo("p4")
+        ]
+        let out = PostGridMosaic.arrangedForMotion(input, startingAt: 0)
+        let portraitSlots = (0..<8).filter { PostGridMosaic.slotShape(at: $0) == .portrait }
+        let landscapeSlots = (0..<8).filter { PostGridMosaic.slotShape(at: $0) == .landscape }
+        #expect(ids(portraitSlots.map { out[$0] }) == ["tall1", "tall2"])
+        #expect(ids(landscapeSlots.map { out[$0] }) == ["wide1", "wide2"])
     }
 
     /// More videos than motion bricks: the surplus has to go somewhere, and
@@ -142,6 +163,46 @@ struct MosaicArrangementTests {
         // ...and no square brick holds anything that would move.
         for slot in 0..<8 where !PostGridMosaic.slotShape(at: slot).suitsMotion {
             #expect(!out[slot].autoplaysInGrid)
+        }
+    }
+}
+
+// MARK: - Shape matching
+
+extension MosaicArrangementTests {
+    /// The reason shape matching exists: aspect-fill crops by the difference
+    /// between media and container, so a 9:16 clip in a 2:1 brick is a hard
+    /// crop that the zoom then has to unwind.
+    @Test func verticalVideoPrefersPortraitBricks() {
+        let input = [
+            photo("p1"), video("v9x16", aspect: 1080.0 / 1920), photo("p2"), photo("p3"),
+            photo("p4"), photo("p5"), photo("p6"), photo("p7")
+        ]
+        let out = PostGridMosaic.arrangedForMotion(input, startingAt: 0)
+        let slot = out.firstIndex { $0.id.rawValue == "v9x16" }
+        #expect(slot != nil)
+        #expect(PostGridMosaic.slotShape(at: slot!) == .portrait)
+    }
+
+    @Test func landscapeVideoPrefersLandscapeBricks() {
+        let input = [
+            photo("p1"), video("v16x9", aspect: 1920.0 / 1080), photo("p2"), photo("p3"),
+            photo("p4"), photo("p5"), photo("p6"), photo("p7")
+        ]
+        let out = PostGridMosaic.arrangedForMotion(input, startingAt: 0)
+        let slot = out.firstIndex { $0.id.rawValue == "v16x9" }
+        #expect(slot != nil)
+        #expect(PostGridMosaic.slotShape(at: slot!) == .landscape)
+    }
+
+    /// A mismatched motion brick still beats a square: more videos than
+    /// matching bricks must not push any of them into a still slot.
+    @Test func surplusVerticalVideosStillAvoidSquares() {
+        let input = (0..<4).map { video("v\($0)", aspect: 0.5625) }
+            + (0..<4).map { photo("p\($0)") }
+        let out = PostGridMosaic.arrangedForMotion(input, startingAt: 0)
+        for slot in 0..<8 where !PostGridMosaic.slotShape(at: slot).suitsMotion {
+            #expect(!out[slot].autoplaysInGrid, "square brick \(slot) got a video")
         }
     }
 }

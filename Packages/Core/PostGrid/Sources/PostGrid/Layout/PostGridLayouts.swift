@@ -28,6 +28,16 @@ public enum PostGridMosaic {
         /// filler: four of the eight, the smallest bricks, and clustered — so
         /// they carry stills and the larger bricks carry motion.
         public var suitsMotion: Bool { self != .square }
+
+        /// Whether a brick of this shape is the natural home for media of
+        /// `shape`. Square media never autoplays, so only the two elongated
+        /// shapes ever match.
+        func matches(_ shape: GalleryPost.Shape) -> Bool {
+            switch (self, shape) {
+            case (.portrait, .portrait), (.landscape, .landscape): true
+            default: false
+            }
+        }
     }
 
     /// Indexed by position within the pattern. Mirrors the diagram above:
@@ -59,8 +69,11 @@ public enum PostGridMosaic {
     /// earlier one. That is what lets the caller keep expressing a page landing
     /// as an insert rather than a reload.
     ///
-    /// Order is preserved within each group, so recency still reads down the
-    /// page — motion posts keep their relative order, and so do stills.
+    /// Order is preserved within each SHAPE, not across all motion. Stills keep
+    /// their sequence outright; videos keep theirs relative to others of the
+    /// same shape, because portrait bricks are filled from portrait clips
+    /// first. That is the deliberate cost of shape matching, and a small one
+    /// once the mosaic is permuting order anyway.
     /// Nothing is dropped or duplicated: when motion posts outnumber the
     /// non-square slots the surplus spills into squares, and vice versa.
     public static func arrangedForMotion(
@@ -77,10 +90,27 @@ public enum PostGridMosaic {
         var placed = [GalleryPost?](repeating: nil, count: posts.count)
         guard placed.indices.contains(where: { slotShape(at: absoluteIndex + $0).suitsMotion })
         else { return posts }
-        // Motion first into the bricks that suit it, then stills into the
-        // squares. Two passes rather than one so an early still cannot occupy
-        // a landscape brick a later video needed.
-        for offset in placed.indices where slotShape(at: absoluteIndex + offset).suitsMotion {
+        // SHAPE-MATCHED first: a portrait video into a portrait brick, a
+        // landscape one into a landscape brick.
+        //
+        // This is what keeps the zoom calm. `resizeAspectFill` crops by the
+        // difference between the media's aspect and its container's, so a 9:16
+        // clip sitting in a 2:1 brick shows a thin horizontal band and then
+        // reveals the whole frame on the way to a 9:16 page — a large change,
+        // continuous but jarring. Matching the brick to the media keeps the
+        // tile's crop small, so the flight only has the page's own aspect to
+        // travel.
+        for shape in [GalleryPost.Shape.portrait, .landscape] {
+            for offset in placed.indices
+            where placed[offset] == nil && slotShape(at: absoluteIndex + offset).matches(shape) {
+                guard let index = motion.firstIndex(where: { $0.shape == shape }) else { break }
+                placed[offset] = motion.remove(at: index)
+            }
+        }
+        // Then any motion left over takes whatever motion brick remains — a
+        // mismatched brick still beats a square.
+        for offset in placed.indices
+        where placed[offset] == nil && slotShape(at: absoluteIndex + offset).suitsMotion {
             if motion.isEmpty { break }
             placed[offset] = motion.removeFirst()
         }

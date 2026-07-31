@@ -115,6 +115,14 @@ public enum MockMediaFixtures {
 
     /// The video assignment used by `MediaCatalog.realAssets`, in order.
     ///
+    /// **9:16 where it can be.** The synthetic entries are all vertical, which
+    /// is the shape a Reels/TikTok-style backend would actually serve. The real
+    /// encodes CANNOT follow: they are fixed public files and every one is
+    /// landscape, so restating them as 9:16 would mis-drive pre-layout and crop
+    /// the subject — the exact defect `BACKEND_MEDIA_ASPECT_RATIO_SUPPORT.md`
+    /// is about. They stay landscape and earn their place by being the only
+    /// fixtures with a real ABR ladder.
+    ///
     /// **Mixed by design.** No stable public source vends portrait or square
     /// test video — every candidate checked was landscape, and the two most
     /// commonly cited buckets are now dead (see `deadSources`). Rather than
@@ -130,15 +138,18 @@ public enum MockMediaFixtures {
     /// surface gets both without either being faked.
     public static let videos: [Video] = [
         appleBipBop16x9,
-        Video(url: "mock://video/portrait-1?w=1080&h=1920", width: 1080, height: 1920, isRemote: false),
+        Video(url: "mock://video/vertical-1?w=1080&h=1920", width: 1080, height: 1920, isRemote: false),
         bigBuckBunny720,
-        Video(url: "mock://video/square-1?w=1080&h=1080", width: 1080, height: 1080, isRemote: false),
+        Video(url: "mock://video/vertical-2?w=1080&h=1920", width: 1080, height: 1920, isRemote: false),
         tearsOfSteel,
         sintelTrailer,
-        Video(url: "mock://video/portrait-2?w=1080&h=1350", width: 1080, height: 1350, isRemote: false),
+        Video(url: "mock://video/vertical-3?w=1080&h=1920", width: 1080, height: 1920, isRemote: false),
         appleAdvancedFMP4,
         longRunning,
-        Video(url: "mock://video/square-2?w=960&h=960", width: 960, height: 960, isRemote: false)
+        // One square survives on purpose: it is the negative case for the
+        // "square media never autoplays" rule, and deleting it would leave that
+        // rule with nothing to exercise in the running app.
+        Video(url: "mock://video/square-1?w=1080&h=1080", width: 1080, height: 1080, isRemote: false)
     ]
 
     // MARK: - Images
