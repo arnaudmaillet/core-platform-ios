@@ -288,6 +288,29 @@ final class VideoFrameRenderer {
         #endif
     }
 
+    /// The luma of the buffer's centre pixel.
+    ///
+    /// Separates "the layer will not draw these buffers" from "these buffers
+    /// are already black". Everything measurable about the pipeline has come
+    /// back healthy — format, IOSurface backing, enqueue status, sample
+    /// attachments, geometry — which leaves the possibility that what arrives
+    /// from `AVPlayerItemVideoOutput` is black before we ever touch it. That
+    /// would put the defect upstream of `AVSampleBufferDisplayLayer` entirely,
+    /// and would explain why `AVPlayerLayer` (which never goes through this
+    /// output) shows the same asset correctly.
+    private static func centreLuma(of buffer: CVPixelBuffer) -> UInt8? {
+        guard CVPixelBufferGetPlaneCount(buffer) > 0 else { return nil }
+        CVPixelBufferLockBaseAddress(buffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddressOfPlane(buffer, 0) else { return nil }
+        let width = CVPixelBufferGetWidthOfPlane(buffer, 0)
+        let height = CVPixelBufferGetHeightOfPlane(buffer, 0)
+        let stride = CVPixelBufferGetBytesPerRowOfPlane(buffer, 0)
+        guard width > 0, height > 0 else { return nil }
+        let offset = (height / 2) * stride + (width / 2)
+        return base.assumingMemoryBound(to: UInt8.self)[offset]
+    }
+
     private func formatDescription(matching buffer: CVPixelBuffer) -> CMVideoFormatDescription? {
         if let formatDescription,
            CMVideoFormatDescriptionMatchesImageBuffer(formatDescription, imageBuffer: buffer) {
@@ -321,7 +344,8 @@ final class VideoFrameRenderer {
                             encoding: .ascii) ?? "?"
         log("buffer \(CVPixelBufferGetWidth(buffer))x\(CVPixelBufferGetHeight(buffer)) "
             + "format=\(fourCC) (0x\(String(type, radix: 16))) "
-            + "ioSurface=\(CVPixelBufferGetIOSurface(buffer) != nil)")
+            + "ioSurface=\(CVPixelBufferGetIOSurface(buffer) != nil) "
+            + "luma=\(Self.centreLuma(of: buffer).map { String($0) } ?? "?")")
     }
 
     private static func makeSampleBuffer(
