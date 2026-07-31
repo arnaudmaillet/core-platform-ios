@@ -29,6 +29,14 @@ public final class VideoPlaybackController {
     /// A player detached from its view but still running, waiting for the next
     /// `play` of the same URL to adopt it. See `parkPlayback(from:)`.
     private var parked: (url: URL, player: AVPlayer)?
+    /// The frame renderer for each pooled player, under `-avsbdl-render`.
+    ///
+    /// Keyed by **player**, not by view, and that is the whole idea: the
+    /// renderer owns the player's video output, so it travels with the player
+    /// through park → adopt and survives being handed between surfaces. A view
+    /// joining or leaving its surface set is bookkeeping that draws nothing.
+    /// Empty when the flag is off.
+    private var renderers: [ObjectIdentifier: VideoFrameRenderer] = [:]
 
     /// `poolSize` is the size of the **idle-player cache**, not a concurrency
     /// limit: `play` mints a new `AVPlayer` when the cache is empty, and the
@@ -71,7 +79,7 @@ public final class VideoPlaybackController {
             self.parked = nil
             detach(key: key, view: view)
             parked.player.currentItem?.preferredPeakBitRate = peakBitRate
-            view.attach(parked.player)
+            bind(parked.player, to: view)
             activePlayers[key] = parked.player
             playingURL[key] = mediaURL
             parked.player.play()
@@ -92,9 +100,10 @@ public final class VideoPlaybackController {
         item.preferredPeakBitRate = peakBitRate
         installLoop(for: player, item: item)
         player.replaceCurrentItem(with: item)
+        renderer(for: player)?.setItem(item)
         player.isMuted = true
         player.actionAtItemEnd = .none
-        view.attach(player)
+        bind(player, to: view)
         activePlayers[key] = player
         playingURL[key] = mediaURL
         player.play()
@@ -144,7 +153,7 @@ public final class VideoPlaybackController {
         guard let parked, parked.url == mediaURL else { return false }
         self.parked = nil
         let key = ObjectIdentifier(view)
-        view.attach(parked.player)
+        bind(parked.player, to: view)
         activePlayers[key] = parked.player
         playingURL[key] = mediaURL
         parked.player.play()
@@ -160,6 +169,7 @@ public final class VideoPlaybackController {
         parked.player.pause()
         removeLoop(for: parked.player)
         parked.player.replaceCurrentItem(with: nil)
+        renderers[ObjectIdentifier(parked.player)]?.invalidate()
         if idlePlayers.count < poolSize {
             idlePlayers.append(parked.player)
         }
@@ -215,7 +225,7 @@ public final class VideoPlaybackController {
     @discardableResult
     public func mirror(from view: VideoRenderView, to mirrorView: VideoRenderView) -> Bool {
         guard let player = activePlayers[ObjectIdentifier(view)] else { return false }
-        mirrorView.attach(player)
+        bind(player, to: mirrorView)
         return true
     }
 
@@ -226,7 +236,7 @@ public final class VideoPlaybackController {
     /// `view` has no active player.
     public func reclaim(_ view: VideoRenderView) {
         guard let player = activePlayers[ObjectIdentifier(view)] else { return }
-        view.attach(player)
+        bind(player, to: view)
     }
 
     /// Warms the source (synthesis/cache) for an upcoming page so its `play` is
@@ -238,6 +248,24 @@ public final class VideoPlaybackController {
 
     // MARK: - Internals
 
+    /// The renderer for `player`, minted on first use. `nil` when
+    /// `-avsbdl-render` is off, which is what keeps every call site below a
+    /// single line that does the right thing in both modes.
+    private func renderer(for player: AVPlayer) -> VideoFrameRenderer? {
+        guard VideoRenderFlags.usesSampleBufferLayer else { return nil }
+        let key = ObjectIdentifier(player)
+        if let existing = renderers[key] { return existing }
+        let renderer = VideoFrameRenderer(player: player)
+        renderers[key] = renderer
+        return renderer
+    }
+
+    /// Makes `view` display `player`: a layer binding in player-layer mode, a
+    /// surface-set insertion in sample-buffer mode.
+    private func bind(_ player: AVPlayer, to view: VideoRenderView) {
+        view.attach(player, renderer: renderer(for: player))
+    }
+
     private func detach(key: ObjectIdentifier, view: VideoRenderView) {
         view.detach()
         playingURL[key] = nil
@@ -245,6 +273,11 @@ public final class VideoPlaybackController {
         player.pause()
         removeLoop(for: player)
         player.replaceCurrentItem(with: nil)
+        // The renderer stays in the map, keyed to this player, and is reused
+        // when the player is loaned out again. Invalidating only drops its
+        // output and its clock registration — an idle pooled player must not
+        // keep the app-wide display link running.
+        renderers[ObjectIdentifier(player)]?.invalidate()
         if idlePlayers.count < poolSize {
             idlePlayers.append(player)
         }
