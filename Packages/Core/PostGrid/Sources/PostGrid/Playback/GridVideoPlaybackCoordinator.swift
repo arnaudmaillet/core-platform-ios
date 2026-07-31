@@ -147,6 +147,27 @@ public final class GridVideoPlaybackCoordinator {
         }
         #if DEBUG
         Self.logPool(playing.count, handoff: handoffID)
+        // Arm the flight probe HERE — the one moment guaranteed to precede any
+        // window under test, since the scope opens before a transition is even
+        // built. Every path that flies this tile's media goes through it.
+        //
+        // The `NOT armed` branch is the important half. A probe attached after
+        // the window reports silence, and silence is indistinguishable from
+        // success — twice in this issue's history a conclusion was drawn from a
+        // trace that was never live. This says so instead, and names what WAS
+        // playing, which is usually the reason (a tile that does not autoplay).
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            if let surface = playing[id]?.loadedVideoRenderView {
+                surface.debugLabel = "tile"
+                surface.debugTracksFlight = true
+                print(String(format: "[zoom-live] %.3f probe armed on tile ready=%@",
+                             CACurrentMediaTime(), surface.isReadyForDisplay ? "true" : "false"))
+            } else {
+                print(String(format: "[zoom-live] %.3f probe NOT armed — no live surface for %@ (playing: %@)",
+                             CACurrentMediaTime(), String(describing: id),
+                             playing.keys.map { String(describing: $0) }.sorted().joined(separator: ",")))
+            }
+        }
         #endif
     }
 

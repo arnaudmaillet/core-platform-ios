@@ -54,7 +54,11 @@ public final class VideoRenderView: UIView {
     }
 
     private func updatePosterVisibility(ready: Bool) {
+        let wasVisible = !posterView.isHidden
         posterView.isHidden = (posterView.image == nil) || ready
+        #if DEBUG
+        if wasVisible != !posterView.isHidden { logPoster(visible: !posterView.isHidden) }
+        #endif
     }
 
     // MARK: - Controller seam
@@ -104,6 +108,19 @@ public final class VideoRenderView: UIView {
     /// teardowns — the other autoplaying tiles being stopped as the grid is
     /// covered — are ordinary and drowned the signal, so they stay unlogged.
     public var debugTracksFlight = false
+
+    /// The poster covering the layer IS the thumbnail flash. `isReadyForDisplay`
+    /// is only a proxy for it — and a lossy one: a layer that has lost the render
+    /// slot to another layer on the same player keeps reporting ready while it
+    /// shows a frozen frame. Log the thing itself, so a flight can be judged on
+    /// what the viewer saw.
+    private func logPoster(visible: Bool) {
+        guard let debugLabel, debugTracksFlight,
+              ProcessInfo.processInfo.arguments.contains("-zoom-live-log")
+        else { return }
+        print(String(format: "[zoom-live] %.3f %@ POSTER=%@",
+                     CACurrentMediaTime(), debugLabel, visible ? "VISIBLE" : "hidden"))
+    }
 
     private func logReadiness(_ ready: Bool) {
         guard let debugLabel, debugTracksFlight,
