@@ -124,15 +124,9 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         poseHoisted?(rect, space, cornerRadius)
     }
 
-    func zoomWarmLiveMediaForLanding() {
-        page?.warmLandingPlayback(for: anchorID)
-    }
 
     func zoomAdoptLiveMediaView(_ view: UIView) {
         guard let view = view as? VideoRenderView else { return }
-        // Warmed during the flight: landing is a visibility flip, and the
-        // card's surface is discarded rather than re-parented.
-        if page?.revealWarmedPlayback(for: anchorID) == true { return }
         page?.adoptLivePlayback(view, for: anchorID)
     }
 

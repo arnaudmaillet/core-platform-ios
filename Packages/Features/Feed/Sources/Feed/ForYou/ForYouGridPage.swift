@@ -259,24 +259,7 @@ final class ForYouGridPage: UIView {
         return playback.isSurfaceRendering(for: postID)
     }
 
-    /// Warms the landing tile's own surface for the duration of a dismissal.
-    @discardableResult
-    func warmLandingPlayback(for postID: PostID) -> Bool {
-        guard let playback,
-              let index = posts.firstIndex(where: { $0.id == postID }),
-              let url = posts[index].videoURL,
-              let cell = collectionView.cellForItem(
-                  at: IndexPath(item: index, section: 0)
-              ) as? PostGridTileCell
-        else { return false }
-        return playback.warmLandingSurface(for: postID, url: url, cell: cell)
-    }
 
-    /// Reveals the tile surface warmed during the dismissal.
-    @discardableResult
-    func revealWarmedPlayback(for postID: PostID) -> Bool {
-        playback?.revealWarmedSurface(for: postID) ?? false
-    }
 
     /// Lands a hosted surface WITHOUT moving it into the cell: the layer stays
     /// where it is and the tile publishes geometry instead.
