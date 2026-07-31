@@ -112,10 +112,37 @@ final class SnapMediaCardView: UIView {
         imageView.image = nil
         imageView.transform = .identity
         renderView.setPoster(nil)
+        logMediaState("configure(kind: \(kind))")
     }
 
-    func setImage(_ image: UIImage?) { imageView.image = image }
-    func setPoster(_ image: UIImage?) { renderView.setPoster(image) }
+    func setImage(_ image: UIImage?) {
+        imageView.image = image
+        logMediaState(image == nil ? "setImage(nil)" : "setImage(image)")
+    }
+
+    func setPoster(_ image: UIImage?) {
+        renderView.setPoster(image)
+        logMediaState(image == nil ? "setPoster(nil)" : "setPoster(image)")
+    }
+
+    /// Traces every mutation of the media area under `-media-log`.
+    ///
+    /// A black media area is always some combination of: the image view empty
+    /// or hidden, the render surface hidden, its poster cleared, its layer
+    /// flushed. Reasoning about which from the code has now been wrong three
+    /// times in a row on this issue, so this prints the whole state on every
+    /// change and lets the sequence say what happened. The gap to look for is a
+    /// long interval between a clearing call and the call that refills it.
+    private func logMediaState(_ event: String) {
+        #if DEBUG
+        guard ProcessInfo.processInfo.arguments.contains("-media-log") else { return }
+        print(String(format: "[media] %.3f %-22@ image=%@ imageHidden=%@ | render %@",
+                     CACurrentMediaTime(), event,
+                     imageView.image == nil ? "nil" : "set",
+                     imageView.isHidden ? "Y" : "N",
+                     renderView.debugSurfaceState))
+        #endif
+    }
     /// Whether the drift has content to animate (a loaded, visible photo).
     var isImageReady: Bool { imageView.image != nil && !imageView.isHidden }
     /// Hit-test identity: whether a hit view is one of the card's surfaces.

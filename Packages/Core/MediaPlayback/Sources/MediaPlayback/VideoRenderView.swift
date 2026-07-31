@@ -437,6 +437,18 @@ public final class VideoRenderView: UIView {
     #if DEBUG
     var isPosterVisible: Bool { !posterView.isHidden && posterView.alpha > 0.01 }
 
+    /// Everything that decides whether this surface shows anything, in one
+    /// string. For tracing who blanks a media area: a black region is always
+    /// some combination of these, and reading them together is what separates
+    /// "hidden" from "empty layer" from "poster cleared".
+    public var debugSurfaceState: String {
+        let poster = posterView.image == nil
+            ? "nil" : (isPosterVisible ? "SHOWN" : "set/hidden")
+        return String(format: "hidden=%@ alpha=%.2f poster=%@ frames=%d bg=%@",
+                      isHidden ? "Y" : "N", alpha, poster, enqueuedFrameCount,
+                      backgroundColor == .clear ? "clear" : "black")
+    }
+
     /// Names this surface in `-zoom-live-log` output (e.g. "tile", "card").
     public var debugLabel: String?
 
