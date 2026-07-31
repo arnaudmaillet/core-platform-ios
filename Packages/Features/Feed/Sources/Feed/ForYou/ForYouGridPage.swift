@@ -278,6 +278,44 @@ final class ForYouGridPage: UIView {
         playback?.revealWarmedSurface(for: postID) ?? false
     }
 
+    /// Lands a hosted surface WITHOUT moving it into the cell: the layer stays
+    /// where it is and the tile publishes geometry instead.
+    @discardableResult
+    func adoptHostedPlayback(_ view: VideoRenderView, for postID: PostID) -> Bool {
+        guard let playback,
+              let index = posts.firstIndex(where: { $0.id == postID }),
+              let url = posts[index].videoURL,
+              let cell = collectionView.cellForItem(
+                  at: IndexPath(item: index, section: 0)
+              ) as? PostGridTileCell
+        else { return false }
+        return playback.adoptHostedSurface(view, for: postID, url: url, cell: cell)
+    }
+
+    /// Where the tile for `postID` currently is, in `space`. The host reads
+    /// this every scroll frame to keep the hosted surface glued to its brick.
+    /// `nil` once the tile is no longer realized.
+    func tileRect(for postID: PostID, in space: UICoordinateSpace) -> CGRect? {
+        guard let index = posts.firstIndex(where: { $0.id == postID }),
+              let cell = collectionView.cellForItem(at: IndexPath(item: index, section: 0))
+        else { return nil }
+        return cell.convert(cell.bounds, to: space)
+    }
+
+    /// The grid's own rect, so the host can clip a hosted surface to it rather
+    /// than letting it draw over the bars.
+    func gridRect(in space: UICoordinateSpace) -> CGRect {
+        collectionView.convert(collectionView.bounds, to: space)
+    }
+
+    /// Called on every scroll frame while a surface is hosted.
+    var onGeometryChanged: (() -> Void)?
+
+    /// Forwards the coordinator's teardown so the host can drop its reference.
+    func setHostedSurfaceReleasedHandler(_ handler: @escaping (PostID) -> Void) {
+        playback?.onHostedSurfaceReleased = handler
+    }
+
     /// Installs the flight card's live surface on the landing tile, so it is
     /// rendering before the card is removed.
     func adoptLivePlayback(_ view: VideoRenderView, for postID: PostID) {
@@ -580,6 +618,10 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        // Unthrottled, unlike the autoplay reconcile below: a hosted surface is
+        // a separate view tracking a moving cell, and anything less than every
+        // frame reads as the video sliding against its own tile.
+        onGeometryChanged?()
         // Autoplay reconciles DURING the scroll, so a brick starts playing as
         // it slides into view rather than after the scroll has stopped.
         // Throttled rather than run per callback: `scrollViewDidScroll` fires

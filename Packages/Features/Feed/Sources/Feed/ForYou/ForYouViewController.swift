@@ -85,13 +85,26 @@ final class ForYouViewController: UIViewController {
     /// container's space. Returns false when there is no host to put it in.
     private func hoistForDismissal(_ view: UIView, at rect: CGRect, in space: UICoordinateSpace) -> Bool {
         guard let host = tabBarController?.view else { return false }
+        // Into the CLIP straight away, sized to the whole host for the flight.
+        // The clip later shrinks to the grid's rect, but the surface itself is
+        // added exactly once — a second move at landing was costing the very
+        // readiness drop this exists to remove.
+        let clip = hostClip ?? {
+            let created = UIView()
+            created.clipsToBounds = true
+            created.isUserInteractionEnabled = false
+            host.addSubview(created)
+            hostClip = created
+            return created
+        }()
+        clip.frame = host.bounds
         view.removeFromSuperview()
         view.transform = .identity
-        view.frame = space.convert(rect, to: host)
+        view.frame = space.convert(rect, to: clip)
         view.autoresizingMask = []
         view.clipsToBounds = true
         view.layer.cornerCurve = .continuous
-        host.addSubview(view)
+        clip.addSubview(view)
         dismissHostedSurface = view
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
@@ -106,23 +119,72 @@ final class ForYouViewController: UIViewController {
     /// Poses the hosted surface. Called inside the flight's spring, so frame
     /// and radius interpolate with the card rather than after it.
     private func poseHostedSurface(at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) {
-        guard let view = dismissHostedSurface, let host = tabBarController?.view else { return }
-        view.frame = space.convert(rect, to: host)
+        guard let view = dismissHostedSurface, let clip = hostClip else { return }
+        view.frame = space.convert(rect, to: clip)
         view.layer.cornerRadius = cornerRadius
     }
 
-    /// Hands the hosted surface to the landing tile and clears the host.
+    /// The post whose video renders from the host rather than from its cell.
+    private var hostedPostID: PostID?
+    private var hostedFormat: GalleryFilter.Format?
+    /// Clips a hosted surface to the grid, so a tile scrolling under the bars
+    /// cannot draw over them.
+    private weak var hostClip: UIView?
+
+    /// Lands the hosted surface WITHOUT moving it into the cell.
+    ///
+    /// The point of the permanent hoist: `addSubview` / `removeFromSuperview`
+    /// are never called on the active player layer again, so the ~65ms
+    /// readiness drop the landing card was covering does not happen at all. The
+    /// tile publishes its rect instead of owning the view.
     private func landHostedSurface(for postID: PostID, format: GalleryFilter.Format) {
-        guard let view = dismissHostedSurface as? VideoRenderView else { return }
+        guard let view = dismissHostedSurface as? VideoRenderView,
+              let page = pager.page(for: format), let host = tabBarController?.view
+        else { return }
         dismissHostedSurface = nil
-        view.layer.cornerRadius = 0
+
+        guard let clip = hostClip else { return }
+        // The surface is ALREADY in the clip — hoisted there at the start of
+        // the flight — so landing moves nothing. Only the clip resizes, from
+        // the full host down to the grid's rect.
+        clip.frame = page.gridRect(in: host)
+        view.layer.cornerRadius = PostGridFlightCard.tileCornerRadius
+
+        guard page.adoptHostedPlayback(view, for: postID) else {
+            view.removeFromSuperview()
+            return
+        }
+        hostedPostID = postID
+        hostedFormat = format
+        page.onGeometryChanged = { [weak self] in self?.syncHostedSurface() }
+        page.setHostedSurfaceReleasedHandler { [weak self] released in
+            guard self?.hostedPostID == released else { return }
+            self?.hostedPostID = nil
+            self?.hostClip?.removeFromSuperview()
+        }
+        syncHostedSurface()
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-            print(String(format: "[zoom-live] %.3f dismiss LANDED ready=%@",
+            print(String(format: "[zoom-live] %.3f dismiss LANDED HOSTED ready=%@",
                          CACurrentMediaTime(), view.isReadyForDisplay ? "true" : "false"))
         }
         #endif
-        pager.page(for: format)?.adoptLivePlayback(view, for: postID)
+    }
+
+    /// Glues the hosted surface to its tile. Runs on every scroll frame.
+    private func syncHostedSurface() {
+        guard let postID = hostedPostID, let format = hostedFormat,
+              let page = pager.page(for: format), let clip = hostClip,
+              let host = tabBarController?.view
+        else { return }
+        clip.frame = page.gridRect(in: host)
+        guard let rect = page.tileRect(for: postID, in: clip) else { return }
+        // Implicit animation off: this tracks a scroll, and any easing reads as
+        // the video lagging behind its own brick.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        clip.subviews.first?.frame = rect
+        CATransaction.commit()
     }
 
     #if DEBUG

@@ -91,6 +91,9 @@ public final class GridVideoPlaybackCoordinator {
     /// bind a player to a tile that has already scrolled away.
     private var startTasks: [PostID: Task<Void, Never>] = [:]
 
+    /// Fires when a hosted surface is torn down, so the host can forget it.
+    public var onHostedSurfaceReleased: ((PostID) -> Void)?
+
     public init(pool: VideoPlaybackController, maxConcurrent: Int = 6) {
         self.pool = pool
         self.maxConcurrent = maxConcurrent
@@ -291,10 +294,44 @@ public final class GridVideoPlaybackCoordinator {
         return true
     }
 
+    /// Surfaces rendering a tile's video from OUTSIDE its cell — hoisted to a
+    /// parent-level host so the hero flight never re-parents them. The cell has
+    /// no surface of its own while one of these is live.
+    private var hostedSurfaces: [PostID: VideoRenderView] = [:]
+
+    /// Registers a hosted surface as the player for `id` WITHOUT moving it into
+    /// the cell.
+    ///
+    /// This is the landing that removes the last readiness drop: every other
+    /// route re-parents the surface into the tile, and a re-parent costs a
+    /// decode round-trip (~65ms, measured). Here the layer simply never moves —
+    /// the cell publishes geometry instead of owning the view.
+    @discardableResult
+    public func adoptHostedSurface(
+        _ view: VideoRenderView, for id: PostID, url: URL, cell: PostGridTileCell
+    ) -> Bool {
+        guard pool.unparkPlayback(to: view, mediaURL: url) else { return false }
+        pool.setPeakBitRate(Self.tileBitRateCap, in: view)
+        hostedSurfaces[id] = view
+        playing[id] = cell
+        cell.onReuse = { [weak self] in
+            guard let self, let cell = playing[id] else { return }
+            stop(id: id, cell: cell)
+        }
+        #if DEBUG
+        Self.logPool(playing.count, handoff: handoffID)
+        #endif
+        return true
+    }
+
+    /// The hosted surface for `id`, if its video is rendering outside the cell.
+    public func hostedSurface(for id: PostID) -> VideoRenderView? { hostedSurfaces[id] }
+
     /// Whether the tile for `id` has a surface with a decoded frame on screen.
     /// False while its layer is still acquiring — the window a landing card is
     /// held across.
     public func isSurfaceRendering(for id: PostID) -> Bool {
+        if let hosted = hostedSurfaces[id] { return hosted.isReadyForDisplay && !hosted.isHidden }
         guard let cell = playing[id], let view = cell.loadedVideoRenderView else { return false }
         return view.isReadyForDisplay && !view.isHidden
     }
@@ -339,6 +376,13 @@ public final class GridVideoPlaybackCoordinator {
     }
 
     private func stop(id: PostID, cell: PostGridTileCell) {
+        // A hosted surface is released here rather than kept alive: playback is
+        // ending anyway, so the layer teardown is invisible.
+        if let hosted = hostedSurfaces.removeValue(forKey: id) {
+            pool.stop(hosted)
+            hosted.removeFromSuperview()
+            onHostedSurfaceReleased?(id)
+        }
         #if DEBUG
         Self.logTransition("stop ", id, count: playing.count - 1)
         #endif

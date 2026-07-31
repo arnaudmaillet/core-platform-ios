@@ -345,7 +345,11 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             // Same handshake in reverse: the landing tile takes the surface
             // the card was flying, so it renders immediately instead of
             // starting a fresh layer that is blank for ~100ms.
-            if !cancelled, let surface = flight.card.zoomLiveMediaSurface {
+            // Only when the surface was NOT hoisted. A hosted surface is landed
+            // by its host, which deliberately does not re-parent it into the
+            // cell — calling this would undo exactly that and reintroduce the
+            // readiness drop the hoist exists to remove.
+            if !cancelled, !hoisted, let surface = flight.card.zoomLiveMediaSurface {
                 self.source.zoomAdoptLiveMediaView(surface)
             }
             flight.shadow.removeFromSuperview()
