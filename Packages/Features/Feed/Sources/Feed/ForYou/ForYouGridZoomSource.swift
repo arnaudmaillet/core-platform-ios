@@ -43,8 +43,12 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         tappedID: PostID,
         activePostID: @escaping () -> PostID?,
         depthView: UIView?,
+        hoistLive: ((UIView, CGRect, UICoordinateSpace) -> Bool)? = nil,
+        poseHoisted: ((CGRect, UICoordinateSpace, CGFloat) -> Void)? = nil,
         donateLive: (() -> VideoRenderView?)? = nil
     ) {
+        self.hoistLive = hoistLive
+        self.poseHoisted = poseHoisted
         self.page = page
         anchorID = tappedID
         self.activePostID = activePostID
@@ -106,6 +110,18 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// has no video at all, which is nothing to wait for.
     var zoomLandingMediaIsReady: Bool {
         page?.isLandingPlaybackReady(for: anchorID) ?? true
+    }
+
+    /// Hoists the dismissal's live surface into the tab-bar-level host.
+    private let hoistLive: ((UIView, CGRect, UICoordinateSpace) -> Bool)?
+    private let poseHoisted: ((CGRect, UICoordinateSpace, CGFloat) -> Void)?
+
+    func zoomHoistLiveMedia(_ view: UIView, at rect: CGRect, in space: UICoordinateSpace) -> Bool {
+        hoistLive?(view, rect, space) ?? false
+    }
+
+    func zoomPoseHoistedMedia(at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) {
+        poseHoisted?(rect, space, cornerRadius)
     }
 
     func zoomWarmLiveMediaForLanding() {

@@ -80,6 +80,20 @@ public protocol ZoomTransitionSource: AnyObject {
     /// something the viewer never sees. Default true: a source with no live
     /// media has nothing to wait for.
     var zoomLandingMediaIsReady: Bool { get }
+
+    /// Takes the flight card's live surface and hosts it ABOVE the navigation
+    /// controller for the duration of a dismissal, positioned at `rect`.
+    ///
+    /// A navigation controller removes non-top views from the window, so a
+    /// surface left in the card — or in either screen — leaves the render tree
+    /// and its layer re-acquires on the way back. Hosting it one level up means
+    /// it never leaves, and the flight becomes pure geometry. Returns whether
+    /// the source took it; `false` leaves the card flying it as before.
+    func zoomHoistLiveMedia(_ view: UIView, at rect: CGRect, in space: UICoordinateSpace) -> Bool
+
+    /// Poses the hosted surface. Called inside the flight's animation block, so
+    /// it interpolates on the same spring as the card.
+    func zoomPoseHoistedMedia(at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat)
 }
 
 public extension ZoomTransitionSource {
@@ -88,6 +102,8 @@ public extension ZoomTransitionSource {
     func zoomAdoptLiveMediaView(_ view: UIView) {}
     func zoomWarmLiveMediaForLanding() {}
     var zoomLandingMediaIsReady: Bool { true }
+    func zoomHoistLiveMedia(_ view: UIView, at rect: CGRect, in space: UICoordinateSpace) -> Bool { false }
+    func zoomPoseHoistedMedia(at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) {}
 }
 
 @MainActor

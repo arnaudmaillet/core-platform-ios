@@ -71,6 +71,60 @@ final class ForYouViewController: UIViewController {
     /// the grid's own cursor is a follow-up.
     private static let seedWindow = 40
 
+    /// The dismissal's live surface, hosted in the tab bar controller's view
+    /// for the length of the return flight.
+    ///
+    /// Above the navigation controller on purpose: a nav controller removes
+    /// non-top views from the window, so a surface hosted in THIS controller's
+    /// view would leave the render tree mid-flight and its layer would
+    /// re-acquire on the way back. One level up, it never leaves — the spike
+    /// measured zero `readyForDisplay` drops across a full push and pop.
+    private weak var dismissHostedSurface: UIView?
+
+    /// Installs `view` in the host at `rect`, converted from the transition
+    /// container's space. Returns false when there is no host to put it in.
+    private func hoistForDismissal(_ view: UIView, at rect: CGRect, in space: UICoordinateSpace) -> Bool {
+        guard let host = tabBarController?.view else { return false }
+        view.removeFromSuperview()
+        view.transform = .identity
+        view.frame = space.convert(rect, to: host)
+        view.autoresizingMask = []
+        view.clipsToBounds = true
+        view.layer.cornerCurve = .continuous
+        host.addSubview(view)
+        dismissHostedSurface = view
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            let ready = (view as? VideoRenderView)?.isReadyForDisplay ?? false
+            print(String(format: "[zoom-live] %.3f dismiss HOISTED ready=%@",
+                         CACurrentMediaTime(), ready ? "true" : "false"))
+        }
+        #endif
+        return true
+    }
+
+    /// Poses the hosted surface. Called inside the flight's spring, so frame
+    /// and radius interpolate with the card rather than after it.
+    private func poseHostedSurface(at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) {
+        guard let view = dismissHostedSurface, let host = tabBarController?.view else { return }
+        view.frame = space.convert(rect, to: host)
+        view.layer.cornerRadius = cornerRadius
+    }
+
+    /// Hands the hosted surface to the landing tile and clears the host.
+    private func landHostedSurface(for postID: PostID, format: GalleryFilter.Format) {
+        guard let view = dismissHostedSurface as? VideoRenderView else { return }
+        dismissHostedSurface = nil
+        view.layer.cornerRadius = 0
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] %.3f dismiss LANDED ready=%@",
+                         CACurrentMediaTime(), view.isReadyForDisplay ? "true" : "false"))
+        }
+        #endif
+        pager.page(for: format)?.adoptLivePlayback(view, for: postID)
+    }
+
     #if DEBUG
     /// `-hoist-spike`: park the in-flight video surface in the TAB BAR
     /// CONTROLLER's view for the whole push and pop, instead of handing it to
@@ -292,6 +346,12 @@ final class ForYouViewController: UIViewController {
             depthView: pager,
             // Donate-then-park, run at card-build time so the card flies the
             // very layer the tile was already rendering.
+            hoistLive: { [weak self] view, rect, space in
+                self?.hoistForDismissal(view, at: rect, in: space) ?? false
+            },
+            poseHoisted: { [weak self] rect, space, radius in
+                self?.poseHostedSurface(at: rect, in: space, cornerRadius: radius)
+            },
             donateLive: { [weak self, weak page] in
                 let donated = page?.donateLivePlayback(of: tapped.id)
                 #if DEBUG
@@ -331,6 +391,12 @@ final class ForYouViewController: UIViewController {
             // grid: it clears the flight's state and reconciles once, so every
             // qualifying visible tile gets a slot again rather than whatever
             // subset survived the transition.
+            // Land the hosted surface on the tile FIRST, then close the scope:
+            // the tile must own a rendering surface before the reconcile that
+            // restores every other slot runs.
+            if let landed = (feed as? SnapFeedViewController)?.activePostID {
+                self?.landHostedSurface(for: landed, format: format)
+            }
             #if DEBUG
             self?.releaseHoistedSurface()
             #endif
