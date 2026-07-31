@@ -345,7 +345,11 @@ public final class PostGridTileCell: UICollectionViewCell {
 
     /// Back to a still tile.
     public func endVideoPreview() {
-        loadedVideoRenderView?.isHidden = true
+        // Faded, not switched off. This runs for every tile `beginHandoff`
+        // stops as a flight leaves, and a binary hide snaps each of their
+        // covers back in a single frame — several thumbnails popping at once,
+        // on the grid, at exactly the moment the viewer is watching the flight.
+        loadedVideoRenderView?.hideCrossFading()
     }
 
     public func configure(with post: GalleryPost, imagePipeline: ImagePipeline) {

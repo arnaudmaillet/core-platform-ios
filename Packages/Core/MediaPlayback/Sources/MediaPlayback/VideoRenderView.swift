@@ -101,7 +101,26 @@ public final class VideoRenderView: UIView {
 
     private func updatePosterVisibility(ready: Bool) {
         let wasVisible = !posterView.isHidden
-        posterView.isHidden = (posterView.image == nil) || ready
+        let shouldHide = (posterView.image == nil) || ready
+        // Faded out, not switched off, for the same reason the surface itself
+        // cross-fades: the poster and the video are two different images in the
+        // same place, and swapping them in one frame is a visible cut. Fading
+        // in is still immediate — a poster only appears when there is nothing
+        // else to show, so there is nothing to blend against and nothing to
+        // gain by easing it.
+        if wasVisible, shouldHide {
+            posterView.isHidden = false
+            UIView.animate(withDuration: Self.revealDuration, delay: 0,
+                           options: [.allowUserInteraction, .beginFromCurrentState]) {
+                self.posterView.alpha = 0
+            } completion: { finished in
+                if finished { self.posterView.isHidden = true }
+            }
+        } else {
+            posterView.layer.removeAllAnimations()
+            posterView.alpha = 1
+            posterView.isHidden = shouldHide
+        }
         // With neither a decoded frame nor a poster there is nothing to show,
         // and a black fill is not "nothing" — it covers whatever the host put
         // behind this surface. A grid tile puts its cover image there and then
@@ -115,7 +134,7 @@ public final class VideoRenderView: UIView {
         // it comes back the moment there is anything to floor.
         backgroundColor = (posterView.image == nil && !ready) ? .clear : .black
         #if DEBUG
-        if wasVisible != !posterView.isHidden { logPoster(visible: !posterView.isHidden) }
+        if wasVisible != !shouldHide { logPoster(visible: !shouldHide) }
         #endif
     }
 
@@ -234,15 +253,71 @@ public final class VideoRenderView: UIView {
     public func revealOnFirstFrame() {
         guard enqueuedFrameCount == 0 else {
             isAwaitingFirstFrameToReveal = false
-            isHidden = false
+            reveal(crossFading: false)
             return
         }
         isAwaitingFirstFrameToReveal = true
         isHidden = true
+        alpha = 0
+    }
+
+    /// How long the surface takes to replace whatever is behind it. Two frames
+    /// at 60Hz — long enough that the swap is a blend rather than a cut, short
+    /// enough that it reads as instant.
+    private static let revealDuration: TimeInterval = 1.0 / 30
+
+    /// Brings the surface up over whatever is behind it — the host's cover
+    /// image, in every case that matters.
+    ///
+    /// **This is the thumbnail pop.** A cover sits permanently beneath the
+    /// video surface (the grid cell's `imageView`, the flight card's), so the
+    /// surface's visibility IS the cover's visibility, inverted. Toggling
+    /// `isHidden` therefore cuts between two different images in a single
+    /// frame, and on a real device that reads as the thumbnail flicking in —
+    /// on BOTH legs, because both legs hold a surface back until it has a
+    /// frame.
+    ///
+    /// Cross-fading makes the same swap continuous: for two frames the cover
+    /// and the video are blended, and there is no frame where the cover is the
+    /// only thing on screen after the video was.
+    private func reveal(crossFading: Bool) {
+        let wasHidden = isHidden || alpha < 1
+        isHidden = false
+        guard crossFading, wasHidden else {
+            layer.removeAnimation(forKey: "reveal")
+            alpha = 1
+            return
+        }
+        UIView.animate(withDuration: Self.revealDuration, delay: 0,
+                       options: [.allowUserInteraction, .beginFromCurrentState]) {
+            self.alpha = 1
+        }
     }
 
     /// Whether this surface has ever displayed a frame since its last flush.
     public var hasFrame: Bool { enqueuedFrameCount > 0 }
+
+    /// Takes the surface down over whatever is behind it, rather than
+    /// switching it off.
+    ///
+    /// The mirror image of `revealOnFirstFrame`, and it matters at exactly the
+    /// moment a flight starts: `beginHandoff` stops every tile that is not
+    /// flying, and a binary hide there snaps each of their covers back in one
+    /// frame — several thumbnails popping at once, on the grid, as the flight
+    /// leaves. Fading hands the tile back to its cover continuously.
+    public func hideCrossFading() {
+        isAwaitingFirstFrameToReveal = false
+        guard !isHidden, alpha > 0 else {
+            isHidden = true
+            return
+        }
+        UIView.animate(withDuration: Self.revealDuration, delay: 0,
+                       options: [.allowUserInteraction, .beginFromCurrentState]) {
+            self.alpha = 0
+        } completion: { finished in
+            if finished { self.isHidden = true }
+        }
+    }
 
     // MARK: - Frame intake
 
@@ -275,7 +350,7 @@ public final class VideoRenderView: UIView {
         lastFrameHostTime = CACurrentMediaTime()
         if wasFirst, isAwaitingFirstFrameToReveal {
             isAwaitingFirstFrameToReveal = false
-            isHidden = false
+            reveal(crossFading: true)
         }
         if wasFirst {
             // The poster's whole job is covering the gap before the first
@@ -335,7 +410,7 @@ public final class VideoRenderView: UIView {
     }
 
     #if DEBUG
-    var isPosterVisible: Bool { !posterView.isHidden }
+    var isPosterVisible: Bool { !posterView.isHidden && posterView.alpha > 0.01 }
 
     /// Names this surface in `-zoom-live-log` output (e.g. "tile", "card").
     public var debugLabel: String?
