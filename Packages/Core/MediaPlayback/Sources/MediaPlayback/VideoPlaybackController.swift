@@ -51,12 +51,32 @@ public final class VideoPlaybackController {
     /// `setPeakBitRate(_:in:)` for why this is a property of the item and not
     /// of the URL.
     public func play(_ mediaURL: URL, in view: VideoRenderView, peakBitRate: Double = 0) async {
-        // The handoff needs no resolution, so take it before anything suspends.
-        if adoptParkedPlayback(mediaURL, in: view, peakBitRate: peakBitRate) { return }
-
         let key = ObjectIdentifier(view)
         let token = (generation[key] ?? 0) + 1
         generation[key] = token
+
+        // A player parked for this exact asset is adopted whole — same item,
+        // same playhead — instead of starting a second one at zero. This is the
+        // grid → full-screen handoff, and it is synchronous: no resolution, no
+        // await, so the destination is already showing the running video by the
+        // time the flight begins. `peakBitRate` re-caps it on the way in, which
+        // is how a tile pinned to the ladder's floor becomes an uncapped
+        // full-screen player without the item ever being replaced.
+        if let parked, parked.url == mediaURL {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                print(String(format: "[zoom-live] %.3f ADOPTED parked player", CACurrentMediaTime()))
+            }
+            #endif
+            self.parked = nil
+            detach(key: key, view: view)
+            parked.player.currentItem?.preferredPeakBitRate = peakBitRate
+            view.attach(parked.player)
+            activePlayers[key] = parked.player
+            playingURL[key] = mediaURL
+            parked.player.play()
+            return
+        }
 
         guard let playableURL = try? await source.playableURL(for: mediaURL) else { return }
         // Lost the race to a newer play/stop while resolving: drop this result.
@@ -78,46 +98,6 @@ public final class VideoPlaybackController {
         activePlayers[key] = player
         playingURL[key] = mediaURL
         player.play()
-    }
-
-    /// Adopts a player parked for this exact asset — same item, same playhead —
-    /// instead of starting a second one at zero. The grid → full-screen handoff.
-    ///
-    /// **Synchronous, and callable without `await`.** That is the entire point:
-    /// there is no resolution to do, so a caller on the transition's critical
-    /// path must not have to hop through an `async` call to reach it. Measured
-    /// on the native-zoom present leg: reaching this through `play`'s Task cost
-    /// ~56ms of the flight in scheduling alone, with the destination showing
-    /// nothing for the duration. Called directly, the destination is live within
-    /// a frame of activation.
-    ///
-    /// `peakBitRate` re-caps the item on the way in, which is how a tile pinned
-    /// to the ladder's floor becomes an uncapped full-screen player without the
-    /// item ever being replaced. Returns false when nothing is parked for
-    /// `mediaURL`, leaving the caller to open the asset normally.
-    @discardableResult
-    public func adoptParkedPlayback(
-        _ mediaURL: URL, in view: VideoRenderView, peakBitRate: Double = 0
-    ) -> Bool {
-        guard let parked, parked.url == mediaURL else { return false }
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-            print(String(format: "[zoom-live] %.3f ADOPTED parked player", CACurrentMediaTime()))
-        }
-        #endif
-        let key = ObjectIdentifier(view)
-        // Supersede any in-flight resolution for this view, exactly as `play`
-        // does, so a slow `playableURL` that lost the race cannot attach a
-        // second item over the one just adopted.
-        generation[key] = (generation[key] ?? 0) + 1
-        self.parked = nil
-        detach(key: key, view: view)
-        parked.player.currentItem?.preferredPeakBitRate = peakBitRate
-        view.attach(parked.player)
-        activePlayers[key] = parked.player
-        playingURL[key] = mediaURL
-        parked.player.play()
-        return true
     }
 
     /// Detaches the player bound to `view` but keeps it **running**, parked
@@ -316,18 +296,6 @@ public final class VideoPlaybackController {
             indicated: event.indicatedBitrate,
             observed: event.observedBitrate
         )
-    }
-
-    /// The playhead and the identity of the item behind `view`, for QA that has
-    /// to prove one item survived a transition rather than being replaced by a
-    /// second one at zero. Identity is an opaque address string — comparing it
-    /// across two surfaces is the whole point, its value means nothing.
-    /// `nil` when nothing is bound. Exposed instead of the `AVPlayerItem` so
-    /// callers still never import AVFoundation.
-    public func debugPlayhead(in view: VideoRenderView) -> (seconds: Double, item: String)? {
-        guard let item = activePlayers[ObjectIdentifier(view)]?.currentItem else { return nil }
-        let time = item.currentTime().seconds
-        return (time.isFinite ? time : 0, String(UInt(bitPattern: ObjectIdentifier(item).hashValue), radix: 16))
     }
 
     var idlePlayerCount: Int { idlePlayers.count }

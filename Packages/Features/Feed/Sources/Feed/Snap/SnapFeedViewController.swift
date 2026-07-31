@@ -64,9 +64,6 @@ final class SnapFeedViewController: UIViewController {
     /// The surface currently on loan to a dismissal's flight card, so a
     /// cancelled grab can take it back.
     private var donatedLiveView: VideoRenderView?
-    /// Resumed by `render` once the feed has posts, for a native-zoom open that
-    /// hydrates before it flies. One-shot; see `nativeZoomPrepare`.
-    private var nativeZoomPreparation: CheckedContinuation<Void, Never>?
     /// The two facts whose AND is the surface's visibility.
     private var isOnScreen = false
     private var isForeground = true
@@ -186,12 +183,6 @@ final class SnapFeedViewController: UIViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-            print(String(format: "[zoom-live] %.3f feed willAppear items=%d",
-                         CACurrentMediaTime(), orderedIDs.count))
-        }
-        #endif
         // The back item exists only when there is somewhere to go back to — a
         // map-opened feed, not the Timeline tab root — and the stack/
         // presentation relationship is known only here, not at viewDidLoad.
@@ -763,16 +754,8 @@ final class SnapFeedViewController: UIViewController {
     private func render(_ state: FeedViewModel.RenderState) {
         refreshControl.endRefreshing()
 
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-            print(String(format: "[zoom-live] %.3f feed render items=%d phase=%@",
-                         CACurrentMediaTime(), state.items.count, String(describing: state.phase)))
-        }
-        #endif
         orderedIDs = state.items.map(\.id)
         modelsByID = Dictionary(uniqueKeysWithValues: state.items.map { ($0.id, $0) })
-        // A pre-push hydrate is waiting on exactly this.
-        if !orderedIDs.isEmpty { finishNativeZoomPreparation() }
 
         var snapshot = NSDiffableDataSourceSnapshot<Section, PostID>()
         snapshot.appendSections([.main])
@@ -1477,87 +1460,6 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         }
         #endif
         return mirrored
-    }
-
-    // MARK: - Native zoom handoff
-
-    /// Loads and HYDRATES the feed before it is pushed, so its first page can
-    /// activate and adopt the parked player on the transition's opening frames
-    /// rather than partway through it.
-    ///
-    /// Measured on the native-zoom path: of the ~82ms between the push and the
-    /// page rendering live video, ~56ms is this — the posts arriving. The cell
-    /// cannot exist, let alone play, until they do. Pulling it in front of the
-    /// push takes it out of the flight entirely.
-    ///
-    /// Data only. No view is re-parented and no layer is touched, which is why
-    /// this is safe where pre-warming the *surface* is not: a layer that changes
-    /// hierarchy pays a decode round-trip, and a layer off-window may never
-    /// become ready at all. `loadViewIfNeeded` reaches `viewModel.viewDidLoad`,
-    /// which is what starts the load.
-    ///
-    /// Bounded: a slow (or failed) hydrate must not hold the tap hostage, so the
-    /// push goes ahead on timeout and the flight degrades to what it was before
-    /// rather than hanging.
-    ///
-    /// `bounds` has to be the real screen size: the load starts from
-    /// `viewDidLayoutSubviews` and is gated on a non-zero width, so
-    /// `loadViewIfNeeded` alone leaves it unstarted and this times out having
-    /// achieved nothing (measured — the first attempt did exactly that).
-    ///
-    /// Laying out here does NOT start playback: activation is gated on
-    /// `isOnScreen`, which `viewWillAppear` sets, so cells realized by this pass
-    /// stay dormant until the push. Only the data moves early.
-    func nativeZoomPrepare(in bounds: CGRect, timeout: Duration = .milliseconds(250)) async {
-        loadViewIfNeeded()
-        view.frame = bounds
-        view.layoutIfNeeded()
-        // Already hydrated — a re-opened feed, or a provider that answered
-        // synchronously from cache.
-        guard orderedIDs.isEmpty else { return }
-
-        let deadline = Task { [weak self] in
-            try? await Task.sleep(for: timeout)
-            guard !Task.isCancelled else { return }
-            await MainActor.run { self?.finishNativeZoomPreparation(timedOut: true) }
-        }
-        // No suspension point between the guard above and the continuation being
-        // stored, and both this and `render` are MainActor — so a render cannot
-        // land in the gap and leave the continuation dangling.
-        await withCheckedContinuation { continuation in
-            nativeZoomPreparation = continuation
-        }
-        deadline.cancel()
-    }
-
-    private func finishNativeZoomPreparation(timedOut: Bool = false) {
-        guard let continuation = nativeZoomPreparation else { return }
-        nativeZoomPreparation = nil
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-            print(String(format: "[zoom-live] %.3f feed prepared items=%d%@",
-                         CACurrentMediaTime(), orderedIDs.count, timedOut ? " (TIMED OUT)" : ""))
-        }
-        #endif
-        continuation.resume()
-    }
-
-    /// Parks the active page's player for the tile a native-zoom dismissal is
-    /// landing on, leaving this page's surface showing its last frame.
-    ///
-    /// The custom transition's equivalent (`zoomParkLiveMediaForHandoff`) exists
-    /// to feed a flight card; there is no card here, so this only has to move
-    /// the player and keep the outgoing side from flashing its poster.
-    @discardableResult
-    func nativeZoomParkForLanding() -> Bool {
-        activeSnapCell?.parkPlaybackKeepingSurface() ?? false
-    }
-
-    /// Takes the player back after a cancelled native-zoom dismissal — the page
-    /// is staying up and the tile has to give it back.
-    @discardableResult
-    func nativeZoomResumePlayback() -> Bool {
-        activeSnapCell?.adoptParkedPlayback() ?? false
     }
 
     private var activeSnapCell: SnapFeedCell? {

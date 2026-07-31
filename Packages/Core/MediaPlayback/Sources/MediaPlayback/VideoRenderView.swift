@@ -54,14 +54,7 @@ public final class VideoRenderView: UIView {
     }
 
     private func updatePosterVisibility(ready: Bool) {
-        let wasVisible = !posterView.isHidden
         posterView.isHidden = (posterView.image == nil) || ready
-        #if DEBUG
-        // The poster covering the layer IS the thumbnail flash. Readiness is a
-        // proxy for it; this is the thing itself, so a flight can be judged on
-        // what the viewer saw rather than on what the layer reported.
-        if wasVisible != !posterView.isHidden { logPoster(visible: !posterView.isHidden) }
-        #endif
     }
 
     // MARK: - Controller seam
@@ -102,10 +95,7 @@ public final class VideoRenderView: UIView {
     public var isReadyForDisplay: Bool { playerLayer.isReadyForDisplay }
 
     #if DEBUG
-    /// Whether the poster is currently covering the video — i.e. exactly the
-    /// "thumbnail flash" the hero work is chasing. Public so an app-level probe
-    /// can sample it per frame across a transition.
-    public var isPosterVisible: Bool { !posterView.isHidden }
+    var isPosterVisible: Bool { !posterView.isHidden }
 
     /// Names this surface in `-zoom-live-log` output (e.g. "tile", "card").
     public var debugLabel: String?
@@ -114,14 +104,6 @@ public final class VideoRenderView: UIView {
     /// teardowns — the other autoplaying tiles being stopped as the grid is
     /// covered — are ordinary and drowned the signal, so they stay unlogged.
     public var debugTracksFlight = false
-
-    private func logPoster(visible: Bool) {
-        guard let debugLabel, debugTracksFlight,
-              ProcessInfo.processInfo.arguments.contains("-zoom-live-log")
-        else { return }
-        print(String(format: "[zoom-live] %.3f %@ POSTER=%@",
-                     CACurrentMediaTime(), debugLabel, visible ? "VISIBLE" : "hidden"))
-    }
 
     private func logReadiness(_ ready: Bool) {
         guard let debugLabel, debugTracksFlight,
