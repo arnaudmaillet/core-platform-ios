@@ -372,14 +372,23 @@ final class ForYouViewController: UIViewController {
                 self?.poseHostedSurface(at: rect, in: space, cornerRadius: radius)
             },
             donateLive: { [weak self, weak page] in
-                let donated = page?.donateLivePlayback(of: tapped.id)
+                // Under `-avsbdl-render` the card joins the tile's playback as
+                // an extra surface instead of taking it over. The tile keeps
+                // rendering behind the card, so there is no park, no transfer,
+                // and nothing to hand back if the flight is abandoned.
+                let attached = VideoRenderFlags.usesSampleBufferLayer
+                let surface = attached
+                    ? page?.liveFlightSurface(for: tapped.id)
+                    : page?.donateLivePlayback(of: tapped.id)
                 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-                    print(String(format: "[zoom-live] %.3f source donate+park -> %@",
-                                 CACurrentMediaTime(), donated != nil ? "true" : "false"))
+                    print(String(format: "[zoom-live] %.3f source %@ -> %@",
+                                 CACurrentMediaTime(),
+                                 attached ? "attach surface" : "donate+park",
+                                 surface != nil ? "true" : "false"))
                 }
                 #endif
-                return donated
+                return surface
             }
         )
         let transition = ZoomTransitionController(source: source, destination: destination)

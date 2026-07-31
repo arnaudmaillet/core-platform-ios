@@ -300,6 +300,17 @@ public final class VideoPlaybackController {
         return renderer.surfaceCount
     }
 
+    /// Re-caps the item playing `mediaURL`, wherever it is bound.
+    ///
+    /// The URL-keyed twin of `setPeakBitRate(_:in:)`, and necessary for the
+    /// same reason `attachSurface` is: a surface that joined an existing
+    /// playback holds no pool loan, so it cannot be looked up by view. Without
+    /// this a full-screen page that joins a grid tile's player inherits the
+    /// tile's rung — `tileBitRateCap`, sized for a thumbnail — and stays there.
+    public func setPeakBitRate(_ peakBitRate: Double, for mediaURL: URL) {
+        activePlayer(playing: mediaURL)?.currentItem?.preferredPeakBitRate = peakBitRate
+    }
+
     private func activePlayer(playing mediaURL: URL) -> AVPlayer? {
         if let key = playingURL.first(where: { $0.value == mediaURL })?.key,
            let player = activePlayers[key] {

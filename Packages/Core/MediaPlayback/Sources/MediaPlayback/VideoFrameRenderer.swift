@@ -50,6 +50,10 @@ final class VideoFrameRenderer {
     /// counted rather than inferred.
     private(set) var dispatchedFrameCount = 0
 
+    /// Surfaces that actually received the last frame — those in a window.
+    /// Always <= `surfaceCount`; see the logging note in `sampleFrameRate`.
+    private(set) var drawnSurfaceCount = 0
+
     private var lastRateSampleHostTime: CFTimeInterval = 0
     private var framesSinceRateSample = 0
 
@@ -60,6 +64,10 @@ final class VideoFrameRenderer {
     /// one's. That backwards jump is the wrap, and the host-time distance
     /// across it is exactly "how long was this surface without a new frame" —
     /// the only number that decides whether the loop needs a flush.
+    /// The most recent frame, kept solely to prime a joining surface. See
+    /// `primeWithLastFrame` for why this one retention is allowed.
+    private var lastFrame: (buffer: CVPixelBuffer, itemTime: CMTime)?
+
     private var lastItemTime: CMTime = .invalid
     private var lastDispatchHostTime: CFTimeInterval = 0
     private var maxGapSinceRateSample: CFTimeInterval = 0
@@ -77,6 +85,9 @@ final class VideoFrameRenderer {
         // A new item's first frame has nothing to do with the old item's, and
         // every attached surface is currently showing the latter.
         formatDescription = nil
+        // A new item's last frame is the OLD item's content; priming a joining
+        // surface with it would show the wrong video.
+        lastFrame = nil
         lastItemTime = .invalid
         lastDispatchHostTime = 0
         updateClockRegistration()
@@ -87,8 +98,36 @@ final class VideoFrameRenderer {
     func addSurface(_ surface: VideoRenderView) {
         guard !surfaces.contains(surface) else { return }
         surfaces.add(surface)
+        primeWithLastFrame(surface)
         updateClockRegistration()
         log("surface + (\(surfaces.count) attached)")
+    }
+
+    /// Gives a joining surface the most recent frame immediately, instead of
+    /// letting it wait for the next one.
+    ///
+    /// **Measured, and the reason this exists:** without it a flight card took
+    /// 34-103ms (median ~44ms) to show its first frame, because dispatch is
+    /// gated on `hasNewPixelBuffer` and at 24-30fps the next frame is up to
+    /// 42ms away. That is the same order as the 65ms handoff window this whole
+    /// pivot exists to remove — it would have shipped as "seamless" while
+    /// actually flashing.
+    ///
+    /// Attaching genuinely costs the EXISTING surfaces nothing. It was the new
+    /// surface that paid, and this is what makes the claim true for it too.
+    ///
+    /// This is a deliberate exception to the renderer's "hold no frame between
+    /// ticks" rule: exactly ONE frame is retained, and one frame per renderer
+    /// is bounded and small. The rule guards against unbounded retention
+    /// starving the decoder's pool, which a single slot cannot do.
+    private func primeWithLastFrame(_ surface: VideoRenderView) {
+        guard let lastFrame, let format = formatDescription else { return }
+        guard let sample = Self.makeSampleBuffer(
+            imageBuffer: lastFrame.buffer,
+            format: format,
+            presentationTime: lastFrame.itemTime
+        ) else { return }
+        surface.enqueue(sample)
     }
 
     func removeSurface(_ surface: VideoRenderView) {
@@ -138,7 +177,15 @@ final class VideoFrameRenderer {
         noteDispatch(itemTime: frame.itemTime, hostTime: hostTime)
         guard let format = formatDescription(matching: frame.buffer) else { return }
 
+        lastFrame = frame
+        var drawn = 0
         for surface in targets {
+            // A surface outside the window hierarchy cannot be seen, and a
+            // discarded flight card sits in exactly that state until ARC gets
+            // to it. Skipping is enough — the set holds surfaces weakly, so it
+            // empties itself; this only stops us paying for them meanwhile.
+            guard surface.window != nil else { continue }
+            drawn += 1
             // Built per surface rather than once and shared. The wrapper is a
             // few hundred bytes around a retained buffer, so N of them is
             // cheap; what it buys is that each display layer gets a sample
@@ -151,6 +198,7 @@ final class VideoFrameRenderer {
             ) else { continue }
             surface.enqueue(sample)
         }
+        drawnSurfaceCount = drawn
         dispatchedFrameCount += 1
         framesSinceRateSample += 1
     }
@@ -184,9 +232,15 @@ final class VideoFrameRenderer {
         }
         let elapsed = hostTime - lastRateSampleHostTime
         guard elapsed >= 1 else { return }
-        log(String(format: "fps=%.1f maxGap=%.1fms surfaces=%d total=%d",
+        // `drawn` and `attached` are reported separately because they diverge,
+        // and the difference is diagnostic. A discarded flight card stays in
+        // the weak set until ARC collects it, so `attached` can read 5 while
+        // only 2 surfaces are in a window. Logging the larger number alone
+        // would read as "5 layers are being fed" — false, and exactly the kind
+        // of flattering metric this issue keeps getting caught by.
+        log(String(format: "fps=%.1f maxGap=%.1fms drawn=%d attached=%d total=%d",
                    Double(framesSinceRateSample) / elapsed, maxGapSinceRateSample * 1000,
-                   surfaces.count, dispatchedFrameCount))
+                   drawnSurfaceCount, surfaces.count, dispatchedFrameCount))
         lastRateSampleHostTime = hostTime
         framesSinceRateSample = 0
         maxGapSinceRateSample = 0

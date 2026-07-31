@@ -249,6 +249,21 @@ final class ForYouGridPage: UIView {
         playback?.donateLiveSurface(of: postID)
     }
 
+    /// The N-surface alternative to `donateLivePlayback`: a NEW surface showing
+    /// the same live playback, with the tile keeping its own.
+    ///
+    /// Nothing is donated, nothing is parked, and the tile is hidden rather
+    /// than stopped — so if the flight is abandoned there is nothing to put
+    /// back. Returns nil when the tile is not playing, which is the same
+    /// contract the donate path had.
+    func liveFlightSurface(for postID: PostID) -> VideoRenderView? {
+        guard let playback,
+              let index = posts.firstIndex(where: { $0.id == postID }),
+              let url = posts[index].videoURL
+        else { return nil }
+        return playback.makeAttachedSurface(for: postID, url: url)
+    }
+
     /// Whether the tile that a dismissal is landing on is already rendering.
     /// True when it carries no video, so a still tile never holds the card.
     func isLandingPlaybackReady(for postID: PostID) -> Bool {

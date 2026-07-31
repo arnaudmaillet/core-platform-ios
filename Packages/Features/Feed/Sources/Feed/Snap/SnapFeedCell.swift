@@ -586,7 +586,25 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         let view = mediaCard.renderView
         #if DEBUG
         view.debugTracksFlight = true
+        view.debugLabel = "page"
         #endif
+        if VideoRenderFlags.usesSampleBufferLayer {
+            // N-surface: joining costs the flying card nothing, so this page's
+            // surface is live AND visible from the moment it exists. The whole
+            // hidden-warm-up-then-reveal dance below is a workaround for one
+            // player having one render slot, and it has nothing to work around
+            // here — the card, the tile and this page all draw the same frames
+            // at the same time.
+            guard videoPlayback.attachSurface(view, to: url) else { return }
+            // The tile capped this item to a thumbnail rung; full screen wants
+            // the whole ladder. Re-capped by URL because a joined surface holds
+            // no pool loan and cannot be looked up by view.
+            videoPlayback.setPeakBitRate(0, for: url)
+            view.isHidden = false
+            hasDeferredPlayback = false
+            isWarmAttached = true
+            return
+        }
         view.isHidden = true
         guard videoPlayback.unparkPlayback(to: view, mediaURL: url) else { return }
         hasDeferredPlayback = false

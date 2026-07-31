@@ -244,6 +244,25 @@ public final class GridVideoPlaybackCoordinator {
         return donated
     }
 
+    /// Builds an ADDITIONAL surface showing `id`'s live playback, leaving the
+    /// tile's own surface exactly where it is.
+    ///
+    /// The N-surface replacement for `donateLiveSurface`, and the difference is
+    /// the whole of #83: nothing is transferred, nothing is parked, and the
+    /// tile keeps drawing for the entire flight. There is no moment at which
+    /// some surface is waiting on a decode round-trip, because no binding
+    /// changed. Returns nil when the tile is not playing.
+    public func makeAttachedSurface(for id: PostID, url: URL) -> VideoRenderView? {
+        guard playing[id] != nil else { return nil }
+        let view = VideoRenderView()
+        #if DEBUG
+        view.debugLabel = "card"
+        view.debugTracksFlight = true
+        #endif
+        guard pool.attachSurface(view, to: url) else { return nil }
+        return view
+    }
+
     @discardableResult
     public func parkForHandoff(_ id: PostID) -> Bool {
         guard let cell = playing[id], let renderView = cell.loadedVideoRenderView else { return false }
