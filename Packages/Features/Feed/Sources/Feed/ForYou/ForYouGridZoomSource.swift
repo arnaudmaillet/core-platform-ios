@@ -93,6 +93,19 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
             cover: appearance?.cover,
             style: appearance?.style ?? .tile
         )
+        #if DEBUG
+        // Whether the card had a texture to show on frame 0. `heroAppearance`
+        // reads the tile's `renderedCover` synchronously and the initialiser
+        // assigns it immediately, so a bound cover is the expected case — this
+        // exists to catch the exception, where the card is posed over the tile
+        // with nothing but its own background colour.
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] %.3f card FRAME0 cover=%@ style=%@",
+                         CACurrentMediaTime(),
+                         appearance?.cover == nil ? "NIL" : "bound",
+                         String(describing: appearance?.style ?? .tile)))
+        }
+        #endif
         // An autoplaying tile hands its RUNNING surface to the card. Donating
         // the live view is preferred over mirroring onto the card's own: a
         // mirrored layer is blank for ~100ms while the source is already
