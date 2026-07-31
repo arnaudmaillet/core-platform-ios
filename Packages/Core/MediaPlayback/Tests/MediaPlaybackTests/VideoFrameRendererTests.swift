@@ -181,6 +181,41 @@ struct SurfaceAttachmentTests {
         #expect(controller.surfaceCount(for: url) == 1)
     }
 
+    /// The dismissal's core move: the landing tile takes the loan while the
+    /// page that owned it is still alive and still drawing.
+    @Test func ownershipMovesWithoutDisturbingAnySurface() async {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        let url = URL(string: "mock://video/transfer")!
+        let page = VideoRenderView()
+        await controller.play(url, in: page)
+        let tile = VideoRenderView()
+        controller.attachSurface(tile, to: url)
+
+        #expect(controller.transferOwnership(of: url, to: tile) == true)
+        // Both are still showing it — ownership moved, rendering did not.
+        #expect(tile.isAttached)
+        #expect(page.isAttached)
+        #expect(controller.surfaceCount(for: url) == concurrentSurfaces)
+    }
+
+    /// Why `transferOwnership` has to happen BEFORE the feed is torn down.
+    ///
+    /// Without it, stopping the owning page returns the player to the pool and
+    /// every joined surface goes dark — including the grid tile the flight just
+    /// landed on. With it, the page can be stopped and the tile keeps playing.
+    @Test func stoppingTheFormerOwnerLeavesTheNewOnePlaying() async {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        let url = URL(string: "mock://video/teardown")!
+        let page = VideoRenderView()
+        await controller.play(url, in: page)
+        let tile = VideoRenderView()
+        controller.transferOwnership(of: url, to: tile)
+
+        controller.stop(page)
+        #expect(tile.isAttached)
+        #expect(controller.surfaceCount(for: url) != nil)
+    }
+
     /// `detachSurface` must never return a pool loan — the owning view's player
     /// is not its to release. Passing the owner is a caller mistake, and the
     /// safe response is to do nothing rather than tear down playback.

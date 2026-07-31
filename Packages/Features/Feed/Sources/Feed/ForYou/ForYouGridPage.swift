@@ -329,6 +329,15 @@ final class ForYouGridPage: UIView {
         // for the flight card at this point, so unhide it first — the card is
         // on top and covers the swap.
         cell.isHidden = false
+        if VideoRenderFlags.usesSampleBufferLayer {
+            // The card's surface is one of several showing this playback, not
+            // the playback itself. The tile gets its OWN surface — primed with
+            // the current frame on attach — and takes the pool loan; the card's
+            // is released once it leaves the window. Nothing is re-parented,
+            // which is the ~65ms drop `holdCard` was covering.
+            playback.adoptAttachedSurface(for: postID, url: url, cell: cell)
+            return
+        }
         playback.adoptLiveSurface(view, for: postID, url: url, cell: cell)
     }
 

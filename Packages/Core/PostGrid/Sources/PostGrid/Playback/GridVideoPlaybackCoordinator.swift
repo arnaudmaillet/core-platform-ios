@@ -270,6 +270,39 @@ public final class GridVideoPlaybackCoordinator {
         return view
     }
 
+    /// Lands a dismissal on `cell` by giving the tile its OWN surface on the
+    /// still-running playback and moving the pool loan to it.
+    ///
+    /// The N-surface replacement for `adoptLiveSurface`, and the difference is
+    /// the last handoff in this issue. That path installed the flight card's
+    /// view into the cell — a re-parent, measured at ~65ms of readiness drop,
+    /// and the reason `ZoomAnimator.holdCard` exists. Here the tile's surface
+    /// is primed with the current frame the moment it attaches, so it is
+    /// already showing the right pixels before the card is taken away; nothing
+    /// moves and there is nothing to hold across.
+    @discardableResult
+    public func adoptAttachedSurface(for id: PostID, url: URL, cell: PostGridTileCell) -> Bool {
+        let view = cell.makeVideoRenderViewIfNeeded()
+        #if DEBUG
+        view.debugLabel = "tile"
+        view.debugTracksFlight = true
+        #endif
+        cell.beginVideoPreview()
+        view.isHidden = false
+        guard pool.transferOwnership(of: url, to: view) else { return false }
+        pool.setPeakBitRate(Self.tileBitRateCap, for: url)
+        playing[id] = cell
+        uncappedIDs.remove(id)
+        cell.onReuse = { [weak self] in
+            guard let self, let cell = playing[id] else { return }
+            stop(id: id, cell: cell)
+        }
+        #if DEBUG
+        Self.logPool(playing.count, handoff: handoffID)
+        #endif
+        return true
+    }
+
     /// Surfaces minted by `makeAttachedSurface`, held weakly — the renderer
     /// holds them weakly too, so this is bookkeeping for *when* to detach, not
     /// ownership.

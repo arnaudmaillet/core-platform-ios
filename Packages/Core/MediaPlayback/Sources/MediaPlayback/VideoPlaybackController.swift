@@ -300,6 +300,44 @@ public final class VideoPlaybackController {
         return renderer.surfaceCount
     }
 
+    /// Moves the pool loan for `mediaURL` to `view`, leaving every attached
+    /// surface exactly as it is.
+    ///
+    /// The dismissal's missing piece, and the reason `attachSurface` alone is
+    /// not enough. A joined surface holds no loan, so when the feed page that
+    /// owns the player is torn down, `stop` returns that player to the pool and
+    /// every surface joined to it — including the grid tile the flight just
+    /// landed on — goes dark. Ownership has to move before the owner dies.
+    ///
+    /// **This touches no layer.** It is the bookkeeping half of what
+    /// `park`/`unpark` did, with the rendering half deleted, because under
+    /// N-surface rendering was never what needed to move. `view` is also
+    /// attached as a surface if it is not one already, which is a no-op when
+    /// the caller has already joined it.
+    @discardableResult
+    public func transferOwnership(of mediaURL: URL, to view: VideoRenderView) -> Bool {
+        guard let player = activePlayer(playing: mediaURL) else { return false }
+        if let previous = playingURL.first(where: { $0.value == mediaURL })?.key,
+           previous != ObjectIdentifier(view) {
+            // Clear the old owner's registration WITHOUT `detach` — detaching
+            // pauses the player and hands it back to the pool, which is exactly
+            // the teardown this exists to get ahead of.
+            activePlayers[previous] = nil
+            playingURL[previous] = nil
+        }
+        // Claimed from the park, if that is where it was.
+        parked = nil
+        let key = ObjectIdentifier(view)
+        // Supersede any in-flight resolution for this view, so a late `play`
+        // cannot attach a second item over the one just adopted.
+        generation[key] = (generation[key] ?? 0) + 1
+        activePlayers[key] = player
+        playingURL[key] = mediaURL
+        bind(player, to: view)
+        player.play()
+        return true
+    }
+
     /// Re-caps the item playing `mediaURL`, wherever it is bound.
     ///
     /// The URL-keyed twin of `setPeakBitRate(_:in:)`, and necessary for the

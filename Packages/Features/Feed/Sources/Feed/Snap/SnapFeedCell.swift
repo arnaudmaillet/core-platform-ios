@@ -639,6 +639,14 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     @discardableResult
     func parkPlayback() -> Bool {
         guard mediaKind == .video, let videoPlayback else { return false }
+        if VideoRenderFlags.usesSampleBufferLayer {
+            // Parking would detach this page's surface and stop it drawing,
+            // and under N-surface there is no reason to: the landing tile takes
+            // the loan directly via `transferOwnership` when the card lands, so
+            // the player stays owned — and rendering — right up to that moment.
+            // Reported as handled so the caller does not fall back to a park.
+            return true
+        }
         return videoPlayback.parkPlayback(from: mediaCard.renderView)
     }
 
@@ -650,8 +658,21 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// page keeps the view in its hierarchy but hands rendering over; on a
     /// cancelled grab `reclaimDonatedPlayback` puts everything back.
     func donateLiveRenderView() -> VideoRenderView? {
-        guard mediaKind == .video, let videoPlayback,
-              videoPlayback.parkPlayback(from: mediaCard.renderView, keepingSurfaceAttached: true)
+        guard mediaKind == .video, let videoPlayback else { return nil }
+        if VideoRenderFlags.usesSampleBufferLayer, let url = mediaURL {
+            // Nothing is donated: the card gets a surface of its own on the
+            // same playback, primed with the current frame, and this page keeps
+            // rendering behind it. A cancelled grab therefore has nothing to
+            // put back — see `reclaimDonatedPlayback`.
+            let card = VideoRenderView()
+            #if DEBUG
+            card.debugLabel = "card"
+            card.debugTracksFlight = true
+            #endif
+            guard videoPlayback.attachSurface(card, to: url) else { return nil }
+            return card
+        }
+        guard videoPlayback.parkPlayback(from: mediaCard.renderView, keepingSurfaceAttached: true)
         else { return nil }
         let view = mediaCard.renderView
         view.removeFromSuperview()
@@ -674,6 +695,14 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// Puts a donated surface back and un-parks its player — the abandoned
     /// dismissal. No-op when the park was already claimed.
     func reclaimDonatedPlayback(_ view: VideoRenderView) {
+        if VideoRenderFlags.usesSampleBufferLayer {
+            // This page never gave anything up, so there is nothing to restore
+            // — the abandoned card's surface is simply released. That is the
+            // whole of "cancel" under N-surface, and it cannot leave the page
+            // blank because the page's own surface never stopped drawing.
+            videoPlayback?.detachSurface(view)
+            return
+        }
         mediaCard.restoreRenderView(view)
         guard let url = mediaURL, let videoPlayback else { return }
         videoPlayback.unparkPlayback(to: view, mediaURL: url)
