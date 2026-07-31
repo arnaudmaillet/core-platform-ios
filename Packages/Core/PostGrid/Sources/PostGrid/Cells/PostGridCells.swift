@@ -27,6 +27,11 @@ public final class PostGridListRowCell: UICollectionViewCell {
         return mediaView.frame
     }
 
+    /// The preview view itself, for UIKit's native zoom transition — which
+    /// takes a source *view* rather than a rect, and morphs it live. Nil for a
+    /// text-only row, matching `mediaHeroRect`.
+    public var mediaHeroView: UIView? { mediaView.isHidden ? nil : mediaView }
+
     /// The image the preview is currently showing — the exact pixels the
     /// viewer is looking at, so a flight starts from them rather than from a
     /// cache lookup that could miss.

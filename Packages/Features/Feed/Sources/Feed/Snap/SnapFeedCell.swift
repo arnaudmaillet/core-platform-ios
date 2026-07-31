@@ -567,6 +567,21 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
                 return
             }
             let view = mediaCard.renderView
+            #if DEBUG
+            // The undeferred activation is the native-zoom path's takeoff: this
+            // page attaches the tile's parked player while the system morphs a
+            // portal of both. Labelled HERE, before the attach, because a probe
+            // installed after the window under test reports silence — and
+            // silence is indistinguishable from success.
+            view.debugLabel = "page"
+            view.debugTracksFlight = true
+            #endif
+            // The tile's parked player is taken NOW, on this turn of the run
+            // loop, not on the next one. Reaching the same adopt through `play`'s
+            // Task cost ~56ms of the present flight in scheduling alone — time
+            // the destination spent with nothing to show. Only a cold open,
+            // which has a URL to resolve anyway, goes async.
+            if videoPlayback.adoptParkedPlayback(url, in: view) { return }
             Task { await videoPlayback.play(url, in: view) }
         case .image:
             startKenBurns()
@@ -622,6 +637,29 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func parkPlayback() -> Bool {
         guard mediaKind == .video, let videoPlayback else { return false }
         return videoPlayback.parkPlayback(from: mediaCard.renderView)
+    }
+
+    /// Parks this page's player while LEAVING its surface attached — the
+    /// native-zoom dismissal.
+    ///
+    /// Nothing flies, so nothing needs the view; what matters is what the page
+    /// shows during the ~100ms before the system's morph has crossfaded to the
+    /// tile. Plain `parkPlayback` detaches, and the page snaps to its poster
+    /// inside that window. Keeping the surface attached leaves the last decoded
+    /// frame on screen instead, which the crossfade then covers.
+    @discardableResult
+    func parkPlaybackKeepingSurface() -> Bool {
+        guard mediaKind == .video, let videoPlayback else { return false }
+        return videoPlayback.parkPlayback(from: mediaCard.renderView, keepingSurfaceAttached: true)
+    }
+
+    /// Takes the parked player back into this page's own surface — a native-zoom
+    /// dismissal the viewer cancelled, where the page stays up and the tile must
+    /// give the player back. Same item, same playhead.
+    @discardableResult
+    func adoptParkedPlayback() -> Bool {
+        guard mediaKind == .video, let url = mediaURL, let videoPlayback else { return false }
+        return videoPlayback.unparkPlayback(to: mediaCard.renderView, mediaURL: url)
     }
 
     /// Hands the page's already-rendering surface to a dismissal's flight card,

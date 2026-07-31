@@ -147,6 +147,22 @@ public final class GridVideoPlaybackCoordinator {
         }
         #if DEBUG
         Self.logPool(playing.count, handoff: handoffID)
+        // The flight's probe, installed at the one moment that is guaranteed to
+        // precede the window under test: the scope opens before the transition
+        // is even built. The `no live surface` branch is not noise — it is the
+        // difference between "no drops" and "nothing was being watched".
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            if let surface = playing[id]?.loadedVideoRenderView {
+                surface.debugLabel = "tile"
+                surface.debugTracksFlight = true
+                print(String(format: "[zoom-live] %.3f probe armed on tile ready=%@",
+                             CACurrentMediaTime(), surface.isReadyForDisplay ? "true" : "false"))
+            } else {
+                print(String(format: "[zoom-live] %.3f probe NOT armed — no live surface for %@ (playing: %@)",
+                             CACurrentMediaTime(), String(describing: id),
+                             playing.keys.map { String(describing: $0) }.sorted().joined(separator: ",")))
+            }
+        }
         #endif
     }
 
@@ -223,6 +239,34 @@ public final class GridVideoPlaybackCoordinator {
         return donated
     }
 
+    /// Parks the tile's player while LEAVING its surface in the cell.
+    ///
+    /// The native-zoom handoff: nothing flies, so there is nothing to donate
+    /// the surface to. The tile keeps rendering the live frame right up to the
+    /// moment the full-screen page attaches the same player to its own layer
+    /// and takes the render slot — which is the takeoff, covered by the
+    /// transition's own crossfade.
+    ///
+    /// Distinct from both neighbours on purpose: `donateLiveSurface` parks the
+    /// same way but pulls the view OUT of the cell (blanking the tile for
+    /// anything that isn't a flight card), and `parkForHandoff` detaches the
+    /// surface outright (poster, immediately). Returns whether a live player
+    /// was actually parked.
+    @discardableResult
+    public func parkKeepingSurface(of id: PostID) -> Bool {
+        guard let cell = playing[id], let renderView = cell.loadedVideoRenderView,
+              pool.parkPlayback(from: renderView, keepingSurfaceAttached: true)
+        else { return false }
+        // Same bookkeeping as a donation: the tile no longer holds a pool loan,
+        // so a reconcile can hand it a fresh one on the way back — but the view
+        // stays put, so the layer never moves.
+        cell.onReuse = nil
+        playing[id] = nil
+        uncappedIDs.remove(id)
+        startTasks.removeValue(forKey: id)?.cancel()
+        return true
+    }
+
     @discardableResult
     public func parkForHandoff(_ id: PostID) -> Bool {
         guard let cell = playing[id], let renderView = cell.loadedVideoRenderView else { return false }
@@ -236,6 +280,36 @@ public final class GridVideoPlaybackCoordinator {
             uncappedIDs.remove(id)
         }
         return parked
+    }
+
+    /// Hands the parked player straight back to the tile's existing surface,
+    /// synchronously — the native-zoom landing.
+    ///
+    /// Moving the render slot between two `AVPlayerLayer`s bound to one
+    /// `AVPlayer` costs a decode round-trip no matter how it is done (issue #83
+    /// measured 70–99ms for the second-layer attach; this path measures ~42ms).
+    /// It cannot be removed, so it is *placed*: run here, at dismissal staging,
+    /// the dip lands at the very start of the pop while the outgoing page is
+    /// still what the morph is showing, and is over before the crossfade reaches
+    /// the tile ~100ms in. Left to the reconcile's async `play`, it landed ~150ms
+    /// in — after the crossfade, i.e. in plain view.
+    ///
+    /// The explicit clear is load-bearing: `attach` is a no-op when the layer is
+    /// already bound to that player (it is — the push parked it keeping the
+    /// surface), so without this the slot never comes back and the tile shows a
+    /// frozen frame.
+    @discardableResult
+    public func adoptParkedIntoTile(_ id: PostID, url: URL, cell: PostGridTileCell) -> Bool {
+        guard let view = cell.loadedVideoRenderView else { return false }
+        view.detachForReplacement()
+        guard pool.unparkPlayback(to: view, mediaURL: url) else { return false }
+        pool.setPeakBitRate(Self.tileBitRateCap, in: view)
+        playing[id] = cell
+        cell.onReuse = { [weak self] in
+            guard let self, let cell = playing[id] else { return }
+            stop(id: id, cell: cell)
+        }
+        return true
     }
 
     /// Installs the flight card's live surface on the landing tile and claims

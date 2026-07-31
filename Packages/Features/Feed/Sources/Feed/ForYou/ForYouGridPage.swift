@@ -249,6 +249,27 @@ final class ForYouGridPage: UIView {
         playback?.donateLiveSurface(of: postID)
     }
 
+    /// Parks the tile's player for a native-zoom handoff, leaving the surface in
+    /// the cell — nothing flies, so nothing needs the view.
+    @discardableResult
+    func parkLivePlaybackKeepingSurface(of postID: PostID) -> Bool {
+        playback?.parkKeepingSurface(of: postID) ?? false
+    }
+
+    /// Gives the parked player back to the landing tile, synchronously, so the
+    /// tile is live before the native-zoom dismissal's crossfade reaches it.
+    @discardableResult
+    func adoptParkedPlaybackIntoTile(of postID: PostID) -> Bool {
+        guard let playback,
+              let index = posts.firstIndex(where: { $0.id == postID }),
+              let url = posts[index].videoURL,
+              let cell = collectionView.cellForItem(
+                  at: IndexPath(item: index, section: 0)
+              ) as? PostGridTileCell
+        else { return false }
+        return playback.adoptParkedIntoTile(postID, url: url, cell: cell)
+    }
+
     /// Whether the tile that a dismissal is landing on is already rendering.
     /// True when it carries no video, so a still tile never holds the card.
     func isLandingPlaybackReady(for postID: PostID) -> Bool {
@@ -357,6 +378,22 @@ final class ForYouGridPage: UIView {
         }
         guard rect != .zero else { return nil }
         return Hero(frame: cell.convert(rect, to: space), cover: appearance.cover, style: appearance.style)
+    }
+
+    /// The post's flyable media as a **view**, for UIKit's native zoom
+    /// (`preferredTransition = .zoom`), which takes a source view and morphs a
+    /// live portal of it rather than a rect it has to be told how to fill.
+    ///
+    /// Deliberately the same resolution rule as `hero(for:in:)` — a brick IS
+    /// its media so the cell is the source; a row is a card of which the media
+    /// is one part, so the preview is. Nil in the same cases: no realized cell,
+    /// or a text-only row.
+    func heroView(for postID: PostID) -> UIView? {
+        switch cell(for: postID) {
+        case let tile as PostGridTileCell: tile
+        case let row as PostGridListRowCell: row.mediaHeroView
+        default: nil
+        }
     }
 
     /// What the flight card should *look* like, without needing a coordinate

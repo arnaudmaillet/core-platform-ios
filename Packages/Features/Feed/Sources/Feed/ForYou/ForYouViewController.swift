@@ -58,6 +58,18 @@ final class ForYouViewController: UIViewController {
     /// the stack holds its delegate weakly.
     private var activeTransition: ZoomTransitionController?
 
+    #if DEBUG
+    /// `-native-zoom`: open the feed with UIKit's system zoom transition
+    /// instead of the custom `ZoomTransitionController` stack. Issue #83
+    /// step 1b — the evaluation spike found the system transition morphs live
+    /// `CAPortalLayer` mirrors with zero `readyForDisplay` drops, so this
+    /// measures the same claim on the real grid.
+    static let usesNativeZoom = ProcessInfo.processInfo.arguments.contains("-native-zoom")
+    /// Retains the native-zoom flight's navigation delegate; same reason as
+    /// `activeTransition`, which it replaces on that path.
+    private var nativeZoomFlight: NativeZoomFeedFlight?
+    #endif
+
     /// The tray's offset from the view's raw bottom edge. Owned rather than
     /// delegated to the safe-area guide; see `syncTrayPosition`.
     private var trayBottomConstraint: NSLayoutConstraint!
@@ -338,6 +350,20 @@ final class ForYouViewController: UIViewController {
         pager.beginPlaybackHandoff(of: tapped.id)
         let feed = makeSnapFeed(Array(ids))
 
+        #if DEBUG
+        // Taken before the tab bar is touched: the native path lets UIKit run
+        // the bar's choreography itself rather than hiding it by hand.
+        if Self.usesNativeZoom, nativeZoomFlight == nil,
+           let page = pager.page(for: format),
+           let heroView = page.heroView(for: tapped.id) {
+            openFeedWithNativeZoom(
+                feed, page: page, format: format, tappedID: tapped.id,
+                heroView: heroView, in: navigationController
+            )
+            return
+        }
+        #endif
+
         // The feed owns the whole screen: hide the bar with the push. Managed
         // by hand rather than via `hidesBottomBarWhenPushed`, because that
         // flag's choreography doesn't scrub with a custom interactive pop —
@@ -461,6 +487,134 @@ final class ForYouViewController: UIViewController {
         }
         #endif
     }
+
+    #if DEBUG
+    /// Traces the native path's staging points into the `-zoom-live-log` stream,
+    /// so the player handoff and the surface readiness read on one timeline.
+    private static func logNativeZoom(_ message: String) {
+        guard ProcessInfo.processInfo.arguments.contains("-zoom-live-log") else { return }
+        print(String(format: "[zoom-live] %.3f native-zoom %@", CACurrentMediaTime(), message))
+    }
+
+    /// The same open, run by UIKit's system zoom transition. Issue #83 step 1b.
+    ///
+    /// The contrast with the branch above is the point of the flag: no
+    /// `ZoomTransitionController`, no `ZoomAnimator`, no `PostGridFlightCard`,
+    /// no hoist, no landing hold, and no donate/adopt of a surface — the tile's
+    /// layer and the page's layer both stay exactly where they are for the whole
+    /// flight, and the system morphs live portals of them.
+    ///
+    /// What is left is the part the system cannot know about: which `AVPlayer`
+    /// belongs to which surface, and when.
+    private func openFeedWithNativeZoom(
+        _ feed: UIViewController,
+        page: ForYouGridPage,
+        format: GalleryFilter.Format,
+        tappedID: PostID,
+        heroView: UIView,
+        in navigationController: UINavigationController
+    ) {
+        // Re-evaluated by UIKit at dismissal, so the return lands on whatever
+        // post the feed paged to. The custom stack needs `activePostID` plumbed
+        // through the source for this; here it is one closure.
+        feed.preferredTransition = .zoom { [weak self, weak feed] _ in
+            guard let self else { return heroView }
+            let landing = (feed as? SnapFeedViewController)?.activePostID ?? tappedID
+            // Falls back to the tapped tile's view when the landing tile has
+            // been recycled out — a hero that resolves to nil makes UIKit drop
+            // to a plain push mid-gesture.
+            return pager.page(for: format)?.heroView(for: landing) ?? heroView
+        }
+
+        // Park the tile's player with its surface left in the cell: the tile
+        // keeps rendering live until the page attaches the same player, and the
+        // same item crosses (issue #83 criterion 4). Nothing flies, so nothing
+        // needs the view — which is why this is not `donateLivePlayback`.
+        let parked = page.parkLivePlaybackKeepingSurface(of: tappedID)
+        Self.logNativeZoom("push staged parked=\(parked)")
+
+        // UIKit runs the bar's choreography as part of its own transition here,
+        // so the flag whose choreography "doesn't scrub with a custom
+        // interactive pop" is the right tool again on this path.
+        feed.hidesBottomBarWhenPushed = true
+
+        let flight = NativeZoomFeedFlight(
+            feed: feed,
+            onDismissalStaged: { [weak self, weak feed] in
+                // BEFORE the flight: the tile has to be rendering by the time
+                // the morph crossfades to it (~100ms in), or the viewer sees its
+                // cover image. Closing the scope is what restarts it, and the
+                // parked player is what it adopts — same item, same playhead.
+                guard let self else { return }
+                let landing = (feed as? SnapFeedViewController)?.activePostID
+                let parked = (feed as? SnapFeedViewController)?.nativeZoomParkForLanding() ?? false
+                // Synchronously, before the flight: the render slot has to be
+                // back on the tile before the morph crossfades to it. Going
+                // through the reconcile's async `play` instead put the dip ~150ms
+                // into the pop, which is after the crossfade and therefore in
+                // plain view.
+                let adopted = landing.map { pager.page(for: format)?.adoptParkedPlaybackIntoTile(of: $0) ?? false }
+                pager.endPlaybackHandoff()
+                Self.logNativeZoom("dismissal staged parked=\(parked) adopted=\(adopted.map(String.init(describing:)) ?? "no landing")")
+            },
+            onDismissalCancelled: { [weak self, weak feed] in
+                // The page is staying up, so the player goes back to it.
+                guard let self, let feed = feed as? SnapFeedViewController else { return }
+                if let landing = feed.activePostID {
+                    pager.beginPlaybackHandoff(of: landing)
+                    pager.page(for: format)?.parkLivePlaybackKeepingSurface(of: landing)
+                }
+                let resumed = feed.nativeZoomResumePlayback()
+                Self.logNativeZoom("dismissal CANCELLED resumed=\(resumed)")
+            },
+            onReturned: { [weak self] in
+                guard let self else { return }
+                navigationController.delegate = nil
+                nativeZoomFlight = nil
+                restoreTrayAfterTransition()
+                // Idempotent: staging already closed the scope on every path
+                // that reaches here, and closing a closed scope reconciles once
+                // more, which is the state we want anyway.
+                pager.endPlaybackHandoff()
+                Self.logNativeZoom("returned")
+                debugAuditTray("returned")
+                debugAdvanceGrabCycleIfNeeded()
+            }
+        )
+        nativeZoomFlight = flight
+        navigationController.delegate = flight
+
+        // Hydrate the feed BEFORE the flight, then push.
+        //
+        // The takeoff is what this synchronises: the destination's first page
+        // cannot render until its posts land, and doing that during the flight
+        // put ~56ms of empty destination inside the morph. Awaiting it here
+        // moves the whole cost in front of the transition, where the tile is
+        // still on screen and still playing — the viewer waits on a live frame,
+        // never on a blank one.
+        //
+        // Bounded inside `nativeZoomPrepare`, so a slow hydrate delays the
+        // flight rather than blocking the tap.
+        Task { @MainActor [weak self, weak navigationController] in
+            await (feed as? SnapFeedViewController)?
+                .nativeZoomPrepare(in: navigationController?.view.bounds ?? UIScreen.main.bounds)
+            guard let self, let navigationController, nativeZoomFlight === flight else { return }
+            Self.logNativeZoom("pushing (feed hydrated)")
+            navigationController.pushViewController(feed, animated: true)
+
+            // `-foryou-demo-grab` on this path drives the NON-interactive
+            // dismissal only. The system owns the interactive one under `.zoom`
+            // and exposes no hook to script it, so that leg needs a synthesized
+            // drag (CGEvent) or a device — it is not covered by this harness,
+            // and a clean run here is not evidence about it.
+            if ProcessInfo.processInfo.arguments.contains("-foryou-demo-grab") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak navigationController] in
+                    navigationController?.popViewController(animated: true)
+                }
+            }
+        }
+    }
+    #endif
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
