@@ -475,6 +475,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// Loads the video poster into the render view; shown under the player until
     /// the first frame is ready (or while an asset is still processing).
     private func loadPoster(_ url: URL, expecting id: PostID, pipeline: ImagePipeline) {
+        // Cache hit applied SYNCHRONOUSLY — see `loadImage` for why the async
+        // hop is what the viewer sees as a gap.
+        if let cached = pipeline.cachedImage(for: url) {
+            mediaCard.setPoster(cached)
+            return
+        }
         imageTasks.append(Task { [weak self] in
             guard let image = try? await pipeline.image(for: url) else { return }
             guard let self, self.representedID == id else { return }
@@ -522,6 +528,31 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     private func loadImage(_ url: URL?, expecting id: PostID, pipeline: ImagePipeline) {
         guard let url else { return }
+        // A cache hit is applied SYNCHRONOUSLY, in the same turn as the
+        // `configure` that just cleared the old image.
+        //
+        // This is the ~1200ms black window on image posts. `configure` nils the
+        // image so a recycled cell can never show the previous post's photo —
+        // which is correct — and every re-supply then went through a `Task`,
+        // even when the image was already in memory. The card's black floor is
+        // what filled that hop, and re-entering a post you had just been
+        // looking at showed photo, black, the SAME photo.
+        //
+        // Deferring the nil-out instead would close the gap by showing the
+        // OUTGOING post's photo on the incoming page — a wrong image rather
+        // than no image, which in a paging feed is the worse failure. Reading
+        // the cache first has neither: the correct photo, no gap. It is also
+        // what `PostGridTileCell.configure` has always done; only the feed
+        // went straight to the async path.
+        //
+        // A genuine cache miss still loads asynchronously and still shows the
+        // floor. That is a first load with nothing to display yet, which is a
+        // different thing from blanking something we already had.
+        if let cached = pipeline.cachedImage(for: url) {
+            mediaCard.setImage(cached)
+            if isActive { startKenBurns() }
+            return
+        }
         imageTasks.append(Task { [weak self] in
             guard let image = try? await pipeline.image(for: url) else { return }
             guard let self, self.representedID == id else { return }
