@@ -245,6 +245,11 @@ final class ForYouGridPage: UIView {
                   at: IndexPath(item: index, section: 0)
               ) as? PostGridTileCell
         else { return }
+        // Same rule as the present leg: the surface must land in a VISIBLE
+        // hierarchy or the layer stops rendering. The cell is still standing in
+        // for the flight card at this point, so unhide it first — the card is
+        // on top and covers the swap.
+        cell.isHidden = false
         playback.adoptLiveSurface(view, for: postID, url: url, cell: cell)
     }
 

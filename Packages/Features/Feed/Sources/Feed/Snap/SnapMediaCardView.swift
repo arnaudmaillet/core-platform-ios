@@ -69,8 +69,17 @@ final class SnapMediaCardView: UIView {
             renderView = view
         }
         view.transform = .identity
+        // Installed by FRAME, not by constraints, and that is the whole fix for
+        // the landing flash. `pin(to:)` sets
+        // `translatesAutoresizingMaskIntoConstraints = false`, which discards
+        // the view's concrete frame until the next layout pass; the transient
+        // bounds reset `AVPlayerLayer.isReadyForDisplay` to false for ~170ms,
+        // measured, exactly on the completion frame. The takeoff path installs
+        // by frame and never resets — this now matches it.
+        view.translatesAutoresizingMaskIntoConstraints = true
+        view.frame = bounds
+        view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         insertSubview(view, aboveSubview: imageView)
-        view.pin(to: self)
     }
 
     @available(*, unavailable)

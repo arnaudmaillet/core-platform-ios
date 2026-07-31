@@ -136,15 +136,17 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                 scaleX: ZoomFlight.presenterDepthScale, y: ZoomFlight.presenterDepthScale
             )
         } completion: { _ in
-            // Hand the live surface to the page BEFORE revealing it. The page
-            // has no player of its own (it deferred for the flight), so
-            // revealing first would show a blank surface until its own layer
-            // rendered — the flash at the END of the flight. Passing the view
-            // on means the page is already displaying the frame the card was.
+            // Reveal the page FIRST, then move the surface into it — order that
+            // matters for a measured reason. An `AVPlayerLayer` only renders
+            // inside a visible hierarchy, so installing it into still-hidden
+            // content stops it and drops `isReadyForDisplay` for ~165ms, which
+            // was the flash at the END of the flight. The card is still on top
+            // and still rendering through both steps, so nothing shows in
+            // between.
+            self.destination?.setZoomContentHidden(false)
             if let surface = flight.card.zoomLiveMediaSurface {
                 self.destination?.zoomAdoptLiveMediaView(surface)
             }
-            self.destination?.setZoomContentHidden(false)
             flight.card.removeFromSuperview()
             flight.shadow.removeFromSuperview()
             dim.removeFromSuperview()
