@@ -43,15 +43,44 @@ struct MockMediaFixturesTests {
 
     // MARK: - Catalog composition
 
-    /// The video catalog has to cover portrait, square, and landscape. No
-    /// public source vends portrait/square video, so those slots are
-    /// synthesized — the point of this test is that the coverage exists at all,
-    /// whichever side of the mix provides it.
-    @Test func videoCatalogCoversEveryAspectRatio() {
+    /// Everything in the real-asset catalog that can AUTOPLAY must be a real
+    /// encode.
+    ///
+    /// This is the invariant `-rich-media` exists to provide, and it was
+    /// silently untrue: synthesized portrait clips landed in the tall bricks
+    /// (`arrangedForMotion` puts portrait media in portrait bricks), which are
+    /// exactly the tiles a hero flight departs from, and those clips decode to
+    /// black through `AVPlayerItemVideoOutput`. Every visual check of the
+    /// flight was judging a black source.
+    ///
+    /// Square is exempt because `autoplaysInGrid` excludes it — it never
+    /// plays, so a synthetic entry there cannot be seen.
+    @Test func everyAutoplayableRealAssetFixtureIsARealEncode() {
+        for fixture in MockMediaFixtures.videos {
+            let aspect = Double(fixture.width) / Double(fixture.height)
+            let isSquare = (0.95...1.05).contains(aspect)
+            if isSquare { continue }
+            #expect(fixture.isRemote, "autoplayable fixture is synthetic: \(fixture.url)")
+        }
+    }
+
+    /// Landscape and square still come from this catalog. Portrait coverage
+    /// deliberately moved to the DEFAULT synthetic catalog: every stable public
+    /// encode is landscape, and declaring one as 9:16 would mis-drive
+    /// pre-layout and crop the subject.
+    @Test func videoCatalogCoversLandscapeAndSquare() {
         let aspects = MockMediaFixtures.videos.map { Double($0.width) / Double($0.height) }
-        #expect(aspects.contains { $0 < 0.95 }, "no portrait video fixture")
         #expect(aspects.contains { (0.95...1.05).contains($0) }, "no square video fixture")
         #expect(aspects.contains { $0 > 1.05 }, "no landscape video fixture")
+    }
+
+    /// Two posts sharing one URL is a hazard for the URL-keyed surface lookup
+    /// in `VideoPlaybackController.attachSurface`, which resolves to the first
+    /// view playing that asset. The dataset cycles this list, so duplicates
+    /// here would put the same URL in two simultaneously visible tiles.
+    @Test func videoCatalogHasNoDuplicateURLs() {
+        let urls = MockMediaFixtures.videos.map(\.url)
+        #expect(Set(urls).count == urls.count)
     }
 
     @Test func videoCatalogMixesRealAndSyntheticAssets() {
