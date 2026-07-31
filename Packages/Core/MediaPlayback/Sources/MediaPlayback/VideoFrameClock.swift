@@ -25,6 +25,9 @@ final class VideoFrameClock {
     /// so a renderer detaching mid-tick cannot mutate the table underneath us.
     private let renderers = NSHashTable<VideoFrameRenderer>.weakObjects()
     private var link: CADisplayLink?
+    #if DEBUG
+    private var lastTickTimestamp: CFTimeInterval = 0
+    #endif
 
     private init() {}
 
@@ -62,6 +65,22 @@ final class VideoFrameClock {
         // against the player's own clock — the thing that becomes audible drift
         // once Phase 3 unmutes the feed.
         let hostTime = link.targetTimestamp
+        #if DEBUG
+        // The interval between ticks measures the MAIN THREAD, not the video.
+        // A display link on the main runloop cannot fire while the main thread
+        // is busy, so every surface in the app freezes together — which is what
+        // a viewer sees as a micro-cut during the transition, and what no
+        // amount of renderer-side work can fix. Logged as the gap itself so the
+        // cost lands on whoever blocked, rather than on the video pipeline.
+        if VideoRenderFlags.logsFrameDispatch, lastTickTimestamp > 0 {
+            let gap = link.timestamp - lastTickTimestamp
+            if gap > 0.1 {
+                print(String(format: "[avsbdl] %.3f MAIN-THREAD STALL %.0fms — %d renderer(s) frozen",
+                             CACurrentMediaTime(), gap * 1000, renderers.count))
+            }
+        }
+        lastTickTimestamp = link.timestamp
+        #endif
         var live = 0
         for renderer in renderers.allObjects {
             renderer.render(atHostTime: hostTime)
