@@ -176,6 +176,21 @@ public final class VideoRenderView: UIView {
         guard renderer != nil || enqueuedFrameCount > 0 else { return }
         renderer?.removeSurface(self)
         renderer = nil
+        // Hide BEFORE flushing. A flush empties the layer, so flushing a
+        // surface the viewer can see turns it black on the spot — measured as
+        // four visible tiles going black at once, every cycle, when
+        // `beginHandoff` stops the tiles that are not flying.
+        //
+        // The flush itself is still needed: it is what resets the frame count
+        // so `revealOnFirstFrame` can hold a recycled surface back until it has
+        // NEW content, rather than revealing the previous post's last frame.
+        // Only the order was wrong.
+        //
+        // Hiding here is safe because a surface with no renderer has nothing to
+        // draw, and every path that resumes playback goes through
+        // `revealOnFirstFrame`, which unhides as soon as a frame lands.
+        isHidden = true
+        isAwaitingFirstFrameToReveal = false
         flushSampleBuffers()
         updatePosterVisibility(ready: false)
     }
@@ -273,6 +288,19 @@ public final class VideoRenderView: UIView {
 
     private func flushSampleBuffers() {
         guard let sampleBufferLayer else { return }
+        #if DEBUG
+        // A flush empties the layer, so a VISIBLE surface that is flushed goes
+        // black on the spot. That is the shape of the remaining dismissal
+        // defect — one black frame on the feed page, chrome still lit — so the
+        // question is whether anything flushes a surface the viewer can see,
+        // and when. Logged with reachability because a flush on an off-screen
+        // surface is ordinary teardown and not interesting.
+        if VideoRenderFlags.logsFrameDispatch, enqueuedFrameCount > 0 {
+            print(String(format: "[avsbdl] %.3f %@ FLUSH frames=%d onScreen=%@ %@",
+                         CACurrentMediaTime(), debugLabel ?? "surface", enqueuedFrameCount,
+                         isEffectivelyOnScreen ? "YES" : "no", debugVisibilityDetail))
+        }
+        #endif
         sampleBufferLayer.sampleBufferRenderer.flush()
         enqueuedFrameCount = 0
         lastFrameHostTime = 0
