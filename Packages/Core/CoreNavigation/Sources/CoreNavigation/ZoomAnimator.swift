@@ -163,7 +163,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     /// however long the layer actually needs, usually a frame or two, and the
     /// ceiling only exists so a surface that never reports ready cannot strand
     /// the card over the screen.
-    private static func holdCard(_ card: UIView, while condition: @escaping () -> Bool) {
+    static func holdCard(_ card: UIView, while condition: @escaping () -> Bool) {
         // No early-out on `condition()`. The dip is delivered by KVO a few
         // milliseconds after the surface is installed, so a single check taken
         // at landing still reads ready and the card would leave just in time to

@@ -403,7 +403,30 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// completion, then reports the outcome to UIKit and drops all state.
     /// (finish/cancelInteractiveTransition was already reported at release.)
     private func finishTransition(cancelled: Bool) {
-        flight?.card.removeFromSuperview()
+        // The two steps the non-interactive completion performs and this one
+        // did not: hand the card's live surface to the source, then hold the
+        // card over the landing until that surface is actually drawing.
+        //
+        // This path is the one a real finger takes, and it removed the card on
+        // its first line — so whenever the landing tile was not already
+        // rendering, the card vanished and the tile's COVER IMAGE was what
+        // appeared. A scripted dismissal hides this because it always lands on
+        // the post it left from, whose player never stopped; anything that
+        // makes the landing not-instant (a slow stream, a dismissal to a post
+        // the viewer scrolled to) exposes it.
+        //
+        // The hold owns removing the card. A cancelled grab has no landing to
+        // wait for — the page is coming back — so its card goes immediately.
+        if !cancelled, let card = flight?.card {
+            if let surface = card.zoomLiveMediaSurface {
+                source?.zoomAdoptLiveMediaView(surface)
+            }
+            ZoomAnimator.holdCard(card, while: { [weak sourceRef = source] in
+                sourceRef.map { !$0.zoomLandingMediaIsReady } ?? false
+            })
+        } else {
+            flight?.card.removeFromSuperview()
+        }
         flight?.shadow.removeFromSuperview()
         dim?.removeFromSuperview()
         presentingView?.transform = .identity
