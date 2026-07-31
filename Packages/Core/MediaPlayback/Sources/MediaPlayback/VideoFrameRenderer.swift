@@ -53,6 +53,17 @@ final class VideoFrameRenderer {
     private var lastRateSampleHostTime: CFTimeInterval = 0
     private var framesSinceRateSample = 0
 
+    /// Gap tracking, which is how a loop wrap is judged.
+    ///
+    /// The wrap is observable without asking anyone: `AVPlayerItemDidPlayToEndTime`
+    /// seeks to zero, so the next frame's item time is EARLIER than the last
+    /// one's. That backwards jump is the wrap, and the host-time distance
+    /// across it is exactly "how long was this surface without a new frame" —
+    /// the only number that decides whether the loop needs a flush.
+    private var lastItemTime: CMTime = .invalid
+    private var lastDispatchHostTime: CFTimeInterval = 0
+    private var maxGapSinceRateSample: CFTimeInterval = 0
+
     init(player: AVPlayer) {
         self.source = VideoFrameSource(player: player)
     }
@@ -66,6 +77,8 @@ final class VideoFrameRenderer {
         // A new item's first frame has nothing to do with the old item's, and
         // every attached surface is currently showing the latter.
         formatDescription = nil
+        lastItemTime = .invalid
+        lastDispatchHostTime = 0
         updateClockRegistration()
     }
 
@@ -122,6 +135,7 @@ final class VideoFrameRenderer {
         // twice. Stalled means `fps=0` on the line, not the absence of a line.
         sampleFrameRate(atHostTime: hostTime)
         guard let frame = source.copyFrame(atHostTime: hostTime) else { return }
+        noteDispatch(itemTime: frame.itemTime, hostTime: hostTime)
         guard let format = formatDescription(matching: frame.buffer) else { return }
 
         for surface in targets {
@@ -141,6 +155,20 @@ final class VideoFrameRenderer {
         framesSinceRateSample += 1
     }
 
+    /// Records the inter-frame gap, and reports it when the item time jumps
+    /// backwards — i.e. when the clip has looped.
+    private func noteDispatch(itemTime: CMTime, hostTime: CFTimeInterval) {
+        let gap = lastDispatchHostTime == 0 ? 0 : hostTime - lastDispatchHostTime
+        maxGapSinceRateSample = max(maxGapSinceRateSample, gap)
+        if VideoRenderFlags.logsFrameDispatch,
+           lastItemTime.isValid, itemTime < lastItemTime {
+            log(String(format: "WRAP %.3fs -> %.3fs gap=%.1fms",
+                       lastItemTime.seconds, itemTime.seconds, gap * 1000))
+        }
+        lastItemTime = itemTime
+        lastDispatchHostTime = hostTime
+    }
+
     /// Per-second dispatch rate under `-avsbdl-log`.
     ///
     /// This is the liveness signal the acceptance harness has been missing.
@@ -156,10 +184,12 @@ final class VideoFrameRenderer {
         }
         let elapsed = hostTime - lastRateSampleHostTime
         guard elapsed >= 1 else { return }
-        log(String(format: "fps=%.1f surfaces=%d total=%d",
-                   Double(framesSinceRateSample) / elapsed, surfaces.count, dispatchedFrameCount))
+        log(String(format: "fps=%.1f maxGap=%.1fms surfaces=%d total=%d",
+                   Double(framesSinceRateSample) / elapsed, maxGapSinceRateSample * 1000,
+                   surfaces.count, dispatchedFrameCount))
         lastRateSampleHostTime = hostTime
         framesSinceRateSample = 0
+        maxGapSinceRateSample = 0
     }
 
     private func formatDescription(matching buffer: CVPixelBuffer) -> CMVideoFormatDescription? {
