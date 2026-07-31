@@ -185,6 +185,20 @@ final class ForYouGridPage: UIView {
 
     /// Tab left, feed presented over the grid, app backgrounded. `keeping`
     /// exempts the post whose player a hero flight is still carrying.
+    /// Opens the handoff scope for a tapped tile. Replaces the old
+    /// "stop everything except this one" call: the scope also makes the post
+    /// invisible to `reconcile`, so nothing can restart or stop it mid-flight.
+    func beginPlaybackHandoff(of postID: PostID) {
+        playback?.beginHandoff(postID)
+    }
+
+    /// Closes the scope and reconciles once — the single act that restores the
+    /// grid's full complement of players after a dismissal.
+    func endPlaybackHandoff() {
+        playback?.endHandoff()
+        updateAutoplay()
+    }
+
     func setAutoplayActive(_ active: Bool, keeping kept: PostID? = nil) {
         playback?.setSurfaceVisible(active, keeping: kept)
         if active {
@@ -274,6 +288,8 @@ final class ForYouGridPage: UIView {
 
     /// The destination never adopted the parked player — a cancelled flight, or
     /// a plain push. Retires it rather than leaving it decoding unseen.
+    ///
+    /// Kept for the plain-push fallback, where no handoff scope was opened.
     func discardPlaybackHandoff() {
         playback?.discardHandoff()
     }

@@ -214,12 +214,11 @@ final class ForYouViewController: UIViewController {
         let tapped = posts[index]
         let ids = posts[index...].prefix(Self.seedWindow).map(\.id)
 
-        // Everything else stops: the grid is about to be covered, and its slots
-        // are the ones the feed needs. The tapped tile keeps playing — its
-        // player is what the flight card will mirror, and the handoff happens
-        // inside `makeZoomFlightCard` so that mirroring strictly precedes
-        // parking.
-        pager.setAutoplayActive(false, keeping: tapped.id)
+        // Open the handoff scope. Everything else stops — the grid is about to
+        // be covered and its slots are what the feed needs — and the tapped
+        // post becomes invisible to reconcile, so nothing can restart or stop
+        // it while its player is in flight.
+        pager.beginPlaybackHandoff(of: tapped.id)
         let feed = makeSnapFeed(Array(ids))
 
         // The feed owns the whole screen: hide the bar with the push. Managed
@@ -276,10 +275,11 @@ final class ForYouViewController: UIViewController {
             // by now, this just guarantees it if a leg was skipped.
             self?.showTabBar(alpha: 1)
             self?.restoreTrayAfterTransition()
-            // The landing tile has had its chance to adopt the parked player by
-            // now (`setHeroHidden(false)` reconciles). Anything still parked
-            // was never claimed.
-            self?.pager.discardPlaybackHandoff()
+            // Close the handoff scope. This is the single act that restores the
+            // grid: it clears the flight's state and reconciles once, so every
+            // qualifying visible tile gets a slot again rather than whatever
+            // subset survived the transition.
+            self?.pager.endPlaybackHandoff()
             #if DEBUG
             self?.debugAuditTray("returned")
             self?.debugAdvanceGrabCycleIfNeeded()
@@ -415,15 +415,9 @@ final class ForYouViewController: UIViewController {
         // before the topViewController guard below: a tab switch back lands
         // here too, and autoplay should resume on either path.
         //
-        // The sweep: a player parked for a handoff nobody took (a plain push,
-        // a post that turned out not to be video) would sit decoding with
-        // nothing on screen.
-        //
-        // Skipped while a transition is live, because a DISMISSAL parks
-        // deliberately — the feed hands its player back for the landing tile to
-        // adopt — and sweeping here would destroy exactly the thing that keeps
-        // the return leg continuous. `onSourceReturned` sweeps whatever is left
-        // once the flight is over.
+        // No handoff open (a plain push, or an ordinary tab switch): sweep any
+        // stranded park. A live transition owns its own scope and closes it in
+        // `onSourceReturned`.
         if activeTransition == nil { pager.discardPlaybackHandoff() }
         pager.setAutoplayActive(true)
         // Coming back from the feed: this screen owns the bottom again.

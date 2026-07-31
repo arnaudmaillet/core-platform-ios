@@ -130,6 +130,16 @@ final class ForYouPagerView: UIView {
         syncAutoplay()
     }
 
+    func beginPlaybackHandoff(of postID: PostID) {
+        pages.forEach { $0.beginPlaybackHandoff(of: postID) }
+    }
+
+    /// Closes the handoff on every page and reconciles. One call, one restored
+    /// grid — no per-tile bookkeeping survives a flight.
+    func endPlaybackHandoff() {
+        pages.forEach { $0.endPlaybackHandoff() }
+    }
+
     /// Retires a handoff nobody adopted. The pool parks at most one player, so
     /// asking any page is asking the pool — no need to know which one parked it.
     func discardPlaybackHandoff() {

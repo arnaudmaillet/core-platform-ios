@@ -82,6 +82,10 @@ public final class GridVideoPlaybackCoordinator {
     /// reconcile doesn't quietly re-cap the item mid-flight.
     private var uncappedIDs: Set<PostID> = []
     private var isSurfaceVisible = true
+    /// The post whose player is currently being handed to (or from) a
+    /// full-screen page. Inside a handoff this coordinator treats that post as
+    /// none of its business: `reconcile` neither starts nor stops it.
+    private var handoffID: PostID?
     /// In-flight `play` calls, keyed by post. Held so a stop arriving while the
     /// URL is still resolving cancels it, rather than letting a late attach
     /// bind a player to a tile that has already scrolled away.
@@ -100,18 +104,65 @@ public final class GridVideoPlaybackCoordinator {
     /// runs: a tile that has left the viewport must give its player back
     /// immediately whatever the scroll is doing, or the pool starves.
     public func update(candidates: [Candidate], allowingStarts: Bool = true) {
-        let ranked = candidates.sorted { $0.distanceFromCentre < $1.distanceFromCentre }
+        // The post in flight is excluded from BOTH halves. Stopping it would
+        // kill the player the card is rendering; starting it would attach a
+        // competing layer. Its lifecycle belongs to the handoff scope until
+        // `endHandoff`.
+        let ranked = candidates
+            .filter { $0.id != handoffID }
+            .sorted { $0.distanceFromCentre < $1.distanceFromCentre }
         let chosen = isSurfaceVisible ? Array(ranked.prefix(maxConcurrent)) : []
         let chosenIDs = Set(chosen.map(\.id))
 
-        for (id, cell) in playing where !chosenIDs.contains(id) {
+        for (id, cell) in playing where !chosenIDs.contains(id) && id != handoffID {
             stop(id: id, cell: cell)
         }
         guard allowingStarts else { return }
         for candidate in chosen where playing[candidate.id] == nil {
             start(candidate)
         }
+        #if DEBUG
+        Self.logPool(playing.count, handoff: handoffID)
+        #endif
     }
+
+    // MARK: - Handoff scope
+
+    /// Opens a handoff for `id`: the grid is about to be covered by a
+    /// full-screen page that will take over this post's player.
+    ///
+    /// Every other tile stops here — their slots are what the page needs — and
+    /// `id` becomes invisible to `reconcile` for the duration. This replaces
+    /// the several ad-hoc entry points that each mutated per-tile state
+    /// directly; they could disagree, and the grid came back with one or two
+    /// slots alive instead of six.
+    public func beginHandoff(_ id: PostID) {
+        handoffID = id
+        isSurfaceVisible = false
+        for (playingID, cell) in playing where playingID != id {
+            stop(id: playingID, cell: cell)
+        }
+        #if DEBUG
+        Self.logPool(playing.count, handoff: handoffID)
+        #endif
+    }
+
+    /// Closes the handoff and retires anything left parked. The caller
+    /// reconciles immediately after, and that single reconcile is what restores
+    /// the full slate of slots — deterministically, from the visible set, with
+    /// no residue from the flight.
+    public func endHandoff() {
+        handoffID = nil
+        isSurfaceVisible = true
+        pool.discardParkedPlayback()
+        #if DEBUG
+        Self.logPool(playing.count, handoff: nil)
+        #endif
+    }
+
+    /// Whether a handoff is open — the transition's own guard against
+    /// re-entrancy.
+    public var isHandingOff: Bool { handoffID != nil }
 
     /// Stops whatever is playing in `cell` — the collection view recycled it.
     public func stop(cell: PostGridTileCell) {
@@ -298,6 +349,12 @@ public final class GridVideoPlaybackCoordinator {
     /// what show that reconciles land DURING a drag rather than only after it,
     /// so the line is deliberately cheap enough to leave on while scrolling.
     static let tracesTransitions = ProcessInfo.processInfo.arguments.contains("-grid-playback-log")
+
+    static func logPool(_ count: Int, handoff: PostID?) {
+        guard tracesTransitions else { return }
+        print(String(format: "[grid-pool] %.3f slots=%d handoff=%@",
+                     CACurrentMediaTime(), count, handoff?.rawValue ?? "-"))
+    }
 
     static func logTransition(_ verb: String, _ id: PostID, count: Int) {
         guard tracesTransitions else { return }
