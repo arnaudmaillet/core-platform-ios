@@ -307,6 +307,16 @@ public final class PostGridTileCell: UICollectionViewCell {
         // decode start-up — measured at ~1.2s on a cold tile — which is a tile
         // going dark at rest, before any transition is involved.
         view.revealOnFirstFrame()
+        #if DEBUG
+        // Whether the tile had a cover AT THE MOMENT playback started. Holding
+        // the surface back is only worth anything if there is something behind
+        // it; a nil here means the tile is black no matter what the renderer
+        // does, and the fix belongs in the cover pipeline rather than here.
+        if ProcessInfo.processInfo.arguments.contains("-avsbdl-log") {
+            print(String(format: "[avsbdl] %.3f tile beginVideoPreview cover=%@",
+                         CACurrentMediaTime(), imageView.image == nil ? "NIL" : "present"))
+        }
+        #endif
     }
 
     /// Back to a still tile.
