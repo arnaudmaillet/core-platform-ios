@@ -303,6 +303,12 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // pixel-invisible swap. The navigation bar is the stack's own, above
         // this container; UIKit runs its item back-transition natively over
         // the shrinking card.
+        //
+        // NOT the cause of the single black frame at dismissal start: deferring
+        // this by a runloop turn was measured and changed nothing (5 flights,
+        // 5 dark frames, before and after). Left synchronous rather than
+        // carrying an unverified async edit through shared transition code that
+        // Maps also rides.
         destination?.setZoomContentHidden(true)
 
         // Reverse depth cue: the map starts receded (0.95, covered) and scales

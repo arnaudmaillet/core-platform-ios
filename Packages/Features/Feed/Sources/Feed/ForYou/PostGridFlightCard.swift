@@ -50,6 +50,18 @@ final class PostGridFlightCard: UIView {
     static let tileCornerRadius: CGFloat = 10
 
     private let style: Style
+    /// Whether a live surface has been adopted, tracked explicitly rather than
+    /// inferred from `videoRenderView.isHidden`.
+    ///
+    /// `isHidden` used to carry both meanings at once, and they have since
+    /// diverged: `VideoRenderView.revealOnFirstFrame()` keeps a surface hidden
+    /// until it has a frame, so "hidden" now means "not ready YET" as well as
+    /// "no media at all". Reading the flag for the second meaning made the card
+    /// disown a surface it genuinely had — and `ZoomFlight` gates
+    /// `prepareZoomLiveMediaForFlight` on this, which is what gives the surface
+    /// its size. The card then flew a zero-sized layer over a dark background,
+    /// which is a black frame at the moment the feed hands over.
+    fileprivate var hasAdoptedLiveMedia = false
     private let imageView = UIImageView()
     /// The card's own surface, used when it has to mirror. Replaced by a
     /// donated one whenever the source can hand over the layer it is already
@@ -138,7 +150,7 @@ extension PostGridFlightCard: ZoomFlightCard {
 
     var zoomRestingChrome: UIView? { restingChromeView }
 
-    var zoomLiveMediaSurface: UIView? { videoRenderView.isHidden ? nil : videoRenderView }
+    var zoomLiveMediaSurface: UIView? { hasAdoptedLiveMedia ? videoRenderView : nil }
 
     /// A grid tile never previews live, so this only ever fires on the dismiss
     /// leg — the feed's playing page mirrors its player here, and the card
@@ -163,6 +175,7 @@ extension PostGridFlightCard: ZoomFlightCard {
         view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         view.clipsToBounds = true
         insertSubview(view, aboveSubview: imageView)
+        hasAdoptedLiveMedia = true
         // Not `isHidden = false`. On a cold flight this surface has no frame
         // yet, and showing it would replace the cover — the very pixels the
         // tile is displaying — with an empty surface for one decode interval.
@@ -179,6 +192,7 @@ extension PostGridFlightCard: ZoomFlightCard {
 
     func adoptZoomLiveMedia(_ mirror: (UIView) -> Bool) {
         guard mirror(videoRenderView) else { return }
+        hasAdoptedLiveMedia = true
         videoRenderView.setPoster(imageView.image)
         videoRenderView.isHidden = false
         #if DEBUG
