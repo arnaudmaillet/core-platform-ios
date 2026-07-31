@@ -71,6 +71,50 @@ final class ForYouViewController: UIViewController {
     /// the grid's own cursor is a follow-up.
     private static let seedWindow = 40
 
+    #if DEBUG
+    /// `-hoist-spike`: park the in-flight video surface in the TAB BAR
+    /// CONTROLLER's view for the whole push and pop, instead of handing it to
+    /// the flight card.
+    ///
+    /// One question only: does a surface hosted above the navigation controller
+    /// survive a push and a pop with zero `readyForDisplay` drops? A navigation
+    /// controller removes non-top views from the window, so a surface hosted in
+    /// THIS view controller would leave the render tree mid-flight; hosting it
+    /// one level up is the whole proposition being tested. The flight card
+    /// falls back to its cover image while the flag is on, so the transition
+    /// looks worse — that is expected and is not what is being measured.
+    static let runsHoistSpike = ProcessInfo.processInfo.arguments.contains("-hoist-spike")
+
+    /// The surface currently parked above the navigation controller.
+    private weak var hoistedSurface: UIView?
+
+    private func hoistSurface(_ view: UIView, from page: ForYouGridPage, postID: PostID) {
+        guard let host = tabBarController?.view else { return }
+        let rect = page.hero(for: postID, in: host)?.frame ?? .zero
+        // Track it BEFORE the move, or the readiness log stays silent for the
+        // very window under test and "no drops" would mean nothing. This is
+        // the same trap that invalidated an earlier measurement.
+        (view as? VideoRenderView)?.debugTracksFlight = true
+        (view as? VideoRenderView)?.debugLabel = "hoisted"
+        view.removeFromSuperview()
+        view.frame = rect
+        view.autoresizingMask = []
+        host.addSubview(view)
+        hoistedSurface = view
+        let ready = (view as? VideoRenderView)?.isReadyForDisplay ?? false
+        print(String(format: "[hoist] %.3f readyAtPark=%@", CACurrentMediaTime(), ready ? "true" : "false"))
+        print(String(format: "[hoist] %.3f parked in tabBarController.view rect=%@",
+                     CACurrentMediaTime(), NSCoder.string(for: rect)))
+    }
+
+    private func releaseHoistedSurface() {
+        guard let view = hoistedSurface else { return }
+        hoistedSurface = nil
+        view.removeFromSuperview()
+        print(String(format: "[hoist] %.3f released", CACurrentMediaTime()))
+    }
+    #endif
+
     init(
         viewModel: ForYouViewModel,
         imagePipeline: ImagePipeline,
@@ -248,8 +292,16 @@ final class ForYouViewController: UIViewController {
             depthView: pager,
             // Donate-then-park, run at card-build time so the card flies the
             // very layer the tile was already rendering.
-            donateLive: { [weak page] in
+            donateLive: { [weak self, weak page] in
                 let donated = page?.donateLivePlayback(of: tapped.id)
+                #if DEBUG
+                // Spike: keep the surface above the nav controller instead of
+                // flying it, and let the card fall back to its cover.
+                if Self.runsHoistSpike, let donated, let page {
+                    self?.hoistSurface(donated, from: page, postID: tapped.id)
+                    return nil
+                }
+                #endif
                 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
                     print(String(format: "[zoom-live] %.3f source donate+park -> %@",
@@ -279,6 +331,9 @@ final class ForYouViewController: UIViewController {
             // grid: it clears the flight's state and reconciles once, so every
             // qualifying visible tile gets a slot again rather than whatever
             // subset survived the transition.
+            #if DEBUG
+            self?.releaseHoistedSurface()
+            #endif
             self?.pager.endPlaybackHandoff()
             #if DEBUG
             self?.debugAuditTray("returned")
