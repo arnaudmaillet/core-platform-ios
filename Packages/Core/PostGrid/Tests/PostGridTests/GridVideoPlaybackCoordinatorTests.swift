@@ -34,6 +34,43 @@ struct GridVideoPlaybackCoordinatorTests {
         )
     }
 
+    // MARK: - Flight surfaces (#83 Phase 2)
+
+    /// A flight card joins the tile's playback rather than taking it over, and
+    /// is released once it leaves the window.
+    ///
+    /// The count assertions are backing-dependent on purpose: only the
+    /// sample-buffer path can actually render two surfaces at once, and under
+    /// `AVPlayerLayer` `surfaceCount` reports the 1 that is true rather than a
+    /// flattering 2. Run with `AVSBDL_RENDER=1` for the arm that proves the
+    /// sweep.
+    @Test func aFlightSurfaceJoinsThenIsReleasedOnceItLeavesTheWindow() async {
+        let pool = makePool()
+        let coordinator = GridVideoPlaybackCoordinator(pool: pool, maxConcurrent: 3)
+        let candidate = makeCandidate(0, distance: 0)
+        coordinator.update(candidates: [candidate])
+        await coordinator.debugAwaitStarts()
+
+        let joined = VideoRenderFlags.usesSampleBufferLayer ? 2 : 1
+        let surface = coordinator.makeAttachedSurface(for: candidate.id, url: candidate.url)
+        #expect(surface != nil)
+        #expect(pool.surfaceCount(for: candidate.url) == joined)
+        // The tile keeps playing throughout — nothing was handed over.
+        #expect(coordinator.playingIDs.contains(candidate.id))
+
+        // The card has been discarded, so its surface is in no window.
+        coordinator.endHandoff()
+        #expect(pool.surfaceCount(for: candidate.url) == 1)
+    }
+
+    /// A tile that is not playing has nothing to join, and must not mint a
+    /// surface that would sit attached to nothing.
+    @Test func noFlightSurfaceForATileThatIsNotPlaying() {
+        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 3)
+        let candidate = makeCandidate(0, distance: 0)
+        #expect(coordinator.makeAttachedSurface(for: candidate.id, url: candidate.url) == nil)
+    }
+
     // MARK: - Selection
 
     /// The cap is the whole reason the grid is affordable: a mosaic can show a

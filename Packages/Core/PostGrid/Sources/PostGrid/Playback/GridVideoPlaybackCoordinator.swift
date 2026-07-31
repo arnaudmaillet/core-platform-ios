@@ -179,6 +179,7 @@ public final class GridVideoPlaybackCoordinator {
         handoffID = nil
         isSurfaceVisible = true
         pool.discardParkedPlayback()
+        releaseFinishedFlightSurfaces()
         #if DEBUG
         Self.logPool(playing.count, handoff: nil)
         #endif
@@ -253,6 +254,11 @@ public final class GridVideoPlaybackCoordinator {
     /// some surface is waiting on a decode round-trip, because no binding
     /// changed. Returns nil when the tile is not playing.
     public func makeAttachedSurface(for id: PostID, url: URL) -> VideoRenderView? {
+        // Sweep before minting, not only at `endHandoff`. A flight can end
+        // without the scope closing cleanly, and this way each new flight
+        // cannot inherit more than the previous one's leftovers — the count is
+        // self-limiting rather than dependent on a teardown path being hit.
+        releaseFinishedFlightSurfaces()
         guard playing[id] != nil else { return nil }
         let view = VideoRenderView()
         #if DEBUG
@@ -260,7 +266,32 @@ public final class GridVideoPlaybackCoordinator {
         view.debugTracksFlight = true
         #endif
         guard pool.attachSurface(view, to: url) else { return nil }
+        flightSurfaces.add(view)
         return view
+    }
+
+    /// Surfaces minted by `makeAttachedSurface`, held weakly — the renderer
+    /// holds them weakly too, so this is bookkeeping for *when* to detach, not
+    /// ownership.
+    private let flightSurfaces = NSHashTable<VideoRenderView>.weakObjects()
+
+    /// Detaches minted surfaces that have left the window.
+    ///
+    /// Windowless is the predicate because a surface still in a window is by
+    /// definition still being used — releasing on any looser test (a timer, or
+    /// "the flight said it was done") risks blanking a card that is still on
+    /// screen, which is the exact defect this whole issue is about.
+    ///
+    /// Without this, discarded flight cards sat in the renderer's set until ARC
+    /// collected them: measured `attached=6` against `drawn=3` over three
+    /// cycles. The renderer already skips windowless surfaces so the cost was
+    /// nil, but the count was real and would have grown with a retain bug
+    /// anywhere upstream.
+    private func releaseFinishedFlightSurfaces() {
+        for view in flightSurfaces.allObjects where view.window == nil {
+            pool.detachSurface(view)
+            flightSurfaces.remove(view)
+        }
     }
 
     @discardableResult
@@ -439,6 +470,14 @@ public final class GridVideoPlaybackCoordinator {
     }
 
     var playingIDs: Set<PostID> { Set(playing.keys) }
+
+    /// Awaits the in-flight `play` tasks, so a test can act on playback that is
+    /// actually running rather than merely requested. `start` dispatches into a
+    /// `Task`, so without this the pool has no active player yet and anything
+    /// keyed on one silently no-ops — passing for the wrong reason.
+    func debugAwaitStarts() async {
+        for task in startTasks.values { await task.value }
+    }
     var uncapped: Set<PostID> { uncappedIDs }
 
     /// Awaits every in-flight `play`, so a test can assert against attached

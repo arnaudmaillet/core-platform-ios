@@ -238,12 +238,37 @@ final class VideoFrameRenderer {
         // only 2 surfaces are in a window. Logging the larger number alone
         // would read as "5 layers are being fed" — false, and exactly the kind
         // of flattering metric this issue keeps getting caught by.
-        log(String(format: "fps=%.1f maxGap=%.1fms drawn=%d attached=%d total=%d",
+        // `inWindow` is counted HERE rather than carried over from the last
+        // dispatch. The carried version lagged by up to a frame and could
+        // disagree with `attached` sampled at this instant, producing lines
+        // whose arithmetic was impossible — which cost a measurement cycle to
+        // notice. One instant, one set of numbers.
+        let inWindow = surfaces.allObjects.count { $0.window != nil }
+        log(String(format: "fps=%.1f maxGap=%.1fms inWindow=%d attached=%d total=%d%@",
                    Double(framesSinceRateSample) / elapsed, maxGapSinceRateSample * 1000,
-                   drawnSurfaceCount, surfaces.count, dispatchedFrameCount))
+                   inWindow, surfaces.count, dispatchedFrameCount, staleSurfaceDetail))
         lastRateSampleHostTime = hostTime
         framesSinceRateSample = 0
         maxGapSinceRateSample = 0
+    }
+
+    /// Names the attached-but-not-drawn surfaces. "6 attached, 3 drawn" says
+    /// there is a leak; it does not say whose, and guessing wrong costs a whole
+    /// measurement cycle.
+    private var staleSurfaceDetail: String {
+        #if DEBUG
+        // Counted per label, not listed: four recycled tiles printed as
+        // "tile,tile,tile,tile" reads at a glance as one, which is how the
+        // dominant source of stale surfaces got mistaken for a single entry.
+        let stale = surfaces.allObjects.filter { $0.window == nil }
+        guard !stale.isEmpty else { return "" }
+        let counts = Dictionary(grouping: stale) { $0.debugLabel ?? "?" }
+            .map { "\($0.key)x\($0.value.count)" }
+            .sorted()
+        return " stale=[\(counts.joined(separator: ","))]"
+        #else
+        return ""
+        #endif
     }
 
     private func formatDescription(matching buffer: CVPixelBuffer) -> CMVideoFormatDescription? {
