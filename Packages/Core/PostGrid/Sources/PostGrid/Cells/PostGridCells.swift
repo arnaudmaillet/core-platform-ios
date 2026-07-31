@@ -290,11 +290,35 @@ public final class PostGridTileCell: UICollectionViewCell {
         // still. The coordinator clears its own bookkeeping in response.
         onReuse?()
         onReuse = nil
+        onCoverLoaded = nil
         endVideoPreview()
         loadTask?.cancel()
         loadTask = nil
         imageView.image = nil
     }
+
+    /// Puts a cover on the tile immediately, without waiting for the async load
+    /// that is already in flight to come back.
+    ///
+    /// Closes a race the autoplay gate would otherwise lose: `configure` asks
+    /// the cache once, and if the image lands *after* that (from the prefetch)
+    /// the cache has it while this cell is still showing nothing. A gate that
+    /// consulted the cache would pass, and the tile would start playing with a
+    /// blank face anyway — which is the exact failure the gate exists to
+    /// prevent.
+    public func applyCover(_ image: UIImage) {
+        guard imageView.image == nil else { return }
+        imageView.image = image
+        loadedVideoRenderView?.setPoster(image)
+    }
+
+    /// Fired when the cover lands from an async load.
+    ///
+    /// Autoplay is gated on the cover being present, and the gate is evaluated
+    /// by a reconcile that normally only runs on scroll. Without this, a tile
+    /// whose cover arrives while the grid is sitting still would fail the gate
+    /// once and never be asked again — it would simply never play.
+    public var onCoverLoaded: (() -> Void)?
 
     /// Reveals the video surface once a player has been attached. The still
     /// stays underneath as the poster, so the first frame replaces it rather
@@ -355,6 +379,7 @@ public final class PostGridTileCell: UICollectionViewCell {
             // difference between a cold flight showing the thumbnail and
             // showing nothing.
             self.loadedVideoRenderView?.setPoster(image)
+            self.onCoverLoaded?()
         }
     }
 }

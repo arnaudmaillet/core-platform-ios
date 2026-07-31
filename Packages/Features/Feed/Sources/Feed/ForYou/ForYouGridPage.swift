@@ -165,7 +165,8 @@ final class ForYouGridPage: UIView {
             // not square. Square bricks stay still.
             guard post.autoplaysInGrid, let url = post.videoURL,
                   post.id != heroHiddenPostID, // its twin is in the air
-                  let cell = collectionView.cellForItem(at: indexPath) as? PostGridTileCell
+                  let cell = collectionView.cellForItem(at: indexPath) as? PostGridTileCell,
+                  hasCover(for: post, in: cell)
             else { return nil }
 
             let frame = cell.convert(cell.bounds, to: collectionView)
@@ -182,6 +183,36 @@ final class ForYouGridPage: UIView {
         }
         playback.update(candidates: candidates, allowingStarts: allowingStarts)
         preloadAutoplayCovers(around: collectionView.indexPathsForVisibleItems)
+    }
+
+    /// Whether a tile has something to show behind its video surface.
+    ///
+    /// A video surface covers the tile's cover image, and until the first frame
+    /// decodes it has nothing of its own to draw — so a tile that starts
+    /// playing before its cover has arrived is simply black, and a hero flight
+    /// departing from it flies black. Measured on a cold `-rich-media` grid,
+    /// every tile reported `cover=NIL` at play start.
+    ///
+    /// Gating here rather than in the renderer because this is not a rendering
+    /// problem: there is no frame AND no poster, and no amount of sequencing
+    /// invents one. Playback simply waits for the tile to have a face.
+    ///
+    /// A post with no `thumbnailURL` is admitted rather than blocked. Nothing
+    /// is coming for it, so waiting would mean never playing — and its first
+    /// decoded frame is the only face it will ever have.
+    private func hasCover(for post: GalleryPost, in cell: PostGridTileCell) -> Bool {
+        guard let thumbnail = post.thumbnailURL else { return true }
+        // The cell's own image first: it may hold a cover the pipeline has
+        // since evicted from its cache.
+        if cell.renderedCover != nil { return true }
+        // Cached but not yet applied — `configure` asked the cache before the
+        // prefetch landed, and the cell's own load has not come back. Apply it
+        // now rather than merely reporting it: a gate that passed on a cover
+        // the tile is not actually showing would let playback start against a
+        // blank face, which is what it exists to prevent.
+        guard let cached = imagePipeline.cachedImage(for: thumbnail) else { return false }
+        cell.applyCover(cached)
+        return true
     }
 
     /// How far beyond the visible range to pull covers for autoplaying posts.
@@ -669,6 +700,11 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
                 withReuseIdentifier: PostGridTileCell.reuseID, for: indexPath
             ) as! PostGridTileCell
             cell.configure(with: post, imagePipeline: imagePipeline)
+            // Autoplay is gated on the cover, so the arrival of a cover is a
+            // reason to re-run the gate. Without this a tile whose cover lands
+            // while the grid is stationary fails the gate once and is never
+            // asked again.
+            cell.onCoverLoaded = { [weak self] in self?.updateAutoplay() }
             cell.isHidden = isFlying
             return cell
         }
