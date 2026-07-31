@@ -287,7 +287,24 @@ final class VideoFrameRenderer {
             return nil
         }
         formatDescription = created
+        logBufferShape(buffer)
         return created
+    }
+
+    /// Describes a decoded buffer the first time its format changes.
+    ///
+    /// `AVSampleBufferDisplayLayer` requires IOSurface-backed buffers and will
+    /// silently drop anything else — so "is it IOSurface-backed, and in what
+    /// pixel format" is the first question to ask of a layer that is enqueuing
+    /// happily and showing black.
+    private func logBufferShape(_ buffer: CVPixelBuffer) {
+        guard VideoRenderFlags.logsFrameDispatch else { return }
+        let type = CVPixelBufferGetPixelFormatType(buffer)
+        let fourCC = String(bytes: (0..<4).reversed().map { UInt8((type >> ($0 * 8)) & 0xFF) },
+                            encoding: .ascii) ?? "?"
+        log("buffer \(CVPixelBufferGetWidth(buffer))x\(CVPixelBufferGetHeight(buffer)) "
+            + "format=\(fourCC) (0x\(String(type, radix: 16))) "
+            + "ioSurface=\(CVPixelBufferGetIOSurface(buffer) != nil)")
     }
 
     private static func makeSampleBuffer(

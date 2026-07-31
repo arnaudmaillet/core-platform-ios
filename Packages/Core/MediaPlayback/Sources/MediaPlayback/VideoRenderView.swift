@@ -102,6 +102,18 @@ public final class VideoRenderView: UIView {
     private func updatePosterVisibility(ready: Bool) {
         let wasVisible = !posterView.isHidden
         posterView.isHidden = (posterView.image == nil) || ready
+        // With neither a decoded frame nor a poster there is nothing to show,
+        // and a black fill is not "nothing" — it covers whatever the host put
+        // behind this surface. A grid tile puts its cover image there and then
+        // unhides the surface at `play`, so between the unhide and the first
+        // frame the black floor replaced the cover for ~1.2s, measured. That is
+        // the tile going dark, and it is not a transition bug: it happens at
+        // rest, on every tile that starts playing before its cover has loaded.
+        //
+        // The dark floor is deliberate where it earns its keep — under a poster
+        // that fails to render, and under video whose aspect leaves bars — so
+        // it comes back the moment there is anything to floor.
+        backgroundColor = (posterView.image == nil && !ready) ? .clear : .black
         #if DEBUG
         if wasVisible != !posterView.isHidden { logPoster(visible: !posterView.isHidden) }
         #endif
@@ -201,6 +213,13 @@ public final class VideoRenderView: UIView {
         guard renderer.isReadyForMoreMediaData else { return }
 
         renderer.enqueue(sampleBuffer)
+        // Enqueue is fire-and-forget: a buffer the layer cannot display is
+        // dropped silently and the FRAME COUNT STILL GOES UP. That is how a
+        // surface can report 30fps of dispatch while showing black. Check the
+        // renderer's own verdict instead of trusting the count.
+        if renderer.status == .failed {
+            logEnqueueFailure(renderer.error)
+        }
         let wasFirst = enqueuedFrameCount == 0
         enqueuedFrameCount += 1
         lastFrameHostTime = CACurrentMediaTime()
@@ -218,6 +237,12 @@ public final class VideoRenderView: UIView {
         sampleBufferLayer.sampleBufferRenderer.flush()
         enqueuedFrameCount = 0
         lastFrameHostTime = 0
+    }
+
+    private func logEnqueueFailure(_ error: Error?) {
+        guard VideoRenderFlags.logsFrameDispatch else { return }
+        print(String(format: "[avsbdl] %.3f ENQUEUE FAILED: %@",
+                     CACurrentMediaTime(), String(describing: error)))
     }
 
     private func logFirstFrame() {

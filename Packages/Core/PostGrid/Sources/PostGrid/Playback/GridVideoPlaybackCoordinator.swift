@@ -288,8 +288,13 @@ public final class GridVideoPlaybackCoordinator {
         view.debugTracksFlight = true
         #endif
         cell.beginVideoPreview()
-        view.isHidden = false
+        // Ownership FIRST, unhide second. `transferOwnership` attaches the
+        // surface, which primes it with the current frame — so by the time it
+        // becomes visible it already has the right pixels. Unhiding first
+        // exposed one frame of an empty surface at the exact moment the flight
+        // card is taken away, which is a flash at landing.
         guard pool.transferOwnership(of: url, to: view) else { return false }
+        view.isHidden = false
         pool.setPeakBitRate(Self.tileBitRateCap, for: url)
         playing[id] = cell
         uncappedIDs.remove(id)

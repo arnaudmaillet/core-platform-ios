@@ -81,7 +81,36 @@ final class VideoFrameSource {
         guard let buffer = output.copyPixelBuffer(forItemTime: itemTime, itemTimeForDisplay: nil) else {
             return nil
         }
+        Self.ensureColorAttachments(on: buffer)
         return (buffer, itemTime)
+    }
+
+    /// Gives a buffer default Rec. 709 colour attachments when it carries none.
+    ///
+    /// **This is the difference between video and a black rectangle**, and it
+    /// cost a full investigation to find. `AVSampleBufferDisplayLayer` will not
+    /// display a buffer whose colour space it cannot determine: the enqueue
+    /// succeeds, the renderer's status stays healthy, the frame counter goes up,
+    /// and the layer shows black. `AVPlayerLayer` tolerates the same buffer and
+    /// renders it, which is why this appeared as an AVSBDL-only regression.
+    ///
+    /// Found by A/B: assets with proper metadata (the `-rich-media` HLS ladder)
+    /// rendered, while the mock `PlaceholderVideoFetcher` clips — written by
+    /// `AVAssetWriter` with no colour properties — came back black on every
+    /// tile. Real content can be just as under-specified, so this belongs in
+    /// the engine rather than in the fixtures.
+    ///
+    /// Rec. 709 is the right default for the SDR H.264 this decodes; a buffer
+    /// that already declares its colour is left completely alone, so nothing
+    /// correctly tagged is ever overridden.
+    private static func ensureColorAttachments(on buffer: CVPixelBuffer) {
+        guard CVBufferGetAttachment(buffer, kCVImageBufferYCbCrMatrixKey, nil) == nil else { return }
+        CVBufferSetAttachment(buffer, kCVImageBufferYCbCrMatrixKey,
+                              kCVImageBufferYCbCrMatrix_ITU_R_709_2, .shouldPropagate)
+        CVBufferSetAttachment(buffer, kCVImageBufferColorPrimariesKey,
+                              kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
+        CVBufferSetAttachment(buffer, kCVImageBufferTransferFunctionKey,
+                              kCVImageBufferTransferFunction_ITU_R_709_2, .shouldPropagate)
     }
 
     /// Whether there is an output installed at all — a player between items has
