@@ -175,6 +175,9 @@ public final class PostGridTileCell: UICollectionViewCell {
     public func makeVideoRenderViewIfNeeded() -> VideoRenderView {
         if let loadedVideoRenderView { return loadedVideoRenderView }
         let view = VideoRenderView()
+        #if DEBUG
+        view.debugLabel = "tile"
+        #endif
         view.isHidden = true
         view.isUserInteractionEnabled = false
         view.frame = contentView.bounds

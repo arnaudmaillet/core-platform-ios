@@ -559,6 +559,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             #endif
             guard !defersPlaybackForFlight else {
                 hasDeferredPlayback = true
+                // Warm THIS page's own layer now, hidden, instead of waiting.
+                // It has the whole flight to decode, so by landing it is ready
+                // and the handoff is a visibility flip rather than a re-parent
+                // — which is what resets `isReadyForDisplay`.
+                warmAttachForFlight(url: url)
                 return
             }
             let view = mediaCard.renderView
@@ -572,6 +577,28 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// activation does not steal the render slot from the flying card.
     var defersPlaybackForFlight = false
     private var hasDeferredPlayback = false
+    private var isWarmAttached = false
+
+    /// Attaches the page's own surface to the parked player and keeps it
+    /// hidden, so it decodes during the flight instead of after it.
+    private func warmAttachForFlight(url: URL) {
+        guard let videoPlayback else { return }
+        let view = mediaCard.renderView
+        view.isHidden = true
+        guard videoPlayback.unparkPlayback(to: view, mediaURL: url) else { return }
+        hasDeferredPlayback = false
+        isWarmAttached = true
+    }
+
+    /// Reveals the warmed surface at landing. A visibility flip only — no
+    /// re-parenting, so the layer never leaves the render tree.
+    func revealWarmAttachedSurface() -> Bool {
+        guard isWarmAttached else { return false }
+        isWarmAttached = false
+        defersPlaybackForFlight = false
+        mediaCard.renderView.isHidden = false
+        return true
+    }
 
     /// Starts the playback that activation held back, once the flight is over.
     /// The pool hands back the player the card was flying — same item, same

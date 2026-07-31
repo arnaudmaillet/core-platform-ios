@@ -54,7 +54,13 @@ final class PostGridFlightCard: UIView {
     /// The card's own surface, used when it has to mirror. Replaced by a
     /// donated one whenever the source can hand over the layer it is already
     /// rendering — see `adoptZoomLiveMediaView`.
-    private(set) var videoRenderView = VideoRenderView()
+    private(set) var videoRenderView: VideoRenderView = {
+        let view = VideoRenderView()
+        #if DEBUG
+        view.debugLabel = "card"
+        #endif
+        return view
+    }()
     /// The tile's furniture: the counter pair and the play badge, in one view
     /// so the flight can fade them as a unit.
     private let restingChromeView = UIView()
@@ -159,7 +165,6 @@ extension PostGridFlightCard: ZoomFlightCard {
         view.isHidden = false
         insertSubview(view, aboveSubview: imageView)
         #if DEBUG
-        view.debugLabel = "card(donated)"
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
             print(String(format: "[zoom-live] %.3f card ADOPTED LIVE VIEW readyNow=%@",
                          CACurrentMediaTime(), view.isReadyForDisplay ? "true" : "false"))
@@ -168,9 +173,6 @@ extension PostGridFlightCard: ZoomFlightCard {
     }
 
     func adoptZoomLiveMedia(_ mirror: (UIView) -> Bool) {
-        #if DEBUG
-        videoRenderView.debugLabel = "card"
-        #endif
         guard mirror(videoRenderView) else { return }
         videoRenderView.setPoster(imageView.image)
         videoRenderView.isHidden = false

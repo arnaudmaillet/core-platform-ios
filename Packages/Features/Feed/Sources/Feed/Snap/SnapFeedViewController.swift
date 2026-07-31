@@ -1411,6 +1411,10 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     public func zoomAdoptLiveMediaView(_ view: UIView) {
         guard let view = view as? VideoRenderView else { return }
         donatedLiveView = nil
+        // The page warmed its OWN layer during the flight, so landing is a
+        // visibility flip and the card's surface is simply discarded. Only fall
+        // back to taking the card's view when there was nothing to warm.
+        if activeSnapCell?.revealWarmAttachedSurface() == true { return }
         activeSnapCell?.adoptLiveRenderView(view)
     }
 

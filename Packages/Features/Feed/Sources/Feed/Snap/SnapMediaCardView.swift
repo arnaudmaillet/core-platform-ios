@@ -24,7 +24,13 @@ final class SnapMediaCardView: UIView {
     /// The video playback surface — the caller drives its external
     /// `VideoPlaybackController` into this (playback ownership stays out
     /// of the card by construction).
-    private(set) var renderView = VideoRenderView()
+    private(set) var renderView: VideoRenderView = {
+        let view = VideoRenderView()
+        #if DEBUG
+        view.debugLabel = "feed"
+        #endif
+        return view
+    }()
 
     /// One center-crop mask per surface (a view masks only one other view);
     /// attached lazily on the first dock, animated full-bounds ↔ centered
