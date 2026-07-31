@@ -181,6 +181,57 @@ final class ForYouGridPage: UIView {
             )
         }
         playback.update(candidates: candidates, allowingStarts: allowingStarts)
+        preloadAutoplayCovers(around: collectionView.indexPathsForVisibleItems)
+    }
+
+    /// How far beyond the visible range to pull covers for autoplaying posts.
+    private static let autoplayCoverLookahead = 6
+
+    /// The visible range covers were last requested for, so a scroll does not
+    /// rebuild the same URL list 30 times a second.
+    private var preloadedCoverRange: ClosedRange<Int>?
+
+    /// Fetches cover images for autoplay-capable posts before their tiles need
+    /// them.
+    ///
+    /// An autoplaying tile is the one case where a missing cover is not merely
+    /// a slower thumbnail: the video surface sits over it, so until the first
+    /// frame decodes the cover IS the tile, and a hero flight departing from it
+    /// carries whatever is there. Measured on a cold `-rich-media` grid, covers
+    /// landed ~6.3s after launch and the tiles were empty until then — so the
+    /// first flight of a session flew from, and landed on, nothing.
+    ///
+    /// Restricted to `autoplaysInGrid` posts deliberately. A still tile shows
+    /// its cover directly and is already served by the normal per-cell load;
+    /// prefetching every thumbnail in range would trade this narrow fix for
+    /// bandwidth the grid did not ask for.
+    private func preloadAutoplayCovers(around visible: [IndexPath]) {
+        guard !showsSkeleton, !posts.isEmpty,
+              let first = visible.map(\.item).min(),
+              let last = visible.map(\.item).max()
+        else { return }
+        let lower = max(0, first - Self.autoplayCoverLookahead)
+        let upper = min(posts.count - 1, last + Self.autoplayCoverLookahead)
+        guard lower <= upper else { return }
+        let range = lower...upper
+        guard range != preloadedCoverRange else { return }
+        preloadedCoverRange = range
+
+        let urls = posts[range].filter(\.autoplaysInGrid).compactMap(\.thumbnailURL)
+        guard !urls.isEmpty else { return }
+        imagePipeline.prefetch(urls)
+    }
+
+    /// The first-load case, where there are no cells yet to be "around".
+    private func preloadLeadingAutoplayCovers() {
+        guard !showsSkeleton, !posts.isEmpty else { return }
+        let upper = min(posts.count - 1, Self.autoplayCoverLookahead * 2)
+        let urls = posts[0...upper].filter(\.autoplaysInGrid).compactMap(\.thumbnailURL)
+        guard !urls.isEmpty else { return }
+        // Leaves `preloadedCoverRange` unset on purpose: the first real
+        // reconcile should still run against the actual visible set rather than
+        // believe this guess already covered it.
+        imagePipeline.prefetch(urls)
     }
 
     /// Tab left, feed presented over the grid, app backgrounded. `keeping`
@@ -558,6 +609,11 @@ final class ForYouGridPage: UIView {
             return
         }
         posts = arrange(incoming, startingAt: 0)
+        // Kick the leading covers before any cell exists. `preloadAutoplayCovers`
+        // keys off visible index paths, which are empty on a first load — the
+        // one moment the grid is coldest and the fetch has the most latency to
+        // hide.
+        preloadLeadingAutoplayCovers()
         if dissolving {
             UIView.transition(
                 with: collectionView, duration: 0.35,

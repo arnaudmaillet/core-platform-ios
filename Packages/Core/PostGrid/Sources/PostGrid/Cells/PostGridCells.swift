@@ -338,6 +338,13 @@ public final class PostGridTileCell: UICollectionViewCell {
             ) {
                 self.imageView.image = image
             }
+            // A tile can start playing before its cover arrives, and
+            // `beginVideoPreview` reads the cover exactly once — so a cover
+            // that lands afterwards never reached the surface, leaving it with
+            // no poster to fall back on for the rest of its life. That is the
+            // difference between a cold flight showing the thumbnail and
+            // showing nothing.
+            self.loadedVideoRenderView?.setPoster(image)
         }
     }
 }
