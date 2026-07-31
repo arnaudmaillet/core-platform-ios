@@ -84,6 +84,14 @@ public final class VideoRenderView: UIView {
                         self?.logReadiness(ready)
                         #endif
                         self?.updatePosterVisibility(ready: ready)
+                        // The player-layer half of `revealOnFirstFrame`: this
+                        // KVO is the only "first frame" signal this backing
+                        // has, so it must drive the reveal exactly as
+                        // `enqueue` does on the other one.
+                        if ready, self?.isAwaitingFirstFrameToReveal == true {
+                            self?.isAwaitingFirstFrameToReveal = false
+                            self?.reveal(crossFading: true)
+                        }
                     }
                 }
             }
@@ -251,7 +259,14 @@ public final class VideoRenderView: UIView {
     /// card's cover — stays visible for those few milliseconds instead, which
     /// is the same image the viewer was already looking at.
     public func revealOnFirstFrame() {
-        guard enqueuedFrameCount == 0 else {
+        // `isReadyForDisplay`, NOT `enqueuedFrameCount`. The counter only ever
+        // increments in sample-buffer mode, so gating on it left every surface
+        // on the `AVPlayerLayer` path hidden forever: no tile showed video at
+        // all, only its cover, and every transition was covers moving around.
+        // That is the default path — the one that ships — and it is why fading
+        // the poster changed nothing: the surface was never revealed to fade
+        // against.
+        guard !isReadyForDisplay else {
             isAwaitingFirstFrameToReveal = false
             reveal(crossFading: false)
             return
@@ -295,7 +310,7 @@ public final class VideoRenderView: UIView {
     }
 
     /// Whether this surface has ever displayed a frame since its last flush.
-    public var hasFrame: Bool { enqueuedFrameCount > 0 }
+    public var hasFrame: Bool { isReadyForDisplay }
 
     /// Takes the surface down over whatever is behind it, rather than
     /// switching it off.
