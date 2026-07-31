@@ -249,6 +249,16 @@ final class ForYouGridPage: UIView {
         playback?.donateLiveSurface(of: postID)
     }
 
+    /// Whether the tile that a dismissal is landing on is already rendering.
+    /// True when it carries no video, so a still tile never holds the card.
+    func isLandingPlaybackReady(for postID: PostID) -> Bool {
+        guard let playback,
+              let index = posts.firstIndex(where: { $0.id == postID }),
+              posts[index].autoplaysInGrid
+        else { return true }
+        return playback.isSurfaceRendering(for: postID)
+    }
+
     /// Warms the landing tile's own surface for the duration of a dismissal.
     @discardableResult
     func warmLandingPlayback(for postID: PostID) -> Bool {

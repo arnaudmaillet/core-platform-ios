@@ -157,6 +157,73 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         }
     }
 
+    /// Keeps `card` on screen while `condition` holds, up to a hard ceiling.
+    ///
+    /// Polled on the display link rather than after a fixed delay: the wait is
+    /// however long the layer actually needs, usually a frame or two, and the
+    /// ceiling only exists so a surface that never reports ready cannot strand
+    /// the card over the screen.
+    private static func holdCard(_ card: UIView, while condition: @escaping () -> Bool) {
+        // No early-out on `condition()`. The dip is delivered by KVO a few
+        // milliseconds after the surface is installed, so a single check taken
+        // at landing still reads ready and the card would leave just in time to
+        // expose it. The hold therefore always runs, spans a minimum number of
+        // frames, and only then starts asking.
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] %.3f landing hold BEGIN", CACurrentMediaTime()))
+        }
+        #endif
+        let deadline = CACurrentMediaTime() + maximumLandingHold
+        let link = CADisplayLink(target: LandingHold(card: card, condition: condition, deadline: deadline),
+                                 selector: #selector(LandingHold.tick))
+        link.add(to: .main, forMode: .common)
+    }
+
+    /// Ceiling on the landing hold. Sized against the measured worst case
+    /// (~600ms was the re-parent dip) with room to spare, while staying short
+    /// enough that a stuck surface is a brief pause rather than a frozen card.
+    private static let maximumLandingHold: CFTimeInterval = 0.75
+
+
+    private final class LandingHold {
+        private let card: UIView
+        private let condition: () -> Bool
+        private let deadline: CFTimeInterval
+
+        init(card: UIView, condition: @escaping () -> Bool, deadline: CFTimeInterval) {
+            self.card = card
+            self.condition = condition
+            self.deadline = deadline
+        }
+
+        /// Frames held before a "ready" answer is trusted. The dip arrives via
+        /// KVO roughly 8ms after the surface is installed, so a few frames at
+        /// 60Hz cover its delivery either way. Lives here, not on the animator,
+        /// because the display-link callback is nonisolated.
+        private static let minimumHoldFrames = 4
+        private var frames = 0
+
+        @objc func tick(_ link: CADisplayLink) {
+            frames += 1
+            // Span the window in which the dip can still arrive before
+            // believing a "ready" answer.
+            let settling = frames < Self.minimumHoldFrames
+            guard settling || condition(), CACurrentMediaTime() < deadline else {
+                link.invalidate()
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                    let timedOut = CACurrentMediaTime() >= deadline
+                    print(String(format: "[zoom-live] %.3f landing hold END%@",
+                                 CACurrentMediaTime(), timedOut ? " (TIMEOUT)" : ""))
+                }
+                #endif
+                card.removeFromSuperview()
+                return
+            }
+        }
+    }
+
     // MARK: - Dismiss
 
     private func dismiss(_ context: any UIViewControllerContextTransitioning) {
@@ -266,11 +333,18 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             if !cancelled, let surface = flight.card.zoomLiveMediaSurface {
                 self.source.zoomAdoptLiveMediaView(surface)
             }
-            flight.card.removeFromSuperview()
             flight.shadow.removeFromSuperview()
             dim.removeFromSuperview()
             presentingView?.transform = .identity
             ZoomFlight.clearRecededChrome(from: presentingView) // bezel-aligned again at scale 1
+            // The card is posed exactly over the source and showing the same
+            // frames, so hold it until the source's own surface is rendering.
+            // Re-binding a player layer costs a decode round-trip that no
+            // ordering avoids; holding the twin over it for those few frames is
+            // what keeps the dip off screen.
+            Self.holdCard(flight.card, while: { [weak sourceRef = self.source] in
+                sourceRef.map { !$0.zoomLandingMediaIsReady } ?? false
+            })
             // Restore the feed content for the cancel path; moot when finished.
             self.destination?.setZoomContentHidden(false)
             self.destination?.zoomTransitionDidEnd()

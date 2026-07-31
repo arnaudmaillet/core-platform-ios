@@ -70,6 +70,16 @@ public protocol ZoomTransitionSource: AnyObject {
     /// and landing is a visibility flip rather than a re-parent — which resets
     /// `isReadyForDisplay` for ~600ms, measured.
     func zoomWarmLiveMediaForLanding()
+
+    /// Whether the surface this side will show after landing is already
+    /// rendering a decoded frame.
+    ///
+    /// The card is posed exactly over the source at landing and shows the same
+    /// content, so it can be held for a few frames while the answer is false —
+    /// which is what turns an unavoidable `isReadyForDisplay` dip into
+    /// something the viewer never sees. Default true: a source with no live
+    /// media has nothing to wait for.
+    var zoomLandingMediaIsReady: Bool { get }
 }
 
 public extension ZoomTransitionSource {
@@ -77,6 +87,7 @@ public extension ZoomTransitionSource {
     func zoomSourceWillStageDismissal() {}
     func zoomAdoptLiveMediaView(_ view: UIView) {}
     func zoomWarmLiveMediaForLanding() {}
+    var zoomLandingMediaIsReady: Bool { true }
 }
 
 @MainActor

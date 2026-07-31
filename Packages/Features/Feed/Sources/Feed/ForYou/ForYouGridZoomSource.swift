@@ -102,6 +102,12 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
 
     /// Takes the card's live surface at landing, so the tile renders the frame
     /// the card was showing instead of starting a blank layer.
+    /// True once the landing tile's own surface is rendering — or when the tile
+    /// has no video at all, which is nothing to wait for.
+    var zoomLandingMediaIsReady: Bool {
+        page?.isLandingPlaybackReady(for: anchorID) ?? true
+    }
+
     func zoomWarmLiveMediaForLanding() {
         page?.warmLandingPlayback(for: anchorID)
     }

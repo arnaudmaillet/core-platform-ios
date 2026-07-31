@@ -291,6 +291,14 @@ public final class GridVideoPlaybackCoordinator {
         return true
     }
 
+    /// Whether the tile for `id` has a surface with a decoded frame on screen.
+    /// False while its layer is still acquiring — the window a landing card is
+    /// held across.
+    public func isSurfaceRendering(for id: PostID) -> Bool {
+        guard let cell = playing[id], let view = cell.loadedVideoRenderView else { return false }
+        return view.isReadyForDisplay && !view.isHidden
+    }
+
     /// Retires a parked player nobody adopted — a cancelled flight, or a
     /// destination that never played it.
     ///
