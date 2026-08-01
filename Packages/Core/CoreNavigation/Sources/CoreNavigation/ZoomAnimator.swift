@@ -120,6 +120,9 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let presentingView = source.zoomPresenterDepthView ?? context.viewController(forKey: .from)?.view
         ZoomFlight.applyRecededChrome(to: presentingView, radius: screenRadius)
 
+        #if DEBUG
+        Self.debugTrackFlightGeometry(card: flight.card)
+        #endif
         // Dim fades on a plain curve — opacity should never bounce.
         UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseIn]) {
             dim.alpha = 1
@@ -226,6 +229,49 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             work()
         }
     }
+
+    #if DEBUG
+    /// Samples the card's and its live surface's PRESENTATION bounds every
+    /// frame of a flight.
+    ///
+    /// The reported artifact is the surface sitting at full-screen size while
+    /// the card's clip expands around it, which looks like an unveil rather
+    /// than a zoom. Model bounds cannot show that — they hold the final value
+    /// from the moment the animation is scheduled — so this reads the
+    /// presentation layer, which is what is actually on screen.
+    static func debugTrackFlightGeometry(card: any ZoomFlightCard) {
+        guard ProcessInfo.processInfo.arguments.contains("-zoom-live-log") else { return }
+        let surface = card.zoomLiveMediaSurface
+        let probe = GeometryProbe(card: card, surface: surface,
+                                  deadline: CACurrentMediaTime() + ZoomFlight.springDuration)
+        let link = CADisplayLink(target: probe, selector: #selector(GeometryProbe.tick))
+        link.add(to: .main, forMode: .common)
+    }
+
+    private final class GeometryProbe {
+        private let card: UIView
+        private let surface: UIView?
+        private let deadline: CFTimeInterval
+        private var frames = 0
+
+        init(card: UIView, surface: UIView?, deadline: CFTimeInterval) {
+            self.card = card
+            self.surface = surface
+            self.deadline = deadline
+        }
+
+        @objc func tick(_ link: CADisplayLink) {
+            frames += 1
+            guard CACurrentMediaTime() < deadline else { link.invalidate(); return }
+            guard frames % 6 == 1 else { return }
+            let cardSize = card.layer.presentation()?.bounds.size ?? card.bounds.size
+            let surfaceSize = surface?.layer.presentation()?.bounds.size ?? surface?.bounds.size
+            print(String(format: "[zoom-live] flight f%02d card=%.0fx%.0f surface=%@",
+                         frames, cardSize.width, cardSize.height,
+                         surfaceSize.map { String(format: "%.0fx%.0f", $0.width, $0.height) } ?? "none"))
+        }
+    }
+    #endif
 
     /// Keeps `card` on screen while `condition` holds, up to a hard ceiling.
     ///
