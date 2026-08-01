@@ -468,6 +468,21 @@ final class ForYouViewController: UIViewController {
                 }
             }
         }
+        // `-foryou-demo-tapback`: pop programmatically instead of grabbing.
+        //
+        // The two dismissals are SEPARATE implementations —
+        // `ZoomDismissInteractionController` for the grab,
+        // `ZoomAnimator.dismiss` for the back button — and the harness could
+        // only ever drive the first. Every dismiss measurement taken here was
+        // therefore of the grab, and said nothing about the button, which is
+        // exactly where a defect survived being "verified".
+        if ProcessInfo.processInfo.arguments.contains("-foryou-demo-tapback") {
+            transition.onDestinationShown = { [weak navigationController] in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    navigationController?.popViewController(animated: true)
+                }
+            }
+        }
         #endif
     }
 

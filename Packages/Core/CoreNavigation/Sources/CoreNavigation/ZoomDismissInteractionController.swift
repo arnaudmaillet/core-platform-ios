@@ -425,6 +425,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
                                   liveMediaIsDrawing: { [weak card] in
                                       card?.zoomLiveMediaIsDrawing ?? true
                                   },
+                                  path: "grab",
                                   while: { [weak sourceRef = source] in
                                       sourceRef.map { !$0.zoomLandingMediaIsReady } ?? false
                                   })

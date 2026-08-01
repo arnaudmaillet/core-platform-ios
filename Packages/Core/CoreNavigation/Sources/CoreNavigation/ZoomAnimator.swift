@@ -236,6 +236,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     static func holdCard(_ card: UIView,
                          ceiling: CFTimeInterval = maximumLandingHold,
                          liveMediaIsDrawing: @escaping () -> Bool = { true },
+                         path: String = "?",
                          while condition: @escaping () -> Bool) {
         // No early-out on `condition()`. The dip is delivered by KVO a few
         // milliseconds after the surface is installed, so a single check taken
@@ -244,7 +245,11 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // frames, and only then starts asking.
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-            print(String(format: "[zoom-live] %.3f landing hold BEGIN", CACurrentMediaTime()))
+            // Which dismissal is being held. The two paths are separate
+            // implementations, and a measurement of one says nothing about the
+            // other — worth naming rather than inferring from a harness flag.
+            print(String(format: "[zoom-live] %.3f landing hold BEGIN [%@]",
+                         CACurrentMediaTime(), path))
         }
         #endif
         let deadline = CACurrentMediaTime() + ceiling
@@ -473,6 +478,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                           liveMediaIsDrawing: { [weak card = flight.card] in
                               card?.zoomLiveMediaIsDrawing ?? true
                           },
+                          path: "animator/tap-back",
                           while: { [weak sourceRef = self.source] in
                               sourceRef.map { !$0.zoomLandingMediaIsReady } ?? false
                           })
