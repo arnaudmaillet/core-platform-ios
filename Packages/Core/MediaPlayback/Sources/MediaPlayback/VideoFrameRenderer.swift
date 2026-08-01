@@ -261,9 +261,12 @@ final class VideoFrameRenderer {
         // whose arithmetic was impossible — which cost a measurement cycle to
         // notice. One instant, one set of numbers.
         let inWindow = surfaces.allObjects.count { $0.window != nil }
-        log(String(format: "fps=%.1f maxGap=%.1fms inWindow=%d attached=%d total=%d%@",
+        // A renderer producing nothing is the interesting case, so it says why.
+        let stalled = framesSinceRateSample == 0
+        log(String(format: "fps=%.1f maxGap=%.1fms inWindow=%d attached=%d total=%d%@%@",
                    Double(framesSinceRateSample) / elapsed, maxGapSinceRateSample * 1000,
-                   inWindow, surfaces.count, dispatchedFrameCount, staleSurfaceDetail))
+                   inWindow, surfaces.count, dispatchedFrameCount, staleSurfaceDetail,
+                   stalled ? "  << " + debugPlayerState : ""))
         lastRateSampleHostTime = hostTime
         framesSinceRateSample = 0
         maxGapSinceRateSample = 0
@@ -272,6 +275,14 @@ final class VideoFrameRenderer {
     /// Names the attached-but-not-drawn surfaces. "6 attached, 3 drawn" says
     /// there is a leak; it does not say whose, and guessing wrong costs a whole
     /// measurement cycle.
+    private var debugPlayerState: String {
+        #if DEBUG
+        return source.debugPlayerState
+        #else
+        return ""
+        #endif
+    }
+
     private var staleSurfaceDetail: String {
         #if DEBUG
         // Counted per label, not listed: four recycled tiles printed as

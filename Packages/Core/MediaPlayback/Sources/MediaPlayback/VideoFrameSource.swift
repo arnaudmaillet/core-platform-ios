@@ -113,6 +113,32 @@ final class VideoFrameSource {
                               kCVImageBufferTransferFunction_ITU_R_709_2, .shouldPropagate)
     }
 
+    #if DEBUG
+    /// The player's own account of why it is or is not producing frames.
+    ///
+    /// A renderer that dispatches nothing has `copyFrame` returning nil, and
+    /// that has exactly two families of cause: the output has no new buffer
+    /// because the PLAYER is not advancing (paused, or waiting on the network),
+    /// or the item time is invalid. Printing the player's state alongside the
+    /// item time separates them without another guess.
+    var debugPlayerState: String {
+        let control: String = switch player.timeControlStatus {
+        case .paused: "PAUSED"
+        case .waitingToPlayAtSpecifiedRate:
+            "waiting(\(player.reasonForWaitingToPlay?.rawValue ?? "?"))"
+        case .playing: "playing"
+        @unknown default: "?"
+        }
+        guard let item = player.currentItem else { return "\(control) rate=\(player.rate) item=NIL" }
+        let host = output.map { $0.itemTime(forHostTime: CACurrentMediaTime()) }
+        return String(format: "%@ rate=%.2f time=%.2fs itemTime=%@ keepUp=%@ status=%@",
+                      control, player.rate, item.currentTime().seconds,
+                      host.map { $0.isValid ? String(format: "%.2fs", $0.seconds) : "INVALID" } ?? "no-output",
+                      item.isPlaybackLikelyToKeepUp ? "Y" : "N",
+                      item.status == .readyToPlay ? "ready" : "\(item.status.rawValue)")
+    }
+    #endif
+
     /// Whether there is an output installed at all — a player between items has
     /// nothing to pull and should not keep a renderer registered with the clock.
     var hasItem: Bool { output != nil }
