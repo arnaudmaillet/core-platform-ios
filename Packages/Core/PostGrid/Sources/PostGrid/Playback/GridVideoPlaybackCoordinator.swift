@@ -300,6 +300,36 @@ public final class GridVideoPlaybackCoordinator {
             return nil
         }
         flightSurfaces.add(view)
+        // Second open of a post that a PREVIOUS dismissal landed by hosting.
+        //
+        // That surface is parented in the tab bar controller's view, above the
+        // navigation controller, so unlike a tile's own surface it is not
+        // covered when the feed goes full screen — it keeps drawing on top, at
+        // the grid cell's rect. Two layers of the same media, which is the
+        // duplicate. Nothing released it either: `stop` is the only path that
+        // does, and `beginHandoff` exempts the very post being opened.
+        //
+        // Released HERE, and not at `beginHandoff`, because of ownership. After
+        // a hosted landing this surface holds the pool loan, and the loan
+        // cannot simply be dropped: `detachSurface` refuses an owner outright,
+        // and clearing the registration would orphan the player, since
+        // `activePlayer(playing:)` is how every later attach finds it again. A
+        // successor has to exist first — and `view`, attached and primed just
+        // above, is it. `transferOwnership` moves the loan without touching a
+        // layer, which leaves the old surface an ordinary joined one that can
+        // then be detached and dropped.
+        if let stale = hostedSurfaces.removeValue(forKey: id), stale !== view {
+            pool.transferOwnership(of: url, to: view)
+            pool.detachSurface(stale, reason: "hostedSurfaceSuperseded")
+            stale.removeFromSuperview()
+            onHostedSurfaceReleased?(id)
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                print("[zoom-live] released stale hosted surface for \(id), " +
+                      "surfaces now \(pool.surfaceCount(for: url).map(String.init) ?? "nil")")
+            }
+            #endif
+        }
         return view
     }
 
@@ -431,6 +461,14 @@ public final class GridVideoPlaybackCoordinator {
         pool.setPeakBitRate(Self.tileBitRateCap, in: view)
         hostedSurfaces[id] = view
         playing[id] = cell
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            // Steady state: the flight is over, so this is the count that
+            // reveals a leak. Transient counts taken mid-flight cannot.
+            print("[zoom-live] settled surfaces for \(url.lastPathComponent) = " +
+                  "\(pool.surfaceCount(for: url).map(String.init) ?? "nil")")
+        }
+        #endif
         cell.onReuse = { [weak self] in
             guard let self, let cell = playing[id] else { return }
             stop(id: id, cell: cell)

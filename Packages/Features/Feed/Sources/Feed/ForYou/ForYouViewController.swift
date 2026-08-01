@@ -119,6 +119,15 @@ final class ForYouViewController: UIViewController {
         // card. The clip's animating bounds are the only crop in the flight.
         view.layer.cornerRadius = 0
         view.clipsToBounds = false
+        // Exactly one surface in the clip, always. `syncHostedSurface` glues
+        // `subviews.first` to the tile, so a leftover from an earlier flight
+        // would both draw over the grid and be the one that gets glued — the
+        // real surface then tracking nothing. The coordinator releases a
+        // superseded surface on the way in; this is the parenting half of the
+        // same invariant, and it is cheap enough to assert unconditionally.
+        for stale in clip.subviews where stale !== view {
+            stale.removeFromSuperview()
+        }
         clip.addSubview(view)
         poseHostedSurface(at: rect, in: space, cornerRadius: cornerRadius)
         dismissHostedSurface = view
