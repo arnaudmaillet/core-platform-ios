@@ -331,6 +331,35 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
 
     // MARK: - Release
 
+    #if DEBUG
+    private var releaseProbe: CADisplayLink?
+    private var releaseProbeStart: CFTimeInterval = 0
+    private weak var releaseProbeCard: UIView?
+
+    /// Samples the card's PRESENTATION frame after a release, under
+    /// `-zoom-probe`. A teleport and a spring are indistinguishable in a log
+    /// that only records the endpoints; this records the path.
+    private func armReleaseProbe(card: UIView) {
+        guard ProcessInfo.processInfo.arguments.contains("-zoom-probe") else { return }
+        releaseProbe?.invalidate()
+        releaseProbeStart = CACurrentMediaTime()
+        releaseProbeCard = card
+        let link = CADisplayLink(target: self, selector: #selector(sampleRelease))
+        link.add(to: .main, forMode: .common)
+        releaseProbe = link
+    }
+
+    @objc private func sampleRelease() {
+        let t = CACurrentMediaTime() - releaseProbeStart
+        guard let card = releaseProbeCard, t < 4.0 else {
+            releaseProbe?.invalidate(); releaseProbe = nil; return
+        }
+        let f = card.layer.presentation()?.frame ?? card.layer.frame
+        print(String(format: "[release] %.3f card=(%.0f,%.0f,%.0fx%.0f)",
+                     t, f.origin.x, f.origin.y, f.width, f.height))
+    }
+    #endif
+
     private func releaseGrab(translation: CGPoint, velocity: CGPoint, ended: Bool, in view: UIView) {
         guard isInteracting, let context, let flight else { return }
         isInteracting = false
@@ -373,6 +402,9 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         let springVelocity = Self.normalizedSpringVelocity(
             of: velocity, from: flight.card.center, to: target
         )
+        #if DEBUG
+        armReleaseProbe(card: flight.card)
+        #endif
         let dim = dim
         let toolbar = toolbar
         let returningChrome = returningChrome
@@ -406,15 +438,82 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
                 )
             }
         }
-        // Completion by wall clock, NOT by the animation's completion block:
-        // UIView completions delivered inside an interactive nav transition's
-        // ambit can be deferred indefinitely (observed: a cancel's completion
-        // frozen for seconds, then flushed by the NEXT grab's animation — and
-        // tearing down that newer grab's transition). A timer makes teardown
-        // deterministic; the spring is visuals-only. A hair past the spring's
-        // own duration so the card has reached its pose before it's retired.
-        DispatchQueue.main.asyncAfter(deadline: .now() + ZoomFlight.springDuration + 0.04) { [weak self] in
+        // Teardown follows the ANIMATION, not the wall clock.
+        //
+        // This was a fixed `asyncAfter(springDuration + 0.04)`, on the
+        // reasoning that UIView completions inside an interactive nav
+        // transition's ambit can be deferred indefinitely — which is real, and
+        // is why the completion block is still not used here.
+        //
+        // But a delay and a spring are two clocks, and Slow Animations stretches
+        // only one of them. Measured: the card was retired 0.46s after release
+        // with its presentation frame still at 688pt of 831 — barely a sixth of
+        // the way home — so it vanished mid-flight and the tile appeared. That
+        // is what reads as an instant teleport on release.
+        //
+        // Nor can the factor simply be looked up: the simulator does not
+        // implement the slowdown as a layer speed, and the window reports 1.0
+        // either way (measured). So this watches the card's PRESENTATION
+        // instead, which is on whatever clock the animation is actually on, and
+        // keeps a wall-clock ceiling as the backstop the old timer was.
+        whenCardSettles(flight.card, ceiling: Self.releaseSettleCeiling) { [weak self] in
             self?.finishTransition(cancelled: !commit)
+        }
+    }
+
+    /// A spring is done when it stops moving, and no timer can know when that
+    /// is under an unknown animation clock.
+    ///
+    /// Settles on the PRESENTATION layer: two consecutive frames that move the
+    /// card less than a quarter point, having seen it move at all first — the
+    /// "moved first" gate matters because the first tick can land before the
+    /// animation has committed, and an ungated check would call that settled
+    /// and retire the card immediately.
+    private static let releaseSettleCeiling: CFTimeInterval = 6
+
+    private func whenCardSettles(
+        _ card: UIView, ceiling: CFTimeInterval, then work: @escaping () -> Void
+    ) {
+        let watcher = SettleWatcher(card: card, deadline: CACurrentMediaTime() + ceiling, work: work)
+        let link = CADisplayLink(target: watcher, selector: #selector(SettleWatcher.tick))
+        link.add(to: .main, forMode: .common)
+        watcher.link = link
+    }
+
+    private final class SettleWatcher: NSObject {
+        private weak var card: UIView?
+        private let deadline: CFTimeInterval
+        private let work: () -> Void
+        private var previous: CGRect?
+        private var hasMoved = false
+        private var stillFrames = 0
+        var link: CADisplayLink?
+
+        init(card: UIView, deadline: CFTimeInterval, work: @escaping () -> Void) {
+            self.card = card
+            self.deadline = deadline
+            self.work = work
+        }
+
+        @objc func tick() {
+            guard let card, CACurrentMediaTime() < deadline else { return finish() }
+            let frame = card.layer.presentation()?.frame ?? card.layer.frame
+            defer { previous = frame }
+            guard let previous else { return }
+            let delta = max(abs(frame.origin.x - previous.origin.x),
+                            abs(frame.origin.y - previous.origin.y),
+                            abs(frame.width - previous.width),
+                            abs(frame.height - previous.height))
+            if delta > 1 { hasMoved = true; stillFrames = 0; return }
+            guard hasMoved else { return }
+            stillFrames += 1
+            if stillFrames >= 2 { finish() }
+        }
+
+        private func finish() {
+            link?.invalidate()
+            link = nil
+            work()
         }
     }
 
