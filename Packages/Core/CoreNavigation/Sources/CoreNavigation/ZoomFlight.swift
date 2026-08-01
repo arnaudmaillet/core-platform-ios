@@ -237,7 +237,25 @@ struct ZoomFlight {
         let center = CGPoint(x: size.width / 2, y: size.height / 2)
         if let surface = card.zoomLiveMediaSurface {
             guard !card.zoomLiveMediaTracksCardBounds else { return }
-            let scale = Self.liveMediaScale(covering: size, surface: liveMediaSize)
+            // Interpolate the SCALE between the two endpoint scales, rather
+            // than recomputing a cover scale from the interpolated size.
+            //
+            // `liveMediaScale` is a `max` of two ratios, and which one wins can
+            // CHANGE mid-drag: with the surface at native 16:9 (1553x874) and
+            // the card travelling 402x874 -> 267x133, height governs at the
+            // page end and width governs at the tile end. At that crossover the
+            // derivative jumps, which reads as the video barely shrinking and
+            // then snapping. Interpolating the scale is monotonic by
+            // construction and still lands on exactly the right cover scale at
+            // both ends, because those are the values being interpolated
+            // between.
+            //
+            // The animator legs never showed this: UIView interpolates the
+            // transform itself between two posed endpoints, which is already
+            // linear in scale. Only the grab recomputes per frame.
+            let startScale = Self.liveMediaScale(covering: startSize, surface: liveMediaSize)
+            let endScale = Self.liveMediaScale(covering: landing.size, surface: liveMediaSize)
+            let scale = startScale + (endScale - startScale) * t
             surface.transform = CGAffineTransform(scaleX: scale, y: scale)
             surface.center = center
         }

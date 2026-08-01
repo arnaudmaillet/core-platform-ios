@@ -253,6 +253,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         private let surface: UIView?
         private let deadline: CFTimeInterval
         private var frames = 0
+        private var grace = 0
 
         init(card: UIView, surface: UIView?, deadline: CFTimeInterval) {
             self.card = card
@@ -344,6 +345,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         /// because the display-link callback is nonisolated.
         private static let minimumHoldFrames = 4
         private var frames = 0
+        private var grace = 0
 
         @objc func tick(_ link: CADisplayLink) {
             frames += 1
@@ -368,6 +370,18 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             // Span the window in which the dip can still arrive before
             // believing a "ready" answer.
             let settling = frames < Self.minimumHoldFrames
+            // One extra frame after the landing first reports ready.
+            //
+            // "Ready" is sampled at the top of a frame; the tile has not
+            // COMPOSITED that frame yet when we answer. Removing the card in
+            // the same tick therefore uncovers a tile whose first frame is
+            // still one pass away — a flash at the very end of the landing,
+            // which is where it was reported. Holding one more tick costs
+            // 16ms of a card that is already showing the same pixels.
+            if !settling, !condition(), grace < 1 {
+                grace += 1
+                return
+            }
             guard settling || condition(), CACurrentMediaTime() < deadline else {
                 link.invalidate()
                 #if DEBUG
