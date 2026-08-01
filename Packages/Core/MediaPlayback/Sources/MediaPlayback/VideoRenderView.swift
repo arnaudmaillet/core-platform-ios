@@ -322,6 +322,15 @@ public final class VideoRenderView: UIView {
     /// Whether this surface has ever displayed a frame since its last flush.
     public var hasFrame: Bool { isReadyForDisplay }
 
+    /// A name for tracing, or a placeholder when the host never set one.
+    var debugLabelOrAnonymous: String {
+        #if DEBUG
+        return debugLabel ?? "unnamed"
+        #else
+        return "surface"
+        #endif
+    }
+
     /// Whether this surface is drawing AND actually opaque on screen right now.
     ///
     /// The signal a handoff must wait on. `isReadyForDisplay && !isHidden` is

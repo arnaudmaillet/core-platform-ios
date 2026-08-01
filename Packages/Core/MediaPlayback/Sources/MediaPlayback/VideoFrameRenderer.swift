@@ -158,6 +158,13 @@ final class VideoFrameRenderer {
     /// Stops this renderer for good: no clock, no output, no surfaces. Called
     /// when its player goes back to the idle pool.
     func invalidate() {
+        // Names what this is about to drop. `invalidate` was written when a
+        // renderer served exactly ONE view; under N-surface it releases every
+        // surface attached, which may include a flight card mid-flight and a
+        // landing tile that has just taken ownership. A count above 1 here is
+        // the bug, not a diagnostic curiosity.
+        log("INVALIDATE dropping \(surfaces.count) surface(s): "
+            + surfaces.allObjects.map { $0.debugLabelOrAnonymous }.sorted().joined(separator: ","))
         for surface in surfaces.allObjects { surface.detachFromRenderer() }
         surfaces.removeAllObjects()
         source.setItem(nil)
