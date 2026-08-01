@@ -29,6 +29,8 @@ import UIKit
 @MainActor
 final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     private let isPresenting: Bool
+    /// Whether this instance is the dismiss leg — the interruptible one.
+    var isDismissing: Bool { !isPresenting }
     private let source: any ZoomTransitionSource
     private weak var destination: (any ZoomTransitionDestination)?
     /// The flight's spring is defined once on `ZoomFlight` and shared with the
@@ -39,6 +41,19 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     /// Source chrome that fades in over the dismiss spring; see
     /// `ZoomTransitionController.returningSourceChrome`.
     private weak var returningChrome: UIView?
+
+    /// The dismissal's animator, kept so it can be paused and scrubbed.
+    ///
+    /// Cached against the CONTEXT that built it, and never cleared while that
+    /// context is alive. UIKit may ask for the interruptible animator more than
+    /// once, and each unmatched ask used to run the whole dismissal setup
+    /// again: a second flight card, posed full screen with its chrome replica,
+    /// inserted into the container, and never animated because nothing started
+    /// its animator. That is a page-sized replica of the feed left sitting over
+    /// the grid — the artifact that made the first attempt at this look like a
+    /// teardown bug.
+    private var interruptible: UIViewPropertyAnimator?
+    private weak var interruptibleContext: AnyObject?
 
     init(
         isPresenting: Bool,
@@ -57,7 +72,52 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     }
 
     func animateTransition(using context: any UIViewControllerContextTransitioning) {
-        if isPresenting { present(context) } else { dismiss(context) }
+        if isPresenting {
+            present(context)
+        } else {
+            interruptibleAnimator(using: context).startAnimation()
+        }
+    }
+
+    /// `interruptibleAnimator(using:)` is OPTIONAL on the protocol, and this
+    /// object answers it only when it is the dismiss leg.
+    ///
+    /// UIKit asks for it on a push as well — measured, `presenting=true` — and
+    /// one class implements both legs, so an unconditional implementation ran
+    /// the whole DISMISS setup against a present context: a page-posed card
+    /// carrying the feed's chrome replica, inserted into the container and
+    /// never animated, because the thing that would have animated it is the
+    /// dismissal that had not happened. It read as a teardown failure and was a
+    /// construction one.
+    ///
+    /// Hiding the selector is the honest fix: the present leg genuinely does
+    /// not implement this yet, and now says so, so UIKit drives it exactly as
+    /// it did before.
+    override func responds(to aSelector: Selector!) -> Bool {
+        if aSelector == #selector(interruptibleAnimator(using:)) { return isDismissing }
+        return super.responds(to: aSelector)
+    }
+
+    /// The dismissal runs on a property animator so it can be interrupted.
+    ///
+    /// Only the dismiss leg. Interrupting a present means defining what a
+    /// reversed push does to the pool loan and to a hoisted surface, which is
+    /// its own change.
+    func interruptibleAnimator(
+        using context: any UIViewControllerContextTransitioning
+    ) -> any UIViewImplicitlyAnimating {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print("[zoom-live] interruptibleAnimator asked presenting=\(isPresenting) cached=\(interruptible != nil) sameCtx=\(interruptibleContext === (context as AnyObject))")
+        }
+        #endif
+        if let interruptible, interruptibleContext === (context as AnyObject) {
+            return interruptible
+        }
+        let animator = dismiss(context)
+        interruptible = animator
+        interruptibleContext = context as AnyObject
+        return animator
     }
 
     // MARK: - Present
@@ -437,11 +497,35 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     }
     #endif
 
-    private func dismiss(_ context: any UIViewControllerContextTransitioning) {
+    #if DEBUG
+    /// Teardown state, so a dismissal that "completes" cleanly in the logs but
+    /// leaves something on screen is visible as data rather than only in a
+    /// screenshot. `card=parented` after `done`, or a from-view still in a
+    /// window, is the whole class of bug this exists to catch.
+    private static func logTeardown(
+        _ stage: String, context: any UIViewControllerContextTransitioning,
+        card: any ZoomFlightCard, fromView: UIView
+    ) {
+        guard ProcessInfo.processInfo.arguments.contains("-zoom-live-log") else { return }
+        print(String(format: "[zoom-live] teardown %@ cancelled=%@ card=%@ cardFrame=%@ fromView=%@",
+                     stage,
+                     context.transitionWasCancelled ? "yes" : "no",
+                     card.superview == nil ? "detached" : "PARENTED",
+                     NSCoder.string(for: card.frame),
+                     fromView.superview == nil ? "detached" : "PARENTED"))
+    }
+    #endif
+
+    private func dismiss(_ context: any UIViewControllerContextTransitioning) -> UIViewPropertyAnimator {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print("[zoom-live] BUILD dismiss flight (presenting=\(isPresenting))")
+        }
+        #endif
         let container = context.containerView
         guard let fromView = context.view(forKey: .from) else {
             context.completeTransition(false)
-            return
+            return UIViewPropertyAnimator(duration: duration, curve: .linear)
         }
         // Reinstall the presenter (`.to`) behind the departing card — a
         // navigation controller removes non-top views, so it isn't in the
@@ -559,9 +643,16 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // settling onto the pin together. The same spring as the grab dismissal,
         // so a tap-back and a released grab land with the same physics; a hair
         // of overshoot reads as the card snapping into its pin socket.
-        UIView.animate(withDuration: duration, delay: 0,
-                       usingSpringWithDamping: ZoomFlight.springDamping,
-                       initialSpringVelocity: ZoomFlight.springVelocity, options: []) {
+        // A property animator rather than `UIView.animate`, so the flight can be
+        // paused and scrubbed mid-air. Same spring — the damping ratio and the
+        // initial velocity are the shared constants — so an uninterrupted
+        // dismissal is physically what it was.
+        let spring = UISpringTimingParameters(
+            dampingRatio: ZoomFlight.springDamping,
+            initialVelocity: CGVector(dx: 0, dy: ZoomFlight.springVelocity)
+        )
+        let animator = UIViewPropertyAnimator(duration: duration, timingParameters: spring)
+        animator.addAnimations {
             flight.poseAtSource()
             if hoisted {
                 self.source.zoomPoseHoistedMedia(
@@ -574,8 +665,45 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             // tap-back and a released grab reveal the bar the same way.
             self.returningChrome?.alpha = 1
             presentingView?.transform = .identity
-        } completion: { _ in
+        }
+        animator.addCompletion { _ in
             let cancelled = context.transitionWasCancelled
+            #if DEBUG
+            Self.logTeardown("enter", context: context, card: flight.card, fromView: fromView)
+            #endif
+            if cancelled {
+                // REVERSED mid-flight: the feed is staying, so everything the
+                // flight took has to go back before it is handed control again.
+                //
+                // The hoisted surface is the piece that cannot be reached the
+                // usual way — `zoomLiveMediaSurface` is nil once it has been
+                // hoisted — so without an explicit release it would stay
+                // parented above the navigation controller, drawing at the grid
+                // cell's rect over the feed.
+                if hoisted {
+                    if let surface = self.source.zoomReleaseHoistedMedia() {
+                        self.destination?.zoomReclaimLiveMediaView(surface)
+                    }
+                } else if let surface = flight.card.zoomLiveMediaSurface {
+                    self.destination?.zoomReclaimLiveMediaView(surface)
+                }
+                // No landing hold: nothing is landing. The card goes outright.
+                flight.card.removeFromSuperview()
+                flight.shadow.removeFromSuperview()
+                dim.removeFromSuperview()
+                presentingView?.transform = .identity
+                ZoomFlight.clearRecededChrome(from: presentingView)
+                self.destination?.setZoomContentHidden(false)
+                self.destination?.zoomTransitionDidEnd()
+                // Undoes `zoomSourceWillStageDismissal`, which hid the tile and
+                // froze the grid's inset for a landing that is not coming.
+                self.source.setZoomSourceHidden(false)
+                context.completeTransition(false)
+                #if DEBUG
+                Self.logTeardown("reversed", context: context, card: flight.card, fromView: fromView)
+                #endif
+                return
+            }
             // A donated surface goes back ONLY when the viewer abandoned the
             // dismissal. On a completed one the destination is leaving and its
             // parked player belongs to the source that is landing — reclaiming
@@ -623,6 +751,10 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                 self.source.setZoomSourceHidden(false)
             }
             context.completeTransition(!cancelled)
+            #if DEBUG
+            Self.logTeardown("done", context: context, card: flight.card, fromView: fromView)
+            #endif
         }
+        return animator
     }
 }

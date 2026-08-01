@@ -250,6 +250,29 @@ final class ForYouViewController: UIViewController {
     }
     #endif
 
+    /// Un-hoists the surface for a REVERSED dismissal and hands it back.
+    ///
+    /// The mirror of `hoistForDismissal`. A flight the viewer cancels leaves
+    /// the feed on screen, so the surface must stop being hosted at the grid
+    /// cell's rect — where it would otherwise keep drawing over the feed that
+    /// came back, one level above the navigation controller and immune to
+    /// anything the feed does.
+    private func releaseHoistedForCancel() -> UIView? {
+        guard let view = dismissHostedSurface else { return nil }
+        stopHostedScaleDriver()
+        dismissHostedSurface = nil
+        view.transform = .identity
+        view.removeFromSuperview()
+        hostClip?.removeFromSuperview()
+        hostClip = nil
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print("[zoom-live] dismiss REVERSED, hoisted surface released")
+        }
+        #endif
+        return view
+    }
+
     /// Drives `syncHostedScale` for the length of the return flight.
     private var hostedScaleDriver: CADisplayLink?
 
@@ -581,6 +604,7 @@ final class ForYouViewController: UIViewController {
             poseHoisted: { [weak self] rect, space, radius in
                 self?.poseHostedSurface(at: rect, in: space, cornerRadius: radius)
             },
+            releaseHoisted: { [weak self] in self?.releaseHoistedForCancel() },
             donateLive: { [weak self, weak page] in
                 // Under `-avsbdl-render` the card joins the tile's playback as
                 // an extra surface instead of taking it over. The tile keeps

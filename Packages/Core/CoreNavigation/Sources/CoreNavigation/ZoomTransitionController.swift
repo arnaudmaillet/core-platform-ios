@@ -106,8 +106,20 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         _ navigationController: UINavigationController,
         interactionControllerFor animationController: any UIViewControllerAnimatedTransitioning
     ) -> (any UIViewControllerInteractiveTransitioning)? {
-        interaction.isInteracting ? interaction : nil
+        // A grab that started from REST owns the transition outright.
+        if interaction.isInteracting { return interaction }
+        // Otherwise a dismissal gets a dormant interruptor: it starts the pop
+        // non-interactively, exactly as a tap-back always did, and holds the
+        // right to catch the flight mid-air.
+        guard let zoom = animationController as? ZoomAnimator, zoom.isDismissing else { return nil }
+        let interruptor = ZoomFlightInterruptor()
+        flightInterruptor = interruptor
+        return interruptor
     }
+
+    /// Retains the interruptor for the length of a flight; UIKit holds its
+    /// interaction controller weakly.
+    private var flightInterruptor: ZoomFlightInterruptor?
 
     public func navigationController(
         _ navigationController: UINavigationController,

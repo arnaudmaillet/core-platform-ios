@@ -45,10 +45,12 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         depthView: UIView?,
         hoistLive: ((UIView, CGRect, UICoordinateSpace, CGFloat) -> Bool)? = nil,
         poseHoisted: ((CGRect, UICoordinateSpace, CGFloat) -> Void)? = nil,
+        releaseHoisted: (() -> UIView?)? = nil,
         donateLive: (() -> VideoRenderView?)? = nil
     ) {
         self.hoistLive = hoistLive
         self.poseHoisted = poseHoisted
+        self.releaseHoisted = releaseHoisted
         self.page = page
         anchorID = tappedID
         self.activePostID = activePostID
@@ -134,6 +136,7 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// Hoists the dismissal's live surface into the tab-bar-level host.
     private let hoistLive: ((UIView, CGRect, UICoordinateSpace, CGFloat) -> Bool)?
     private let poseHoisted: ((CGRect, UICoordinateSpace, CGFloat) -> Void)?
+    private let releaseHoisted: (() -> UIView?)?
 
     func zoomHoistLiveMedia(_ view: UIView, at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) -> Bool {
         hoistLive?(view, rect, space, cornerRadius) ?? false
@@ -141,6 +144,10 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
 
     func zoomPoseHoistedMedia(at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) {
         poseHoisted?(rect, space, cornerRadius)
+    }
+
+    func zoomReleaseHoistedMedia() -> UIView? {
+        releaseHoisted?()
     }
 
 
