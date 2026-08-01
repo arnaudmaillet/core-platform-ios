@@ -349,13 +349,26 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             container.insertSubview(toView, at: 0)
         }
 
-        let pageFrame = destination?.zoomTargetFrame(in: container) ?? container.bounds
         // Settle the presenter's own layout FIRST — it was only just
         // reinstalled above — and only then let the source move within it. The
         // order matters: a grid asked to scroll a tile into view against stale
         // bounds computes the wrong offset, and every rect read afterwards
         // inherits the error.
         container.layoutIfNeeded()
+        // Read the page rect AFTER that layout, not before it.
+        //
+        // `ZoomFlight.build` assigns this straight to `card.frame`, and the
+        // card is what the live surface is sized against — so an empty rect
+        // here produces a zero-sized card flying a zero-sized surface, which is
+        // a view at the origin with no size. Measured on the tap-back path:
+        // `cardBounds={{0,0},{0,0}}` at adopt, against `{{0,0},{402,874}}` on
+        // the grab, which stages its own layout before building.
+        //
+        // The empty check is belt and braces: whatever leaves the rect empty,
+        // the container's own bounds are a truthful full-screen fallback and
+        // strictly better than zero.
+        let measuredPage = destination?.zoomTargetFrame(in: container) ?? .zero
+        let pageFrame = measuredPage.isEmpty ? container.bounds : measuredPage
         source.zoomSourceWillStageDismissal()
         let sourceFrame = source.zoomHeroFrame(in: container)
 
