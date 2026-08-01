@@ -451,6 +451,22 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             guard let self, let id = self.representedID, !self.isCommentsEngaged else { return }
             self.onRequestComments?(id)
         }
+        #if DEBUG
+        // Which projection fields are present the moment the page is
+        // configured. Everything listed here is supposed to render at 0ms from
+        // the grid's own projection; anything reported missing is arriving on a
+        // later fetch and is what "instant metadata" is actually waiting on.
+        if ProcessInfo.processInfo.arguments.contains("-media-log") {
+            print(String(format: "[media] %.3f page CONFIGURE author=%@ caption=%@ avatar=%@ audio=%@ likes=%@ age=%@",
+                         CACurrentMediaTime(),
+                         model.authorName.isEmpty ? "MISSING" : "yes",
+                         model.caption?.isEmpty == false ? "yes" : "MISSING",
+                         model.avatarURL == nil ? "MISSING" : "yes",
+                         model.audioText?.isEmpty == false ? "yes" : "n/a",
+                         model.likeCount > 0 ? "\(model.likeCount)" : "0",
+                         model.timestampText.isEmpty ? "MISSING" : "yes"))
+        }
+        #endif
         let hasMedia = model.mediaURL != nil
         infoCard.setCaption(model.caption)
         infoCard.configure(with: model)
@@ -507,6 +523,15 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// surface starts once both its content and the visibility gate are in
     /// place.
     func updateCommentStreams(_ streams: FeedViewModel.CommentStreams) {
+        #if DEBUG
+        // The async half. `isLoaded=false` is the known-zero flag, so a first
+        // delivery with it false is the placeholder and the real one follows.
+        if ProcessInfo.processInfo.arguments.contains("-media-log") {
+            print(String(format: "[media] %.3f page STREAMS loaded=%@ reactions=%d subtitles=%d count=%d",
+                         CACurrentMediaTime(), streams.isLoaded ? "yes" : "NO",
+                         streams.reactions.count, streams.subtitles.count, streams.commentCount))
+        }
+        #endif
         chrome.updateCommentStreams(streams)
         // The info card's comment metric rides the same seam (and the
         // same known-zero honesty flag) as the chrome's surfaces.
