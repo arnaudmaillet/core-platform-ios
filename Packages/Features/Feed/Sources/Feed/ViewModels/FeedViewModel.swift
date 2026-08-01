@@ -268,6 +268,18 @@ public final class FeedViewModel {
 
     // MARK: - Loading
 
+    /// Renders a projection the caller already has, before any fetch.
+    ///
+    /// Only while there is nothing else: a real page always wins, and a seed
+    /// arriving after one would be a downgrade. `phase` moves to `.content` so
+    /// the page lays out immediately rather than sitting in its loading state.
+    public func seed(_ models: [FeedItemDisplayModel]) {
+        guard items.isEmpty, !models.isEmpty else { return }
+        items = models
+        phase = .content
+        emit()
+    }
+
     private func loadInitial() async {
         // Offline-first: render the snapshot immediately if there is one…
         if let cached = await repository.cachedFirstPage(), let models = await build(cached) {

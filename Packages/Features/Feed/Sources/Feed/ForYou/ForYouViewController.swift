@@ -322,6 +322,35 @@ final class ForYouViewController: UIViewController {
     /// mechanism end to end — `makeSnapFeedViewController(postIDs:)` over
     /// `FixedPostsFeedProvider`, pushed under a `ZoomTransitionController` —
     /// with a tile as the source instead of a pin.
+    /// A partial display model from the projection this grid already holds.
+    ///
+    /// Lives here, not on `FeedItemDisplayModel`, so the shared display model
+    /// stays free of `PostGrid` — the grid is one opener among several, and the
+    /// feed is also reached from Maps and from a route.
+    ///
+    /// **Partial, and the gap belongs to the contract.** `GalleryPost` carries
+    /// no author: no display name, handle or avatar. Those stay empty and fill
+    /// when the real entry lands. Everything the grid DOES have — caption,
+    /// poster, media URL and kind, reaction count — renders immediately.
+    /// Completing it means the grid projection carrying author identity, which
+    /// is a backend contract change rather than a client one.
+    private static func seedModel(from post: GalleryPost) -> FeedItemDisplayModel {
+        FeedItemDisplayModel(
+            id: post.id,
+            authorID: ProfileID(""),
+            authorName: "",
+            metaText: "",
+            avatarURL: nil,
+            caption: post.caption.isEmpty ? nil : post.caption,
+            mediaURL: post.videoURL ?? post.thumbnailURL,
+            mediaKind: post.kind == .video ? .video : .image,
+            thumbnailURL: post.thumbnailURL,
+            audioText: nil,
+            likeCount: post.reactionCount ?? 0,
+            timestampText: ""
+        )
+    }
+
     private func openFeed(from format: GalleryFilter.Format, at index: Int) {
         // One flight at a time: a second tap while a card is in the air would
         // stage a transition over a live one. Same guard as the map's.
@@ -337,6 +366,12 @@ final class ForYouViewController: UIViewController {
         // it while its player is in flight.
         pager.beginPlaybackHandoff(of: tapped.id)
         let feed = makeSnapFeed(Array(ids))
+        // Hand the feed the projection this grid already holds, so its first
+        // page configures at push time rather than when its own fetch returns.
+        // Measured at ~0.69s of empty destination without it.
+        if let seedable = feed as? SnapFeedViewController {
+            seedable.seedProjection(posts[index...].prefix(Self.seedWindow).map(Self.seedModel))
+        }
 
         // The feed owns the whole screen: hide the bar with the push. Managed
         // by hand rather than via `hidesBottomBarWhenPushed`, because that

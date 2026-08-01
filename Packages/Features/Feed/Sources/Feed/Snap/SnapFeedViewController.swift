@@ -1393,6 +1393,15 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// none until its first `render`, which under injected latency arrived
     /// 2.18s after the flight began — against a 0.42s flight, so the card was
     /// removed over an empty screen and the cell's black floor was what showed.
+    /// Renders a projection the opener already has, before this screen's own
+    /// fetch returns — so the page configures at push time instead of ~0.7s
+    /// later. Additive: a real page replaces it, and a seed arriving after one
+    /// is ignored.
+    public func seedProjection(_ models: [FeedItemDisplayModel]) {
+        loadViewIfNeeded()
+        viewModel.seed(models)
+    }
+
     public var zoomDestinationContentIsReady: Bool { !orderedIDs.isEmpty }
 
     public func setZoomContentHidden(_ hidden: Bool) {
