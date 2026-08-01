@@ -51,7 +51,7 @@ public struct PlaceholderVideoFetcher: VideoSource {
         // dataset can mix real streams with synthetic clips for the aspect
         // ratios no public asset covers.
         if let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" {
-            return url
+            return try await Self.locallyCached(url)
         }
 
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
@@ -72,6 +72,80 @@ public struct PlaceholderVideoFetcher: VideoSource {
         }
         try await synthesize(to: cacheURL, width: width, height: height, hue: hue)
         return cacheURL
+    }
+
+    /// Downloads a remote fixture once and replays it from disk thereafter.
+    ///
+    /// **Why this exists: we rate-limited ourselves.** The `-rich-media`
+    /// fixtures are public test assets, and every launch re-fetched all of
+    /// them. Across a session of automated runs the hosts returned HTTP 429,
+    /// which `AVPlayerItem` surfaces as a generic "unknown error" — so the
+    /// symptom was tiles and flight cards showing a cover and never any video,
+    /// indistinguishable from the rendering bug being investigated at the time.
+    /// A `curl` of each URL still returned 206, because the throttle is
+    /// per-client at a request RATE a single range request never reaches.
+    ///
+    /// The cache is keyed on the absolute URL and lives in the temp directory,
+    /// so it survives across launches: one fetch per asset per machine rather
+    /// than one per launch.
+    ///
+    /// **HLS is passed through.** A manifest is an index over many segment
+    /// files, so caching it as one file would produce something unplayable;
+    /// localising a ladder properly means a local server, which is a different
+    /// piece of work. Those fixtures still hit the network every launch, and
+    /// they are the remaining 429 exposure.
+    ///
+    /// A failed download falls back to the remote URL rather than throwing:
+    /// this is a test-fixture convenience, and it must never be the reason a
+    /// video does not play.
+    private static func locallyCached(_ url: URL) async throws -> URL {
+        // Only under `-rich-media`, which is the only thing that introduces
+        // remote fixtures. The unit suite, previews and CI run without it and
+        // must not touch the network — caching there would turn every
+        // passthrough assertion into a download attempt, which is exactly the
+        // offline guarantee this file's header promises.
+        guard ProcessInfo.processInfo.arguments.contains("-rich-media") else { return url }
+        guard url.pathExtension.lowercased() != "m3u8" else { return url }
+
+        // NOT `Hasher`. Swift's is randomly seeded PER PROCESS, so a key built
+        // from it changes every launch — the cache would miss every time and
+        // re-download the whole fixture set, which is precisely the behaviour
+        // that got us rate-limited. Caught by checking twice: the second launch
+        // wrote a second copy of every asset under a different name.
+        //
+        // FNV-1a is stable across processes and machines, which is the only
+        // property this key needs.
+        let name = "fixture-\(Self.stableHash(url.absoluteString))."
+            + (url.pathExtension.isEmpty ? "mp4" : url.pathExtension)
+        let cached = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        if FileManager.default.fileExists(atPath: cached.path) { return cached }
+
+        guard let (downloaded, response) = try? await URLSession.shared.download(from: url),
+              (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true
+        else { return url }
+
+        // Scratch-then-move, the same discipline the synthesized path uses: only
+        // complete files ever appear at the cache path, so a second resolve
+        // racing this one cannot read a half-written asset.
+        do {
+            try FileManager.default.moveItem(at: downloaded, to: cached)
+        } catch let error as CocoaError where error.code == .fileWriteFileExists {
+            try? FileManager.default.removeItem(at: downloaded)
+        } catch {
+            return url
+        }
+        return cached
+    }
+
+    /// FNV-1a over the UTF-8 bytes. Deterministic across processes, unlike
+    /// `Hasher`, which is what a cross-launch cache key requires.
+    private static func stableHash(_ string: String) -> String {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in string.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01B3
+        }
+        return String(hash, radix: 16)
     }
 
     private static func cacheURL(for url: URL, width: Int, height: Int) -> URL {
