@@ -103,11 +103,26 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // change again, so nothing can relayout mid-flight.
         container.layoutIfNeeded()
 
-        // Pose the card as the pin and swap the real pin for it inside this
-        // same transaction: the twin is pixel-identical (same component, same
-        // ring, same crop, live video mirrored), so no frame can render a
-        // mismatch — or both pins, or neither.
+        // Pose the card as the pin, COMMIT it, and only then hide the real one.
+        //
+        // These used to sit in one transaction, on the reasoning that a single
+        // commit cannot render a mismatch. That is true of the model and says
+        // nothing about content: a media layer with no frame enqueued yet
+        // composites EMPTY on that commit, while the pin it stands in for is
+        // already hidden. One frame of nothing, on both legs, and only when the
+        // card loses the race — which is why it reads as a random flash rather
+        // than a reproducible one.
+        //
+        // `flush` commits the card to the render server here; the hide lands in
+        // the next transaction, so the two overlap by a frame instead of
+        // leaving a gap. Overlap is free: the card is a pixel-identical twin
+        // posed exactly over the source, so a frame showing both is
+        // indistinguishable from a frame showing either.
         flight.poseAtSource()
+        CATransaction.flush()
+        #if DEBUG
+        Self.logFirstFrameHandoff("present", card: flight.card)
+        #endif
         source.setZoomSourceHidden(true)
 
         let screenRadius = ZoomFlight.screenCornerRadius(behind: container)
@@ -408,6 +423,20 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
 
     // MARK: - Dismiss
 
+    #if DEBUG
+    /// Reports whether the flight card had content at the instant the view it
+    /// replaces was hidden. `drawing=false` here IS the flash — the frame where
+    /// the source is gone and the card has nothing to show yet. Under
+    /// `-zoom-live-log`, and on both legs, because the race is symmetric.
+    private static func logFirstFrameHandoff(_ leg: String, card: any ZoomFlightCard) {
+        guard ProcessInfo.processInfo.arguments.contains("-zoom-live-log") else { return }
+        print(String(format: "[zoom-live] %.3f %@ hide-source drawing=%@ %@",
+                     CACurrentMediaTime(), leg,
+                     card.zoomLiveMediaIsDrawing ? "yes" : "NO",
+                     card.zoomLiveMediaDebugState))
+    }
+    #endif
+
     private func dismiss(_ context: any UIViewControllerContextTransitioning) {
         let container = context.containerView
         guard let fromView = context.view(forKey: .from) else {
@@ -502,11 +531,19 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // this container; UIKit runs its item back-transition natively over
         // the shrinking card.
         //
-        // NOT the cause of the single black frame at dismissal start: deferring
-        // this by a runloop turn was measured and changed nothing (5 flights,
-        // 5 dark frames, before and after). Left synchronous rather than
-        // carrying an unverified async edit through shared transition code that
-        // Maps also rides.
+        // Same first-frame rule as the present leg: commit the card, THEN hide
+        // what it replaces, so the two overlap by a frame instead of leaving a
+        // gap where neither has content.
+        //
+        // Deferring this by a runloop TURN was tried earlier and changed
+        // nothing, which is consistent rather than contradictory — the problem
+        // was never when the hide is scheduled, it is whether the card has been
+        // committed by the time it happens. A turn's delay does not commit
+        // anything; `flush` does.
+        CATransaction.flush()
+        #if DEBUG
+        Self.logFirstFrameHandoff("dismiss", card: flight.card)
+        #endif
         destination?.setZoomContentHidden(true)
 
         // Reverse depth cue: the map starts receded (0.95, covered) and scales
