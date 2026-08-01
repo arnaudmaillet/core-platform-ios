@@ -179,6 +179,10 @@ extension PostGridFlightCard: ZoomFlightCard {
         hasAdoptedLiveMedia ? videoRenderView.isRenderingVisibly : true
     }
 
+    var zoomLiveMediaDebugState: String {
+        hasAdoptedLiveMedia ? videoRenderView.debugSurfaceState : "no live media"
+    }
+
     /// A grid tile never previews live, so this only ever fires on the dismiss
     /// leg — the feed's playing page mirrors its player here, and the card
     /// carries the live video home instead of a frozen cover.

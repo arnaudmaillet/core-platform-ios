@@ -236,6 +236,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     static func holdCard(_ card: UIView,
                          ceiling: CFTimeInterval = maximumLandingHold,
                          liveMediaIsDrawing: @escaping () -> Bool = { true },
+                         liveMediaState: @escaping () -> String = { "" },
                          path: String = "?",
                          while condition: @escaping () -> Bool) {
         // No early-out on `condition()`. The dip is delivered by KVO a few
@@ -255,6 +256,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let deadline = CACurrentMediaTime() + ceiling
         let link = CADisplayLink(target: LandingHold(card: card, condition: condition,
                                                      liveMediaIsDrawing: liveMediaIsDrawing,
+                                                     liveMediaState: liveMediaState,
                                                      deadline: deadline),
                                  selector: #selector(LandingHold.tick))
         link.add(to: .main, forMode: .common)
@@ -277,13 +279,16 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         private let card: UIView
         private let condition: () -> Bool
         private let liveMediaIsDrawing: () -> Bool
+        private let liveMediaState: () -> String
         private let deadline: CFTimeInterval
 
         init(card: UIView, condition: @escaping () -> Bool,
-             liveMediaIsDrawing: @escaping () -> Bool, deadline: CFTimeInterval) {
+             liveMediaIsDrawing: @escaping () -> Bool,
+             liveMediaState: @escaping () -> String, deadline: CFTimeInterval) {
             self.card = card
             self.condition = condition
             self.liveMediaIsDrawing = liveMediaIsDrawing
+            self.liveMediaState = liveMediaState
             self.deadline = deadline
         }
 
@@ -310,7 +315,8 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                 print(String(format: "[zoom-live] %.3f hold f%d card window=%@ alpha=%.2f drawing=%@",
                              CACurrentMediaTime(), frames,
                              card.window == nil ? "NIL" : "yes",
-                             card.alpha, liveMediaIsDrawing() ? "yes" : "NO"))
+                             card.alpha, liveMediaIsDrawing() ? "yes" : "NO")
+                      + "  surface[" + liveMediaState() + "]")
             }
             #endif
             // Span the window in which the dip can still arrive before
@@ -490,6 +496,9 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             Self.holdCard(flight.card,
                           liveMediaIsDrawing: { [weak card = flight.card] in
                               card?.zoomLiveMediaIsDrawing ?? true
+                          },
+                          liveMediaState: { [weak card = flight.card] in
+                              card?.zoomLiveMediaDebugState ?? "card gone"
                           },
                           path: "animator/tap-back",
                           while: { [weak sourceRef = self.source] in

@@ -26,6 +26,11 @@ public protocol ZoomFlightCard: UIView {
     /// is always drawing, so there is nothing that can stop.
     var zoomLiveMediaIsDrawing: Bool { get }
 
+    /// The live surface's full state, for tracing. Empty when there is none.
+    /// CoreNavigation cannot ask a `VideoRenderView` anything directly — it
+    /// deliberately does not depend on MediaPlayback — so the card reports it.
+    var zoomLiveMediaDebugState: String { get }
+
     /// The radius the card rests at on its source (a pin's 12pt, a mosaic
     /// brick's 10pt). The flight sweeps between this and the display's own
     /// corner radius.
@@ -99,6 +104,7 @@ public protocol ZoomFlightCard: UIView {
 
 public extension ZoomFlightCard {
     var zoomLiveMediaIsDrawing: Bool { true }
+    var zoomLiveMediaDebugState: String { "" }
     var zoomLiveMediaSurface: UIView? { nil }
     func adoptZoomLiveMedia(_ mirror: (UIView) -> Bool) {}
     func adoptZoomLiveMediaView(_ view: UIView) {}
