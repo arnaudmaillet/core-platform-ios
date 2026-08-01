@@ -141,6 +141,9 @@ public final class VideoPlaybackController {
         parked = (url, player)
         return true
     }
+    /// The URL of the player currently parked for a handoff, if any. Read by
+    /// diagnostics that need to explain why an unpark was refused.
+    public var parkedURL: URL? { parked?.url }
 
     /// Cancels a park, re-registering the parked player as `view`'s active one.
     ///

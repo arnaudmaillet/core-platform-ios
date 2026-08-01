@@ -392,7 +392,15 @@ final class ForYouGridPage: UIView {
                   at: IndexPath(item: index, section: 0)
               ) as? PostGridTileCell
         else { return false }
-        return playback.adoptHostedSurface(view, for: postID, url: url, cell: cell)
+        let adopted = playback.adoptHostedSurface(view, for: postID, url: url, cell: cell)
+        #if DEBUG
+        if !adopted, ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            // Both URLs, because a refusal is almost always the two sides
+            // naming the same asset differently.
+            print("[zoom-live] adopt REFUSED tile=\(url.absoluteString) parked=\(playback.debugParkedURL?.absoluteString ?? "nil")")
+        }
+        #endif
+        return adopted
     }
 
     /// Where the tile for `postID` currently is, in `space`. The host reads

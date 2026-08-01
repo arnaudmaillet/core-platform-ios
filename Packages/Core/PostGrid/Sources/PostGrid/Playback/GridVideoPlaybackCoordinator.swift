@@ -413,7 +413,21 @@ public final class GridVideoPlaybackCoordinator {
     public func adoptHostedSurface(
         _ view: VideoRenderView, for id: PostID, url: URL, cell: PostGridTileCell
     ) -> Bool {
-        guard pool.unparkPlayback(to: view, mediaURL: url) else { return false }
+        // Two handoff models, and this has to use the one the producing side
+        // actually used. Under N-surface rendering the feed page does NOT park:
+        // `SnapFeedCell.parkPlayback` returns early by design, because nothing
+        // needs to stop rendering — the loan moves by ownership transfer and
+        // the player keeps drawing right through the landing.
+        //
+        // This side kept asking for an unpark regardless, so it was claiming a
+        // park that the AVSBDL path never creates. Measured: `parkedURL=nil` at
+        // every landing, `unparkPlayback` refusing every time, and the tile
+        // falling back to starting a fresh player — paying exactly the
+        // readiness drop the permanent hoist exists to remove.
+        let claimed = VideoRenderFlags.usesSampleBufferLayer
+            ? pool.transferOwnership(of: url, to: view)
+            : pool.unparkPlayback(to: view, mediaURL: url)
+        guard claimed else { return false }
         pool.setPeakBitRate(Self.tileBitRateCap, in: view)
         hostedSurfaces[id] = view
         playing[id] = cell
@@ -426,6 +440,9 @@ public final class GridVideoPlaybackCoordinator {
         #endif
         return true
     }
+
+    /// The URL parked for the current handoff — diagnostics only.
+    public var debugParkedURL: URL? { pool.parkedURL }
 
     /// The hosted surface for `id`, if its video is rendering outside the cell.
     public func hostedSurface(for id: PostID) -> VideoRenderView? { hostedSurfaces[id] }
