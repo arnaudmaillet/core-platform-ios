@@ -36,30 +36,32 @@ struct GridVideoPlaybackCoordinatorTests {
 
     // MARK: - Flight surfaces (#83 Phase 2)
 
-    /// A flight card joins the tile's playback rather than taking it over, and
-    /// is released once it leaves the window.
+    /// A flight surface is only produced when it can actually DRAW.
     ///
-    /// The count assertions are backing-dependent on purpose: only the
-    /// sample-buffer path can actually render two surfaces at once, and under
-    /// `AVPlayerLayer` `surfaceCount` reports the 1 that is true rather than a
-    /// flattering 2. Run with `AVSBDL_RENDER=1` for the arm that proves the
-    /// sweep.
-    @Test func aFlightSurfaceJoinsThenIsReleasedOnceItLeavesTheWindow() async {
+    /// `attachSurface` succeeds whenever something is playing the URL, but a
+    /// surface can only be primed if that playback has already decoded a frame.
+    /// One that could not be primed flies as a hidden empty layer over the
+    /// card's cover — the thumbnail pop traced in #83 — so the coordinator
+    /// refuses it and lets the flight fall through to a producer whose surface
+    /// is live.
+    ///
+    /// Nothing decodes in a unit-test environment, which makes this the case
+    /// the suite can actually pin: playback is registered, the attach would
+    /// succeed, and the guard still refuses because no frame exists. The
+    /// released-when-windowless sweep needs a real decoded frame and is
+    /// exercised in the simulator instead.
+    @Test func noFlightSurfaceUntilThePlaybackHasDecodedAFrame() async {
         let pool = makePool()
         let coordinator = GridVideoPlaybackCoordinator(pool: pool, maxConcurrent: 3)
         let candidate = makeCandidate(0, distance: 0)
         coordinator.update(candidates: [candidate])
         await coordinator.debugAwaitStarts()
 
-        let joined = VideoRenderFlags.usesSampleBufferLayer ? 2 : 1
-        let surface = coordinator.makeAttachedSurface(for: candidate.id, url: candidate.url)
-        #expect(surface != nil)
-        #expect(pool.surfaceCount(for: candidate.url) == joined)
-        // The tile keeps playing throughout — nothing was handed over.
+        // The tile IS registered as playing — the refusal below is about the
+        // absence of a decoded frame, not the absence of playback.
         #expect(coordinator.playingIDs.contains(candidate.id))
-
-        // The card has been discarded, so its surface is in no window.
-        coordinator.endHandoff()
+        #expect(coordinator.makeAttachedSurface(for: candidate.id, url: candidate.url) == nil)
+        // Refusing must not leave a surface attached behind it.
         #expect(pool.surfaceCount(for: candidate.url) == 1)
     }
 
