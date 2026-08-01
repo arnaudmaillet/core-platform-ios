@@ -71,9 +71,6 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// reads the same function, there is nothing left to correct when the spring
     /// takes over.
     private var stagedLanding: CGRect = .zero
-    /// The card's size at zero progress — the page after the detach dip. The
-    /// interpolation's other endpoint.
-    private var detachedSize: CGSize = .zero
     /// True while the detach spring is settling; pose sets wait for it so a
     /// direct set doesn't stomp the dip mid-flight (position is unaffected —
     /// the dip animates bounds and subviews only).
@@ -83,6 +80,14 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// dragging backwards past the origin.
     private let verticalDriftLimit: CGFloat = 140
     private let backDragLimit: CGFloat = 60
+    /// How far the card may travel along the dismissal axis, however hard it is
+    /// thrown. Asymptotic, not a clamp — see `rubberBand` — so the card keeps
+    /// answering the finger the whole way instead of sticking at a wall.
+    ///
+    /// Generous next to the other two because this is the INTENDED direction:
+    /// it should feel free for the first part of the gesture and only firm up
+    /// well past the commit threshold, where more travel means nothing anyway.
+    private let forwardDragLimit: CGFloat = 320
 
     /// Set by the owner alongside `attach`; see `returningChrome`.
     func setReturningChrome(_ chrome: UIView?) {
@@ -221,10 +226,6 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         self.screenRadius = screenRadius
         self.pageCenter = CGPoint(x: pageFrame.midX, y: pageFrame.midY)
         stagedLanding = sourceFrame
-        detachedSize = CGSize(
-            width: pageFrame.width * ZoomFlight.detachScale,
-            height: pageFrame.height * ZoomFlight.detachScale
-        )
 
         // The detach: a real spring, not a scrubbed keyframe — it registers
         // the instant the grab starts, however slowly the finger then moves.
@@ -289,20 +290,33 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // Position channel: free 2D float. Horizontal 1:1 (it is also the
         // progress axis); vertical and back-drag rubber-band so the card
         // follows the hand but resists leaving the dismissal axis.
+        // Both directions resist now. Forward used to be 1:1, so a hard throw
+        // could put the card most of the way off screen while the finger was
+        // still down — motion that promises the card has left when the gesture
+        // can still be abandoned.
         let dx = translation.x >= 0
-            ? translation.x
+            ? ZoomTransitionGeometry.rubberBand(translation.x, limit: forwardDragLimit)
             : ZoomTransitionGeometry.rubberBand(translation.x, limit: backDragLimit)
         let dy = ZoomTransitionGeometry.rubberBand(translation.y, limit: verticalDriftLimit)
         flight.card.center = CGPoint(x: pageCenter.x + dx, y: pageCenter.y + dy)
 
-        // Morph channel: pure functions of progress, interpolating the card's
-        // size and radius toward the rect it will actually land on. Skipped
-        // while the detach spring settles (its endpoint is this function at
-        // progress 0, so the handoff is invisible).
+        // Scale channel: the card shrinks but keeps the PAGE's aspect ratio the
+        // whole time it is held.
+        //
+        // It used to interpolate toward the landing rect, so the card was
+        // already becoming tile-shaped under the finger — the post visibly
+        // turning into its thumbnail before the viewer had decided anything,
+        // and a shape that has to snap back if the grab is abandoned. The
+        // aspect morph belongs to the release, which is when the outcome is
+        // known: `poseAtSource(at:)` takes the card from this pose to the
+        // tile's rect on the landing spring.
+        //
+        // Skipped while the detach spring settles — its endpoint is this
+        // function at progress 0, so the handoff is invisible.
         if !isDetachSettling {
-            flight.poseInterpolated(
-                progress, from: detachedSize, to: stagedLanding, startCornerRadius: screenRadius
-            )
+            let span = ZoomFlight.detachScale - ZoomFlight.minimumGrabScale
+            let scale = max(ZoomFlight.detachScale - span * progress, ZoomFlight.minimumGrabScale)
+            flight.poseFloating(scale: scale, cornerRadius: screenRadius)
         }
         dim?.alpha = 1 - progress
         // The toolbar recedes on the same channel as the dim: pure function

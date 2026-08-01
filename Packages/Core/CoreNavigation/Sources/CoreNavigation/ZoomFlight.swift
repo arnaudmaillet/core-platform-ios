@@ -37,6 +37,16 @@ struct ZoomFlight {
     /// visibly detaches from the screen canvas before flying home.
     static let detachScale: CGFloat = 0.95
 
+    /// The smallest the card may shrink to while the finger still holds it.
+    ///
+    /// A held card is still the PAGE — the viewer is deciding, not landing —
+    /// and a page that shrinks toward thumbnail size under the hand reads as
+    /// the post having already gone. Clamping keeps the thing being dragged
+    /// recognisably the thing being dismissed; the remaining distance to the
+    /// tile is covered by the release spring, which is the moment the outcome
+    /// is actually decided.
+    static let minimumGrabScale: CGFloat = 0.6
+
     /// The single spring every FLIGHT lands on — the non-interactive present
     /// and tap-back (`ZoomAnimator`) and the released grab
     /// (`ZoomDismissInteractionController`) — so all three settle with identical
