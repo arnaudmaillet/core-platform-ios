@@ -141,6 +141,25 @@ final class PostGridFlightCard: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Pins the live surface to the card's bounds explicitly, every layout.
+    ///
+    /// `zoomLiveMediaTracksCardBounds` is true for this card, so the flight
+    /// resizes it rather than driving a uniform scale — and that tracking was
+    /// left to `autoresizingMask`. Autoresizing distributes a size DELTA, which
+    /// is degenerate when the starting size is zero: the surface is adopted
+    /// while the card is still unlaid-out at {0,0} (measured), so the deltas it
+    /// computes from that never produce a correct fit. The surface then failed
+    /// to follow the card through an interactive drag, where bounds change on
+    /// every pan event.
+    ///
+    /// Setting the frame outright has no such dependence on where it started.
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard hasAdoptedLiveMedia else { return }
+        videoRenderView.transform = .identity
+        videoRenderView.frame = bounds
+    }
 }
 
 // MARK: - ZoomFlightCard

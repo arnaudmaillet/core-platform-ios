@@ -272,6 +272,23 @@ public final class GridVideoPlaybackCoordinator {
         view.debugTracksFlight = true
         #endif
         guard pool.attachSurface(view, to: url) else { return nil }
+        // Refuse a surface that could not be primed.
+        //
+        // `attachSurface` succeeds whenever something is playing the URL, but
+        // priming only works if that renderer has already decoded a frame. On a
+        // DISMISS the grid tile is often not decoding — the feed page is — so
+        // this produced a surface with no frame, `revealOnFirstFrame` hid it,
+        // and the card flew a hidden empty layer over its own cover. That is
+        // the thumbnail, traced end to end.
+        //
+        // Returning nil instead lets `ZoomFlight.build` fall through to the
+        // destination's `zoomDonateLiveMediaView`, whose surface joins a
+        // renderer that IS decoding. Whichever side can actually draw wins,
+        // rather than whichever side is asked first.
+        guard view.hasFrame else {
+            pool.detachSurface(view)
+            return nil
+        }
         flightSurfaces.add(view)
         return view
     }
