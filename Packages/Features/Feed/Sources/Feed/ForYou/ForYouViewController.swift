@@ -369,18 +369,30 @@ final class ForYouViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
-        navigationItem.title = "For You"
-        // The big left-aligned title, which is the convention for a root tab.
+        // No title. The large left-aligned title was the convention for a root
+        // tab here, and removing it also removes the large-title content-area
+        // layout from the transition's path — which is the second reason for
+        // this change, see below.
+        navigationItem.title = nil
+        navigationItem.largeTitleDisplayMode = .never
+        // Native bar items on both sides.
         //
-        // `.inline` is genuinely the mode that produces it here, however
-        // backwards that reads. This stack leaves `prefersLargeTitles` at its
-        // default of false, and under iOS 26 that makes `.always` and `.never`
-        // BOTH resolve to the small centred bar title, while `.inline` renders
-        // the large one in the content area. All three were measured in-sim
-        // before this line was settled; don't "fix" it to `.always` without
-        // re-measuring. Verified not to leak into the pushed feed, whose bar
-        // keeps just its back item and author pill.
-        navigationItem.largeTitleDisplayMode = .inline
+        // Partly product, partly a probe: a large title renders in the CONTENT
+        // area rather than the bar, so it participates in the layout the hero
+        // flight animates over, and the question was whether its passes were
+        // invalidating views mid-transition. Plain bar items lay out in the bar
+        // itself and cannot, so if the dismissal's frame-0 artifact survives
+        // this it is not the header — which is a real answer either way.
+        navigationItem.leftBarButtonItem = UIBarButtonItem(
+            image: UIImage(systemName: "line.3.horizontal.decrease"),
+            style: .plain, target: self, action: #selector(headerLeftTapped)
+        )
+        navigationItem.leftBarButtonItem?.accessibilityLabel = "Filters"
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            image: UIImage(systemName: "magnifyingglass"),
+            style: .plain, target: self, action: #selector(headerRightTapped)
+        )
+        navigationItem.rightBarButtonItem?.accessibilityLabel = "Search"
 
         pager.pin(to: view)
         // The tray floats over the pages, so they must be able to scroll their
@@ -746,9 +758,65 @@ final class ForYouViewController: UIViewController {
     /// on an idle one the grid never started. `viewDidAppear` is the first
     /// moment both facts are true — surface active, cells realized — so the
     /// reconcile here is the one that cannot be raced.
+    #if DEBUG
+    /// `-foryou-tab-away <seconds>`: switch to another tab after a delay.
+    ///
+    /// Exists because the leak it checks for is invisible from this screen —
+    /// the hosted surface lives in the tab bar controller's view, so the way
+    /// to see it is to leave the tab and look at what is still drawing.
+    private var hasScheduledTabAway = false
+
+    private func scheduleTabAwayIfNeeded() {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard !hasScheduledTabAway,
+              let position = arguments.firstIndex(of: "-foryou-tab-away"),
+              position + 1 < arguments.count,
+              let delay = Double(arguments[position + 1])
+        else { return }
+        hasScheduledTabAway = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let tabs = self?.tabBarController else { return }
+            print("[zoom-live] TAB AWAY -> index 2")
+            tabs.selectedIndex = 2
+        }
+    }
+    #endif
+
+    /// Placeholders: these exist to put real bar items in the header, not to
+    /// add features. Wired to nothing on purpose rather than to a half-built
+    /// destination.
+    @objc private func headerLeftTapped() {}
+    @objc private func headerRightTapped() {}
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         pager.setAutoplayActive(true)
+        #if DEBUG
+        scheduleTabAwayIfNeeded()
+        #endif
+    }
+
+    /// Suspends the grid's media when the TAB moves away.
+    ///
+    /// A push disappears this screen too, and there the flight owns playback —
+    /// stopping it is precisely the restart the whole handoff exists to
+    /// prevent. The stack's top separates the two: on a push it is already the
+    /// pushed screen, on a tab switch it is still this one.
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        guard navigationController?.topViewController === self else { return }
+        // The hosted surface lives in the TAB BAR CONTROLLER's view, one level
+        // above the navigation controller — deliberately, so a push cannot
+        // unmount it mid-flight. The consequence is that nothing about leaving
+        // this tab removes it either: it kept drawing, and playing, at the grid
+        // cell's rect over whichever tab the viewer switched to.
+        //
+        // Hidden first and synchronously, so it cannot compose over the
+        // incoming tab even for one frame; `setAutoplayActive(false)` then
+        // stops every playing tile, and `stop` is the path that actually
+        // releases a hosted surface and tears its clip down.
+        hostClip?.isHidden = true
+        pager.setAutoplayActive(false)
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -770,6 +838,10 @@ final class ForYouViewController: UIViewController {
         // stranded park. A live transition owns its own scope and closes it in
         // `onSourceReturned`.
         if activeTransition == nil { pager.discardPlaybackHandoff() }
+        // Paired with the hide in `viewWillDisappear`. Usually moot — the stop
+        // there tears the clip down outright — but a clip that outlived it must
+        // not come back invisible.
+        hostClip?.isHidden = false
         pager.setAutoplayActive(true)
         // Coming back from the feed: this screen owns the bottom again.
         guard navigationController?.topViewController === self else { return }
