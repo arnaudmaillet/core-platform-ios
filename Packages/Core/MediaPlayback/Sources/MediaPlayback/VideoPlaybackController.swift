@@ -278,9 +278,9 @@ public final class VideoPlaybackController {
     ///
     /// Not `stop(_:)`: that returns a pool loan and tears the player down.
     /// This surface never held one.
-    public func detachSurface(_ view: VideoRenderView) {
+    public func detachSurface(_ view: VideoRenderView, reason: String = "detachSurface") {
         guard activePlayers[ObjectIdentifier(view)] == nil else { return }
-        view.detach()
+        view.detach(reason: reason)
     }
 
     /// How many surfaces are currently showing `mediaURL`.
@@ -389,7 +389,7 @@ public final class VideoPlaybackController {
     }
 
     private func detach(key: ObjectIdentifier, view: VideoRenderView) {
-        view.detach()
+        view.detach(reason: "controller.stop")
         playingURL[key] = nil
         guard let player = activePlayers.removeValue(forKey: key) else { return }
         player.pause()

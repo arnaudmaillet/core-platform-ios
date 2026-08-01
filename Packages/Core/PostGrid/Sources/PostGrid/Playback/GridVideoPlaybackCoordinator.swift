@@ -185,7 +185,17 @@ public final class GridVideoPlaybackCoordinator {
         handoffID = nil
         isSurfaceVisible = true
         pool.discardParkedPlayback()
-        releaseFinishedFlightSurfaces()
+        // NOT swept here. `endHandoff` fires while the flight card can still be
+        // in the air — measured on the tap-back path as
+        // `card DETACHED by flightSurfaceSweep (frames=11)`, once per cycle,
+        // taking the live surface out from under a card that was mid-flight and
+        // leaving it on its cover. That is the tap-back thumbnail pop.
+        //
+        // The sweep keeps its self-limiting property from the OTHER call site:
+        // `makeAttachedSurface` sweeps before minting, so each flight clears
+        // the previous one's leftovers and the count still cannot grow. What is
+        // removed here is only the mid-flight sweep, which was never the part
+        // that bounded anything.
         #if DEBUG
         Self.logPool(playing.count, handoff: nil)
         #endif
@@ -286,7 +296,7 @@ public final class GridVideoPlaybackCoordinator {
         // renderer that IS decoding. Whichever side can actually draw wins,
         // rather than whichever side is asked first.
         guard view.hasFrame else {
-            pool.detachSurface(view)
+            pool.detachSurface(view, reason: "unprimedRefusal")
             return nil
         }
         flightSurfaces.add(view)
@@ -350,7 +360,7 @@ public final class GridVideoPlaybackCoordinator {
     /// anywhere upstream.
     private func releaseFinishedFlightSurfaces() {
         for view in flightSurfaces.allObjects where view.window == nil {
-            pool.detachSurface(view)
+            pool.detachSurface(view, reason: "flightSurfaceSweep")
             flightSurfaces.remove(view)
         }
     }

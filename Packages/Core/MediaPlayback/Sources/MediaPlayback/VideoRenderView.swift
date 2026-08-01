@@ -153,7 +153,7 @@ public final class VideoRenderView: UIView {
     /// only has to stop it rendering.
     public func detachForReplacement() {
         playerLayer?.player = nil
-        detachFromRenderer()
+        detachFromRenderer(reason: "detachForReplacement")
     }
 
     /// The player currently bound to this layer, for callers that must avoid
@@ -187,9 +187,9 @@ public final class VideoRenderView: UIView {
         playerLayer.player = player
     }
 
-    func detach() {
+    func detach(reason: String = "detach") {
         playerLayer?.player = nil
-        detachFromRenderer()
+        detachFromRenderer(reason: reason)
         // No player → nothing to display → the poster comes back.
         updatePosterVisibility(ready: false)
     }
@@ -199,8 +199,18 @@ public final class VideoRenderView: UIView {
     /// Called both from `detach` and from the renderer itself when it is
     /// invalidated, so the edge is always broken from whichever side noticed
     /// first.
-    func detachFromRenderer() {
+    func detachFromRenderer(reason: String = "?") {
         guard renderer != nil || enqueuedFrameCount > 0 else { return }
+        #if DEBUG
+        // Names WHO took this surface away. A surface losing its renderer is
+        // ordinary teardown almost everywhere and a defect during a flight, and
+        // the two are indistinguishable from the surface's own state — which is
+        // why three suspects in a row fit the evidence and were wrong.
+        if VideoRenderFlags.logsFrameDispatch {
+            print(String(format: "[avsbdl] %.3f %@ DETACHED by %@ (frames=%d)",
+                         CACurrentMediaTime(), debugLabelOrAnonymous, reason, enqueuedFrameCount))
+        }
+        #endif
         renderer?.removeSurface(self)
         renderer = nil
         // A flush empties the layer, so it must be COVERED before it happens or
