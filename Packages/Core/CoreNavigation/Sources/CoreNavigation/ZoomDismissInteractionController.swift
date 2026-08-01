@@ -155,6 +155,11 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// to the pan events. No transition animation is started: the drag phase
     /// owns the card frame-by-frame.
     func startInteractiveTransition(_ context: any UIViewControllerContextTransitioning) {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print("[zoom-live] GRAB from rest: staging own flight")
+        }
+        #endif
         let container = context.containerView
         guard let fromView = context.view(forKey: .from), let source else {
             context.completeTransition(false)

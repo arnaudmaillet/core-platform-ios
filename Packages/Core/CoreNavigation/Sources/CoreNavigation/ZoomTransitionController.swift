@@ -106,8 +106,14 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         _ navigationController: UINavigationController,
         interactionControllerFor animationController: any UIViewControllerAnimatedTransitioning
     ) -> (any UIViewControllerInteractiveTransitioning)? {
-        // A grab that started from REST owns the transition outright.
-        if interaction.isInteracting { return interaction }
+        // A grab that started from REST owns the transition outright, and the
+        // animator has to stand down completely: it stages its own flight, so
+        // an animator that also built one would put a second card over the one
+        // under the finger.
+        if interaction.isInteracting {
+            (animationController as? ZoomAnimator)?.isSupersededByInteractiveDriver = true
+            return interaction
+        }
         // Otherwise the flight gets a dormant interruptor — either leg. It
         // starts the transition non-interactively, exactly as a tap always did,
         // and holds the right to catch the flight mid-air.

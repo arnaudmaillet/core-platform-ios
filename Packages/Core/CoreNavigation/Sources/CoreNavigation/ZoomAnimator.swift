@@ -72,11 +72,25 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     }
 
     func animateTransition(using context: any UIViewControllerContextTransitioning) {
+        // Belt and braces: an interactive driver runs its own flight through
+        // `startInteractiveTransition` and UIKit does not call this, but
+        // building a second flight here would be silent and total.
+        guard !isSupersededByInteractiveDriver else { return }
         interruptibleAnimator(using: context).startAnimation()
     }
 
-    /// Both legs now answer `interruptibleAnimator(using:)`, so the selector is
-    /// no longer hidden from UIKit.
+    /// Set when a grab that started from REST owns this transition.
+    ///
+    /// `ZoomDismissInteractionController` stages its OWN complete flight — card,
+    /// shadow, dim, destination hidden — and drives it from pan events. This
+    /// animator must then build nothing at all, or the two flights stack: two
+    /// cards over one screen, the destination hidden twice, and a grab that
+    /// looks dead because a second card is sitting on top of the one the finger
+    /// is moving.
+    var isSupersededByInteractiveDriver = false
+
+    /// Both legs answer `interruptibleAnimator(using:)`, EXCEPT when an
+    /// interactive driver has taken the transition.
     ///
     /// It used to be, and the reason is worth keeping: the method is OPTIONAL
     /// and one class serves both legs, so while only the dismissal was built
@@ -85,6 +99,13 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     /// the feed's chrome replica, inserted and never animated. Now that the
     /// build below branches on the leg, answering for both is correct; the
     /// branch is what makes it correct, not the selector.
+
+    override func responds(to aSelector: Selector!) -> Bool {
+        if aSelector == #selector(interruptibleAnimator(using:)) {
+            return !isSupersededByInteractiveDriver
+        }
+        return super.responds(to: aSelector)
+    }
 
     /// The dismissal runs on a property animator so it can be interrupted.
     ///
