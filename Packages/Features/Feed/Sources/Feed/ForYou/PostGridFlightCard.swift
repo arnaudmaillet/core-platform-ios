@@ -214,8 +214,11 @@ extension PostGridFlightCard: ZoomFlightCard {
             // Full state at adopt. `frames=0` says it was never primed;
             // `hidden=Y frames>0` says something hid it after; anything else
             // points at a later detach.
-            print(String(format: "[zoom-live] %.3f card ADOPTED LIVE VIEW %@",
-                         CACurrentMediaTime(), view.debugSurfaceState))
+            // Geometry too: a subview inserted with a zero frame renders at
+            // the origin, which is what a ghost at the top-left corner is.
+            print(String(format: "[zoom-live] %.3f card ADOPTED LIVE VIEW %@ cardBounds=%@ surfaceFrame=%@",
+                         CACurrentMediaTime(), view.debugSurfaceState,
+                         NSCoder.string(for: bounds), NSCoder.string(for: view.frame)))
         }
         #endif
     }

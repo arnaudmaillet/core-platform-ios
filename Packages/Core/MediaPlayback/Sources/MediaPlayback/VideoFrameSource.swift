@@ -135,7 +135,9 @@ final class VideoFrameSource {
                       control, player.rate, item.currentTime().seconds,
                       host.map { $0.isValid ? String(format: "%.2fs", $0.seconds) : "INVALID" } ?? "no-output",
                       item.isPlaybackLikelyToKeepUp ? "Y" : "N",
-                      item.status == .readyToPlay ? "ready" : "\(item.status.rawValue)")
+                      item.status == .failed
+                          ? "FAILED(\(item.error.map { String(describing: $0) } ?? "no error"))"
+                          : (item.status == .readyToPlay ? "ready" : "unknown"))
     }
     #endif
 
