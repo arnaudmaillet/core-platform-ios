@@ -421,9 +421,13 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
             if let surface = card.zoomLiveMediaSurface {
                 source?.zoomAdoptLiveMediaView(surface)
             }
-            ZoomAnimator.holdCard(card, while: { [weak sourceRef = source] in
-                sourceRef.map { !$0.zoomLandingMediaIsReady } ?? false
-            })
+            ZoomAnimator.holdCard(card,
+                                  liveMediaIsDrawing: { [weak card] in
+                                      card?.zoomLiveMediaIsDrawing ?? true
+                                  },
+                                  while: { [weak sourceRef = source] in
+                                      sourceRef.map { !$0.zoomLandingMediaIsReady } ?? false
+                                  })
         } else {
             flight?.card.removeFromSuperview()
         }

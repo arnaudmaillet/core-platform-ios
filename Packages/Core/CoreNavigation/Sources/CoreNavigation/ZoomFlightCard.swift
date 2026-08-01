@@ -13,6 +13,19 @@ import UIKit
 /// animatable channel the flight poses; nothing is transition state.
 @MainActor
 public protocol ZoomFlightCard: UIView {
+    /// Whether the card's live media is putting pixels on screen right now.
+    ///
+    /// Distinct from `zoomLiveMediaSurface != nil`, which only says the card
+    /// HAS one. A card can be present, parented and fully opaque while its live
+    /// surface has quietly stopped drawing — and because the card's cover image
+    /// sits directly beneath that surface, the cover is then what the viewer
+    /// sees. That is a thumbnail pop with every other signal reading healthy,
+    /// which is the state this exists to make observable.
+    ///
+    /// Defaults to `true`: a card with no live media has only its cover, which
+    /// is always drawing, so there is nothing that can stop.
+    var zoomLiveMediaIsDrawing: Bool { get }
+
     /// The radius the card rests at on its source (a pin's 12pt, a mosaic
     /// brick's 10pt). The flight sweeps between this and the display's own
     /// corner radius.
@@ -85,6 +98,7 @@ public protocol ZoomFlightCard: UIView {
 }
 
 public extension ZoomFlightCard {
+    var zoomLiveMediaIsDrawing: Bool { true }
     var zoomLiveMediaSurface: UIView? { nil }
     func adoptZoomLiveMedia(_ mirror: (UIView) -> Bool) {}
     func adoptZoomLiveMediaView(_ view: UIView) {}

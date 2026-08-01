@@ -235,6 +235,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     /// the card over the screen.
     static func holdCard(_ card: UIView,
                          ceiling: CFTimeInterval = maximumLandingHold,
+                         liveMediaIsDrawing: @escaping () -> Bool = { true },
                          while condition: @escaping () -> Bool) {
         // No early-out on `condition()`. The dip is delivered by KVO a few
         // milliseconds after the surface is installed, so a single check taken
@@ -247,7 +248,9 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         }
         #endif
         let deadline = CACurrentMediaTime() + ceiling
-        let link = CADisplayLink(target: LandingHold(card: card, condition: condition, deadline: deadline),
+        let link = CADisplayLink(target: LandingHold(card: card, condition: condition,
+                                                     liveMediaIsDrawing: liveMediaIsDrawing,
+                                                     deadline: deadline),
                                  selector: #selector(LandingHold.tick))
         link.add(to: .main, forMode: .common)
     }
@@ -268,11 +271,14 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     private final class LandingHold {
         private let card: UIView
         private let condition: () -> Bool
+        private let liveMediaIsDrawing: () -> Bool
         private let deadline: CFTimeInterval
 
-        init(card: UIView, condition: @escaping () -> Bool, deadline: CFTimeInterval) {
+        init(card: UIView, condition: @escaping () -> Bool,
+             liveMediaIsDrawing: @escaping () -> Bool, deadline: CFTimeInterval) {
             self.card = card
             self.condition = condition
+            self.liveMediaIsDrawing = liveMediaIsDrawing
             self.deadline = deadline
         }
 
@@ -293,11 +299,13 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             // and its duration would look perfectly healthy in a log.
             if frames == 1 || frames == 3,
                ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-                print(String(format: "[zoom-live] %.3f hold f%d card window=%@ super=%@ alpha=%.2f",
+                // `drawing=NO` is the answer that explains a pop while every
+                // other signal reads healthy: the card is present and opaque,
+                // but its cover is what is on screen.
+                print(String(format: "[zoom-live] %.3f hold f%d card window=%@ alpha=%.2f drawing=%@",
                              CACurrentMediaTime(), frames,
                              card.window == nil ? "NIL" : "yes",
-                             card.superview.map { "\(type(of: $0))" } ?? "nil",
-                             card.alpha))
+                             card.alpha, liveMediaIsDrawing() ? "yes" : "NO"))
             }
             #endif
             // Span the window in which the dip can still arrive before
@@ -461,9 +469,13 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             // Re-binding a player layer costs a decode round-trip that no
             // ordering avoids; holding the twin over it for those few frames is
             // what keeps the dip off screen.
-            Self.holdCard(flight.card, while: { [weak sourceRef = self.source] in
-                sourceRef.map { !$0.zoomLandingMediaIsReady } ?? false
-            })
+            Self.holdCard(flight.card,
+                          liveMediaIsDrawing: { [weak card = flight.card] in
+                              card?.zoomLiveMediaIsDrawing ?? true
+                          },
+                          while: { [weak sourceRef = self.source] in
+                              sourceRef.map { !$0.zoomLandingMediaIsReady } ?? false
+                          })
             // Restore the feed content for the cancel path; moot when finished.
             self.destination?.setZoomContentHidden(false)
             self.destination?.zoomTransitionDidEnd()

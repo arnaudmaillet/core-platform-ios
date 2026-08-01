@@ -152,6 +152,14 @@ extension PostGridFlightCard: ZoomFlightCard {
 
     var zoomLiveMediaSurface: UIView? { hasAdoptedLiveMedia ? videoRenderView : nil }
 
+    /// True when the card has no live media (the cover is the content and is
+    /// always drawing), or when the live surface it adopted is genuinely
+    /// visible and rendering. False is the interesting answer: it means the
+    /// cover underneath is what the viewer is looking at.
+    var zoomLiveMediaIsDrawing: Bool {
+        hasAdoptedLiveMedia ? videoRenderView.isRenderingVisibly : true
+    }
+
     /// A grid tile never previews live, so this only ever fires on the dismiss
     /// leg — the feed's playing page mirrors its player here, and the card
     /// carries the live video home instead of a frozen cover.
