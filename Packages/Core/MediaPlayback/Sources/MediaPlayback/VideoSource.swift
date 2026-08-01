@@ -115,14 +115,31 @@ public struct PlaceholderVideoFetcher: VideoSource {
         //
         // FNV-1a is stable across processes and machines, which is the only
         // property this key needs.
-        let name = "fixture-\(Self.stableHash(url.absoluteString))."
+        // `v2` abandons entries written before the validation below existed.
+        // Those were error-page bodies downloaded while the host was returning
+        // 429 — a few hundred bytes each, cached under a .mp4 name and then
+        // served as video, which AVFoundation reports as
+        // `-11829 "Cannot Open — This media may be damaged."` A cache that
+        // poisons itself is worse than no cache, and the poison outlives the
+        // outage that created it.
+        let name = "fixture-v2-\(Self.stableHash(url.absoluteString))."
             + (url.pathExtension.isEmpty ? "mp4" : url.pathExtension)
         let cached = FileManager.default.temporaryDirectory.appendingPathComponent(name)
         if FileManager.default.fileExists(atPath: cached.path) { return cached }
 
-        guard let (downloaded, response) = try? await URLSession.shared.download(from: url),
-              (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true
-        else { return url }
+        guard let (downloaded, response) = try? await URLSession.shared.download(from: url) else {
+            return url
+        }
+        // Only cache something that is plausibly the asset. A throttle or an
+        // error page arrives as a perfectly successful small HTML/JSON body, so
+        // the status code alone is not enough to trust what was written.
+        let http = response as? HTTPURLResponse
+        let size = (try? FileManager.default.attributesOfItem(atPath: downloaded.path)[.size] as? Int) ?? 0
+        let looksLikeMedia = (http?.mimeType?.hasPrefix("video") ?? true) && (size ?? 0) > Self.minimumFixtureBytes
+        guard http.map({ (200..<300).contains($0.statusCode) }) ?? true, looksLikeMedia else {
+            try? FileManager.default.removeItem(at: downloaded)
+            return url
+        }
 
         // Scratch-then-move, the same discipline the synthesized path uses: only
         // complete files ever appear at the cache path, so a second resolve
@@ -136,6 +153,11 @@ public struct PlaceholderVideoFetcher: VideoSource {
         }
         return cached
     }
+
+    /// Smallest plausible fixture. The smallest real one in the catalog is
+    /// ~1MB; the poisoned entries were ~1KB, so this separates them by three
+    /// orders of magnitude rather than by a fine margin.
+    private static let minimumFixtureBytes = 64 * 1024
 
     /// FNV-1a over the UTF-8 bytes. Deterministic across processes, unlike
     /// `Hasher`, which is what a cross-launch cache key requires.
