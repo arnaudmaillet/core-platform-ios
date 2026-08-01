@@ -322,6 +322,24 @@ public final class VideoRenderView: UIView {
     /// Whether this surface has ever displayed a frame since its last flush.
     public var hasFrame: Bool { isReadyForDisplay }
 
+    /// Whether this surface is drawing AND actually opaque on screen right now.
+    ///
+    /// The signal a handoff must wait on. `isReadyForDisplay && !isHidden` is
+    /// not enough once the reveal cross-fades: `reveal` clears `isHidden` and
+    /// THEN animates alpha 0 → 1, so those two go true while the surface is
+    /// still transparent. A landing gated on them releases the flight card
+    /// two frames early and the host's cover shows through — a thumbnail
+    /// flicker at the exact end of the flight.
+    ///
+    /// Reads the PRESENTATION layer, not `alpha`. During a UIView animation
+    /// `alpha` already holds the target value, so it reports 1 the moment the
+    /// fade is scheduled and would carry the same lie.
+    public var isRenderingVisibly: Bool {
+        guard isReadyForDisplay, !isHidden else { return false }
+        let opacity = layer.presentation()?.opacity ?? Float(alpha)
+        return opacity > 0.99
+    }
+
     /// Takes the surface down over whatever is behind it, rather than
     /// switching it off.
     ///

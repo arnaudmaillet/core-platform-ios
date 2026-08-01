@@ -407,9 +407,13 @@ public final class GridVideoPlaybackCoordinator {
     /// False while its layer is still acquiring — the window a landing card is
     /// held across.
     public func isSurfaceRendering(for id: PostID) -> Bool {
-        if let hosted = hostedSurfaces[id] { return hosted.isReadyForDisplay && !hosted.isHidden }
+        // `isRenderingVisibly`, not `isReadyForDisplay && !isHidden`: the reveal
+        // cross-fades, so those two go true while the surface is still
+        // transparent and a landing gated on them drops the flight card two
+        // frames early, showing the tile's cover through it.
+        if let hosted = hostedSurfaces[id] { return hosted.isRenderingVisibly }
         guard let cell = playing[id], let view = cell.loadedVideoRenderView else { return false }
-        return view.isReadyForDisplay && !view.isHidden
+        return view.isRenderingVisibly
     }
 
     /// Retires a parked player nobody adopted — a cancelled flight, or a
