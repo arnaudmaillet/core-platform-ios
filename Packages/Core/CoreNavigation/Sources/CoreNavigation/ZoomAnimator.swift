@@ -285,6 +285,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                          liveMediaIsDrawing: @escaping () -> Bool = { true },
                          liveMediaState: @escaping () -> String = { "" },
                          finalizeLanding: @escaping () -> Void = {},
+                         onUnmounted: @escaping () -> Void = {},
                          path: String = "?",
                          while condition: @escaping () -> Bool) {
         // No early-out on `condition()`. The dip is delivered by KVO a few
@@ -306,6 +307,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                                                      liveMediaIsDrawing: liveMediaIsDrawing,
                                                      liveMediaState: liveMediaState,
                                                      finalizeLanding: finalizeLanding,
+                                                     onUnmounted: onUnmounted,
                                                      deadline: deadline),
                                  selector: #selector(LandingHold.tick))
         link.add(to: .main, forMode: .common)
@@ -330,17 +332,20 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         private let liveMediaIsDrawing: () -> Bool
         private let liveMediaState: () -> String
         private let finalizeLanding: () -> Void
+        private let onUnmounted: () -> Void
         private let deadline: CFTimeInterval
 
         init(card: UIView, condition: @escaping () -> Bool,
              liveMediaIsDrawing: @escaping () -> Bool,
              liveMediaState: @escaping () -> String,
-             finalizeLanding: @escaping () -> Void, deadline: CFTimeInterval) {
+             finalizeLanding: @escaping () -> Void,
+             onUnmounted: @escaping () -> Void, deadline: CFTimeInterval) {
             self.card = card
             self.condition = condition
             self.liveMediaIsDrawing = liveMediaIsDrawing
             self.liveMediaState = liveMediaState
             self.finalizeLanding = finalizeLanding
+            self.onUnmounted = onUnmounted
             self.deadline = deadline
         }
 
@@ -400,7 +405,15 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                                  CACurrentMediaTime(), timedOut ? " (TIMEOUT)" : ""))
                 }
                 #endif
+                // Unmount and report completion INSIDE one transaction, with a
+                // completion block, so UIKit tears the transition down only
+                // after Core Animation has committed the frame that removed the
+                // card — by which point the cell beneath it has already been
+                // laid out and composited.
+                CATransaction.begin()
+                CATransaction.setCompletionBlock(onUnmounted)
                 card.removeFromSuperview()
+                CATransaction.commit()
                 return
             }
         }
@@ -572,6 +585,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                           finalizeLanding: { [weak sourceRef = self.source] in
                               sourceRef?.zoomFinalizeLanding()
                           },
+                          onUnmounted: { context.completeTransition(!cancelled) },
                           path: "animator/tap-back",
                           while: { [weak sourceRef = self.source] in
                               sourceRef.map { !$0.zoomLandingMediaIsReady } ?? false
@@ -582,7 +596,18 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             if !cancelled {
                 self.source.setZoomSourceHidden(false)
             }
-            context.completeTransition(!cancelled)
+            // `completeTransition` is NOT called here. It tells UIKit to
+            // dismantle the transition container, and doing that in the same
+            // turn as the landing races Core Animation: the grid cell is
+            // unhidden above but has not been COMPOSITED, and at 60/120fps the
+            // teardown can win. Slow Animations makes the flash vanish
+            // entirely, which is what identified this as a race rather than a
+            // geometry error — the work is the same, only the clock differs.
+            //
+            // It is handed to the hold instead, which calls it from a
+            // CATransaction completion block after the card is unmounted. The
+            // hold always terminates (it has a deadline), so completion is
+            // never dropped.
         }
     }
 }
