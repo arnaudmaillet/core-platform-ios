@@ -428,6 +428,9 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
                                   liveMediaState: { [weak card] in
                                       card?.zoomLiveMediaDebugState ?? "card gone"
                                   },
+                                  finalizeLanding: { [weak sourceRef = source] in
+                                      sourceRef?.zoomFinalizeLanding()
+                                  },
                                   path: "grab",
                                   while: { [weak sourceRef = source] in
                                       sourceRef.map { !$0.zoomLandingMediaIsReady } ?? false

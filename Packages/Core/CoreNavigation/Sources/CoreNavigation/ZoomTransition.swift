@@ -76,6 +76,17 @@ public protocol ZoomTransitionSource: AnyObject {
     /// media has nothing to wait for.
     var zoomLandingMediaIsReady: Bool { get }
 
+    /// Forces the landing target to finish its layout before the flight card
+    /// is taken away.
+    ///
+    /// `zoomLandingMediaIsReady` answers about the SURFACE; this is about the
+    /// cell around it. A cell can report a drawing surface while its own
+    /// subview composition is still pending a layout pass, and unmounting the
+    /// card into that gap is a one-frame flash at the very end of the landing.
+    /// Default is nothing — a source whose landing needs no pass has none to
+    /// force.
+    func zoomFinalizeLanding()
+
     /// Takes the flight card's live surface and hosts it ABOVE the navigation
     /// controller for the duration of a dismissal, positioned at `rect`.
     ///
@@ -96,6 +107,7 @@ public extension ZoomTransitionSource {
     func zoomSourceWillStageDismissal() {}
     func zoomAdoptLiveMediaView(_ view: UIView) {}
     var zoomLandingMediaIsReady: Bool { true }
+    func zoomFinalizeLanding() {}
     func zoomHoistLiveMedia(_ view: UIView, at rect: CGRect, in space: UICoordinateSpace) -> Bool { false }
     func zoomPoseHoistedMedia(at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) {}
 }

@@ -353,6 +353,22 @@ final class ForYouGridPage: UIView {
         return made
     }
 
+    /// Forces the landing cell through a layout pass while the card still
+    /// covers it.
+    ///
+    /// The surface can report a decoded frame while the CELL around it has a
+    /// pending layout — the render view was just inserted or unhidden, and its
+    /// frame resolves on the next pass. Unmounting the card into that gap
+    /// shows the cell mid-composition for a frame. Doing the pass under the
+    /// card costs nothing visible.
+    func finalizeLandingLayout(for postID: PostID) {
+        guard let index = posts.firstIndex(where: { $0.id == postID }),
+              let cell = collectionView.cellForItem(at: IndexPath(item: index, section: 0))
+        else { return }
+        cell.setNeedsLayout()
+        cell.layoutIfNeeded()
+    }
+
     /// Whether the tile that a dismissal is landing on is already rendering.
     /// True when it carries no video, so a still tile never holds the card.
     func isLandingPlaybackReady(for postID: PostID) -> Bool {

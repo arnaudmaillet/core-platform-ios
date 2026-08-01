@@ -284,6 +284,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                          ceiling: CFTimeInterval = maximumLandingHold,
                          liveMediaIsDrawing: @escaping () -> Bool = { true },
                          liveMediaState: @escaping () -> String = { "" },
+                         finalizeLanding: @escaping () -> Void = {},
                          path: String = "?",
                          while condition: @escaping () -> Bool) {
         // No early-out on `condition()`. The dip is delivered by KVO a few
@@ -304,6 +305,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let link = CADisplayLink(target: LandingHold(card: card, condition: condition,
                                                      liveMediaIsDrawing: liveMediaIsDrawing,
                                                      liveMediaState: liveMediaState,
+                                                     finalizeLanding: finalizeLanding,
                                                      deadline: deadline),
                                  selector: #selector(LandingHold.tick))
         link.add(to: .main, forMode: .common)
@@ -327,15 +329,18 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         private let condition: () -> Bool
         private let liveMediaIsDrawing: () -> Bool
         private let liveMediaState: () -> String
+        private let finalizeLanding: () -> Void
         private let deadline: CFTimeInterval
 
         init(card: UIView, condition: @escaping () -> Bool,
              liveMediaIsDrawing: @escaping () -> Bool,
-             liveMediaState: @escaping () -> String, deadline: CFTimeInterval) {
+             liveMediaState: @escaping () -> String,
+             finalizeLanding: @escaping () -> Void, deadline: CFTimeInterval) {
             self.card = card
             self.condition = condition
             self.liveMediaIsDrawing = liveMediaIsDrawing
             self.liveMediaState = liveMediaState
+            self.finalizeLanding = finalizeLanding
             self.deadline = deadline
         }
 
@@ -379,6 +384,10 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             // which is where it was reported. Holding one more tick costs
             // 16ms of a card that is already showing the same pixels.
             if !settling, !condition(), grace < 1 {
+                // Make the landing finish its layout, THEN spend the grace
+                // frame — so the extra tick is the cell composing, not just
+                // time passing.
+                finalizeLanding()
                 grace += 1
                 return
             }
@@ -559,6 +568,9 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                           },
                           liveMediaState: { [weak card = flight.card] in
                               card?.zoomLiveMediaDebugState ?? "card gone"
+                          },
+                          finalizeLanding: { [weak sourceRef = self.source] in
+                              sourceRef?.zoomFinalizeLanding()
                           },
                           path: "animator/tap-back",
                           while: { [weak sourceRef = self.source] in

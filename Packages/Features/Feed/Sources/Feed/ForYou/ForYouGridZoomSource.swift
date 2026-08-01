@@ -125,6 +125,12 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         page?.isLandingPlaybackReady(for: anchorID) ?? true
     }
 
+    /// Lays the landing tile out before the card is unmounted, so the cell's
+    /// subview composition is resolved rather than pending.
+    func zoomFinalizeLanding() {
+        page?.finalizeLandingLayout(for: anchorID)
+    }
+
     /// Hoists the dismissal's live surface into the tab-bar-level host.
     private let hoistLive: ((UIView, CGRect, UICoordinateSpace) -> Bool)?
     private let poseHoisted: ((CGRect, UICoordinateSpace, CGFloat) -> Void)?
