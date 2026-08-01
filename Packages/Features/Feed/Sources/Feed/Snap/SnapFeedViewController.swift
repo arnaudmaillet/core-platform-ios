@@ -757,6 +757,17 @@ final class SnapFeedViewController: UIViewController {
         orderedIDs = state.items.map(\.id)
         modelsByID = Dictionary(uniqueKeysWithValues: state.items.map { ($0.id, $0) })
 
+        #if DEBUG
+        // How many pages this feed has, and when. A feed pushed before its
+        // items arrive has NOTHING to lay out, so what fills the screen is the
+        // cell's black floor — no media card involved, which is why tracing the
+        // card showed it holding a poster the whole time. Under injected
+        // latency this window is the injected latency long.
+        if ProcessInfo.processInfo.arguments.contains("-media-log") {
+            print(String(format: "[media] %.3f feed render items=%d",
+                         CACurrentMediaTime(), orderedIDs.count))
+        }
+        #endif
         var snapshot = NSDiffableDataSourceSnapshot<Section, PostID>()
         snapshot.appendSections([.main])
         snapshot.appendItems(orderedIDs)
@@ -1378,6 +1389,12 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// Hides only the feed's own view: the navigation bar above it (owned by
     /// the wrapping navigation controller) keeps rendering natively while the
     /// flying card impersonates the page underneath it.
+    /// The feed has something to show once it has pages. Pushed cold it has
+    /// none until its first `render`, which under injected latency arrived
+    /// 2.18s after the flight began — against a 0.42s flight, so the card was
+    /// removed over an empty screen and the cell's black floor was what showed.
+    public var zoomDestinationContentIsReady: Bool { !orderedIDs.isEmpty }
+
     public func setZoomContentHidden(_ hidden: Bool) {
         view.alpha = hidden ? 0 : 1
     }

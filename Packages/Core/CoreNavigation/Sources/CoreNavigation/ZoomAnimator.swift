@@ -143,17 +143,87 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             // was the flash at the END of the flight. The card is still on top
             // and still rendering through both steps, so nothing shows in
             // between.
-            self.destination?.setZoomContentHidden(false)
-            if let surface = flight.card.zoomLiveMediaSurface {
-                self.destination?.zoomAdoptLiveMediaView(surface)
+            // Wait for the destination to HAVE content before revealing it.
+            //
+            // Holding the card cannot help here: it is inserted BELOW the
+            // destination view, so the moment `setZoomContentHidden(false)`
+            // runs the destination covers it regardless. What has to wait is
+            // the reveal itself. A screen pushed cold has nothing to lay out —
+            // measured at 1000ms injected latency as 2.18s of empty feed
+            // against a 0.42s flight — and revealing it on schedule is what put
+            // the cell's black floor on screen.
+            //
+            // Everything below stays in one block so the ordering note above
+            // still holds: reveal, THEN adopt the surface, then drop the card.
+            Self.whenReady(ceiling: Self.maximumHydrationHold,
+                           condition: { [weak destination = self.destination] in
+                               destination?.zoomDestinationContentIsReady ?? true
+                           }) {
+                self.destination?.setZoomContentHidden(false)
+                if let surface = flight.card.zoomLiveMediaSurface {
+                    self.destination?.zoomAdoptLiveMediaView(surface)
+                }
+                flight.card.removeFromSuperview()
+                flight.shadow.removeFromSuperview()
+                dim.removeFromSuperview()
+                presentingView?.transform = .identity
+                ZoomFlight.clearRecededChrome(from: presentingView)
+                self.destination?.zoomTransitionDidEnd()
+                context.completeTransition(!context.transitionWasCancelled)
             }
-            flight.card.removeFromSuperview()
-            flight.shadow.removeFromSuperview()
-            dim.removeFromSuperview()
-            presentingView?.transform = .identity
-            ZoomFlight.clearRecededChrome(from: presentingView) // covered by the opaque feed
-            self.destination?.zoomTransitionDidEnd()
-            context.completeTransition(!context.transitionWasCancelled)
+        }
+    }
+
+    /// Runs `work` as soon as `condition` is true, or at `ceiling`, whichever
+    /// comes first. Polled on the display link, like the landing hold.
+    ///
+    /// Fires SYNCHRONOUSLY when the condition already holds, so the common case
+    /// — a destination whose data was ready before the flight ended — keeps the
+    /// exact ordering and timing it had before this existed.
+    static func whenReady(ceiling: CFTimeInterval,
+                          condition: @escaping () -> Bool,
+                          then work: @escaping () -> Void) {
+        if condition() {
+            work()
+            return
+        }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] %.3f destination NOT ready — holding reveal",
+                         CACurrentMediaTime()))
+        }
+        #endif
+        let deadline = CACurrentMediaTime() + ceiling
+        let link = CADisplayLink(target: ReadyGate(condition: condition, deadline: deadline, work: work),
+                                 selector: #selector(ReadyGate.tick))
+        link.add(to: .main, forMode: .common)
+    }
+
+    private final class ReadyGate {
+        private let condition: () -> Bool
+        private let deadline: CFTimeInterval
+        private let work: () -> Void
+        private var fired = false
+
+        init(condition: @escaping () -> Bool, deadline: CFTimeInterval, work: @escaping () -> Void) {
+            self.condition = condition
+            self.deadline = deadline
+            self.work = work
+        }
+
+        @objc func tick(_ link: CADisplayLink) {
+            guard !fired else { return }
+            let timedOut = CACurrentMediaTime() >= deadline
+            guard condition() || timedOut else { return }
+            fired = true
+            link.invalidate()
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                print(String(format: "[zoom-live] %.3f reveal released%@",
+                             CACurrentMediaTime(), timedOut ? " (TIMEOUT)" : ""))
+            }
+            #endif
+            work()
         }
     }
 
@@ -163,7 +233,9 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     /// however long the layer actually needs, usually a frame or two, and the
     /// ceiling only exists so a surface that never reports ready cannot strand
     /// the card over the screen.
-    static func holdCard(_ card: UIView, while condition: @escaping () -> Bool) {
+    static func holdCard(_ card: UIView,
+                         ceiling: CFTimeInterval = maximumLandingHold,
+                         while condition: @escaping () -> Bool) {
         // No early-out on `condition()`. The dip is delivered by KVO a few
         // milliseconds after the surface is installed, so a single check taken
         // at landing still reads ready and the card would leave just in time to
@@ -174,7 +246,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             print(String(format: "[zoom-live] %.3f landing hold BEGIN", CACurrentMediaTime()))
         }
         #endif
-        let deadline = CACurrentMediaTime() + maximumLandingHold
+        let deadline = CACurrentMediaTime() + ceiling
         let link = CADisplayLink(target: LandingHold(card: card, condition: condition, deadline: deadline),
                                  selector: #selector(LandingHold.tick))
         link.add(to: .main, forMode: .common)
@@ -184,6 +256,13 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     /// (~600ms was the re-parent dip) with room to spare, while staying short
     /// enough that a stuck surface is a brief pause rather than a frozen card.
     private static let maximumLandingHold: CFTimeInterval = 0.75
+
+    /// Ceiling on the hold that waits for a destination's CONTENT rather than
+    /// its decoded frames. Longer than the landing hold because it waits on a
+    /// network round trip, not a decode — and short enough that a screen whose
+    /// data never arrives becomes a normal empty state rather than a card
+    /// frozen over it indefinitely.
+    private static let maximumHydrationHold: CFTimeInterval = 3.0
 
 
     private final class LandingHold {

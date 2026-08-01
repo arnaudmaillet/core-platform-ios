@@ -102,6 +102,18 @@ public extension ZoomTransitionSource {
 
 @MainActor
 public protocol ZoomTransitionDestination: AnyObject {
+    /// Whether the destination has content to reveal yet.
+    ///
+    /// A pushed screen whose data has not arrived has nothing to lay out, so
+    /// removing the flight card exposes its background — measured at 1000ms
+    /// injected latency as the feed sitting empty for 2.18s after the flight
+    /// began, against a flight that lasts 0.42s. The card is a full-bleed
+    /// cover of the very post being opened, so holding it there is both
+    /// truthful and better-looking than the alternative.
+    ///
+    /// Defaults to `true`: a destination that is ready the moment it is pushed
+    /// (anything not network-backed) opts out by saying nothing.
+    var zoomDestinationContentIsReady: Bool { get }
     /// The full rect the flying card lands on (present) / lifts from (dismiss),
     /// in `container`'s coordinate space — the active page's bounds.
     func zoomTargetFrame(in container: UICoordinateSpace) -> CGRect
@@ -193,6 +205,7 @@ public protocol ZoomTransitionDestination: AnyObject {
 }
 
 public extension ZoomTransitionDestination {
+    var zoomDestinationContentIsReady: Bool { true }
     func zoomMirrorLiveMedia(onto surface: UIView) -> Bool { false }
     func zoomDonateLiveMediaView() -> UIView? { nil }
     func zoomReclaimLiveMediaView(_ view: UIView) {}
