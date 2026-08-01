@@ -285,6 +285,21 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
 
         @objc func tick(_ link: CADisplayLink) {
             frames += 1
+            #if DEBUG
+            // Is the card we are "holding" actually on screen? The hold is
+            // scheduled and then `completeTransition` runs, and UIKit tears
+            // down the transition container — which is the card's superview.
+            // A hold over a card UIKit has already removed protects nothing,
+            // and its duration would look perfectly healthy in a log.
+            if frames == 1 || frames == 3,
+               ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                print(String(format: "[zoom-live] %.3f hold f%d card window=%@ super=%@ alpha=%.2f",
+                             CACurrentMediaTime(), frames,
+                             card.window == nil ? "NIL" : "yes",
+                             card.superview.map { "\(type(of: $0))" } ?? "nil",
+                             card.alpha))
+            }
+            #endif
             // Span the window in which the dip can still arrive before
             // believing a "ready" answer.
             let settling = frames < Self.minimumHoldFrames
