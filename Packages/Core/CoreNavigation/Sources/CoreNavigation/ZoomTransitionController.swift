@@ -108,11 +108,11 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
     ) -> (any UIViewControllerInteractiveTransitioning)? {
         // A grab that started from REST owns the transition outright.
         if interaction.isInteracting { return interaction }
-        // Otherwise a dismissal gets a dormant interruptor: it starts the pop
-        // non-interactively, exactly as a tap-back always did, and holds the
-        // right to catch the flight mid-air.
-        guard let zoom = animationController as? ZoomAnimator, zoom.isDismissing else { return nil }
-        let interruptor = ZoomFlightInterruptor()
+        // Otherwise the flight gets a dormant interruptor — either leg. It
+        // starts the transition non-interactively, exactly as a tap always did,
+        // and holds the right to catch the flight mid-air.
+        guard let zoom = animationController as? ZoomAnimator else { return nil }
+        let interruptor = ZoomFlightInterruptor(advancesOnDownwardDrag: zoom.isDismissing)
         flightInterruptor = interruptor
         return interruptor
     }

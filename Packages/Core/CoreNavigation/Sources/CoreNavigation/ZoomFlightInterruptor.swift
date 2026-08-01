@@ -15,14 +15,13 @@ import UIKit
 /// stops that animator wherever it is; `update(_:)` scrubs it; `finish()` and
 /// `cancel()` hand it back with the remaining distance re-timed.
 ///
-/// **Direction.** Downward advances the dismissal, which is the same direction
-/// that starts one from rest (`ZoomDismissInteractionController`), so a viewer
-/// who grabs a flight mid-air pushes it home the way they would have thrown it.
-/// Dragging up runs it backwards toward the page.
-///
-/// This is the DISMISS leg only. Interrupting a present means defining what a
-/// reversed push does to the pool loan and to a surface that has been hoisted
-/// above the navigation controller, and that is its own change.
+/// **Direction is per leg, and both mean "down puts it back".** On a DISMISSAL
+/// downward advances, which is the direction that starts one from rest
+/// (`ZoomDismissInteractionController`), so catching a flight mid-air pushes it
+/// home the way it would have been thrown. On a PRESENT the same downward drag
+/// has to REVERSE the push, because down is the gesture for going back to the
+/// grid either way. One sign flip expresses that, and inverting the velocity
+/// with it keeps a flick meaning the same thing on both legs.
 @MainActor
 final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
     /// The flight starts on its own. This object only ever interrupts one.
@@ -41,6 +40,14 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
     /// than the card's, so the gain does not change with the post's shape.
     private var span: CGFloat = 1
     private var isGrabbing = false
+    /// `+1` when a downward drag advances the transition (dismiss), `-1` when it
+    /// reverses one (present).
+    private let direction: CGFloat
+
+    init(advancesOnDownwardDrag: Bool) {
+        direction = advancesOnDownwardDrag ? 1 : -1
+        super.init()
+    }
 
     override func startInteractiveTransition(_ transitionContext: any UIViewControllerContextTransitioning) {
         super.startInteractiveTransition(transitionContext)
@@ -73,12 +80,14 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
             grabbedAt = percentComplete
         case .changed:
             guard isGrabbing else { return }
-            update(min(max(grabbedAt + translation / span, 0), 1))
+            update(progress(for: translation))
         case .ended, .cancelled, .failed:
             guard isGrabbing else { return }
             isGrabbing = false
-            let velocity = recogniser.velocity(in: container).y
-            let progress = min(max(grabbedAt + translation / span, 0), 1)
+            // Both flipped by `direction`, so the decision reads the same on
+            // either leg: "is this heading for the end, or back to the start".
+            let velocity = direction * recogniser.velocity(in: container).y
+            let progress = progress(for: translation)
             // A flick decides regardless of distance, matching the grab-from-rest
             // contract; otherwise the same completion threshold everything else
             // in this transition uses.
@@ -118,6 +127,10 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
         }
     }
     #endif
+
+    private func progress(for translation: CGFloat) -> CGFloat {
+        min(max(grabbedAt + direction * translation / span, 0), 1)
+    }
 
     /// Takes the recogniser off the container once a decision is made, so the
     /// same flight cannot be grabbed twice on its way out.

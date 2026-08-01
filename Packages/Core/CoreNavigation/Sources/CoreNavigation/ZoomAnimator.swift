@@ -72,31 +72,19 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     }
 
     func animateTransition(using context: any UIViewControllerContextTransitioning) {
-        if isPresenting {
-            present(context)
-        } else {
-            interruptibleAnimator(using: context).startAnimation()
-        }
+        interruptibleAnimator(using: context).startAnimation()
     }
 
-    /// `interruptibleAnimator(using:)` is OPTIONAL on the protocol, and this
-    /// object answers it only when it is the dismiss leg.
+    /// Both legs now answer `interruptibleAnimator(using:)`, so the selector is
+    /// no longer hidden from UIKit.
     ///
-    /// UIKit asks for it on a push as well — measured, `presenting=true` — and
-    /// one class implements both legs, so an unconditional implementation ran
-    /// the whole DISMISS setup against a present context: a page-posed card
-    /// carrying the feed's chrome replica, inserted into the container and
-    /// never animated, because the thing that would have animated it is the
-    /// dismissal that had not happened. It read as a teardown failure and was a
-    /// construction one.
-    ///
-    /// Hiding the selector is the honest fix: the present leg genuinely does
-    /// not implement this yet, and now says so, so UIKit drives it exactly as
-    /// it did before.
-    override func responds(to aSelector: Selector!) -> Bool {
-        if aSelector == #selector(interruptibleAnimator(using:)) { return isDismissing }
-        return super.responds(to: aSelector)
-    }
+    /// It used to be, and the reason is worth keeping: the method is OPTIONAL
+    /// and one class serves both legs, so while only the dismissal was built
+    /// here an unconditional implementation answered the PUSH too and ran the
+    /// whole DISMISS setup against a present context — a page-posed card with
+    /// the feed's chrome replica, inserted and never animated. Now that the
+    /// build below branches on the leg, answering for both is correct; the
+    /// branch is what makes it correct, not the selector.
 
     /// The dismissal runs on a property animator so it can be interrupted.
     ///
@@ -114,7 +102,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         if let interruptible, interruptibleContext === (context as AnyObject) {
             return interruptible
         }
-        let animator = dismiss(context)
+        let animator = isPresenting ? present(context) : dismiss(context)
         interruptible = animator
         interruptibleContext = context as AnyObject
         return animator
@@ -122,11 +110,16 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
 
     // MARK: - Present
 
-    private func present(_ context: any UIViewControllerContextTransitioning) {
+    private func present(_ context: any UIViewControllerContextTransitioning) -> UIViewPropertyAnimator {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print("[zoom-live] BUILD present flight (presenting=\(isPresenting))")
+        }
+        #endif
         let container = context.containerView
         guard let toView = context.view(forKey: .to) else {
             context.completeTransition(false)
-            return
+            return UIViewPropertyAnimator(duration: duration, curve: .linear)
         }
         // Dims the map around the flying card; tail-weighted so the map reads
         // through for most of the flight and recedes to black as the card lands.
@@ -198,22 +191,54 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         #if DEBUG
         Self.debugTrackFlightGeometry(card: flight.card)
         #endif
-        // Dim fades on a plain curve — opacity should never bounce.
-        UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseIn]) {
-            dim.alpha = 1
-        }
+        // One property animator, so the push can be caught mid-air and scrubbed.
         // Card and the map's depth ride ONE spring, so the lift-off and the
         // canvas receding stay locked together and land as a single settle.
         // The card lands flush with the device's own display corners, so the
         // reveal of the (screen-clipped) feed underneath is seamless.
-        UIView.animate(withDuration: duration, delay: 0,
-                       usingSpringWithDamping: ZoomFlight.springDamping,
-                       initialSpringVelocity: ZoomFlight.springVelocity, options: []) {
+        let spring = UISpringTimingParameters(
+            dampingRatio: ZoomFlight.springDamping,
+            initialVelocity: CGVector(dx: 0, dy: ZoomFlight.springVelocity)
+        )
+        let animator = UIViewPropertyAnimator(duration: duration, timingParameters: spring)
+        animator.addAnimations {
             flight.poseAsPage(cornerRadius: screenRadius)
             presentingView?.transform = CGAffineTransform(
                 scaleX: ZoomFlight.presenterDepthScale, y: ZoomFlight.presenterDepthScale
             )
-        } completion: { _ in
+        }
+        // The dim was a second, plainly-curved animation ("opacity should never
+        // bounce"). A property animator carries one curve, and a separate
+        // UIView animation would neither scrub nor reverse with the rest, so it
+        // rides this one delayed instead — which keeps what the curve was FOR:
+        // the map reads through for most of the flight and goes to black as the
+        // card lands.
+        animator.addAnimations({ dim.alpha = 1 }, delayFactor: 0.35)
+        animator.addCompletion { _ in
+            if context.transitionWasCancelled {
+                // REVERSED push: the grid is staying. The card has already been
+                // animated back onto the tile, so this only has to put the tile
+                // back and drop everything the flight added.
+                //
+                // Nothing to hand back: under N-surface the card joined the
+                // TILE's playback as an extra surface and the tile never stopped
+                // rendering, so the surface is simply dropped. The destination
+                // is not revealed — UIKit removes it on `completeTransition`.
+                flight.card.removeFromSuperview()
+                flight.shadow.removeFromSuperview()
+                dim.removeFromSuperview()
+                presentingView?.transform = .identity
+                ZoomFlight.clearRecededChrome(from: presentingView)
+                self.destination?.zoomTransitionDidEnd()
+                self.source.setZoomSourceHidden(false)
+                context.completeTransition(false)
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                    print("[zoom-live] present REVERSED, source restored")
+                }
+                #endif
+                return
+            }
             // Reveal the page FIRST, then move the surface into it — order that
             // matters for a measured reason. An `AVPlayerLayer` only renders
             // inside a visible hierarchy, so installing it into still-hidden
@@ -250,6 +275,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                 context.completeTransition(!context.transitionWasCancelled)
             }
         }
+        return animator
     }
 
     /// Runs `work` as soon as `condition` is true, or at `ceiling`, whichever
