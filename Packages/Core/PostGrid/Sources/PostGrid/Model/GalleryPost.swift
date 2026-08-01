@@ -65,6 +65,21 @@ public struct GalleryPost: Equatable, Sendable {
     public let publishedAtMS: Int64
     /// counter.v1 projections; nil when the read-model had no value (the
     /// cells hide the counter rather than asserting a zero).
+    /// The post's author, when the projection that built this carried it.
+    ///
+    /// The grid itself renders none of this — a tile is media and counters. It
+    /// is here because the grid's projection is what a full-screen open is
+    /// SEEDED from: without author identity the opened page shows a caption and
+    /// a blank author capsule for as long as its own fetch takes (~0.69s
+    /// measured), and the capsule then fills in late. Carrying it makes the
+    /// open complete at 0ms rather than partial.
+    ///
+    /// Optional because not every builder has it: the profile gallery is
+    /// already scoped to one author and never needed it.
+    public var authorID: ProfileID?
+    public var authorName: String?
+    public var authorHandle: String?
+    public var authorAvatarURL: URL?
     public var reactionCount: Int64?
     public var commentCount: Int64?
     public var viewCount: Int64?
@@ -78,6 +93,10 @@ public struct GalleryPost: Equatable, Sendable {
         aspectRatio: Double = 1,
         caption: String,
         publishedAtMS: Int64,
+        authorID: ProfileID? = nil,
+        authorName: String? = nil,
+        authorHandle: String? = nil,
+        authorAvatarURL: URL? = nil,
         reactionCount: Int64? = nil,
         commentCount: Int64? = nil,
         viewCount: Int64? = nil
@@ -90,6 +109,10 @@ public struct GalleryPost: Equatable, Sendable {
         self.aspectRatio = aspectRatio
         self.caption = caption
         self.publishedAtMS = publishedAtMS
+        self.authorID = authorID
+        self.authorName = authorName
+        self.authorHandle = authorHandle
+        self.authorAvatarURL = authorAvatarURL
         self.reactionCount = reactionCount
         self.commentCount = commentCount
         self.viewCount = viewCount

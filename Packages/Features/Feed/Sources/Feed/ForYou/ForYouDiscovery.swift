@@ -117,6 +117,12 @@ public actor ForYouRepository: ForYouProviding {
                     aspectRatio: attachment?.aspectRatio ?? 1,
                     caption: entry.post.caption,
                     publishedAtMS: Int64(entry.post.publishedAt.timeIntervalSince1970 * 1000),
+                    // Carried so a tile tap can seed the full-screen page with
+                    // a COMPLETE projection; the grid renders none of it.
+                    authorID: entry.author.id,
+                    authorName: entry.author.displayName,
+                    authorHandle: entry.author.handle,
+                    authorAvatarURL: entry.author.avatarURL,
                     reactionCount: entry.likeCount
                 )
             },

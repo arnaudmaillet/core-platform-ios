@@ -328,26 +328,30 @@ final class ForYouViewController: UIViewController {
     /// stays free of `PostGrid` — the grid is one opener among several, and the
     /// feed is also reached from Maps and from a route.
     ///
-    /// **Partial, and the gap belongs to the contract.** `GalleryPost` carries
-    /// no author: no display name, handle or avatar. Those stay empty and fill
-    /// when the real entry lands. Everything the grid DOES have — caption,
-    /// poster, media URL and kind, reaction count — renders immediately.
-    /// Completing it means the grid projection carrying author identity, which
-    /// is a backend contract change rather than a client one.
+    /// Complete now that the projection carries author identity — the page
+    /// opens with its capsule populated rather than filling in ~0.69s later.
+    ///
+    /// `metaText` is rebuilt here in the feed's own "@handle · age" form using
+    /// the same `PostMetadata.compactAge` the grid's cells use, so the seeded
+    /// string matches the one the real entry will carry and nothing re-renders
+    /// differently when it lands.
     private static func seedModel(from post: GalleryPost) -> FeedItemDisplayModel {
-        FeedItemDisplayModel(
+        let handle = post.authorHandle.map { "@\($0)" } ?? ""
+        let age = PostMetadata.compactAge(ofMillis: post.publishedAtMS)
+        return FeedItemDisplayModel(
             id: post.id,
-            authorID: ProfileID(""),
-            authorName: "",
-            metaText: "",
-            avatarURL: nil,
+            authorID: post.authorID ?? ProfileID(""),
+            authorName: post.authorName ?? "",
+            metaText: handle.isEmpty ? age : "\(handle) · \(age)",
+            avatarURL: post.authorAvatarURL,
             caption: post.caption.isEmpty ? nil : post.caption,
             mediaURL: post.videoURL ?? post.thumbnailURL,
             mediaKind: post.kind == .video ? .video : .image,
             thumbnailURL: post.thumbnailURL,
-            audioText: nil,
+            audioText: post.kind == .video && !handle.isEmpty
+                ? "Original audio · \(handle)" : nil,
             likeCount: post.reactionCount ?? 0,
-            timestampText: ""
+            timestampText: age
         )
     }
 
