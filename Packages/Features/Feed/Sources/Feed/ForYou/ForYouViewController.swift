@@ -129,8 +129,12 @@ final class ForYouViewController: UIViewController {
             stale.removeFromSuperview()
         }
         clip.addSubview(view)
-        poseHostedSurface(at: rect, in: space, cornerRadius: cornerRadius)
         dismissHostedSurface = view
+        poseHostedSurface(at: rect, in: space, cornerRadius: cornerRadius)
+        // The one synchronous set, from the rect just applied — there is no
+        // presentation layer to read yet on a freshly parented surface.
+        syncHostedScale(coveringSize: clip.bounds.size)
+        startHostedScaleDriver()
         #if DEBUG
         armFlightProbe()
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
@@ -145,34 +149,65 @@ final class ForYouViewController: UIViewController {
     /// Poses the hosted surface. Called inside the flight's spring, so frame
     /// and radius interpolate with the card rather than after it.
     private func poseHostedSurface(at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) {
-        guard let view = dismissHostedSurface, let clip = hostClip,
-              let host = tabBarController?.view
-        else { return }
-        // The window moves and rounds...
-        let framed = space.convert(rect, to: host)
-        clip.frame = framed
+        guard let clip = hostClip, let host = tabBarController?.view else { return }
+        // ONLY the window is animated here. The surface's covering scale is not
+        // animated alongside it — see `syncHostedScale`.
+        clip.frame = space.convert(rect, to: host)
         clip.layer.cornerRadius = cornerRadius
-        // ...and the media covers it by SCALE, never by bounds. Same rule the
-        // card uses, from the same function, so the two cannot drift.
+    }
+
+    /// Rescales the hosted surface to cover the clip's CURRENT presented size.
+    ///
+    /// Animating the scale alongside the clip's bounds does not hold aspect
+    /// fill, and cannot. Both interpolate affinely in the spring's progress,
+    /// but coverage is their RATIO, which is affine in neither — so it is exact
+    /// at both endpoints and drifts in between. Measured on the landing spring:
+    /// coverX fell to 0.952, uncovering ~2.4% of the clip on each side, and the
+    /// tile's thumbnail showed through at the edges during the overshoot.
+    ///
+    /// Reading the clip's presentation bounds each frame and deriving the scale
+    /// from them makes coverage exact by construction at every instant, at any
+    /// spring, with no assumption about the curve. This is the same per-frame
+    /// glue `syncHostedSurface` already uses once the surface has landed.
+    private func syncHostedScale(coveringSize explicit: CGSize? = nil) {
+        guard let view = dismissHostedSurface, let clip = hostClip else { return }
+        // PRESENTATION bounds, except at setup where the caller passes the size
+        // outright.
+        //
+        // The model value is never right here once a flight is staged. Inside
+        // the animation block `clip.frame` has already been set to the LANDING
+        // rect while UIKit has not attached the animation yet, so the model
+        // reads as the tile and the presentation still reads as the page —
+        // deriving the scale from the model there snapped the surface to the
+        // landing scale for one frame, a small patch of video adrift in a
+        // full-screen window. That is the drop at frame 0 of a dismissal,
+        // measured at coverY 0.173 on exactly one sample per flight.
+        //
+        // So: the only caller that knows a size synchronously is the hoist,
+        // and it says so; everyone else tracks what is actually on screen.
+        let size = explicit ?? clip.layer.presentation()?.bounds.size ?? clip.bounds.size
         let media = view.bounds.size
-        guard media.width > 0, media.height > 0 else { return }
-        let scale = ZoomTransitionGeometry.mediaFillScale(covering: framed.size, surface: media)
+        guard media.width > 0, media.height > 0, size.width > 0, size.height > 0 else { return }
+        let scale = ZoomTransitionGeometry.mediaFillScale(covering: size, surface: media)
+        // Implicit animation off: this TRACKS an animation, and easing it would
+        // put the scale a frame behind the window it has to cover.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         view.transform = CGAffineTransform(scaleX: scale, y: scale)
-        view.center = CGPoint(x: framed.width / 2, y: framed.height / 2)
+        view.center = CGPoint(x: size.width / 2, y: size.height / 2)
+        CATransaction.commit()
     }
 
     #if DEBUG
     // Samples what the hosted surface's LAYER is actually doing across a
-    // dismissal: presentation frame, bounds, radius and the live animation
-    // keys, every frame, under `-zoom-probe`.
+    // dismissal, under `-zoom-probe`.
     //
-    // Kept because it is the only instrument that settles this class of
-    // question. Three reported flight anomalies had each survived a round of
-    // reasoning-from-plausible-cause; one run of this printed
-    // `position,position-2,transform` stacked on a single layer with `bounds`
-    // inflating while the card shrank, which named the cause outright. The
-    // animation KEYS are the load-bearing field — a second driver is invisible
-    // in any screen capture and obvious here.
+    // The load-bearing field is `cover`: the drawn media's size over the window
+    // it must cover, on both axes. Aspect fill holds iff both are >= 1. That is
+    // not answerable from a still frame, and it is how the overshoot's uncovered
+    // edges were found — the window deliberately outlasts the spring's rebond,
+    // because an earlier version of this probe stopped at 0.9s and reported a
+    // clean flight while the artifact happened at 1.2s.
     private var flightProbe: CADisplayLink?
     private var flightProbeStart: CFTimeInterval = 0
 
@@ -187,24 +222,22 @@ final class ForYouViewController: UIViewController {
 
     @objc private func sampleFlightProbe() {
         let t = CACurrentMediaTime() - flightProbeStart
-        guard let view = dismissHostedSurface, let clip = hostClip, t < 0.9 else {
+        guard let view = dismissHostedSurface, let clip = hostClip, t < 3.0 else {
             flightProbe?.invalidate(); flightProbe = nil; return
         }
         let vp = view.layer.presentation()
         let cp = clip.layer.presentation()
-        // The aspect-fill invariant, stated as a number: the media's drawn size
-        // divided by the window it must cover, on both axes. Aspect-fill holds
-        // iff BOTH are >= 1 and one is ~1. Below 1 on either axis means the
-        // media has stopped covering the card, which no still frame shows
-        // reliably but this does, every frame.
         let bounds = vp?.bounds ?? view.layer.bounds
         let scale = vp?.affineTransform().a ?? view.transform.a
         let win = (cp?.bounds ?? clip.layer.bounds).size
         let coverX = win.width > 0 ? bounds.width * scale / win.width : 0
         let coverY = win.height > 0 ? bounds.height * scale / win.height : 0
-        print(String(format: "[probe] %.3f cover=%.3f/%.3f%@ scale=%.3f b=%@ | clip f=%@ r=%.1f | surfkeys=%@",
+        let opacity = vp?.opacity ?? view.layer.opacity
+        print(String(format: "[probe] %.3f cover=%.3f/%.3f%@ op=%.2f%@ scale=%.3f b=%@ | clip f=%@ r=%.1f | surfkeys=%@",
                      t, coverX, coverY,
                      (coverX < 0.999 || coverY < 0.999) ? " UNCOVERED" : "",
+                     opacity,
+                     opacity < 0.99 ? " DIM" : "",
                      scale,
                      NSCoderRect(bounds),
                      NSCoderRect(cp?.frame ?? clip.layer.frame),
@@ -216,6 +249,30 @@ final class ForYouViewController: UIViewController {
         String(format: "(%.0f,%.0f,%.0fx%.0f)", r.origin.x, r.origin.y, r.width, r.height)
     }
     #endif
+
+    /// Drives `syncHostedScale` for the length of the return flight.
+    private var hostedScaleDriver: CADisplayLink?
+
+    private func startHostedScaleDriver() {
+        hostedScaleDriver?.invalidate()
+        let link = CADisplayLink(target: self, selector: #selector(stepHostedScale))
+        link.add(to: .main, forMode: .common)
+        hostedScaleDriver = link
+    }
+
+    @objc private func stepHostedScale() {
+        // Stops itself when the flight is over, so no path has to remember to.
+        guard dismissHostedSurface != nil, hostClip != nil else {
+            stopHostedScaleDriver()
+            return
+        }
+        syncHostedScale()
+    }
+
+    private func stopHostedScaleDriver() {
+        hostedScaleDriver?.invalidate()
+        hostedScaleDriver = nil
+    }
 
     /// The post whose video renders from the host rather than from its cell.
     private var hostedPostID: PostID?
@@ -247,6 +304,7 @@ final class ForYouViewController: UIViewController {
             return
         }
 
+        stopHostedScaleDriver()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         view.transform = .identity
