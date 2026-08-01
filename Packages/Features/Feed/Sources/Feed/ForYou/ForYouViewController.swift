@@ -83,7 +83,7 @@ final class ForYouViewController: UIViewController {
 
     /// Installs `view` in the host at `rect`, converted from the transition
     /// container's space. Returns false when there is no host to put it in.
-    private func hoistForDismissal(_ view: UIView, at rect: CGRect, in space: UICoordinateSpace) -> Bool {
+    private func hoistForDismissal(_ view: UIView, at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) -> Bool {
         guard let host = tabBarController?.view else { return false }
         // Into the CLIP straight away, sized to the whole host for the flight.
         // The clip later shrinks to the grid's rect, but the surface itself is
@@ -104,9 +104,13 @@ final class ForYouViewController: UIViewController {
         view.autoresizingMask = []
         view.clipsToBounds = true
         view.layer.cornerCurve = .continuous
+        // Starts at the PAGE's radius, so the spring interpolates it down to
+        // the tile's rather than jumping there at the end.
+        view.layer.cornerRadius = cornerRadius
         clip.addSubview(view)
         dismissHostedSurface = view
         #if DEBUG
+        armFlightProbe()
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
             let ready = (view as? VideoRenderView)?.isReadyForDisplay ?? false
             print(String(format: "[zoom-live] %.3f dismiss HOISTED ready=%@",
@@ -123,6 +127,53 @@ final class ForYouViewController: UIViewController {
         view.frame = space.convert(rect, to: clip)
         view.layer.cornerRadius = cornerRadius
     }
+
+    #if DEBUG
+    // Samples what the hosted surface's LAYER is actually doing across a
+    // dismissal: presentation frame, bounds, radius and the live animation
+    // keys, every frame, under `-zoom-probe`.
+    //
+    // Kept because it is the only instrument that settles this class of
+    // question. Three reported flight anomalies had each survived a round of
+    // reasoning-from-plausible-cause; one run of this printed
+    // `position,position-2,transform` stacked on a single layer with `bounds`
+    // inflating while the card shrank, which named the cause outright. The
+    // animation KEYS are the load-bearing field — a second driver is invisible
+    // in any screen capture and obvious here.
+    private var flightProbe: CADisplayLink?
+    private var flightProbeStart: CFTimeInterval = 0
+
+    private func armFlightProbe() {
+        guard ProcessInfo.processInfo.arguments.contains("-zoom-probe") else { return }
+        flightProbe?.invalidate()
+        flightProbeStart = CACurrentMediaTime()
+        let link = CADisplayLink(target: self, selector: #selector(sampleFlightProbe))
+        link.add(to: .main, forMode: .common)
+        flightProbe = link
+    }
+
+    @objc private func sampleFlightProbe() {
+        let t = CACurrentMediaTime() - flightProbeStart
+        guard let view = dismissHostedSurface, let clip = hostClip, t < 0.9 else {
+            flightProbe?.invalidate(); flightProbe = nil; return
+        }
+        let vp = view.layer.presentation()
+        let cp = clip.layer.presentation()
+        print(String(format: "[probe] %.3f surf f=%@ b=%@ r=%.1f keys=%@ | clip f=%@ r=%.1f keys=%@",
+                     t,
+                     NSCoderRect(vp?.frame ?? view.layer.frame),
+                     NSCoderRect(vp?.bounds ?? view.layer.bounds),
+                     vp?.cornerRadius ?? view.layer.cornerRadius,
+                     (view.layer.animationKeys() ?? []).joined(separator: ","),
+                     NSCoderRect(cp?.frame ?? clip.layer.frame),
+                     cp?.cornerRadius ?? clip.layer.cornerRadius,
+                     (clip.layer.animationKeys() ?? []).joined(separator: ",")))
+    }
+
+    private func NSCoderRect(_ r: CGRect) -> String {
+        String(format: "(%.0f,%.0f,%.0fx%.0f)", r.origin.x, r.origin.y, r.width, r.height)
+    }
+    #endif
 
     /// The post whose video renders from the host rather than from its cell.
     private var hostedPostID: PostID?
@@ -404,8 +455,8 @@ final class ForYouViewController: UIViewController {
             depthView: pager,
             // Donate-then-park, run at card-build time so the card flies the
             // very layer the tile was already rendering.
-            hoistLive: { [weak self] view, rect, space in
-                self?.hoistForDismissal(view, at: rect, in: space) ?? false
+            hoistLive: { [weak self] view, rect, space, radius in
+                self?.hoistForDismissal(view, at: rect, in: space, cornerRadius: radius) ?? false
             },
             poseHoisted: { [weak self] rect, space, radius in
                 self?.poseHostedSurface(at: rect, in: space, cornerRadius: radius)

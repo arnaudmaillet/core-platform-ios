@@ -468,7 +468,10 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // rects.
         var hoisted = false
         if let surface = flight.card.zoomLiveMediaSurface {
-            hoisted = source.zoomHoistLiveMedia(surface, at: pageFrame, in: container)
+            hoisted = source.zoomHoistLiveMedia(
+                surface, at: pageFrame, in: container,
+                cornerRadius: ZoomFlight.screenCornerRadius(behind: container)
+            )
         }
         if flight.card.zoomLiveMediaSurface != nil || hoisted {
             destination?.zoomParkLiveMediaForHandoff()

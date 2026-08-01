@@ -151,7 +151,26 @@ extension PostGridFlightCard: ZoomFlightCard {
 
     var zoomRestingChrome: UIView? { restingChromeView }
 
-    var zoomLiveMediaSurface: UIView? { hasAdoptedLiveMedia ? videoRenderView : nil }
+    /// The live surface, but ONLY while this card still contains it.
+    ///
+    /// A dismissal hoists the surface out of the card and into a host above the
+    /// navigation controller, and from that moment the host owns its geometry.
+    /// Reporting it here anyway meant the flight kept posing it too: `poseAtSource`
+    /// sets `center` in CARD-LOCAL coordinates, which for a ~130pt tile is about
+    /// (65, 65) — the top-left of the SCREEN once the view lives in the host's
+    /// space. That is the landscape media's jump to the left at frame 0.
+    ///
+    /// The two drivers also fought over the same layer: setting `frame` (the
+    /// host) on a view with an in-flight `transform` animation (the card) is
+    /// undefined, and it showed — a probe caught `position` AND `position-2`
+    /// stacked on one layer, with `bounds` inflating 406->752 while the card
+    /// was shrinking toward the tile.
+    ///
+    /// The invariant is the fix: a card poses only the media it actually holds.
+    var zoomLiveMediaSurface: UIView? {
+        guard hasAdoptedLiveMedia, videoRenderView.isDescendant(of: self) else { return nil }
+        return videoRenderView
+    }
 
     var zoomLiveMediaNativeSize: CGSize? { videoRenderView.nativeVideoSize }
 

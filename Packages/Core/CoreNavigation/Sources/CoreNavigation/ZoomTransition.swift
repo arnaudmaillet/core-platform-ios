@@ -95,7 +95,12 @@ public protocol ZoomTransitionSource: AnyObject {
     /// and its layer re-acquires on the way back. Hosting it one level up means
     /// it never leaves, and the flight becomes pure geometry. Returns whether
     /// the source took it; `false` leaves the card flying it as before.
-    func zoomHoistLiveMedia(_ view: UIView, at rect: CGRect, in space: UICoordinateSpace) -> Bool
+    /// `cornerRadius` is the radius the surface must START at — the page's
+    /// display-corner radius — so it interpolates to the tile's radius on the
+    /// same spring as the card. Hoisting without it left the surface at 0 while
+    /// the card animated 55 -> 10: square corners over rounded ones for the
+    /// whole flight, converging only at the very end, which reads as a snap.
+    func zoomHoistLiveMedia(_ view: UIView, at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) -> Bool
 
     /// Poses the hosted surface. Called inside the flight's animation block, so
     /// it interpolates on the same spring as the card.
@@ -108,7 +113,12 @@ public extension ZoomTransitionSource {
     func zoomAdoptLiveMediaView(_ view: UIView) {}
     var zoomLandingMediaIsReady: Bool { true }
     func zoomFinalizeLanding() {}
-    func zoomHoistLiveMedia(_ view: UIView, at rect: CGRect, in space: UICoordinateSpace) -> Bool { false }
+    /// `cornerRadius` is the radius the surface must START at — the page's
+    /// display-corner radius — so it interpolates to the tile's radius on the
+    /// same spring as the card. Hoisting without it left the surface at 0 while
+    /// the card animated 55 -> 10: square corners over rounded ones for the
+    /// whole flight, converging only at the very end, which reads as a snap.
+    func zoomHoistLiveMedia(_ view: UIView, at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) -> Bool { false }
     func zoomPoseHoistedMedia(at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) {}
 }
 
