@@ -97,17 +97,30 @@ final class ForYouViewController: UIViewController {
             hostClip = created
             return created
         }()
-        clip.frame = host.bounds
+        // The CLIP is the flying window — it takes the card's role once the
+        // surface is hoisted: it holds the rect, the rounding and the crop.
+        // Starts at the PAGE's radius so the spring interpolates down to the
+        // tile's rather than jumping there at the end.
+        clip.frame = space.convert(rect, to: host)
+        clip.layer.cornerCurve = .continuous
+        clip.layer.cornerRadius = cornerRadius
+
         view.removeFromSuperview()
-        view.transform = .identity
-        view.frame = space.convert(rect, to: clip)
         view.autoresizingMask = []
-        view.clipsToBounds = true
-        view.layer.cornerCurve = .continuous
-        // Starts at the PAGE's radius, so the spring interpolates it down to
-        // the tile's rather than jumping there at the end.
-        view.layer.cornerRadius = cornerRadius
+        // The surface's BOUNDS are deliberately left exactly as
+        // `prepareZoomLiveMediaForFlight` set them — the media's native aspect,
+        // sized to cover the page — and are never animated. A video layer whose
+        // bounds animate does not re-render to track them; its video rect
+        // snaps. Driving this by `frame` (which animates bounds) is what made
+        // the media stop covering the card mid-dismissal.
+        //
+        // Coverage is a uniform scale about the centre instead, which is
+        // exactly how the card poses it while the surface is still inside the
+        // card. The clip's animating bounds are the only crop in the flight.
+        view.layer.cornerRadius = 0
+        view.clipsToBounds = false
         clip.addSubview(view)
+        poseHostedSurface(at: rect, in: space, cornerRadius: cornerRadius)
         dismissHostedSurface = view
         #if DEBUG
         armFlightProbe()
@@ -123,9 +136,20 @@ final class ForYouViewController: UIViewController {
     /// Poses the hosted surface. Called inside the flight's spring, so frame
     /// and radius interpolate with the card rather than after it.
     private func poseHostedSurface(at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) {
-        guard let view = dismissHostedSurface, let clip = hostClip else { return }
-        view.frame = space.convert(rect, to: clip)
-        view.layer.cornerRadius = cornerRadius
+        guard let view = dismissHostedSurface, let clip = hostClip,
+              let host = tabBarController?.view
+        else { return }
+        // The window moves and rounds...
+        let framed = space.convert(rect, to: host)
+        clip.frame = framed
+        clip.layer.cornerRadius = cornerRadius
+        // ...and the media covers it by SCALE, never by bounds. Same rule the
+        // card uses, from the same function, so the two cannot drift.
+        let media = view.bounds.size
+        guard media.width > 0, media.height > 0 else { return }
+        let scale = ZoomTransitionGeometry.mediaFillScale(covering: framed.size, surface: media)
+        view.transform = CGAffineTransform(scaleX: scale, y: scale)
+        view.center = CGPoint(x: framed.width / 2, y: framed.height / 2)
     }
 
     #if DEBUG
@@ -159,15 +183,24 @@ final class ForYouViewController: UIViewController {
         }
         let vp = view.layer.presentation()
         let cp = clip.layer.presentation()
-        print(String(format: "[probe] %.3f surf f=%@ b=%@ r=%.1f keys=%@ | clip f=%@ r=%.1f keys=%@",
-                     t,
-                     NSCoderRect(vp?.frame ?? view.layer.frame),
-                     NSCoderRect(vp?.bounds ?? view.layer.bounds),
-                     vp?.cornerRadius ?? view.layer.cornerRadius,
-                     (view.layer.animationKeys() ?? []).joined(separator: ","),
+        // The aspect-fill invariant, stated as a number: the media's drawn size
+        // divided by the window it must cover, on both axes. Aspect-fill holds
+        // iff BOTH are >= 1 and one is ~1. Below 1 on either axis means the
+        // media has stopped covering the card, which no still frame shows
+        // reliably but this does, every frame.
+        let bounds = vp?.bounds ?? view.layer.bounds
+        let scale = vp?.affineTransform().a ?? view.transform.a
+        let win = (cp?.bounds ?? clip.layer.bounds).size
+        let coverX = win.width > 0 ? bounds.width * scale / win.width : 0
+        let coverY = win.height > 0 ? bounds.height * scale / win.height : 0
+        print(String(format: "[probe] %.3f cover=%.3f/%.3f%@ scale=%.3f b=%@ | clip f=%@ r=%.1f | surfkeys=%@",
+                     t, coverX, coverY,
+                     (coverX < 0.999 || coverY < 0.999) ? " UNCOVERED" : "",
+                     scale,
+                     NSCoderRect(bounds),
                      NSCoderRect(cp?.frame ?? clip.layer.frame),
                      cp?.cornerRadius ?? clip.layer.cornerRadius,
-                     (clip.layer.animationKeys() ?? []).joined(separator: ",")))
+                     (view.layer.animationKeys() ?? []).joined(separator: ",")))
     }
 
     private func NSCoderRect(_ r: CGRect) -> String {
@@ -195,16 +228,24 @@ final class ForYouViewController: UIViewController {
         dismissHostedSurface = nil
 
         guard let clip = hostClip else { return }
-        // The surface is ALREADY in the clip — hoisted there at the start of
-        // the flight — so landing moves nothing. Only the clip resizes, from
-        // the full host down to the grid's rect.
-        clip.frame = page.gridRect(in: host)
-        view.layer.cornerRadius = PostGridFlightCard.tileCornerRadius
-
         guard page.adoptHostedPlayback(view, for: postID) else {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                print("[zoom-live] land REFUSED by adoptHostedPlayback post=\(postID)")
+            }
+            #endif
             view.removeFromSuperview()
             return
         }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        view.transform = .identity
+        clip.layer.cornerRadius = 0
+        clip.frame = page.gridRect(in: host)
+        view.layer.cornerRadius = PostGridFlightCard.tileCornerRadius
+        view.clipsToBounds = true
+        CATransaction.commit()
         hostedPostID = postID
         hostedFormat = format
         page.onGeometryChanged = { [weak self] in self?.syncHostedSurface() }

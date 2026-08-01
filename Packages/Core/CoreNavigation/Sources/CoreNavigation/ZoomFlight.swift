@@ -296,8 +296,7 @@ struct ZoomFlight {
     /// The uniform scale that makes a `surface`-sized video layer cover a
     /// `size`-sized card — the flight-video analog of `scaleAspectFill`.
     static func liveMediaScale(covering size: CGSize, surface: CGSize) -> CGFloat {
-        guard surface.width > 0, surface.height > 0 else { return 1 }
-        return max(size.width / surface.width, size.height / surface.height)
+        ZoomTransitionGeometry.mediaFillScale(covering: size, surface: surface)
     }
 
     /// A black view, initially transparent, that dims the source screen behind
