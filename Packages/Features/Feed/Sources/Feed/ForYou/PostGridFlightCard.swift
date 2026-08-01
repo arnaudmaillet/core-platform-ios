@@ -236,12 +236,39 @@ extension PostGridFlightCard: ZoomFlightCard {
     /// aspect-fill to a thin band of a page-shaped video. A 1:2 portrait brick
     /// showed 92.3% and looked fine — which is why the jump read as
     /// landscape-only.
-    var zoomLiveMediaTracksCardBounds: Bool { true }
+    /// FALSE: the surface is laid out once at destination size and driven by
+    /// a uniform-scale transform, the same path the map pin uses.
+    ///
+    /// It was true, so the flight resized the surface's bounds instead. The
+    /// surface's FRAME tracked the card perfectly under that — measured
+    /// per-frame off the presentation layer — but an
+    /// `AVSampleBufferDisplayLayer` does not re-render its video rect during an
+    /// ANIMATED bounds change: inside a correctly sized, correctly centred
+    /// surface the content stayed drawn at its previous size, pinned to the
+    /// layer origin. On screen that is the media unveiling from its top-left
+    /// corner rather than zooming, which is exactly what was reported.
+    ///
+    /// Core Animation DOES interpolate layer content under a transform, so the
+    /// scale path renders smoothly at every intermediate size.
+    ///
+    /// **The trade this re-accepts.** A page-sized surface under a uniform
+    /// scale renders the PAGE's crop whatever shape the card currently is:
+    /// against a 402x874 page a 2:1 landscape brick shows only 22.9% of the
+    /// surface vertically. That is why this was flipped to true originally.
+    /// `PostGridMosaic.arrangedForMotion` now places portrait media in portrait
+    /// bricks and landscape in landscape, so the flight travels the page's own
+    /// aspect and that crop is small — which is what makes this affordable
+    /// again.
+    var zoomLiveMediaTracksCardBounds: Bool { false }
 
+    /// Lays the surface out ONCE at destination size, with autoresizing off so
+    /// nothing else moves it. The flight owns its transform and centre from
+    /// here; the layer's bounds never change again, which is what keeps the
+    /// content rendering smoothly across the morph.
     func prepareZoomLiveMediaForFlight(destinationSize: CGSize) {
         videoRenderView.transform = .identity
-        videoRenderView.frame = bounds
-        videoRenderView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        videoRenderView.autoresizingMask = []
+        videoRenderView.bounds = CGRect(origin: .zero, size: destinationSize)
     }
 
     // `applyZoomRestingShadow` is left at its default no-op: mosaic bricks rest
