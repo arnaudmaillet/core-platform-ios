@@ -700,7 +700,15 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             card.debugLabel = "card"
             card.debugTracksFlight = true
             #endif
-            guard videoPlayback.attachSurface(card, to: url) else { return nil }
+            let attached = videoPlayback.attachSurface(card, to: url)
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                print(String(format: "[zoom-live] %.3f producer FEED donateLiveRenderView -> %@ %@",
+                             CACurrentMediaTime(), attached ? "attached" : "REFUSED",
+                             card.debugSurfaceState))
+            }
+            #endif
+            guard attached else { return nil }
             return card
         }
         guard videoPlayback.parkPlayback(from: mediaCard.renderView, keepingSurfaceAttached: true)

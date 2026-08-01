@@ -343,7 +343,14 @@ final class ForYouGridPage: UIView {
               let index = posts.firstIndex(where: { $0.id == postID }),
               let url = posts[index].videoURL
         else { return nil }
-        return playback.makeAttachedSurface(for: postID, url: url)
+        let made = playback.makeAttachedSurface(for: postID, url: url)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] %.3f producer GRID liveFlightSurface -> %@",
+                         CACurrentMediaTime(), made == nil ? "NIL (tile not playing)" : "surface"))
+        }
+        #endif
+        return made
     }
 
     /// Whether the tile that a dismissal is landing on is already rendering.

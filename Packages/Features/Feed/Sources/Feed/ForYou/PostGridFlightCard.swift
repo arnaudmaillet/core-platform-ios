@@ -192,8 +192,11 @@ extension PostGridFlightCard: ZoomFlightCard {
         #if DEBUG
         view.debugTracksFlight = true
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-            print(String(format: "[zoom-live] %.3f card ADOPTED LIVE VIEW readyNow=%@",
-                         CACurrentMediaTime(), view.isReadyForDisplay ? "true" : "false"))
+            // Full state at adopt. `frames=0` says it was never primed;
+            // `hidden=Y frames>0` says something hid it after; anything else
+            // points at a later detach.
+            print(String(format: "[zoom-live] %.3f card ADOPTED LIVE VIEW %@",
+                         CACurrentMediaTime(), view.debugSurfaceState))
         }
         #endif
     }
