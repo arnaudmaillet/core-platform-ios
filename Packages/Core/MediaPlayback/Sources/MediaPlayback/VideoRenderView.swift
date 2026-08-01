@@ -329,6 +329,19 @@ public final class VideoRenderView: UIView {
         }
     }
 
+    /// The media's NATIVE pixel dimensions, or nil before the item resolves
+    /// them.
+    ///
+    /// Read from `AVPlayerItem.presentationSize`, which both backings share —
+    /// the player owns the item either way, so this does not depend on which
+    /// layer is doing the drawing.
+    public var nativeVideoSize: CGSize? {
+        guard let size = attachedPlayer?.currentItem?.presentationSize,
+              size.width > 0, size.height > 0
+        else { return nil }
+        return size
+    }
+
     /// Whether this surface has ever displayed a frame since its last flush.
     public var hasFrame: Bool { isReadyForDisplay }
 

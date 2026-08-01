@@ -153,6 +153,8 @@ extension PostGridFlightCard: ZoomFlightCard {
 
     var zoomLiveMediaSurface: UIView? { hasAdoptedLiveMedia ? videoRenderView : nil }
 
+    var zoomLiveMediaNativeSize: CGSize? { videoRenderView.nativeVideoSize }
+
     /// True when the card has no live media (the cover is the content and is
     /// always drawing), or when the live surface it adopted is genuinely
     /// visible and rendering. False is the interesting answer: it means the

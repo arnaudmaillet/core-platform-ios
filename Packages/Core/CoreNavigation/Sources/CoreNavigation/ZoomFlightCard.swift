@@ -31,6 +31,22 @@ public protocol ZoomFlightCard: UIView {
     /// deliberately does not depend on MediaPlayback — so the card reports it.
     var zoomLiveMediaDebugState: String { get }
 
+    /// The media's NATIVE aspect, if known.
+    ///
+    /// The flight lays its surface out at this aspect rather than at the
+    /// destination viewport's, because a viewport-sized surface is ALREADY a
+    /// crop: the page renders `resizeAspectFill`, so scaling that down to a
+    /// tile crops a second time, from the page's crop rather than from the
+    /// media. The landing tile renders aspect-fill of the NATIVE media, so the
+    /// two disagree and the difference shows as a snap at the landing.
+    ///
+    /// With the surface at native aspect, scaling it to cover either endpoint
+    /// reproduces that endpoint's own aspect-fill exactly, and the card's
+    /// animating bounds are the only crop in play.
+    ///
+    /// Nil falls back to the viewport, which is the previous behaviour.
+    var zoomLiveMediaNativeSize: CGSize? { get }
+
     /// The radius the card rests at on its source (a pin's 12pt, a mosaic
     /// brick's 10pt). The flight sweeps between this and the display's own
     /// corner radius.
@@ -105,6 +121,7 @@ public protocol ZoomFlightCard: UIView {
 public extension ZoomFlightCard {
     var zoomLiveMediaIsDrawing: Bool { true }
     var zoomLiveMediaDebugState: String { "" }
+    var zoomLiveMediaNativeSize: CGSize? { nil }
     var zoomLiveMediaSurface: UIView? { nil }
     func adoptZoomLiveMedia(_ mirror: (UIView) -> Bool) {}
     func adoptZoomLiveMediaView(_ view: UIView) {}
