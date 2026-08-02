@@ -175,6 +175,10 @@ public final class VideoPlaybackController {
         renderers[ObjectIdentifier(parked.player)]?.invalidate()
         if idlePlayers.count < poolSize {
             idlePlayers.append(parked.player)
+        } else {
+            // Same rule as `detach`: a dropped player takes its renderer entry
+            // with it, or the map retains both forever.
+            renderers.removeValue(forKey: ObjectIdentifier(parked.player))
         }
     }
 
@@ -405,6 +409,13 @@ public final class VideoPlaybackController {
         renderers[ObjectIdentifier(player)]?.invalidate()
         if idlePlayers.count < poolSize {
             idlePlayers.append(player)
+        } else {
+            // A player the pool has no room for is dropped — and its renderer
+            // entry must go with it. The map's chain is strong (renderer →
+            // frame source → player), so a surviving entry kept every
+            // over-pool player, its video output and its renderer alive for
+            // the life of the app; the map only ever grew.
+            renderers.removeValue(forKey: ObjectIdentifier(player))
         }
     }
 
