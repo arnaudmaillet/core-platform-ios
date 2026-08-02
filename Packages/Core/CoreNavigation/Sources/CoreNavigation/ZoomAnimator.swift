@@ -539,7 +539,9 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     /// or two render-server passes it normally waits, and small against the
     /// 420ms flight, so a surface that never reports drawing degrades to the
     /// old commit-ordered timing instead of stranding two live twins.
-    private static let maximumFirstFrameHold: CFTimeInterval = 0.15
+    /// Internal: the grab (`ZoomDismissInteractionController`) runs the same
+    /// gate at its own staging.
+    static let maximumFirstFrameHold: CFTimeInterval = 0.15
 
     /// Set when a REVERSED flight has already restored what the pending
     /// frame-0 hide would take away. The hide waits on a display-link gate,

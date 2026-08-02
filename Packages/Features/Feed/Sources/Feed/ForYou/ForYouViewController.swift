@@ -119,6 +119,19 @@ final class ForYouViewController: UIViewController {
         // card. The clip's animating bounds are the only crop in the flight.
         view.layer.cornerRadius = 0
         view.clipsToBounds = false
+        // TRANSPARENT, not the black floor `updatePosterVisibility` gave it at
+        // prime time. This surface appears ABOVE the feed, full-page, in the
+        // very first staging commit — and its background composites WITH that
+        // commit while its video content rides the sample-buffer path outside
+        // it. On a busy device the content can miss the first pass, and an
+        // opaque floor turns that pass into a full-screen black plate over a
+        // live page: the 1-frame blink at tap-back frame 0, invisible to the
+        // red-floor diagnostic because this black belongs to the SURFACE, not
+        // the card. Clear, the same pass shows the feed through — pixel
+        // continuity — and the floor is not missed: `syncHostedScale` keeps
+        // the surface covering its clip at every instant, so there is never a
+        // gap for a floor to fill.
+        view.backgroundColor = .clear
         // Exactly one surface in the clip, always. `syncHostedSurface` glues
         // `subviews.first` to the tile, so a leftover from an earlier flight
         // would both draw over the grid and be the one that gets glued — the

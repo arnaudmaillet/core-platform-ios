@@ -78,6 +78,10 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// direct set doesn't stomp the dip mid-flight (position is unaffected —
     /// the dip animates bounds and subviews only).
     private var isDetachSettling = false
+    /// Set when this grab's teardown has restored (or is done with) the
+    /// destination, so the staged frame-0 hide — which waits on a display-link
+    /// gate — cannot fire afterwards and strand the feed invisible.
+    private var hasAbandonedContentHide = false
 
     /// Rubber-band caps: generous vertically (the float), tight against
     /// dragging backwards past the origin.
@@ -208,7 +212,27 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         container.layoutIfNeeded()
         let screenRadius = ZoomFlight.screenCornerRadius(behind: container)
         flight.poseAsPage(cornerRadius: screenRadius)
-        destination?.setZoomContentHidden(true)
+        // Same frame-0 rule as the animator legs, which this staging predated:
+        // hiding the feed in the SAME commit that first puts the card (and its
+        // freshly attached surface) in the tree trades the page for a surface
+        // whose content may not have composited yet — the card's floor for a
+        // pass, at the exact start of a grab. Commit first, then the card
+        // drawing plus one display tick, then hide. The feed staying opaque
+        // over the already-tracking card for those ticks is 8–16ms of finger
+        // travel — invisible — and a lightning cancel is covered by the
+        // abandon flag, or the restore in `finishTransition` would be undone
+        // by a hide still in flight.
+        hasAbandonedContentHide = false
+        ZoomAnimator.afterCurrentTransactionCommits { [weak self] in
+            ZoomAnimator.whenReady(ceiling: ZoomAnimator.maximumFirstFrameHold,
+                                   afterTicks: 1,
+                                   condition: { [weak card = flight.card] in
+                                       card?.zoomLiveMediaIsDrawing ?? true
+                                   }) {
+                guard let self, !self.hasAbandonedContentHide else { return }
+                self.destination?.setZoomContentHidden(true)
+            }
+        }
 
         // Depth rides the source-nominated view when there is one; see
         // `ZoomTransitionSource.zoomPresenterDepthView`. Nil under the
@@ -527,6 +551,8 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// completion, then reports the outcome to UIKit and drops all state.
     /// (finish/cancelInteractiveTransition was already reported at release.)
     private func finishTransition(cancelled: Bool) {
+        // Whatever happens below, the staged frame-0 hide is stale from here.
+        hasAbandonedContentHide = true
         // The two steps the non-interactive completion performs and this one
         // did not: hand the card's live surface to the source, then hold the
         // card over the landing until that surface is actually drawing.
