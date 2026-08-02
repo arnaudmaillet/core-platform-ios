@@ -1,5 +1,5 @@
 import CoreGraphics
-import CoreNavigation
+@testable import CoreNavigation
 import Testing
 
 struct ZoomTransitionGeometryTests {
@@ -67,5 +67,46 @@ struct ZoomTransitionGeometryTests {
         #expect(!ZoomTransitionGeometry.shouldCompleteDismissal(
             progress: 0.05, velocity: -1200, progressThreshold: 0.35, flickVelocity: 900
         ))
+    }
+}
+
+/// The grab's scale channel had a 180ms hole in it: the detach dip animated to
+/// a constant while the drag interpolated a curve, so every point the finger
+/// travelled during the dip accumulated with nothing applying it, and the first
+/// ungated pan event discharged the lot in one frame. Measured on a scripted
+/// grab, the card's height fell 830pt to 774pt between two frames against
+/// ~5.5pt/frame either side.
+///
+/// The fix is structural — one curve, shared by the dip and the drag — and
+/// these pin the curve's shape so a future edit cannot reintroduce a second
+/// definition that disagrees at the seam.
+@MainActor
+struct GrabScaleCurveTests {
+    /// The dip's endpoint and the drag's starting value must be THE SAME
+    /// number, arrived at through the same function. The old code stated this
+    /// as a comment ("its endpoint is this function at progress 0") while the
+    /// two sides computed it separately.
+    @Test func theCurveStartsAtTheDetachScale() {
+        #expect(ZoomDismissInteractionController.grabScale(at: 0) == ZoomFlight.detachScale)
+    }
+
+    /// Monotonic and continuous: no step anywhere the finger can put it.
+    @Test func theCurveNeverSteps() {
+        var previous = ZoomDismissInteractionController.grabScale(at: 0)
+        for step in 1...1000 {
+            let scale = ZoomDismissInteractionController.grabScale(at: CGFloat(step) / 1000)
+            #expect(scale <= previous + 1e-9, "the curve rose at \(step)")
+            // The whole curve spans 0.35 over 1000 samples; anything an order of
+            // magnitude above the even rate is a step.
+            #expect(previous - scale < 0.01, "a step of \(previous - scale) at \(step)")
+            previous = scale
+        }
+    }
+
+    /// A held card stays recognisably the page — the clamp is what stops it
+    /// shrinking to thumbnail size under the hand.
+    @Test func theCurveClampsAtTheMinimum() {
+        #expect(ZoomDismissInteractionController.grabScale(at: 1) == ZoomFlight.minimumGrabScale)
+        #expect(ZoomDismissInteractionController.grabScale(at: 4) == ZoomFlight.minimumGrabScale)
     }
 }
