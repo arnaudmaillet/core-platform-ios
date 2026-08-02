@@ -230,6 +230,25 @@ public final class VideoRenderView: UIView {
         playerLayer.player = player
     }
 
+    /// Joins `sibling`'s playback directly — the same renderer in
+    /// sample-buffer mode, the same player in layer mode — for callers that
+    /// know WHICH surface they must mirror rather than which URL. The seam
+    /// `attachSurface(_:alongsideSurface:)` needs when the sibling holds no
+    /// pool loan (a surface that JOINED its playback has no registration for
+    /// a URL lookup to find). Returns false when the sibling is bound to
+    /// nothing.
+    func attachAlongside(_ sibling: VideoRenderView) -> Bool {
+        if let renderer = sibling.renderer {
+            attach(renderer.player, renderer: renderer)
+            return true
+        }
+        if let player = sibling.playerLayer?.player {
+            attach(player)
+            return true
+        }
+        return false
+    }
+
     func detach(reason: String = "detach") {
         playerLayer?.player = nil
         detachFromRenderer(reason: reason)

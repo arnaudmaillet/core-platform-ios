@@ -691,6 +691,22 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         else { return }
         hasDeferredPlayback = false
         let view = mediaCard.renderView
+        // The warm attach at activation loses a race on cold opens: the
+        // tile's own `play` is still resolving then, so there is no active
+        // player to join and the attach silently fails. Falling straight to
+        // `play` here minted a SECOND AVPlayer for the same asset — two
+        // decoders on two clocks for the whole feed session, a dismissal
+        // card primed from whichever of them a URL lookup happened to find
+        // (the frame-0 jump at the start of a dismiss), and a landing that
+        // restarted at zero. By landing time the tile's play has resolved,
+        // so try the join again first — it is the very player the flight
+        // card was flying, which is what makes this a continuation. Mint
+        // only when there is genuinely nothing to join.
+        if VideoRenderFlags.usesSampleBufferLayer, videoPlayback.attachSurface(view, to: url) {
+            videoPlayback.setPeakBitRate(0, for: url)
+            view.revealOnFirstFrame()
+            return
+        }
         Task { await videoPlayback.play(url, in: view) }
     }
 
@@ -747,17 +763,24 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// cancelled grab `reclaimDonatedPlayback` puts everything back.
     func donateLiveRenderView() -> VideoRenderView? {
         guard mediaKind == .video, let videoPlayback else { return nil }
-        if VideoRenderFlags.usesSampleBufferLayer, let url = mediaURL {
+        if VideoRenderFlags.usesSampleBufferLayer {
             // Nothing is donated: the card gets a surface of its own on the
             // same playback, primed with the current frame, and this page keeps
             // rendering behind it. A cancelled grab therefore has nothing to
             // put back — see `reclaimDonatedPlayback`.
+            //
+            // ALONGSIDE this page's own surface, by identity — never by URL.
+            // Two players can exist for one asset (the cold-open race), and a
+            // URL lookup answers from dictionary order: the card could prime
+            // from the other player's playhead, which is the frame-0 jump at
+            // the start of a dismiss. The sibling is what the viewer is
+            // watching, so the card provably flies the same frames.
             let card = VideoRenderView()
             #if DEBUG
             card.debugLabel = "card"
             card.debugTracksFlight = true
             #endif
-            let attached = videoPlayback.attachSurface(card, to: url)
+            let attached = videoPlayback.attachSurface(card, alongsideSurface: mediaCard.renderView)
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
                 print(String(format: "[zoom-live] %.3f producer FEED donateLiveRenderView -> %@ %@",

@@ -280,6 +280,29 @@ public final class VideoPlaybackController {
         return true
     }
 
+    /// Makes `view` show the SAME playback `sibling` is currently showing —
+    /// resolved by view IDENTITY, never by URL.
+    ///
+    /// URL lookup is ambiguous the moment two players exist for one asset
+    /// (the cold-open warm-attach race minted a second), and
+    /// `activePlayer(playing:)` then answers from dictionary order — a
+    /// dismissal's card could prime from the TILE's playhead while the
+    /// viewer watches the PAGE's, a visible jump at frame 0 of the return.
+    /// The sibling is the surface the viewer is literally watching, so it is
+    /// the one answer that cannot show the wrong frames. Passive exactly
+    /// like `attachSurface(_:to:)`: the new surface holds no pool loan.
+    /// Returns false when the sibling is bound to nothing.
+    @discardableResult
+    public func attachSurface(_ view: VideoRenderView, alongsideSurface sibling: VideoRenderView) -> Bool {
+        if let player = activePlayers[ObjectIdentifier(sibling)] {
+            bind(player, to: view)
+            return true
+        }
+        // The sibling may itself be a JOINED surface with no loan — reach its
+        // binding directly.
+        return view.attachAlongside(sibling)
+    }
+
     /// Releases a surface attached with `attachSurface`, leaving the playback
     /// and every other surface untouched.
     ///

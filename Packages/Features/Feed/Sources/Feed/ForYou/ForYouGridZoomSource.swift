@@ -38,6 +38,11 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// player for the destination. `nil` when the tile was not playing.
     private let donateLive: (() -> VideoRenderView?)?
 
+    /// Set the moment a dismissal stages, and never cleared: this source
+    /// serves one push/pop pair, so every card built after staging belongs
+    /// to a return flight.
+    private var isStagingDismissal = false
+
     init(
         page: ForYouGridPage,
         tappedID: PostID,
@@ -113,7 +118,17 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         // mirrored layer is blank for ~100ms while the source is already
         // hidden, which is the flash at the start of the flight. Moving the
         // layer that is mid-playback has no such window.
-        if let donateLive, let donated = donateLive() {
+        //
+        // PRESENT only. On a dismissal the card must fly what the VIEWER is
+        // watching — the destination page's playback. This grid-side attach
+        // resolves by URL, and with the cold-open race having minted a
+        // second player for the same asset (measured: two renderers, one
+        // URL, different clocks) that lookup could prime the card from the
+        // TILE's playhead, seconds from the page's — the frame-0 jump at
+        // the start of a dismiss. Declining lets `ZoomFlight.build` fall
+        // through to `zoomDonateLiveMediaView`, which attaches alongside
+        // the page's own surface by IDENTITY.
+        if !isStagingDismissal, let donateLive, let donated = donateLive() {
             card.adoptZoomLiveMediaView(donated)
         }
         return card
@@ -181,6 +196,8 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// dequeued) cell, because a scroll can realize a *new* cell that never saw
     /// the earlier hide.
     func zoomSourceWillStageDismissal() {
+        // From here on, cards belong to return flights — see `makeZoomFlightCard`.
+        isStagingDismissal = true
         // Pin the grid's inset first, before anything reads a rect from it: the
         // pop animates the safe area, and an unpinned grid keeps drifting under
         // the flight. See `ForYouGridPage.beginHeroFreeze`.
