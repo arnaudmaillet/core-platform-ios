@@ -104,7 +104,12 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         switch operation {
         case .push where toVC === feed:
             let animator = ZoomAnimator(isPresenting: true, source: source, destination: destination)
-            animator.onPresentationReversed = { [weak self] in self?.onPresentationCancelled?() }
+            animator.onPresentationReversed = { [weak self] in
+                // The flight this interruptor served is over; didShow will not
+                // fire to release it.
+                self?.flightInterruptor = nil
+                self?.onPresentationCancelled?()
+            }
             return animator
         case .pop where fromVC === feed:
             return ZoomAnimator(
@@ -146,6 +151,11 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         didShow viewController: UIViewController,
         animated: Bool
     ) {
+        // Whatever showed, the flight that interruptor served is over. Left
+        // set, it survived until the next flight replaced it — a small object,
+        // but a retained one whose pan the container's teardown had already
+        // orphaned.
+        flightInterruptor = nil
         if viewController === feedViewController {
             onDestinationShown?()
             return

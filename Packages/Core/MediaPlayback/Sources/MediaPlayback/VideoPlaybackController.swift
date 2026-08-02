@@ -332,8 +332,12 @@ public final class VideoPlaybackController {
             activePlayers[previous] = nil
             playingURL[previous] = nil
         }
-        // Claimed from the park, if that is where it was.
-        parked = nil
+        // Claimed from the park — but only when the park holds THIS asset.
+        // Clearing unconditionally orphaned a parked player of a DIFFERENT
+        // URL: never paused, never re-pooled, decoding forever with nothing on
+        // screen. A mismatched park stays put for its own claimant, or for the
+        // next discard sweep.
+        if parked?.url == mediaURL { parked = nil }
         let key = ObjectIdentifier(view)
         // Supersede any in-flight resolution for this view, so a late `play`
         // cannot attach a second item over the one just adopted.

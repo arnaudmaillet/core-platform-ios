@@ -33,7 +33,10 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// delegate returns this controller only while true.
     private(set) var isInteracting = false
 
-    private var source: (any ZoomTransitionSource)?
+    /// Weak, like `destination`: the transition controller owns the source for
+    /// the flight's lifetime, and this seam only borrows it. A strong copy
+    /// here silently doubled the ownership for no benefit.
+    private weak var source: (any ZoomTransitionSource)?
     private weak var destination: (any ZoomTransitionDestination)?
     /// Kicks off `dismiss(animated:)` on the presented feed when a grab begins.
     private var onBeginDismiss: (() -> Void)?
