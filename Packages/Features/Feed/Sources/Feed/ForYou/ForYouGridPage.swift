@@ -35,12 +35,51 @@ final class ForYouGridPage: UIView {
     /// recognised as one before arrangement permutes it.
     private var rawPosts: [GalleryPost] = []
 
-    /// Mosaic pages steer autoplaying posts into the non-square bricks; list
-    /// pages are a timeline, where order carries meaning and must not be
+    /// Grid pages steer each post into the block whose shape crops it least;
+    /// list pages are a timeline, where order carries meaning and must not be
     /// rearranged for looks.
+    ///
+    /// The slot shapes come from the layout rather than from a table, because a
+    /// BSP tiling generates them — see `PostGridSliceArrangement`. Before the
+    /// page has been laid out there are no shapes yet and this is the identity;
+    /// `onPlanInvalidated` re-runs it when geometry resolves.
     private func arrange(_ posts: [GalleryPost], startingAt index: Int) -> [GalleryPost] {
-        guard style == .grid else { return posts }
-        return PostGridMosaic.arrangedForMotion(posts, startingAt: index)
+        guard style == .grid, let sliceLayout else { return posts }
+        return PostGridSliceArrangement.arranged(
+            posts, startingAt: index,
+            slotMetrics: sliceLayout.slotMetrics(forItemCount: index + posts.count)
+        )
+    }
+
+    private var sliceLayout: ChaoticSliceLayout? {
+        collectionView.collectionViewLayout as? ChaoticSliceLayout
+    }
+
+    /// The rounding this page's tiles take, paired with the layout's gutter.
+    /// List pages fall back to the tile default, which they never use.
+    private var tileCornerRadius: CGFloat {
+        sliceLayout?.tileCornerRadius ?? PostGridTileCell.mosaicCornerRadius
+    }
+
+    /// Re-places every post against slot shapes that have just changed — a
+    /// rotation, or any resize that alters the slice's aspect and therefore what
+    /// shape each block is.
+    ///
+    /// Guarded on the two states where moving a cell would be destructive: a
+    /// staged dismissal has already measured where its card is landing, and a
+    /// hidden hero means a card is in the air over a tile that must not move
+    /// out from under it. Reloading is also skipped when the new arrangement
+    /// matches the old, which is the common case on first layout and keeps the
+    /// cold start to a single reload.
+    private func replanArrangement() {
+        guard style == .grid, !showsSkeleton, !rawPosts.isEmpty,
+              !isRepositioning, heroHiddenPostID == nil
+        else { return }
+        let rearranged = arrange(rawPosts, startingAt: 0)
+        guard rearranged.map(\.id) != posts.map(\.id) else { return }
+        posts = rearranged
+        collectionView.reloadData()
+        DispatchQueue.main.async { [weak self] in self?.updateAutoplay() }
     }
 
     private let imagePipeline: ImagePipeline
@@ -75,10 +114,12 @@ final class ForYouGridPage: UIView {
     private var hasScheduledDiagnostics = false
     #endif
 
-    /// List pages show a column of placeholder cards; the mosaic shows two
-    /// full 8-brick patterns — a scrolling page has a whole viewport to fill,
-    /// where the profile's one pattern only had to reach the fold.
-    private var skeletonCount: Int { style == .grid ? PostGridMosaic.patternLength * 2 : 6 }
+    /// List pages show a column of placeholder cards; the grid shows two full
+    /// slices — a scrolling page has a whole viewport to fill, and a slice is
+    /// only a little over one screenful.
+    private var skeletonCount: Int {
+        style == .grid ? (sliceLayout?.cellsPerSlice ?? 11) * 2 : 6
+    }
 
     /// How close to the end a scroll gets before the next page is requested.
     private static let prefetchDistance: CGFloat = 800
@@ -89,10 +130,11 @@ final class ForYouGridPage: UIView {
         self.style = style
         collectionView = UICollectionView(
             frame: .zero,
-            collectionViewLayout: style == .grid ? PostGridMosaic.layout() : PostGridListLayout.layout()
+            collectionViewLayout: style == .grid ? ChaoticSliceLayout() : PostGridListLayout.layout()
         )
         super.init(frame: .zero)
 
+        sliceLayout?.onPlanInvalidated = { [weak self] in self?.replanArrangement() }
         collectionView.backgroundColor = .clear
         collectionView.alwaysBounceVertical = true
         collectionView.register(PostGridTileCell.self, forCellWithReuseIdentifier: PostGridTileCell.reuseID)
@@ -708,9 +750,13 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
                 cell.configure(variant: indexPath.item)
                 return cell
             case .grid:
-                return collectionView.dequeueReusableCell(
+                let cell = collectionView.dequeueReusableCell(
                     withReuseIdentifier: PostGridSkeletonTileCell.reuseID, for: indexPath
-                )
+                ) as! PostGridSkeletonTileCell
+                // The shimmer has to be the shape content will hydrate into, or
+                // the cross-dissolve changes silhouette as it lands.
+                cell.cornerRadius = tileCornerRadius
+                return cell
             }
         }
         let post = posts[indexPath.item]
@@ -730,6 +776,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             let cell = collectionView.dequeueReusableCell(
                 withReuseIdentifier: PostGridTileCell.reuseID, for: indexPath
             ) as! PostGridTileCell
+            cell.cornerRadius = tileCornerRadius
             cell.configure(with: post, imagePipeline: imagePipeline)
             // Autoplay is gated on the cover, so the arrival of a cover is a
             // reason to re-run the gate. Without this a tile whose cover lands
