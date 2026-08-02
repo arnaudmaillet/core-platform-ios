@@ -121,6 +121,14 @@ public final class PostGridSkeletonTileCell: UICollectionViewCell {
         bone.pin(to: contentView)
     }
 
+    /// Same rule as the real tile: a recycled cell comes back visible, whatever
+    /// a flight left it as.
+    override public func prepareForReuse() {
+        super.prepareForReuse()
+        isHidden = false
+        alpha = 1
+    }
+
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }

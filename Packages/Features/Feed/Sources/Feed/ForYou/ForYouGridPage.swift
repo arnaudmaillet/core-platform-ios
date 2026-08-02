@@ -95,6 +95,17 @@ final class ForYouGridPage: UIView {
     /// The post whose cell is standing in for a flight card and must stay
     /// invisible until the card lands. See `setHeroHidden`.
     private var heroHiddenPostID: PostID?
+    /// The exact cell hidden at takeoff.
+    ///
+    /// Held by reference because the post→cell mapping is not stable across a
+    /// flight: staging swaps the active post into the departure slot, so by
+    /// landing `cell(for:)` resolves the anchor to a DIFFERENT instance than the
+    /// one the hide was applied to. Unhiding by lookup therefore cleared the
+    /// wrong cell and left the original invisible for good — with the flag
+    /// correctly nil, which is why it survived every check that looked at the
+    /// flag. Weak: the collection view owns cells and may recycle this one,
+    /// and a recycled cell is corrected by `cellForItemAt` anyway.
+    private weak var heroHiddenCell: UICollectionViewCell?
     /// The inset to hand back when a flight ends; non-nil means frozen.
     private var frozenContentInset: UIEdgeInsets?
     /// Throttle state for the during-scroll autoplay reconcile.
@@ -384,6 +395,9 @@ final class ForYouGridPage: UIView {
     func endPlaybackHandoff() {
         playback?.endHandoff()
         updateAutoplay()
+        #if DEBUG
+        logVisibility("return-complete")
+        #endif
     }
 
     func setAutoplayActive(_ active: Bool, keeping kept: PostID? = nil) {
@@ -750,18 +764,72 @@ final class ForYouGridPage: UIView {
     /// under the card and the viewer sees it twice; and a recycled cell carries
     /// the stale `isHidden` to whatever index it is next used for, leaving an
     /// invisible tile somewhere else in the grid.
+    #if DEBUG
+    /// `-foryou-visibility-log`: the state of the grid's visibility invariant at
+    /// a named moment.
+    ///
+    /// Written to answer one question the simulator would not: when a tile has
+    /// vanished on device, is it HIDDEN or is it ABSENT? Those point at opposite
+    /// halves of the system — a leaked hero hide against a data/arrangement
+    /// fault — and no screenshot distinguishes them.
+    ///
+    /// `hero` should be nil whenever no flight is in the air; a non-nil value
+    /// here is a leaked hide, and every future dequeue of that post will hide
+    /// its cell. `hidden` should be empty for the same reason. `posts` and
+    /// `items` must agree, or the data source and the collection view have
+    /// diverged and cells are missing rather than invisible.
+    func logVisibility(_ moment: String) {
+        guard ProcessInfo.processInfo.arguments.contains("-foryou-visibility-log"),
+              style == .grid
+        else { return }
+        let visible = collectionView.indexPathsForVisibleItems.sorted()
+        let invisible = visible.compactMap { path -> String? in
+            guard let cell = collectionView.cellForItem(at: path) else { return nil }
+            guard cell.isHidden || cell.alpha == 0 else { return nil }
+            let id = posts.indices.contains(path.item) ? posts[path.item].id.rawValue : "?"
+            return "\(path.item):\(id)\(cell.isHidden ? "/hidden" : "")\(cell.alpha == 0 ? "/alpha0" : "")"
+        }
+        let items = collectionView.numberOfSections > 0
+            ? collectionView.numberOfItems(inSection: 0) : 0
+        let ids = Set(posts.map(\.id))
+        print("[vis] \(moment) hero=\(heroHiddenPostID?.rawValue ?? "nil")"
+            + " posts=\(posts.count) items=\(items) uniqueIDs=\(ids.count)"
+            + " visible=\(visible.count) invisible=\(invisible.isEmpty ? "none" : invisible.joined(separator: ","))"
+            + (posts.count == items && ids.count == posts.count ? "" : "  <<< DATA SOURCE DIVERGED"))
+    }
+    #endif
+
     func setHeroHidden(_ hidden: Bool, for postID: PostID) {
         heroHiddenPostID = hidden ? postID : nil
         // Apply to whatever is on screen right now; `cellForItemAt` covers
         // everything realized from here on.
-        if let cell = cell(for: postID) {
-            cell.isHidden = hidden
+        let resolved = cell(for: postID)
+        resolved?.isHidden = hidden
+        if hidden {
+            heroHiddenCell = resolved
+        } else {
+            // The instance that was actually hidden, which a lookup may no
+            // longer reach.
+            heroHiddenCell?.isHidden = false
+            heroHiddenCell = nil
+            // And a sweep, because a flight can end without either reference
+            // naming the hidden cell — an interrupted transition, or a swap
+            // that moved the post twice. No flight is in the air once the flag
+            // is nil, so nothing on screen may legitimately be invisible.
+            for visible in collectionView.visibleCells where visible.isHidden {
+                visible.isHidden = false
+            }
         }
         // Unhiding is the end of a flight. The tile is excluded from
         // candidates while its twin is in the air (or it would adopt the
         // player mid-flight and blank the card), so this is the first moment
         // it may claim the player the destination parked for it.
-        if !hidden { updateAutoplay() }
+        if !hidden {
+            updateAutoplay()
+            #if DEBUG
+            logVisibility("unhide")
+            #endif
+        }
     }
 
     /// The post behind an id, for a flight card that must configure itself
@@ -770,16 +838,31 @@ final class ForYouGridPage: UIView {
         posts.first { $0.id == postID }
     }
 
-    /// The indices `new` adds when it is exactly `old` plus a suffix, else nil.
+    /// The posts `new` adds to `old`, or nil when this is not an addition.
     ///
-    /// Strict: every existing element must be unchanged and in place. A reorder
-    /// (the discovery source switching between Trending and Recent) or an
-    /// in-place edit is NOT an append and has to go through a full reload, or
-    /// the cells would keep rendering stale posts.
-    static func appendedRange(from old: [GalleryPost], to new: [GalleryPost]) -> Range<Int>? {
+    /// Membership, not order. The old rule demanded that `new` be exactly `old`
+    /// plus a suffix, so a page landing failed it whenever the discovery source
+    /// had re-ranked the corpus in the meantime — which Trending does on every
+    /// page. `apply` then took the reload branch and re-permuted EVERY slot,
+    /// and the grid visibly reshuffled under the viewer: tiles they were looking
+    /// at jumped elsewhere, reading as tiles vanishing.
+    ///
+    /// So a re-rank that only ADDS is treated as an addition. The upstream
+    /// ordering is honoured for the newcomers and ignored for posts already
+    /// placed, which is what the layout's immutable slices promise anyway — a
+    /// slot's contents do not move once the viewer has seen them. A genuine
+    /// removal or replacement still falls through to the reload.
+    static func addedPosts(from old: [GalleryPost], to new: [GalleryPost]) -> [GalleryPost]? {
         guard !old.isEmpty, new.count > old.count else { return nil }
-        guard Array(new.prefix(old.count)) == old else { return nil }
-        return old.count..<new.count
+        let existing = Set(old.map(\.id))
+        // Everything already on screen must still be there. A post that
+        // disappeared is a removal, which an insert cannot express.
+        guard existing.isSubset(of: Set(new.map(\.id))) else { return nil }
+        let added = new.filter { !existing.contains($0.id) }
+        // And the arithmetic has to close: same membership plus the newcomers,
+        // or something was duplicated and the counts would drift.
+        guard added.count == new.count - old.count else { return nil }
+        return added
     }
 
     private func cell(for postID: PostID) -> UICollectionViewCell? {
@@ -819,18 +902,28 @@ final class ForYouGridPage: UIView {
         // Measured against the RAW list, not the arranged one: arrangement is a
         // permutation, so an append upstream is still an append downstream, and
         // comparing raw keeps that fact simple to establish.
-        let appended = Self.appendedRange(from: rawPosts, to: incoming)
+        // A data change ends any flight this page still thinks is in the air.
+        // The flag is written in exactly one place and cleared only by the
+        // matching unhide, so a flight that never delivered one would hide its
+        // post's cell on every future dequeue — for the life of the page.
+        if !posts.contains(where: { $0.id == heroHiddenPostID }) { heroHiddenPostID = nil }
+        let added = Self.addedPosts(from: rawPosts, to: incoming)
         rawPosts = incoming
         showsSkeleton = skeleton
-        if let appended, !showsSkeleton, !skeleton, !dissolving {
-            // Arrange only the new tail, against the absolute slots it will
+        if let added, !added.isEmpty, !showsSkeleton, !skeleton, !dissolving {
+            // Arrange only the newcomers, against the absolute slots they will
             // occupy. Placement depends solely on the absolute index, so the
             // items already on screen cannot move — which is what keeps this an
             // insert rather than a reload.
-            posts += arrange(Array(incoming[appended]), startingAt: posts.count)
+            //
+            // Indexed off `posts`, not off `incoming`: the two are no longer the
+            // same order once a swap or a re-rank has happened, and the rows
+            // being inserted are this page's, not upstream's.
+            let start = posts.count
+            posts += arrange(added, startingAt: start)
             collectionView.performBatchUpdates {
                 collectionView.insertItems(
-                    at: appended.map { IndexPath(item: $0, section: 0) }
+                    at: (start..<posts.count).map { IndexPath(item: $0, section: 0) }
                 )
             }
             DispatchQueue.main.async { [weak self] in self?.updateAutoplay() }

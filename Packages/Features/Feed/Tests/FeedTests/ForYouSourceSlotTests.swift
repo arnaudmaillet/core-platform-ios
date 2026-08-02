@@ -271,3 +271,83 @@ struct ForYouRepeatedRoundTripTests {
         }
     }
 }
+
+/// Recycling is the trigger the balanced round-trip tests miss: they keep every
+/// cell realized, so the hide is always lifted from the same instance it was
+/// applied to. A hero hide lives on the CELL, and a cell recycled while hidden
+/// carries the invisibility to whatever post it is bound to next.
+@MainActor
+struct ForYouHiddenCellRecyclingTests {
+    private struct SilentFetcher: ImageFetching {
+        func fetchImageData(for url: URL) async throws -> Data { Data() }
+    }
+
+    /// Small viewport, many posts — so most cells are unrealized and the pool
+    /// actually recycles when the grid scrolls.
+    private func page(_ count: Int = 120) -> ForYouGridPage {
+        let page = ForYouGridPage(
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid
+        )
+        page.frame = CGRect(x: 0, y: 0, width: 393, height: 500)
+        page.render(.content((0..<count).map {
+            GalleryPost(
+                id: PostID("p\($0)"), kind: .photo, isRepost: false, thumbnailURL: nil,
+                aspectRatio: 1, caption: "", publishedAtMS: 0
+            )
+        }))
+        page.layoutIfNeeded()
+        return page
+    }
+
+    private func scroll(_ page: ForYouGridPage, to y: CGFloat) {
+        let view = page.subviews.compactMap { $0 as? UICollectionView }.first!
+        view.contentOffset = CGPoint(x: 0, y: y)
+        page.layoutIfNeeded()
+        view.layoutIfNeeded()
+    }
+
+    private func invisibleTiles(_ page: ForYouGridPage) -> [Int] {
+        let view = page.subviews.compactMap { $0 as? UICollectionView }.first!
+        return view.indexPathsForVisibleItems.sorted().compactMap { path in
+            guard let cell = view.cellForItem(at: path) else { return nil }
+            return (cell.isHidden || cell.alpha == 0) ? path.item : nil
+        }
+    }
+
+    /// Hide a tile for a flight, scroll far enough that its cell is recycled,
+    /// then come back. Nothing on screen may be invisible.
+    @Test func aCellRecycledWhileHiddenComesBackVisible() {
+        let page = page()
+        let hidden = page.posts[1].id
+        page.setHeroHidden(true, for: hidden)
+        page.layoutIfNeeded()
+
+        // Far away, so the hidden cell is returned to the pool and re-issued.
+        scroll(page, to: 6000)
+        #expect(invisibleTiles(page).isEmpty,
+                "recycled cells are invisible at \(invisibleTiles(page))")
+
+        // And back, after the flight has ended.
+        page.setHeroHidden(false, for: hidden)
+        scroll(page, to: 0)
+        #expect(invisibleTiles(page).isEmpty,
+                "tiles still invisible after the flight at \(invisibleTiles(page))")
+    }
+
+    /// Ten rounds of hide → scroll away → scroll back → unhide, which is the
+    /// shape of repeated open/dismiss with a scrolling gallery in between.
+    @Test func tenRecyclingRoundsLeaveNothingInvisible() {
+        let page = page()
+        for round in 0..<10 {
+            let hidden = page.posts[round * 2].id
+            page.setHeroHidden(true, for: hidden)
+            page.layoutIfNeeded()
+            scroll(page, to: CGFloat(2000 + round * 400))
+            scroll(page, to: 0)
+            page.setHeroHidden(false, for: hidden)
+            page.layoutIfNeeded()
+            #expect(invisibleTiles(page).isEmpty,
+                    "round \(round): invisible tiles at \(invisibleTiles(page))")
+        }
+    }
+}

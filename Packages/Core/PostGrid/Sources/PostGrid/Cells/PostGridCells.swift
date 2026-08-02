@@ -299,6 +299,14 @@ public final class PostGridTileCell: UICollectionViewCell {
 
     override public func prepareForReuse() {
         super.prepareForReuse()
+        // A recycled cell must come back VISIBLE. A hero flight hides the tile
+        // it is flying from, and that hide lives on the cell — so a cell
+        // recycled while hidden carries the invisibility to whatever post it is
+        // next bound to, and nothing on the reuse path would ever put it back.
+        // One tile lost per flight whose cell got recycled before its unhide,
+        // which is what made the gallery thin out over repeated round trips.
+        isHidden = false
+        alpha = 1
         // Hand the player back BEFORE anything else: a recycled cell that kept
         // its loan would show the previous post's video under the new post's
         // still. The coordinator clears its own bookkeeping in response.
