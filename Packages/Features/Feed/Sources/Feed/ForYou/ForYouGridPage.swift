@@ -73,7 +73,7 @@ final class ForYouGridPage: UIView {
     /// cold start to a single reload.
     private func replanArrangement() {
         guard style == .grid, !showsSkeleton, !rawPosts.isEmpty,
-              !isRepositioning, heroHiddenPostID == nil
+              heroHiddenPostID == nil
         else { return }
         let rearranged = arrange(rawPosts, startingAt: 0)
         guard rearranged.map(\.id) != posts.map(\.id) else { return }
@@ -97,16 +97,6 @@ final class ForYouGridPage: UIView {
     private var heroHiddenPostID: PostID?
     /// The inset to hand back when a flight ends; non-nil means frozen.
     private var frozenContentInset: UIEdgeInsets?
-    /// Suppresses prefetch while the page repositions itself.
-    ///
-    /// Pagination is a response to the VIEWER reaching the end, not to the code
-    /// moving the content. Without this, the hero's staging scroll
-    /// (`scrollPostIntoView`) reports as an ordinary scroll, asks for the next
-    /// page, and the corpus re-sorts under the active ordering — so every tile
-    /// reshuffles at the exact moment the flight is landing on one of them.
-    /// Caught in-sim as the grid visibly rearranging just after the card set
-    /// down on the right tile.
-    private var isRepositioning = false
     /// Throttle state for the during-scroll autoplay reconcile.
     private var lastReconcileTime: CFTimeInterval = 0
     private var lastReconcileOffset: CGFloat = 0
@@ -661,29 +651,58 @@ final class ForYouGridPage: UIView {
         applyBottomInset()
     }
 
-    /// Brings the post fully into view without animation, so a dismissal can
-    /// land on a cell the viewer had scrolled past — or only half scrolled to.
+    /// Puts the post the viewer ended on into the slot they LEFT from, swapping
+    /// it with whatever was there. Reports whether anything moved.
     ///
-    /// "Fully" is measured against the *inset* viewport, not the raw bounds: a
-    /// cell tucked under the filter tray or the tab bar passes an intersection
-    /// test while being somewhere no card should land. A cell already clear of
-    /// the insets is left exactly where it is, so a dismissal to something the
-    /// viewer can already see never jerks the grid under them.
-    func scrollPostIntoView(_ postID: PostID) {
-        guard let index = posts.firstIndex(where: { $0.id == postID }),
-              let attributes = collectionView.layoutAttributesForItem(
-                  at: IndexPath(item: index, section: 0)
-              )
-        else { return }
-        let viewport = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
-        guard !viewport.contains(attributes.frame) else { return }
-        isRepositioning = true
-        defer { isRepositioning = false }
-        collectionView.scrollToItem(
-            at: IndexPath(item: index, section: 0), at: .centeredVertically, animated: false
-        )
-        // The rect the caller is about to read must reflect the new offset.
-        collectionView.layoutIfNeeded()
+    /// A dismissal has to land somewhere, and there are two candidates: the tile
+    /// the active post already occupies — which means scrolling the grid under
+    /// the viewer to reach it — or the tile they tapped, which is still exactly
+    /// where they left it. This is the second. The slot becomes a window onto
+    /// whatever the feed settled on, and the card flies home to the frame it
+    /// launched from.
+    ///
+    /// **A swap, not an overwrite.** Every lookup on this page resolves a post
+    /// id to a cell through `firstIndex`. Writing the active post into the
+    /// departure slot while it still sat in its own would put one id in two
+    /// places, and `firstIndex` would answer with whichever came first — so the
+    /// flight rect, the hero hide and the playback adoption could each end up
+    /// addressing a different tile. Swapping keeps ids unique, which is what
+    /// lets the rest of the machinery go on addressing cells by post with no
+    /// idea this happened.
+    ///
+    /// **Geometry cannot shift.** The chaotic layout maps *index* to frame, so
+    /// exchanging the contents of two indices moves nothing. What does change is
+    /// the shape each of the two posts is cropped to: `PostGridSliceArrangement`
+    /// paired them with slots chosen for their own aspects, and a swap trades
+    /// those pairings.
+    @discardableResult
+    func adoptPost(_ postID: PostID, intoSlotOf occupantID: PostID) -> Bool {
+        guard style == .grid, !showsSkeleton,
+              let slot = posts.firstIndex(where: { $0.id == occupantID }),
+              let current = posts.firstIndex(where: { $0.id == postID }),
+              slot != current
+        else { return false }
+        posts.swapAt(slot, current)
+        // Reloaded rather than reconfigured: `reconfigureItems` reuses the cell
+        // without `prepareForReuse`, so a tile would keep the previous post's
+        // video surface and play one post's motion under another's cover.
+        UIView.performWithoutAnimation {
+            collectionView.reloadItems(at: [
+                IndexPath(item: slot, section: 0),
+                IndexPath(item: current, section: 0)
+            ])
+            // Force the pass NOW. `reloadItems` only marks the items dirty; the
+            // cells are rebuilt on the next layout, and the caller reads the
+            // landing rect from a realized cell immediately after this returns.
+            // Without it `cellForItem(at:)` answers nil, the source reports
+            // itself off-screen, and the flight collapses to the middle of the
+            // screen instead of flying to the tile — measured exactly that way.
+            collectionView.layoutIfNeeded()
+        }
+        // The landing tile is about to be flown onto; give its cover a head
+        // start in case the cache does not already hold it.
+        if let url = posts[slot].thumbnailURL { imagePipeline.prefetch([url]) }
+        return true
     }
 
     /// Hides the real cell while its twin is flying.
@@ -877,7 +896,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // time diffing than the work is worth.
         throttledAutoplayReconcile(scrollView)
 
-        guard !showsSkeleton, !posts.isEmpty, !isRepositioning else { return }
+        guard !showsSkeleton, !posts.isEmpty else { return }
         let remaining = scrollView.contentSize.height
             - (scrollView.contentOffset.y + scrollView.bounds.height)
         guard remaining < Self.prefetchDistance else { return }
@@ -900,7 +919,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     private static let maximumStartVelocity: CGFloat = 2200
 
     private func throttledAutoplayReconcile(_ scrollView: UIScrollView) {
-        guard playback != nil, !showsSkeleton, !isRepositioning else { return }
+        guard playback != nil, !showsSkeleton else { return }
         let now = CACurrentMediaTime()
         let elapsed = now - lastReconcileTime
         guard elapsed >= Self.scrollReconcileInterval else { return }

@@ -23,6 +23,13 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// The post the flight is currently anchored to. Starts at the tapped
     /// post and re-points to whatever the feed settled on.
     private var anchorID: PostID
+    /// The tile the viewer left from, kept for the whole push/pop pair.
+    ///
+    /// This is the landing target, whatever they scrolled to in between: the
+    /// grid is not moved, so the departure tile is still exactly where it was
+    /// when they tapped it, and the active post is brought TO that slot rather
+    /// than the grid being taken to the active post.
+    private let departureID: PostID
     /// The post the destination is showing right now, injected so this type
     /// never has to know what a feed is.
     private let activePostID: () -> PostID?
@@ -58,6 +65,7 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         self.releaseHoisted = releaseHoisted
         self.page = page
         anchorID = tappedID
+        departureID = tappedID
         self.activePostID = activePostID
         self.depthView = depthView
         self.donateLive = donateLive
@@ -186,15 +194,20 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         }
     }
 
-    /// Re-point at the post the feed ended on, then make sure its cell exists
-    /// and is on screen before anyone reads the landing rect.
+    /// Bring the post the feed ended on TO the tile the viewer left from, then
+    /// anchor there.
     ///
-    /// Order matters and is the whole content of this method: adopt the new
-    /// anchor first, because everything downstream is keyed on it; scroll only
-    /// if the cell isn't already visible, so a dismissal to something already
-    /// on screen never jolts the grid; then hide the (possibly freshly
-    /// dequeued) cell, because a scroll can realize a *new* cell that never saw
-    /// the earlier hide.
+    /// The grid is deliberately not scrolled. Scrolling it to reach the active
+    /// post's own tile moves the whole gallery under the viewer while a card is
+    /// about to land on it — and the tile they launched from, which is the frame
+    /// the flight reads as home, is still exactly where they left it. Nothing
+    /// can have scrolled the grid in the meantime: it has been covered by the
+    /// feed the whole time.
+    ///
+    /// Order matters. The swap goes first, because it is what makes the
+    /// anchor's id resolve to the departure slot; the hide goes last, because
+    /// the swap reloads those two cells and a cell dequeued before the flag was
+    /// set would come back visible.
     func zoomSourceWillStageDismissal() {
         // From here on, cards belong to return flights — see `makeZoomFlightCard`.
         isStagingDismissal = true
@@ -202,14 +215,16 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         // pop animates the safe area, and an unpinned grid keeps drifting under
         // the flight. See `ForYouGridPage.beginHeroFreeze`.
         page?.beginHeroFreeze()
-        if let landed = activePostID() {
+        if let landed = activePostID(), page?.adoptPost(landed, intoSlotOf: departureID) == true {
+            // The active post now occupies the departure slot, so anchoring to
+            // it lands on that tile without moving anything.
             anchorID = landed
+        } else {
+            // Nothing moved: either the viewer never left the tile, or the feed
+            // settled on a post this grid no longer holds. Both land on the
+            // departure tile itself rather than on a rect that no longer exists.
+            anchorID = departureID
         }
-        // Always, not only when off-screen: a *partially* visible cell is
-        // "visible" by the intersection test but would have the card land
-        // half under the tray or the tab bar. Centring it is idempotent when
-        // it is already centred, and this runs behind the dim either way.
-        page?.scrollPostIntoView(anchorID)
         page?.setHeroHidden(true, for: anchorID)
     }
 

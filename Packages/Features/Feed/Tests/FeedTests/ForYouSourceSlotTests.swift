@@ -1,0 +1,113 @@
+import CoreModels
+import Foundation
+import MediaCore
+import PostGrid
+import Testing
+import UIKit
+@testable import Feed
+
+/// A dismissal lands on the tile the viewer LEFT from, not on the tile the post
+/// they ended on happens to occupy. Rather than scrolling the gallery under a
+/// card that is about to land on it, the active post is moved into the
+/// departure slot.
+///
+/// The swap is what makes that safe: every lookup on the page resolves a post
+/// id to a cell through `firstIndex`, so the same id in two slots would let the
+/// flight rect, the hero hide and the playback adoption each address a
+/// different tile.
+@MainActor
+struct ForYouSourceSlotTests {
+    private struct SilentFetcher: ImageFetching {
+        func fetchImageData(for url: URL) async throws -> Data { Data() }
+    }
+
+    private func posts(_ count: Int) -> [GalleryPost] {
+        (0..<count).map {
+            GalleryPost(
+                id: PostID("p\($0)"), kind: .photo, isRepost: false, thumbnailURL: nil,
+                aspectRatio: 1, caption: "", publishedAtMS: 0
+            )
+        }
+    }
+
+    private func page(_ count: Int = 30) -> ForYouGridPage {
+        let page = ForYouGridPage(
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid
+        )
+        page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        page.render(.content(posts(count)))
+        page.layoutIfNeeded()
+        return page
+    }
+
+    private func frames(of page: ForYouGridPage) -> [CGRect] {
+        let scroll = page.subviews.compactMap { $0 as? UICollectionView }.first!
+        return (0..<page.posts.count).compactMap {
+            scroll.collectionViewLayout
+                .layoutAttributesForItem(at: IndexPath(item: $0, section: 0))?.frame
+        }
+    }
+
+    @Test func theActivePostMovesIntoTheDepartureSlot() {
+        let page = page()
+        let departure = page.posts[3].id
+        let active = page.posts[17].id
+
+        #expect(page.adoptPost(active, intoSlotOf: departure))
+        #expect(page.posts[3].id == active, "the departure slot does not hold the active post")
+        #expect(page.posts[17].id == departure, "the two posts did not swap")
+    }
+
+    /// The point of the swap. If both slots held the active post, `firstIndex`
+    /// would answer with whichever came first and the flight could aim at a
+    /// different tile than the one the hide covered.
+    @Test func idsStayUnique() {
+        let page = page()
+        let before = Set(page.posts.map(\.id))
+        page.adoptPost(page.posts[17].id, intoSlotOf: page.posts[3].id)
+        #expect(Set(page.posts.map(\.id)) == before, "the swap changed which posts exist")
+        #expect(page.posts.count == Set(page.posts.map(\.id)).count, "a post id was duplicated")
+    }
+
+    /// The landing rect must be the one the flight launched from. The chaotic
+    /// layout maps INDEX to frame, so exchanging two indices' contents cannot
+    /// move a tile — this pins that, since it is the whole reason the grid no
+    /// longer has to scroll.
+    @Test func noTileMovesWhenTheSlotIsReused() {
+        let page = page()
+        let before = frames(of: page)
+        page.adoptPost(page.posts[17].id, intoSlotOf: page.posts[3].id)
+        page.layoutIfNeeded()
+        #expect(frames(of: page) == before, "swapping content moved a tile")
+    }
+
+    /// The viewer never left the tile they tapped: nothing to move.
+    @Test func adoptingIntoItsOwnSlotDoesNothing() {
+        let page = page()
+        let id = page.posts[3].id
+        #expect(!page.adoptPost(id, intoSlotOf: id))
+        #expect(page.posts[3].id == id)
+    }
+
+    /// The feed settled on something this grid no longer holds. The caller
+    /// falls back to the departure tile, so this must report that nothing moved
+    /// rather than silently rearranging.
+    @Test func anAbsentPostIsRefused() {
+        let page = page()
+        let departure = page.posts[3].id
+        #expect(!page.adoptPost(PostID("nowhere"), intoSlotOf: departure))
+        #expect(!page.adoptPost(departure, intoSlotOf: PostID("nowhere")))
+        #expect(page.posts[3].id == departure)
+    }
+
+    /// A skeleton page has slots but no posts behind them.
+    @Test func aLoadingPageIsRefused() {
+        let page = ForYouGridPage(
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid
+        )
+        page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        page.render(.loading)
+        page.layoutIfNeeded()
+        #expect(!page.adoptPost(PostID("p1"), intoSlotOf: PostID("p0")))
+    }
+}
