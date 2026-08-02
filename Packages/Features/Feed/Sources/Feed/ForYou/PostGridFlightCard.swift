@@ -22,7 +22,8 @@ final class PostGridFlightCard: UIView {
     /// differently, and a hero that flew from both with one set of constants
     /// would be a twin of neither.
     enum Style {
-        /// A mosaic brick: 10pt corners, counters and badge overlaid on the media.
+        /// A grid brick: the layout's tile corners, counters and badge overlaid
+        /// on the media.
         case tile
         /// The preview inside a timeline row: 12pt corners, and NO counters —
         /// that row shows its metrics in a line *below* the media, so overlaying
@@ -46,8 +47,16 @@ final class PostGridFlightCard: UIView {
         }
     }
 
-    /// Matches `PostGridTileCell`'s brick rounding.
-    static let tileCornerRadius: CGFloat = 10
+    /// Matches the rounding the For You grid gives its tiles, so the card is
+    /// the brick's twin rather than its approximation.
+    ///
+    /// Sourced from the layout rather than restated as a literal: the card, the
+    /// tile and the hoisted dismissal surface (`ForYouViewController`) all have
+    /// to round identically, and three copies of one number is how they drift
+    /// apart. Every flight this card serves departs from the For You grid — the
+    /// profile gallery has no zoom source — so the chaotic layout's pairing is
+    /// unconditionally the right one here.
+    static let tileCornerRadius = ChaoticSliceLayout.harmonisedCornerRadius
 
     private let style: Style
     /// Whether a live surface has been adopted, tracked explicitly rather than
@@ -290,10 +299,16 @@ extension PostGridFlightCard: ZoomFlightCard {
     /// scale renders the PAGE's crop whatever shape the card currently is:
     /// against a 402x874 page a 2:1 landscape brick shows only 22.9% of the
     /// surface vertically. That is why this was flipped to true originally.
-    /// `PostGridMosaic.arrangedForMotion` now places portrait media in portrait
-    /// bricks and landscape in landscape, so the flight travels the page's own
-    /// aspect and that crop is small — which is what makes this affordable
-    /// again.
+    /// `PostGridSliceArrangement` keeps that crop small by placing each clip in
+    /// the block whose aspect is nearest its media, so the flight travels the
+    /// page's own aspect — which is what makes this affordable again.
+    ///
+    /// The chaotic layout narrows the range this has to survive as well as
+    /// matching within it: BSP blocks are scored toward 3:4 … 4:3, so there is
+    /// no 2:1 brick left to produce the worst case above. The trade is that
+    /// there is no 1:2 brick either, so a 9:16 clip cannot be matched as tightly
+    /// as the old mosaic matched it — verify takeoff on portrait video before
+    /// trusting this comment.
     var zoomLiveMediaTracksCardBounds: Bool { false }
 
     /// Lays the surface out ONCE at destination size, with autoresizing off so

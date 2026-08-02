@@ -98,15 +98,35 @@ public final class PostGridSkeletonCard: UIView {
 
 // MARK: - Mosaic tile skeleton
 
-/// The `PostGridTileCell` mimic: one full-bleed bone with the mosaic's 10pt
-/// continuous rounding. The mosaic layout itself supplies the brick shapes —
-/// squares, landscapes, portraits — so the skeleton page IS the real pattern.
+/// The `PostGridTileCell` mimic: one full-bleed bone with the same rounding the
+/// real tile carries. The layout itself supplies the brick shapes, so the
+/// skeleton page IS the real pattern.
 public final class PostGridSkeletonTileCell: UICollectionViewCell {
     public static let reuseID = "PostGridSkeletonTileCell"
 
+    private let bone = SkeletonBoneView(rounding: .fixed(PostGridTileCell.mosaicCornerRadius))
+
+    /// Tracks the real tile's rounding — see `PostGridTileCell.cornerRadius`.
+    ///
+    /// Load-bearing for hydration: the skeleton hands off to content through a
+    /// cross-dissolve inside the same silhouette, so a skeleton still rounded at
+    /// the mosaic's 10pt under a grid whose tiles are 16pt would visibly change
+    /// shape at the very moment it is supposed to be invisible.
+    public var cornerRadius: CGFloat = PostGridTileCell.mosaicCornerRadius {
+        didSet { bone.layer.cornerRadius = cornerRadius }
+    }
+
     override public init(frame: CGRect) {
         super.init(frame: frame)
-        SkeletonBoneView(rounding: .fixed(10)).pin(to: contentView)
+        bone.pin(to: contentView)
+    }
+
+    /// Same rule as the real tile: a recycled cell comes back visible, whatever
+    /// a flight left it as.
+    override public func prepareForReuse() {
+        super.prepareForReuse()
+        isHidden = false
+        alpha = 1
     }
 
     @available(*, unavailable)

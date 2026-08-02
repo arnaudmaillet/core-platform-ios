@@ -445,6 +445,7 @@ final class ForYouViewController: UIViewController {
             prewarmVisible()
         }
         viewModel.onLoadSettled = { [weak self] in self?.pager.endRefreshing() }
+        viewModel.onPagingChange = { [weak self] paging in self?.pager.setPaging(paging) }
 
         // Land on the stored format before first layout, so the screen OPENS
         // there with no visible jump.
@@ -575,15 +576,28 @@ final class ForYouViewController: UIViewController {
             activePostID: { [weak feed] in (feed as? SnapFeedViewController)?.activePostID },
             // The gallery recedes; the tray and the title stay grounded.
             depthView: pager,
-            // Donate-then-park, run at card-build time so the card flies the
-            // very layer the tile was already rendering.
-            hoistLive: { [weak self] view, rect, space, radius in
-                self?.hoistForDismissal(view, at: rect, in: space, cornerRadius: radius) ?? false
-            },
-            poseHoisted: { [weak self] rect, space, radius in
-                self?.poseHostedSurface(at: rect, in: space, cornerRadius: radius)
-            },
-            releaseHoisted: { [weak self] in self?.releaseHoistedForCancel() },
+            // NOT hoisted — the two dismissals share one surface flow.
+            //
+            // Hoisting lifted the live layer out of the card and into a host
+            // above the navigation controller for the return, and only the
+            // tap-back path ever did it: the grab keeps the surface inside the
+            // card the whole way. That asymmetry is where tap-back's two
+            // defects lived. The hoisted landing has a refusal branch — if
+            // `adoptHostedPlayback` cannot match the surface to a realized
+            // tile it calls `detachForReplacement()` and drops the view — and a
+            // torn-down surface means the tile starts a FRESH player, which is
+            // the video restarting from zero mid-return. Nothing on the grab
+            // path can do that, which is why only tap-back showed it.
+            //
+            // The readiness drop the hoist was introduced to remove is already
+            // gone by other means: `adoptAttachedSurface` gives the landing tile
+            // its OWN surface primed with the current frame, so the player layer
+            // is never re-parented either way. Both paths now land through
+            // `zoomAdoptLiveMediaView` and hold on the same
+            // `zoomLandingMediaIsReady` gate.
+            hoistLive: nil,
+            poseHoisted: nil,
+            releaseHoisted: nil,
             donateLive: { [weak self, weak page] in
                 // Under `-avsbdl-render` the card joins the tile's playback as
                 // an extra surface instead of taking it over. The tile keeps

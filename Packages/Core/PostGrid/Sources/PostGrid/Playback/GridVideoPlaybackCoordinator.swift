@@ -139,6 +139,21 @@ public final class GridVideoPlaybackCoordinator {
     /// the several ad-hoc entry points that each mutated per-tile state
     /// directly; they could disagree, and the grid came back with one or two
     /// slots alive instead of six.
+    /// Moves the handoff exemption to another post without re-running the
+    /// scope's teardown.
+    ///
+    /// The scope is opened for the post that was TAPPED, but a dismissal can
+    /// land on a different one — the grid moves whatever the feed settled on
+    /// into the departure slot. Landing exempted the wrong post: the tile
+    /// adopted the flight's surface and then `updateAutoplay`, which runs the
+    /// instant the tile is unhidden, swept it away again because it was neither
+    /// `handoffID` nor a viable candidate (a tile with no cover yet cannot be
+    /// one). The surface was torn down in the same turn it was handed over,
+    /// which is the flash, and the playhead went with it.
+    public func retargetHandoff(_ id: PostID) {
+        handoffID = id
+    }
+
     public func beginHandoff(_ id: PostID) {
         handoffID = id
         isSurfaceVisible = false

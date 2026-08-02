@@ -162,6 +162,19 @@ public final class PostGridListRowCell: UICollectionViewCell {
 public final class PostGridTileCell: UICollectionViewCell {
     public static let reuseID = "PostGridTileCell"
 
+    /// The mosaic's rounding, and the default: it is paired with that layout's
+    /// 1.5pt hairline gutter, where anything softer would leave visible pinches
+    /// where four bricks meet.
+    public static let mosaicCornerRadius: CGFloat = 10
+
+    /// The brick's rounding, settable because the two grids that share this
+    /// cell space their tiles differently — see
+    /// `ChaoticSliceLayout.harmonisedGutter`. Gap and curve are one decision,
+    /// so a surface that widens the gap sets this to match.
+    public var cornerRadius: CGFloat = PostGridTileCell.mosaicCornerRadius {
+        didSet { contentView.layer.cornerRadius = cornerRadius }
+    }
+
     /// The image the brick is currently showing — see `PostGridListRowCell`'s
     /// note for why a hero reads this rather than the image pipeline.
     public var renderedCover: UIImage? { imageView.image }
@@ -249,9 +262,10 @@ public final class PostGridTileCell: UICollectionViewCell {
         super.init(frame: frame)
         contentView.backgroundColor = .secondarySystemBackground
         contentView.clipsToBounds = true
-        // Soft mosaic bricks, not hard edges — matched to the list cards'
-        // inner media rounding.
-        contentView.layer.cornerRadius = 10
+        // Soft bricks, not hard edges. `cornerRadius` re-applies this whenever
+        // a host wants the softer pairing; the curve stays continuous either
+        // way, which is what keeps a widened radius from reading as a stadium.
+        contentView.layer.cornerRadius = cornerRadius
         contentView.layer.cornerCurve = .continuous
 
         imageView.contentMode = .scaleAspectFill
@@ -285,6 +299,14 @@ public final class PostGridTileCell: UICollectionViewCell {
 
     override public func prepareForReuse() {
         super.prepareForReuse()
+        // A recycled cell must come back VISIBLE. A hero flight hides the tile
+        // it is flying from, and that hide lives on the cell — so a cell
+        // recycled while hidden carries the invisibility to whatever post it is
+        // next bound to, and nothing on the reuse path would ever put it back.
+        // One tile lost per flight whose cell got recycled before its unhide,
+        // which is what made the gallery thin out over repeated round trips.
+        isHidden = false
+        alpha = 1
         // Hand the player back BEFORE anything else: a recycled cell that kept
         // its loan would show the previous post's video under the new post's
         // still. The coordinator clears its own bookkeeping in response.

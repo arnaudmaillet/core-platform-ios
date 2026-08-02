@@ -74,10 +74,33 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// reads the same function, there is nothing left to correct when the spring
     /// takes over.
     private var stagedLanding: CGRect = .zero
-    /// True while the detach spring is settling; pose sets wait for it so a
-    /// direct set doesn't stomp the dip mid-flight (position is unaffected —
-    /// the dip animates bounds and subviews only).
-    private var isDetachSettling = false
+    /// When the detach dip is due to have landed.
+    ///
+    /// A deadline rather than a flag, because the dip no longer *blocks* the
+    /// scale channel — it shares it. Every pan event inside the window
+    /// re-targets the dip at the live curve over the time the dip has left, so
+    /// the animation converges to zero duration exactly as the window closes
+    /// and the handoff to direct sets is continuous by construction.
+    private var detachDeadline: CFTimeInterval = 0
+    private var isDetachSettling: Bool { CACurrentMediaTime() < detachDeadline }
+
+    /// How long the detach dip takes to settle.
+    private static let detachDuration: TimeInterval = 0.18
+
+    /// The card's scale for a drag progress — the ONE curve, used by the drag
+    /// and by the detach dip alike.
+    ///
+    /// Having the dip animate to a constant while the drag used this function
+    /// is what put a hole in the scale channel: for the dip's whole 180ms the
+    /// finger accumulated progress that nothing applied, and the first ungated
+    /// pan event discharged all of it in a single frame. Measured on a scripted
+    /// grab: the card's height went 830pt to 774pt in one frame, against
+    /// ~5.5pt/frame either side, and the drop grows with drag speed — 252pt at
+    /// 1800pt/s.
+    static func grabScale(at progress: CGFloat) -> CGFloat {
+        let span = ZoomFlight.detachScale - ZoomFlight.minimumGrabScale
+        return max(ZoomFlight.detachScale - span * progress, ZoomFlight.minimumGrabScale)
+    }
     /// Set when this grab's teardown has restored (or is done with) the
     /// destination, so the staged frame-0 hide — which waits on a display-link
     /// gate — cannot fire afterwards and strand the feed invisible.
@@ -266,18 +289,33 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // pivot. One hop later the scope is a normal animation context. (Not
         // a UIViewPropertyAnimator: its tracked animations entangled the
         // release spring's completion under the transition, freezing it.)
-        isDetachSettling = true
-        DispatchQueue.main.async {
-            UIView.animate(
-                withDuration: 0.18, delay: 0, usingSpringWithDamping: 0.8,
-                initialSpringVelocity: 0.4, options: [.allowUserInteraction, .beginFromCurrentState]
-            ) {
-                flight.poseFloating(scale: ZoomFlight.detachScale, cornerRadius: self.screenRadius)
-            } completion: { _ in
-                self.isDetachSettling = false
-            }
+        detachDeadline = 0
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.detachDeadline = CACurrentMediaTime() + Self.detachDuration
+            // Progress is still ~0 one runloop turn in, so this is the same dip
+            // it always was; pan events re-aim it from here.
+            self.springDetach(flight, to: Self.grabScale(at: 0))
         }
         context.updateInteractiveTransition(0)
+    }
+
+    /// Springs the card's scale toward `scale` over whatever the dip has left.
+    ///
+    /// The shrinking duration is the point. A fixed one re-issued per pan event
+    /// behaves like a lag filter — the card trails the finger by the spring's
+    /// time constant, and the trailing error has to be discharged somewhere,
+    /// which is the very jump this replaces. Winding the duration down to the
+    /// deadline makes the animation vanish into a direct set exactly when the
+    /// window closes, so there is nothing left to discharge.
+    private func springDetach(_ flight: ZoomFlight, to scale: CGFloat) {
+        let remaining = max(detachDeadline - CACurrentMediaTime(), 0)
+        UIView.animate(
+            withDuration: remaining, delay: 0, usingSpringWithDamping: 0.8,
+            initialSpringVelocity: 0.4, options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            flight.poseFloating(scale: scale, cornerRadius: self.screenRadius)
+        }
     }
 
     // MARK: - Drag
@@ -338,11 +376,13 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // known: `poseAtSource(at:)` takes the card from this pose to the
         // tile's rect on the landing spring.
         //
-        // Skipped while the detach spring settles — its endpoint is this
-        // function at progress 0, so the handoff is invisible.
-        if !isDetachSettling {
-            let span = ZoomFlight.detachScale - ZoomFlight.minimumGrabScale
-            let scale = max(ZoomFlight.detachScale - span * progress, ZoomFlight.minimumGrabScale)
+        // Applied on EVERY event, dip or no dip. While the dip is settling the
+        // curve is handed to it as a moving target rather than skipped, so the
+        // finger's travel is never banked up to be released in one frame.
+        let scale = Self.grabScale(at: progress)
+        if isDetachSettling {
+            springDetach(flight, to: scale)
+        } else {
             flight.poseFloating(scale: scale, cornerRadius: screenRadius)
         }
         dim?.alpha = 1 - progress
@@ -611,7 +651,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         flight = nil
         dim = nil
         toolbar = nil
-        isDetachSettling = false
+        detachDeadline = 0
     }
 
     /// UIKit's spring velocity is normalized to "distances to target per

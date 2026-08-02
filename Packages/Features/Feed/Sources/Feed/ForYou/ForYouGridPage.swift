@@ -35,12 +35,51 @@ final class ForYouGridPage: UIView {
     /// recognised as one before arrangement permutes it.
     private var rawPosts: [GalleryPost] = []
 
-    /// Mosaic pages steer autoplaying posts into the non-square bricks; list
-    /// pages are a timeline, where order carries meaning and must not be
+    /// Grid pages steer each post into the block whose shape crops it least;
+    /// list pages are a timeline, where order carries meaning and must not be
     /// rearranged for looks.
+    ///
+    /// The slot shapes come from the layout rather than from a table, because a
+    /// BSP tiling generates them — see `PostGridSliceArrangement`. Before the
+    /// page has been laid out there are no shapes yet and this is the identity;
+    /// `onPlanInvalidated` re-runs it when geometry resolves.
     private func arrange(_ posts: [GalleryPost], startingAt index: Int) -> [GalleryPost] {
-        guard style == .grid else { return posts }
-        return PostGridMosaic.arrangedForMotion(posts, startingAt: index)
+        guard style == .grid, let sliceLayout else { return posts }
+        return PostGridSliceArrangement.arranged(
+            posts, startingAt: index,
+            slotMetrics: sliceLayout.slotMetrics(forItemCount: index + posts.count)
+        )
+    }
+
+    private var sliceLayout: ChaoticSliceLayout? {
+        collectionView.collectionViewLayout as? ChaoticSliceLayout
+    }
+
+    /// The rounding this page's tiles take, paired with the layout's gutter.
+    /// List pages fall back to the tile default, which they never use.
+    private var tileCornerRadius: CGFloat {
+        sliceLayout?.tileCornerRadius ?? PostGridTileCell.mosaicCornerRadius
+    }
+
+    /// Re-places every post against slot shapes that have just changed — a
+    /// rotation, or any resize that alters the slice's aspect and therefore what
+    /// shape each block is.
+    ///
+    /// Guarded on the two states where moving a cell would be destructive: a
+    /// staged dismissal has already measured where its card is landing, and a
+    /// hidden hero means a card is in the air over a tile that must not move
+    /// out from under it. Reloading is also skipped when the new arrangement
+    /// matches the old, which is the common case on first layout and keeps the
+    /// cold start to a single reload.
+    private func replanArrangement() {
+        guard style == .grid, !showsSkeleton, !rawPosts.isEmpty,
+              heroHiddenPostID == nil
+        else { return }
+        let rearranged = arrange(rawPosts, startingAt: 0)
+        guard rearranged.map(\.id) != posts.map(\.id) else { return }
+        posts = rearranged
+        collectionView.reloadData()
+        DispatchQueue.main.async { [weak self] in self?.updateAutoplay() }
     }
 
     private let imagePipeline: ImagePipeline
@@ -56,18 +95,26 @@ final class ForYouGridPage: UIView {
     /// The post whose cell is standing in for a flight card and must stay
     /// invisible until the card lands. See `setHeroHidden`.
     private var heroHiddenPostID: PostID?
+    /// The exact cell hidden at takeoff.
+    ///
+    /// Held by reference because the post→cell mapping is not stable across a
+    /// flight: staging swaps the active post into the departure slot, so by
+    /// landing `cell(for:)` resolves the anchor to a DIFFERENT instance than the
+    /// one the hide was applied to. Unhiding by lookup therefore cleared the
+    /// wrong cell and left the original invisible for good — with the flag
+    /// correctly nil, which is why it survived every check that looked at the
+    /// flag. Weak: the collection view owns cells and may recycle this one,
+    /// and a recycled cell is corrected by `cellForItemAt` anyway.
+    private weak var heroHiddenCell: UICollectionViewCell?
+    /// The post whose twin is in the air, concealed or not.
+    ///
+    /// Split from `heroHiddenPostID` because the two questions came apart: a
+    /// dismissal wants its landing tile VISIBLE under the incoming card, but
+    /// still must not let it claim a player while the card is flying that same
+    /// playback.
+    private var heroFlyingPostID: PostID?
     /// The inset to hand back when a flight ends; non-nil means frozen.
     private var frozenContentInset: UIEdgeInsets?
-    /// Suppresses prefetch while the page repositions itself.
-    ///
-    /// Pagination is a response to the VIEWER reaching the end, not to the code
-    /// moving the content. Without this, the hero's staging scroll
-    /// (`scrollPostIntoView`) reports as an ordinary scroll, asks for the next
-    /// page, and the corpus re-sorts under the active ordering — so every tile
-    /// reshuffles at the exact moment the flight is landing on one of them.
-    /// Caught in-sim as the grid visibly rearranging just after the card set
-    /// down on the right tile.
-    private var isRepositioning = false
     /// Throttle state for the during-scroll autoplay reconcile.
     private var lastReconcileTime: CFTimeInterval = 0
     private var lastReconcileOffset: CGFloat = 0
@@ -75,10 +122,12 @@ final class ForYouGridPage: UIView {
     private var hasScheduledDiagnostics = false
     #endif
 
-    /// List pages show a column of placeholder cards; the mosaic shows two
-    /// full 8-brick patterns — a scrolling page has a whole viewport to fill,
-    /// where the profile's one pattern only had to reach the fold.
-    private var skeletonCount: Int { style == .grid ? PostGridMosaic.patternLength * 2 : 6 }
+    /// List pages show a column of placeholder cards; the grid shows two full
+    /// slices — a scrolling page has a whole viewport to fill, and a slice is
+    /// only a little over one screenful.
+    private var skeletonCount: Int {
+        style == .grid ? (sliceLayout?.cellsPerSlice ?? ChaoticSliceEngine.defaultCellsPerSlice) * 2 : 6
+    }
 
     /// How close to the end a scroll gets before the next page is requested.
     private static let prefetchDistance: CGFloat = 800
@@ -89,10 +138,14 @@ final class ForYouGridPage: UIView {
         self.style = style
         collectionView = UICollectionView(
             frame: .zero,
-            collectionViewLayout: style == .grid ? PostGridMosaic.layout() : PostGridListLayout.layout()
+            collectionViewLayout: style == .grid ? ChaoticSliceLayout() : PostGridListLayout.layout()
         )
         super.init(frame: .zero)
 
+        sliceLayout?.onPlanInvalidated = { [weak self] in self?.replanArrangement() }
+        pagingSpinner.alpha = 0
+        pagingSpinner.hidesWhenStopped = false
+        collectionView.addSubview(pagingSpinner)
         collectionView.backgroundColor = .clear
         collectionView.alwaysBounceVertical = true
         collectionView.register(PostGridTileCell.self, forCellWithReuseIdentifier: PostGridTileCell.reuseID)
@@ -127,11 +180,75 @@ final class ForYouGridPage: UIView {
     /// The content inset the pager's owner needs to clear with its tray — the
     /// page scrolls under it, so the last row must be reachable above it.
     var additionalBottomInset: CGFloat {
-        get { collectionView.contentInset.bottom }
+        get { trayInset }
         set {
-            collectionView.contentInset.bottom = newValue
-            collectionView.verticalScrollIndicatorInsets.bottom = newValue
+            trayInset = newValue
+            applyBottomInset()
         }
+    }
+
+    /// The tray's clearance and the paging footer's, kept apart because they
+    /// change independently and both land on the same inset.
+    private var trayInset: CGFloat = 0
+    private var footerInset: CGFloat = 0
+
+    private func applyBottomInset() {
+        // A hero flight pins the inset so its landing measurement stays valid —
+        // see `beginHeroFreeze`. Writing to it here would unpick that, so the
+        // value is held and applied when the flight thaws.
+        guard frozenContentInset == nil else { return }
+        let bottom = trayInset + footerInset
+        collectionView.contentInset.bottom = bottom
+        collectionView.verticalScrollIndicatorInsets.bottom = bottom
+    }
+
+    // MARK: - Paging footer
+
+    /// The band reserved below the content while the next page is in flight.
+    ///
+    /// The tray's own clearance cannot serve here: it is exactly the height the
+    /// tray floats over, so anything parked in it sits *behind* the tray at full
+    /// scroll. The footer adds its own space above that.
+    private static let footerHeight: CGFloat = 56
+
+    private let pagingSpinner = UIActivityIndicatorView(style: .medium)
+    private var isPaging = false
+
+    /// Shows or hides the next-page spinner beneath the last tile.
+    ///
+    /// **Why this cannot jump the scroll.** Reserving the band happens when
+    /// pagination fires, which is `prefetchDistance` (800pt) before the end —
+    /// growing the bottom inset never moves `contentOffset`, so there is nothing
+    /// to see. Releasing it happens once the page has landed and added a whole
+    /// slice of content, by which point the viewer is far from the bottom and
+    /// the offset cannot be clamped by 56pt. The animation covers the one case
+    /// left: a page that lands empty, where the release can nudge a viewer
+    /// sitting at the very end.
+    func setPaging(_ paging: Bool) {
+        guard style == .grid, isPaging != paging else { return }
+        isPaging = paging
+        if paging {
+            pagingSpinner.startAnimating()
+            positionPagingFooter()
+        }
+        footerInset = paging ? Self.footerHeight : 0
+        UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState]) {
+            self.applyBottomInset()
+            self.pagingSpinner.alpha = paging ? 1 : 0
+        } completion: { _ in
+            if !self.isPaging { self.pagingSpinner.stopAnimating() }
+        }
+    }
+
+    /// Parks the spinner just under the content, in the scroll view's own
+    /// coordinates, so it travels with the last row instead of floating over it.
+    private func positionPagingFooter() {
+        guard isPaging else { return }
+        let contentHeight = collectionView.collectionViewLayout.collectionViewContentSize.height
+        pagingSpinner.center = CGPoint(
+            x: collectionView.bounds.width / 2,
+            y: contentHeight + Self.footerHeight / 2
+        )
     }
 
     func endRefreshing() {
@@ -164,7 +281,7 @@ final class ForYouGridPage: UIView {
             // `autoplaysInGrid` is the shape rule: video, with a stream, and
             // not square. Square bricks stay still.
             guard post.autoplaysInGrid, let url = post.videoURL,
-                  post.id != heroHiddenPostID, // its twin is in the air
+                  post.id != heroFlyingPostID, // its twin is in the air
                   let cell = collectionView.cellForItem(at: indexPath) as? PostGridTileCell,
                   hasCover(for: post, in: cell)
             else { return nil }
@@ -274,11 +391,20 @@ final class ForYouGridPage: UIView {
         playback?.beginHandoff(postID)
     }
 
+    /// Points the handoff scope at the post a dismissal is actually landing on.
+    /// See `GridVideoPlaybackCoordinator.retargetHandoff`.
+    func retargetPlaybackHandoff(to postID: PostID) {
+        playback?.retargetHandoff(postID)
+    }
+
     /// Closes the scope and reconciles once — the single act that restores the
     /// grid's full complement of players after a dismissal.
     func endPlaybackHandoff() {
         playback?.endHandoff()
         updateAutoplay()
+        #if DEBUG
+        logVisibility("return-complete")
+        #endif
     }
 
     func setAutoplayActive(_ active: Bool, keeping kept: PostID? = nil) {
@@ -369,14 +495,37 @@ final class ForYouGridPage: UIView {
         cell.layoutIfNeeded()
     }
 
-    /// Whether the tile that a dismissal is landing on is already rendering.
-    /// True when it carries no video, so a still tile never holds the card.
+    /// Whether the tile a dismissal is landing on has something to show yet.
+    ///
+    /// The card is held over the landing until this is true, so "ready" has to
+    /// mean *the viewer would see content*, not merely *playback is running*.
+    /// Three cases, and the first two are why a swapped-in post could flash:
+    ///
+    /// - The tile has TAKEN a surface. A dismissal hands its live surface to any
+    ///   post carrying a stream, but the old gate only waited when the post also
+    ///   passed `autoplaysInGrid` — which excludes square clips. So a square
+    ///   video adopted a surface, the gate said ready, the card let go, and the
+    ///   surface's first frame had not arrived: one empty tile.
+    /// - A still tile is ready when it has a cover. Nothing waited on that at
+    ///   all, so landing on a post whose thumbnail was not already cached — the
+    ///   normal case for one swapped in from further down the feed — showed the
+    ///   tile's background colour until the load returned.
+    /// - Nothing realized, or nothing to load: there is no gap to cover.
+    ///
+    /// `ZoomAnimator.holdCard`'s ceiling bounds all of this, so a cover that
+    /// never arrives is a brief pause rather than a stuck card.
     func isLandingPlaybackReady(for postID: PostID) -> Bool {
-        guard let playback,
-              let index = posts.firstIndex(where: { $0.id == postID }),
-              posts[index].autoplaysInGrid
-        else { return true }
-        return playback.isSurfaceRendering(for: postID)
+        guard let index = posts.firstIndex(where: { $0.id == postID }) else { return true }
+        let post = posts[index]
+        let cell = collectionView.cellForItem(
+            at: IndexPath(item: index, section: 0)
+        ) as? PostGridTileCell
+        if let playback, post.videoURL != nil,
+           post.autoplaysInGrid || cell?.loadedVideoRenderView != nil {
+            return playback.isSurfaceRendering(for: postID)
+        }
+        guard let cell, post.thumbnailURL != nil else { return true }
+        return cell.renderedCover != nil
     }
 
 
@@ -547,31 +696,101 @@ final class ForYouGridPage: UIView {
         self.frozenContentInset = nil
         collectionView.contentInsetAdjustmentBehavior = .automatic
         collectionView.contentInset = frozenContentInset
+        // The footer may have opened or closed while the inset was pinned, and
+        // those writes were dropped. Re-apply now that it is ours again.
+        applyBottomInset()
     }
 
-    /// Brings the post fully into view without animation, so a dismissal can
-    /// land on a cell the viewer had scrolled past — or only half scrolled to.
+    /// Puts the post the viewer ended on into the slot they LEFT from, swapping
+    /// it with whatever was there. Reports whether anything moved.
     ///
-    /// "Fully" is measured against the *inset* viewport, not the raw bounds: a
-    /// cell tucked under the filter tray or the tab bar passes an intersection
-    /// test while being somewhere no card should land. A cell already clear of
-    /// the insets is left exactly where it is, so a dismissal to something the
-    /// viewer can already see never jerks the grid under them.
-    func scrollPostIntoView(_ postID: PostID) {
-        guard let index = posts.firstIndex(where: { $0.id == postID }),
-              let attributes = collectionView.layoutAttributesForItem(
-                  at: IndexPath(item: index, section: 0)
-              )
-        else { return }
-        let viewport = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
-        guard !viewport.contains(attributes.frame) else { return }
-        isRepositioning = true
-        defer { isRepositioning = false }
-        collectionView.scrollToItem(
-            at: IndexPath(item: index, section: 0), at: .centeredVertically, animated: false
-        )
-        // The rect the caller is about to read must reflect the new offset.
-        collectionView.layoutIfNeeded()
+    /// A dismissal has to land somewhere, and there are two candidates: the tile
+    /// the active post already occupies — which means scrolling the grid under
+    /// the viewer to reach it — or the tile they tapped, which is still exactly
+    /// where they left it. This is the second. The slot becomes a window onto
+    /// whatever the feed settled on, and the card flies home to the frame it
+    /// launched from.
+    ///
+    /// **A swap, not an overwrite.** Every lookup on this page resolves a post
+    /// id to a cell through `firstIndex`. Writing the active post into the
+    /// departure slot while it still sat in its own would put one id in two
+    /// places, and `firstIndex` would answer with whichever came first — so the
+    /// flight rect, the hero hide and the playback adoption could each end up
+    /// addressing a different tile. Swapping keeps ids unique, which is what
+    /// lets the rest of the machinery go on addressing cells by post with no
+    /// idea this happened.
+    ///
+    /// **Geometry cannot shift.** The chaotic layout maps *index* to frame, so
+    /// exchanging the contents of two indices moves nothing. What does change is
+    /// the shape each of the two posts is cropped to: `PostGridSliceArrangement`
+    /// paired them with slots chosen for their own aspects, and a swap trades
+    /// those pairings.
+    @discardableResult
+    func adoptPost(_ postID: PostID, intoSlotOf occupantID: PostID) -> Bool {
+        guard style == .grid, !showsSkeleton,
+              let slot = posts.firstIndex(where: { $0.id == occupantID }),
+              let current = posts.firstIndex(where: { $0.id == postID }),
+              slot != current
+        else { return false }
+        // The pixels each cell is showing RIGHT NOW, carried across the reload.
+        //
+        // `configure` clears the image and re-asks the cache, so a cell whose
+        // cover the cache has since evicted comes back empty — a blank square
+        // where a tile used to be, for as long as the refetch takes. Both cells
+        // are on screen during a dismissal, so both would show it.
+        let carried = [slot, current].reduce(into: [Int: UIImage]()) { covers, index in
+            let path = IndexPath(item: index, section: 0)
+            if let cover = (collectionView.cellForItem(at: path) as? PostGridTileCell)?.renderedCover {
+                covers[index] = cover
+            }
+        }
+        posts.swapAt(slot, current)
+        // Reloaded rather than reconfigured: `reconfigureItems` reuses the cell
+        // without `prepareForReuse`, so a tile would keep the previous post's
+        // video surface and play one post's motion under another's cover.
+        UIView.performWithoutAnimation {
+            collectionView.reloadItems(at: [
+                IndexPath(item: slot, section: 0),
+                IndexPath(item: current, section: 0)
+            ])
+            // Force the pass NOW. `reloadItems` only marks the items dirty; the
+            // cells are rebuilt on the next layout, and the caller reads the
+            // landing rect from a realized cell immediately after this returns.
+            // Without it `cellForItem(at:)` answers nil, the source reports
+            // itself off-screen, and the flight collapses to the middle of the
+            // screen instead of flying to the tile — measured exactly that way.
+            collectionView.layoutIfNeeded()
+            // Re-apply after the rebuild: `applyCover` is a no-op on a cell that
+            // already found its image, so a cache hit still wins.
+            for (index, cover) in carried {
+                let moved = index == slot ? current : slot
+                (collectionView.cellForItem(at: IndexPath(item: moved, section: 0))
+                    as? PostGridTileCell)?.applyCover(cover)
+            }
+            // Both swapped cells are on screen for the whole return, and both
+            // must be drawn before it starts. The displaced post's slot is the
+            // one that gets forgotten: nothing is flying to it, so no landing
+            // step ever revisits it, and it would carry whatever state the
+            // rebuild left until something else happened to touch it.
+            for index in [slot, current] {
+                guard let cell = collectionView.cellForItem(
+                    at: IndexPath(item: index, section: 0)
+                ) else { continue }
+                cell.isHidden = false
+                cell.alpha = 1
+                cell.layoutIfNeeded()
+            }
+            // And commit them to the render server in this turn rather than the
+            // next. Everything downstream — the hero rect, the flight card built
+            // from this cell's cover, the landing gate — reads the cell
+            // immediately, and a cell whose layers are still pending answers as
+            // though it were empty.
+            CATransaction.flush()
+        }
+        // The landing tile is about to be flown onto; give its cover a head
+        // start in case the cache does not already hold it.
+        if let url = posts[slot].thumbnailURL { imagePipeline.prefetch([url]) }
+        return true
     }
 
     /// Hides the real cell while its twin is flying.
@@ -584,18 +803,89 @@ final class ForYouGridPage: UIView {
     /// under the card and the viewer sees it twice; and a recycled cell carries
     /// the stale `isHidden` to whatever index it is next used for, leaving an
     /// invisible tile somewhere else in the grid.
-    func setHeroHidden(_ hidden: Bool, for postID: PostID) {
-        heroHiddenPostID = hidden ? postID : nil
+    #if DEBUG
+    /// `-foryou-visibility-log`: the state of the grid's visibility invariant at
+    /// a named moment.
+    ///
+    /// Written to answer one question the simulator would not: when a tile has
+    /// vanished on device, is it HIDDEN or is it ABSENT? Those point at opposite
+    /// halves of the system — a leaked hero hide against a data/arrangement
+    /// fault — and no screenshot distinguishes them.
+    ///
+    /// `hero` should be nil whenever no flight is in the air; a non-nil value
+    /// here is a leaked hide, and every future dequeue of that post will hide
+    /// its cell. `hidden` should be empty for the same reason. `posts` and
+    /// `items` must agree, or the data source and the collection view have
+    /// diverged and cells are missing rather than invisible.
+    func logVisibility(_ moment: String) {
+        guard ProcessInfo.processInfo.arguments.contains("-foryou-visibility-log"),
+              style == .grid
+        else { return }
+        let visible = collectionView.indexPathsForVisibleItems.sorted()
+        let invisible = visible.compactMap { path -> String? in
+            guard let cell = collectionView.cellForItem(at: path) else { return nil }
+            guard cell.isHidden || cell.alpha == 0 else { return nil }
+            let id = posts.indices.contains(path.item) ? posts[path.item].id.rawValue : "?"
+            return "\(path.item):\(id)\(cell.isHidden ? "/hidden" : "")\(cell.alpha == 0 ? "/alpha0" : "")"
+        }
+        let blank = visible.compactMap { path -> String? in
+            guard let cell = collectionView.cellForItem(at: path) as? PostGridTileCell,
+                  posts.indices.contains(path.item) else { return nil }
+            let post = posts[path.item]
+            guard post.thumbnailURL != nil, cell.renderedCover == nil,
+                  cell.loadedVideoRenderView?.isReadyForDisplay != true
+            else { return nil }
+            return "\(path.item):\(post.id.rawValue)"
+        }
+        let items = collectionView.numberOfSections > 0
+            ? collectionView.numberOfItems(inSection: 0) : 0
+        let ids = Set(posts.map(\.id))
+        print("[vis] \(moment) hero=\(heroHiddenPostID?.rawValue ?? "nil")"
+            + " posts=\(posts.count) items=\(items) uniqueIDs=\(ids.count)"
+            + " visible=\(visible.count) invisible=\(invisible.isEmpty ? "none" : invisible.joined(separator: ","))"
+            + " blank=\(blank.isEmpty ? "none" : blank.joined(separator: ","))"
+            + (posts.count == items && ids.count == posts.count ? "" : "  <<< DATA SOURCE DIVERGED"))
+    }
+    #endif
+
+    /// `conceals` is false for a DISMISSAL. The card is flying home TO this
+    /// tile, so hiding it opens a hole in the grid for the whole flight and the
+    /// tile pops in at the end. Left visible, the card simply lands on top of
+    /// content that was already there. A presentation still conceals: there the
+    /// card is flying AWAY from the tile, and two copies of the same post would
+    /// be on screen at once.
+    func setHeroHidden(_ hidden: Bool, for postID: PostID, conceals: Bool = true) {
+        heroFlyingPostID = hidden ? postID : nil
+        heroHiddenPostID = (hidden && conceals) ? postID : nil
         // Apply to whatever is on screen right now; `cellForItemAt` covers
         // everything realized from here on.
-        if let cell = cell(for: postID) {
-            cell.isHidden = hidden
+        let resolved = cell(for: postID)
+        resolved?.isHidden = hidden
+        if hidden {
+            heroHiddenCell = resolved
+        } else {
+            // The instance that was actually hidden, which a lookup may no
+            // longer reach.
+            heroHiddenCell?.isHidden = false
+            heroHiddenCell = nil
+            // And a sweep, because a flight can end without either reference
+            // naming the hidden cell — an interrupted transition, or a swap
+            // that moved the post twice. No flight is in the air once the flag
+            // is nil, so nothing on screen may legitimately be invisible.
+            for visible in collectionView.visibleCells where visible.isHidden {
+                visible.isHidden = false
+            }
         }
         // Unhiding is the end of a flight. The tile is excluded from
         // candidates while its twin is in the air (or it would adopt the
         // player mid-flight and blank the card), so this is the first moment
         // it may claim the player the destination parked for it.
-        if !hidden { updateAutoplay() }
+        if !hidden {
+            updateAutoplay()
+            #if DEBUG
+            logVisibility("unhide")
+            #endif
+        }
     }
 
     /// The post behind an id, for a flight card that must configure itself
@@ -604,16 +894,31 @@ final class ForYouGridPage: UIView {
         posts.first { $0.id == postID }
     }
 
-    /// The indices `new` adds when it is exactly `old` plus a suffix, else nil.
+    /// The posts `new` adds to `old`, or nil when this is not an addition.
     ///
-    /// Strict: every existing element must be unchanged and in place. A reorder
-    /// (the discovery source switching between Trending and Recent) or an
-    /// in-place edit is NOT an append and has to go through a full reload, or
-    /// the cells would keep rendering stale posts.
-    static func appendedRange(from old: [GalleryPost], to new: [GalleryPost]) -> Range<Int>? {
+    /// Membership, not order. The old rule demanded that `new` be exactly `old`
+    /// plus a suffix, so a page landing failed it whenever the discovery source
+    /// had re-ranked the corpus in the meantime — which Trending does on every
+    /// page. `apply` then took the reload branch and re-permuted EVERY slot,
+    /// and the grid visibly reshuffled under the viewer: tiles they were looking
+    /// at jumped elsewhere, reading as tiles vanishing.
+    ///
+    /// So a re-rank that only ADDS is treated as an addition. The upstream
+    /// ordering is honoured for the newcomers and ignored for posts already
+    /// placed, which is what the layout's immutable slices promise anyway — a
+    /// slot's contents do not move once the viewer has seen them. A genuine
+    /// removal or replacement still falls through to the reload.
+    static func addedPosts(from old: [GalleryPost], to new: [GalleryPost]) -> [GalleryPost]? {
         guard !old.isEmpty, new.count > old.count else { return nil }
-        guard Array(new.prefix(old.count)) == old else { return nil }
-        return old.count..<new.count
+        let existing = Set(old.map(\.id))
+        // Everything already on screen must still be there. A post that
+        // disappeared is a removal, which an insert cannot express.
+        guard existing.isSubset(of: Set(new.map(\.id))) else { return nil }
+        let added = new.filter { !existing.contains($0.id) }
+        // And the arithmetic has to close: same membership plus the newcomers,
+        // or something was duplicated and the counts would drift.
+        guard added.count == new.count - old.count else { return nil }
+        return added
     }
 
     private func cell(for postID: PostID) -> UICollectionViewCell? {
@@ -653,18 +958,28 @@ final class ForYouGridPage: UIView {
         // Measured against the RAW list, not the arranged one: arrangement is a
         // permutation, so an append upstream is still an append downstream, and
         // comparing raw keeps that fact simple to establish.
-        let appended = Self.appendedRange(from: rawPosts, to: incoming)
+        // A data change ends any flight this page still thinks is in the air.
+        // The flag is written in exactly one place and cleared only by the
+        // matching unhide, so a flight that never delivered one would hide its
+        // post's cell on every future dequeue — for the life of the page.
+        if !posts.contains(where: { $0.id == heroHiddenPostID }) { heroHiddenPostID = nil }
+        let added = Self.addedPosts(from: rawPosts, to: incoming)
         rawPosts = incoming
         showsSkeleton = skeleton
-        if let appended, !showsSkeleton, !skeleton, !dissolving {
-            // Arrange only the new tail, against the absolute slots it will
+        if let added, !added.isEmpty, !showsSkeleton, !skeleton, !dissolving {
+            // Arrange only the newcomers, against the absolute slots they will
             // occupy. Placement depends solely on the absolute index, so the
             // items already on screen cannot move — which is what keeps this an
             // insert rather than a reload.
-            posts += arrange(Array(incoming[appended]), startingAt: posts.count)
+            //
+            // Indexed off `posts`, not off `incoming`: the two are no longer the
+            // same order once a swap or a re-rank has happened, and the rows
+            // being inserted are this page's, not upstream's.
+            let start = posts.count
+            posts += arrange(added, startingAt: start)
             collectionView.performBatchUpdates {
                 collectionView.insertItems(
-                    at: appended.map { IndexPath(item: $0, section: 0) }
+                    at: (start..<posts.count).map { IndexPath(item: $0, section: 0) }
                 )
             }
             DispatchQueue.main.async { [weak self] in self?.updateAutoplay() }
@@ -708,9 +1023,13 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
                 cell.configure(variant: indexPath.item)
                 return cell
             case .grid:
-                return collectionView.dequeueReusableCell(
+                let cell = collectionView.dequeueReusableCell(
                     withReuseIdentifier: PostGridSkeletonTileCell.reuseID, for: indexPath
-                )
+                ) as! PostGridSkeletonTileCell
+                // The shimmer has to be the shape content will hydrate into, or
+                // the cross-dissolve changes silhouette as it lands.
+                cell.cornerRadius = tileCornerRadius
+                return cell
             }
         }
         let post = posts[indexPath.item]
@@ -730,6 +1049,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             let cell = collectionView.dequeueReusableCell(
                 withReuseIdentifier: PostGridTileCell.reuseID, for: indexPath
             ) as! PostGridTileCell
+            cell.cornerRadius = tileCornerRadius
             cell.configure(with: post, imagePipeline: imagePipeline)
             // Autoplay is gated on the cover, so the arrival of a cover is a
             // reason to re-run the gate. Without this a tile whose cover lands
@@ -752,6 +1072,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // a separate view tracking a moving cell, and anything less than every
         // frame reads as the video sliding against its own tile.
         onGeometryChanged?()
+        positionPagingFooter()
         // Autoplay reconciles DURING the scroll, so a brick starts playing as
         // it slides into view rather than after the scroll has stopped.
         // Throttled rather than run per callback: `scrollViewDidScroll` fires
@@ -759,7 +1080,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // time diffing than the work is worth.
         throttledAutoplayReconcile(scrollView)
 
-        guard !showsSkeleton, !posts.isEmpty, !isRepositioning else { return }
+        guard !showsSkeleton, !posts.isEmpty else { return }
         let remaining = scrollView.contentSize.height
             - (scrollView.contentOffset.y + scrollView.bounds.height)
         guard remaining < Self.prefetchDistance else { return }
@@ -782,7 +1103,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     private static let maximumStartVelocity: CGFloat = 2200
 
     private func throttledAutoplayReconcile(_ scrollView: UIScrollView) {
-        guard playback != nil, !showsSkeleton, !isRepositioning else { return }
+        guard playback != nil, !showsSkeleton else { return }
         let now = CACurrentMediaTime()
         let elapsed = now - lastReconcileTime
         guard elapsed >= Self.scrollReconcileInterval else { return }
