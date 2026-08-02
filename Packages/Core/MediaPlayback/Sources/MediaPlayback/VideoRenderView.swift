@@ -33,6 +33,9 @@ public final class VideoRenderView: UIView {
     private var sampleBufferLayer: AVSampleBufferDisplayLayer? { layer as? AVSampleBufferDisplayLayer }
 
     private let posterView = UIImageView()
+    /// Gates the poster fade's terminal completion — see the note in
+    /// `updatePosterVisibility`.
+    private var posterGeneration = 0
     private var readinessObservation: NSKeyValueObservation?
 
     /// The renderer feeding this surface, in sample-buffer mode. Unowned by
@@ -116,19 +119,53 @@ public final class VideoRenderView: UIView {
     private func updatePosterVisibility(ready: Bool) {
         let wasVisible = !posterView.isHidden
         let shouldHide = (posterView.image == nil) || ready
+        #if DEBUG
+        // `-poster-log`: every visibility decision, unconditionally. The
+        // transition-only `logPoster` has a blind window before a surface
+        // starts flight-tracking, and that window is exactly where the
+        // cold-open poster vanished — a defect the transition logs reported
+        // as healthy. This is the trace that convicted it.
+        if ProcessInfo.processInfo.arguments.contains("-poster-log") {
+            print(String(format: "[poster] %.3f %@ ready=%@ image=%@ wasVisible=%@ -> shouldHide=%@",
+                         CACurrentMediaTime(), debugLabelOrAnonymous,
+                         ready ? "Y" : "n", posterView.image == nil ? "nil" : "set",
+                         wasVisible ? "Y" : "n", shouldHide ? "Y" : "n"))
+        }
+        #endif
         // Faded out, not switched off, for the same reason the surface itself
         // cross-fades: the poster and the video are two different images in the
         // same place, and swapping them in one frame is a visible cut. Fading
         // in is still immediate — a poster only appears when there is nothing
         // else to show, so there is nothing to blend against and nothing to
         // gain by easing it.
-        if wasVisible, shouldHide {
+        //
+        // Two guards on the fade, and they are THE cold-open black screen:
+        //
+        //  - `image != nil`: only a poster with pixels fades; an imageless one
+        //    hides instantly. The poster starts life unhidden, so the very
+        //    first `setPoster(nil)` of a cell's configure took the fade path —
+        //    inside `cellForItemAt`, where UIKit disables animations, so the
+        //    completion fired `finished == true` DEFERRED, past the real
+        //    poster's install one line later.
+        //  - the generation gate on the completion: a hide's terminal state
+        //    must never land after a later call re-showed the poster. The
+        //    deferred completion above did exactly that — an unlogged
+        //    `isHidden = true` stamped onto a freshly shown poster, leaving
+        //    every cold video page with a set-but-hidden cover and a BLACK
+        //    media area until its first decoded frame. Traced end to end
+        //    under `-poster-log`; the same stale-completion class as
+        //    `visibilityGeneration`, one level down.
+        posterGeneration += 1
+        let generation = posterGeneration
+        if wasVisible, shouldHide, posterView.image != nil {
             posterView.isHidden = false
             UIView.animate(withDuration: Self.revealDuration, delay: 0,
                            options: [.allowUserInteraction, .beginFromCurrentState]) {
                 self.posterView.alpha = 0
             } completion: { finished in
-                if finished { self.posterView.isHidden = true }
+                if finished, generation == self.posterGeneration {
+                    self.posterView.isHidden = true
+                }
             }
         } else {
             posterView.layer.removeAllAnimations()
@@ -308,6 +345,22 @@ public final class VideoRenderView: UIView {
             reveal(crossFading: false)
             return
         }
+        // A POSTERED surface is not empty, and must not be hidden. The rule
+        // this method enforces is "never show a surface with nothing to
+        // show" — but the poster is something: it sits above the layer and
+        // `updatePosterVisibility` retires it the moment the first frame
+        // lands. Hiding the VIEW buries the poster with it, and for hosts
+        // that keep their cover INSIDE the surface (the feed page — the
+        // render view IS the cover there) that left the cell's black floor
+        // as the media area for the whole decode start-up. Traced on device
+        // and in `-media-log` as the cold-open black screen: poster=SHOWN at
+        // configure, entombed by this hide at warm-attach, black until the
+        // first decoded frame seconds later.
+        if posterView.image != nil, !posterView.isHidden {
+            isAwaitingFirstFrameToReveal = false
+            reveal(crossFading: false)
+            return
+        }
         visibilityGeneration += 1
         isAwaitingFirstFrameToReveal = true
         isHidden = true
@@ -393,6 +446,22 @@ public final class VideoRenderView: UIView {
         guard isReadyForDisplay, !isHidden else { return false }
         let opacity = layer.presentation()?.opacity ?? Float(alpha)
         return opacity > 0.99
+    }
+
+    /// Whether this surface is compositing SOMETHING real — a decoded frame
+    /// drawing at full opacity, or its poster standing in over the layer.
+    ///
+    /// The present landing's reveal gates on this. `isRenderingVisibly` alone
+    /// is the wrong question there: a page that has not started playback yet
+    /// legitimately shows its POSTER, and holding a reveal hostage to decoded
+    /// frames would freeze the flight card over a perfectly presentable page.
+    /// What the landing must never do is swap the card for a media area with
+    /// NEITHER — that is the black beat measured on device (run 2 of the
+    /// frame-0 investigation: card removed, feed revealed, nothing behind it).
+    public var isCompositingContent: Bool {
+        if isRenderingVisibly { return true }
+        guard !isHidden, alpha > 0.01 else { return false }
+        return posterView.image != nil && !posterView.isHidden && posterView.alpha > 0.01
     }
 
     /// Takes the surface down over whatever is behind it, rather than
