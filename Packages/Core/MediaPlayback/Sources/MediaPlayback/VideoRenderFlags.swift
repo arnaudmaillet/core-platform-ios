@@ -15,19 +15,28 @@ import Foundation
 /// build measures the wrong binary. The flag has to survive into a release
 /// build for the A/B to mean anything.
 public enum VideoRenderFlags {
-    /// `-avsbdl-render` routes playback through `VideoFrameRenderer` into an
-    /// `AVSampleBufferDisplayLayer`. Absent, `VideoRenderView` behaves exactly
-    /// as it did before this subsystem existed.
+    /// `AVSampleBufferDisplayLayer` fed by `VideoFrameRenderer` is the DEFAULT
+    /// backing (promoted 2026-08-02). It is the mode every no-window guarantee
+    /// of the hero transition actually holds in — N surfaces per playback, no
+    /// render slot to move — and while it was opt-in, the shipping
+    /// configuration was the one with the 65–100ms re-bind gaps that all the
+    /// hold/grace machinery exists to paper over.
     ///
-    /// `AVSBDL_RENDER=1` is the same switch by environment, and it exists for
-    /// one reason: because `layerClass` is resolved per process, a unit-test
-    /// bundle can only ever exercise ONE of the two backings per run. The env
-    /// var is what lets CI run the suite twice — once each way — instead of
-    /// leaving the new path covered by nothing.
+    /// `-avplayer-render` (or `AVSBDL_RENDER=0` by environment) reverts to the
+    /// historical `AVPlayerLayer` path — the escape hatch, and the A/B's other
+    /// arm. The env var exists because `layerClass` is resolved once per
+    /// process, so a unit-test bundle can only ever exercise ONE backing per
+    /// run; CI runs the MediaPlayback suite a second time with it set to keep
+    /// the legacy path covered. The old `-avsbdl-render` / `AVSBDL_RENDER=1`
+    /// spellings still select the (now default) new path, so existing QA
+    /// recipes keep meaning what they meant.
     public static let usesSampleBufferLayer: Bool = {
         let info = ProcessInfo.processInfo
-        return info.arguments.contains("-avsbdl-render")
-            || info.environment["AVSBDL_RENDER"] == "1"
+        if info.arguments.contains("-avplayer-render")
+            || info.environment["AVSBDL_RENDER"] == "0" {
+            return false
+        }
+        return true
     }()
 
     /// `-avsbdl-log` traces frame dispatch: renderer lifecycle, first frame per
