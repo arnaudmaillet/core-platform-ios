@@ -652,10 +652,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // here — the card, the tile and this page all draw the same frames
             // at the same time.
             guard videoPlayback.attachSurface(view, to: url) else { return }
-            // The tile capped this item to a thumbnail rung; full screen wants
-            // the whole ladder. Re-capped by URL because a joined surface holds
-            // no pool loan and cannot be looked up by view.
-            videoPlayback.setPeakBitRate(0, for: url)
+            // The tile's thumbnail-rung cap is NOT lifted here, deliberately.
+            // An uncap invites an ABR switch, a switch changes the decoded
+            // buffer's dimensions, and the layer re-fits the new buffer into
+            // its bounds in a single frame — a discrete crop/sharpness pop
+            // that this timing aimed squarely at the flight. The lift happens
+            // in `startDeferredPlayback`, at `zoomTransitionDidEnd`, so
+            // switch points land on a resting page.
             view.revealOnFirstFrame()
             hasDeferredPlayback = false
             isWarmAttached = true
@@ -682,9 +685,16 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// playhead — so the page continues rather than restarting.
     func startDeferredPlayback() {
         defersPlaybackForFlight = false
-        guard hasDeferredPlayback, isActive, mediaKind == .video,
+        guard isActive, mediaKind == .video,
               let url = mediaURL, let videoPlayback
         else { return }
+        // The flight is over: lift the tile's thumbnail-rung cap NOW, at
+        // rest, whether playback was warm-attached or is about to start. The
+        // lift used to ride the warm attach — flight staging — which invited
+        // the ladder's next switch point (a one-frame dimension re-fit on the
+        // layer) to land mid-flight.
+        videoPlayback.setPeakBitRate(0, for: url)
+        guard hasDeferredPlayback else { return }
         hasDeferredPlayback = false
         let view = mediaCard.renderView
         // The warm attach at activation loses a race on cold opens: the
@@ -699,7 +709,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // card was flying, which is what makes this a continuation. Mint
         // only when there is genuinely nothing to join.
         if VideoRenderFlags.usesSampleBufferLayer, videoPlayback.attachSurface(view, to: url) {
-            videoPlayback.setPeakBitRate(0, for: url)
             view.revealOnFirstFrame()
             return
         }
