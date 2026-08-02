@@ -95,6 +95,16 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
                 progress: progress, velocity: velocity
             )
             detach()
+            // Without an explicit curve the percent driver continues a caught
+            // flight with its default completion curve — ease-in-out from
+            // rest — which is different physics from every other leg of this
+            // transition and reads as a hesitation-then-snap at exactly the
+            // moment of release. Hand it the shared spring instead, seeded
+            // with the hand's velocity, so a caught flight lands the way a
+            // grab-from-rest release does.
+            timingCurve = continuationSpring(
+                rawVelocity: recogniser.velocity(in: container).y, towardEnd: completes
+            )
             if completes { finish() } else { cancel() }
         default:
             break
@@ -122,6 +132,10 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
             print("[zoom-live] SCRIPTED INTERRUPT caught=\(String(format: "%.2f", caught)) mode=\(mode)")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                 self.detach()
+                // Zero velocity, but the SAME spring a hand's release hands
+                // over — the scripted path must exercise the physics it
+                // stands in for.
+                self.timingCurve = self.continuationSpring(rawVelocity: 0, towardEnd: mode != "cancel")
                 if mode == "cancel" { self.cancel() } else { self.finish() }
             }
         }
@@ -130,6 +144,25 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
 
     private func progress(for translation: CGFloat) -> CGFloat {
         min(max(grabbedAt + direction * translation / span, 0), 1)
+    }
+
+    /// The timing the caught flight continues on: the transition's own spring,
+    /// seeded with the hand's release velocity in UIKit's spring units —
+    /// remaining-distances per second toward the outcome's target.
+    ///
+    /// `rawVelocity` is the pan's vertical points/second; `direction` maps it
+    /// onto transition progress (down advances a dismissal, reverses a
+    /// present), and the sign flips again for a cancel, whose target is the
+    /// START. Clamped like the grab-from-rest release, so a wild flick cannot
+    /// detonate the spring.
+    private func continuationSpring(rawVelocity: CGFloat, towardEnd: Bool) -> UISpringTimingParameters {
+        let travel = towardEnd ? max(1 - percentComplete, 0.001) : max(percentComplete, 0.001)
+        let towardTarget = (towardEnd ? 1 : -1) * direction * rawVelocity / (travel * span)
+        let unit = min(max(towardTarget, -3), 3)
+        return UISpringTimingParameters(
+            dampingRatio: ZoomFlight.springDamping,
+            initialVelocity: CGVector(dx: 0, dy: unit)
+        )
     }
 
     /// Takes the recogniser off the container once a decision is made, so the
