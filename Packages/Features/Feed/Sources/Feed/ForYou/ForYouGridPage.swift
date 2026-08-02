@@ -732,6 +732,18 @@ final class ForYouGridPage: UIView {
               let current = posts.firstIndex(where: { $0.id == postID }),
               slot != current
         else { return false }
+        // The pixels each cell is showing RIGHT NOW, carried across the reload.
+        //
+        // `configure` clears the image and re-asks the cache, so a cell whose
+        // cover the cache has since evicted comes back empty — a blank square
+        // where a tile used to be, for as long as the refetch takes. Both cells
+        // are on screen during a dismissal, so both would show it.
+        let carried = [slot, current].reduce(into: [Int: UIImage]()) { covers, index in
+            let path = IndexPath(item: index, section: 0)
+            if let cover = (collectionView.cellForItem(at: path) as? PostGridTileCell)?.renderedCover {
+                covers[index] = cover
+            }
+        }
         posts.swapAt(slot, current)
         // Reloaded rather than reconfigured: `reconfigureItems` reuses the cell
         // without `prepareForReuse`, so a tile would keep the previous post's
@@ -748,6 +760,13 @@ final class ForYouGridPage: UIView {
             // itself off-screen, and the flight collapses to the middle of the
             // screen instead of flying to the tile — measured exactly that way.
             collectionView.layoutIfNeeded()
+            // Re-apply after the rebuild: `applyCover` is a no-op on a cell that
+            // already found its image, so a cache hit still wins.
+            for (index, cover) in carried {
+                let moved = index == slot ? current : slot
+                (collectionView.cellForItem(at: IndexPath(item: moved, section: 0))
+                    as? PostGridTileCell)?.applyCover(cover)
+            }
             // And commit them to the render server in this turn rather than the
             // next. Everything downstream — the hero rect, the flight card built
             // from this cell's cover, the landing gate — reads the cell
@@ -796,12 +815,22 @@ final class ForYouGridPage: UIView {
             let id = posts.indices.contains(path.item) ? posts[path.item].id.rawValue : "?"
             return "\(path.item):\(id)\(cell.isHidden ? "/hidden" : "")\(cell.alpha == 0 ? "/alpha0" : "")"
         }
+        let blank = visible.compactMap { path -> String? in
+            guard let cell = collectionView.cellForItem(at: path) as? PostGridTileCell,
+                  posts.indices.contains(path.item) else { return nil }
+            let post = posts[path.item]
+            guard post.thumbnailURL != nil, cell.renderedCover == nil,
+                  cell.loadedVideoRenderView?.isReadyForDisplay != true
+            else { return nil }
+            return "\(path.item):\(post.id.rawValue)"
+        }
         let items = collectionView.numberOfSections > 0
             ? collectionView.numberOfItems(inSection: 0) : 0
         let ids = Set(posts.map(\.id))
         print("[vis] \(moment) hero=\(heroHiddenPostID?.rawValue ?? "nil")"
             + " posts=\(posts.count) items=\(items) uniqueIDs=\(ids.count)"
             + " visible=\(visible.count) invisible=\(invisible.isEmpty ? "none" : invisible.joined(separator: ","))"
+            + " blank=\(blank.isEmpty ? "none" : blank.joined(separator: ","))"
             + (posts.count == items && ids.count == posts.count ? "" : "  <<< DATA SOURCE DIVERGED"))
     }
     #endif
