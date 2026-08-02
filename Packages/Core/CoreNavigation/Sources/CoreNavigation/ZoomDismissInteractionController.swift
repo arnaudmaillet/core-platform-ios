@@ -235,11 +235,8 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         }
 
         // Depth rides the source-nominated view when there is one; see
-        // `ZoomTransitionSource.zoomPresenterDepthView`. Nil under the
-        // stage-dressing diagnostic — every drive below is optional-chained.
-        let presentingView = ZoomFlight.debugDisablesStageDressing
-            ? nil
-            : source.zoomPresenterDepthView ?? context.viewController(forKey: .to)?.view
+        // `ZoomTransitionSource.zoomPresenterDepthView`.
+        let presentingView = source.zoomPresenterDepthView ?? context.viewController(forKey: .to)?.view
         ZoomFlight.applyRecededChrome(to: presentingView, radius: screenRadius)
         presentingView?.transform = CGAffineTransform(
             scaleX: ZoomFlight.presenterDepthScale, y: ZoomFlight.presenterDepthScale

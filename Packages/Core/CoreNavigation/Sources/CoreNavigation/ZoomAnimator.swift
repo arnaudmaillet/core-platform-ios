@@ -237,11 +237,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // over-full-screen present, so reach the root via the view controller.)
         // The depth cue rides the source-nominated view when there is one, so a
         // screen's own chrome stays grounded while its content recedes.
-        // Nil under the stage-dressing diagnostic: every transform and recede
-        // below is optional-chained, so one nil removes the whole cue.
-        let presentingView = ZoomFlight.debugDisablesStageDressing
-            ? nil
-            : source.zoomPresenterDepthView ?? context.viewController(forKey: .from)?.view
+        let presentingView = source.zoomPresenterDepthView ?? context.viewController(forKey: .from)?.view
         ZoomFlight.applyRecededChrome(to: presentingView, radius: screenRadius)
 
         #if DEBUG
@@ -810,11 +806,8 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         }
 
         // Reverse depth cue: the map starts receded (0.95, covered) and scales
-        // back to full as the card shrinks. Nil under the stage-dressing
-        // diagnostic — see the present leg.
-        let presentingView = ZoomFlight.debugDisablesStageDressing
-            ? nil
-            : source.zoomPresenterDepthView ?? context.viewController(forKey: .to)?.view
+        // back to full as the card shrinks.
+        let presentingView = source.zoomPresenterDepthView ?? context.viewController(forKey: .to)?.view
         ZoomFlight.applyRecededChrome(to: presentingView, radius: screenRadius)
         presentingView?.transform = CGAffineTransform(
             scaleX: ZoomFlight.presenterDepthScale, y: ZoomFlight.presenterDepthScale

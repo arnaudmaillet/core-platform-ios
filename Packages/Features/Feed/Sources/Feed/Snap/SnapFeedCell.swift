@@ -602,10 +602,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         chrome.setSubtitlesActive(true)
         switch mediaKind {
         case .video:
-            // The image-only control arm of the frame-0 device test: the page
-            // rests on its poster, so the transition never sees live media on
-            // either side. See `VideoRenderFlags.debugCoversOnly`.
-            guard !VideoRenderFlags.debugCoversOnly else { return }
             guard let url = mediaURL, let videoPlayback else { return }
             // A hero card may be flying this post's player right now. Starting
             // here would attach a NEWER layer to the same player and blank the

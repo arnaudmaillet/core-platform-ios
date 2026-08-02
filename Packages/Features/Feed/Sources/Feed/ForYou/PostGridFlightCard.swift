@@ -49,24 +49,6 @@ final class PostGridFlightCard: UIView {
     /// Matches `PostGridTileCell`'s brick rounding.
     static let tileCornerRadius: CGFloat = 10
 
-    /// The floor under a video card's media.
-    ///
-    /// TEMPORARY DIAGNOSTIC (2026-08-02): bright red in DEBUG, so a frame
-    /// where the card composites with neither video nor cover is an
-    /// unequivocal signal on a real device — logs count client-side commits
-    /// and enqueues, and the simulator renders mock video black, so this is
-    /// the only instrument that observes what actually reached the screen. A
-    /// red flash at frame 0 means the drawing gate let a hide through before
-    /// the surface's first composite. Revert to `.darkGray` (and delete this
-    /// note) once the device pass is clean.
-    private static let mediaFloorColor: UIColor = {
-        #if DEBUG
-        return .red
-        #else
-        return .darkGray
-        #endif
-    }()
-
     private let style: Style
     /// Whether a live surface has been adopted, tracked explicitly rather than
     /// inferred from `videoRenderView.isHidden`.
@@ -110,9 +92,8 @@ final class PostGridFlightCard: UIView {
         super.init(frame: .zero)
         clipsToBounds = true
         // Video bricks keep a dark floor, exactly as the tile cell does: the
-        // poster may be unrenderable and the glyph needs a stage. (Red in
-        // DEBUG for the device diagnostic — see `mediaFloorColor`.)
-        backgroundColor = post.kind == .video ? Self.mediaFloorColor : .secondarySystemBackground
+        // poster may be unrenderable and the glyph needs a stage.
+        backgroundColor = post.kind == .video ? .darkGray : .secondarySystemBackground
         layer.cornerRadius = style.cornerRadius
         layer.cornerCurve = .continuous
 
@@ -238,17 +219,10 @@ extension PostGridFlightCard: ZoomFlightCard {
         // the source THROUGH the card at the same rect — continuity instead
         // of a flash. A COLD surface keeps the cover: there is no video
         // anywhere yet, so the cover is the content, exactly as on a card
-        // with no live media at all. In DEBUG the floor deliberately stays —
-        // red — so a pass where neither video nor cover composites is
-        // visible on device rather than silently covered; see
-        // `mediaFloorColor`.
+        // with no live media at all.
         if view.hasFrame {
             imageView.isHidden = true
-            #if DEBUG
-            backgroundColor = Self.mediaFloorColor
-            #else
             backgroundColor = .clear
-            #endif
         }
         // Not `isHidden = false`. On a cold flight this surface has no frame
         // yet, and showing it would replace the cover — the very pixels the

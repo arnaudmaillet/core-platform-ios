@@ -31,23 +31,6 @@ struct ZoomFlight {
     /// a surface that does not exist.
     let liveMediaSize: CGSize
 
-    /// TEMPORARY DIAGNOSTIC (2026-08-02): `-zoom-no-stage-dressing` flies the
-    /// card with NO dim, NO shadow stand-in and NO presenter depth cue, so a
-    /// device test can tell whether the residual frame-0 flash is one of the
-    /// stage's own overlays snapping (a dim appearing at alpha 1, the
-    /// presenter's masksToBounds/corner toggle) rather than the media
-    /// handoff — which the red-floor test has already exonerated. The dim and
-    /// shadow views still EXIST, hidden, so every pose and alpha write stays
-    /// exercised; only their pixels are removed from the experiment. Delete
-    /// once the suspect is convicted or cleared.
-    static let debugDisablesStageDressing: Bool = {
-        #if DEBUG
-        return ProcessInfo.processInfo.arguments.contains("-zoom-no-stage-dressing")
-        #else
-        return false
-        #endif
-    }()
-
     /// How far the presenting screen recedes behind a flight (depth cue).
     static let presenterDepthScale: CGFloat = 0.95
     /// Grab feedback: the card's scale the instant a dismissal starts — it
@@ -136,7 +119,6 @@ struct ZoomFlight {
         let shadow = UIView(frame: sourceFrame)
         shadow.backgroundColor = .clear
         shadow.isUserInteractionEnabled = false
-        shadow.isHidden = debugDisablesStageDressing
         card.applyZoomRestingShadow(to: shadow.layer)
         // A clear view casts nothing on its own; the explicit path draws the
         // source's silhouette. Harmless when the card declined to set a shadow.
@@ -335,9 +317,6 @@ struct ZoomFlight {
         dim.backgroundColor = .black
         dim.alpha = 0
         dim.isUserInteractionEnabled = false
-        // Present in the hierarchy, invisible in the experiment — every
-        // alpha write across the three drivers keeps its target.
-        dim.isHidden = debugDisablesStageDressing
         return dim
     }
 

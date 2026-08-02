@@ -45,20 +45,4 @@ public enum VideoRenderFlags {
     /// buried the signal last time.
     static let logsFrameDispatch: Bool =
         ProcessInfo.processInfo.arguments.contains("-avsbdl-log")
-
-    /// TEMPORARY DIAGNOSTIC (2026-08-02): `-zoom-covers-only` suppresses video
-    /// playback at both producers of the hero transition — grid tiles never
-    /// autoplay and feed pages never start their player — so every live seam
-    /// (donate, attach, mirror, hoist, adopt, park) naturally reports nothing
-    /// and the whole flight is static images end to end. The control arm of
-    /// the frame-0 device test: a flash that survives THIS is a raw UIKit
-    /// layer/transition artifact with no media involved at all. Delete with
-    /// the experiment.
-    public static let debugCoversOnly: Bool = {
-        #if DEBUG
-        return ProcessInfo.processInfo.arguments.contains("-zoom-covers-only")
-        #else
-        return false
-        #endif
-    }()
 }

@@ -114,11 +114,7 @@ public final class GridVideoPlaybackCoordinator {
         let ranked = candidates
             .filter { $0.id != handoffID }
             .sorted { $0.distanceFromCentre < $1.distanceFromCentre }
-        // `debugCoversOnly` is the image-only control arm of the frame-0
-        // device test: with no tile ever playing, the hero flight has no live
-        // surface to carry and flies covers end to end.
-        let chosen = isSurfaceVisible && !VideoRenderFlags.debugCoversOnly
-            ? Array(ranked.prefix(maxConcurrent)) : []
+        let chosen = isSurfaceVisible ? Array(ranked.prefix(maxConcurrent)) : []
         let chosenIDs = Set(chosen.map(\.id))
 
         for (id, cell) in playing where !chosenIDs.contains(id) && id != handoffID {
