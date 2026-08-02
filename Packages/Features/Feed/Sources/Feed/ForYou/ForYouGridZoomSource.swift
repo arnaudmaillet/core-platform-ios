@@ -225,6 +225,10 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
             // departure tile itself rather than on a rect that no longer exists.
             anchorID = departureID
         }
+        // The scope was opened for the TAPPED post; the landing is on this one.
+        // Without this the reconcile that fires when the tile is unhidden stops
+        // the surface it has just been handed.
+        page?.retargetPlaybackHandoff(to: anchorID)
         page?.setHeroHidden(true, for: anchorID)
     }
 

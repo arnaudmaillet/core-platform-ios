@@ -373,6 +373,12 @@ final class ForYouGridPage: UIView {
         playback?.beginHandoff(postID)
     }
 
+    /// Points the handoff scope at the post a dismissal is actually landing on.
+    /// See `GridVideoPlaybackCoordinator.retargetHandoff`.
+    func retargetPlaybackHandoff(to postID: PostID) {
+        playback?.retargetHandoff(postID)
+    }
+
     /// Closes the scope and reconciles once — the single act that restores the
     /// grid's full complement of players after a dismissal.
     func endPlaybackHandoff() {
