@@ -71,8 +71,6 @@ struct ZoomFlight {
     ) -> ZoomFlight {
         let card = source.makeZoomFlightCard()
         card.frame = pageFrame
-        let liveMediaSize = Self.liveMediaLayoutSize(native: card.zoomLiveMediaNativeSize,
-                                                     page: pageFrame.size)
         card.isUserInteractionEnabled = false
         // Live media, either direction: the source may already have mirrored a
         // live-previewing thumbnail inside `makeZoomFlightCard` (present leg);
@@ -93,6 +91,17 @@ struct ZoomFlight {
         if card.zoomLiveMediaSurface == nil, let destination {
             card.adoptZoomLiveMedia { surface in destination.zoomMirrorLiveMedia(onto: surface) }
         }
+        // The native aspect is read AFTER the card has its surface, and the
+        // order is load-bearing: on the dismiss leg the surface arrives from
+        // the destination donation just above, and reading the size before it
+        // answered nil — the page-size fallback. A page-shaped surface is
+        // ALREADY the feed's crop, so the flight showed that crop miniaturised
+        // all the way home and the landing's own aspect-fill snapped to the
+        // tile's true crop at the end: the double-crop mismatch the note on
+        // `liveMediaLayoutSize` describes, reintroduced by an ordering change
+        // and measured on device as the landing zoom snap.
+        let liveMediaSize = Self.liveMediaLayoutSize(native: card.zoomLiveMediaNativeSize,
+                                                     page: pageFrame.size)
         if card.zoomLiveMediaSurface != nil {
             card.prepareZoomLiveMediaForFlight(destinationSize: liveMediaSize)
         }
