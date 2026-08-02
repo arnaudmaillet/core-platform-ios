@@ -49,6 +49,24 @@ final class PostGridFlightCard: UIView {
     /// Matches `PostGridTileCell`'s brick rounding.
     static let tileCornerRadius: CGFloat = 10
 
+    /// The floor under a video card's media.
+    ///
+    /// TEMPORARY DIAGNOSTIC (2026-08-02): bright red in DEBUG, so a frame
+    /// where the card composites with neither video nor cover is an
+    /// unequivocal signal on a real device — logs count client-side commits
+    /// and enqueues, and the simulator renders mock video black, so this is
+    /// the only instrument that observes what actually reached the screen. A
+    /// red flash at frame 0 means the drawing gate let a hide through before
+    /// the surface's first composite. Revert to `.darkGray` (and delete this
+    /// note) once the device pass is clean.
+    private static let mediaFloorColor: UIColor = {
+        #if DEBUG
+        return .red
+        #else
+        return .darkGray
+        #endif
+    }()
+
     private let style: Style
     /// Whether a live surface has been adopted, tracked explicitly rather than
     /// inferred from `videoRenderView.isHidden`.
@@ -92,8 +110,9 @@ final class PostGridFlightCard: UIView {
         super.init(frame: .zero)
         clipsToBounds = true
         // Video bricks keep a dark floor, exactly as the tile cell does: the
-        // poster may be unrenderable and the glyph needs a stage.
-        backgroundColor = post.kind == .video ? .darkGray : .secondarySystemBackground
+        // poster may be unrenderable and the glyph needs a stage. (Red in
+        // DEBUG for the device diagnostic — see `mediaFloorColor`.)
+        backgroundColor = post.kind == .video ? Self.mediaFloorColor : .secondarySystemBackground
         layer.cornerRadius = style.cornerRadius
         layer.cornerCurve = .continuous
 
@@ -210,6 +229,27 @@ extension PostGridFlightCard: ZoomFlightCard {
         view.clipsToBounds = true
         insertSubview(view, aboveSubview: imageView)
         hasAdoptedLiveMedia = true
+        // A card flying a surface that ALREADY HAS A FRAME must be
+        // transparent beneath it. The surface's content rides outside the
+        // CATransaction, so its first composite can lag its commit by a pass
+        // — and an opaque cover or floor under it turns that pass into a
+        // visible content blink: the stale cover drawn over the still-live
+        // source (video → cover → video). Transparent, the same pass shows
+        // the source THROUGH the card at the same rect — continuity instead
+        // of a flash. A COLD surface keeps the cover: there is no video
+        // anywhere yet, so the cover is the content, exactly as on a card
+        // with no live media at all. In DEBUG the floor deliberately stays —
+        // red — so a pass where neither video nor cover composites is
+        // visible on device rather than silently covered; see
+        // `mediaFloorColor`.
+        if view.hasFrame {
+            imageView.isHidden = true
+            #if DEBUG
+            backgroundColor = Self.mediaFloorColor
+            #else
+            backgroundColor = .clear
+            #endif
+        }
         // Not `isHidden = false`. On a cold flight this surface has no frame
         // yet, and showing it would replace the cover — the very pixels the
         // tile is displaying — with an empty surface for one decode interval.

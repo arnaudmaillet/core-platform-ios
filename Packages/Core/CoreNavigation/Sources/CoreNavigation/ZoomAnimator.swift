@@ -201,18 +201,33 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // card loses the race — which is why it reads as a random flash rather
         // than a reproducible one.
         //
-        // The hide therefore lands one commit AFTER the pose, so the two
-        // overlap by a frame instead of leaving a gap. Overlap is free: the
-        // card is a pixel-identical twin posed exactly over the source, so a
-        // frame showing both is indistinguishable from a frame showing either.
-        // See `afterCurrentTransactionCommits` for why the ordering is a
-        // transaction completion rather than the synchronous flush it was.
+        // The hide therefore lands strictly AFTER the pose's commit — and
+        // then waits one thing more, because commit ordering is necessary but
+        // not sufficient on device: a video layer's content travels OUTSIDE
+        // the transaction (sample buffers, layer acquisition), so a card can
+        // be committed, in-tree, and still composite EMPTY for a pass. Every
+        // signal this side can read is client-side, so the gate is the card's
+        // own drawing report plus one display refresh — the only observable
+        // proxy for "the render server has had a pass with the card in it".
+        // Overlap is free either way: while the source is still up, a live
+        // card is transparent beneath its surface and a cover-only card is a
+        // pixel-identical twin, so no frame in the window can show a
+        // mismatch. See `afterCurrentTransactionCommits` for why the commit
+        // half is a transaction completion rather than the flush it was.
         flight.poseAtSource()
         Self.afterCurrentTransactionCommits {
-            #if DEBUG
-            Self.logFirstFrameHandoff("present", card: flight.card)
-            #endif
-            self.source.setZoomSourceHidden(true)
+            Self.whenReady(ceiling: Self.maximumFirstFrameHold, afterTicks: 1,
+                           condition: { [weak card = flight.card] in
+                               card?.zoomLiveMediaIsDrawing ?? true
+                           }) {
+                // A reversal that beat this gate has already restored the
+                // source; hiding it now would strand it invisible.
+                guard !self.hasAbandonedFirstFrameHandoff else { return }
+                #if DEBUG
+                Self.logFirstFrameHandoff("present", card: flight.card)
+                #endif
+                self.source.setZoomSourceHidden(true)
+            }
         }
 
         let screenRadius = ZoomFlight.screenCornerRadius(behind: container)
@@ -261,6 +276,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                 // TILE's playback as an extra surface and the tile never stopped
                 // rendering, so the surface is simply dropped. The destination
                 // is not revealed — UIKit removes it on `completeTransition`.
+                self.hasAbandonedFirstFrameHandoff = true
                 flight.card.removeFromSuperview()
                 flight.shadow.removeFromSuperview()
                 dim.removeFromSuperview()
@@ -351,50 +367,63 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     /// Runs `work` as soon as `condition` is true, or at `ceiling`, whichever
     /// comes first. Polled on the display link, like the landing hold.
     ///
-    /// Fires SYNCHRONOUSLY when the condition already holds, so the common case
-    /// — a destination whose data was ready before the flight ended — keeps the
-    /// exact ordering and timing it had before this existed.
+    /// With `afterTicks` 0 it fires SYNCHRONOUSLY when the condition already
+    /// holds, so the common case — a destination whose data was ready before
+    /// the flight ended — keeps the exact ordering and timing it had before
+    /// this existed. A non-zero `afterTicks` always waits that many display
+    /// refreshes first: every condition this gate can ask is a CLIENT-side
+    /// fact, and a tick is the only observable proxy for "the render server
+    /// has had a pass since then".
     static func whenReady(ceiling: CFTimeInterval,
+                          afterTicks minimumTicks: Int = 0,
                           condition: @escaping () -> Bool,
                           then work: @escaping () -> Void) {
-        if condition() {
+        if minimumTicks == 0, condition() {
             work()
             return
         }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-            print(String(format: "[zoom-live] %.3f destination NOT ready — holding reveal",
-                         CACurrentMediaTime()))
+            print(String(format: "[zoom-live] %.3f gate holding (minTicks=%d ready=%@)",
+                         CACurrentMediaTime(), minimumTicks, condition() ? "yes" : "no"))
         }
         #endif
         let deadline = CACurrentMediaTime() + ceiling
-        let link = CADisplayLink(target: ReadyGate(condition: condition, deadline: deadline, work: work),
-                                 selector: #selector(ReadyGate.tick))
+        let link = CADisplayLink(
+            target: ReadyGate(condition: condition, deadline: deadline,
+                              minimumTicks: minimumTicks, work: work),
+            selector: #selector(ReadyGate.tick)
+        )
         link.add(to: .main, forMode: .common)
     }
 
     private final class ReadyGate {
         private let condition: () -> Bool
         private let deadline: CFTimeInterval
+        private let minimumTicks: Int
         private let work: () -> Void
         private var fired = false
+        private var ticks = 0
 
-        init(condition: @escaping () -> Bool, deadline: CFTimeInterval, work: @escaping () -> Void) {
+        init(condition: @escaping () -> Bool, deadline: CFTimeInterval,
+             minimumTicks: Int, work: @escaping () -> Void) {
             self.condition = condition
             self.deadline = deadline
+            self.minimumTicks = minimumTicks
             self.work = work
         }
 
         @objc func tick(_ link: CADisplayLink) {
             guard !fired else { return }
+            ticks += 1
             let timedOut = CACurrentMediaTime() >= deadline
-            guard condition() || timedOut else { return }
+            guard ticks >= minimumTicks, condition() || timedOut else { return }
             fired = true
             link.invalidate()
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-                print(String(format: "[zoom-live] %.3f reveal released%@",
-                             CACurrentMediaTime(), timedOut ? " (TIMEOUT)" : ""))
+                print(String(format: "[zoom-live] %.3f gate released t%d%@",
+                             CACurrentMediaTime(), ticks, timedOut ? " (TIMEOUT)" : ""))
             }
             #endif
             work()
@@ -486,6 +515,19 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     /// (~600ms was the re-parent dip) with room to spare, while staying short
     /// enough that a stuck surface is a brief pause rather than a frozen card.
     private static let maximumLandingHold: CFTimeInterval = 0.75
+
+    /// Ceiling on the drawing-gated hide at frame 0. Generous next to the one
+    /// or two render-server passes it normally waits, and small against the
+    /// 420ms flight, so a surface that never reports drawing degrades to the
+    /// old commit-ordered timing instead of stranding two live twins.
+    private static let maximumFirstFrameHold: CFTimeInterval = 0.15
+
+    /// Set when a REVERSED flight has already restored what the pending
+    /// frame-0 hide would take away. The hide waits on a display-link gate,
+    /// so a very fast reversal can land inside its window — and a hide that
+    /// fires after the restore would leave the source (or the destination)
+    /// invisible with nothing left to ever bring it back.
+    private var hasAbandonedFirstFrameHandoff = false
 
     /// Ceiling on the hold that waits for a destination's CONTENT rather than
     /// its decoded frames. Longer than the landing hold because it waits on a
@@ -725,13 +767,25 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // was never when the hide is scheduled, it is whether the card has been
         // committed by the time it happens. A turn's delay does not commit
         // anything; a transaction completion is enqueued only after the commit
-        // itself, which is the guarantee the old synchronous flush provided —
-        // see `afterCurrentTransactionCommits` for the full trade.
+        // itself. And commit is still only half: the surface's CONTENT rides
+        // outside the transaction, so the hide additionally waits for the
+        // card to report drawing plus one display refresh — the same gate,
+        // for the same reason, as the present leg. The feed stays opaque over
+        // the (already animating) card for those ticks, which shows as the
+        // flight starting a frame late rather than as a frame of stale cover.
         Self.afterCurrentTransactionCommits { [weak destination = self.destination] in
-            #if DEBUG
-            Self.logFirstFrameHandoff("dismiss", card: flight.card)
-            #endif
-            destination?.setZoomContentHidden(true)
+            Self.whenReady(ceiling: Self.maximumFirstFrameHold, afterTicks: 1,
+                           condition: { [weak card = flight.card] in
+                               card?.zoomLiveMediaIsDrawing ?? true
+                           }) {
+                // A reversal that beat this gate has already restored the
+                // destination; hiding it now would strand the feed invisible.
+                guard !self.hasAbandonedFirstFrameHandoff else { return }
+                #if DEBUG
+                Self.logFirstFrameHandoff("dismiss", card: flight.card)
+                #endif
+                destination?.setZoomContentHidden(true)
+            }
         }
 
         // Reverse depth cue: the map starts receded (0.95, covered) and scales
@@ -778,6 +832,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             if cancelled {
                 // REVERSED mid-flight: the feed is staying, so everything the
                 // flight took has to go back before it is handed control again.
+                self.hasAbandonedFirstFrameHandoff = true
                 //
                 // The hoisted surface is the piece that cannot be reached the
                 // usual way — `zoomLiveMediaSurface` is nil once it has been
