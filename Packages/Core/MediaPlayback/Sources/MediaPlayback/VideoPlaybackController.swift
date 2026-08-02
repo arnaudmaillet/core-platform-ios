@@ -23,8 +23,28 @@ public final class VideoPlaybackController {
     /// that lost the race is discarded instead of attaching to a recycled cell.
     private var generation: [ObjectIdentifier: Int] = [:]
     private var loopObservers: [ObjectIdentifier: NSObjectProtocol] = [:]
+    /// The media URL each bound view is playing, so a parked player can be
+    /// matched back to the same asset.
+    private var playingURL: [ObjectIdentifier: URL] = [:]
+    /// A player detached from its view but still running, waiting for the next
+    /// `play` of the same URL to adopt it. See `parkPlayback(from:)`.
+    private var parked: (url: URL, player: AVPlayer)?
+    /// The frame renderer for each pooled player, under `-avsbdl-render`.
+    ///
+    /// Keyed by **player**, not by view, and that is the whole idea: the
+    /// renderer owns the player's video output, so it travels with the player
+    /// through park → adopt and survives being handed between surfaces. A view
+    /// joining or leaving its surface set is bookkeeping that draws nothing.
+    /// Empty when the flag is off.
+    private var renderers: [ObjectIdentifier: VideoFrameRenderer] = [:]
 
-    public init(source: any VideoSource, poolSize: Int = 3) {
+    /// `poolSize` is the size of the **idle-player cache**, not a concurrency
+    /// limit: `play` mints a new `AVPlayer` when the cache is empty, and the
+    /// number of simultaneous players is set by the calling surface (the grid's
+    /// `maxConcurrent`). Sizing it to match that surface is what keeps a scroll
+    /// from allocating and discarding players continuously — a cache smaller
+    /// than the working set drops every returned player on the floor.
+    public init(source: any VideoSource, poolSize: Int = 6) {
         self.source = source
         self.poolSize = poolSize
         try? AVAudioSession.sharedInstance().setCategory(.ambient, mode: .moviePlayback)
@@ -33,10 +53,38 @@ public final class VideoPlaybackController {
     /// Resolves `mediaURL`, loans a pooled player, binds it to `view`, and
     /// starts looping muted playback. Safe to call repeatedly; a superseding
     /// `play`/`stop` for the same view cancels an in-flight resolution.
-    public func play(_ mediaURL: URL, in view: VideoRenderView) async {
+    ///
+    /// `peakBitRate` caps which rung of an adaptive ladder the item may select,
+    /// in bits per second; `0` (the default) means uncapped. See
+    /// `setPeakBitRate(_:in:)` for why this is a property of the item and not
+    /// of the URL.
+    public func play(_ mediaURL: URL, in view: VideoRenderView, peakBitRate: Double = 0) async {
         let key = ObjectIdentifier(view)
         let token = (generation[key] ?? 0) + 1
         generation[key] = token
+
+        // A player parked for this exact asset is adopted whole — same item,
+        // same playhead — instead of starting a second one at zero. This is the
+        // grid → full-screen handoff, and it is synchronous: no resolution, no
+        // await, so the destination is already showing the running video by the
+        // time the flight begins. `peakBitRate` re-caps it on the way in, which
+        // is how a tile pinned to the ladder's floor becomes an uncapped
+        // full-screen player without the item ever being replaced.
+        if let parked, parked.url == mediaURL {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                print(String(format: "[zoom-live] %.3f ADOPTED parked player", CACurrentMediaTime()))
+            }
+            #endif
+            self.parked = nil
+            detach(key: key, view: view)
+            parked.player.currentItem?.preferredPeakBitRate = peakBitRate
+            bind(parked.player, to: view)
+            activePlayers[key] = parked.player
+            playingURL[key] = mediaURL
+            parked.player.play()
+            return
+        }
 
         guard let playableURL = try? await source.playableURL(for: mediaURL) else { return }
         // Lost the race to a newer play/stop while resolving: drop this result.
@@ -45,13 +93,110 @@ public final class VideoPlaybackController {
         detach(key: key, view: view)
         let player = idlePlayers.popLast() ?? AVPlayer()
         let item = AVPlayerItem(url: playableURL)
+        // Set BEFORE the item goes live, so the very first segment request
+        // already asks for the capped rung — set afterwards, the player has
+        // usually committed to a higher one and the cap only takes effect at
+        // the next switch point.
+        item.preferredPeakBitRate = peakBitRate
         installLoop(for: player, item: item)
         player.replaceCurrentItem(with: item)
+        renderer(for: player)?.setItem(item)
         player.isMuted = true
         player.actionAtItemEnd = .none
-        view.attach(player)
+        bind(player, to: view)
         activePlayers[key] = player
+        playingURL[key] = mediaURL
         player.play()
+    }
+
+    /// Detaches the player bound to `view` but keeps it **running**, parked
+    /// under the URL it is playing, so the next `play` of that same URL adopts
+    /// it rather than starting a second item.
+    ///
+    /// This is what carries the playhead from a grid tile into the full-screen
+    /// page. The alternative — letting the destination open its own item —
+    /// restarts at `CMTime.zero`, which is the break the hero transition exists
+    /// to avoid; see `dev/issues/BACKEND_MEDIA_PREVIEW_RENDITIONS.md` §0.2.
+    ///
+    /// Only one player parks at a time: a second call returns the previous
+    /// occupant to the pool, so a rapid double-tap cannot strand one. Returns
+    /// whether there was anything to park.
+    /// `keepingSurfaceAttached` leaves `view` bound to the player instead of
+    /// clearing it. Used when the surface has been DONATED to a flight card:
+    /// the card is that same view, already rendering, and detaching would blank
+    /// the layer — which is the flash this exists to avoid. The surface stops
+    /// displaying naturally when the adopter attaches its own layer, since only
+    /// the most recently attached one renders.
+    @discardableResult
+    public func parkPlayback(from view: VideoRenderView, keepingSurfaceAttached: Bool = false) -> Bool {
+        let key = ObjectIdentifier(view)
+        guard let player = activePlayers[key], let url = playingURL[key] else { return false }
+        discardParkedPlayback()
+        // Cancel any in-flight resolution for this view so a late arrival can't
+        // attach a fresh item over the surface we just cleared.
+        generation[key] = (generation[key] ?? 0) + 1
+        activePlayers[key] = nil
+        playingURL[key] = nil
+        if !keepingSurfaceAttached { view.detach() }
+        parked = (url, player)
+        return true
+    }
+    /// The URL of the player currently parked for a handoff, if any. Read by
+    /// diagnostics that need to explain why an unpark was refused.
+    public var parkedURL: URL? { parked?.url }
+
+    /// Cancels a park, re-registering the parked player as `view`'s active one.
+    ///
+    /// For a dismissal the viewer abandons: the surface was donated to a flight
+    /// card and its player parked, and both have to come back without the item
+    /// being touched. The view is re-attached rather than assumed still bound,
+    /// so this works whether or not the donation kept the surface attached.
+    @discardableResult
+    public func unparkPlayback(to view: VideoRenderView, mediaURL: URL) -> Bool {
+        guard let parked, parked.url == mediaURL else { return false }
+        self.parked = nil
+        let key = ObjectIdentifier(view)
+        bind(parked.player, to: view)
+        activePlayers[key] = parked.player
+        playingURL[key] = mediaURL
+        parked.player.play()
+        return true
+    }
+
+    /// Retires an unclaimed parked player — the flight was cancelled, or the
+    /// destination never played it. Without this the player would keep decoding
+    /// with nothing on screen.
+    public func discardParkedPlayback() {
+        guard let parked else { return }
+        self.parked = nil
+        parked.player.pause()
+        removeLoop(for: parked.player)
+        parked.player.replaceCurrentItem(with: nil)
+        renderers[ObjectIdentifier(parked.player)]?.invalidate()
+        if idlePlayers.count < poolSize {
+            idlePlayers.append(parked.player)
+        } else {
+            // Same rule as `detach`: a dropped player takes its renderer entry
+            // with it, or the map retains both forever.
+            renderers.removeValue(forKey: ObjectIdentifier(parked.player))
+        }
+    }
+
+    /// Re-caps the bit rate of the item already playing in `view`, in bits per
+    /// second; `0` lifts the cap entirely.
+    ///
+    /// **This mutates the live `AVPlayerItem` and never replaces it**, which is
+    /// the entire point. The playhead belongs to the item, so swapping items to
+    /// change quality would reset `currentTime` to zero — the restart the hero
+    /// transition exists to avoid. Changing the cap in place lets ABR climb to a
+    /// higher rung at its next switch point while the clock keeps running, which
+    /// is how a grid tile capped to the ladder's floor becomes a full-quality
+    /// full-screen player without a visible break.
+    ///
+    /// A no-op when `view` has no active player. See
+    /// `dev/issues/BACKEND_MEDIA_PREVIEW_RENDITIONS.md` §0.3.
+    public func setPeakBitRate(_ peakBitRate: Double, in view: VideoRenderView) {
+        activePlayers[ObjectIdentifier(view)]?.currentItem?.preferredPeakBitRate = peakBitRate
     }
 
     /// Unbinds `view` and returns its player to the pool. Also cancels any
@@ -87,7 +232,7 @@ public final class VideoPlaybackController {
     @discardableResult
     public func mirror(from view: VideoRenderView, to mirrorView: VideoRenderView) -> Bool {
         guard let player = activePlayers[ObjectIdentifier(view)] else { return false }
-        mirrorView.attach(player)
+        bind(player, to: mirrorView)
         return true
     }
 
@@ -98,7 +243,156 @@ public final class VideoPlaybackController {
     /// `view` has no active player.
     public func reclaim(_ view: VideoRenderView) {
         guard let player = activePlayers[ObjectIdentifier(view)] else { return }
-        view.attach(player)
+        bind(player, to: view)
+    }
+
+    // MARK: - Surfaces
+
+    /// Makes `view` show whatever is already playing `mediaURL`, alongside the
+    /// surfaces already showing it. Returns whether anything was playing it.
+    ///
+    /// **This is the one mechanism `park` / `unpark` / `donate` / `adopt` /
+    /// `mirror` / `hold` were six approximations of** (#83, criterion 8). All
+    /// six exist because an `AVPlayer` renders into exactly one
+    /// `AVPlayerLayer`, so "show this video somewhere else" had to mean *move*
+    /// the render slot, and every move costs a decode round-trip during which
+    /// neither layer draws. Under `-avsbdl-render` there is no slot to move:
+    /// the renderer dispatches each decoded frame to every attached surface, so
+    /// a second surface is an insertion into a set and the first one never
+    /// notices.
+    ///
+    /// Keyed by URL rather than by a source view because the caller usually
+    /// does not have the source view — a flight card knows which post it is
+    /// flying, not which cell currently owns its layer. That indirection is
+    /// what let the transition stop reaching into the grid's internals.
+    ///
+    /// Passive, exactly like `mirror` was: the attached surface holds no pool
+    /// loan, so releasing it (or `stop`ping the owning view) simply ends it.
+    ///
+    /// **Degrades honestly with the flag off.** In `AVPlayerLayer` mode this
+    /// still steals the render slot, because that is all one player can do — so
+    /// call sites can be written once against this API, and the A/B measures a
+    /// real difference in behaviour rather than a difference in code paths.
+    @discardableResult
+    public func attachSurface(_ view: VideoRenderView, to mediaURL: URL) -> Bool {
+        guard let player = activePlayer(playing: mediaURL) else { return false }
+        bind(player, to: view)
+        return true
+    }
+
+    /// Makes `view` show the SAME playback `sibling` is currently showing —
+    /// resolved by view IDENTITY, never by URL.
+    ///
+    /// URL lookup is ambiguous the moment two players exist for one asset
+    /// (the cold-open warm-attach race minted a second), and
+    /// `activePlayer(playing:)` then answers from dictionary order — a
+    /// dismissal's card could prime from the TILE's playhead while the
+    /// viewer watches the PAGE's, a visible jump at frame 0 of the return.
+    /// The sibling is the surface the viewer is literally watching, so it is
+    /// the one answer that cannot show the wrong frames. Passive exactly
+    /// like `attachSurface(_:to:)`: the new surface holds no pool loan.
+    /// Returns false when the sibling is bound to nothing.
+    @discardableResult
+    public func attachSurface(_ view: VideoRenderView, alongsideSurface sibling: VideoRenderView) -> Bool {
+        if let player = activePlayers[ObjectIdentifier(sibling)] {
+            bind(player, to: view)
+            return true
+        }
+        // The sibling may itself be a JOINED surface with no loan — reach its
+        // binding directly.
+        return view.attachAlongside(sibling)
+    }
+
+    /// Releases a surface attached with `attachSurface`, leaving the playback
+    /// and every other surface untouched.
+    ///
+    /// Not `stop(_:)`: that returns a pool loan and tears the player down.
+    /// This surface never held one.
+    public func detachSurface(_ view: VideoRenderView, reason: String = "detachSurface") {
+        guard activePlayers[ObjectIdentifier(view)] == nil else { return }
+        view.detach(reason: reason)
+    }
+
+    /// How many surfaces are currently showing `mediaURL`.
+    ///
+    /// The direct evidence that a flight is flying live media rather than
+    /// handing it over: during a hero flight this reads 2 or 3, and at no point
+    /// does it pass through 0. `nil` when nothing is playing that URL, which is
+    /// distinct from "playing on no surfaces".
+    public func surfaceCount(for mediaURL: URL) -> Int? {
+        guard let player = activePlayer(playing: mediaURL) else { return nil }
+        guard let renderer = renderers[ObjectIdentifier(player)] else {
+            // Player-layer mode: exactly one layer can be rendering, whatever
+            // else is attached. Reporting the truth of that mode rather than a
+            // flattering count is the point of measuring it.
+            return 1
+        }
+        return renderer.surfaceCount
+    }
+
+    /// Moves the pool loan for `mediaURL` to `view`, leaving every attached
+    /// surface exactly as it is.
+    ///
+    /// The dismissal's missing piece, and the reason `attachSurface` alone is
+    /// not enough. A joined surface holds no loan, so when the feed page that
+    /// owns the player is torn down, `stop` returns that player to the pool and
+    /// every surface joined to it — including the grid tile the flight just
+    /// landed on — goes dark. Ownership has to move before the owner dies.
+    ///
+    /// **This touches no layer.** It is the bookkeeping half of what
+    /// `park`/`unpark` did, with the rendering half deleted, because under
+    /// N-surface rendering was never what needed to move. `view` is also
+    /// attached as a surface if it is not one already, which is a no-op when
+    /// the caller has already joined it.
+    @discardableResult
+    public func transferOwnership(of mediaURL: URL, to view: VideoRenderView) -> Bool {
+        guard let player = activePlayer(playing: mediaURL) else { return false }
+        if let previous = playingURL.first(where: { $0.value == mediaURL })?.key,
+           previous != ObjectIdentifier(view) {
+            // Clear the old owner's registration WITHOUT `detach` — detaching
+            // pauses the player and hands it back to the pool, which is exactly
+            // the teardown this exists to get ahead of.
+            activePlayers[previous] = nil
+            playingURL[previous] = nil
+        }
+        // Claimed from the park — but only when the park holds THIS asset.
+        // Clearing unconditionally orphaned a parked player of a DIFFERENT
+        // URL: never paused, never re-pooled, decoding forever with nothing on
+        // screen. A mismatched park stays put for its own claimant, or for the
+        // next discard sweep.
+        if parked?.url == mediaURL { parked = nil }
+        let key = ObjectIdentifier(view)
+        // Supersede any in-flight resolution for this view, so a late `play`
+        // cannot attach a second item over the one just adopted.
+        generation[key] = (generation[key] ?? 0) + 1
+        activePlayers[key] = player
+        playingURL[key] = mediaURL
+        bind(player, to: view)
+        player.play()
+        return true
+    }
+
+    /// Re-caps the item playing `mediaURL`, wherever it is bound.
+    ///
+    /// The URL-keyed twin of `setPeakBitRate(_:in:)`, and necessary for the
+    /// same reason `attachSurface` is: a surface that joined an existing
+    /// playback holds no pool loan, so it cannot be looked up by view. Without
+    /// this a full-screen page that joins a grid tile's player inherits the
+    /// tile's rung — `tileBitRateCap`, sized for a thumbnail — and stays there.
+    public func setPeakBitRate(_ peakBitRate: Double, for mediaURL: URL) {
+        activePlayer(playing: mediaURL)?.currentItem?.preferredPeakBitRate = peakBitRate
+    }
+
+    private func activePlayer(playing mediaURL: URL) -> AVPlayer? {
+        if let key = playingURL.first(where: { $0.value == mediaURL })?.key,
+           let player = activePlayers[key] {
+            return player
+        }
+        // A parked player is still running and still the thing showing this
+        // asset; a dismissal attaches its landing surface while the page that
+        // owned it has already let go.
+        if let parked, parked.url == mediaURL { return parked.player }
+        return nil
     }
 
     /// Warms the source (synthesis/cache) for an upcoming page so its `play` is
@@ -110,14 +404,45 @@ public final class VideoPlaybackController {
 
     // MARK: - Internals
 
+    /// The renderer for `player`, minted on first use. `nil` when
+    /// `-avsbdl-render` is off, which is what keeps every call site below a
+    /// single line that does the right thing in both modes.
+    private func renderer(for player: AVPlayer) -> VideoFrameRenderer? {
+        guard VideoRenderFlags.usesSampleBufferLayer else { return nil }
+        let key = ObjectIdentifier(player)
+        if let existing = renderers[key] { return existing }
+        let renderer = VideoFrameRenderer(player: player)
+        renderers[key] = renderer
+        return renderer
+    }
+
+    /// Makes `view` display `player`: a layer binding in player-layer mode, a
+    /// surface-set insertion in sample-buffer mode.
+    private func bind(_ player: AVPlayer, to view: VideoRenderView) {
+        view.attach(player, renderer: renderer(for: player))
+    }
+
     private func detach(key: ObjectIdentifier, view: VideoRenderView) {
-        view.detach()
+        view.detach(reason: "controller.stop")
+        playingURL[key] = nil
         guard let player = activePlayers.removeValue(forKey: key) else { return }
         player.pause()
         removeLoop(for: player)
         player.replaceCurrentItem(with: nil)
+        // The renderer stays in the map, keyed to this player, and is reused
+        // when the player is loaned out again. Invalidating only drops its
+        // output and its clock registration — an idle pooled player must not
+        // keep the app-wide display link running.
+        renderers[ObjectIdentifier(player)]?.invalidate()
         if idlePlayers.count < poolSize {
             idlePlayers.append(player)
+        } else {
+            // A player the pool has no room for is dropped — and its renderer
+            // entry must go with it. The map's chain is strong (renderer →
+            // frame source → player), so a surviving entry kept every
+            // over-pool player, its video output and its renderer alive for
+            // the life of the app; the map only ever grew.
+            renderers.removeValue(forKey: ObjectIdentifier(player))
         }
     }
 
@@ -144,7 +469,38 @@ public final class VideoPlaybackController {
     // MARK: - Test hooks
 
     #if DEBUG
+    /// What rung an adaptive stream actually settled on, for QA.
+    ///
+    /// `preferred` is the ceiling we asked for; `indicated` is the declared
+    /// bitrate of the variant AVFoundation chose. Comparing them is the only
+    /// direct evidence that a cap did anything — byte counting can't tell a
+    /// capped ladder from a progressive file, which ignores the cap entirely.
+    /// `nil` when nothing is playing or the stream has produced no access log
+    /// yet (progressive assets never do).
+    public struct BitRateReport: Sendable {
+        public let preferred: Double
+        public let indicated: Double
+        public let observed: Double
+    }
+
+    public func debugBitRateReport(in view: VideoRenderView) -> BitRateReport? {
+        guard let item = activePlayers[ObjectIdentifier(view)]?.currentItem,
+              let event = item.accessLog()?.events.last
+        else { return nil }
+        return BitRateReport(
+            preferred: item.preferredPeakBitRate,
+            indicated: event.indicatedBitrate,
+            observed: event.observedBitrate
+        )
+    }
+
     var idlePlayerCount: Int { idlePlayers.count }
     func activePlayer(in view: VideoRenderView) -> AVPlayer? { activePlayers[ObjectIdentifier(view)] }
+    func peakBitRate(in view: VideoRenderView) -> Double? {
+        activePlayers[ObjectIdentifier(view)]?.currentItem?.preferredPeakBitRate
+    }
+    func currentItem(in view: VideoRenderView) -> AVPlayerItem? {
+        activePlayers[ObjectIdentifier(view)]?.currentItem
+    }
     #endif
 }

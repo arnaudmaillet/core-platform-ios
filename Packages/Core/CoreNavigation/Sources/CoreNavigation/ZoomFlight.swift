@@ -25,12 +25,27 @@ struct ZoomFlight {
     let shadow: UIView
     let sourceFrame: CGRect
     let pageFrame: CGRect
+    /// The size the live surface is actually laid out at — native aspect when
+    /// the card knows it, the page viewport otherwise. Every pose scales
+    /// against this, NOT against `pageFrame`, or the cover math would describe
+    /// a surface that does not exist.
+    let liveMediaSize: CGSize
 
     /// How far the presenting screen recedes behind a flight (depth cue).
     static let presenterDepthScale: CGFloat = 0.95
     /// Grab feedback: the card's scale the instant a dismissal starts — it
     /// visibly detaches from the screen canvas before flying home.
     static let detachScale: CGFloat = 0.95
+
+    /// The smallest the card may shrink to while the finger still holds it.
+    ///
+    /// A held card is still the PAGE — the viewer is deciding, not landing —
+    /// and a page that shrinks toward thumbnail size under the hand reads as
+    /// the post having already gone. Clamping keeps the thing being dragged
+    /// recognisably the thing being dismissed; the remaining distance to the
+    /// tile is covered by the release spring, which is the moment the outcome
+    /// is actually decided.
+    static let minimumGrabScale: CGFloat = 0.6
 
     /// The single spring every FLIGHT lands on — the non-interactive present
     /// and tap-back (`ZoomAnimator`) and the released grab
@@ -63,12 +78,38 @@ struct ZoomFlight {
         // (dismiss leg) — so a playing video never freezes into a cover at
         // either handshake. On a present the destination's page isn't playing
         // yet and refuses.
+        // Donation before mirroring, both directions. A mirror is a second
+        // `AVPlayerLayer` with no decoded frame — blank for ~70-100ms while the
+        // other side is already hidden, which is the flash at the start of the
+        // flight. Moving the view that is already rendering has no such window;
+        // mirroring stays as the fallback for sources that cannot give theirs
+        // up.
+        if card.zoomLiveMediaSurface == nil, let destination,
+           let donated = destination.zoomDonateLiveMediaView() {
+            card.adoptZoomLiveMediaView(donated)
+        }
         if card.zoomLiveMediaSurface == nil, let destination {
             card.adoptZoomLiveMedia { surface in destination.zoomMirrorLiveMedia(onto: surface) }
         }
+        // The native aspect is read AFTER the card has its surface, and the
+        // order is load-bearing: on the dismiss leg the surface arrives from
+        // the destination donation just above, and reading the size before it
+        // answered nil — the page-size fallback. A page-shaped surface is
+        // ALREADY the feed's crop, so the flight showed that crop miniaturised
+        // all the way home and the landing's own aspect-fill snapped to the
+        // tile's true crop at the end: the double-crop mismatch the note on
+        // `liveMediaLayoutSize` describes, reintroduced by an ordering change
+        // and measured on device as the landing zoom snap.
+        let liveMediaSize = Self.liveMediaLayoutSize(native: card.zoomLiveMediaNativeSize,
+                                                     page: pageFrame.size)
         if card.zoomLiveMediaSurface != nil {
-            card.prepareZoomLiveMediaForFlight(destinationSize: pageFrame.size)
+            card.prepareZoomLiveMediaForFlight(destinationSize: liveMediaSize)
         }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print("[zoom-live] build live=\(card.zoomLiveMediaSurface != nil) destination=\(destination != nil)")
+        }
+        #endif
 
         let chrome = destination?.zoomFlightChrome()
         if let chrome {
@@ -96,7 +137,8 @@ struct ZoomFlight {
         ).cgPath
         return ZoomFlight(
             card: card, chrome: chrome, shadow: shadow,
-            sourceFrame: sourceFrame, pageFrame: pageFrame
+            sourceFrame: sourceFrame, pageFrame: pageFrame,
+            liveMediaSize: liveMediaSize
         )
     }
 
@@ -122,8 +164,8 @@ struct ZoomFlight {
         shadow.frame = CGRect(origin: landing.origin, size: shadow.frame.size)
         shadow.alpha = 1
         let center = CGPoint(x: landing.width / 2, y: landing.height / 2)
-        if let surface = card.zoomLiveMediaSurface {
-            let scale = Self.liveMediaScale(covering: landing.size, surface: pageFrame.size)
+        if let surface = card.zoomLiveMediaSurface, !card.zoomLiveMediaTracksCardBounds {
+            let scale = Self.liveMediaScale(covering: landing.size, surface: liveMediaSize)
             surface.transform = CGAffineTransform(scaleX: scale, y: scale)
             surface.center = center
         }
@@ -145,7 +187,7 @@ struct ZoomFlight {
         card.zoomRestingChrome?.alpha = 0
         shadow.alpha = 0
         let center = CGPoint(x: pageFrame.width / 2, y: pageFrame.height / 2)
-        if let surface = card.zoomLiveMediaSurface {
+        if let surface = card.zoomLiveMediaSurface, !card.zoomLiveMediaTracksCardBounds {
             surface.transform = .identity
             surface.center = center
         }
@@ -213,7 +255,26 @@ struct ZoomFlight {
         )
         let center = CGPoint(x: size.width / 2, y: size.height / 2)
         if let surface = card.zoomLiveMediaSurface {
-            let scale = Self.liveMediaScale(covering: size, surface: pageFrame.size)
+            guard !card.zoomLiveMediaTracksCardBounds else { return }
+            // Interpolate the SCALE between the two endpoint scales, rather
+            // than recomputing a cover scale from the interpolated size.
+            //
+            // `liveMediaScale` is a `max` of two ratios, and which one wins can
+            // CHANGE mid-drag: with the surface at native 16:9 (1553x874) and
+            // the card travelling 402x874 -> 267x133, height governs at the
+            // page end and width governs at the tile end. At that crossover the
+            // derivative jumps, which reads as the video barely shrinking and
+            // then snapping. Interpolating the scale is monotonic by
+            // construction and still lands on exactly the right cover scale at
+            // both ends, because those are the values being interpolated
+            // between.
+            //
+            // The animator legs never showed this: UIView interpolates the
+            // transform itself between two posed endpoints, which is already
+            // linear in scale. Only the grab recomputes per frame.
+            let startScale = Self.liveMediaScale(covering: startSize, surface: liveMediaSize)
+            let endScale = Self.liveMediaScale(covering: landing.size, surface: liveMediaSize)
+            let scale = startScale + (endScale - startScale) * t
             surface.transform = CGAffineTransform(scaleX: scale, y: scale)
             surface.center = center
         }
@@ -227,11 +288,34 @@ struct ZoomFlight {
 
     // MARK: - Stage dressing
 
+    /// The size to lay the flight's live surface out at.
+    ///
+    /// The media's NATIVE aspect, sized so it just covers the page — not the
+    /// page's own size. A page-sized surface is already a crop (the page
+    /// renders aspect-fill), so scaling it down to a tile crops a SECOND time,
+    /// from the page's crop rather than from the media. The landing tile shows
+    /// aspect-fill of the native media, so the two disagree and the mismatch
+    /// lands as a snap.
+    ///
+    /// At native aspect, `liveMediaScale` covering either endpoint reproduces
+    /// that endpoint's own aspect-fill exactly, so the card's animating bounds
+    /// are the only crop in the flight.
+    ///
+    /// Sized to just cover the page rather than at raw pixel dimensions so the
+    /// page end sits at scale ~1 and the surface is never resampled up from
+    /// something smaller than the screen.
+    static func liveMediaLayoutSize(native: CGSize?, page: CGSize) -> CGSize {
+        guard let native, native.width > 0, native.height > 0,
+              page.width > 0, page.height > 0
+        else { return page }
+        let cover = max(page.width / native.width, page.height / native.height)
+        return CGSize(width: native.width * cover, height: native.height * cover)
+    }
+
     /// The uniform scale that makes a `surface`-sized video layer cover a
     /// `size`-sized card — the flight-video analog of `scaleAspectFill`.
     static func liveMediaScale(covering size: CGSize, surface: CGSize) -> CGFloat {
-        guard surface.width > 0, surface.height > 0 else { return 1 }
-        return max(size.width / surface.width, size.height / surface.height)
+        ZoomTransitionGeometry.mediaFillScale(covering: size, surface: surface)
     }
 
     /// A black view, initially transparent, that dims the source screen behind

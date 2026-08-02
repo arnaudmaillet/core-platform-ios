@@ -16,6 +16,19 @@ public enum ZoomTransitionGeometry {
     /// The rect a hero shrinks to when its source is off-screen (a panned-away
     /// pin): a small square centered in `bounds`. Dismissing to this reads as
     /// "collapse away" rather than flying to an invisible off-screen point.
+    /// The uniform scale that makes a `surface`-sized video layer COVER a
+    /// `size`-sized window — the flight-video analog of `scaleAspectFill`.
+    ///
+    /// Public because two drivers need it and must not each carry their own
+    /// copy: the flight card poses the surface while it is inside the card, and
+    /// the dismissal's host poses it after the surface is hoisted out. When
+    /// those two disagreed about the fill rule the media stopped covering
+    /// mid-flight, so the rule lives in exactly one place.
+    public static func mediaFillScale(covering size: CGSize, surface: CGSize) -> CGFloat {
+        guard surface.width > 0, surface.height > 0 else { return 1 }
+        return max(size.width / surface.width, size.height / surface.height)
+    }
+
     public static func centeredFallback(in bounds: CGRect, side: CGFloat = 56) -> CGRect {
         CGRect(
             x: bounds.midX - side / 2,

@@ -47,11 +47,27 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         didSet { interaction.onCancelled = onDismissalCancelled }
     }
 
+    /// Fires when the PUSH itself is reversed mid-air — the flight was caught
+    /// and dragged back, so the destination never showed and never will.
+    ///
+    /// `didShow` reports neither side of a cancelled transition, so without
+    /// this the owner's per-flight state (its retained controller, the hidden
+    /// tab bar, an open playback handoff) stayed locked until the next
+    /// completed transition — which could never come, because the retained
+    /// controller is exactly what gates starting one. The owner should tear
+    /// down here as it does in `onSourceReturned`; both are idempotent
+    /// close-outs of the same flight.
+    public var onPresentationCancelled: (() -> Void)?
+
     public init(source: any ZoomTransitionSource, destination: any ZoomTransitionDestination) {
         self.source = source
         self.destination = destination
         self.feedViewController = destination as? UIViewController
         super.init()
+        // Before the destination is pushed, and so before it lays out and
+        // activates its first page — the only point early enough for it to
+        // suppress its own playback for the duration of the flight.
+        destination.zoomTransitionWillBegin()
     }
 
     /// Installs the grab-to-dismiss gesture on the pushed feed's view. Called
@@ -87,7 +103,14 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         guard let destination, let feed = feedViewController else { return nil }
         switch operation {
         case .push where toVC === feed:
-            return ZoomAnimator(isPresenting: true, source: source, destination: destination)
+            let animator = ZoomAnimator(isPresenting: true, source: source, destination: destination)
+            animator.onPresentationReversed = { [weak self] in
+                // The flight this interruptor served is over; didShow will not
+                // fire to release it.
+                self?.flightInterruptor = nil
+                self?.onPresentationCancelled?()
+            }
+            return animator
         case .pop where fromVC === feed:
             return ZoomAnimator(
                 isPresenting: false, source: source, destination: destination,
@@ -102,14 +125,37 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         _ navigationController: UINavigationController,
         interactionControllerFor animationController: any UIViewControllerAnimatedTransitioning
     ) -> (any UIViewControllerInteractiveTransitioning)? {
-        interaction.isInteracting ? interaction : nil
+        // A grab that started from REST owns the transition outright, and the
+        // animator has to stand down completely: it stages its own flight, so
+        // an animator that also built one would put a second card over the one
+        // under the finger.
+        if interaction.isInteracting {
+            (animationController as? ZoomAnimator)?.isSupersededByInteractiveDriver = true
+            return interaction
+        }
+        // Otherwise the flight gets a dormant interruptor — either leg. It
+        // starts the transition non-interactively, exactly as a tap always did,
+        // and holds the right to catch the flight mid-air.
+        guard let zoom = animationController as? ZoomAnimator else { return nil }
+        let interruptor = ZoomFlightInterruptor(advancesOnDownwardDrag: zoom.isDismissing)
+        flightInterruptor = interruptor
+        return interruptor
     }
+
+    /// Retains the interruptor for the length of a flight; UIKit holds its
+    /// interaction controller weakly.
+    private var flightInterruptor: ZoomFlightInterruptor?
 
     public func navigationController(
         _ navigationController: UINavigationController,
         didShow viewController: UIViewController,
         animated: Bool
     ) {
+        // Whatever showed, the flight that interruptor served is over. Left
+        // set, it survived until the next flight replaced it — a small object,
+        // but a retained one whose pan the container's teardown had already
+        // orphaned.
+        flightInterruptor = nil
         if viewController === feedViewController {
             onDestinationShown?()
             return

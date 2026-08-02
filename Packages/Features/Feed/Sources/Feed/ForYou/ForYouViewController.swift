@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import DesignSystem
 import MediaCore
+import MediaPlayback
 import PostGrid
 import UIKit
 
@@ -70,16 +71,295 @@ final class ForYouViewController: UIViewController {
     /// the grid's own cursor is a follow-up.
     private static let seedWindow = 40
 
+    /// The dismissal's live surface, hosted in the tab bar controller's view
+    /// for the length of the return flight.
+    ///
+    /// Above the navigation controller on purpose: a nav controller removes
+    /// non-top views from the window, so a surface hosted in THIS controller's
+    /// view would leave the render tree mid-flight and its layer would
+    /// re-acquire on the way back. One level up, it never leaves — the spike
+    /// measured zero `readyForDisplay` drops across a full push and pop.
+    private weak var dismissHostedSurface: UIView?
+
+    /// Installs `view` in the host at `rect`, converted from the transition
+    /// container's space. Returns false when there is no host to put it in.
+    private func hoistForDismissal(_ view: UIView, at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) -> Bool {
+        guard let host = tabBarController?.view else { return false }
+        // Into the CLIP straight away, sized to the whole host for the flight.
+        // The clip later shrinks to the grid's rect, but the surface itself is
+        // added exactly once — a second move at landing was costing the very
+        // readiness drop this exists to remove.
+        let clip = hostClip ?? {
+            let created = UIView()
+            created.clipsToBounds = true
+            created.isUserInteractionEnabled = false
+            host.addSubview(created)
+            hostClip = created
+            return created
+        }()
+        // The CLIP is the flying window — it takes the card's role once the
+        // surface is hoisted: it holds the rect, the rounding and the crop.
+        // Starts at the PAGE's radius so the spring interpolates down to the
+        // tile's rather than jumping there at the end.
+        clip.frame = space.convert(rect, to: host)
+        clip.layer.cornerCurve = .continuous
+        clip.layer.cornerRadius = cornerRadius
+
+        view.removeFromSuperview()
+        view.autoresizingMask = []
+        // The surface's BOUNDS are deliberately left exactly as
+        // `prepareZoomLiveMediaForFlight` set them — the media's native aspect,
+        // sized to cover the page — and are never animated. A video layer whose
+        // bounds animate does not re-render to track them; its video rect
+        // snaps. Driving this by `frame` (which animates bounds) is what made
+        // the media stop covering the card mid-dismissal.
+        //
+        // Coverage is a uniform scale about the centre instead, which is
+        // exactly how the card poses it while the surface is still inside the
+        // card. The clip's animating bounds are the only crop in the flight.
+        view.layer.cornerRadius = 0
+        view.clipsToBounds = false
+        // TRANSPARENT, not the black floor `updatePosterVisibility` gave it at
+        // prime time. This surface appears ABOVE the feed, full-page, in the
+        // very first staging commit — and its background composites WITH that
+        // commit while its video content rides the sample-buffer path outside
+        // it. On a busy device the content can miss the first pass, and an
+        // opaque floor turns that pass into a full-screen black plate over a
+        // live page: the 1-frame blink at tap-back frame 0, invisible to the
+        // red-floor diagnostic because this black belongs to the SURFACE, not
+        // the card. Clear, the same pass shows the feed through — pixel
+        // continuity — and the floor is not missed: `poseHostedSurface` keeps
+        // the surface covering its clip through the whole flight, so there is
+        // never a gap for a floor to fill.
+        view.backgroundColor = .clear
+        // Exactly one surface in the clip, always. `syncHostedSurface` glues
+        // `subviews.first` to the tile, so a leftover from an earlier flight
+        // would both draw over the grid and be the one that gets glued — the
+        // real surface then tracking nothing. The coordinator releases a
+        // superseded surface on the way in; this is the parenting half of the
+        // same invariant, and it is cheap enough to assert unconditionally.
+        for stale in clip.subviews where stale !== view {
+            stale.removeFromSuperview()
+        }
+        clip.addSubview(view)
+        dismissHostedSurface = view
+        // Poses window AND covering scale together — synchronously here (the
+        // takeoff state), and again inside the flight's spring block via
+        // `zoomPoseHoistedMedia`, so both ride ONE animation on the render
+        // server. This replaces a per-display-tick scale driver, whose clock
+        // was the MAIN THREAD while the window animated server-side: every
+        // missed tick froze the video's scale under a still-gliding window
+        // and then snapped it frames' worth to catch up — the aspect-fill
+        // stepping seen on device, intermittent because it needed a stall.
+        poseHostedSurface(at: rect, in: space, cornerRadius: cornerRadius)
+        #if DEBUG
+        armFlightProbe()
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            let ready = (view as? VideoRenderView)?.isReadyForDisplay ?? false
+            print(String(format: "[zoom-live] %.3f dismiss HOISTED ready=%@",
+                         CACurrentMediaTime(), ready ? "true" : "false"))
+        }
+        #endif
+        return true
+    }
+
+    /// Poses the hosted surface: the window (frame + radius) AND the video's
+    /// covering scale, as one pose. Called synchronously at the hoist and
+    /// inside the flight's spring block, so everything interpolates on the
+    /// same animation.
+    ///
+    /// Animating the scale between the two endpoint covers is SAFE, and the
+    /// reason is worth keeping: the scale the window needs at progress p is
+    /// `max(w(p)/W, h(p)/H)` with w and h affine in p — a max of affine
+    /// functions, which is CONVEX. The animated scale is the chord between
+    /// that function's own endpoint values, and a chord never dips below a
+    /// convex curve on its interval: mid-flight the video is always exactly
+    /// covered or slightly over-covered (a marginally tighter crop, cropped
+    /// away by the clip — invisible). The one place the chord CAN dip under
+    /// is the spring's overshoot, which extrapolates past the interval —
+    /// ~1.1% of progress at damping 0.82, a ≲3% cover deficit for a frame or
+    /// two at the settle, against the card's own furniture. Accepted: the
+    /// alternative was a per-display-tick driver on the main thread's clock,
+    /// whose missed ticks froze and snapped the scale in visible steps.
+    private func poseHostedSurface(at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) {
+        guard let clip = hostClip, let host = tabBarController?.view else { return }
+        clip.frame = space.convert(rect, to: host)
+        clip.layer.cornerRadius = cornerRadius
+        guard let view = dismissHostedSurface else { return }
+        let size = clip.bounds.size
+        let media = view.bounds.size
+        guard media.width > 0, media.height > 0, size.width > 0, size.height > 0 else { return }
+        let scale = ZoomTransitionGeometry.mediaFillScale(covering: size, surface: media)
+        view.transform = CGAffineTransform(scaleX: scale, y: scale)
+        view.center = CGPoint(x: size.width / 2, y: size.height / 2)
+    }
+
+    #if DEBUG
+    // Samples what the hosted surface's LAYER is actually doing across a
+    // dismissal, under `-zoom-probe`.
+    //
+    // The load-bearing field is `cover`: the drawn media's size over the window
+    // it must cover, on both axes. Aspect fill holds iff both are >= 1. That is
+    // not answerable from a still frame, and it is how the overshoot's uncovered
+    // edges were found — the window deliberately outlasts the spring's rebond,
+    // because an earlier version of this probe stopped at 0.9s and reported a
+    // clean flight while the artifact happened at 1.2s.
+    private var flightProbe: CADisplayLink?
+    private var flightProbeStart: CFTimeInterval = 0
+
+    private func armFlightProbe() {
+        guard ProcessInfo.processInfo.arguments.contains("-zoom-probe") else { return }
+        flightProbe?.invalidate()
+        flightProbeStart = CACurrentMediaTime()
+        let link = CADisplayLink(target: self, selector: #selector(sampleFlightProbe))
+        link.add(to: .main, forMode: .common)
+        flightProbe = link
+    }
+
+    @objc private func sampleFlightProbe() {
+        let t = CACurrentMediaTime() - flightProbeStart
+        guard let view = dismissHostedSurface, let clip = hostClip, t < 3.0 else {
+            flightProbe?.invalidate(); flightProbe = nil; return
+        }
+        let vp = view.layer.presentation()
+        let cp = clip.layer.presentation()
+        let bounds = vp?.bounds ?? view.layer.bounds
+        let scale = vp?.affineTransform().a ?? view.transform.a
+        let win = (cp?.bounds ?? clip.layer.bounds).size
+        let coverX = win.width > 0 ? bounds.width * scale / win.width : 0
+        let coverY = win.height > 0 ? bounds.height * scale / win.height : 0
+        let opacity = vp?.opacity ?? view.layer.opacity
+        print(String(format: "[probe] %.3f cover=%.3f/%.3f%@ op=%.2f%@ scale=%.3f b=%@ | clip f=%@ r=%.1f | surfkeys=%@",
+                     t, coverX, coverY,
+                     (coverX < 0.999 || coverY < 0.999) ? " UNCOVERED" : "",
+                     opacity,
+                     opacity < 0.99 ? " DIM" : "",
+                     scale,
+                     NSCoderRect(bounds),
+                     NSCoderRect(cp?.frame ?? clip.layer.frame),
+                     cp?.cornerRadius ?? clip.layer.cornerRadius,
+                     (view.layer.animationKeys() ?? []).joined(separator: ",")))
+    }
+
+    private func NSCoderRect(_ r: CGRect) -> String {
+        String(format: "(%.0f,%.0f,%.0fx%.0f)", r.origin.x, r.origin.y, r.width, r.height)
+    }
+    #endif
+
+    /// Un-hoists the surface for a REVERSED dismissal and hands it back.
+    ///
+    /// The mirror of `hoistForDismissal`. A flight the viewer cancels leaves
+    /// the feed on screen, so the surface must stop being hosted at the grid
+    /// cell's rect — where it would otherwise keep drawing over the feed that
+    /// came back, one level above the navigation controller and immune to
+    /// anything the feed does.
+    private func releaseHoistedForCancel() -> UIView? {
+        guard let view = dismissHostedSurface else { return nil }
+        dismissHostedSurface = nil
+        view.transform = .identity
+        view.removeFromSuperview()
+        hostClip?.removeFromSuperview()
+        hostClip = nil
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print("[zoom-live] dismiss REVERSED, hoisted surface released")
+        }
+        #endif
+        return view
+    }
+
+    /// The post whose video renders from the host rather than from its cell.
+    private var hostedPostID: PostID?
+    private var hostedFormat: GalleryFilter.Format?
+    /// Clips a hosted surface to the grid, so a tile scrolling under the bars
+    /// cannot draw over them.
+    private weak var hostClip: UIView?
+
+    /// Lands the hosted surface WITHOUT moving it into the cell.
+    ///
+    /// The point of the permanent hoist: `addSubview` / `removeFromSuperview`
+    /// are never called on the active player layer again, so the ~65ms
+    /// readiness drop the landing card was covering does not happen at all. The
+    /// tile publishes its rect instead of owning the view.
+    private func landHostedSurface(for postID: PostID, format: GalleryFilter.Format) {
+        guard let view = dismissHostedSurface as? VideoRenderView,
+              let page = pager.page(for: format), let host = tabBarController?.view
+        else { return }
+        dismissHostedSurface = nil
+
+        guard let clip = hostClip else { return }
+        guard page.adoptHostedPlayback(view, for: postID) else {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                print("[zoom-live] land REFUSED by adoptHostedPlayback post=\(postID)")
+            }
+            #endif
+            // Nothing landed, so nothing may survive: the surface used to be
+            // unparented but left attached to its renderer, and the empty clip
+            // stayed in the tab bar controller's view for the life of the tab
+            // — one stranded pair per refused landing. Same teardown as
+            // `releaseHoistedForCancel`, minus the hand-back (there is no
+            // feed left to reclaim it).
+            view.detachForReplacement()
+            view.removeFromSuperview()
+            clip.removeFromSuperview()
+            hostClip = nil
+            return
+        }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        view.transform = .identity
+        clip.layer.cornerRadius = 0
+        clip.frame = page.gridRect(in: host)
+        view.layer.cornerRadius = PostGridFlightCard.tileCornerRadius
+        view.clipsToBounds = true
+        CATransaction.commit()
+        hostedPostID = postID
+        hostedFormat = format
+        page.onGeometryChanged = { [weak self] in self?.syncHostedSurface() }
+        page.setHostedSurfaceReleasedHandler { [weak self] released in
+            guard self?.hostedPostID == released else { return }
+            self?.hostedPostID = nil
+            self?.hostClip?.removeFromSuperview()
+        }
+        syncHostedSurface()
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] %.3f dismiss LANDED HOSTED ready=%@",
+                         CACurrentMediaTime(), view.isReadyForDisplay ? "true" : "false"))
+        }
+        #endif
+    }
+
+    /// Glues the hosted surface to its tile. Runs on every scroll frame.
+    private func syncHostedSurface() {
+        guard let postID = hostedPostID, let format = hostedFormat,
+              let page = pager.page(for: format), let clip = hostClip,
+              let host = tabBarController?.view
+        else { return }
+        clip.frame = page.gridRect(in: host)
+        guard let rect = page.tileRect(for: postID, in: clip) else { return }
+        // Implicit animation off: this tracks a scroll, and any easing reads as
+        // the video lagging behind its own brick.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        clip.subviews.first?.frame = rect
+        CATransaction.commit()
+    }
+
+
     init(
         viewModel: ForYouViewModel,
         imagePipeline: ImagePipeline,
+        videoPlayback: VideoPlaybackController? = nil,
         makeSnapFeed: @escaping ([PostID]) -> UIViewController,
         prewarm: @escaping ([PostID]) async -> Void
     ) {
         self.viewModel = viewModel
         self.makeSnapFeed = makeSnapFeed
         self.prewarm = prewarm
-        pager = ForYouPagerView(imagePipeline: imagePipeline)
+        pager = ForYouPagerView(imagePipeline: imagePipeline, videoPlayback: videoPlayback)
         super.init(nibName: nil, bundle: nil)
         // NOT hidesBottomBarWhenPushed: this is a tab root, and the bar is how
         // the viewer leaves it.
@@ -91,18 +371,30 @@ final class ForYouViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
-        navigationItem.title = "For You"
-        // The big left-aligned title, which is the convention for a root tab.
+        // No title. The large left-aligned title was the convention for a root
+        // tab here, and removing it also removes the large-title content-area
+        // layout from the transition's path — which is the second reason for
+        // this change, see below.
+        navigationItem.title = nil
+        navigationItem.largeTitleDisplayMode = .never
+        // Native bar items on both sides.
         //
-        // `.inline` is genuinely the mode that produces it here, however
-        // backwards that reads. This stack leaves `prefersLargeTitles` at its
-        // default of false, and under iOS 26 that makes `.always` and `.never`
-        // BOTH resolve to the small centred bar title, while `.inline` renders
-        // the large one in the content area. All three were measured in-sim
-        // before this line was settled; don't "fix" it to `.always` without
-        // re-measuring. Verified not to leak into the pushed feed, whose bar
-        // keeps just its back item and author pill.
-        navigationItem.largeTitleDisplayMode = .inline
+        // Partly product, partly a probe: a large title renders in the CONTENT
+        // area rather than the bar, so it participates in the layout the hero
+        // flight animates over, and the question was whether its passes were
+        // invalidating views mid-transition. Plain bar items lay out in the bar
+        // itself and cannot, so if the dismissal's frame-0 artifact survives
+        // this it is not the header — which is a real answer either way.
+        navigationItem.leftBarButtonItem = UIBarButtonItem(
+            image: UIImage(systemName: "line.3.horizontal.decrease"),
+            style: .plain, target: self, action: #selector(headerLeftTapped)
+        )
+        navigationItem.leftBarButtonItem?.accessibilityLabel = "Filters"
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            image: UIImage(systemName: "magnifyingglass"),
+            style: .plain, target: self, action: #selector(headerRightTapped)
+        )
+        navigationItem.rightBarButtonItem?.accessibilityLabel = "Search"
 
         pager.pin(to: view)
         // The tray floats over the pages, so they must be able to scroll their
@@ -203,6 +495,39 @@ final class ForYouViewController: UIViewController {
     /// mechanism end to end — `makeSnapFeedViewController(postIDs:)` over
     /// `FixedPostsFeedProvider`, pushed under a `ZoomTransitionController` —
     /// with a tile as the source instead of a pin.
+    /// A partial display model from the projection this grid already holds.
+    ///
+    /// Lives here, not on `FeedItemDisplayModel`, so the shared display model
+    /// stays free of `PostGrid` — the grid is one opener among several, and the
+    /// feed is also reached from Maps and from a route.
+    ///
+    /// Complete now that the projection carries author identity — the page
+    /// opens with its capsule populated rather than filling in ~0.69s later.
+    ///
+    /// `metaText` is rebuilt here in the feed's own "@handle · age" form using
+    /// the same `PostMetadata.compactAge` the grid's cells use, so the seeded
+    /// string matches the one the real entry will carry and nothing re-renders
+    /// differently when it lands.
+    private static func seedModel(from post: GalleryPost) -> FeedItemDisplayModel {
+        let handle = post.authorHandle.map { "@\($0)" } ?? ""
+        let age = PostMetadata.compactAge(ofMillis: post.publishedAtMS)
+        return FeedItemDisplayModel(
+            id: post.id,
+            authorID: post.authorID ?? ProfileID(""),
+            authorName: post.authorName ?? "",
+            metaText: handle.isEmpty ? age : "\(handle) · \(age)",
+            avatarURL: post.authorAvatarURL,
+            caption: post.caption.isEmpty ? nil : post.caption,
+            mediaURL: post.videoURL ?? post.thumbnailURL,
+            mediaKind: post.kind == .video ? .video : .image,
+            thumbnailURL: post.thumbnailURL,
+            audioText: post.kind == .video && !handle.isEmpty
+                ? "Original audio · \(handle)" : nil,
+            likeCount: post.reactionCount ?? 0,
+            timestampText: age
+        )
+    }
+
     private func openFeed(from format: GalleryFilter.Format, at index: Int) {
         // One flight at a time: a second tap while a card is in the air would
         // stage a transition over a live one. Same guard as the map's.
@@ -211,7 +536,19 @@ final class ForYouViewController: UIViewController {
         guard posts.indices.contains(index), let navigationController else { return }
         let tapped = posts[index]
         let ids = posts[index...].prefix(Self.seedWindow).map(\.id)
+
+        // Open the handoff scope. Everything else stops — the grid is about to
+        // be covered and its slots are what the feed needs — and the tapped
+        // post becomes invisible to reconcile, so nothing can restart or stop
+        // it while its player is in flight.
+        pager.beginPlaybackHandoff(of: tapped.id)
         let feed = makeSnapFeed(Array(ids))
+        // Hand the feed the projection this grid already holds, so its first
+        // page configures at push time rather than when its own fetch returns.
+        // Measured at ~0.69s of empty destination without it.
+        if let seedable = feed as? SnapFeedViewController {
+            seedable.seedProjection(posts[index...].prefix(Self.seedWindow).map(Self.seedModel))
+        }
 
         // The feed owns the whole screen: hide the bar with the push. Managed
         // by hand rather than via `hidesBottomBarWhenPushed`, because that
@@ -230,7 +567,6 @@ final class ForYouViewController: UIViewController {
             navigationController.pushViewController(feed, animated: true)
             return
         }
-
         let source = ForYouGridZoomSource(
             page: page,
             tappedID: tapped.id,
@@ -238,7 +574,35 @@ final class ForYouViewController: UIViewController {
             // and never learns what a feed is.
             activePostID: { [weak feed] in (feed as? SnapFeedViewController)?.activePostID },
             // The gallery recedes; the tray and the title stay grounded.
-            depthView: pager
+            depthView: pager,
+            // Donate-then-park, run at card-build time so the card flies the
+            // very layer the tile was already rendering.
+            hoistLive: { [weak self] view, rect, space, radius in
+                self?.hoistForDismissal(view, at: rect, in: space, cornerRadius: radius) ?? false
+            },
+            poseHoisted: { [weak self] rect, space, radius in
+                self?.poseHostedSurface(at: rect, in: space, cornerRadius: radius)
+            },
+            releaseHoisted: { [weak self] in self?.releaseHoistedForCancel() },
+            donateLive: { [weak self, weak page] in
+                // Under `-avsbdl-render` the card joins the tile's playback as
+                // an extra surface instead of taking it over. The tile keeps
+                // rendering behind the card, so there is no park, no transfer,
+                // and nothing to hand back if the flight is abandoned.
+                let attached = VideoRenderFlags.usesSampleBufferLayer
+                let surface = attached
+                    ? page?.liveFlightSurface(for: tapped.id)
+                    : page?.donateLivePlayback(of: tapped.id)
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                    print(String(format: "[zoom-live] %.3f source %@ -> %@",
+                                 CACurrentMediaTime(),
+                                 attached ? "attach surface" : "donate+park",
+                                 surface != nil ? "true" : "false"))
+                }
+                #endif
+                return surface
+            }
         )
         let transition = ZoomTransitionController(source: source, destination: destination)
         activeTransition = transition
@@ -256,6 +620,17 @@ final class ForYouViewController: UIViewController {
             // by now, this just guarantees it if a leg was skipped.
             self?.showTabBar(alpha: 1)
             self?.restoreTrayAfterTransition()
+            // Close the handoff scope. This is the single act that restores the
+            // grid: it clears the flight's state and reconciles once, so every
+            // qualifying visible tile gets a slot again rather than whatever
+            // subset survived the transition.
+            // Land the hosted surface on the tile FIRST, then close the scope:
+            // the tile must own a rendering surface before the reconcile that
+            // restores every other slot runs.
+            if let landed = (feed as? SnapFeedViewController)?.activePostID {
+                self?.landHostedSurface(for: landed, format: format)
+            }
+            self?.pager.endPlaybackHandoff()
             #if DEBUG
             self?.debugAuditTray("returned")
             self?.debugAdvanceGrabCycleIfNeeded()
@@ -270,6 +645,19 @@ final class ForYouViewController: UIViewController {
             #if DEBUG
             self?.debugAuditTray("cancelled")
             #endif
+        }
+        transition.onPresentationCancelled = { [weak self] in
+            // The PUSH was reversed mid-air: the feed never showed, `didShow`
+            // reports nothing, and the grid is the screen again. The same
+            // idempotent close-out as `onSourceReturned`, minus the landing —
+            // a present hoists nothing, so there is nothing to land. Without
+            // this, the retained transition made every future tile tap a
+            // silent no-op and the handoff scope kept the grid's players down.
+            self?.navigationController?.delegate = nil
+            self?.activeTransition = nil
+            self?.showTabBar(alpha: 1)
+            self?.restoreTrayAfterTransition()
+            self?.pager.endPlaybackHandoff()
         }
         // Accessing `view` loads it so the grab-to-dismiss pan can attach.
         transition.attachInteractiveDismissal(to: feed.view) { [weak self] in
@@ -303,6 +691,21 @@ final class ForYouViewController: UIViewController {
             transition.onDestinationShown = { [weak transition] in
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                     transition?.debugScriptedGrab()
+                }
+            }
+        }
+        // `-foryou-demo-tapback`: pop programmatically instead of grabbing.
+        //
+        // The two dismissals are SEPARATE implementations —
+        // `ZoomDismissInteractionController` for the grab,
+        // `ZoomAnimator.dismiss` for the back button — and the harness could
+        // only ever drive the first. Every dismiss measurement taken here was
+        // therefore of the grab, and said nothing about the button, which is
+        // exactly where a defect survived being "verified".
+        if ProcessInfo.processInfo.arguments.contains("-foryou-demo-tapback") {
+            transition.onDestinationShown = { [weak navigationController] in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    navigationController?.popViewController(animated: true)
                 }
             }
         }
@@ -357,6 +760,81 @@ final class ForYouViewController: UIViewController {
         trayBottomConstraint.constant = target
     }
 
+    /// Reconciles autoplay once the grid has actually laid out.
+    ///
+    /// `viewWillAppear` is too early on its own: no cell is realized yet, so
+    /// the reconcile there finds no candidates. And when content lands BEFORE
+    /// the screen appears — which is the normal case against the mock backend,
+    /// and against a warm cache on device — the post-reload reconcile runs
+    /// while the surface is still inactive and also does nothing. Between them
+    /// the grid could sit fully laid out, visible, and silent, with no further
+    /// event to retrigger it until the viewer happened to scroll.
+    ///
+    /// Caught only because a loaded machine reversed the ordering and hid it;
+    /// on an idle one the grid never started. `viewDidAppear` is the first
+    /// moment both facts are true — surface active, cells realized — so the
+    /// reconcile here is the one that cannot be raced.
+    #if DEBUG
+    /// `-foryou-tab-away <seconds>`: switch to another tab after a delay.
+    ///
+    /// Exists because the leak it checks for is invisible from this screen —
+    /// the hosted surface lives in the tab bar controller's view, so the way
+    /// to see it is to leave the tab and look at what is still drawing.
+    private var hasScheduledTabAway = false
+
+    private func scheduleTabAwayIfNeeded() {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard !hasScheduledTabAway,
+              let position = arguments.firstIndex(of: "-foryou-tab-away"),
+              position + 1 < arguments.count,
+              let delay = Double(arguments[position + 1])
+        else { return }
+        hasScheduledTabAway = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let tabs = self?.tabBarController else { return }
+            print("[zoom-live] TAB AWAY -> index 2")
+            tabs.selectedIndex = 2
+        }
+    }
+    #endif
+
+    /// Placeholders: these exist to put real bar items in the header, not to
+    /// add features. Wired to nothing on purpose rather than to a half-built
+    /// destination.
+    @objc private func headerLeftTapped() {}
+    @objc private func headerRightTapped() {}
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        pager.setAutoplayActive(true)
+        #if DEBUG
+        scheduleTabAwayIfNeeded()
+        #endif
+    }
+
+    /// Suspends the grid's media when the TAB moves away.
+    ///
+    /// A push disappears this screen too, and there the flight owns playback —
+    /// stopping it is precisely the restart the whole handoff exists to
+    /// prevent. The stack's top separates the two: on a push it is already the
+    /// pushed screen, on a tab switch it is still this one.
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        guard navigationController?.topViewController === self else { return }
+        // The hosted surface lives in the TAB BAR CONTROLLER's view, one level
+        // above the navigation controller — deliberately, so a push cannot
+        // unmount it mid-flight. The consequence is that nothing about leaving
+        // this tab removes it either: it kept drawing, and playing, at the grid
+        // cell's rect over whichever tab the viewer switched to.
+        //
+        // Hidden first and synchronously, so it cannot compose over the
+        // incoming tab even for one frame; `setAutoplayActive(false)` then
+        // stops every playing tile, and `stop` is the path that actually
+        // releases a hosted surface and tears its clip down.
+        hostClip?.isHidden = true
+        pager.setAutoplayActive(false)
+    }
+
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         // The segment row and the view model hold two copies of one fact — which
@@ -368,6 +846,19 @@ final class ForYouViewController: UIViewController {
         // costs nothing when they already agree.
         syncFormatRowSelection()
         restoreTrayAfterTransition()
+        // The grid owns the screen again, so its bricks may play again. Runs
+        // before the topViewController guard below: a tab switch back lands
+        // here too, and autoplay should resume on either path.
+        //
+        // No handoff open (a plain push, or an ordinary tab switch): sweep any
+        // stranded park. A live transition owns its own scope and closes it in
+        // `onSourceReturned`.
+        if activeTransition == nil { pager.discardPlaybackHandoff() }
+        // Paired with the hide in `viewWillDisappear`. Usually moot — the stop
+        // there tears the clip down outright — but a clip that outlived it must
+        // not come back invisible.
+        hostClip?.isHidden = false
+        pager.setAutoplayActive(true)
         // Coming back from the feed: this screen owns the bottom again.
         guard navigationController?.topViewController === self else { return }
         guard activeTransition != nil else {

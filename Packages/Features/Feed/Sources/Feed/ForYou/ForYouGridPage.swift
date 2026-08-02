@@ -1,6 +1,7 @@
 import CoreModels
 import DesignSystem
 import MediaCore
+import MediaPlayback
 import PostGrid
 import UIKit
 
@@ -27,9 +28,26 @@ final class ForYouGridPage: UIView {
     var onNearEnd: (() -> Void)?
     var onRefresh: (() -> Void)?
 
+    /// Display order — the mosaic's arrangement of `rawPosts`. What the cells,
+    /// the hero, and a tile tap all read.
     private(set) var posts: [GalleryPost] = []
+    /// The order the view model handed over, kept so an append can be
+    /// recognised as one before arrangement permutes it.
+    private var rawPosts: [GalleryPost] = []
+
+    /// Mosaic pages steer autoplaying posts into the non-square bricks; list
+    /// pages are a timeline, where order carries meaning and must not be
+    /// rearranged for looks.
+    private func arrange(_ posts: [GalleryPost], startingAt index: Int) -> [GalleryPost] {
+        guard style == .grid else { return posts }
+        return PostGridMosaic.arrangedForMotion(posts, startingAt: index)
+    }
 
     private let imagePipeline: ImagePipeline
+    /// Autoplay for the mosaic's video bricks. Absent on list pages — a
+    /// timeline row is a reading surface, not a viewing one — and absent
+    /// wherever the host didn't supply a player pool.
+    private let playback: GridVideoPlaybackCoordinator?
     private let style: Style
     private let collectionView: UICollectionView
     private let statusLabel = UILabel()
@@ -50,6 +68,12 @@ final class ForYouGridPage: UIView {
     /// Caught in-sim as the grid visibly rearranging just after the card set
     /// down on the right tile.
     private var isRepositioning = false
+    /// Throttle state for the during-scroll autoplay reconcile.
+    private var lastReconcileTime: CFTimeInterval = 0
+    private var lastReconcileOffset: CGFloat = 0
+    #if DEBUG
+    private var hasScheduledDiagnostics = false
+    #endif
 
     /// List pages show a column of placeholder cards; the mosaic shows two
     /// full 8-brick patterns — a scrolling page has a whole viewport to fill,
@@ -59,8 +83,9 @@ final class ForYouGridPage: UIView {
     /// How close to the end a scroll gets before the next page is requested.
     private static let prefetchDistance: CGFloat = 800
 
-    init(imagePipeline: ImagePipeline, style: Style) {
+    init(imagePipeline: ImagePipeline, style: Style, videoPlayback: VideoPlaybackController? = nil) {
         self.imagePipeline = imagePipeline
+        playback = style == .grid ? videoPlayback.map { GridVideoPlaybackCoordinator(pool: $0) } : nil
         self.style = style
         collectionView = UICollectionView(
             frame: .zero,
@@ -111,6 +136,330 @@ final class ForYouGridPage: UIView {
 
     func endRefreshing() {
         refreshControl.endRefreshing()
+    }
+
+    // MARK: - Autoplay
+
+    /// Minimum fraction of a tile that must be inside the inset viewport before
+    /// it may autoplay. A brick creeping in at the edge is not something the
+    /// viewer is looking at, and starting it there spends a pool slot the
+    /// centre of the screen wants.
+    private static let minimumVisibleFraction: CGFloat = 0.5
+
+    /// Reconciles autoplay against what is on screen now. Cheap and idempotent;
+    /// call it whenever the visible set or the surface's visibility can have
+    /// changed.
+    ///
+    /// `allowingStarts: false` still stops tiles that left, but starts nothing
+    /// new — the mid-fling case, where anything started is gone before its first
+    /// frame.
+    func updateAutoplay(allowingStarts: Bool = true) {
+        guard let playback else { return }
+        let viewport = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
+        let centreY = viewport.midY
+        let candidates = collectionView.indexPathsForVisibleItems.compactMap {
+            indexPath -> GridVideoPlaybackCoordinator.Candidate? in
+            guard !showsSkeleton, posts.indices.contains(indexPath.item) else { return nil }
+            let post = posts[indexPath.item]
+            // `autoplaysInGrid` is the shape rule: video, with a stream, and
+            // not square. Square bricks stay still.
+            guard post.autoplaysInGrid, let url = post.videoURL,
+                  post.id != heroHiddenPostID, // its twin is in the air
+                  let cell = collectionView.cellForItem(at: indexPath) as? PostGridTileCell,
+                  hasCover(for: post, in: cell)
+            else { return nil }
+
+            let frame = cell.convert(cell.bounds, to: collectionView)
+            let visible = frame.intersection(viewport)
+            guard !visible.isNull, frame.height > 0,
+                  (visible.height * visible.width) / (frame.height * frame.width)
+                      >= Self.minimumVisibleFraction
+            else { return nil }
+
+            return .init(
+                id: post.id, url: url, cell: cell,
+                distanceFromCentre: abs(frame.midY - centreY)
+            )
+        }
+        playback.update(candidates: candidates, allowingStarts: allowingStarts)
+        preloadAutoplayCovers(around: collectionView.indexPathsForVisibleItems)
+    }
+
+    /// Whether a tile has something to show behind its video surface.
+    ///
+    /// A video surface covers the tile's cover image, and until the first frame
+    /// decodes it has nothing of its own to draw — so a tile that starts
+    /// playing before its cover has arrived is simply black, and a hero flight
+    /// departing from it flies black. Measured on a cold `-rich-media` grid,
+    /// every tile reported `cover=NIL` at play start.
+    ///
+    /// Gating here rather than in the renderer because this is not a rendering
+    /// problem: there is no frame AND no poster, and no amount of sequencing
+    /// invents one. Playback simply waits for the tile to have a face.
+    ///
+    /// A post with no `thumbnailURL` is admitted rather than blocked. Nothing
+    /// is coming for it, so waiting would mean never playing — and its first
+    /// decoded frame is the only face it will ever have.
+    private func hasCover(for post: GalleryPost, in cell: PostGridTileCell) -> Bool {
+        guard let thumbnail = post.thumbnailURL else { return true }
+        // The cell's own image first: it may hold a cover the pipeline has
+        // since evicted from its cache.
+        if cell.renderedCover != nil { return true }
+        // Cached but not yet applied — `configure` asked the cache before the
+        // prefetch landed, and the cell's own load has not come back. Apply it
+        // now rather than merely reporting it: a gate that passed on a cover
+        // the tile is not actually showing would let playback start against a
+        // blank face, which is what it exists to prevent.
+        guard let cached = imagePipeline.cachedImage(for: thumbnail) else { return false }
+        cell.applyCover(cached)
+        return true
+    }
+
+    /// How far beyond the visible range to pull covers for autoplaying posts.
+    private static let autoplayCoverLookahead = 6
+
+    /// The visible range covers were last requested for, so a scroll does not
+    /// rebuild the same URL list 30 times a second.
+    private var preloadedCoverRange: ClosedRange<Int>?
+
+    /// Fetches cover images for autoplay-capable posts before their tiles need
+    /// them.
+    ///
+    /// An autoplaying tile is the one case where a missing cover is not merely
+    /// a slower thumbnail: the video surface sits over it, so until the first
+    /// frame decodes the cover IS the tile, and a hero flight departing from it
+    /// carries whatever is there. Measured on a cold `-rich-media` grid, covers
+    /// landed ~6.3s after launch and the tiles were empty until then — so the
+    /// first flight of a session flew from, and landed on, nothing.
+    ///
+    /// Restricted to `autoplaysInGrid` posts deliberately. A still tile shows
+    /// its cover directly and is already served by the normal per-cell load;
+    /// prefetching every thumbnail in range would trade this narrow fix for
+    /// bandwidth the grid did not ask for.
+    private func preloadAutoplayCovers(around visible: [IndexPath]) {
+        guard !showsSkeleton, !posts.isEmpty,
+              let first = visible.map(\.item).min(),
+              let last = visible.map(\.item).max()
+        else { return }
+        let lower = max(0, first - Self.autoplayCoverLookahead)
+        let upper = min(posts.count - 1, last + Self.autoplayCoverLookahead)
+        guard lower <= upper else { return }
+        let range = lower...upper
+        guard range != preloadedCoverRange else { return }
+        preloadedCoverRange = range
+
+        let urls = posts[range].filter(\.autoplaysInGrid).compactMap(\.thumbnailURL)
+        guard !urls.isEmpty else { return }
+        imagePipeline.prefetch(urls)
+    }
+
+    /// The first-load case, where there are no cells yet to be "around".
+    private func preloadLeadingAutoplayCovers() {
+        guard !showsSkeleton, !posts.isEmpty else { return }
+        let upper = min(posts.count - 1, Self.autoplayCoverLookahead * 2)
+        let urls = posts[0...upper].filter(\.autoplaysInGrid).compactMap(\.thumbnailURL)
+        guard !urls.isEmpty else { return }
+        // Leaves `preloadedCoverRange` unset on purpose: the first real
+        // reconcile should still run against the actual visible set rather than
+        // believe this guess already covered it.
+        imagePipeline.prefetch(urls)
+    }
+
+    /// Tab left, feed presented over the grid, app backgrounded. `keeping`
+    /// exempts the post whose player a hero flight is still carrying.
+    /// Opens the handoff scope for a tapped tile. Replaces the old
+    /// "stop everything except this one" call: the scope also makes the post
+    /// invisible to `reconcile`, so nothing can restart or stop it mid-flight.
+    func beginPlaybackHandoff(of postID: PostID) {
+        playback?.beginHandoff(postID)
+    }
+
+    /// Closes the scope and reconciles once — the single act that restores the
+    /// grid's full complement of players after a dismissal.
+    func endPlaybackHandoff() {
+        playback?.endHandoff()
+        updateAutoplay()
+    }
+
+    func setAutoplayActive(_ active: Bool, keeping kept: PostID? = nil) {
+        playback?.setSurfaceVisible(active, keeping: kept)
+        if active {
+            updateAutoplay()
+            #if DEBUG
+            schedulePlaybackDiagnosticsIfNeeded()
+            #endif
+        }
+    }
+
+    #if DEBUG
+    /// `-grid-playback-log`: report which ladder rung each playing tile settled
+    /// on, once the streams have had time to choose one.
+    private func schedulePlaybackDiagnosticsIfNeeded() {
+        guard ProcessInfo.processInfo.arguments.contains("-grid-playback-log"),
+              let playback, !hasScheduledDiagnostics
+        else { return }
+        hasScheduledDiagnostics = true
+        // Sampled rather than taken once: a stream needs a few seconds to pick
+        // a rung, and the first sample often lands before content has even
+        // loaded. Three samples show the settle instead of guessing at it.
+        for delay in [8.0, 16.0, 24.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                print("[grid-playback] --- t+\(Int(delay))s ---")
+                self?.updateAutoplay()
+                playback.logPlaybackDiagnostics()
+            }
+        }
+    }
+    #endif
+
+    // MARK: - Hero handoff
+
+    /// Mirrors a playing tile's player onto the flight card and then parks it.
+    ///
+    /// Order is the whole point, and it is why both steps live here rather than
+    /// at the call site. Mirroring first attaches the card's layer while the
+    /// tile still owns the player, so the card renders live from frame 0 and,
+    /// being the most recently attached layer, is the one that displays.
+    /// Parking second releases the tile without interrupting the player, so the
+    /// destination can adopt it — same item, same playhead — when the flight
+    /// lands.
+    ///
+    /// Parking first, which is what this used to do, left nothing to mirror:
+    /// the card flew a static cover for the whole 420ms zoom while the player
+    /// sat parked, and the live frame only reappeared after landing.
+    func donateLivePlayback(of postID: PostID) -> VideoRenderView? {
+        playback?.donateLiveSurface(of: postID)
+    }
+
+    /// The N-surface alternative to `donateLivePlayback`: a NEW surface showing
+    /// the same live playback, with the tile keeping its own.
+    ///
+    /// Nothing is donated, nothing is parked, and the tile is hidden rather
+    /// than stopped — so if the flight is abandoned there is nothing to put
+    /// back. Returns nil when the tile is not playing, which is the same
+    /// contract the donate path had.
+    func liveFlightSurface(for postID: PostID) -> VideoRenderView? {
+        guard let playback,
+              let index = posts.firstIndex(where: { $0.id == postID }),
+              let url = posts[index].videoURL
+        else { return nil }
+        let made = playback.makeAttachedSurface(for: postID, url: url)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] %.3f producer GRID liveFlightSurface -> %@",
+                         CACurrentMediaTime(), made == nil ? "NIL (tile not playing)" : "surface"))
+        }
+        #endif
+        return made
+    }
+
+    /// Forces the landing cell through a layout pass while the card still
+    /// covers it.
+    ///
+    /// The surface can report a decoded frame while the CELL around it has a
+    /// pending layout — the render view was just inserted or unhidden, and its
+    /// frame resolves on the next pass. Unmounting the card into that gap
+    /// shows the cell mid-composition for a frame. Doing the pass under the
+    /// card costs nothing visible.
+    func finalizeLandingLayout(for postID: PostID) {
+        guard let index = posts.firstIndex(where: { $0.id == postID }),
+              let cell = collectionView.cellForItem(at: IndexPath(item: index, section: 0))
+        else { return }
+        cell.setNeedsLayout()
+        cell.layoutIfNeeded()
+    }
+
+    /// Whether the tile that a dismissal is landing on is already rendering.
+    /// True when it carries no video, so a still tile never holds the card.
+    func isLandingPlaybackReady(for postID: PostID) -> Bool {
+        guard let playback,
+              let index = posts.firstIndex(where: { $0.id == postID }),
+              posts[index].autoplaysInGrid
+        else { return true }
+        return playback.isSurfaceRendering(for: postID)
+    }
+
+
+
+    /// Lands a hosted surface WITHOUT moving it into the cell: the layer stays
+    /// where it is and the tile publishes geometry instead.
+    @discardableResult
+    func adoptHostedPlayback(_ view: VideoRenderView, for postID: PostID) -> Bool {
+        guard let playback,
+              let index = posts.firstIndex(where: { $0.id == postID }),
+              let url = posts[index].videoURL,
+              let cell = collectionView.cellForItem(
+                  at: IndexPath(item: index, section: 0)
+              ) as? PostGridTileCell
+        else { return false }
+        let adopted = playback.adoptHostedSurface(view, for: postID, url: url, cell: cell)
+        #if DEBUG
+        if !adopted, ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            // Both URLs, because a refusal is almost always the two sides
+            // naming the same asset differently.
+            print("[zoom-live] adopt REFUSED tile=\(url.absoluteString) parked=\(playback.debugParkedURL?.absoluteString ?? "nil")")
+        }
+        #endif
+        return adopted
+    }
+
+    /// Where the tile for `postID` currently is, in `space`. The host reads
+    /// this every scroll frame to keep the hosted surface glued to its brick.
+    /// `nil` once the tile is no longer realized.
+    func tileRect(for postID: PostID, in space: UICoordinateSpace) -> CGRect? {
+        guard let index = posts.firstIndex(where: { $0.id == postID }),
+              let cell = collectionView.cellForItem(at: IndexPath(item: index, section: 0))
+        else { return nil }
+        return cell.convert(cell.bounds, to: space)
+    }
+
+    /// The grid's own rect, so the host can clip a hosted surface to it rather
+    /// than letting it draw over the bars.
+    func gridRect(in space: UICoordinateSpace) -> CGRect {
+        collectionView.convert(collectionView.bounds, to: space)
+    }
+
+    /// Called on every scroll frame while a surface is hosted.
+    var onGeometryChanged: (() -> Void)?
+
+    /// Forwards the coordinator's teardown so the host can drop its reference.
+    func setHostedSurfaceReleasedHandler(_ handler: @escaping (PostID) -> Void) {
+        playback?.onHostedSurfaceReleased = handler
+    }
+
+    /// Installs the flight card's live surface on the landing tile, so it is
+    /// rendering before the card is removed.
+    func adoptLivePlayback(_ view: VideoRenderView, for postID: PostID) {
+        guard let playback,
+              let index = posts.firstIndex(where: { $0.id == postID }),
+              let url = posts[index].videoURL,
+              let cell = collectionView.cellForItem(
+                  at: IndexPath(item: index, section: 0)
+              ) as? PostGridTileCell
+        else { return }
+        // Same rule as the present leg: the surface must land in a VISIBLE
+        // hierarchy or the layer stops rendering. The cell is still standing in
+        // for the flight card at this point, so unhide it first — the card is
+        // on top and covers the swap.
+        cell.isHidden = false
+        if VideoRenderFlags.usesSampleBufferLayer {
+            // The card's surface is one of several showing this playback, not
+            // the playback itself. The tile gets its OWN surface — primed with
+            // the current frame on attach — and takes the pool loan; the card's
+            // is released once it leaves the window. Nothing is re-parented,
+            // which is the ~65ms drop `holdCard` was covering.
+            playback.adoptAttachedSurface(for: postID, url: url, cell: cell)
+            return
+        }
+        playback.adoptLiveSurface(view, for: postID, url: url, cell: cell)
+    }
+
+    /// The destination never adopted the parked player — a cancelled flight, or
+    /// a plain push. Retires it rather than leaving it decoding unseen.
+    ///
+    /// Kept for the plain-push fallback, where no handoff scope was opened.
+    func discardPlaybackHandoff() {
+        playback?.discardHandoff()
     }
 
     // MARK: - Hero geometry
@@ -242,12 +591,29 @@ final class ForYouGridPage: UIView {
         if let cell = cell(for: postID) {
             cell.isHidden = hidden
         }
+        // Unhiding is the end of a flight. The tile is excluded from
+        // candidates while its twin is in the air (or it would adopt the
+        // player mid-flight and blank the card), so this is the first moment
+        // it may claim the player the destination parked for it.
+        if !hidden { updateAutoplay() }
     }
 
     /// The post behind an id, for a flight card that must configure itself
     /// from the model rather than from a cell that may not be realized.
     func post(for postID: PostID) -> GalleryPost? {
         posts.first { $0.id == postID }
+    }
+
+    /// The indices `new` adds when it is exactly `old` plus a suffix, else nil.
+    ///
+    /// Strict: every existing element must be unchanged and in place. A reorder
+    /// (the discovery source switching between Trending and Recent) or an
+    /// in-place edit is NOT an append and has to go through a full reload, or
+    /// the cells would keep rendering stale posts.
+    static func appendedRange(from old: [GalleryPost], to new: [GalleryPost]) -> Range<Int>? {
+        guard !old.isEmpty, new.count > old.count else { return nil }
+        guard Array(new.prefix(old.count)) == old else { return nil }
+        return old.count..<new.count
     }
 
     private func cell(for postID: PostID) -> UICollectionViewCell? {
@@ -273,13 +639,43 @@ final class ForYouGridPage: UIView {
         }
     }
 
-    private func apply(_ posts: [GalleryPost], skeleton: Bool) {
-        guard self.posts != posts || showsSkeleton != skeleton else { return }
+    private func apply(_ incoming: [GalleryPost], skeleton: Bool) {
+        guard rawPosts != incoming || showsSkeleton != skeleton else { return }
         // Hydration retires the skeleton with a cross-dissolve, the same
         // in-place hand-off the profile gallery uses.
-        let dissolving = showsSkeleton && !skeleton && !posts.isEmpty && window != nil
-        self.posts = posts
+        let dissolving = showsSkeleton && !skeleton && !incoming.isEmpty && window != nil
+        // A page landing is a pure APPEND, and `reloadData` would recycle every
+        // realized cell to express it. That is what made a drag stop and restart
+        // all four playing tiles inside 60ms — the players were fine, the cells
+        // under them were destroyed and rebuilt. Inserting only the new items
+        // leaves existing cells (and their playback) untouched.
+        //
+        // Measured against the RAW list, not the arranged one: arrangement is a
+        // permutation, so an append upstream is still an append downstream, and
+        // comparing raw keeps that fact simple to establish.
+        let appended = Self.appendedRange(from: rawPosts, to: incoming)
+        rawPosts = incoming
         showsSkeleton = skeleton
+        if let appended, !showsSkeleton, !skeleton, !dissolving {
+            // Arrange only the new tail, against the absolute slots it will
+            // occupy. Placement depends solely on the absolute index, so the
+            // items already on screen cannot move — which is what keeps this an
+            // insert rather than a reload.
+            posts += arrange(Array(incoming[appended]), startingAt: posts.count)
+            collectionView.performBatchUpdates {
+                collectionView.insertItems(
+                    at: appended.map { IndexPath(item: $0, section: 0) }
+                )
+            }
+            DispatchQueue.main.async { [weak self] in self?.updateAutoplay() }
+            return
+        }
+        posts = arrange(incoming, startingAt: 0)
+        // Kick the leading covers before any cell exists. `preloadAutoplayCovers`
+        // keys off visible index paths, which are empty on a first load — the
+        // one moment the grid is coldest and the fetch has the most latency to
+        // hide.
+        preloadLeadingAutoplayCovers()
         if dissolving {
             UIView.transition(
                 with: collectionView, duration: 0.35,
@@ -289,6 +685,9 @@ final class ForYouGridPage: UIView {
         } else {
             collectionView.reloadData()
         }
+        // New content means a new visible set. Reconcile after the reload has
+        // realized its cells, or every candidate lookup returns nil.
+        DispatchQueue.main.async { [weak self] in self?.updateAutoplay() }
     }
 }
 
@@ -332,6 +731,11 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
                 withReuseIdentifier: PostGridTileCell.reuseID, for: indexPath
             ) as! PostGridTileCell
             cell.configure(with: post, imagePipeline: imagePipeline)
+            // Autoplay is gated on the cover, so the arrival of a cover is a
+            // reason to re-run the gate. Without this a tile whose cover lands
+            // while the grid is stationary fails the gate once and is never
+            // asked again.
+            cell.onCoverLoaded = { [weak self] in self?.updateAutoplay() }
             cell.isHidden = isFlying
             return cell
         }
@@ -344,10 +748,78 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        // Unthrottled, unlike the autoplay reconcile below: a hosted surface is
+        // a separate view tracking a moving cell, and anything less than every
+        // frame reads as the video sliding against its own tile.
+        onGeometryChanged?()
+        // Autoplay reconciles DURING the scroll, so a brick starts playing as
+        // it slides into view rather than after the scroll has stopped.
+        // Throttled rather than run per callback: `scrollViewDidScroll` fires
+        // at the display refresh rate, and reconciling at 120 Hz spends more
+        // time diffing than the work is worth.
+        throttledAutoplayReconcile(scrollView)
+
         guard !showsSkeleton, !posts.isEmpty, !isRepositioning else { return }
         let remaining = scrollView.contentSize.height
             - (scrollView.contentOffset.y + scrollView.bounds.height)
         guard remaining < Self.prefetchDistance else { return }
         onNearEnd?()
+    }
+
+    /// Reconcile cadence during a scroll, in seconds. ~30 Hz: fast enough that
+    /// a tile is playing by the time the eye has settled on it, slow enough
+    /// that the diff cost stays invisible next to the scroll itself.
+    private static let scrollReconcileInterval: CFTimeInterval = 1.0 / 30
+
+    /// Points-per-second past which a *new* player is not started.
+    ///
+    /// The reconcile still runs at speed — tiles that leave stop immediately —
+    /// but nothing starts during a hard fling. At 4000 pt/s a brick crosses the
+    /// viewport in about a fifth of a second, so starting it means an item
+    /// allocation and a segment fetch for something already gone. Dragging by
+    /// hand rarely exceeds ~1500 pt/s, so the behaviour the request is about —
+    /// tiles playing while the finger is still moving — sits well inside this.
+    private static let maximumStartVelocity: CGFloat = 2200
+
+    private func throttledAutoplayReconcile(_ scrollView: UIScrollView) {
+        guard playback != nil, !showsSkeleton, !isRepositioning else { return }
+        let now = CACurrentMediaTime()
+        let elapsed = now - lastReconcileTime
+        guard elapsed >= Self.scrollReconcileInterval else { return }
+
+        let offset = scrollView.contentOffset.y
+        // Velocity from the sampling interval itself; `panGestureRecognizer
+        // .velocity` reports zero once the finger lifts, which is exactly the
+        // decelerating stretch this needs to measure.
+        let velocity = elapsed > 0 ? abs(offset - lastReconcileOffset) / CGFloat(elapsed) : 0
+        lastReconcileTime = now
+        lastReconcileOffset = offset
+
+        updateAutoplay(allowingStarts: velocity <= Self.maximumStartVelocity)
+    }
+
+    /// A fling that ends without deceleration still needs a final reconcile:
+    /// the throttled pass may have been velocity-gated right up to the stop.
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        if !decelerate { updateAutoplay() }
+    }
+
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        updateAutoplay()
+    }
+
+    func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        updateAutoplay()
+    }
+
+    /// A recycled cell hands its player back immediately rather than waiting
+    /// for the next reconcile, so it can never render the previous post.
+    func collectionView(
+        _ collectionView: UICollectionView,
+        didEndDisplaying cell: UICollectionViewCell,
+        forItemAt indexPath: IndexPath
+    ) {
+        guard let tile = cell as? PostGridTileCell else { return }
+        playback?.stop(cell: tile)
     }
 }

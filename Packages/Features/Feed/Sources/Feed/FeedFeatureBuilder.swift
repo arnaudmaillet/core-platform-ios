@@ -68,6 +68,11 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 preferences: GalleryPreferences(keyPrefix: "foryou.gallery")
             ),
             imagePipeline: imagePipeline,
+            // Deliberately the SAME pool the snap feed uses. The grid parks a
+            // tile's running player for the feed to adopt, and a park in one
+            // pool is invisible to another — two pools would silently restart
+            // every video at 0:00 on tap.
+            videoPlayback: videoPlayback,
             // The same seeded surface a Maps pin opens, from a tile instead.
             makeSnapFeed: { postIDs in makeSnapFeedViewController(postIDs: postIDs) },
             prewarm: { ids in await repository.prewarm(ids) }

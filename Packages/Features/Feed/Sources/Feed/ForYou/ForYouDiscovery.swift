@@ -108,8 +108,21 @@ public actor ForYouRepository: ForYouProviding {
                     kind: kind,
                     isRepost: false,
                     thumbnailURL: attachment.flatMap { $0.thumbnailURL ?? $0.url },
+                    // `url` is the stream itself, so a tile and the full-screen
+                    // viewer open the same asset — see `GalleryPost.videoURL`.
+                    videoURL: kind == .video ? attachment?.url : nil,
+                    // Already 1 when the contract carried no dimensions, which
+                    // reads as square and so withholds autoplay — see
+                    // `GalleryPost.aspectRatio`.
+                    aspectRatio: attachment?.aspectRatio ?? 1,
                     caption: entry.post.caption,
                     publishedAtMS: Int64(entry.post.publishedAt.timeIntervalSince1970 * 1000),
+                    // Carried so a tile tap can seed the full-screen page with
+                    // a COMPLETE projection; the grid renders none of it.
+                    authorID: entry.author.id,
+                    authorName: entry.author.displayName,
+                    authorHandle: entry.author.handle,
+                    authorAvatarURL: entry.author.avatarURL,
                     reactionCount: entry.likeCount
                 )
             },

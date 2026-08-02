@@ -174,21 +174,29 @@ public final class MockSocialServices: @unchecked Sendable {
         return .success(response)
     }
 
-    /// The dataset encodes post kind in the media URL host (`video` vs
-    /// `media`); no media at all is a text-only post.
+    /// The dataset encodes post kind in the media URL — the `video` host under
+    /// the synthetic catalog, the file extension under the real one; no media
+    /// at all is a text-only post.
     private static func kind(forMediaURL url: String?) -> Post_V1_PostKind {
         guard let url else { return .textOnly }
-        return url.contains("mock://video/") ? .mainVideo : .carousel
+        return MockMediaFixtures.isVideoURL(url) ? .mainVideo : .carousel
     }
 
     private func makeAttachment(url: String, width: Int, height: Int) -> Post_V1_MediaAttachmentView {
         var attachment = Post_V1_MediaAttachmentView()
         attachment.cdnURL = url
-        // The snap feed routes on MIME: `mock://video/…` posts play, others render as images.
-        attachment.mimeType = url.contains("mock://video/") ? "video/mp4" : "image/png"
+        // The snap feed routes on MIME, so this is what decides whether a post
+        // plays. HLS fixtures declare the manifest type, not a `video/*` one.
+        attachment.mimeType = MockMediaFixtures.mimeType(for: url)
         attachment.width = UInt32(width)
         attachment.height = UInt32(height)
-        attachment.thumbnailURL = url
+        // A still poster for video, mirroring what `thumbnail_url` means on the
+        // wire. Under the real catalog an HLS manifest is useless as a
+        // thumbnail, so video posts get a real photo at the clip's aspect
+        // instead of pointing the image pipeline at a manifest.
+        attachment.thumbnailURL = MockMediaFixtures.isVideoURL(url) && !url.hasPrefix("mock://")
+            ? MockMediaFixtures.imageURL(index: width &+ height, width: width, height: height)
+            : url
         return attachment
     }
 

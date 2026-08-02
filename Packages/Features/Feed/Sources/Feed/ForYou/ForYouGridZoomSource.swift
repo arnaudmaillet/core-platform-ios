@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import MediaPlayback
 import PostGrid
 import UIKit
 
@@ -33,16 +34,33 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// `zoomPresenterDepthView`.
     private weak var depthView: UIView?
 
+    /// Hands over the tapped tile's already-rendering surface and parks its
+    /// player for the destination. `nil` when the tile was not playing.
+    private let donateLive: (() -> VideoRenderView?)?
+
+    /// Set the moment a dismissal stages, and never cleared: this source
+    /// serves one push/pop pair, so every card built after staging belongs
+    /// to a return flight.
+    private var isStagingDismissal = false
+
     init(
         page: ForYouGridPage,
         tappedID: PostID,
         activePostID: @escaping () -> PostID?,
-        depthView: UIView?
+        depthView: UIView?,
+        hoistLive: ((UIView, CGRect, UICoordinateSpace, CGFloat) -> Bool)? = nil,
+        poseHoisted: ((CGRect, UICoordinateSpace, CGFloat) -> Void)? = nil,
+        releaseHoisted: (() -> UIView?)? = nil,
+        donateLive: (() -> VideoRenderView?)? = nil
     ) {
+        self.hoistLive = hoistLive
+        self.poseHoisted = poseHoisted
+        self.releaseHoisted = releaseHoisted
         self.page = page
         anchorID = tappedID
         self.activePostID = activePostID
         self.depthView = depthView
+        self.donateLive = donateLive
     }
 
     /// The pager, not the whole screen.
@@ -77,14 +95,89 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// preview round differently and carry different furniture).
     func makeZoomFlightCard() -> any ZoomFlightCard {
         let appearance = page?.heroAppearance(for: anchorID)
-        return PostGridFlightCard(
+        let card = PostGridFlightCard(
             post: page?.post(for: anchorID) ?? Self.placeholder(id: anchorID),
             cover: appearance?.cover,
             style: appearance?.style ?? .tile
         )
+        #if DEBUG
+        // Whether the card had a texture to show on frame 0. `heroAppearance`
+        // reads the tile's `renderedCover` synchronously and the initialiser
+        // assigns it immediately, so a bound cover is the expected case — this
+        // exists to catch the exception, where the card is posed over the tile
+        // with nothing but its own background colour.
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] %.3f card FRAME0 cover=%@ style=%@",
+                         CACurrentMediaTime(),
+                         appearance?.cover == nil ? "NIL" : "bound",
+                         String(describing: appearance?.style ?? .tile)))
+        }
+        #endif
+        // An autoplaying tile hands its RUNNING surface to the card. Donating
+        // the live view is preferred over mirroring onto the card's own: a
+        // mirrored layer is blank for ~100ms while the source is already
+        // hidden, which is the flash at the start of the flight. Moving the
+        // layer that is mid-playback has no such window.
+        //
+        // PRESENT only. On a dismissal the card must fly what the VIEWER is
+        // watching — the destination page's playback. This grid-side attach
+        // resolves by URL, and with the cold-open race having minted a
+        // second player for the same asset (measured: two renderers, one
+        // URL, different clocks) that lookup could prime the card from the
+        // TILE's playhead, seconds from the page's — the frame-0 jump at
+        // the start of a dismiss. Declining lets `ZoomFlight.build` fall
+        // through to `zoomDonateLiveMediaView`, which attaches alongside
+        // the page's own surface by IDENTITY.
+        if !isStagingDismissal, let donateLive, let donated = donateLive() {
+            card.adoptZoomLiveMediaView(donated)
+        }
+        return card
+    }
+
+    /// Takes the card's live surface at landing, so the tile renders the frame
+    /// the card was showing instead of starting a blank layer.
+    /// True once the landing tile's own surface is rendering — or when the tile
+    /// has no video at all, which is nothing to wait for.
+    var zoomLandingMediaIsReady: Bool {
+        page?.isLandingPlaybackReady(for: anchorID) ?? true
+    }
+
+    /// Lays the landing tile out before the card is unmounted, so the cell's
+    /// subview composition is resolved rather than pending.
+    func zoomFinalizeLanding() {
+        page?.finalizeLandingLayout(for: anchorID)
+    }
+
+    /// Hoists the dismissal's live surface into the tab-bar-level host.
+    private let hoistLive: ((UIView, CGRect, UICoordinateSpace, CGFloat) -> Bool)?
+    private let poseHoisted: ((CGRect, UICoordinateSpace, CGFloat) -> Void)?
+    private let releaseHoisted: (() -> UIView?)?
+
+    func zoomHoistLiveMedia(_ view: UIView, at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) -> Bool {
+        hoistLive?(view, rect, space, cornerRadius) ?? false
+    }
+
+    func zoomPoseHoistedMedia(at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) {
+        poseHoisted?(rect, space, cornerRadius)
+    }
+
+    func zoomReleaseHoistedMedia() -> UIView? {
+        releaseHoisted?()
+    }
+
+
+    func zoomAdoptLiveMediaView(_ view: UIView) {
+        guard let view = view as? VideoRenderView else { return }
+        page?.adoptLivePlayback(view, for: anchorID)
     }
 
     func setZoomSourceHidden(_ hidden: Bool) {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] %.3f source hidden=%@",
+                         CACurrentMediaTime(), hidden ? "true" : "false"))
+        }
+        #endif
         page?.setHeroHidden(hidden, for: anchorID)
         // Restoring the source is the end of the flight, whichever way it went:
         // hand the grid's inset back so it tracks the safe area again.
@@ -103,6 +196,8 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// dequeued) cell, because a scroll can realize a *new* cell that never saw
     /// the earlier hide.
     func zoomSourceWillStageDismissal() {
+        // From here on, cards belong to return flights — see `makeZoomFlightCard`.
+        isStagingDismissal = true
         // Pin the grid's inset first, before anything reads a rect from it: the
         // pop animates the safe area, and an unpinned grid keeps drifting under
         // the flight. See `ForYouGridPage.beginHeroFreeze`.

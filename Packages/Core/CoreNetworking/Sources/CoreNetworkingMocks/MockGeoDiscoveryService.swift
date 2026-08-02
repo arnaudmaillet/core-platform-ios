@@ -27,6 +27,33 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         self.dataset = dataset
     }
 
+    /// What a pin puts in its single `thumbnail_url` field.
+    ///
+    /// `RadarPin` has exactly one URL and no media kind, which is the gap
+    /// `dev/issues/BACKEND_MEDIA_PREVIEW_RENDITIONS.md` §C exists to close: a
+    /// video pin has nowhere to say "this is a video, here is a cheap loop".
+    /// The client therefore renders every pin through the image pipeline unless
+    /// `-maps-force-video` is on, so this has to follow the same rule:
+    ///
+    /// - Default — a **still**. Under `.realAssets` a video post's media URL is
+    ///   an HLS manifest or an MP4, which the image pipeline cannot decode, so
+    ///   it is swapped for a real photograph. Handing the raw video URL over
+    ///   here renders a blank pin, which is a fixture bug, not a finding.
+    /// - Under `-maps-force-video` — the lightweight **preview loop**, never
+    ///   the full stream. A pin must not be able to open an HLS ladder mid-pan,
+    ///   which is the whole point of the contract ask. Its `mock-kind=video`
+    ///   marker is what `GeoDiscoveryRepository.mediaKind(for:)` matches on.
+    static func pinURL(forMediaURL url: String, catalog: MockSocialDataset.MediaCatalog) -> String {
+        guard catalog == .realAssets, MockMediaFixtures.isVideoURL(url) else { return url }
+        return forcesMapVideo
+            ? MockMediaFixtures.mapPreviewLoop.url
+            : MockMediaFixtures.imageURL(index: url.count, width: 256, height: 256)
+    }
+
+    /// Mirrors the Maps feature's own DEBUG launch argument. Read here so the
+    /// fixture a pin carries matches how the client will classify it.
+    static let forcesMapVideo = ProcessInfo.processInfo.arguments.contains("-maps-force-video")
+
     public func register(on bff: MockBFF) {
         bff.register(path: "/geo_discovery.v1.GeoDiscoveryService/QueryTile") { [self] (request: GeoDiscovery_V1_QueryTileRequest, headers: Headers) in
             queryTile(request, filter: headers[Self.filterHeader]?.first)
@@ -58,7 +85,7 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
             pin.postID = post.postID
             pin.lat = lat
             pin.lng = lng
-            pin.thumbnailURL = media.url
+            pin.thumbnailURL = Self.pinURL(forMediaURL: media.url, catalog: dataset.mediaCatalog)
             return pin
         }
 

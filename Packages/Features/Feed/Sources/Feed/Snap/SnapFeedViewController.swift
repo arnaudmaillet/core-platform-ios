@@ -57,6 +57,13 @@ final class SnapFeedViewController: UIViewController {
     private var orderedIDs: [PostID] = []
 
     private var lifecycle = SnapLifecycleDispatcher()
+    /// True between `zoomTransitionWillBegin` and `zoomTransitionDidEnd`. Cells
+    /// realized inside that window inherit the playback deferral, so a page
+    /// activating mid-flight cannot steal the render slot from the flying card.
+    private var isAwaitingZoomPresentation = false
+    /// The surface currently on loan to a dismissal's flight card, so a
+    /// cancelled grab can take it back.
+    private var donatedLiveView: VideoRenderView?
     /// The two facts whose AND is the surface's visibility.
     private var isOnScreen = false
     private var isForeground = true
@@ -750,6 +757,17 @@ final class SnapFeedViewController: UIViewController {
         orderedIDs = state.items.map(\.id)
         modelsByID = Dictionary(uniqueKeysWithValues: state.items.map { ($0.id, $0) })
 
+        #if DEBUG
+        // How many pages this feed has, and when. A feed pushed before its
+        // items arrive has NOTHING to lay out, so what fills the screen is the
+        // cell's black floor — no media card involved, which is why tracing the
+        // card showed it holding a poster the whole time. Under injected
+        // latency this window is the injected latency long.
+        if ProcessInfo.processInfo.arguments.contains("-media-log") {
+            print(String(format: "[media] %.3f feed render items=%d",
+                         CACurrentMediaTime(), orderedIDs.count))
+        }
+        #endif
         var snapshot = NSDiffableDataSourceSnapshot<Section, PostID>()
         snapshot.appendSections([.main])
         snapshot.appendItems(orderedIDs)
@@ -1144,6 +1162,15 @@ final class SnapFeedViewController: UIViewController {
             }
         }
         if let activate = transition.activate {
+            // The cell that will be active almost never exists yet when
+            // `zoomTransitionWillBegin` fires — it is realized by the layout
+            // pass the presentation itself triggers — so the deferral is
+            // stamped here, at the moment it is about to start playing.
+            if let snapCell = collectionView.cellForItem(
+                at: IndexPath(item: activate, section: 0)
+            ) as? SnapFeedCell {
+                snapCell.defersPlaybackForFlight = isAwaitingZoomPresentation
+            }
             lifecycleCell(at: activate)?.willBecomeActive()
             // Same settle-quantized seam that drives playback: both bar
             // surfaces (identity pill above, media attribution below) follow
@@ -1243,6 +1270,13 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // loads, which can be before the cell exists; without this net that
         // activation would be lost, since the index never changes again.
         updateActiveItem()
+        // Stamp the flight deferral BEFORE any activation on this path. There
+        // are two activation sites — the settle-quantized one in `apply` and
+        // this net for cells that did not exist at settle time — and a present
+        // leg always takes THIS one, because the cell is realized by the very
+        // layout pass the presentation triggers. Stamping only in `apply` left
+        // the flag false exactly when it mattered.
+        (cell as? SnapFeedCell)?.defersPlaybackForFlight = isAwaitingZoomPresentation
         if lifecycle.activeIndex == indexPath.item {
             (cell as? SnapCellLifecycle)?.willBecomeActive()
         }
@@ -1355,17 +1389,98 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// Hides only the feed's own view: the navigation bar above it (owned by
     /// the wrapping navigation controller) keeps rendering natively while the
     /// flying card impersonates the page underneath it.
+    /// The feed has something to show once it has pages. Pushed cold it has
+    /// none until its first `render`, which under injected latency arrived
+    /// 2.18s after the flight began — against a 0.42s flight, so the card was
+    /// removed over an empty screen and the cell's black floor was what showed.
+    /// Renders a projection the opener already has, before this screen's own
+    /// fetch returns — so the page configures at push time instead of ~0.7s
+    /// later. Additive: a real page replaces it, and a seed arriving after one
+    /// is ignored.
+    public func seedProjection(_ models: [FeedItemDisplayModel]) {
+        loadViewIfNeeded()
+        viewModel.seed(models)
+    }
+
+    public var zoomDestinationContentIsReady: Bool { !orderedIDs.isEmpty }
+
+    /// The render half of landing readiness: the active page's media area is
+    /// compositing something (surface or poster). Nil cell — not realized
+    /// yet — reports true and falls back to the data-only behaviour.
+    public var zoomDestinationMediaIsRendering: Bool {
+        let cell = activeSnapCell
+        let rendering = cell?.isMediaContentRendering ?? true
+        #if DEBUG
+        // Why a landing is being held, in the surface's own words — a "no"
+        // with every component healthy has already cost one wrong deduction.
+        if !rendering, ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] %.3f landing NOT rendering: %@",
+                         CACurrentMediaTime(), cell?.debugMediaState ?? "no active cell"))
+        }
+        #endif
+        return rendering
+    }
+
     public func setZoomContentHidden(_ hidden: Bool) {
         view.alpha = hidden ? 0 : 1
     }
 
+    /// A presenting flight is staging. The active page must not start its own
+    /// playback while the card is flying that player, so the flag is set before
+    /// this controller lays out and activates anything.
+    public func zoomTransitionWillBegin() {
+        isAwaitingZoomPresentation = true
+        activeSnapCell?.defersPlaybackForFlight = true
+    }
+
+    /// Parks the active page's player for the source it is flying home to.
+    @discardableResult
+    public func zoomParkLiveMediaForHandoff() -> Bool {
+        // Already handed over as a donated view, which parks as part of the
+        // same step — parking again would retire the player the card is flying.
+        guard donatedLiveView == nil else { return true }
+        return activeSnapCell?.parkPlayback() ?? false
+    }
+
+    /// Hands the active page's rendering surface to a dismissal's flight card.
+    public func zoomDonateLiveMediaView() -> UIView? {
+        guard let donated = activeSnapCell?.donateLiveRenderView() else { return nil }
+        donatedLiveView = donated
+        return donated
+    }
+
+    /// Takes the card's live surface at landing, so the page renders the frame
+    /// the card was showing rather than starting a layer of its own.
+    public func zoomAdoptLiveMediaView(_ view: UIView) {
+        guard let view = view as? VideoRenderView else { return }
+        donatedLiveView = nil
+        // The page warmed its OWN layer during the flight, so landing is a
+        // visibility flip and the card's surface is simply discarded. Only fall
+        // back to taking the card's view when there was nothing to warm.
+        if activeSnapCell?.revealWarmAttachedSurface() == true { return }
+        activeSnapCell?.adoptLiveRenderView(view)
+    }
+
+    /// Puts a donated surface back — the abandoned grab, where this page stays
+    /// on screen and has to look untouched.
+    public func zoomReclaimLiveMediaView(_ view: UIView) {
+        guard let view = view as? VideoRenderView else { return }
+        donatedLiveView = nil
+        activeSnapCell?.reclaimDonatedPlayback(view)
+    }
+
     public func zoomTransitionDidEnd() {
         flightChrome = nil
+        isAwaitingZoomPresentation = false
         // A flight card may have mirrored the active cell's player; with the
         // card gone, the cell reclaims the render slot (only the most
         // recently attached layer of a shared player is guaranteed to
         // display). Harmless when nothing was mirrored.
         activeSnapCell?.reclaimPlayback()
+        // And the presenting leg's held-back start runs now: the card is gone,
+        // so attaching here is the hand-off rather than a theft. Adopts the
+        // parked player, so the page resumes instead of restarting.
+        activeSnapCell?.startDeferredPlayback()
     }
 
     /// The hero transition's dismiss-leg live seam: mirrors the active cell's
@@ -1373,8 +1488,21 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// the same frames the page was showing instead of a frozen cover.
     public func zoomMirrorLiveMedia(onto surface: UIView) -> Bool {
         guard let renderView = surface as? VideoRenderView,
-              let cell = activeSnapCell else { return false }
-        return cell.mirrorPlayback(to: renderView)
+              let cell = activeSnapCell else {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                print("[zoom-live] destination mirror refused: activeCell=\(activeSnapCell != nil)")
+            }
+            #endif
+            return false
+        }
+        let mirrored = cell.mirrorPlayback(to: renderView)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print("[zoom-live] destination mirror -> \(mirrored)")
+        }
+        #endif
+        return mirrored
     }
 
     private var activeSnapCell: SnapFeedCell? {

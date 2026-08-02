@@ -50,7 +50,20 @@ final class AppContainer {
     /// The whole in-process backend (dataset + stores + fully registered
     /// MockBFF), with network realism read from launch arguments
     /// (`-mock-latency`, `-mock-fail`, `-mock-fail-code`, `-mock-fail-rate`).
-    private lazy var mockBackend = MockBackend(conditions: .fromLaunchArguments())
+    private lazy var mockBackend = MockBackend(
+        conditions: .fromLaunchArguments(),
+        mediaCatalog: Self.usesRichMedia ? .realAssets : .synthetic
+    )
+
+    /// `-rich-media`: seed the mock dataset from `MockMediaFixtures` — real HLS
+    /// ladders, progressive MP4s, and real photographs at exact dimensions —
+    /// instead of the synthesized `mock://` assets.
+    ///
+    /// Opt-in on purpose. The default mock mode is offline and deterministic,
+    /// which is what the unit suite and CI depend on; this flag trades that for
+    /// realism (real decode cost, ABR, range requests) when driving the app by
+    /// hand. It requires network.
+    static let usesRichMedia = ProcessInfo.processInfo.arguments.contains("-rich-media")
 
     private(set) lazy var mockRealtimeServer = MockRealtimeServer()
 
@@ -90,7 +103,10 @@ final class AppContainer {
     private(set) lazy var imagePipeline: ImagePipeline = {
         let fetcher: any ImageFetching = switch environment {
         case .mock:
-            PlaceholderImageFetcher()
+            // Scheme-routing, not plain placeholder: under `-rich-media` the
+            // dataset mixes real `https://` photographs with synthesized
+            // `mock://` assets, and each has to reach the right fetcher.
+            SchemeRoutingImageFetcher()
         case .localFleet:
             URLSessionImageFetcher(hostRewrite: HostRewrite(from: "minio:9000", to: "localhost:9000"))
         }
