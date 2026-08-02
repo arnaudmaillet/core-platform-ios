@@ -515,11 +515,16 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             self.deadline = deadline
         }
 
-        /// Frames held before a "ready" answer is trusted. The dip arrives via
-        /// KVO roughly 8ms after the surface is installed, so a few frames at
-        /// 60Hz cover its delivery either way. Lives here, not on the animator,
-        /// because the display-link callback is nonisolated.
-        private static let minimumHoldFrames = 4
+        /// How long a "ready" answer is distrusted after the hold begins. The
+        /// dip arrives via KVO roughly 8ms after the surface is installed, and
+        /// this spans its delivery with margin. WALL CLOCK, deliberately: the
+        /// old four-frame count was tuned at 60Hz (~66ms) and silently halved
+        /// to 33ms on ProMotion, where ticks come twice as fast — the window's
+        /// rationale is a delivery latency, which does not scale with the
+        /// refresh rate. The GRACE step below stays tick-based on purpose: its
+        /// unit genuinely is one compositor pass.
+        private static let minimumSettleWindow: CFTimeInterval = 4.0 / 60.0
+        private let began = CACurrentMediaTime()
         private var frames = 0
         private var grace = 0
 
@@ -545,7 +550,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             #endif
             // Span the window in which the dip can still arrive before
             // believing a "ready" answer.
-            let settling = frames < Self.minimumHoldFrames
+            let settling = CACurrentMediaTime() - began < Self.minimumSettleWindow
             // One extra frame after the landing first reports ready.
             //
             // "Ready" is sampled at the top of a frame; the tile has not
