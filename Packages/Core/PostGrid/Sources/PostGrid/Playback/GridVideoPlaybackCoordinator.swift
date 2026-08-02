@@ -142,9 +142,21 @@ public final class GridVideoPlaybackCoordinator {
     public func beginHandoff(_ id: PostID) {
         handoffID = id
         isSurfaceVisible = false
-        for (playingID, cell) in playing where playingID != id {
-            stop(id: playingID, cell: cell)
-        }
+        // The other tiles release their players OFF the tap turn, one per
+        // main-queue hop, instead of synchronously here. Each stop is real
+        // AVFoundation teardown — pause, `replaceCurrentItem(nil)`, renderer
+        // invalidation — and up to five of them ran inside the very turn that
+        // also seeds the feed, lays the container out twice and commits the
+        // flight's first frame. At 120Hz that turn has an 8ms budget, and
+        // blowing it is a dropped frame at frame 0 of the present — sporadic
+        // because the cost scales with how many tiles happened to be playing.
+        //
+        // Nothing needs the stops synchronously: `isSurfaceVisible` above
+        // already keeps `update` from starting anything new, the tapped post
+        // is exempt on every path, and the tiles simply keep drawing behind
+        // the dim for the few frames the stagger takes — which is invisible,
+        // and arguably truer than freezing them all at the instant of the tap.
+        stopStaggered(playing.keys.filter { $0 != id }, forHandoff: id)
         #if DEBUG
         Self.logPool(playing.count, handoff: handoffID)
         // Arm the flight probe HERE — the one moment guaranteed to precede any
@@ -175,6 +187,26 @@ public final class GridVideoPlaybackCoordinator {
             }
         }
         #endif
+    }
+
+    /// Stops one tile per main-queue hop, so the teardown cost lands as a few
+    /// milliseconds per frame instead of one multi-frame stall.
+    ///
+    /// Every step re-checks the world before acting: the scope may have closed
+    /// or moved to another post — its own reconcile is then the authority and
+    /// these stops are stale — and a tile may already have been stopped by a
+    /// reconcile or a cell reuse in the meantime, in which case `playing` no
+    /// longer names it and the step is a no-op.
+    private func stopStaggered(_ ids: [PostID], forHandoff handoff: PostID) {
+        var remaining = ids
+        guard let next = remaining.popLast() else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, handoffID == handoff else { return }
+            if let cell = playing[next] {
+                stop(id: next, cell: cell)
+            }
+            stopStaggered(remaining, forHandoff: handoff)
+        }
     }
 
     /// Closes the handoff and retires anything left parked. The caller
@@ -532,8 +564,20 @@ public final class GridVideoPlaybackCoordinator {
         let url = candidate.url
         // A tile that is already flying full screen keeps its lifted cap.
         let cap = uncappedIDs.contains(id) ? Self.uncapped : Self.tileBitRateCap
-        startTasks[id] = Task { [pool] in
+        startTasks[id] = Task { [weak self, pool] in
             await pool.play(url, in: renderView, peakBitRate: cap)
+            // A settled start removes its own entry. Left in place, the map
+            // only ever shrank on stop/donate, so `startTasks.isEmpty` — the
+            // gate `discardHandoff` uses to tell "a claimant is still coming"
+            // from "nobody is coming" — was false for the rest of the session
+            // after the first tile ever played, and a stranded parked player
+            // was never retired: it sat decoding, looping, invisible.
+            //
+            // The cancellation check is what protects a SUCCESSOR's entry: a
+            // stop cancels this task but its continuation still resumes, and
+            // by then the same id may hold a fresh start's task.
+            guard let self, !Task.isCancelled else { return }
+            startTasks.removeValue(forKey: id)
         }
     }
 

@@ -79,6 +79,20 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         interruptibleAnimator(using: context).startAnimation()
     }
 
+    /// Fires when a PRESENT flight is REVERSED mid-air — the viewer caught the
+    /// push and dragged it back to the grid, so the destination never showed.
+    ///
+    /// This is the one outcome `UINavigationControllerDelegate.didShow` cannot
+    /// be relied on to report: it announces completed transitions, and a
+    /// cancelled one completes nothing. Every owner-side teardown was keyed on
+    /// the didShow pair (`onDestinationShown` / `onSourceReturned`), so a
+    /// reversed push left the owner's per-flight state locked — the retained
+    /// transition controller (which gates every future tap), the stale
+    /// navigation delegate, the open playback-handoff scope, the hidden tab
+    /// bar. Fired after `completeTransition(false)`, mirroring where didShow
+    /// would have landed.
+    var onPresentationReversed: (() -> Void)?
+
     /// Set when a grab that started from REST owns this transition.
     ///
     /// `ZoomDismissInteractionController` stages its OWN complete flight — card,
@@ -187,17 +201,19 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // card loses the race — which is why it reads as a random flash rather
         // than a reproducible one.
         //
-        // `flush` commits the card to the render server here; the hide lands in
-        // the next transaction, so the two overlap by a frame instead of
-        // leaving a gap. Overlap is free: the card is a pixel-identical twin
-        // posed exactly over the source, so a frame showing both is
-        // indistinguishable from a frame showing either.
+        // The hide therefore lands one commit AFTER the pose, so the two
+        // overlap by a frame instead of leaving a gap. Overlap is free: the
+        // card is a pixel-identical twin posed exactly over the source, so a
+        // frame showing both is indistinguishable from a frame showing either.
+        // See `afterCurrentTransactionCommits` for why the ordering is a
+        // transaction completion rather than the synchronous flush it was.
         flight.poseAtSource()
-        CATransaction.flush()
-        #if DEBUG
-        Self.logFirstFrameHandoff("present", card: flight.card)
-        #endif
-        source.setZoomSourceHidden(true)
+        Self.afterCurrentTransactionCommits {
+            #if DEBUG
+            Self.logFirstFrameHandoff("present", card: flight.card)
+            #endif
+            self.source.setZoomSourceHidden(true)
+        }
 
         let screenRadius = ZoomFlight.screenCornerRadius(behind: container)
 
@@ -258,6 +274,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                     print("[zoom-live] present REVERSED, source restored")
                 }
                 #endif
+                self.onPresentationReversed?()
                 return
             }
             // Reveal the page FIRST, then move the surface into it — order that
@@ -297,6 +314,38 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             }
         }
         return animator
+    }
+
+    /// Runs `work` after the transaction currently being staged has been
+    /// committed to the render server — so whatever `work` mutates lands one
+    /// commit BEHIND everything staged so far.
+    ///
+    /// This replaces `CATransaction.flush()` at the frame-0 handshakes. The
+    /// flush bought the right ordering — card committed first, its source
+    /// hidden a commit later — but paid for it by committing the entire dirty
+    /// layer tree synchronously, in the middle of the one turn that is already
+    /// the flight's most expensive (staging layout passes, feed construction,
+    /// player teardown). At 120Hz that turn has an 8ms budget, and blowing it
+    /// is itself a dropped frame at frame 0 — a stall that varied with how
+    /// much happened to be dirty, which is what made it read as random.
+    ///
+    /// A plain `DispatchQueue.main.async` is NOT a substitute, and was
+    /// measured changing nothing when it was tried on the dismiss leg: the
+    /// main queue can drain several blocks inside one runloop iteration, so a
+    /// "next turn" hide can land in the SAME commit as the pose and the
+    /// overlap frame never exists. An empty nested transaction's completion
+    /// block has the one property that matters — Core Animation enqueues it
+    /// only once the enclosing commit has gone to the render server, so what
+    /// `work` changes is a strictly later commit. The ordering the flush
+    /// guaranteed, without the synchronous cost.
+    static func afterCurrentTransactionCommits(_ work: @escaping @MainActor () -> Void) {
+        CATransaction.begin()
+        CATransaction.setCompletionBlock {
+            // Documented to arrive on the main thread; hop the isolation
+            // boundary the CA API cannot express.
+            MainActor.assumeIsolated(work)
+        }
+        CATransaction.commit()
     }
 
     /// Runs `work` as soon as `condition` is true, or at `ceiling`, whichever
@@ -670,12 +719,15 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // nothing, which is consistent rather than contradictory — the problem
         // was never when the hide is scheduled, it is whether the card has been
         // committed by the time it happens. A turn's delay does not commit
-        // anything; `flush` does.
-        CATransaction.flush()
-        #if DEBUG
-        Self.logFirstFrameHandoff("dismiss", card: flight.card)
-        #endif
-        destination?.setZoomContentHidden(true)
+        // anything; a transaction completion is enqueued only after the commit
+        // itself, which is the guarantee the old synchronous flush provided —
+        // see `afterCurrentTransactionCommits` for the full trade.
+        Self.afterCurrentTransactionCommits { [weak destination = self.destination] in
+            #if DEBUG
+            Self.logFirstFrameHandoff("dismiss", card: flight.card)
+            #endif
+            destination?.setZoomContentHidden(true)
+        }
 
         // Reverse depth cue: the map starts receded (0.95, covered) and scales
         // back to full as the card shrinks.
@@ -751,13 +803,12 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                 #endif
                 return
             }
-            // A donated surface goes back ONLY when the viewer abandoned the
-            // dismissal. On a completed one the destination is leaving and its
-            // parked player belongs to the source that is landing — reclaiming
-            // there would steal it back and restart the video at zero.
-            if cancelled, let surface = flight.card.zoomLiveMediaSurface {
-                self.destination?.zoomReclaimLiveMediaView(surface)
-            }
+            // From here on the dismissal COMPLETED — the cancelled branch
+            // returned above, and it is the one that gives donated surfaces
+            // back. On a completed dismissal the destination is leaving and
+            // its parked player belongs to the source that is landing;
+            // reclaiming here would steal it back and restart the video at
+            // zero.
             // Same handshake in reverse: the landing tile takes the surface
             // the card was flying, so it renders immediately instead of
             // starting a fresh layer that is blank for ~100ms.
@@ -765,7 +816,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             // by its host, which deliberately does not re-parent it into the
             // cell — calling this would undo exactly that and reintroduce the
             // readiness drop the hoist exists to remove.
-            if !cancelled, !hoisted, let surface = flight.card.zoomLiveMediaSurface {
+            if !hoisted, let surface = flight.card.zoomLiveMediaSurface {
                 self.source.zoomAdoptLiveMediaView(surface)
             }
             flight.shadow.removeFromSuperview()
@@ -791,13 +842,10 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                           while: { [weak sourceRef = self.source] in
                               sourceRef.map { !$0.zoomLandingMediaIsReady } ?? false
                           })
-            // Restore the feed content for the cancel path; moot when finished.
             self.destination?.setZoomContentHidden(false)
             self.destination?.zoomTransitionDidEnd()
-            if !cancelled {
-                self.source.setZoomSourceHidden(false)
-            }
-            context.completeTransition(!cancelled)
+            self.source.setZoomSourceHidden(false)
+            context.completeTransition(true)
             #if DEBUG
             Self.logTeardown("done", context: context, card: flight.card, fromView: fromView)
             #endif
