@@ -229,7 +229,8 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         // Without this the reconcile that fires when the tile is unhidden stops
         // the surface it has just been handed.
         page?.retargetPlaybackHandoff(to: anchorID)
-        page?.setHeroHidden(true, for: anchorID)
+        // Visible for the whole return: the card is landing ON this tile.
+        page?.setHeroHidden(true, for: anchorID, conceals: false)
     }
 
     /// A tile whose post is no longer in the grid still needs a card to fly —

@@ -106,6 +106,13 @@ final class ForYouGridPage: UIView {
     /// flag. Weak: the collection view owns cells and may recycle this one,
     /// and a recycled cell is corrected by `cellForItemAt` anyway.
     private weak var heroHiddenCell: UICollectionViewCell?
+    /// The post whose twin is in the air, concealed or not.
+    ///
+    /// Split from `heroHiddenPostID` because the two questions came apart: a
+    /// dismissal wants its landing tile VISIBLE under the incoming card, but
+    /// still must not let it claim a player while the card is flying that same
+    /// playback.
+    private var heroFlyingPostID: PostID?
     /// The inset to hand back when a flight ends; non-nil means frozen.
     private var frozenContentInset: UIEdgeInsets?
     /// Throttle state for the during-scroll autoplay reconcile.
@@ -274,7 +281,7 @@ final class ForYouGridPage: UIView {
             // `autoplaysInGrid` is the shape rule: video, with a stream, and
             // not square. Square bricks stay still.
             guard post.autoplaysInGrid, let url = post.videoURL,
-                  post.id != heroHiddenPostID, // its twin is in the air
+                  post.id != heroFlyingPostID, // its twin is in the air
                   let cell = collectionView.cellForItem(at: indexPath) as? PostGridTileCell,
                   hasCover(for: post, in: cell)
             else { return nil }
@@ -799,8 +806,15 @@ final class ForYouGridPage: UIView {
     }
     #endif
 
-    func setHeroHidden(_ hidden: Bool, for postID: PostID) {
-        heroHiddenPostID = hidden ? postID : nil
+    /// `conceals` is false for a DISMISSAL. The card is flying home TO this
+    /// tile, so hiding it opens a hole in the grid for the whole flight and the
+    /// tile pops in at the end. Left visible, the card simply lands on top of
+    /// content that was already there. A presentation still conceals: there the
+    /// card is flying AWAY from the tile, and two copies of the same post would
+    /// be on screen at once.
+    func setHeroHidden(_ hidden: Bool, for postID: PostID, conceals: Bool = true) {
+        heroFlyingPostID = hidden ? postID : nil
+        heroHiddenPostID = (hidden && conceals) ? postID : nil
         // Apply to whatever is on screen right now; `cellForItemAt` covers
         // everything realized from here on.
         let resolved = cell(for: postID)
