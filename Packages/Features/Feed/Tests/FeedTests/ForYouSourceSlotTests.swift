@@ -172,3 +172,102 @@ struct ForYouLandingGateTests {
         #expect(page.isLandingPlaybackReady(for: PostID("p58")))
     }
 }
+
+/// Repeated open → swipe → dismiss rounds. Each one swaps a post into the
+/// departure slot, hides that tile for the flight, and unhides it on landing.
+/// Nothing in that cycle may accumulate: not a duplicated id, not a lost post,
+/// and above all not a tile left hidden.
+@MainActor
+struct ForYouRepeatedRoundTripTests {
+    private struct SilentFetcher: ImageFetching {
+        func fetchImageData(for url: URL) async throws -> Data { Data() }
+    }
+
+    private func page(_ count: Int) -> ForYouGridPage {
+        let page = ForYouGridPage(
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid
+        )
+        page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        page.render(.content((0..<count).map {
+            GalleryPost(
+                id: PostID("p\($0)"), kind: .photo, isRepost: false, thumbnailURL: nil,
+                aspectRatio: 1, caption: "", publishedAtMS: 0
+            )
+        }))
+        page.layoutIfNeeded()
+        return page
+    }
+
+    private func collectionView(of page: ForYouGridPage) -> UICollectionView {
+        page.subviews.compactMap { $0 as? UICollectionView }.first!
+    }
+
+    /// Every realized tile must be visible once no flight is in the air.
+    private func hiddenTiles(of page: ForYouGridPage) -> [Int] {
+        let view = collectionView(of: page)
+        return (0..<page.posts.count).filter {
+            view.cellForItem(at: IndexPath(item: $0, section: 0))?.isHidden == true
+        }
+    }
+
+    /// The headline: 25 rounds, each landing on a different post than it left
+    /// from, and the grid must be exactly as complete at the end as at the
+    /// start.
+    @Test func twentyFiveRoundTripsLeaveTheGridIntact() {
+        let page = page(40)
+        let original = Set(page.posts.map(\.id))
+
+        for round in 0..<25 {
+            // Tap a tile near the top, the way a viewer would.
+            let departure = page.posts[round % 6].id
+            // Swipe forward a few posts, landing somewhere further down.
+            let active = page.posts[(round % 6) + 3 + (round % 9)].id
+
+            page.adoptPost(active, intoSlotOf: departure)
+            let anchor = page.posts.contains { $0.id == active } ? active : departure
+            page.setHeroHidden(true, for: anchor)
+            page.layoutIfNeeded()
+            page.setHeroHidden(false, for: anchor)
+            page.layoutIfNeeded()
+
+            #expect(page.posts.count == 40, "round \(round): the grid lost or gained a slot")
+            #expect(Set(page.posts.map(\.id)) == original, "round \(round): the post set changed")
+            #expect(page.posts.count == Set(page.posts.map(\.id)).count,
+                    "round \(round): a post id was duplicated")
+            #expect(hiddenTiles(of: page).isEmpty,
+                    "round \(round): tiles left hidden at \(hiddenTiles(of: page))")
+        }
+    }
+
+    /// The same cycle where the viewer never swipes — departure and active are
+    /// the same post, so `adoptPost` refuses and the anchor falls back. The
+    /// hide/unhide still has to balance.
+    @Test func roundTripsWithoutSwipingLeaveNothingHidden() {
+        let page = page(30)
+        for round in 0..<25 {
+            let departure = page.posts[round % 8].id
+            page.adoptPost(departure, intoSlotOf: departure)
+            page.setHeroHidden(true, for: departure)
+            page.layoutIfNeeded()
+            page.setHeroHidden(false, for: departure)
+            page.layoutIfNeeded()
+            #expect(hiddenTiles(of: page).isEmpty, "round \(round): a tile stayed hidden")
+        }
+    }
+
+    /// A dismissal that lands on a post the grid no longer holds: the source
+    /// falls back to the departure tile, and the hide it set must still be
+    /// lifted from the tile it was actually applied to.
+    @Test func aFallbackLandingStillUnhidesItsTile() {
+        let page = page(20)
+        for round in 0..<25 {
+            let departure = page.posts[round % 5].id
+            #expect(!page.adoptPost(PostID("absent"), intoSlotOf: departure))
+            page.setHeroHidden(true, for: departure)
+            page.layoutIfNeeded()
+            page.setHeroHidden(false, for: departure)
+            page.layoutIfNeeded()
+            #expect(hiddenTiles(of: page).isEmpty, "round \(round): a tile stayed hidden")
+        }
+    }
+}
