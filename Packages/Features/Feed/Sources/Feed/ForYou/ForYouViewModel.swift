@@ -32,6 +32,13 @@ public final class ForYouViewModel {
     }
 
     public var onSnapshotChange: ((Snapshot) -> Void)?
+    /// Fires when a NEXT-PAGE fetch starts and again when it settles.
+    ///
+    /// Separate from `onSnapshotChange` on purpose: a page landing publishes a
+    /// snapshot, but a page *starting* publishes nothing, and the grid's footer
+    /// spinner needs the leading edge. Also distinct from the first load, which
+    /// the pages already render as skeletons.
+    public var onPagingChange: ((Bool) -> Void)?
     /// Fires when a load settles, however it settled — the view closes out its
     /// refresh control on this rather than inferring it from a snapshot that
     /// may be identical to the last one.
@@ -108,9 +115,16 @@ public final class ForYouViewModel {
     /// page has landed.
     public func loadNextPageIfNeeded() {
         guard pageLoad == nil, load == nil, corpus != nil, let token = nextPageToken else { return }
+        // Announced only past the guard: the common case is a scroll that
+        // reaches the end of an exhausted corpus, and a spinner for a fetch
+        // that never starts would sit there forever.
+        onPagingChange?(true)
         pageLoad = Task { [weak self] in
             guard let self else { return }
-            defer { self.pageLoad = nil }
+            defer {
+                self.pageLoad = nil
+                self.onPagingChange?(false)
+            }
             guard let page = try? await repository.page(after: token), !Task.isCancelled else { return }
             // Append, never reorder: the new page is ranked among ITSELF and
             // added to the end, so a page landing cannot renumber what is
@@ -125,7 +139,12 @@ public final class ForYouViewModel {
     private func loadFirstPage(reset: Bool) {
         if reset {
             load?.cancel()
-            pageLoad?.cancel()
+            if pageLoad != nil {
+                pageLoad?.cancel()
+                // A cancelled task's `defer` does not run, so the footer would
+                // be left spinning for a fetch that was thrown away.
+                onPagingChange?(false)
+            }
             pageLoad = nil
             corpus = nil
             failure = nil

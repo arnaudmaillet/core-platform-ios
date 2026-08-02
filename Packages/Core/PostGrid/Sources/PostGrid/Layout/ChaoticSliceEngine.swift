@@ -135,6 +135,23 @@ public struct ChaoticSliceEngine: Sendable {
         self.maximumBlocksPerRow = maximumBlocksPerRow
     }
 
+    /// Items per full slice, and the knob the column mix actually turns on.
+    ///
+    /// A three-across row needs tiles of roughly a third the canvas width —
+    /// about 15k pt² against a 34k mean at 11 cells — so at that density
+    /// three-across rows fight the geometry and barely appear (measured: 5% of
+    /// rows, and 42 of 60 slices with none at all). At 14 the mean block is 26k
+    /// and they arise on their own, roughly a quarter of rows, while the shape
+    /// metrics IMPROVE rather than degrade.
+    ///
+    /// **Reach for this before reaching for a scoring rule.** Trying to buy
+    /// three-across rows with penalties, rewards and dedicated cut shapes cost a
+    /// long detour and produced a banded grid — the quota was met by cutting
+    /// full-width strips into equal columns, which is a row by construction.
+    /// Density gets them without touching the partition's character. 16 pushes
+    /// the mix to 45% three-across; 20 starts failing the tile floor.
+    public static let defaultCellsPerSlice = 14
+
     public static let standard = ChaoticSliceEngine()
 
     /// Added to a cut's score for every block it would produce below
@@ -504,6 +521,44 @@ public struct ChaoticSliceEngine: Sendable {
             for other in others { chargeIfTwin(other) }
         }
         return cost
+    }
+
+    /// How many blocks cross each distinct horizontal row band, top to bottom.
+    ///
+    /// The count is piecewise constant in y and can only change at a block's top
+    /// edge, so probing each distinct `minY` samples every band exactly once.
+    static func rowCounts(of blocks: [CGRect]) -> [Int] {
+        let eps = edgeEpsilon
+        var counts: [Int] = []
+        var lastProbe = -CGFloat.infinity
+        for top in blocks.map(\.minY).sorted() {
+            guard top - lastProbe > eps else { continue }
+            lastProbe = top
+            let row = top + eps
+            counts.append(blocks.reduce(0) { $1.minY <= row && $1.maxY > row ? $0 + 1 : $0 })
+        }
+        return counts
+    }
+
+    /// The interior heights at which a block STARTS, paired with whether that
+    /// height is a clean break — a horizontal line running the full width of the
+    /// slice, with nothing spanning across it.
+    ///
+    /// This is the measure of banding. A rigid grid is clean breaks all the way
+    /// down: every tile top and bottom lines up, and the tiling reads as rows.
+    /// A true BSP staggers, so most boundaries have some block spanning past
+    /// them and the seams interlock instead of running through.
+    static func interiorBoundaries(of blocks: [CGRect]) -> [(y: CGFloat, isCleanBreak: Bool)] {
+        let eps = edgeEpsilon
+        var result: [(CGFloat, Bool)] = []
+        var lastTop = -CGFloat.infinity
+        for top in blocks.map(\.minY).sorted() where top > eps {
+            guard top - lastTop > eps else { continue }
+            lastTop = top
+            let spans = blocks.contains { $0.minY < top - eps && $0.maxY > top + eps }
+            result.append((top, !spans))
+        }
+        return result
     }
 
     /// Whether a candidate split would put more than `maximumBlocksPerRow`

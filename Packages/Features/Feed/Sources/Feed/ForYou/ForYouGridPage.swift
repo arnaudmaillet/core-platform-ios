@@ -118,7 +118,7 @@ final class ForYouGridPage: UIView {
     /// slices — a scrolling page has a whole viewport to fill, and a slice is
     /// only a little over one screenful.
     private var skeletonCount: Int {
-        style == .grid ? (sliceLayout?.cellsPerSlice ?? 11) * 2 : 6
+        style == .grid ? (sliceLayout?.cellsPerSlice ?? ChaoticSliceEngine.defaultCellsPerSlice) * 2 : 6
     }
 
     /// How close to the end a scroll gets before the next page is requested.
@@ -135,6 +135,9 @@ final class ForYouGridPage: UIView {
         super.init(frame: .zero)
 
         sliceLayout?.onPlanInvalidated = { [weak self] in self?.replanArrangement() }
+        pagingSpinner.alpha = 0
+        pagingSpinner.hidesWhenStopped = false
+        collectionView.addSubview(pagingSpinner)
         collectionView.backgroundColor = .clear
         collectionView.alwaysBounceVertical = true
         collectionView.register(PostGridTileCell.self, forCellWithReuseIdentifier: PostGridTileCell.reuseID)
@@ -169,11 +172,75 @@ final class ForYouGridPage: UIView {
     /// The content inset the pager's owner needs to clear with its tray — the
     /// page scrolls under it, so the last row must be reachable above it.
     var additionalBottomInset: CGFloat {
-        get { collectionView.contentInset.bottom }
+        get { trayInset }
         set {
-            collectionView.contentInset.bottom = newValue
-            collectionView.verticalScrollIndicatorInsets.bottom = newValue
+            trayInset = newValue
+            applyBottomInset()
         }
+    }
+
+    /// The tray's clearance and the paging footer's, kept apart because they
+    /// change independently and both land on the same inset.
+    private var trayInset: CGFloat = 0
+    private var footerInset: CGFloat = 0
+
+    private func applyBottomInset() {
+        // A hero flight pins the inset so its landing measurement stays valid —
+        // see `beginHeroFreeze`. Writing to it here would unpick that, so the
+        // value is held and applied when the flight thaws.
+        guard frozenContentInset == nil else { return }
+        let bottom = trayInset + footerInset
+        collectionView.contentInset.bottom = bottom
+        collectionView.verticalScrollIndicatorInsets.bottom = bottom
+    }
+
+    // MARK: - Paging footer
+
+    /// The band reserved below the content while the next page is in flight.
+    ///
+    /// The tray's own clearance cannot serve here: it is exactly the height the
+    /// tray floats over, so anything parked in it sits *behind* the tray at full
+    /// scroll. The footer adds its own space above that.
+    private static let footerHeight: CGFloat = 56
+
+    private let pagingSpinner = UIActivityIndicatorView(style: .medium)
+    private var isPaging = false
+
+    /// Shows or hides the next-page spinner beneath the last tile.
+    ///
+    /// **Why this cannot jump the scroll.** Reserving the band happens when
+    /// pagination fires, which is `prefetchDistance` (800pt) before the end —
+    /// growing the bottom inset never moves `contentOffset`, so there is nothing
+    /// to see. Releasing it happens once the page has landed and added a whole
+    /// slice of content, by which point the viewer is far from the bottom and
+    /// the offset cannot be clamped by 56pt. The animation covers the one case
+    /// left: a page that lands empty, where the release can nudge a viewer
+    /// sitting at the very end.
+    func setPaging(_ paging: Bool) {
+        guard style == .grid, isPaging != paging else { return }
+        isPaging = paging
+        if paging {
+            pagingSpinner.startAnimating()
+            positionPagingFooter()
+        }
+        footerInset = paging ? Self.footerHeight : 0
+        UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState]) {
+            self.applyBottomInset()
+            self.pagingSpinner.alpha = paging ? 1 : 0
+        } completion: { _ in
+            if !self.isPaging { self.pagingSpinner.stopAnimating() }
+        }
+    }
+
+    /// Parks the spinner just under the content, in the scroll view's own
+    /// coordinates, so it travels with the last row instead of floating over it.
+    private func positionPagingFooter() {
+        guard isPaging else { return }
+        let contentHeight = collectionView.collectionViewLayout.collectionViewContentSize.height
+        pagingSpinner.center = CGPoint(
+            x: collectionView.bounds.width / 2,
+            y: contentHeight + Self.footerHeight / 2
+        )
     }
 
     func endRefreshing() {
@@ -589,6 +656,9 @@ final class ForYouGridPage: UIView {
         self.frozenContentInset = nil
         collectionView.contentInsetAdjustmentBehavior = .automatic
         collectionView.contentInset = frozenContentInset
+        // The footer may have opened or closed while the inset was pinned, and
+        // those writes were dropped. Re-apply now that it is ours again.
+        applyBottomInset()
     }
 
     /// Brings the post fully into view without animation, so a dismissal can
@@ -799,6 +869,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // a separate view tracking a moving cell, and anything less than every
         // frame reads as the video sliding against its own tile.
         onGeometryChanged?()
+        positionPagingFooter()
         // Autoplay reconciles DURING the scroll, so a brick starts playing as
         // it slides into view rather than after the scroll has stopped.
         // Throttled rather than run per callback: `scrollViewDidScroll` fires

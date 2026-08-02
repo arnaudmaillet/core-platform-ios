@@ -151,8 +151,8 @@ public extension ChaoticSliceEngine {
 /// A custom layout keeps the single-section addressing those depend on and
 /// leaves the hero and autoplay machinery untouched.
 public final class ChaoticSliceLayout: UICollectionViewLayout {
-    /// Items per full slice. The tail slice holds whatever is left.
-    public var cellsPerSlice: Int = 11 {
+    /// Items per full slice — see `ChaoticSliceEngine.defaultCellsPerSlice`.
+    public var cellsPerSlice: Int = ChaoticSliceEngine.defaultCellsPerSlice {
         didSet { if cellsPerSlice != oldValue { invalidateLayout() } }
     }
 

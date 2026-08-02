@@ -445,6 +445,7 @@ final class ForYouViewController: UIViewController {
             prewarmVisible()
         }
         viewModel.onLoadSettled = { [weak self] in self?.pager.endRefreshing() }
+        viewModel.onPagingChange = { [weak self] paging in self?.pager.setPaging(paging) }
 
         // Land on the stored format before first layout, so the screen OPENS
         // there with no visible jump.

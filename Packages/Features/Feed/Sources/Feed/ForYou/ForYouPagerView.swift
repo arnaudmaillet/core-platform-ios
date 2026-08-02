@@ -108,6 +108,14 @@ final class ForYouPagerView: UIView {
         pages.forEach { $0.endRefreshing() }
     }
 
+    /// Only the page being read shows the footer spinner. The other two are
+    /// laid out off-screen and would otherwise reserve a band nobody can see.
+    func setPaging(_ paging: Bool) {
+        for (index, page) in pages.enumerated() {
+            page.setPaging(paging && index == activeIndex)
+        }
+    }
+
     /// Selector tap → smooth page.
     func setActivePage(_ format: GalleryFilter.Format, animated: Bool) {
         guard let index = Self.pageOrder.firstIndex(of: format), index != activeIndex else { return }
