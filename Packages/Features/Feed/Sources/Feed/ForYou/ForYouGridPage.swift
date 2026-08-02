@@ -767,6 +767,19 @@ final class ForYouGridPage: UIView {
                 (collectionView.cellForItem(at: IndexPath(item: moved, section: 0))
                     as? PostGridTileCell)?.applyCover(cover)
             }
+            // Both swapped cells are on screen for the whole return, and both
+            // must be drawn before it starts. The displaced post's slot is the
+            // one that gets forgotten: nothing is flying to it, so no landing
+            // step ever revisits it, and it would carry whatever state the
+            // rebuild left until something else happened to touch it.
+            for index in [slot, current] {
+                guard let cell = collectionView.cellForItem(
+                    at: IndexPath(item: index, section: 0)
+                ) else { continue }
+                cell.isHidden = false
+                cell.alpha = 1
+                cell.layoutIfNeeded()
+            }
             // And commit them to the render server in this turn rather than the
             // next. Everything downstream — the hero rect, the flight card built
             // from this cell's cover, the landing gate — reads the cell
