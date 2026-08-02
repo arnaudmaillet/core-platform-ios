@@ -76,21 +76,27 @@ public final class VideoRenderView: UIView {
         } else if let playerLayer {
             playerLayer.videoGravity = .resizeAspectFill
             updatePosterVisibility(ready: playerLayer.isReadyForDisplay)
-            readinessObservation = playerLayer.observe(\.isReadyForDisplay, options: [.new]) { [weak self] layer, _ in
-                let ready = layer.isReadyForDisplay
+            readinessObservation = playerLayer.observe(\.isReadyForDisplay, options: [.new]) { [weak self] _, _ in
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
+                        guard let self else { return }
+                        // Re-read at delivery, never the value captured when
+                        // the KVO fired: a `detach` can interleave between the
+                        // two, and applying a stale `true` hides the poster
+                        // over a layer that no longer has a player — a
+                        // one-frame black pop with every other signal healthy.
+                        let ready = self.playerLayer?.isReadyForDisplay ?? false
                         #if DEBUG
-                        self?.logReadiness(ready)
+                        self.logReadiness(ready)
                         #endif
-                        self?.updatePosterVisibility(ready: ready)
+                        self.updatePosterVisibility(ready: ready)
                         // The player-layer half of `revealOnFirstFrame`: this
                         // KVO is the only "first frame" signal this backing
                         // has, so it must drive the reveal exactly as
                         // `enqueue` does on the other one.
-                        if ready, self?.isAwaitingFirstFrameToReveal == true {
-                            self?.isAwaitingFirstFrameToReveal = false
-                            self?.reveal(crossFading: true)
+                        if ready, self.isAwaitingFirstFrameToReveal {
+                            self.isAwaitingFirstFrameToReveal = false
+                            self.reveal(crossFading: true)
                         }
                     }
                 }
@@ -262,6 +268,17 @@ public final class VideoRenderView: UIView {
     /// visible. See `revealOnFirstFrame`.
     private var isAwaitingFirstFrameToReveal = false
 
+    /// Bumped on every reveal/hide entry, so a terminal completion from a
+    /// SUPERSEDED transition can never apply. The direct-set reveal path does
+    /// not cancel an in-flight UIView fade (assigning a property replaces the
+    /// model value but the attached animation runs to its natural end,
+    /// reporting `finished == true`), so without this a hide's fade-out could
+    /// outlive a reveal that interleaved within its 33ms window and stamp
+    /// `isHidden = true` on a surface whose model state says it is showing —
+    /// an invisible surface that then fails `isRenderingVisibly` and holds a
+    /// landing card up to its ceiling before popping the cover.
+    private var visibilityGeneration = 0
+
     /// Reveals this surface now if it already has a frame, otherwise keeps it
     /// hidden and reveals it the instant one arrives.
     ///
@@ -291,6 +308,7 @@ public final class VideoRenderView: UIView {
             reveal(crossFading: false)
             return
         }
+        visibilityGeneration += 1
         isAwaitingFirstFrameToReveal = true
         isHidden = true
         alpha = 0
@@ -316,10 +334,15 @@ public final class VideoRenderView: UIView {
     /// and the video are blended, and there is no frame where the cover is the
     /// only thing on screen after the video was.
     private func reveal(crossFading: Bool) {
+        visibilityGeneration += 1
         let wasHidden = isHidden || alpha < 1
         isHidden = false
         guard crossFading, wasHidden else {
-            layer.removeAnimation(forKey: "reveal")
+            // "opacity" is the key a UIView alpha animation actually lands
+            // under — a direct set replaces the model value but leaves an
+            // in-flight fade running, so it has to be removed by its real
+            // name. (This line once said "reveal", which matched nothing.)
+            layer.removeAnimation(forKey: "opacity")
             alpha = 1
             return
         }
@@ -382,6 +405,8 @@ public final class VideoRenderView: UIView {
     /// leaves. Fading hands the tile back to its cover continuously.
     public func hideCrossFading() {
         isAwaitingFirstFrameToReveal = false
+        visibilityGeneration += 1
+        let generation = visibilityGeneration
         guard !isHidden, alpha > 0 else {
             isHidden = true
             return
@@ -390,7 +415,11 @@ public final class VideoRenderView: UIView {
                        options: [.allowUserInteraction, .beginFromCurrentState]) {
             self.alpha = 0
         } completion: { finished in
-            if finished { self.isHidden = true }
+            // The generation gate is the half `finished` cannot cover — see
+            // `visibilityGeneration`.
+            if finished, generation == self.visibilityGeneration {
+                self.isHidden = true
+            }
         }
     }
 
