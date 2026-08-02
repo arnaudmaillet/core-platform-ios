@@ -75,6 +75,116 @@ struct VideoPlaybackControllerTests {
         #expect(controller.idlePlayerCount == 0)
     }
 
+    // MARK: - Bit-rate cap
+
+    @Test func playAppliesThePeakBitRateCapToTheItem() async {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        let view = VideoRenderView()
+        await controller.play(URL(string: "mock://video/1")!, in: view, peakBitRate: 600_000)
+        #expect(controller.peakBitRate(in: view) == 600_000)
+    }
+
+    @Test func playIsUncappedByDefault() async {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        let view = VideoRenderView()
+        await controller.play(URL(string: "mock://video/1")!, in: view)
+        #expect(controller.peakBitRate(in: view) == 0)
+    }
+
+    /// The whole point of re-capping in place: the item, and therefore the
+    /// playhead, must survive. Replacing it would reset `currentTime` to zero.
+    @Test func recappingKeepsTheSameItem() async {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        let view = VideoRenderView()
+        await controller.play(URL(string: "mock://video/1")!, in: view, peakBitRate: 600_000)
+        let item = controller.currentItem(in: view)
+
+        controller.setPeakBitRate(0, in: view)
+        #expect(controller.peakBitRate(in: view) == 0)
+        #expect(controller.currentItem(in: view) === item)
+    }
+
+    @Test func recappingAViewWithNoPlayerIsANoOp() {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        controller.setPeakBitRate(0, in: VideoRenderView()) // must not trap
+    }
+
+    // MARK: - Handoff
+
+    /// The grid → full-screen handoff: the destination adopts the *same*
+    /// player and item, so playback continues instead of restarting.
+    @Test func parkedPlaybackIsAdoptedByTheNextPlayOfTheSameURL() async {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        let tile = VideoRenderView()
+        let page = VideoRenderView()
+        let url = URL(string: "mock://video/1")!
+
+        await controller.play(url, in: tile, peakBitRate: 600_000)
+        let player = controller.activePlayer(in: tile)
+        let item = controller.currentItem(in: tile)
+
+        #expect(controller.parkPlayback(from: tile))
+        #expect(controller.activePlayer(in: tile) == nil)
+
+        await controller.play(url, in: page) // uncapped, as a full-screen page plays
+        #expect(controller.activePlayer(in: page) === player)
+        #expect(controller.currentItem(in: page) === item)
+        // Adoption is what lifts the cap — one step, so the two can't disagree.
+        #expect(controller.peakBitRate(in: page) == 0)
+    }
+
+    /// A different asset must NOT adopt the parked player, or one post's video
+    /// would appear under another's.
+    @Test func aDifferentURLDoesNotAdoptTheParkedPlayer() async {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        let tile = VideoRenderView()
+        let page = VideoRenderView()
+
+        await controller.play(URL(string: "mock://video/1")!, in: tile)
+        let item = controller.currentItem(in: tile)
+        controller.parkPlayback(from: tile)
+
+        await controller.play(URL(string: "mock://video/2")!, in: page)
+        #expect(controller.currentItem(in: page) !== item)
+    }
+
+    @Test func parkingWithNothingPlayingReportsFalse() {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        #expect(controller.parkPlayback(from: VideoRenderView()) == false)
+    }
+
+    /// An unclaimed park must not strand a decoding player — it returns to the
+    /// pool, ready for reuse.
+    @Test func discardingAnUnclaimedParkReturnsThePlayerToThePool() async {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        let tile = VideoRenderView()
+        await controller.play(URL(string: "mock://video/1")!, in: tile)
+        controller.parkPlayback(from: tile)
+        #expect(controller.idlePlayerCount == 0) // parked, not idle
+
+        controller.discardParkedPlayback()
+        #expect(controller.idlePlayerCount == 1)
+
+        // And a later play of that URL now starts fresh rather than adopting.
+        let page = VideoRenderView()
+        await controller.play(URL(string: "mock://video/1")!, in: page, peakBitRate: 600_000)
+        #expect(controller.peakBitRate(in: page) == 600_000)
+    }
+
+    /// Parking twice must not strand the first player.
+    @Test func asecondParkRetiresTheFirst() async {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        let first = VideoRenderView()
+        let second = VideoRenderView()
+        await controller.play(URL(string: "mock://video/1")!, in: first)
+        await controller.play(URL(string: "mock://video/2")!, in: second)
+
+        controller.parkPlayback(from: first)
+        controller.parkPlayback(from: second)
+        // The first went back to the pool rather than being lost.
+        #expect(controller.idlePlayerCount == 1)
+    }
+
     @Test func togglePlaybackFlipsPausedStateOfTheActivePlayer() async {
         let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
         let view = VideoRenderView()

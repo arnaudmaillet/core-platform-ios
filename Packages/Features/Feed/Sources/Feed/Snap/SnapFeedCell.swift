@@ -451,6 +451,22 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             guard let self, let id = self.representedID, !self.isCommentsEngaged else { return }
             self.onRequestComments?(id)
         }
+        #if DEBUG
+        // Which projection fields are present the moment the page is
+        // configured. Everything listed here is supposed to render at 0ms from
+        // the grid's own projection; anything reported missing is arriving on a
+        // later fetch and is what "instant metadata" is actually waiting on.
+        if ProcessInfo.processInfo.arguments.contains("-media-log") {
+            print(String(format: "[media] %.3f page CONFIGURE author=%@ caption=%@ avatar=%@ audio=%@ likes=%@ age=%@",
+                         CACurrentMediaTime(),
+                         model.authorName.isEmpty ? "MISSING" : "yes",
+                         model.caption?.isEmpty == false ? "yes" : "MISSING",
+                         model.avatarURL == nil ? "MISSING" : "yes",
+                         model.audioText?.isEmpty == false ? "yes" : "n/a",
+                         model.likeCount > 0 ? "\(model.likeCount)" : "0",
+                         model.timestampText.isEmpty ? "MISSING" : "yes"))
+        }
+        #endif
         let hasMedia = model.mediaURL != nil
         infoCard.setCaption(model.caption)
         infoCard.configure(with: model)
@@ -475,6 +491,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// Loads the video poster into the render view; shown under the player until
     /// the first frame is ready (or while an asset is still processing).
     private func loadPoster(_ url: URL, expecting id: PostID, pipeline: ImagePipeline) {
+        // Cache hit applied SYNCHRONOUSLY — see `loadImage` for why the async
+        // hop is what the viewer sees as a gap.
+        if let cached = pipeline.cachedImage(for: url) {
+            mediaCard.setPoster(cached)
+            return
+        }
         imageTasks.append(Task { [weak self] in
             guard let image = try? await pipeline.image(for: url) else { return }
             guard let self, self.representedID == id else { return }
@@ -501,6 +523,15 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// surface starts once both its content and the visibility gate are in
     /// place.
     func updateCommentStreams(_ streams: FeedViewModel.CommentStreams) {
+        #if DEBUG
+        // The async half. `isLoaded=false` is the known-zero flag, so a first
+        // delivery with it false is the placeholder and the real one follows.
+        if ProcessInfo.processInfo.arguments.contains("-media-log") {
+            print(String(format: "[media] %.3f page STREAMS loaded=%@ reactions=%d subtitles=%d count=%d",
+                         CACurrentMediaTime(), streams.isLoaded ? "yes" : "NO",
+                         streams.reactions.count, streams.subtitles.count, streams.commentCount))
+        }
+        #endif
         chrome.updateCommentStreams(streams)
         // The info card's comment metric rides the same seam (and the
         // same known-zero honesty flag) as the chrome's surfaces.
@@ -522,6 +553,31 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     private func loadImage(_ url: URL?, expecting id: PostID, pipeline: ImagePipeline) {
         guard let url else { return }
+        // A cache hit is applied SYNCHRONOUSLY, in the same turn as the
+        // `configure` that just cleared the old image.
+        //
+        // This is the ~1200ms black window on image posts. `configure` nils the
+        // image so a recycled cell can never show the previous post's photo —
+        // which is correct — and every re-supply then went through a `Task`,
+        // even when the image was already in memory. The card's black floor is
+        // what filled that hop, and re-entering a post you had just been
+        // looking at showed photo, black, the SAME photo.
+        //
+        // Deferring the nil-out instead would close the gap by showing the
+        // OUTGOING post's photo on the incoming page — a wrong image rather
+        // than no image, which in a paging feed is the worse failure. Reading
+        // the cache first has neither: the correct photo, no gap. It is also
+        // what `PostGridTileCell.configure` has always done; only the feed
+        // went straight to the async path.
+        //
+        // A genuine cache miss still loads asynchronously and still shows the
+        // floor. That is a first load with nothing to display yet, which is a
+        // different thing from blanking something we already had.
+        if let cached = pipeline.cachedImage(for: url) {
+            mediaCard.setImage(cached)
+            if isActive { startKenBurns() }
+            return
+        }
         imageTasks.append(Task { [weak self] in
             guard let image = try? await pipeline.image(for: url) else { return }
             guard let self, self.representedID == id else { return }
@@ -547,11 +603,233 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         switch mediaKind {
         case .video:
             guard let url = mediaURL, let videoPlayback else { return }
+            // A hero card may be flying this post's player right now. Starting
+            // here would attach a NEWER layer to the same player and blank the
+            // card mid-flight, so the start waits for the flight to land — see
+            // `startDeferredPlayback`.
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                print(String(format: "[zoom-live] %.3f cell activate defers=%@",
+                             CACurrentMediaTime(), defersPlaybackForFlight ? "true" : "false"))
+            }
+            #endif
+            guard !defersPlaybackForFlight else {
+                hasDeferredPlayback = true
+                // Warm THIS page's own layer now, hidden, instead of waiting.
+                // It has the whole flight to decode, so by landing it is ready
+                // and the handoff is a visibility flip rather than a re-parent
+                // — which is what resets `isReadyForDisplay`.
+                warmAttachForFlight(url: url)
+                return
+            }
             let view = mediaCard.renderView
             Task { await videoPlayback.play(url, in: view) }
         case .image:
             startKenBurns()
         }
+    }
+
+    /// Set while a presenting hero flight is staging, so this page's first
+    /// activation does not steal the render slot from the flying card.
+    var defersPlaybackForFlight = false
+    private var hasDeferredPlayback = false
+    private var isWarmAttached = false
+
+    /// Attaches the page's own surface to the parked player and keeps it
+    /// hidden, so it decodes during the flight instead of after it.
+    private func warmAttachForFlight(url: URL) {
+        guard let videoPlayback else { return }
+        let view = mediaCard.renderView
+        #if DEBUG
+        view.debugTracksFlight = true
+        view.debugLabel = "page"
+        #endif
+        if VideoRenderFlags.usesSampleBufferLayer {
+            // N-surface: joining costs the flying card nothing, so this page's
+            // surface is live AND visible from the moment it exists. The whole
+            // hidden-warm-up-then-reveal dance below is a workaround for one
+            // player having one render slot, and it has nothing to work around
+            // here — the card, the tile and this page all draw the same frames
+            // at the same time.
+            guard videoPlayback.attachSurface(view, to: url) else { return }
+            // The tile's thumbnail-rung cap is NOT lifted here, deliberately.
+            // An uncap invites an ABR switch, a switch changes the decoded
+            // buffer's dimensions, and the layer re-fits the new buffer into
+            // its bounds in a single frame — a discrete crop/sharpness pop
+            // that this timing aimed squarely at the flight. The lift happens
+            // in `startDeferredPlayback`, at `zoomTransitionDidEnd`, so
+            // switch points land on a resting page.
+            view.revealOnFirstFrame()
+            hasDeferredPlayback = false
+            isWarmAttached = true
+            return
+        }
+        view.isHidden = true
+        guard videoPlayback.unparkPlayback(to: view, mediaURL: url) else { return }
+        hasDeferredPlayback = false
+        isWarmAttached = true
+    }
+
+    /// Reveals the warmed surface at landing. A visibility flip only — no
+    /// re-parenting, so the layer never leaves the render tree.
+    func revealWarmAttachedSurface() -> Bool {
+        guard isWarmAttached else { return false }
+        isWarmAttached = false
+        defersPlaybackForFlight = false
+        mediaCard.renderView.isHidden = false
+        return true
+    }
+
+    /// Starts the playback that activation held back, once the flight is over.
+    /// The pool hands back the player the card was flying — same item, same
+    /// playhead — so the page continues rather than restarting.
+    func startDeferredPlayback() {
+        defersPlaybackForFlight = false
+        guard isActive, mediaKind == .video,
+              let url = mediaURL, let videoPlayback
+        else { return }
+        // The flight is over: lift the tile's thumbnail-rung cap NOW, at
+        // rest, whether playback was warm-attached or is about to start. The
+        // lift used to ride the warm attach — flight staging — which invited
+        // the ladder's next switch point (a one-frame dimension re-fit on the
+        // layer) to land mid-flight.
+        videoPlayback.setPeakBitRate(0, for: url)
+        guard hasDeferredPlayback else { return }
+        hasDeferredPlayback = false
+        let view = mediaCard.renderView
+        // The warm attach at activation loses a race on cold opens: the
+        // tile's own `play` is still resolving then, so there is no active
+        // player to join and the attach silently fails. Falling straight to
+        // `play` here minted a SECOND AVPlayer for the same asset — two
+        // decoders on two clocks for the whole feed session, a dismissal
+        // card primed from whichever of them a URL lookup happened to find
+        // (the frame-0 jump at the start of a dismiss), and a landing that
+        // restarted at zero. By landing time the tile's play has resolved,
+        // so try the join again first — it is the very player the flight
+        // card was flying, which is what makes this a continuation. Mint
+        // only when there is genuinely nothing to join.
+        if VideoRenderFlags.usesSampleBufferLayer, videoPlayback.attachSurface(view, to: url) {
+            view.revealOnFirstFrame()
+            return
+        }
+        Task { await videoPlayback.play(url, in: view) }
+    }
+
+    /// Whether this page's media area has something REAL on screen — the
+    /// landing-side twin of the grid's `isLandingPlaybackReady`.
+    ///
+    /// The present landing reveals the feed and unmounts the flight card in
+    /// one commit, and it used to do so on a DATA answer alone (the feed has
+    /// posts). Measured on device as the run-2 black beat: card removed, feed
+    /// revealed, and the page's media area compositing nothing yet. A video
+    /// page answers for its surface OR its poster — a page that has not
+    /// started playing but shows its poster is presentable; one with neither
+    /// is the black the card must keep covering. Text pages have no media
+    /// area and nothing to wait for.
+    var isMediaContentRendering: Bool {
+        guard mediaURL != nil else { return true }
+        switch mediaKind {
+        case .video:
+            return mediaCard.renderView.isCompositingContent
+        case .image:
+            return mediaCard.isImageReady
+        }
+    }
+
+    #if DEBUG
+    /// The media area's full state for the landing trace.
+    var debugMediaState: String {
+        "kind=\(mediaKind) url=\(mediaURL == nil ? "nil" : "set") render[\(mediaCard.renderView.debugSurfaceState)]"
+    }
+    #endif
+
+    /// Detaches this page's player and parks it for the next play of the same
+    /// asset — the grid tile a dismissal is flying home to.
+    @discardableResult
+    func parkPlayback() -> Bool {
+        guard mediaKind == .video, let videoPlayback else { return false }
+        if VideoRenderFlags.usesSampleBufferLayer {
+            // Parking would detach this page's surface and stop it drawing,
+            // and under N-surface there is no reason to: the landing tile takes
+            // the loan directly via `transferOwnership` when the card lands, so
+            // the player stays owned — and rendering — right up to that moment.
+            // Reported as handled so the caller does not fall back to a park.
+            return true
+        }
+        return videoPlayback.parkPlayback(from: mediaCard.renderView)
+    }
+
+    /// Hands the page's already-rendering surface to a dismissal's flight card,
+    /// parking the player behind it.
+    ///
+    /// The card then flies the layer that is mid-playback instead of a mirror,
+    /// which is blank for ~70ms — the flash at the start of a back-tap. The
+    /// page keeps the view in its hierarchy but hands rendering over; on a
+    /// cancelled grab `reclaimDonatedPlayback` puts everything back.
+    func donateLiveRenderView() -> VideoRenderView? {
+        guard mediaKind == .video, let videoPlayback else { return nil }
+        if VideoRenderFlags.usesSampleBufferLayer {
+            // Nothing is donated: the card gets a surface of its own on the
+            // same playback, primed with the current frame, and this page keeps
+            // rendering behind it. A cancelled grab therefore has nothing to
+            // put back — see `reclaimDonatedPlayback`.
+            //
+            // ALONGSIDE this page's own surface, by identity — never by URL.
+            // Two players can exist for one asset (the cold-open race), and a
+            // URL lookup answers from dictionary order: the card could prime
+            // from the other player's playhead, which is the frame-0 jump at
+            // the start of a dismiss. The sibling is what the viewer is
+            // watching, so the card provably flies the same frames.
+            let card = VideoRenderView()
+            #if DEBUG
+            card.debugLabel = "card"
+            card.debugTracksFlight = true
+            #endif
+            let attached = videoPlayback.attachSurface(card, alongsideSurface: mediaCard.renderView)
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                print(String(format: "[zoom-live] %.3f producer FEED donateLiveRenderView -> %@ %@",
+                             CACurrentMediaTime(), attached ? "attached" : "REFUSED",
+                             card.debugSurfaceState))
+            }
+            #endif
+            guard attached else { return nil }
+            return card
+        }
+        guard videoPlayback.parkPlayback(from: mediaCard.renderView, keepingSurfaceAttached: true)
+        else { return nil }
+        let view = mediaCard.renderView
+        view.removeFromSuperview()
+        return view
+    }
+
+    /// Installs the flight card's live surface as this page's own, at landing.
+    ///
+    /// The view arrives already rendering the frame the card was showing, so
+    /// the page has nothing to wait for. The parked player is claimed here too,
+    /// which is what makes the deferred start unnecessary — there is no
+    /// separate `play` to blank the screen.
+    func adoptLiveRenderView(_ view: VideoRenderView) {
+        defersPlaybackForFlight = false
+        mediaCard.restoreRenderView(view)
+        guard let url = mediaURL, let videoPlayback else { return }
+        videoPlayback.unparkPlayback(to: view, mediaURL: url)
+    }
+
+    /// Puts a donated surface back and un-parks its player — the abandoned
+    /// dismissal. No-op when the park was already claimed.
+    func reclaimDonatedPlayback(_ view: VideoRenderView) {
+        if VideoRenderFlags.usesSampleBufferLayer {
+            // This page never gave anything up, so there is nothing to restore
+            // — the abandoned card's surface is simply released. That is the
+            // whole of "cancel" under N-surface, and it cannot leave the page
+            // blank because the page's own surface never stopped drawing.
+            videoPlayback?.detachSurface(view)
+            return
+        }
+        mediaCard.restoreRenderView(view)
+        guard let url = mediaURL, let videoPlayback else { return }
+        videoPlayback.unparkPlayback(to: view, mediaURL: url)
     }
 
     // MARK: - Play/pause toggle

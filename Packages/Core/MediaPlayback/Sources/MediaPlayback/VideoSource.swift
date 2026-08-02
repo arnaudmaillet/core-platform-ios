@@ -51,7 +51,7 @@ public struct PlaceholderVideoFetcher: VideoSource {
         // dataset can mix real streams with synthetic clips for the aspect
         // ratios no public asset covers.
         if let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" {
-            return url
+            return try await Self.locallyCached(url)
         }
 
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
@@ -74,11 +74,112 @@ public struct PlaceholderVideoFetcher: VideoSource {
         return cacheURL
     }
 
+    /// Downloads a remote fixture once and replays it from disk thereafter.
+    ///
+    /// **Why this exists: we rate-limited ourselves.** The `-rich-media`
+    /// fixtures are public test assets, and every launch re-fetched all of
+    /// them. Across a session of automated runs the hosts returned HTTP 429,
+    /// which `AVPlayerItem` surfaces as a generic "unknown error" — so the
+    /// symptom was tiles and flight cards showing a cover and never any video,
+    /// indistinguishable from the rendering bug being investigated at the time.
+    /// A `curl` of each URL still returned 206, because the throttle is
+    /// per-client at a request RATE a single range request never reaches.
+    ///
+    /// The cache is keyed on the absolute URL and lives in the temp directory,
+    /// so it survives across launches: one fetch per asset per machine rather
+    /// than one per launch.
+    ///
+    /// **HLS is passed through.** A manifest is an index over many segment
+    /// files, so caching it as one file would produce something unplayable;
+    /// localising a ladder properly means a local server, which is a different
+    /// piece of work. Those fixtures still hit the network every launch, and
+    /// they are the remaining 429 exposure.
+    ///
+    /// A failed download falls back to the remote URL rather than throwing:
+    /// this is a test-fixture convenience, and it must never be the reason a
+    /// video does not play.
+    private static func locallyCached(_ url: URL) async throws -> URL {
+        // Only under `-rich-media`, which is the only thing that introduces
+        // remote fixtures. The unit suite, previews and CI run without it and
+        // must not touch the network — caching there would turn every
+        // passthrough assertion into a download attempt, which is exactly the
+        // offline guarantee this file's header promises.
+        guard ProcessInfo.processInfo.arguments.contains("-rich-media") else { return url }
+        guard url.pathExtension.lowercased() != "m3u8" else { return url }
+
+        // NOT `Hasher`. Swift's is randomly seeded PER PROCESS, so a key built
+        // from it changes every launch — the cache would miss every time and
+        // re-download the whole fixture set, which is precisely the behaviour
+        // that got us rate-limited. Caught by checking twice: the second launch
+        // wrote a second copy of every asset under a different name.
+        //
+        // FNV-1a is stable across processes and machines, which is the only
+        // property this key needs.
+        // `v2` abandons entries written before the validation below existed.
+        // Those were error-page bodies downloaded while the host was returning
+        // 429 — a few hundred bytes each, cached under a .mp4 name and then
+        // served as video, which AVFoundation reports as
+        // `-11829 "Cannot Open — This media may be damaged."` A cache that
+        // poisons itself is worse than no cache, and the poison outlives the
+        // outage that created it.
+        let name = "fixture-v2-\(Self.stableHash(url.absoluteString))."
+            + (url.pathExtension.isEmpty ? "mp4" : url.pathExtension)
+        let cached = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        if FileManager.default.fileExists(atPath: cached.path) { return cached }
+
+        guard let (downloaded, response) = try? await URLSession.shared.download(from: url) else {
+            return url
+        }
+        // Only cache something that is plausibly the asset. A throttle or an
+        // error page arrives as a perfectly successful small HTML/JSON body, so
+        // the status code alone is not enough to trust what was written.
+        let http = response as? HTTPURLResponse
+        let size = (try? FileManager.default.attributesOfItem(atPath: downloaded.path)[.size] as? Int) ?? 0
+        let looksLikeMedia = (http?.mimeType?.hasPrefix("video") ?? true) && (size ?? 0) > Self.minimumFixtureBytes
+        guard http.map({ (200..<300).contains($0.statusCode) }) ?? true, looksLikeMedia else {
+            try? FileManager.default.removeItem(at: downloaded)
+            return url
+        }
+
+        // Scratch-then-move, the same discipline the synthesized path uses: only
+        // complete files ever appear at the cache path, so a second resolve
+        // racing this one cannot read a half-written asset.
+        do {
+            try FileManager.default.moveItem(at: downloaded, to: cached)
+        } catch let error as CocoaError where error.code == .fileWriteFileExists {
+            try? FileManager.default.removeItem(at: downloaded)
+        } catch {
+            return url
+        }
+        return cached
+    }
+
+    /// Smallest plausible fixture. The smallest real one in the catalog is
+    /// ~1MB; the poisoned entries were ~1KB, so this separates them by three
+    /// orders of magnitude rather than by a fine margin.
+    private static let minimumFixtureBytes = 64 * 1024
+
+    /// FNV-1a over the UTF-8 bytes. Deterministic across processes, unlike
+    /// `Hasher`, which is what a cross-launch cache key requires.
+    private static func stableHash(_ string: String) -> String {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in string.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01B3
+        }
+        return String(hash, radix: 16)
+    }
+
     private static func cacheURL(for url: URL, width: Int, height: Int) -> URL {
         var hasher = Hasher()
         hasher.combine(url.absoluteString)
         hasher.combine(width)
         hasher.combine(height)
+        // Bumped when the encoder settings change, because clips are cached on
+        // disk across launches: without it, every machine that ran the old
+        // untagged encoder keeps serving those files forever and the fix looks
+        // like it did nothing.
+        hasher.combine(2) // v2: explicit Rec. 709 colour tagging
         let name = "synthvid-\(UInt(bitPattern: hasher.finalize())).mp4"
         return FileManager.default.temporaryDirectory.appendingPathComponent(name)
     }
@@ -95,7 +196,23 @@ public struct PlaceholderVideoFetcher: VideoSource {
         let settings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: width,
-            AVVideoHeightKey: height
+            AVVideoHeightKey: height,
+            // Tag the colour space explicitly. Without this the clip is written
+            // with UNSPECIFIED colour, which `AVPlayerLayer` happily guesses at
+            // and `AVSampleBufferDisplayLayer` does not — it accepts the
+            // buffers, reports no error, advances the frame count, and draws
+            // black. Every mock video tile was black under `-avsbdl-render` for
+            // exactly this reason, while the `-rich-media` assets (properly
+            // tagged) rendered fine.
+            //
+            // A fixture that is less well-formed than real content tests the
+            // wrong thing: it made the engine look broken, and would equally
+            // have hidden a real defect behind "it's just the mock".
+            AVVideoColorPropertiesKey: [
+                AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+                AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+                AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2
+            ]
         ]
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
         input.expectsMediaDataInRealTime = false

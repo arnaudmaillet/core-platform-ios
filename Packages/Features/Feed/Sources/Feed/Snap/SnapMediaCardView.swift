@@ -24,7 +24,13 @@ final class SnapMediaCardView: UIView {
     /// The video playback surface — the caller drives its external
     /// `VideoPlaybackController` into this (playback ownership stays out
     /// of the card by construction).
-    let renderView = VideoRenderView()
+    private(set) var renderView: VideoRenderView = {
+        let view = VideoRenderView()
+        #if DEBUG
+        view.debugLabel = "feed"
+        #endif
+        return view
+    }()
 
     /// One center-crop mask per surface (a view masks only one other view);
     /// attached lazily on the first dock, animated full-bounds ↔ centered
@@ -52,6 +58,36 @@ final class SnapMediaCardView: UIView {
         renderView.pin(to: self)
     }
 
+    /// Re-installs the video surface after a hero flight borrowed it.
+    ///
+    /// Removing the view drops its pinning constraints with it, so the restore
+    /// has to re-pin rather than just re-add. Ordering matters as much: it goes
+    /// back above the photo surface, where it started.
+    func restoreRenderView(_ view: VideoRenderView) {
+        guard view.superview !== self else { return }
+        // A LANDING hands over the other side's surface, not the one this card
+        // started with — the view travels tile -> flight card -> page (and back
+        // on a dismissal) so the layer is never re-created. Adopt it as this
+        // card's own and drop the surface it replaces.
+        if view !== renderView {
+            renderView.detachForReplacement()
+            renderView.removeFromSuperview()
+            renderView = view
+        }
+        view.transform = .identity
+        // Installed by FRAME, not by constraints, and that is the whole fix for
+        // the landing flash. `pin(to:)` sets
+        // `translatesAutoresizingMaskIntoConstraints = false`, which discards
+        // the view's concrete frame until the next layout pass; the transient
+        // bounds reset `AVPlayerLayer.isReadyForDisplay` to false for ~170ms,
+        // measured, exactly on the completion frame. The takeoff path installs
+        // by frame and never resets — this now matches it.
+        view.translatesAutoresizingMaskIntoConstraints = true
+        view.frame = bounds
+        view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        insertSubview(view, aboveSubview: imageView)
+    }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
@@ -76,10 +112,37 @@ final class SnapMediaCardView: UIView {
         imageView.image = nil
         imageView.transform = .identity
         renderView.setPoster(nil)
+        logMediaState("configure(kind: \(kind))")
     }
 
-    func setImage(_ image: UIImage?) { imageView.image = image }
-    func setPoster(_ image: UIImage?) { renderView.setPoster(image) }
+    func setImage(_ image: UIImage?) {
+        imageView.image = image
+        logMediaState(image == nil ? "setImage(nil)" : "setImage(image)")
+    }
+
+    func setPoster(_ image: UIImage?) {
+        renderView.setPoster(image)
+        logMediaState(image == nil ? "setPoster(nil)" : "setPoster(image)")
+    }
+
+    /// Traces every mutation of the media area under `-media-log`.
+    ///
+    /// A black media area is always some combination of: the image view empty
+    /// or hidden, the render surface hidden, its poster cleared, its layer
+    /// flushed. Reasoning about which from the code has now been wrong three
+    /// times in a row on this issue, so this prints the whole state on every
+    /// change and lets the sequence say what happened. The gap to look for is a
+    /// long interval between a clearing call and the call that refills it.
+    private func logMediaState(_ event: String) {
+        #if DEBUG
+        guard ProcessInfo.processInfo.arguments.contains("-media-log") else { return }
+        print(String(format: "[media] %.3f %-22@ image=%@ imageHidden=%@ | render %@",
+                     CACurrentMediaTime(), event,
+                     imageView.image == nil ? "nil" : "set",
+                     imageView.isHidden ? "Y" : "N",
+                     renderView.debugSurfaceState))
+        #endif
+    }
     /// Whether the drift has content to animate (a loaded, visible photo).
     var isImageReady: Bool { imageView.image != nil && !imageView.isHidden }
     /// Hit-test identity: whether a hit view is one of the card's surfaces.

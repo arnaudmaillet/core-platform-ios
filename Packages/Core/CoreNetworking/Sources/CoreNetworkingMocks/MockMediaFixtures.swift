@@ -115,6 +115,14 @@ public enum MockMediaFixtures {
 
     /// The video assignment used by `MediaCatalog.realAssets`, in order.
     ///
+    /// **9:16 where it can be.** The synthetic entries are all vertical, which
+    /// is the shape a Reels/TikTok-style backend would actually serve. The real
+    /// encodes CANNOT follow: they are fixed public files and every one is
+    /// landscape, so restating them as 9:16 would mis-drive pre-layout and crop
+    /// the subject — the exact defect `BACKEND_MEDIA_ASPECT_RATIO_SUPPORT.md`
+    /// is about. They stay landscape and earn their place by being the only
+    /// fixtures with a real ABR ladder.
+    ///
     /// **Mixed by design.** No stable public source vends portrait or square
     /// test video — every candidate checked was landscape, and the two most
     /// commonly cited buckets are now dead (see `deadSources`). Rather than
@@ -125,20 +133,41 @@ public enum MockMediaFixtures {
     /// `PlaceholderVideoFetcher` renders at whatever aspect the `w`/`h` query
     /// asks for.
     ///
-    /// So this list gives **real encodes for streaming/ABR/decode realism** and
-    /// **synthetic clips for aspect-ratio layout coverage**, and the video
-    /// surface gets both without either being faked.
+    /// **Every entry that can autoplay is a real encode** (#83).
+    ///
+    /// This list used to interleave synthesized `mock://video/vertical-*`
+    /// clips to cover portrait, and that made `-rich-media` unable to do the
+    /// one job it exists for. `PostGridMosaic.arrangedForMotion` places
+    /// portrait media in portrait bricks, so the synthetic entries landed in
+    /// exactly the tall tiles a hero flight departs from — and those clips
+    /// decode to black through `AVPlayerItemVideoOutput` (luma=16 against an
+    /// asset whose every frame is a solid hue; see `VideoFrameRenderer`). Every
+    /// visual check of the flight was therefore judging a black source and
+    /// could not distinguish a working renderer from a broken one.
+    ///
+    /// The square entry stays: `autoplaysInGrid` excludes square media, so it
+    /// never plays, never renders, and remains the negative case for the
+    /// "square media never autoplays" rule.
+    ///
+    /// **The trade, stated plainly.** Portrait video coverage leaves this
+    /// catalog, because every stable public encode is landscape and declaring
+    /// one as 9:16 would mis-drive pre-layout and crop the subject — the exact
+    /// defect `BACKEND_MEDIA_ASPECT_RATIO_SUPPORT.md` is about. Aspect coverage
+    /// now belongs to the DEFAULT synthetic catalog, which renders any `w`/`h`
+    /// asked of it and is what the unit suite and previews run against anyway.
+    /// So the two catalogs each do one job: synthetic covers shape, real covers
+    /// streaming, ABR and decode.
+    ///
+    /// Entries are distinct on purpose — see the note on `attachSurface` about
+    /// URL-keyed lookup when two tiles play the same asset.
     public static let videos: [Video] = [
         appleBipBop16x9,
-        Video(url: "mock://video/portrait-1?w=1080&h=1920", width: 1080, height: 1920, isRemote: false),
         bigBuckBunny720,
-        Video(url: "mock://video/square-1?w=1080&h=1080", width: 1080, height: 1080, isRemote: false),
         tearsOfSteel,
         sintelTrailer,
-        Video(url: "mock://video/portrait-2?w=1080&h=1350", width: 1080, height: 1350, isRemote: false),
         appleAdvancedFMP4,
         longRunning,
-        Video(url: "mock://video/square-2?w=960&h=960", width: 960, height: 960, isRemote: false)
+        Video(url: "mock://video/square-1?w=1080&h=1080", width: 1080, height: 1080, isRemote: false)
     ]
 
     // MARK: - Images

@@ -1,5 +1,7 @@
+import CoreModels
 import DesignSystem
 import MediaCore
+import MediaPlayback
 import PostGrid
 import UIKit
 
@@ -46,9 +48,13 @@ final class ForYouPagerView: UIView {
         didSet { pages.forEach { $0.additionalBottomInset = trayClearance } }
     }
 
-    init(imagePipeline: ImagePipeline) {
+    init(imagePipeline: ImagePipeline, videoPlayback: VideoPlaybackController? = nil) {
         pages = Self.pageOrder.map { format in
-            ForYouGridPage(imagePipeline: imagePipeline, style: format == .media ? .grid : .list)
+            ForYouGridPage(
+                imagePipeline: imagePipeline,
+                style: format == .media ? .grid : .list,
+                videoPlayback: videoPlayback
+            )
         }
         super.init(frame: .zero)
 
@@ -107,6 +113,46 @@ final class ForYouPagerView: UIView {
         guard let index = Self.pageOrder.firstIndex(of: format), index != activeIndex else { return }
         activeIndex = index
         scrollView.setContentOffset(CGPoint(x: CGFloat(index) * bounds.width, y: 0), animated: animated)
+        syncAutoplay()
+    }
+
+    // MARK: - Autoplay
+
+    /// Whether this surface may autoplay at all — tab frontmost, nothing
+    /// presented over it, app foregrounded. ANDed with per-page activity below.
+    private var isSurfaceActive = false
+    /// Exempt from the stop sweep: the post whose player a flight is carrying.
+    private var flightPostID: PostID?
+
+    func setAutoplayActive(_ active: Bool, keeping kept: PostID? = nil) {
+        isSurfaceActive = active
+        flightPostID = kept
+        syncAutoplay()
+    }
+
+    func beginPlaybackHandoff(of postID: PostID) {
+        pages.forEach { $0.beginPlaybackHandoff(of: postID) }
+    }
+
+    /// Closes the handoff on every page and reconciles. One call, one restored
+    /// grid — no per-tile bookkeeping survives a flight.
+    func endPlaybackHandoff() {
+        pages.forEach { $0.endPlaybackHandoff() }
+    }
+
+    /// Retires a handoff nobody adopted. The pool parks at most one player, so
+    /// asking any page is asking the pool — no need to know which one parked it.
+    func discardPlaybackHandoff() {
+        pages.forEach { $0.discardPlaybackHandoff() }
+    }
+
+    /// Only the page the viewer is actually on plays. The pager keeps all three
+    /// laid out, so without this the off-screen formats would hold pool slots
+    /// for video nobody can see.
+    private func syncAutoplay() {
+        for (index, page) in pages.enumerated() {
+            page.setAutoplayActive(isSurfaceActive && index == activeIndex, keeping: flightPostID)
+        }
     }
 
     private var lastLayoutWidth: CGFloat = 0
@@ -131,6 +177,7 @@ extension ForYouPagerView: UIScrollViewDelegate {
         let landed = min(max(Int((scrollView.contentOffset.x / bounds.width).rounded()), 0), pages.count - 1)
         guard landed != activeIndex else { return }
         activeIndex = landed
+        syncAutoplay()
         onPageSettled?(Self.pageOrder[landed])
     }
 }

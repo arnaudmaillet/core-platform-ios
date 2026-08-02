@@ -112,6 +112,15 @@ extension PinCardView: ZoomFlightCard {
 
     var zoomLiveMediaSurface: UIView? { videoRenderView.isHidden ? nil : videoRenderView }
 
+    var zoomLiveMediaNativeSize: CGSize? { videoRenderView.nativeVideoSize }
+
+    /// Same rule as the grid's flight card: a pin flying without live media
+    /// shows its cover, which is always drawing; one flying with live media is
+    /// only "drawing" while that surface is actually visible.
+    var zoomLiveMediaIsDrawing: Bool {
+        videoRenderView.isHidden ? true : videoRenderView.isRenderingVisibly
+    }
+
     func adoptZoomLiveMedia(_ mirror: (UIView) -> Bool) {
         guard mirror(videoRenderView) else { return }
         // Poster covers the (usually sub-frame) gap until the mirrored layer

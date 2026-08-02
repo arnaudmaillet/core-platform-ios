@@ -126,6 +126,25 @@ jobs:
             echo "::endgroup::"
           done
 
+          # MediaPlayback's AVSampleBufferDisplayLayer backing is the process
+          # default, and layerClass resolves once per process — so the loop
+          # above only ever covered the new path. This second run forwards
+          # AVSBDL_RENDER=0 to the test runner to cover the legacy
+          # AVPlayerLayer backing; the suite prints which backing it actually
+          # got ("[avsbdl-test] backing = ..."), so a forwarding regression is
+          # visible in the log rather than a silent double-run of one path.
+          echo "::group::Test MediaPlayback (legacy AVPlayerLayer backing)"
+          if ( cd "$GITHUB_WORKSPACE/Packages/Core/MediaPlayback" && \
+               env TEST_RUNNER_AVSBDL_RENDER=0 \
+                 xcodebuild test -scheme MediaPlayback -destination "$DEST" \
+                 -clonedSourcePackagesDirPath "$SPM" -skipMacroValidation ); then
+            echo "PASS MediaPlayback (legacy backing)"
+          else
+            echo "FAIL MediaPlayback (legacy backing)"
+            FAILED+=("MediaPlayback-legacy-backing")
+          fi
+          echo "::endgroup::"
+
           if [ ${#FAILED[@]} -ne 0 ]; then
             echo "::error::Failed package tests: ${FAILED[*]}"
             exit 1
