@@ -47,6 +47,18 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         didSet { interaction.onCancelled = onDismissalCancelled }
     }
 
+    /// Fires when the PUSH itself is reversed mid-air — the flight was caught
+    /// and dragged back, so the destination never showed and never will.
+    ///
+    /// `didShow` reports neither side of a cancelled transition, so without
+    /// this the owner's per-flight state (its retained controller, the hidden
+    /// tab bar, an open playback handoff) stayed locked until the next
+    /// completed transition — which could never come, because the retained
+    /// controller is exactly what gates starting one. The owner should tear
+    /// down here as it does in `onSourceReturned`; both are idempotent
+    /// close-outs of the same flight.
+    public var onPresentationCancelled: (() -> Void)?
+
     public init(source: any ZoomTransitionSource, destination: any ZoomTransitionDestination) {
         self.source = source
         self.destination = destination
@@ -91,7 +103,9 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         guard let destination, let feed = feedViewController else { return nil }
         switch operation {
         case .push where toVC === feed:
-            return ZoomAnimator(isPresenting: true, source: source, destination: destination)
+            let animator = ZoomAnimator(isPresenting: true, source: source, destination: destination)
+            animator.onPresentationReversed = { [weak self] in self?.onPresentationCancelled?() }
+            return animator
         case .pop where fromVC === feed:
             return ZoomAnimator(
                 isPresenting: false, source: source, destination: destination,

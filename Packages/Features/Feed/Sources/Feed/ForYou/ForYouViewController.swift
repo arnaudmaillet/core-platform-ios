@@ -323,7 +323,17 @@ final class ForYouViewController: UIViewController {
                 print("[zoom-live] land REFUSED by adoptHostedPlayback post=\(postID)")
             }
             #endif
+            // Nothing landed, so nothing may survive: the surface used to be
+            // unparented but left attached to its renderer, and the empty clip
+            // stayed in the tab bar controller's view for the life of the tab
+            // — one stranded pair per refused landing. Same teardown as
+            // `releaseHoistedForCancel`, minus the hand-back (there is no
+            // feed left to reclaim it).
+            stopHostedScaleDriver()
+            view.detachForReplacement()
             view.removeFromSuperview()
+            clip.removeFromSuperview()
+            hostClip = nil
             return
         }
 
@@ -666,6 +676,19 @@ final class ForYouViewController: UIViewController {
             #if DEBUG
             self?.debugAuditTray("cancelled")
             #endif
+        }
+        transition.onPresentationCancelled = { [weak self] in
+            // The PUSH was reversed mid-air: the feed never showed, `didShow`
+            // reports nothing, and the grid is the screen again. The same
+            // idempotent close-out as `onSourceReturned`, minus the landing —
+            // a present hoists nothing, so there is nothing to land. Without
+            // this, the retained transition made every future tile tap a
+            // silent no-op and the handoff scope kept the grid's players down.
+            self?.navigationController?.delegate = nil
+            self?.activeTransition = nil
+            self?.showTabBar(alpha: 1)
+            self?.restoreTrayAfterTransition()
+            self?.pager.endPlaybackHandoff()
         }
         // Accessing `view` loads it so the grab-to-dismiss pan can attach.
         transition.attachInteractiveDismissal(to: feed.view) { [weak self] in
