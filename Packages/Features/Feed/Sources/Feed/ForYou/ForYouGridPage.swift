@@ -468,14 +468,37 @@ final class ForYouGridPage: UIView {
         cell.layoutIfNeeded()
     }
 
-    /// Whether the tile that a dismissal is landing on is already rendering.
-    /// True when it carries no video, so a still tile never holds the card.
+    /// Whether the tile a dismissal is landing on has something to show yet.
+    ///
+    /// The card is held over the landing until this is true, so "ready" has to
+    /// mean *the viewer would see content*, not merely *playback is running*.
+    /// Three cases, and the first two are why a swapped-in post could flash:
+    ///
+    /// - The tile has TAKEN a surface. A dismissal hands its live surface to any
+    ///   post carrying a stream, but the old gate only waited when the post also
+    ///   passed `autoplaysInGrid` — which excludes square clips. So a square
+    ///   video adopted a surface, the gate said ready, the card let go, and the
+    ///   surface's first frame had not arrived: one empty tile.
+    /// - A still tile is ready when it has a cover. Nothing waited on that at
+    ///   all, so landing on a post whose thumbnail was not already cached — the
+    ///   normal case for one swapped in from further down the feed — showed the
+    ///   tile's background colour until the load returned.
+    /// - Nothing realized, or nothing to load: there is no gap to cover.
+    ///
+    /// `ZoomAnimator.holdCard`'s ceiling bounds all of this, so a cover that
+    /// never arrives is a brief pause rather than a stuck card.
     func isLandingPlaybackReady(for postID: PostID) -> Bool {
-        guard let playback,
-              let index = posts.firstIndex(where: { $0.id == postID }),
-              posts[index].autoplaysInGrid
-        else { return true }
-        return playback.isSurfaceRendering(for: postID)
+        guard let index = posts.firstIndex(where: { $0.id == postID }) else { return true }
+        let post = posts[index]
+        let cell = collectionView.cellForItem(
+            at: IndexPath(item: index, section: 0)
+        ) as? PostGridTileCell
+        if let playback, post.videoURL != nil,
+           post.autoplaysInGrid || cell?.loadedVideoRenderView != nil {
+            return playback.isSurfaceRendering(for: postID)
+        }
+        guard let cell, post.thumbnailURL != nil else { return true }
+        return cell.renderedCover != nil
     }
 
 
@@ -698,6 +721,12 @@ final class ForYouGridPage: UIView {
             // itself off-screen, and the flight collapses to the middle of the
             // screen instead of flying to the tile — measured exactly that way.
             collectionView.layoutIfNeeded()
+            // And commit them to the render server in this turn rather than the
+            // next. Everything downstream — the hero rect, the flight card built
+            // from this cell's cover, the landing gate — reads the cell
+            // immediately, and a cell whose layers are still pending answers as
+            // though it were empty.
+            CATransaction.flush()
         }
         // The landing tile is about to be flown onto; give its cover a head
         // start in case the cache does not already hold it.
