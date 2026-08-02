@@ -314,11 +314,26 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             // against a 0.42s flight — and revealing it on schedule is what put
             // the cell's black floor on screen.
             //
+            // BOTH halves of readiness, and the second is the device lesson:
+            // data is not pixels. With posts present the reveal still swapped
+            // the card for a page whose media area was compositing NOTHING
+            // yet — measured on device (run 2, covers-only) as the card
+            // vanishing into a black screen at the exact end of the present.
+            // So the gate also asks whether the active page's media area is
+            // actually rendering (surface or poster), plus one display tick
+            // for the composite to land. Until then the card — the same
+            // cover, full-bleed — stays on screen through the transparent
+            // destination, which is strictly better content than the black
+            // it was being traded for.
+            //
             // Everything below stays in one block so the ordering note above
             // still holds: reveal, THEN adopt the surface, then drop the card.
             Self.whenReady(ceiling: Self.maximumHydrationHold,
+                           afterTicks: 1,
                            condition: { [weak destination = self.destination] in
-                               destination?.zoomDestinationContentIsReady ?? true
+                               guard let destination else { return true }
+                               return destination.zoomDestinationContentIsReady
+                                   && destination.zoomDestinationMediaIsRendering
                            }) {
                 self.destination?.setZoomContentHidden(false)
                 if let surface = flight.card.zoomLiveMediaSurface {

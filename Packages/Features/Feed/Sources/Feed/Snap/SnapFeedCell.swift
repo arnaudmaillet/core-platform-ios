@@ -694,6 +694,34 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         Task { await videoPlayback.play(url, in: view) }
     }
 
+    /// Whether this page's media area has something REAL on screen — the
+    /// landing-side twin of the grid's `isLandingPlaybackReady`.
+    ///
+    /// The present landing reveals the feed and unmounts the flight card in
+    /// one commit, and it used to do so on a DATA answer alone (the feed has
+    /// posts). Measured on device as the run-2 black beat: card removed, feed
+    /// revealed, and the page's media area compositing nothing yet. A video
+    /// page answers for its surface OR its poster — a page that has not
+    /// started playing but shows its poster is presentable; one with neither
+    /// is the black the card must keep covering. Text pages have no media
+    /// area and nothing to wait for.
+    var isMediaContentRendering: Bool {
+        guard mediaURL != nil else { return true }
+        switch mediaKind {
+        case .video:
+            return mediaCard.renderView.isCompositingContent
+        case .image:
+            return mediaCard.isImageReady
+        }
+    }
+
+    #if DEBUG
+    /// The media area's full state for the landing trace.
+    var debugMediaState: String {
+        "kind=\(mediaKind) url=\(mediaURL == nil ? "nil" : "set") render[\(mediaCard.renderView.debugSurfaceState)]"
+    }
+    #endif
+
     /// Detaches this page's player and parks it for the next play of the same
     /// asset — the grid tile a dismissal is flying home to.
     @discardableResult

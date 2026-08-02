@@ -1404,6 +1404,23 @@ extension SnapFeedViewController: ZoomTransitionDestination {
 
     public var zoomDestinationContentIsReady: Bool { !orderedIDs.isEmpty }
 
+    /// The render half of landing readiness: the active page's media area is
+    /// compositing something (surface or poster). Nil cell — not realized
+    /// yet — reports true and falls back to the data-only behaviour.
+    public var zoomDestinationMediaIsRendering: Bool {
+        let cell = activeSnapCell
+        let rendering = cell?.isMediaContentRendering ?? true
+        #if DEBUG
+        // Why a landing is being held, in the surface's own words — a "no"
+        // with every component healthy has already cost one wrong deduction.
+        if !rendering, ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] %.3f landing NOT rendering: %@",
+                         CACurrentMediaTime(), cell?.debugMediaState ?? "no active cell"))
+        }
+        #endif
+        return rendering
+    }
+
     public func setZoomContentHidden(_ hidden: Bool) {
         view.alpha = hidden ? 0 : 1
     }

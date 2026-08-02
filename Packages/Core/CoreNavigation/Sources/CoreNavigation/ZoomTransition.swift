@@ -147,6 +147,19 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// Defaults to `true`: a destination that is ready the moment it is pushed
     /// (anything not network-backed) opts out by saying nothing.
     var zoomDestinationContentIsReady: Bool { get }
+
+    /// Whether the destination's active page is actually COMPOSITING its
+    /// media area — a drawing surface, or a poster/cover in place.
+    ///
+    /// `zoomDestinationContentIsReady` answers about DATA, and data is not
+    /// pixels: a page can have its post and still have nothing in its media
+    /// area for a beat (a surface whose first composite lags, a poster still
+    /// decoding). The present landing reveals the destination and retires
+    /// the card in one commit, so gating that on data alone swapped the card
+    /// for a black media area — measured on device as a flash at the exact
+    /// end of the present. Defaults to `true`: a destination with no media
+    /// area has nothing to wait for.
+    var zoomDestinationMediaIsRendering: Bool { get }
     /// The full rect the flying card lands on (present) / lifts from (dismiss),
     /// in `container`'s coordinate space — the active page's bounds.
     func zoomTargetFrame(in container: UICoordinateSpace) -> CGRect
@@ -239,6 +252,7 @@ public protocol ZoomTransitionDestination: AnyObject {
 
 public extension ZoomTransitionDestination {
     var zoomDestinationContentIsReady: Bool { true }
+    var zoomDestinationMediaIsRendering: Bool { true }
     func zoomMirrorLiveMedia(onto surface: UIView) -> Bool { false }
     func zoomDonateLiveMediaView() -> UIView? { nil }
     func zoomReclaimLiveMediaView(_ view: UIView) {}
