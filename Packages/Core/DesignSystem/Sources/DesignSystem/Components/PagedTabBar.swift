@@ -243,7 +243,9 @@ public final class PagedTabBar: UIControl {
     /// The active-segment marker. A tinted overlay, NOT a second material —
     /// see the type comment on why glass-inside-glass cost the lens its edge.
     private let lens = UIView()
-    private let row = UIStackView()
+    /// The segment strip. A subclass only so it can say when it has finished
+    /// positioning its arranged subviews — see `SegmentRow`.
+    private let row = SegmentRow()
     private var segments: [SegmentView] = []
     private var progress: CGFloat = 0
     private var scrubPan: UIPanGestureRecognizer!
@@ -320,6 +322,11 @@ public final class PagedTabBar: UIControl {
         // slack — and what still lets the row out-measure the capsule and
         // scroll when the titles genuinely need more room than the screen has.
         row.distribution = .fillEqually
+        // ⚠️ THE authoritative moment to size the lens. Everything else that
+        // calls `applyProgress` is a hint that may be one pass early; this is
+        // the one call that cannot be, because it fires after the row has
+        // placed the very frames the lens is derived from.
+        row.onLayout = { [weak self] in self?.applyProgress() }
         buildSegments()
         row.constrain(in: content) { parent in
             row.topAnchor.constraint(equalTo: parent.topAnchor)
@@ -494,6 +501,16 @@ public final class PagedTabBar: UIControl {
                 cornerRadius: shadowHost.bounds.height / 2
             ).cgPath
         }
+        resolveSegmentsThenApplyProgress()
+    }
+
+    /// Re-derives the lens, for the paths that change geometry outside a layout
+    /// pass (a badge arriving, a transition restoring the bar).
+    ///
+    /// This is a HINT, not the guarantee. The guarantee is `row.onLayout` —
+    /// see `SegmentRow`.
+    private func resolveSegmentsThenApplyProgress() {
+        content.layoutIfNeeded()
         applyProgress()
     }
 
@@ -560,7 +577,25 @@ public final class PagedTabBar: UIControl {
         setNeedsLayout()
         layoutIfNeeded()
         invalidateIntrinsicContentSize()
-        applyProgress()
+        // The SEGMENTS have to be resolved before the lens is derived from
+        // them, and `layoutIfNeeded()` above only guarantees this view's own
+        // subviews — not the segments two levels down inside the scroll
+        // content. Without this the lens keeps its pre-badge width and the
+        // count renders outside its own selection pill.
+        resolveSegmentsThenApplyProgress()
+    }
+
+    /// The frame the selection pill currently occupies, and the frame of the
+    /// segment it is supposed to be framing — equal, at rest, to within a
+    /// rounding error.
+    ///
+    /// Exposed so a host can assert the invariant instead of eyeballing a
+    /// screenshot: the lag this catches is invisible until a badge changes a
+    /// segment's width, and then it is the whole bug.
+    public var debugLensAlignment: (lens: CGRect, segment: CGRect)? {
+        let index = min(max(selectedIndex, 0), segments.count - 1)
+        guard segments.indices.contains(index) else { return nil }
+        return (lens.frame, lensFrame(for: index))
     }
 
     /// Re-asserts the bar's appearance after an interactive transition.
@@ -593,6 +628,7 @@ public final class PagedTabBar: UIControl {
         invalidateIntrinsicContentSize()
         setNeedsLayout()
         layoutIfNeeded()
+        resolveSegmentsThenApplyProgress()
     }
 
     /// How many points of segment strip the capsule cannot show at its current
@@ -733,6 +769,17 @@ public final class PagedTabBar: UIControl {
             height: from.height
         )
 
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-tabbar-shape-trace") {
+            let frames = segments.map { String(format: "%.1f@%.1f", $0.frame.width, $0.frame.minX) }
+            let pinned = segments.map { String(format: "%.1f", $0.pinnedWidth) }
+            print(String(
+                format: "[tabshape] p=%.2f self=%.1f row=%.1f@%.1f content=%.1f segs=[%@] pinned=[%@] lens=%.1f@%.1f",
+                progress, bounds.width, row.bounds.width, row.frame.minX, content.bounds.width,
+                frames.joined(separator: " "), pinned.joined(separator: " "), rect.width, rect.minX
+            ))
+        }
+        #endif
         lens.frame = rect
         lens.layer.cornerRadius = lens.bounds.height / 2
         lens.layer.cornerCurve = .continuous
@@ -783,6 +830,39 @@ public final class PagedTabBar: UIControl {
 /// `UIView` already declares `gestureRecognizerShouldBegin(_:)` and Swift will
 /// not let an extension override it.
 extension PagedTabBar: UIGestureRecognizerDelegate {}
+
+// MARK: - Segment row
+
+/// The segment strip, which exists as a subclass for ONE reason: to announce
+/// that it has finished positioning its arranged subviews.
+///
+/// ⚠️ **The selection lens is built entirely out of segment FRAMES, and a stack
+/// view positions its arranged subviews in its OWN `layoutSubviews` — which
+/// runs after its superview's.** So every place the bar derives the lens
+/// (`layoutSubviews`, `setBadge`, `setProgress`) is reading frames from the
+/// previous pass. That is invisible while the segments never change size, and
+/// it is the whole bug the moment a badge widens one: measured on a badge
+/// arriving, the row had its new width (184) while its segments still carried
+/// the frames they had at the old one (77 each, against a pinned 91) — so the
+/// lens framed 77pt of a 91pt segment and the "99" it was supposed to enclose
+/// rendered outside its own selection pill, permanently, because nothing ever
+/// asked again.
+///
+/// `layoutIfNeeded()` on an ancestor does NOT fix it: when nothing is flagged
+/// dirty at that instant the call is a no-op, and the stack still lays its
+/// children out later in the same pass. The only reliable moment is this one.
+private final class SegmentRow: UIStackView {
+    /// Fired after every layout pass, once the arranged subviews have frames.
+    var onLayout: (() -> Void)?
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // Safe to drive the lens from here: it is a SIBLING of this row inside
+        // the scroll content, so positioning it touches nothing this pass owns
+        // and cannot re-enter.
+        onLayout?()
+    }
+}
 
 // MARK: - Segment
 

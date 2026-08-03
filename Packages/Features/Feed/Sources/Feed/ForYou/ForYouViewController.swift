@@ -1048,6 +1048,24 @@ final class ForYouViewController: UIViewController {
         if buttons.count != titles.count {
             offenders.append("segment count \(buttons.count) != \(titles.count)")
         }
+        // The selection pill must frame the segment it claims to select — badge
+        // and all. This is checkable rather than a matter of taste, and it is
+        // the one defect a screenshot hides until a badge changes a width: the
+        // segment grows to fit "Following 99" and the lens keeps its old size,
+        // leaving the count outside its own pill.
+        if let alignment = tabBar.debugLensAlignment {
+            let drift = max(
+                abs(alignment.lens.minX - alignment.segment.minX),
+                abs(alignment.lens.width - alignment.segment.width)
+            )
+            if drift > 0.5 {
+                offenders.append(String(
+                    format: "lens off by %.1f (lens %.1fx%.1f@%.1f vs segment %.1fx%.1f@%.1f)",
+                    drift, alignment.lens.width, alignment.lens.height, alignment.lens.minX,
+                    alignment.segment.width, alignment.segment.height, alignment.segment.minX
+                ))
+            }
+        }
         // Hit-tested from the WINDOW, because a bar inside the navigation bar
         // is not reachable from this screen's `view` at all and testing there
         // would call every segment unreachable — a false alarm indistinguishable
@@ -1138,6 +1156,10 @@ final class ForYouViewController: UIViewController {
         // display link starts in `viewDidLoad`, so the first sample is the first
         // frame this screen has ever had.
         let shape = tabBar.debugCapsuleShape
+        let lensDrift = tabBar.debugLensAlignment.map {
+            max(abs($0.lens.minX - $0.segment.minX), abs($0.lens.width - $0.segment.width))
+        } ?? -1
+        let lensRect = tabBar.debugLensAlignment?.lens ?? .zero
         // What the nav bar is actually drawing its item capsules with, by class
         // and geometry — the search space for a dynamic height match.
         if ProcessInfo.processInfo.arguments.contains("-foryou-dump-bar"), let bar {
@@ -1159,10 +1181,11 @@ final class ForYouViewController: UIViewController {
         print(String(
             format: "[chrome:%@] tabsX=%.1f tabsW=%.1f tabsY=%.2f tabsH=%.2f itemH=%.2f itemY=%.2f "
                 + "leftEnd=%.1f rightStart=%.1f slot=%.1f overflow=%.1f safeT=%.2f navY=%.2f navH=%.2f "
-                + "r=%.2f/%.2f glass=%@ CAPSULE=%@",
+                + "lensW=%.1f lensX=%.1f drift=%.2f r=%.2f/%.2f glass=%@ CAPSULE=%@",
             phase, tabs.minX, tabs.width, tabs.minY, tabs.height, itemH, itemY,
             leftEnd, rightStart, rightStart - leftEnd, overflow, safeTop,
             barRect.minY, barRect.height,
+            lensRect.width, lensRect.minX, lensDrift,
             shape.radius, shape.height, shape.hasEffect ? "on" : "off", round ? "yes" : "NO"
         ))
     }
