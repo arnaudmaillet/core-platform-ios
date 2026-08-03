@@ -68,6 +68,10 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
     /// baseline `railDelta` is measured against.
     private var railOrigin: CGPoint = .zero
     private let advancesOnDownwardDrag: Bool
+    #if DEBUG
+    /// Thins the per-event drag trace under `-zoom-live-log`.
+    private var dragEventCount = 0
+    #endif
 
     init(advancesOnDownwardDrag: Bool) {
         self.advancesOnDownwardDrag = advancesOnDownwardDrag
@@ -120,10 +124,22 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
         switch recogniser.state {
         case .began:
             // Freezes the animator wherever the spring had got to.
-            if handoff.touchDown() == .pauseFlight { pause() }
+            if handoff.touchDown() == .pauseFlight {
+                pause()
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                    print(String(format: "[zoom-live] CATCH freeze at=%.2f", percentComplete))
+                }
+                #endif
+            }
         case .ended, .cancelled, .failed:
             if handoff.touchUp() == .resumeTowardEnd {
                 detach()
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                    print(String(format: "[zoom-live] CATCH resume toward end from=%.2f", percentComplete))
+                }
+                #endif
                 // Resume on the shared spring from rest — the same physics
                 // every other leg lands with, minus the hand's velocity a
                 // motionless hold does not have.
@@ -157,6 +173,12 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
                 grabbedCard = card
                 railOrigin = Self.railPosition(of: card)
             }
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                print(String(format: "[zoom-live] CATCH grab at=%.2f free=%@",
+                             percentComplete, grabbedCard == nil ? "no" : "yes"))
+            }
+            #endif
         case .changed:
             guard handoff.phase == .grabbing else { return }
             update(handoff.fraction(forVerticalTranslation: translation.y))
@@ -170,6 +192,14 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
                     railDelta: CGPoint(x: rail.x - railOrigin.x, y: rail.y - railOrigin.y)
                 )
                 card.transform = CGAffineTransform(translationX: offset.x, y: offset.y)
+                #if DEBUG
+                dragEventCount += 1
+                if dragEventCount % 12 == 1,
+                   ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                    print(String(format: "[zoom-live] CATCH drag t=(%.0f,%.0f) fraction=%.2f offset=(%.0f,%.0f)",
+                                 translation.x, translation.y, percentComplete, offset.x, offset.y))
+                }
+                #endif
             }
         case .ended, .cancelled, .failed:
             guard let release = handoff.released(
@@ -177,6 +207,14 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
                 verticalVelocity: recogniser.velocity(in: container).y
             ) else { return }
             detach()
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                print(String(format: "[zoom-live] CATCH release completes=%@ progress=%.2f vy=%.0f",
+                             release.completes ? "yes" : "no",
+                             handoff.fraction(forVerticalTranslation: translation.y),
+                             recogniser.velocity(in: container).y))
+            }
+            #endif
             settleFreeChannel()
             // Without an explicit curve the percent driver continues a caught
             // flight with its default completion curve — ease-in-out from
