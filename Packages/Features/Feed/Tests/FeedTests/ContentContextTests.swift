@@ -201,16 +201,18 @@ struct ForYouContextTests {
     }
 
     @Test func anEmptyContextSaysWhyItIsEmpty() {
-        let message = ForYouViewModel.emptyMessage(format: .media, source: .trending, context: .work)
-        #expect(message.contains("Work"))
-        // A blank page with no explanation reads as a broken feed; naming the
-        // lens turns it into a menu tap.
-        #expect(message.hasSuffix("Showing Work only."))
+        let empty = ForYouViewModel.emptyState(format: .media, source: .trending, context: .work)
+        // The finding stays in the title; the REASON — the only part the viewer
+        // can act on — gets its own line rather than trailing the sentence
+        // where it read as punctuation.
+        #expect(empty.title == "No trending media yet.")
+        #expect(empty.subtitle?.contains("Work") == true)
     }
 
-    @Test func theDefaultContextAddsNothingToTheMessage() {
-        let message = ForYouViewModel.emptyMessage(format: .media, source: .trending)
-        #expect(message == "No trending media yet.")
+    @Test func theDefaultContextOffersNoReason() {
+        let empty = ForYouViewModel.emptyState(format: .media, source: .trending)
+        #expect(empty.title == "No trending media yet.")
+        #expect(empty.subtitle == nil)
     }
 
     @Test func repeatingTheActiveContextIsANoOp() async {

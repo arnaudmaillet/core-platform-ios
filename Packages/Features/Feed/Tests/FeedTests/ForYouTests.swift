@@ -411,16 +411,19 @@ struct ForYouViewModelTests {
     /// An empty combination has to name itself, and the sentence has to read
     /// correctly in every one of them.
     @Test func emptyMessagesNameTheCombination() {
-        #expect(ForYouViewModel.emptyMessage(format: .media, source: .trending) == "No trending media yet.")
-        #expect(ForYouViewModel.emptyMessage(format: .activity, source: .recent) == "No recent activity yet.")
+        #expect(ForYouViewModel.emptyState(format: .media, source: .trending).title == "No trending media yet.")
+        #expect(ForYouViewModel.emptyState(format: .activity, source: .recent).title == "No recent activity yet.")
         // Sweeps the whole grid rather than sampling it: the sentence is built
         // from two enums, and a case added to either is a sentence nobody has
         // read. Every one must name both halves and end in a full stop.
         for format in GalleryFilter.Format.allCases {
             for source in DiscoverySource.allCases {
-                let message = ForYouViewModel.emptyMessage(format: format, source: source)
-                #expect(message.hasPrefix("No "))
-                #expect(message.hasSuffix(" yet."))
+                let empty = ForYouViewModel.emptyState(format: format, source: source)
+                #expect(empty.title.hasPrefix("No "))
+                #expect(empty.title.hasSuffix(" yet."))
+                // Nothing is narrowing an unfiltered page, so there is no
+                // reason to offer — and inventing one would be noise.
+                #expect(empty.subtitle == nil)
             }
         }
     }

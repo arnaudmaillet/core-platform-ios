@@ -11,10 +11,30 @@ public final class ForYouViewModel {
     public nonisolated enum PageState: Equatable, Sendable {
         case loading
         case content([GalleryPost])
-        /// The combination has nothing to show; `message` names it so the
-        /// blank page reads intentional, not broken.
-        case empty(message: String)
+        /// The combination has nothing to show, said in two parts so the page
+        /// reads intentional rather than broken.
+        case empty(EmptyState)
         case failed(message: String)
+    }
+
+    /// An empty page, in the two pieces the viewer needs separately.
+    ///
+    /// The split is not cosmetic. The TITLE is the finding — "No activity yet"
+    /// — and is true regardless of how the viewer got here. The SUBTITLE is the
+    /// reason the page might be narrower than they expected, and it is the only
+    /// part that tells them there is something they can change. Running them
+    /// into one sentence made the actionable half look like punctuation.
+    public nonisolated struct EmptyState: Equatable, Sendable {
+        public let title: String
+        /// Absent when nothing is narrowing the page — an unfiltered surface
+        /// with no content has no explanation to offer, and inventing one would
+        /// be noise.
+        public let subtitle: String?
+
+        public init(title: String, subtitle: String? = nil) {
+            self.title = title
+            self.subtitle = subtitle
+        }
     }
 
     public nonisolated struct Snapshot: Equatable, Sendable {
@@ -324,7 +344,7 @@ public final class ForYouViewModel {
             guard corpus != nil else { return .loading }
             let posts = posts(for: format)
             return posts.isEmpty
-                ? .empty(message: Self.emptyMessage(format: format, source: source, context: context))
+                ? .empty(Self.emptyState(format: format, source: source, context: context))
                 : .content(posts)
         }
         onSnapshotChange?(Snapshot(activity: page(.activity), media: page(.media), short: page(.short)))
@@ -393,11 +413,11 @@ public final class ForYouViewModel {
     #endif
 
     /// Names the empty combination so the blank page reads as an answer.
-    nonisolated static func emptyMessage(
+    nonisolated static func emptyState(
         format: GalleryFilter.Format,
         source: DiscoverySource,
         context: ContentContext = .all
-    ) -> String {
+    ) -> EmptyState {
         let what = switch format {
         case .activity: "activity"
         case .media: "media"
@@ -408,7 +428,7 @@ public final class ForYouViewModel {
         // ("...from people you follow"), which is why this used to have two
         // shapes; if a source that is not an adjective returns, it will need
         // its own slot again rather than being forced into this one.
-        let sentence = switch source {
+        let title = switch source {
         case .trending: "No trending \(what) yet."
         case .recent: "No recent \(what) yet."
         }
@@ -417,7 +437,10 @@ public final class ForYouViewModel {
         // lens turns "this is broken" into "this is filtered", which is the
         // difference between a bug report and a menu tap. All adds nothing,
         // because it filters nothing.
-        guard !context.isUnfiltered else { return sentence }
-        return sentence + " Showing \(context.title) only."
+        guard !context.isUnfiltered else { return EmptyState(title: title) }
+        return EmptyState(
+            title: title,
+            subtitle: "Showing \(context.title) only. Change the context to see everything."
+        )
     }
 }
