@@ -218,7 +218,7 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
                              recogniser.velocity(in: container).y))
             }
             #endif
-            settleFreeChannel()
+            settleFreeChannel(withHandVelocity: recogniser.velocity(in: container))
             // Without an explicit curve the percent driver continues a caught
             // flight with its default completion curve — ease-in-out from
             // rest — which is different physics from every other leg of this
@@ -315,17 +315,27 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
     }
 
     /// Springs the free channel's offset home alongside the percent driver's
-    /// continuation, on the same shared spring, so the 2D float and the rail
-    /// converge together — whichever outcome, the card's transform must be
-    /// identity by the time the animator's completion tears the stage down.
-    private func settleFreeChannel() {
+    /// continuation — the same duration and damping, so the 2D float and the
+    /// rail converge on the tile as one elastic settle, and the card's
+    /// transform is identity by the time the animator's completion tears the
+    /// stage down.
+    ///
+    /// Seeded with the hand's release velocity, projected onto the return
+    /// direction (`freeChannelReturnVelocity`): a card released mid-fling
+    /// keeps its momentum for a beat and is reeled back, instead of reversing
+    /// from rest — which read as the card hitting a wall at the moment of
+    /// release.
+    private func settleFreeChannel(withHandVelocity velocity: CGPoint) {
         guard let card = grabbedCard else { return }
         grabbedCard = nil
-        guard card.transform != .identity else { return }
+        let offset = card.transform
+        guard offset != .identity else { return }
         UIView.animate(
             withDuration: ZoomFlight.springDuration, delay: 0,
             usingSpringWithDamping: ZoomFlight.springDamping,
-            initialSpringVelocity: 0,
+            initialSpringVelocity: ZoomFlightGrabHandoff.freeChannelReturnVelocity(
+                offset: CGPoint(x: offset.tx, y: offset.ty), handVelocity: velocity
+            ),
             options: [.beginFromCurrentState, .allowUserInteraction]
         ) {
             card.transform = .identity

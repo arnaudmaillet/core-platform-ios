@@ -67,9 +67,14 @@ public enum ZoomTransitionGeometry {
     }
 
     /// How far along its flight a caught transition must have been for a bare
-    /// release to let it keep going. The midpoint: whichever state the catch
-    /// was nearer is the state a release returns to.
-    public static let caughtCompletionThreshold: CGFloat = 0.5
+    /// release to let it keep going.
+    ///
+    /// Deliberately high, not the midpoint: reaching out and stopping a
+    /// flying card is almost always an arrest — the viewer changed their
+    /// mind — so a bare release puts it back unless the flight was
+    /// practically landed when it was caught. Continuing from further back is
+    /// still one flick away.
+    public static let caughtCompletionThreshold: CGFloat = 0.75
 
     /// The release contract for a flight CAUGHT mid-air, where — unlike a
     /// grab from rest — a decisive flick wins in EITHER direction and a bare
@@ -79,12 +84,11 @@ public enum ZoomTransitionGeometry {
     /// grab from rest: the viewer dragged the whole distance themselves, so
     /// the distance is their intent. A caught flight's distance is mostly the
     /// ANIMATION's, and the drag afterwards is exploration — the card in the
-    /// hand, not a commitment. So below flick speed the outcome is the state
-    /// the catch was nearer: caught early, the open had barely begun and a
-    /// release puts it back; caught late, it was practically open and a
-    /// release lets it land. Commitment against that default is expressed the
-    /// only unambiguous way a caught flight offers — a flick, which wins in
-    /// either direction regardless of anything else.
+    /// hand, not a commitment. So below flick speed a release returns the
+    /// flight to the grid unless it was caught practically landed (see
+    /// `caughtCompletionThreshold`). Commitment against that default is
+    /// expressed the only unambiguous way a caught flight offers — a flick,
+    /// which wins in either direction regardless of anything else.
     public static func caughtReleaseCompletes(
         caughtAt caughtFraction: CGFloat,
         velocityTowardEnd: CGFloat,

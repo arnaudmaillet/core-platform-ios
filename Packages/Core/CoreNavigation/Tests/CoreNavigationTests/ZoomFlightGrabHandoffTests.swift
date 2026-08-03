@@ -147,9 +147,18 @@ struct ZoomFlightGrabHandoffTests {
         #expect(release?.completes == false)
     }
 
-    @Test func caughtLateABareReleaseKeepsOpening() {
+    /// A catch is an arrest: even one well past the midpoint returns on a
+    /// bare release. Only a flight caught practically landed keeps going.
+    @Test func caughtWellPastTheMidpointStillReturns() {
         var handoff = presentCatch()
-        _ = handoff.grabBegan(atFraction: 0.7)
+        _ = handoff.grabBegan(atFraction: 0.6)
+        let release = handoff.released(verticalTranslation: 0, verticalVelocity: 0)
+        #expect(release?.completes == false)
+    }
+
+    @Test func caughtPracticallyLandedABareReleaseKeepsOpening() {
+        var handoff = presentCatch()
+        _ = handoff.grabBegan(atFraction: 0.8)
         let release = handoff.released(verticalTranslation: 0, verticalVelocity: 0)
         #expect(release?.completes == true)
     }
@@ -163,9 +172,9 @@ struct ZoomFlightGrabHandoffTests {
         _ = early.grabBegan(atFraction: 0.2)
         let draggedOpen = early.released(verticalTranslation: -600, verticalVelocity: 0)
         #expect(draggedOpen?.completes == false)
-        // Caught late, then dragged DOWN most of the way — still opens.
+        // Caught nearly landed, then dragged DOWN most of the way — still opens.
         var late = presentCatch()
-        _ = late.grabBegan(atFraction: 0.7)
+        _ = late.grabBegan(atFraction: 0.85)
         let draggedHome = late.released(verticalTranslation: 600, verticalVelocity: 0)
         #expect(draggedHome?.completes == true)
     }
@@ -195,14 +204,51 @@ struct ZoomFlightGrabHandoffTests {
     }
 
     @Test func theDismissLegDefaultsBySymmetry() {
-        // A dismissal caught late (nearly home) lands on a bare release...
+        // A dismissal caught nearly home lands on a bare release...
         var late = dismissCatch()
-        _ = late.grabBegan(atFraction: 0.8)
+        _ = late.grabBegan(atFraction: 0.9)
         #expect(late.released(verticalTranslation: 0, verticalVelocity: 0)?.completes == true)
-        // ...and one caught early returns to the feed.
+        // ...and one caught earlier returns to the feed.
         var early = dismissCatch()
-        _ = early.grabBegan(atFraction: 0.2)
+        _ = early.grabBegan(atFraction: 0.6)
         #expect(early.released(verticalTranslation: 0, verticalVelocity: 0)?.completes == false)
+    }
+
+    // MARK: - Free-channel return spring
+
+    /// The 2D offset's return spring is seeded with the hand's velocity,
+    /// SIGNED by direction — released mid-fling away from the tile, the card
+    /// keeps its momentum for a beat and is reeled back; released while
+    /// already returning, the spring catches the motion. Zero seed was the
+    /// brusque stop: a moving card reversing from rest.
+    @Test func theReturnSeedFollowsTheHandsDirection() {
+        // Offset down-right, hand still flinging down-right (away): negative.
+        let away = ZoomFlightGrabHandoff.freeChannelReturnVelocity(
+            offset: CGPoint(x: 100, y: 100), handVelocity: CGPoint(x: 300, y: 300)
+        )
+        #expect(away < 0)
+        // Same offset, hand moving back toward the tile: positive.
+        let homeward = ZoomFlightGrabHandoff.freeChannelReturnVelocity(
+            offset: CGPoint(x: 100, y: 100), handVelocity: CGPoint(x: -300, y: -300)
+        )
+        #expect(homeward > 0)
+        // Perpendicular motion neither helps nor fights the return.
+        let sideways = ZoomFlightGrabHandoff.freeChannelReturnVelocity(
+            offset: CGPoint(x: 100, y: 0), handVelocity: CGPoint(x: 0, y: 500)
+        )
+        #expect(abs(sideways) < 0.001)
+    }
+
+    @Test func theReturnSeedIsClampedAndQuietNearTheTile() {
+        // A wild fling cannot detonate the spring.
+        let clamped = ZoomFlightGrabHandoff.freeChannelReturnVelocity(
+            offset: CGPoint(x: 10, y: 0), handVelocity: CGPoint(x: 100_000, y: 0)
+        )
+        #expect(clamped == -3)
+        // No meaningful offset → no seed, whatever the hand was doing.
+        #expect(ZoomFlightGrabHandoff.freeChannelReturnVelocity(
+            offset: .zero, handVelocity: CGPoint(x: 900, y: 900)
+        ) == 0)
     }
 
     // MARK: - Caught fraction
@@ -306,20 +352,22 @@ struct CaughtReleaseContractTests {
         ))
     }
 
-    @Test func belowFlickSpeedTheCatchPointDecidesAtTheMidpoint() {
-        #expect(ZoomTransitionGeometry.caughtCompletionThreshold == 0.5)
+    @Test func belowFlickSpeedTheCatchPointDecidesAtTheThreshold() {
+        // High on purpose: a catch is an arrest, and only a flight caught
+        // practically landed continues on a bare release.
+        #expect(ZoomTransitionGeometry.caughtCompletionThreshold == 0.75)
         #expect(ZoomTransitionGeometry.caughtReleaseCompletes(
-            caughtAt: 0.5, velocityTowardEnd: 0
+            caughtAt: 0.75, velocityTowardEnd: 0
         ))
         #expect(!ZoomTransitionGeometry.caughtReleaseCompletes(
-            caughtAt: 0.49, velocityTowardEnd: 0
+            caughtAt: 0.74, velocityTowardEnd: 0
         ))
         // A sub-flick drift does not override the default either way.
         #expect(ZoomTransitionGeometry.caughtReleaseCompletes(
-            caughtAt: 0.6, velocityTowardEnd: -400
+            caughtAt: 0.8, velocityTowardEnd: -400
         ))
         #expect(!ZoomTransitionGeometry.caughtReleaseCompletes(
-            caughtAt: 0.4, velocityTowardEnd: 400
+            caughtAt: 0.7, velocityTowardEnd: 400
         ))
     }
 }

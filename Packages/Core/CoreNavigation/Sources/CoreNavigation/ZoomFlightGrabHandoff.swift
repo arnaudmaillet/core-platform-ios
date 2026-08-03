@@ -182,6 +182,25 @@ struct ZoomFlightGrabHandoff {
         return min(max(fraction, 0), 1)
     }
 
+    /// The free channel's return-spring velocity, in UIKit's unit —
+    /// distances-to-target per second — from the hand's release velocity and
+    /// the card's current 2D offset.
+    ///
+    /// SIGNED, by projecting the hand's velocity onto the direction back to
+    /// identity: a card released mid-fling away from the tile is still moving
+    /// away, and a spring seeded from rest (or with an unsigned magnitude)
+    /// reverses it against a wall — the brusque stop this exists to remove.
+    /// A negative seed lets the spring carry the fling for a beat and reel it
+    /// back; a positive one catches a hand already returning. Clamped like
+    /// every other seed so a wild flick cannot detonate the spring, and zero
+    /// for a card that has effectively no offset to return across.
+    static func freeChannelReturnVelocity(offset: CGPoint, handVelocity: CGPoint) -> CGFloat {
+        let distance = hypot(offset.x, offset.y)
+        guard distance > 1 else { return 0 }
+        let towardIdentity = (-offset.x * handVelocity.x - offset.y * handVelocity.y) / distance
+        return min(max(towardIdentity / distance, -3), 3)
+    }
+
     /// The hand's points/second, projected onto transition progress and
     /// normalized to the remaining travel toward the outcome's target —
     /// UIKit's spring-velocity unit. Clamped so a wild flick cannot detonate
