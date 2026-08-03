@@ -1,6 +1,8 @@
 import CoreModels
 import Foundation
+import MediaCore
 import PostGrid
+import UIKit
 import Testing
 @testable import Feed
 
@@ -230,5 +232,47 @@ private final class StubContextProvider: ForYouProviding, @unchecked Sendable {
     func firstPage() async throws -> ForYouPage { lock.withLock { first } }
     func page(after token: String) async throws -> ForYouPage {
         ForYouPage(posts: [], nextPageToken: nil)
+    }
+}
+
+// MARK: - The menu
+
+@MainActor
+struct ContentContextMenuTests {
+    private struct SilentFetcher: ImageFetching {
+        func fetchImageData(for url: URL) async throws -> Data { Data() }
+    }
+
+    private func makeScreen() -> ForYouViewController {
+        ForYouViewController(
+            viewModel: ForYouViewModel(
+                repository: StubContextProvider(first: ForYouPage(posts: [], nextPageToken: nil))
+            ),
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            makeSnapFeed: { _ in UIViewController() },
+            prewarm: { _ in }
+        )
+    }
+
+    @Test func theMenuOffersEveryContext() {
+        let children = makeScreen().makeContextMenu().children
+        #expect(children.count == ContentContext.allCases.count)
+        #expect(children.compactMap { ($0 as? UIAction)?.title } == ContentContext.allCases.map(\.title))
+    }
+
+    @Test func noItemCarriesACheckmark() {
+        // The bar item's GLYPH is the selection indicator; a tick beside the
+        // matching row says the same thing again, somewhere you have to open a
+        // menu to read. This is the regression guard for that decision — the
+        // default `.off` is easy to undo by adding `.singleSelection` back.
+        let children = makeScreen().makeContextMenu().children
+        #expect(children.compactMap { $0 as? UIAction }.allSatisfy { $0.state == .off })
+    }
+
+    @Test func everyItemCarriesItsIcon() {
+        // Without checkmarks the icon is the only thing distinguishing the rows
+        // at a glance, so a missing one costs more than it used to.
+        let children = makeScreen().makeContextMenu().children
+        #expect(children.compactMap { $0 as? UIAction }.allSatisfy { $0.image != nil })
     }
 }

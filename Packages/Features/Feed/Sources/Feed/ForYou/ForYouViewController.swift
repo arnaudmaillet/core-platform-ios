@@ -64,13 +64,11 @@ final class ForYouViewController: UIViewController {
         return item
     }()
 
-    /// The content context: the trailing item, whose native single-selection
-    /// menu carries the four lenses and whose glyph shows the active one.
+    /// The content context: the trailing item, whose menu carries the lenses
+    /// and whose GLYPH is the active one.
     ///
-    /// A bar item rather than a glass bubble, and the menu is REBUILT on every
-    /// change — which is what lets `.singleSelection`'s checkmark follow a
-    /// programmatic change as well as a tap. An icon-only button cannot be told
-    /// where its checkmark went.
+    /// The glyph doing that job is what lets the menu stay plain — see
+    /// `makeContextMenu` for why there is no checkmark in it.
     private lazy var contextItem: UIBarButtonItem = {
         let item = UIBarButtonItem(image: UIImage(systemName: viewModel.context.symbol))
         item.accessibilityLabel = "Content context"
@@ -409,7 +407,7 @@ final class ForYouViewController: UIViewController {
         // gives the slot what is left between them, so neither can be covered.
         navigationItem.leftBarButtonItem = composeItem
         navigationItem.rightBarButtonItem = contextItem
-        rebuildContextMenu()
+        contextItem.menu = makeContextMenu()
 
         pager.pin(to: view)
 
@@ -520,41 +518,44 @@ final class ForYouViewController: UIViewController {
         router?.route(to: .upload)
     }
 
-    /// Rebuilds the context menu so `.singleSelection` marks the active lens.
-    /// Cheap, and the only way the checkmark can follow a change this screen
-    /// made itself rather than one the menu made.
-    private func rebuildContextMenu() {
+    /// The context menu: plain actions, **no `.singleSelection` and no
+    /// checkmark**.
+    ///
+    /// The selection is already on screen — the bar item's glyph IS the active
+    /// context, which is the whole reason it is a state item rather than an
+    /// action. A tick beside the matching row says the same thing a second
+    /// time, in a place you have to open a menu to read.
+    ///
+    /// Built ONCE, and that follows directly. The rebuild this used to do on
+    /// every change existed solely to move the checkmark; with nothing stateful
+    /// left in the menu, rebuilding it would be work whose only output nobody
+    /// can see. `applyContext` moves the glyph instead.
+    func makeContextMenu() -> UIMenu {
         // Closure form, not a bare `map(makeContextAction)`: passing a
         // MainActor-isolated method as a function value strips its isolation
         // and Swift 6 rejects it.
-        contextItem.menu = UIMenu(
-            options: .singleSelection,
-            children: ContentContext.allCases.map { makeContextAction($0) }
-        )
+        UIMenu(children: ContentContext.allCases.map { makeContextAction($0) })
     }
 
     private func makeContextAction(_ context: ContentContext) -> UIAction {
         UIAction(
             title: context.title,
-            image: UIImage(systemName: context.symbol),
-            state: context == viewModel.context ? .on : .off
+            image: UIImage(systemName: context.symbol)
         ) { [weak self] _ in
             self?.applyContext(context)
         }
     }
 
     /// Adopts a context everywhere it shows: the glyph, the VoiceOver value,
-    /// the menu's own checkmark, and the corpus both tabs are reading.
+    /// and the corpus both tabs are reading.
     ///
     /// Set HERE rather than in the menu action so that every path that changes
     /// the context — a menu tap, a debug hook, a restore — moves all of them
-    /// together. The rebuild is what lets a programmatic change carry the
-    /// checkmark.
+    /// together.
     private func applyContext(_ context: ContentContext) {
         viewModel.setContext(context)
         contextItem.image = UIImage(systemName: context.symbol)
         contextItem.accessibilityValue = context.title
-        rebuildContextMenu()
     }
 
     /// Opens the full-screen feed on the tapped post, with the hero zoom.
