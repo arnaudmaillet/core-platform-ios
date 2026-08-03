@@ -285,6 +285,68 @@ struct ForYouViewModelTests {
         #expect(provider.pagedLoads == 1)
     }
 
+    /// A page that re-serves rows the corpus already holds must not duplicate
+    /// them. Pages are not reliably disjoint — the mock's offset cursor
+    /// shifts when the timeline grows underneath it, and a real cursor can
+    /// re-serve a boundary row the same way — and a repeated id is fatal
+    /// downstream: the snap feed seeds `Dictionary(uniqueKeysWithValues:)`
+    /// from a tapped tile's slice, which traps on the duplicate. Found live:
+    /// catch-and-reverse a hero present, let the next page land, tap any
+    /// tile — crash on 'post-0033'.
+    @Test func anOverlappingPageAppendsOnlyItsGenuinelyNewPosts() async {
+        let provider = StubForYouProvider(first: ForYouPage(posts: mixed, nextPageToken: "p2"))
+        provider.pages["p2"] = ForYouPage(
+            posts: [
+                tile("m2", kind: .video, publishedAtMS: 20, reactions: 3), // re-served
+                tile("m3", kind: .photo, publishedAtMS: 50, reactions: 99)
+            ],
+            nextPageToken: nil
+        )
+        let (viewModel, _) = makeViewModel(provider)
+        viewModel.viewDidLoad()
+        await settle()
+        let before = viewModel.posts(for: .activity).map(\.id.rawValue)
+
+        viewModel.loadNextPageIfNeeded()
+        await settle()
+
+        let after = viewModel.posts(for: .activity).map(\.id.rawValue)
+        #expect(after == before + ["m3"])
+        #expect(Set(after).count == after.count)
+    }
+
+    /// `onPagingChange(true)` shows the paging footer, showing the footer
+    /// runs a layout pass, and a layout pass can fire `onNearEnd` — so the
+    /// announcement can RE-ENTER `loadNextPageIfNeeded` synchronously. When
+    /// the announcement preceded the `pageLoad` assignment, the re-entrant
+    /// call passed the in-flight guard and fetched the same token twice,
+    /// appending the whole page again (found live via a hero flight's staging
+    /// layout; the duplicate then trapped the snap feed's seed dictionary).
+    @Test func aReentrantNearEndDuringTheAnnouncementDoesNotDoubleFetch() async {
+        let provider = StubForYouProvider(first: ForYouPage(posts: mixed, nextPageToken: "p2"))
+        provider.pages["p2"] = ForYouPage(
+            posts: [tile("m3", kind: .photo, publishedAtMS: 50, reactions: 99)],
+            nextPageToken: nil
+        )
+        let (viewModel, _) = makeViewModel(provider)
+        viewModel.viewDidLoad()
+        await settle()
+
+        var reentered = false
+        viewModel.onPagingChange = { [weak viewModel] starting in
+            guard starting, !reentered else { return }
+            reentered = true
+            viewModel?.loadNextPageIfNeeded()
+        }
+        viewModel.loadNextPageIfNeeded()
+        await settle()
+
+        #expect(reentered)
+        #expect(provider.pagedLoads == 1)
+        let ids = viewModel.posts(for: .activity).map(\.id.rawValue)
+        #expect(Set(ids).count == ids.count)
+    }
+
     /// Changing the source is the one action that may reorder everything,
     /// because the viewer asked for it.
     @Test func changingSourceReordersTheWholeLoadedCorpus() async {

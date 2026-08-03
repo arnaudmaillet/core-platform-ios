@@ -115,10 +115,11 @@ public final class ForYouViewModel {
     /// page has landed.
     public func loadNextPageIfNeeded() {
         guard pageLoad == nil, load == nil, corpus != nil, let token = nextPageToken else { return }
-        // Announced only past the guard: the common case is a scroll that
-        // reaches the end of an exhausted corpus, and a spinner for a fetch
-        // that never starts would sit there forever.
-        onPagingChange?(true)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print("[foryou-page] fetch after=\(token)")
+        }
+        #endif
         pageLoad = Task { [weak self] in
             guard let self else { return }
             defer {
@@ -129,11 +130,47 @@ public final class ForYouViewModel {
             // Append, never reorder: the new page is ranked among ITSELF and
             // added to the end, so a page landing cannot renumber what is
             // already on screen.
-            corpus = (corpus ?? []) + source.ordering(page.posts)
+            //
+            // Deduplicated against everything already loaded, as a second
+            // line of defense behind the announcement ordering below: a
+            // re-served row is never trusted into the corpus, whoever serves
+            // it — a re-entrant fetch like the one found here, or a real
+            // server re-serving a boundary row after the timeline grew under
+            // its cursor. A repeated id is not cosmetic — every id-keyed
+            // structure downstream assumes uniqueness, and the first one (the
+            // snap feed seeding `Dictionary(uniqueKeysWithValues:)` from a
+            // tapped tile's slice) took the whole app down when a duplicate
+            // reached it.
+            let existing = Set((corpus ?? []).map(\.id))
+            let fresh = page.posts.filter { !existing.contains($0.id) }
+            #if DEBUG
+            if fresh.count != page.posts.count,
+               ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                let repeated = page.posts.filter { existing.contains($0.id) }.map(\.id.rawValue)
+                print("[foryou-page] token=\(token) re-served \(repeated)")
+            }
+            #endif
+            corpus = (corpus ?? []) + source.ordering(fresh)
             nextPageToken = page.nextPageToken
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                print("[foryou-page] appended fresh=\(fresh.count) corpus=\(corpus?.count ?? 0) next=\(page.nextPageToken ?? "nil")")
+            }
+            #endif
             publish()
             onLoadSettled?()
         }
+        // Announced only past the guard (the common case is a scroll reaching
+        // the end of an exhausted corpus, and a spinner for a fetch that never
+        // starts would sit there forever) — and only AFTER `pageLoad` is
+        // assigned. Showing the footer runs a layout pass, a layout pass can
+        // fire `onNearEnd`, and a re-entrant call arriving before the
+        // assignment passed the `pageLoad == nil` guard and started a SECOND
+        // fetch with the same token. Measured live, triggered by a hero
+        // flight's staging layout: two `page(after: 20)` fetches back to
+        // back, the whole second page appended twice, and the next tile tap
+        // trapping on the duplicate id.
+        onPagingChange?(true)
     }
 
     private func loadFirstPage(reset: Bool) {
@@ -161,6 +198,11 @@ public final class ForYouViewModel {
                 corpus = source.ordering(page.posts)
                 failure = nil
                 nextPageToken = page.nextPageToken
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                    print("[foryou-page] first count=\(page.posts.count) next=\(page.nextPageToken ?? "nil") reset=\(reset)")
+                }
+                #endif
             } catch {
                 guard !Task.isCancelled else { return }
                 failure = "Couldn't load. Pull to retry."

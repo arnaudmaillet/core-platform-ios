@@ -55,6 +55,20 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     private var interruptible: UIViewPropertyAnimator?
     private weak var interruptibleContext: AnyObject?
 
+    /// The card of the flight this animator currently has staged. A mid-air
+    /// catch (`ZoomFlightInterruptor`) drives its transform directly — the
+    /// free-position channel — while the percent driver scrubs everything
+    /// else. Weak: the transition container owns the card for the flight's
+    /// lifetime, and this seam only borrows it.
+    private(set) weak var stagedFlightCard: (any ZoomFlightCard)?
+
+    /// The staged flight's two endpoint rects in ANIMATION order — `start` is
+    /// the pose the animator departs from (the tile on a present, the page on
+    /// a dismiss), `end` where it lands. A mid-air catch recovers the caught
+    /// fraction from the card's presentation size against these, because the
+    /// percent driver's synced fraction is time-based and wrong for a spring.
+    private(set) var stagedFlightEndpoints: (start: CGRect, end: CGRect)?
+
     init(
         isPresenting: Bool,
         source: any ZoomTransitionSource,
@@ -184,12 +198,29 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let flight = ZoomFlight.build(
             source: source, destination: destination, sourceFrame: sourceFrame, pageFrame: pageFrame
         )
+        stagedFlightCard = flight.card
+        stagedFlightEndpoints = (start: sourceFrame, end: pageFrame)
         container.insertSubview(flight.card, belowSubview: toView)
         container.insertSubview(flight.shadow, belowSubview: flight.card)
         // Resolve the chrome replica's full-screen layout (safe areas, text
         // wrapping) while the card still spans the page; its bounds never
         // change again, so nothing can relayout mid-flight.
         container.layoutIfNeeded()
+
+        // The flight is watchable, not touchable. The presented container
+        // stays visible and CLEAR above the card (that is what keeps the
+        // navigation bar native), and the grid stays live beneath it — so
+        // without this, every touch during the flight fell through to one of
+        // them: a feed button on a screen that has not landed, a tile tap, or
+        // a gallery scroll whose layout pass could even start a page fetch
+        // mid-flight. The shield sits topmost in the container, so
+        // hit-testing stops at it, while the mid-air catch keeps working —
+        // its recognizers are attached to the container itself and see every
+        // touch in its subtree. Removed on both completions; the container
+        // outlives the transition.
+        let shield = UIView(frame: container.bounds)
+        shield.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        container.addSubview(shield)
 
         // Pose the card as the pin, COMMIT it, and only then hide the real one.
         //
@@ -277,6 +308,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                 // rendering, so the surface is simply dropped. The destination
                 // is not revealed — UIKit removes it on `completeTransition`.
                 self.hasAbandonedFirstFrameHandoff = true
+                shield.removeFromSuperview()
                 flight.card.removeFromSuperview()
                 flight.shadow.removeFromSuperview()
                 dim.removeFromSuperview()
@@ -331,6 +363,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                                return destination.zoomDestinationContentIsReady
                                    && destination.zoomDestinationMediaIsRendering
                            }) {
+                shield.removeFromSuperview()
                 self.destination?.setZoomContentHidden(false)
                 if let surface = flight.card.zoomLiveMediaSurface {
                     self.destination?.zoomAdoptLiveMediaView(surface)
@@ -729,6 +762,8 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let flight = ZoomFlight.build(
             source: source, destination: destination, sourceFrame: sourceFrame, pageFrame: pageFrame
         )
+        stagedFlightCard = flight.card
+        stagedFlightEndpoints = (start: pageFrame, end: sourceFrame)
         // The card now renders the destination's player. Hand that player over
         // to whoever plays the same asset next — the source it is flying home
         // to — so the landing adopts a running item instead of starting a fresh
@@ -766,6 +801,12 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         container.insertSubview(flight.card, belowSubview: fromView)
         container.insertSubview(flight.shadow, belowSubview: flight.card)
         container.layoutIfNeeded()
+        // Same shield as the present leg, for the same reason: the departing
+        // feed's view rides on top with its content hidden but its touch
+        // handling alive, and the grid is live beneath it.
+        let shield = UIView(frame: container.bounds)
+        shield.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        container.addSubview(shield)
         // Starts flush with the device's own display corners (visually identical
         // to the screen-clipped feed it replaces); rounds back to the pin.
         let screenRadius = ZoomFlight.screenCornerRadius(behind: container)
@@ -843,6 +884,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         }
         animator.addCompletion { _ in
             let cancelled = context.transitionWasCancelled
+            shield.removeFromSuperview()
             #if DEBUG
             Self.logTeardown("enter", context: context, card: flight.card, fromView: fromView)
             #endif

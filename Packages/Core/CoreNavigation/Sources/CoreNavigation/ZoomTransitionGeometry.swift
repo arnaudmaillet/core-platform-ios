@@ -65,4 +65,38 @@ public enum ZoomTransitionGeometry {
     ) -> Bool {
         progress >= progressThreshold || velocity >= flickVelocity
     }
+
+    /// How far along its flight a caught transition must have been for a bare
+    /// release to let it keep going.
+    ///
+    /// Deliberately high, not the midpoint: reaching out and stopping a
+    /// flying card is almost always an arrest — the viewer changed their
+    /// mind — so a bare release puts it back unless the flight was
+    /// practically landed when it was caught. Continuing from further back is
+    /// still one flick away.
+    public static let caughtCompletionThreshold: CGFloat = 0.75
+
+    /// The release contract for a flight CAUGHT mid-air, where — unlike a
+    /// grab from rest — a decisive flick wins in EITHER direction and a bare
+    /// release is decided by WHERE THE FLIGHT WAS CAUGHT, not by the drag.
+    ///
+    /// `shouldCompleteDismissal` measures drag distance, which is right for a
+    /// grab from rest: the viewer dragged the whole distance themselves, so
+    /// the distance is their intent. A caught flight's distance is mostly the
+    /// ANIMATION's, and the drag afterwards is exploration — the card in the
+    /// hand, not a commitment. So below flick speed a release returns the
+    /// flight to the grid unless it was caught practically landed (see
+    /// `caughtCompletionThreshold`). Commitment against that default is
+    /// expressed the only unambiguous way a caught flight offers — a flick,
+    /// which wins in either direction regardless of anything else.
+    public static func caughtReleaseCompletes(
+        caughtAt caughtFraction: CGFloat,
+        velocityTowardEnd: CGFloat,
+        caughtThreshold: CGFloat = caughtCompletionThreshold,
+        flickVelocity: CGFloat = flickVelocity
+    ) -> Bool {
+        if velocityTowardEnd >= flickVelocity { return true }
+        if velocityTowardEnd <= -flickVelocity { return false }
+        return caughtFraction >= caughtThreshold
+    }
 }
