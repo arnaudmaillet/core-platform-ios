@@ -80,7 +80,7 @@ public final class ForYouViewModel {
     public private(set) var source: DiscoverySource = .trending
     /// The active lens. Restored from the store at init, so the surface opens
     /// where the viewer left it.
-    public private(set) var context: ContentContext = .entertainment
+    public private(set) var context: ContentContext = .all
 
     /// Everything loaded so far, **in the order it is displayed**. nil = the
     /// first page is still in flight (pages report loading); a failure records
@@ -396,7 +396,7 @@ public final class ForYouViewModel {
     nonisolated static func emptyMessage(
         format: GalleryFilter.Format,
         source: DiscoverySource,
-        context: ContentContext = .entertainment
+        context: ContentContext = .all
     ) -> String {
         let what = switch format {
         case .activity: "activity"
@@ -415,9 +415,9 @@ public final class ForYouViewModel {
         // A narrowed context is very often the REASON a page is empty, and a
         // blank screen that does not say so reads as a broken feed. Naming the
         // lens turns "this is broken" into "this is filtered", which is the
-        // difference between a bug report and a menu tap. Entertainment adds
-        // nothing, because it filters nothing.
-        guard context != .entertainment else { return sentence }
+        // difference between a bug report and a menu tap. All adds nothing,
+        // because it filters nothing.
+        guard !context.isUnfiltered else { return sentence }
         return sentence + " Showing \(context.title) only."
     }
 }

@@ -1137,7 +1137,13 @@ private final class BadgeView: UIView {
         layer.cornerRadius = bounds.height / 2
     }
 
+    /// The style currently rendered, because the FILL depends on it and the
+    /// fill is also re-derived on every selection change.
+    private var style: PagedTabBar.BadgeStyle = .count(0)
+
     func apply(_ style: PagedTabBar.BadgeStyle) {
+        self.style = style
+        defer { applyFill() }
         switch style {
         case .count(let count):
             // Past 99 the pill would out-measure its own segment title.
@@ -1158,7 +1164,37 @@ private final class BadgeView: UIView {
     }
 
     func setSelectionStrength(_ strength: CGFloat) {
-        backgroundColor = strength > 0.5 ? .label : .secondaryLabel
+        self.strength = strength
+        applyFill()
+    }
+
+    private var strength: CGFloat = 0
+
+    /// The badge's fill, which differs by style because the two say different
+    /// things.
+    ///
+    /// A COUNT is chrome: it follows its segment's selection, brightening from
+    /// `secondaryLabel` to `label` alongside the title it belongs to, so a row
+    /// of counts reads as one control.
+    ///
+    /// A DOT is an alert. It is the only mark on this bar that means "look
+    /// here", so it takes the tint rather than the text colour and holds it
+    /// whether or not its segment is selected — a dot that dimmed with its
+    /// segment would be quietest exactly when it is the only thing worth
+    /// noticing.
+    ///
+    /// ⚠️ `.systemBlue` is a semantic colour inside a `UIGlassEffect` content
+    /// view, which is the arrangement that once resolved `.systemBackground` to
+    /// the wrong end of the spectrum in dark mode (see the type comment). It was
+    /// therefore checked in both appearances rather than reasoned about, and it
+    /// resolves correctly in each.
+    private func applyFill() {
+        switch style {
+        case .count:
+            backgroundColor = strength > 0.5 ? .label : .secondaryLabel
+        case .dot:
+            backgroundColor = .systemBlue
+        }
     }
 }
 

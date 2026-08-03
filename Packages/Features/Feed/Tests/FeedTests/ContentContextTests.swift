@@ -24,16 +24,35 @@ struct ContentContextTests {
         post("d", caption: "Deep work morning, no notifications")
     ]
 
-    @Test func entertainmentFiltersNothing() {
+    @Test func allFiltersNothing() {
         // The default must be the WHOLE corpus, not a keyword-shaped slice of
         // it — a viewer who never opens the menu should not be silently reading
         // a filtered feed.
-        #expect(ContentContext.entertainment.filtering(corpus).count == corpus.count)
+        #expect(ContentContext.all.filtering(corpus).count == corpus.count)
     }
 
-    @Test func entertainmentAdmitsAPostThatMatchesNoKeywordAnywhere() {
+    @Test func allAdmitsAPostThatMatchesNoKeywordAnywhere() {
         let unrelated = [post("x", caption: "")]
-        #expect(ContentContext.entertainment.filtering(unrelated).count == 1)
+        #expect(ContentContext.all.filtering(unrelated).count == 1)
+    }
+
+    @Test func exactlyOneContextIsUnfiltered() {
+        // The property that makes the menu honest: All is a SCOPE, the rest are
+        // subjects. A second case quietly matching everything would be a filter
+        // that does not filter, which is the thing this split exists to end.
+        #expect(ContentContext.allCases.filter(\.isUnfiltered) == [.all])
+    }
+
+    @Test func entertainmentIsNowASubjectLikeTheOthers() {
+        // It used to BE the unfiltered default. It now has to earn its posts.
+        let mixed = [post("m", caption: "New album on repeat"), post("n", caption: "Sunset over the bay")]
+        #expect(ContentContext.entertainment.filtering(mixed).map(\.id.rawValue) == ["m"])
+    }
+
+    @Test func allLeadsTheMenu() {
+        // `CaseIterable` order is menu order, and the unfiltered scope belongs
+        // at the top where a viewer looks for "show me everything".
+        #expect(ContentContext.allCases.first == .all)
     }
 
     @Test func eachContextAdmitsItsOwnCaptions() {
@@ -85,10 +104,10 @@ struct ContentContextStoreTests {
         return (ContentContextStore(defaults: suite, key: "test.context"), suite, name)
     }
 
-    @Test func theDefaultIsEntertainment() {
+    @Test func theDefaultIsAll() {
         let (store, _, name) = makeStore()
         defer { UserDefaults().removePersistentDomain(forName: name) }
-        #expect(store.context == .entertainment)
+        #expect(store.context == .all)
     }
 
     @Test func aChoiceSurvivesANewStoreOverTheSameDefaults() {
@@ -109,7 +128,19 @@ struct ContentContextStoreTests {
         // clean fallback here is an empty screen with no way out.
         suite.set("astrophotography", forKey: "test.context")
         let store = ContentContextStore(defaults: suite, key: "test.context")
-        #expect(store.context == .entertainment)
+        #expect(store.context == .all)
+    }
+
+    /// The live key is versioned because the vocabulary changed MEANING:
+    /// `entertainment` used to be the unfiltered default and is now a filtered
+    /// subject. Reading the old key would wake an install up quietly filtered.
+    @Test func theLiveKeyIsVersionedPastTheOldMeaning() {
+        let name = "foryou.context.tests.\(UUID().uuidString)"
+        let suite = UserDefaults(suiteName: name)!
+        defer { UserDefaults().removePersistentDomain(forName: name) }
+        suite.set("entertainment", forKey: "foryou.context")
+        let store = ContentContextStore(defaults: suite)
+        #expect(store.context == .all)
     }
 }
 
@@ -151,7 +182,7 @@ struct ForYouContextTests {
         model.viewDidLoad()
         for _ in 0..<12 { await Task.yield() }
         model.setContext(.work)
-        model.setContext(.entertainment)
+        model.setContext(.all)
         // The corpus is filtered on READ, never narrowed in place — so going
         // back to Entertainment restores everything without a refetch. Storing
         // the narrowed corpus would have made this unrecoverable.
@@ -185,7 +216,7 @@ struct ForYouContextTests {
         model.viewDidLoad()
         for _ in 0..<12 { await Task.yield() }
         let before = snapshots().count
-        model.setContext(.entertainment)
+        model.setContext(.all)
         #expect(snapshots().count == before)
     }
 }
