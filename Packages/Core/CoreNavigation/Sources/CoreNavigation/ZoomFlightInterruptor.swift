@@ -146,6 +146,7 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
                 timingCurve = UISpringTimingParameters(
                     dampingRatio: ZoomFlight.springDamping, initialVelocity: .zero
                 )
+                continueOverFullSpring(fromProgress: percentComplete, towardEnd: true)
                 finish()
             }
         default:
@@ -211,8 +212,8 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
             detach()
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-                print(String(format: "[zoom-live] CATCH release completes=%@ progress=%.2f vy=%.0f",
-                             release.completes ? "yes" : "no",
+                print(String(format: "[zoom-live] CATCH release completes=%@ caught=%.2f progress=%.2f vy=%.0f",
+                             release.completes ? "yes" : "no", handoff.grabbedAt,
                              handoff.fraction(forVerticalTranslation: translation.y),
                              recogniser.velocity(in: container).y))
             }
@@ -228,6 +229,10 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
             timingCurve = UISpringTimingParameters(
                 dampingRatio: ZoomFlight.springDamping,
                 initialVelocity: CGVector(dx: 0, dy: release.springVelocity)
+            )
+            continueOverFullSpring(
+                fromProgress: handoff.fraction(forVerticalTranslation: translation.y),
+                towardEnd: release.completes
             )
             release.completes ? finish() : cancel()
         default:
@@ -289,6 +294,24 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
         update(fraction)
         aligned = fraction
         return fraction
+    }
+
+    /// Stretches the percent driver's continuation to the flight's FULL
+    /// spring duration, whatever fraction remains.
+    ///
+    /// The driver's default scales the continuation by the remaining
+    /// fraction — `(1 − progress) × duration` toward the end, `progress ×
+    /// duration` back to the start — so a flight caught early rewound to the
+    /// tile in a tenth of a second: no time for the spring to breathe, which
+    /// reads as a rigid snap rather than the elastic settling every other
+    /// dismissal lands with. Every non-caught release in this transition runs
+    /// the whole `ZoomFlight.springDuration` regardless of remaining distance
+    /// (the grab-from-rest release is a fixed-duration `UIView.animate`), so
+    /// the caught one does too: `completionSpeed` divides the remaining time,
+    /// making it the full duration again.
+    private func continueOverFullSpring(fromProgress progress: CGFloat, towardEnd: Bool) {
+        let remaining = towardEnd ? 1 - progress : progress
+        completionSpeed = min(max(remaining, 0.001), 1)
     }
 
     /// Springs the free channel's offset home alongside the percent driver's

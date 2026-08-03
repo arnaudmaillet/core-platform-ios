@@ -128,9 +128,11 @@ struct ZoomFlightGrabHandoff {
     }
 
     /// The finger lifted mid-grab. Decides the outcome on the caught-flight
-    /// release contract and converts the hand's velocity into the
-    /// continuation spring's unit. Nil when no grab was in flight (a release
-    /// the pan delivered after the decision was already made).
+    /// release contract — the catch point and the hand's speed, never the
+    /// drag distance — and converts that velocity into the continuation
+    /// spring's unit (seeded from the CURRENT progress, which is where the
+    /// card physically is). Nil when no grab was in flight (a release the
+    /// pan delivered after the decision was already made).
     mutating func released(
         verticalTranslation translation: CGFloat, verticalVelocity velocity: CGFloat
     ) -> Release? {
@@ -138,7 +140,7 @@ struct ZoomFlightGrabHandoff {
         phase = .decided
         let progress = fraction(forVerticalTranslation: translation)
         let completes = ZoomTransitionGeometry.caughtReleaseCompletes(
-            progress: progress, velocityTowardEnd: direction * velocity
+            caughtAt: grabbedAt, velocityTowardEnd: direction * velocity
         )
         return Release(
             completes: completes,

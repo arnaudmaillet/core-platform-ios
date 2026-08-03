@@ -140,27 +140,40 @@ struct ZoomFlightGrabHandoffTests {
 
     // MARK: - Release contract
 
-    @Test func aCaughtPresentReleasedPastTheThresholdKeepsOpening() {
+    @Test func caughtEarlyABareReleaseReturnsToTheGrid() {
         var handoff = presentCatch()
-        _ = handoff.grabBegan(atFraction: 0.5)
+        _ = handoff.grabBegan(atFraction: 0.3)
+        let release = handoff.released(verticalTranslation: 0, verticalVelocity: 0)
+        #expect(release?.completes == false)
+    }
+
+    @Test func caughtLateABareReleaseKeepsOpening() {
+        var handoff = presentCatch()
+        _ = handoff.grabBegan(atFraction: 0.7)
         let release = handoff.released(verticalTranslation: 0, verticalVelocity: 0)
         #expect(release?.completes == true)
     }
 
-    @Test func aCaughtPresentDraggedBelowTheThresholdReverses() {
-        var handoff = presentCatch()
-        _ = handoff.grabBegan(atFraction: 0.5)
-        // 300pt down on a 1000pt span → progress 0.2, under the shared 0.35.
-        let release = handoff.released(verticalTranslation: 300, verticalVelocity: 0)
-        #expect(release?.completes == false)
+    /// The drag scrubs the visuals but never decides the outcome — the
+    /// distance was mostly the animation's, and a slow drag is the card in
+    /// the hand, not a commitment. Only the catch point and a flick decide.
+    @Test func theDragDistanceDoesNotDecideTheOutcome() {
+        // Caught early, then dragged UP most of the way — still returns.
+        var early = presentCatch()
+        _ = early.grabBegan(atFraction: 0.2)
+        let draggedOpen = early.released(verticalTranslation: -600, verticalVelocity: 0)
+        #expect(draggedOpen?.completes == false)
+        // Caught late, then dragged DOWN most of the way — still opens.
+        var late = presentCatch()
+        _ = late.grabBegan(atFraction: 0.7)
+        let draggedHome = late.released(verticalTranslation: 600, verticalVelocity: 0)
+        #expect(draggedHome?.completes == true)
     }
 
     @Test func aDownwardFlickReversesAPresentHoweverFarItHadFlown() {
         var handoff = presentCatch()
         _ = handoff.grabBegan(atFraction: 0.9)
-        // The hand's speed at release outranks where the machine happened to
-        // be — this is where the caught contract departs from the
-        // grab-from-rest one, whose progress term would have won here.
+        // The hand's speed at release outranks the catch point's default.
         let release = handoff.released(verticalTranslation: 40, verticalVelocity: 1200)
         #expect(release?.completes == false)
     }
@@ -179,6 +192,17 @@ struct ZoomFlightGrabHandoffTests {
         // reverses a present sends a dismissal home.
         let release = handoff.released(verticalTranslation: 40, verticalVelocity: 1200)
         #expect(release?.completes == true)
+    }
+
+    @Test func theDismissLegDefaultsBySymmetry() {
+        // A dismissal caught late (nearly home) lands on a bare release...
+        var late = dismissCatch()
+        _ = late.grabBegan(atFraction: 0.8)
+        #expect(late.released(verticalTranslation: 0, verticalVelocity: 0)?.completes == true)
+        // ...and one caught early returns to the feed.
+        var early = dismissCatch()
+        _ = early.grabBegan(atFraction: 0.2)
+        #expect(early.released(verticalTranslation: 0, verticalVelocity: 0)?.completes == false)
     }
 
     // MARK: - Caught fraction
@@ -267,32 +291,35 @@ struct ZoomFlightGrabHandoffTests {
 }
 
 /// The caught-flight release contract is deliberately NOT
-/// `shouldCompleteDismissal`: a caught flight's progress is mostly the
-/// animation's, so a decisive flick must win in either direction. These pin
-/// the asymmetry so the two contracts cannot silently converge.
+/// `shouldCompleteDismissal`: a caught flight's distance is mostly the
+/// animation's, so a bare release is decided by WHERE it was caught — the
+/// midpoint splits the defaults — and a decisive flick wins in either
+/// direction. These pin the asymmetry so the two contracts cannot silently
+/// converge.
 struct CaughtReleaseContractTests {
     @Test func aDecisiveFlickWinsInEitherDirection() {
         #expect(ZoomTransitionGeometry.caughtReleaseCompletes(
-            progress: 0.05, velocityTowardEnd: 900
+            caughtAt: 0.05, velocityTowardEnd: 900
         ))
         #expect(!ZoomTransitionGeometry.caughtReleaseCompletes(
-            progress: 0.95, velocityTowardEnd: -900
+            caughtAt: 0.95, velocityTowardEnd: -900
         ))
     }
 
-    @Test func belowFlickSpeedTheSharedThresholdDecides() {
+    @Test func belowFlickSpeedTheCatchPointDecidesAtTheMidpoint() {
+        #expect(ZoomTransitionGeometry.caughtCompletionThreshold == 0.5)
         #expect(ZoomTransitionGeometry.caughtReleaseCompletes(
-            progress: 0.35, velocityTowardEnd: 0
+            caughtAt: 0.5, velocityTowardEnd: 0
         ))
         #expect(!ZoomTransitionGeometry.caughtReleaseCompletes(
-            progress: 0.34, velocityTowardEnd: 0
+            caughtAt: 0.49, velocityTowardEnd: 0
         ))
-        // A sub-flick drift does not override the threshold either way.
+        // A sub-flick drift does not override the default either way.
         #expect(ZoomTransitionGeometry.caughtReleaseCompletes(
-            progress: 0.5, velocityTowardEnd: -400
+            caughtAt: 0.6, velocityTowardEnd: -400
         ))
         #expect(!ZoomTransitionGeometry.caughtReleaseCompletes(
-            progress: 0.2, velocityTowardEnd: 400
+            caughtAt: 0.4, velocityTowardEnd: 400
         ))
     }
 }
