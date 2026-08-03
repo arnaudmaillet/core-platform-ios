@@ -136,6 +136,62 @@ struct ForYouUnreadStoreTests {
         #expect(store.count(for: .short, in: short) == 0)
     }
 
+    @Test func stagingBacksDatesTheWatermarkWhenTheCorpusAllows() {
+        let store = makeStore()
+        let posts = [post("a", at: 10), post("b", at: 20), post("c", at: 30), post("d", at: 40)]
+        store.stageUnread(3, for: .activity, in: posts)
+        // The three newest (40, 30, 20) are now newer than the watermark (10).
+        #expect(store.count(for: .activity, in: posts) == 3)
+    }
+
+    @Test func stagingSurvivesUnsortedInput() {
+        let store = makeStore()
+        // The corpus arrives in display order, which is whatever the active
+        // discovery ordering says — never assume it is chronological.
+        let posts = [post("c", at: 30), post("a", at: 10), post("d", at: 40), post("b", at: 20)]
+        store.stageUnread(2, for: .activity, in: posts)
+        #expect(store.count(for: .activity, in: posts) == 2)
+    }
+
+    @Test func aCountBiggerThanTheCorpusIsStatedOutright() {
+        let store = makeStore()
+        let posts = [post("a", at: 10), post("b", at: 20)]
+        // No timestamp leaves 5 posts above it in a corpus of 2, so the
+        // watermark cannot express this and the count is stated instead. A QA
+        // argument asking for a wide pill gets the wide pill.
+        store.stageUnread(5, for: .activity, in: posts)
+        #expect(store.count(for: .activity, in: posts) == 5)
+    }
+
+    @Test func aStatedCountStillClearsWhenTheTabIsRead() {
+        let store = makeStore()
+        let posts = [post("a", at: 10), post("b", at: 20)]
+        store.stageUnread(99, for: .activity, in: posts)
+        #expect(store.count(for: .activity, in: posts) == 99)
+        // Same clearing path as a derived one — the mock must not leave a badge
+        // that no amount of reading can dismiss.
+        store.markSeen(.activity, in: posts, clearingOverride: true)
+        #expect(store.count(for: .activity, in: posts) == 0)
+    }
+
+    @Test func stagingZeroDoesNothing() {
+        let store = makeStore()
+        let posts = [post("a", at: 10), post("b", at: 20)]
+        store.stageUnread(0, for: .activity, in: posts)
+        #expect(store.count(for: .activity, in: posts) == 0)
+    }
+
+    @Test func aDerivedStagedBadgeClearsThroughTheOrdinaryPath() {
+        let store = makeStore()
+        let posts = [post("a", at: 10), post("b", at: 20), post("c", at: 30)]
+        store.stageUnread(2, for: .activity, in: posts)
+        #expect(store.count(for: .activity, in: posts) == 2)
+        // The whole point of staging it this way rather than forcing a number:
+        // reading the tab clears it exactly as a genuine count would.
+        store.markSeen(.activity, in: posts)
+        #expect(store.count(for: .activity, in: posts) == 0)
+    }
+
     @Test func watermarksSurviveANewStoreOverTheSameDefaults() {
         let suite = UserDefaults(suiteName: "foryou.unread.tests.\(UUID().uuidString)")!
         let first = ForYouUnreadStore(defaults: suite, keyPrefix: "test.unread", arguments: [])
@@ -152,28 +208,48 @@ struct ForYouUnreadStoreTests {
 #if DEBUG
 struct ForYouBadgeOverrideTests {
     @Test func theArgumentForcesCountsInPagerOrder() {
-        let store = makeStore(arguments: ["-foryou-badges", "3,0,1"])
-        #expect(store.count(for: .activity, in: []) == 3)
-        #expect(store.count(for: .media, in: []) == 0)
-        #expect(store.count(for: .short, in: []) == 1)
+        // Pager order is Discover then Following, so the first number is the
+        // media page's and the second is the unfiltered one's.
+        let store = makeStore(arguments: ["-foryou-badges", "3,7"])
+        #expect(store.count(for: .media, in: []) == 3)
+        #expect(store.count(for: .activity, in: []) == 7)
+    }
+
+    @Test func aCountPastTheTabsIsIgnored() {
+        // Three numbers for two tabs: the extra belongs to a tab that no longer
+        // exists, and must not land on one that does.
+        let store = makeStore(arguments: ["-foryou-badges", "3,7,9"])
+        #expect(store.count(for: .media, in: []) == 3)
+        #expect(store.count(for: .activity, in: []) == 7)
+        #expect(store.count(for: .short, in: []) == 0)
     }
 
     @MainActor
     @Test func theForcedOrderIsThePagerOrder() {
-        // `ForYouUnreadStore` spells the order out literally because the pager's
-        // static is MainActor-isolated. This is what stops the two drifting.
-        #expect(ForYouPagerView.pageOrder == [.activity, .media, .short])
+        // `ForYouUnreadStore` reads `ForYouViewModel.tabs` because the pager's
+        // own static is MainActor-isolated. This is what stops the two drifting.
+        #expect(ForYouPagerView.pageOrder == ForYouViewModel.tabs)
+        #expect(ForYouViewModel.tabs == [.media, .activity])
+    }
+
+    @MainActor
+    @Test func theBadgedTabIsFollowingAndTheLandingTabIsDiscover() {
+        #expect(ForYouViewModel.badgedTab == .activity)
+        #expect(ForYouViewModel.defaultFormat == .media)
+        // The landing tab must not be the badged one, or the badge clears
+        // itself on the first publish and can never be seen.
+        #expect(ForYouViewModel.defaultFormat != ForYouViewModel.badgedTab)
     }
 
     @Test func aTabChangeRetiresItsOverride() {
-        let store = makeStore(arguments: ["-foryou-badges", "3,0,1"])
+        let store = makeStore(arguments: ["-foryou-badges", "0,3"])
         #expect(store.count(for: .activity, in: []) == 3)
         store.markSeen(.activity, in: [post("a", at: 10)], clearingOverride: true)
         #expect(store.count(for: .activity, in: [post("a", at: 10)]) == 0)
     }
 
     @Test func anAutomaticAdvanceLeavesTheOverrideStanding() {
-        let store = makeStore(arguments: ["-foryou-badges", "3,0,1"])
+        let store = makeStore(arguments: ["-foryou-badges", "0,3"])
         // The view model advances the active tab's watermark on every publish,
         // including the first one. If that retired the override, a forced badge
         // would be wiped before it rendered a single frame.
@@ -220,47 +296,68 @@ struct ForYouViewModelUnreadTests {
         )
         model.viewDidLoad()
         await settle()
-        #expect(box.latest == [.activity: 0, .media: 0, .short: 0])
+        // Two tabs, both silent — and `.short` is absent entirely, because a
+        // count for a tab that does not exist has nowhere to be shown.
+        #expect(box.latest == [.media: 0, .activity: 0])
     }
 
-    @Test func theActiveTabNeverBadgesContentThatLandedUnderTheViewersEyes() async {
+    @Test func onlyFollowingIsEverBadged() async {
         let store = makeStore()
-        // Activity is the landing tab and shows everything, so a first load
-        // arriving while it is on screen has been seen by definition.
+        // Both tabs have been visited, then a newer post lands on both of them
+        // (an unfiltered page shows the media page's posts too).
         store.markSeen(.activity, in: [post("old", at: 1)])
         store.markSeen(.media, in: [post("old", at: 1)])
         let (model, box) = makeModel(posts: [post("a", at: 100)], store: store)
         model.viewDidLoad()
         await settle()
+        // Following counts it: the viewer is on Discover and has not seen it.
+        #expect(box.latest[.activity] == 1)
+        // Discover does not, whatever its watermark says — a ranked surface has
+        // no "since you last looked" to count against.
+        #expect(box.latest[.media] == 0)
+    }
+
+    @Test func theActiveTabNeverBadgesContentThatLandedUnderTheViewersEyes() async {
+        let store = makeStore()
+        store.markSeen(.activity, in: [post("old", at: 1)])
+        let (model, box) = makeModel(posts: [post("a", at: 100)], store: store)
+        // Sitting on Following when the load arrives: it has been seen by
+        // definition, so the one badged tab still reports nothing.
+        model.setFormat(.activity)
+        model.viewDidLoad()
+        await settle()
         #expect(box.latest[.activity] == 0)
-        // The same post is unread on Gallery, which the viewer is NOT looking
-        // at — one arrival, two honest answers.
-        #expect(box.latest[.media] == 1)
     }
 
     @Test func changingTabsClearsThatTabsBadge() async {
         let store = makeStore()
         store.markSeen(.activity, in: [post("old", at: 1)])
-        store.markSeen(.media, in: [post("old", at: 1)])
         let (model, box) = makeModel(posts: [post("a", at: 100)], store: store)
         model.viewDidLoad()
         await settle()
-        #expect(box.latest[.media] == 1)
-        model.setFormat(.media)
-        #expect(box.latest[.media] == 0)
+        #expect(box.latest[.activity] == 1)
+        model.setFormat(.activity)
+        #expect(box.latest[.activity] == 0)
     }
 
     @Test func leavingATabDoesNotBadgeWhatWasOnScreen() async {
         let store = makeStore()
         store.markSeen(.activity, in: [post("old", at: 1)])
         let (model, box) = makeModel(posts: [post("a", at: 100)], store: store)
+        model.setFormat(.activity)
         model.viewDidLoad()
         await settle()
-        // Activity was watching when "a" landed; walking to Gallery and back
+        // Following was watching when "a" landed; walking to Discover and back
         // must not present it as news.
         model.setFormat(.media)
         model.setFormat(.activity)
         #expect(box.latest[.activity] == 0)
+    }
+
+    @Test func theModelOpensOnDiscover() async {
+        let store = makeStore()
+        let (model, _) = makeModel(posts: [post("a", at: 100)], store: store)
+        #expect(model.format == .media)
     }
 
     @Test func noBadgeIsPublishedBeforeTheFirstPageLands() async {

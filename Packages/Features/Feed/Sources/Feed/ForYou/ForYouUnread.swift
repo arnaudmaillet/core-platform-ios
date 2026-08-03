@@ -64,6 +64,37 @@ public final class ForYouUnreadStore {
         forced = Self.forcedCounts(from: arguments)
     }
 
+    /// Stages `count` unread items on `format`, so the badge shows that many.
+    ///
+    /// This is what `-foryou-mock-new-activity` drives, and it takes the
+    /// truthful route whenever the corpus allows: back-date the watermark to
+    /// just before the `count` newest posts, and let the ordinary derivation
+    /// produce the number. That puts the whole path under test — watermark,
+    /// comparison, publication, and the clearing that follows a read — rather
+    /// than proving only that a pill can be drawn.
+    ///
+    /// When the corpus is smaller than the number asked for, the watermark
+    /// cannot express it (there is no timestamp that leaves 99 posts above it
+    /// in a corpus of 40), so the count is stated outright instead. The badge is
+    /// then a claim about nothing, which is exactly what a QA argument asking
+    /// for "99" wants: the pill at its widest, against the real layout. Either
+    /// way it clears through the ordinary `markSeen` path when the tab is read.
+    public func stageUnread(_ count: Int, for format: GalleryFilter.Format, in posts: [GalleryPost]) {
+        guard count > 0 else { return }
+        let times = posts.map(\.publishedAtMS).sorted(by: >)
+        guard times.count > count else {
+            // Not expressible as a watermark — state it. `forced` is the same
+            // channel `-foryou-badges` uses, including its clear-on-tab-change
+            // behaviour, so nothing new has to be taught to clear it.
+            forced[format] = count
+            return
+        }
+        // The (count+1)-th newest: strictly older than the `count` posts above
+        // it, which is exactly the watermark that makes those `count` unread.
+        forced[format] = nil
+        defaults.set(times[count], forKey: key(for: format))
+    }
+
     /// The badge for a format, given everything currently loaded on it.
     ///
     /// Seeds the watermark on first sight, so an unvisited format reports zero
@@ -142,13 +173,12 @@ public final class ForYouUnreadStore {
               position + 1 < arguments.count
         else { return [:] }
         let counts = arguments[position + 1].split(separator: ",").compactMap { Int($0) }
-        // Stated literally rather than read from `ForYouPagerView.pageOrder`:
-        // that static is `@MainActor` by inference (a `UIView` subclass's are),
-        // and this store is deliberately not actor-isolated so its logic stays
-        // testable off the main actor. `ForYouUnreadTests` pins the two orders
-        // together so they cannot drift.
-        let order: [GalleryFilter.Format] = [.activity, .media, .short]
-        return zip(order, counts).reduce(into: [:]) { result, pair in
+        // Pager order: Discover, then Following. Taken from `ForYouViewModel`
+        // rather than `ForYouPagerView.pageOrder` because that one is
+        // `@MainActor` by inference (a `UIView` subclass's statics are) and this
+        // store is deliberately un-isolated so its logic stays testable off the
+        // main actor. `ForYouUnreadTests` pins the two orders together.
+        return zip(ForYouViewModel.tabs, counts).reduce(into: [:]) { result, pair in
             if pair.1 > 0 { result[pair.0] = pair.1 }
         }
         #else

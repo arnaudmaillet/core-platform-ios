@@ -17,8 +17,20 @@ import UIKit
 /// Unlike the profile gallery's pager, this one does NOT sync its height to
 /// the active page: every page is viewport-height and scrolls on its own.
 final class ForYouPagerView: UIView {
-    /// Pager order == selector order.
-    static let pageOrder: [GalleryFilter.Format] = [.activity, .media, .short]
+    /// Pager order == selector order == the tabs the screen actually has.
+    ///
+    /// **Two tabs, and the media grid leads.** `GalleryFilter.Format` still has
+    /// three cases because the profile gallery uses all of them; For You simply
+    /// does not give each one a tab. `.short` (text-only posts) has no tab of
+    /// its own here — those posts still appear, under Following, which is the
+    /// unfiltered page.
+    ///
+    /// The titles the viewer reads are `ForYouViewController`'s, and they do not
+    /// echo the enum: `.media` is "Discover" and `.activity` is "Following".
+    /// The enum names the CONTENT SHAPE (what is in the page), the titles name
+    /// the PRODUCT IDEA (why you would go there), and those were never the same
+    /// question.
+    static let pageOrder: [GalleryFilter.Format] = [.media, .activity]
 
     /// The tapped post's index into the *given format page's* posts.
     var onItemTapped: ((GalleryFilter.Format, Int) -> Void)?

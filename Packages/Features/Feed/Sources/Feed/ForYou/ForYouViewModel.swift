@@ -64,7 +64,16 @@ public final class ForYouViewModel {
     /// second copy of the same fact.
     private let unreadStore: ForYouUnreadStore
 
-    public private(set) var format: GalleryFilter.Format = .activity
+    /// The tabs this screen has, in the pager's order. Stated here rather than
+    /// read from `ForYouPagerView.pageOrder` because that static is `@MainActor`
+    /// by inference (a `UIView` subclass's are) and this type answers off it in
+    /// tests; `ForYouTabOrderTests` pins the two together.
+    nonisolated static let tabs: [GalleryFilter.Format] = [.media, .activity]
+
+    /// Where the screen opens. Discover — the media grid — is the landing tab.
+    nonisolated static let defaultFormat: GalleryFilter.Format = .media
+
+    public private(set) var format: GalleryFilter.Format = ForYouViewModel.defaultFormat
     public private(set) var source: DiscoverySource = .trending
 
     /// Everything loaded so far, **in the order it is displayed**. nil = the
@@ -98,10 +107,39 @@ public final class ForYouViewModel {
         self.repository = repository
         self.preferences = preferences
         self.unreadStore = unreadStore
-        if let preferences {
+        // Two conditions, and both were learned the hard way.
+        //
+        // `hasStoredFormat` — because `preferences.format` answers `.activity`
+        // when NOTHING has been stored, which is indistinguishable from a
+        // viewer who chose Following. Without this every fresh install opened
+        // on Following rather than on Discover (seen in-sim after a clean
+        // reinstall, which is the only way to see it at all).
+        //
+        // `tabs.contains` — because an install that last sat on Short has a
+        // stored format this screen no longer has a tab for, and paging to a
+        // page the pager does not own would leave the capsule pointing at
+        // nothing.
+        if let preferences, preferences.hasStoredFormat, Self.tabs.contains(preferences.format) {
             format = preferences.format
         }
+        #if DEBUG
+        // The mock stages unread on FOLLOWING, and the tab you are looking at
+        // can never have unread by construction — everything on it has been
+        // seen. So the demo lands on Discover, which is what makes the badge it
+        // stages honest rather than a contradiction the code has to special-
+        // case. Not persisted: this is a launch argument's opinion, not the
+        // viewer's.
+        if ProcessInfo.processInfo.arguments.contains("-foryou-mock-new-activity"),
+           format == Self.badgedTab {
+            format = Self.defaultFormat
+        }
+        #endif
     }
+
+    /// The tab that carries the unread badge: Following, where new posts from
+    /// the accounts you follow land. Discover is a ranked surface with no
+    /// "since you last looked" to speak of, so it is not badged.
+    nonisolated static let badgedTab: GalleryFilter.Format = .activity
 
     public func viewDidLoad() {
         loadFirstPage(reset: false)
@@ -109,6 +147,7 @@ public final class ForYouViewModel {
 
     /// Pull-to-refresh: drops the corpus and the cursor and starts over.
     public func refresh() {
+        rearmMockNewActivity()
         loadFirstPage(reset: true)
     }
 
@@ -265,13 +304,56 @@ public final class ForYouViewModel {
     /// later cannot badge content that was on screen the whole time.
     private func publishUnread() {
         guard corpus != nil else { return }
+        applyMockNewActivityIfNeeded()
         unreadStore.markSeen(format, in: posts(for: format))
+        // Only the tabs this screen HAS, not every case of the shared enum —
+        // `.short` has no tab here, and publishing a count for it would invite
+        // a badge with nowhere to sit.
         var counts: [GalleryFilter.Format: Int] = [:]
-        for page in GalleryFilter.Format.allCases {
-            counts[page] = unreadStore.count(for: page, in: posts(for: page))
+        for page in Self.tabs {
+            // Discover carries no badge by product decision, not by accident:
+            // a ranked feed has no "since you last looked" to count against.
+            counts[page] = page == Self.badgedTab
+                ? unreadStore.count(for: page, in: posts(for: page))
+                : 0
         }
         onUnreadChange?(counts)
     }
+
+    #if DEBUG
+    /// `-foryou-mock-new-activity [n]` (n defaults to 3): back-dates the
+    /// Activity watermark so the n newest activity posts read as new.
+    ///
+    /// Armed once per LOAD, not once per publish — every page that lands would
+    /// otherwise re-back-date and the badge would never settle. A pull-to-refresh
+    /// re-arms it, which is the point: pull, and three new things are waiting.
+    ///
+    /// The badge it produces is a real derived count, so tapping Activity clears
+    /// it through `markSeen` exactly as a genuine one would.
+    private var hasArmedMockActivity = false
+
+    private func applyMockNewActivityIfNeeded() {
+        guard !hasArmedMockActivity else { return }
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let position = arguments.firstIndex(of: "-foryou-mock-new-activity") else { return }
+        let count = position + 1 < arguments.count ? Int(arguments[position + 1]) ?? 3 : 3
+        hasArmedMockActivity = true
+        // Belt and braces: `init` already moves the landing tab off Following
+        // for exactly this reason, so reaching here on Following means someone
+        // navigated there — in which case the posts really have been seen and
+        // staging them as new would be a lie the badge tells.
+        guard format != Self.badgedTab else { return }
+        unreadStore.stageUnread(count, for: Self.badgedTab, in: posts(for: Self.badgedTab))
+    }
+
+    /// Re-arms the mock so a pull produces a fresh badge.
+    private func rearmMockNewActivity() {
+        hasArmedMockActivity = false
+    }
+    #else
+    private func applyMockNewActivityIfNeeded() {}
+    private func rearmMockNewActivity() {}
+    #endif
 
     /// Names the empty combination so the blank page reads as an answer.
     nonisolated static func emptyMessage(format: GalleryFilter.Format, source: DiscoverySource) -> String {

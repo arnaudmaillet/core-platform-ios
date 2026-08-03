@@ -36,6 +36,19 @@ public final class GalleryPreferences: @unchecked Sendable {
         set { defaults.set(Self.key(for: newValue), forKey: formatKey) }
     }
 
+    /// Whether a format has ever been WRITTEN, as opposed to being answered
+    /// from this type's own default.
+    ///
+    /// `format` cannot express the difference: with nothing stored it returns
+    /// `.activity`, which is indistinguishable from a viewer who chose Activity.
+    /// A surface whose landing tab differs from that default needs to know
+    /// which it is — For You opens on Discover, and read the stored value's
+    /// `.activity` as a real choice until it could ask this instead, so every
+    /// fresh install landed on the wrong tab.
+    public var hasStoredFormat: Bool {
+        defaults.object(forKey: formatKey) != nil
+    }
+
     public var filter: GalleryFilter {
         get {
             GalleryFilter(

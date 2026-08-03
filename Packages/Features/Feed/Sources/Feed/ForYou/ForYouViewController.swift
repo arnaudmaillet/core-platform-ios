@@ -6,21 +6,25 @@ import MediaPlayback
 import PostGrid
 import UIKit
 
-/// The For You tab root: curated content in the shared three-format grid under
-/// a top tab capsule, with a tile tap opening the full-screen feed.
+/// The For You tab root: two paged surfaces — **Discover** (the media grid) and
+/// **Following** — under a tab capsule that lives IN the navigation bar, with a
+/// tile tap opening the full-screen feed.
 ///
-/// **Same shape as the Messages inbox, and deliberately the same component.**
-/// The format tabs are a `PagedTabBar` floating under the navigation bar, and
-/// the layout contract is the one that container documents: the pager fills the
-/// view, the bar floats above it, and `additionalSafeAreaInsets.top` reserves
-/// the bar's height so every grid page insets itself below the glass through
-/// the standard safe area — content scrolls *under* the capsule and no page
-/// carries a line of header-aware layout.
+/// **The capsule is the title.** It is `navigationItem.titleView`, not a strip
+/// beneath the bar, so this screen reserves no safe area of its own and the grid
+/// starts directly under the navigation bar — one row of chrome, not two. That
+/// is the one place it diverges from `MessagesInboxViewController`, which wears
+/// the same `PagedTabBar` floating over its content and therefore does reserve
+/// its height. Everything else — fractional progress driving the lens, the
+/// capsule scrubbing the pager, badges — is shared.
 ///
 /// The discovery axis (Trending / Recent / Following) is a navigation bar item
 /// rather than a second floating control: with the tabs at the top there is
 /// nothing left for a bottom tray to hold, and a lone glass bubble over the
-/// grid reads as furniture the screen forgot to remove.
+/// grid reads as furniture the screen forgot to remove. ⚠️ Note the word
+/// "Following" now names two different things — a TAB (an unfiltered page) and a
+/// SOURCE (an ordering of the corpus). They are independent axes and can be set
+/// to disagreeing values; worth resolving in naming before this ships.
 ///
 /// This is a **tab root**, so the tab bar stays — it is how the viewer leaves.
 final class ForYouViewController: UIViewController {
@@ -29,13 +33,17 @@ final class ForYouViewController: UIViewController {
     private let makeSnapFeed: ([PostID]) -> UIViewController
     private let prewarm: ([PostID]) async -> Void
 
-    /// The format tabs, in pager order. Shared with the Messages inbox — see
-    /// `PagedTabBar` for why the lens is a tint rather than a second material.
-    private let tabBar = PagedTabBar(titles: ["Activity", "Gallery", "Short"])
+    /// The tab titles, in `ForYouPagerView.pageOrder` order: Discover (the
+    /// media grid) then Following (the unfiltered page).
+    ///
+    /// They deliberately do not echo `GalleryFilter.Format`'s case names. The
+    /// enum names the content SHAPE, these name the product idea; the audit
+    /// reads this array rather than a second copy of the strings.
+    private static let tabTitles = ["Discover", "Following"]
 
-    /// Pins the capsule to the bottom of the navigation bar. The constant is
-    /// re-derived in `viewSafeAreaInsetsDidChange`.
-    private lazy var tabBarTop = tabBar.topAnchor.constraint(equalTo: view.topAnchor)
+    /// The tab capsule. Shared with the Messages inbox — see `PagedTabBar` for
+    /// why the lens is a tint rather than a second material.
+    private let tabBar = PagedTabBar(titles: tabTitles, style: .navigationTitle)
 
     /// The discovery axis's options, in menu order. One table so the menu, the
     /// bubble's glyph and any programmatic selection cannot disagree about
@@ -383,16 +391,16 @@ final class ForYouViewController: UIViewController {
         // tab here, and removing it also removes the large-title content-area
         // layout from the transition's path — which is the second reason for
         // this change, see below.
+        // No title, because the tabs ARE the title: the capsule occupies the
+        // slot a title string would have. Removing the large title also keeps
+        // the large-title content-area layout out of the hero flight's path,
+        // which is the second reason for it — see below.
         navigationItem.title = nil
         navigationItem.largeTitleDisplayMode = .never
-        // Native bar items on both sides.
-        //
-        // Partly product, partly a probe: a large title renders in the CONTENT
-        // area rather than the bar, so it participates in the layout the hero
-        // flight animates over, and the question was whether its passes were
-        // invalidating views mid-transition. Plain bar items lay out in the bar
-        // itself and cannot, so if the dismissal's frame-0 artifact survives
-        // this it is not the header — which is a real answer either way.
+        navigationItem.titleView = tabBar
+        // Native bar items on both sides. They lay out in the bar itself, which
+        // is also what bounds the title slot the capsule now sits in — UIKit
+        // gives the slot what is left between them, so neither can be covered.
         navigationItem.leftBarButtonItem = sourceItem
         rebuildSourceMenu()
         navigationItem.rightBarButtonItem = UIBarButtonItem(
@@ -403,18 +411,12 @@ final class ForYouViewController: UIViewController {
 
         pager.pin(to: view)
 
-        // The capsule's height is reserved as safe area, so every grid page
-        // insets under it automatically — the mechanism `MessagesInboxViewController`
-        // documents, and the reason no page here knows the bar exists.
-        additionalSafeAreaInsets.top = PagedTabBar.height
-        view.addSubview(tabBar)
-        tabBar.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            tabBarTop,
-            tabBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            tabBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            tabBar.heightAnchor.constraint(equalToConstant: PagedTabBar.height)
-        ])
+        // NO `additionalSafeAreaInsets.top`, and no constraints for the bar:
+        // the capsule is inside the navigation bar, so the navigation bar's own
+        // height already accounts for it and the grid starts directly beneath
+        // it. This is the whole difference from `MessagesInboxViewController`,
+        // which reserves the bar's height as safe area because its copy floats
+        // over the content.
 
         // Wired like any system control: the bar carries the chosen segment as
         // its value and announces it, rather than handing back a closure.
@@ -470,10 +472,25 @@ final class ForYouViewController: UIViewController {
     }
 
     /// Pushes the counts onto the capsule, in pager order.
+    ///
+    /// ⚠️ A badge changes the capsule's WIDTH, and a navigation bar caches the
+    /// size of its title view: `invalidateIntrinsicContentSize` alone is not
+    /// enough, and the frame and the content drift apart the moment a count
+    /// appears or clears. Measured symptom, with the strip measuring zero
+    /// overflow at rest: scrubbing to Short cleared its badge, the bar resized
+    /// the slot to the new narrower intrinsic width, the row inside kept the
+    /// old one — and the leading title rendered as "tivity".
+    ///
+    /// Re-stating the size and forcing the bar to lay out is what makes the two
+    /// agree. This has no equivalent in the floating arrangement, where the
+    /// bar's width is the screen's and nothing has to be told about it.
     private func applyBadges(_ counts: [GalleryFilter.Format: Int]) {
         for (index, format) in ForYouPagerView.pageOrder.enumerated() {
             tabBar.setBadge(counts[format] ?? 0, at: index)
         }
+        tabBar.sizeToFit()
+        navigationController?.navigationBar.setNeedsLayout()
+        navigationController?.navigationBar.layoutIfNeeded()
     }
 
     /// Rebuilds the discovery menu so `.singleSelection` marks the active
@@ -753,20 +770,6 @@ final class ForYouViewController: UIViewController {
         #endif
     }
 
-    override func viewSafeAreaInsetsDidChange() {
-        super.viewSafeAreaInsetsDidChange()
-        // `view.safeAreaInsets.top` already contains the capsule's height added
-        // in `viewDidLoad`; removing it again lands the bar exactly on the
-        // navigation bar's bottom edge, whatever chrome is present.
-        //
-        // Note this is the TOP inset, which — unlike the bottom one the deleted
-        // filter tray had to fight — does not misreport itself mid-flight: the
-        // tab bar is what animates through a pop here, and it is at the other
-        // end of the screen. The capsule can therefore track the safe area
-        // directly, with no resting-measurement machinery.
-        tabBarTop.constant = view.safeAreaInsets.top - additionalSafeAreaInsets.top
-    }
-
     /// Rebuilds the capsule's appearance after any transition ends.
     ///
     /// Called on a completed hero return, a cancelled grab, and every appearance
@@ -959,7 +962,7 @@ final class ForYouViewController: UIViewController {
     /// clipping and reachability, which is where the real failure lives.
     func debugAuditTabBar(_ label: String) {
         guard ProcessInfo.processInfo.arguments.contains("-foryou-audit-tabs") else { return }
-        let titles = ["Activity", "Gallery", "Short"]
+        let titles = Self.tabTitles
         func carriesTitle(_ v: UIView) -> Bool {
             if let label = v as? UILabel, titles.contains(label.text ?? "") { return true }
             return v.subviews.contains(where: carriesTitle)
@@ -1008,15 +1011,28 @@ final class ForYouViewController: UIViewController {
         // The capsule clips ON PURPOSE (it is a rounded material with a scroll
         // view inside it), so the walk starts at its superview: what must not
         // clip is anything BETWEEN the bar and the screen.
+        //
+        // The walk stops AT the navigation bar. The bar lives in its subtree
+        // now, so `view` is not on the ancestor chain at all and stopping there
+        // would never stop — but walking all the way to the window is just as
+        // wrong the other way: `UILayoutContainerView` and `UITransitionView`
+        // clip on purpose, and reporting them buries the one clip that would
+        // actually cut a segment off. What can crop the capsule is what sits
+        // between it and its host.
         var node = tabBar.superview
-        while let current = node, current !== view {
+        while let current = node, !(current is UINavigationBar), !(current is UIWindow) {
             if current.clipsToBounds { offenders.append("\(type(of: current)) clipsToBounds") }
             if current.layer.mask != nil { offenders.append("\(type(of: current)) masked") }
             node = current.superview
         }
         // Six, not three: each segment carries a regular/semibold pair so
         // selection can change weight without re-measuring the row.
-        if labels.count != 6 { offenders.append("label count \(labels.count) != 6") }
+        // Two labels per segment — a regular/semibold pair that crossfades —
+        // so the expected count follows the tab count rather than a constant.
+        let expectedLabels = titles.count * 2
+        if labels.count != expectedLabels {
+            offenders.append("label count \(labels.count) != \(expectedLabels)")
+        }
         for expected in titles where labels.filter({ $0.hasPrefix(expected) }).count != 2 {
             offenders.append("'\(expected)' not drawn twice")
         }
@@ -1031,13 +1047,56 @@ final class ForYouViewController: UIViewController {
             v.subviews.forEach(collectButtons)
         }
         collectButtons(tabBar)
-        if buttons.count != 3 { offenders.append("segment count \(buttons.count) != 3") }
-        for (index, button) in buttons.enumerated() {
-            let point = button.convert(CGPoint(x: button.bounds.midX, y: button.bounds.midY), to: view)
-            let hit = view.hitTest(point, with: nil)
-            let reachable = hit.map { $0 === button || $0.isDescendant(of: button) } ?? false
-            if !reachable {
-                offenders.append("segment \(index) unreachable (hit=\(hit.map { "\(type(of: $0))" } ?? "nil"))")
+        if buttons.count != titles.count {
+            offenders.append("segment count \(buttons.count) != \(titles.count)")
+        }
+        // Hit-tested from the WINDOW, because a bar inside the navigation bar
+        // is not reachable from this screen's `view` at all and testing there
+        // would call every segment unreachable — a false alarm indistinguishable
+        // from the real thing. The side bar items go through the same path and
+        // answer the same question, because the risk this arrangement
+        // introduces is precisely that a title view sized wrong sits over one.
+        //
+        // ⚠️ Deferred one turn of the run loop. This is called from a
+        // transition's completion, and UIKit's own `TouchBlocker` is still
+        // installed over the whole window at that instant — a window-level hit
+        // test run inline reports EVERYTHING unreachable, every time. (The
+        // earlier `view`-rooted test never saw it: the blocker is a sibling
+        // above `view`, not inside it.) One hop later it is gone and the
+        // reading is of the screen, not of the transition.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            var late: [String] = []
+            defer {
+                if !late.isEmpty {
+                    print("[tabsaudit \(label)] REACHABILITY: " + late.joined(separator: " | "))
+                }
+            }
+            guard let window = view.window else { return }
+            for (index, button) in buttons.enumerated() {
+                let point = button.convert(CGPoint(x: button.bounds.midX, y: button.bounds.midY), to: window)
+                let hit = window.hitTest(point, with: nil)
+                let reachable = hit.map { $0 === button || $0.isDescendant(of: button) } ?? false
+                if !reachable {
+                    late.append("segment \(index) unreachable (hit=\(hit.map { "\(type(of: $0))" } ?? "nil"))")
+                }
+            }
+            for (name, item) in [("source", sourceItem), ("search", navigationItem.rightBarButtonItem)] {
+                guard let itemView = item?.value(forKey: "view") as? UIView else {
+                    late.append("\(name) item has no view")
+                    continue
+                }
+                let point = itemView.convert(
+                    CGPoint(x: itemView.bounds.midX, y: itemView.bounds.midY), to: window
+                )
+                let hit = window.hitTest(point, with: nil)
+                let reachable = hit.map { $0 === itemView || $0.isDescendant(of: itemView) } ?? false
+                if !reachable {
+                    late.append("\(name) item unreachable (hit=\(hit.map { "\(type(of: $0))" } ?? "nil"))")
+                }
+                if itemView.frame.intersects(tabBar.convert(tabBar.bounds, to: itemView.superview)) {
+                    late.append("\(name) item OVERLAPS the capsule")
+                }
             }
         }
         print("[tabsaudit \(label)] sel=\(tabBar.selectedIndex) labels=\(labels.joined(separator: " ")) "
@@ -1062,36 +1121,51 @@ final class ForYouViewController: UIViewController {
         let safeTop = view.safeAreaInsets.top
         let bar = navigationController?.navigationBar
         let barRect = bar.map { $0.convert($0.bounds, to: window) } ?? .zero
-        // Find whatever is actually drawing the big "For You" — it is not in the
-        // 54pt compact bar, so measuring `navigationBar` alone proves nothing.
-        var titleRect = CGRect.zero
-        var titleOwner = "none"
-        func findTitle(_ v: UIView) {
-            if let label = v as? UILabel, label.text == "For You", label.bounds.height > 20 {
-                titleRect = label.convert(label.bounds, to: window)
-                titleOwner = "\(type(of: label.superview ?? label))"
+        // The title-slot question, in numbers: how wide is the capsule allowed
+        // to be, where do the side items start and end, and is the capsule
+        // scrolling its own content (which is what silently crops a badge)?
+        let leftRect = (sourceItem.value(forKey: "view") as? UIView)
+            .map { $0.convert($0.bounds, to: window) } ?? .zero
+        let rightRect = (navigationItem.rightBarButtonItem?.value(forKey: "view") as? UIView)
+            .map { $0.convert($0.bounds, to: window) } ?? .zero
+        let leftEnd = leftRect.maxX
+        let rightStart = rightRect.minX
+        // The height the capsule has to match, and where the item's own glass
+        // sits — "same height" is only right if they also share a centre line.
+        let itemH = leftRect.height
+        let itemY = leftRect.minY
+        let overflow = tabBar.debugOverflow
+        // The square-flash check, as a number rather than an impression: a
+        // capsule holds radius == height/2 on every frame it is drawn. The
+        // display link starts in `viewDidLoad`, so the first sample is the first
+        // frame this screen has ever had.
+        let shape = tabBar.debugCapsuleShape
+        // What the nav bar is actually drawing its item capsules with, by class
+        // and geometry — the search space for a dynamic height match.
+        if ProcessInfo.processInfo.arguments.contains("-foryou-dump-bar"), let bar {
+            var rows: [String] = []
+            func walk(_ v: UIView, _ depth: Int) {
+                guard depth < 8 else { return }
+                let r = v.convert(v.bounds, to: window)
+                if r.height > 1, r.width > 1 {
+                    rows.append(String(format: "%d:%@ %.0fx%.0f@%.0f,%.0f%@",
+                                       depth, "\(type(of: v))", r.width, r.height, r.minX, r.minY,
+                                       v is UIVisualEffectView ? " EFFECT" : ""))
+                }
+                v.subviews.forEach { walk($0, depth + 1) }
             }
-            v.subviews.forEach(findTitle)
+            walk(bar, 0)
+            print("[bardump] " + rows.joined(separator: " | "))
         }
-        findTitle(window)
-        // The navigation bar's ENTIRE subtree, not just its direct children: an
-        // item that slides inside a container at a fixed position would
-        // otherwise go unseen.
-        var rows: [String] = []
-        func walkBar(_ v: UIView, _ depth: Int) {
-            guard depth < 6 else { return }
-            let r = v.convert(v.bounds, to: window)
-            if r.width > 1, r.height > 1 {
-                rows.append(String(format: "%.0f:%.1f/%.1f", Double(depth), r.minX, r.minY))
-            }
-            v.subviews.forEach { walkBar($0, depth + 1) }
-        }
-        if let bar { walkBar(bar, 0) }
-        let items = rows.joined(separator: ",")
+        let round = shape.height > 0 && abs(shape.radius - shape.height / 2) < 0.01
         print(String(
-            format: "[chrome:%@] tabsY=%.2f tabsH=%.2f safeT=%.2f navY=%.2f titleY=%.2f t=%@ items=%@",
-            phase, tabs.minY, tabs.height, safeTop, barRect.minY,
-            titleRect.minY, NSCoder.string(for: view.transform), items
+            format: "[chrome:%@] tabsX=%.1f tabsW=%.1f tabsY=%.2f tabsH=%.2f itemH=%.2f itemY=%.2f "
+                + "leftEnd=%.1f rightStart=%.1f slot=%.1f overflow=%.1f safeT=%.2f navY=%.2f navH=%.2f "
+                + "r=%.2f/%.2f glass=%@ CAPSULE=%@",
+            phase, tabs.minX, tabs.width, tabs.minY, tabs.height, itemH, itemY,
+            leftEnd, rightStart, rightStart - leftEnd, overflow, safeTop,
+            barRect.minY, barRect.height,
+            shape.radius, shape.height, shape.hasEffect ? "on" : "off", round ? "yes" : "NO"
         ))
     }
 
@@ -1150,10 +1224,12 @@ final class ForYouViewController: UIViewController {
             // of order and proves nothing.
             openDelay = 1.5 + 0.8 * Double(names.count)
             for (step, name) in names.enumerated() {
+                // Product names first, content-shape names kept as aliases so
+                // scripts written against the three-tab layout still drive the
+                // page they meant. "short" is gone with its tab.
                 let format: GalleryFilter.Format? = switch name {
-                case "activity": .activity
-                case "media", "gallery": .media
-                case "short": .short
+                case "discover", "media", "gallery": .media
+                case "following", "activity": .activity
                 default: nil
                 }
                 guard let format, let index = ForYouPagerView.pageOrder.firstIndex(of: format) else { continue }

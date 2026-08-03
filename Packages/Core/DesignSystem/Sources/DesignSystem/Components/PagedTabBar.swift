@@ -73,11 +73,129 @@ import UIKit
 /// outlives the last progress change, because `setProgress` early-returns on an
 /// unchanged position and will otherwise freeze the effect mid-stretch.
 public final class PagedTabBar: UIControl {
+    /// Where the bar is being hosted, which decides its metrics and whether it
+    /// carries a material of its own.
+    ///
+    /// Not a cosmetic switch: a navigation bar's title slot is a fundamentally
+    /// different box from a strip of the screen. It is ~44pt tall rather than
+    /// as tall as the bar likes, it is bounded by the side bar items rather
+    /// than by the screen, its margins belong to the navigation bar, and — the
+    /// part that costs a material — it already composites what it holds.
+    public enum Style: Sendable {
+        /// A free-floating strip under the navigation bar, on the screen's own
+        /// margins. Carries its own glass and its own shadow.
+        case floating
+        /// `navigationItem.titleView`. Compact, marginless, and BARE: the
+        /// navigation bar supplies the backdrop, so the bar contributes only
+        /// its lens and its titles.
+        case navigationTitle
+
+        var capsuleHeight: CGFloat {
+            switch self {
+            case .floating: 42
+            // 44pt: the standard UIKit bar-item touch height, stated outright
+            // rather than measured from the bar's private view tree.
+            //
+            // ⚠️ Worth knowing, because it is visible: 44 is the size of the
+            // item's TOUCH TARGET (the platter), not of the glass circle it
+            // draws. The drawn circle measures 36 — the platter inset 4pt a side
+            // — so a 44pt capsule stands 8pt taller than the buttons beside it
+            // rather than flush with them. `-foryou-trace-chrome` prints `tabsH`
+            // beside `itemH` if that comparison ever needs re-taking; 36 is the
+            // value that makes the three read as one row.
+            case .navigationTitle: 44
+            }
+        }
+
+        var topMargin: CGFloat {
+            switch self {
+            case .floating: 4
+            case .navigationTitle: 0
+            }
+        }
+
+        var bottomMargin: CGFloat {
+            switch self {
+            case .floating: 8
+            case .navigationTitle: 0
+            }
+        }
+
+        /// Inset from the host's leading and trailing edges.
+        var horizontalMargin: CGFloat {
+            switch self {
+            case .floating: Spacing.lg
+            // The navigation bar decides where the title slot begins and ends;
+            // a margin of ours inside it would be a second opinion.
+            case .navigationTitle: 0
+            }
+        }
+
+        /// Whether the bar draws its own material and shadow.
+        var carriesBackdrop: Bool {
+            switch self {
+            case .floating: true
+            // TRUE, after measuring the alternative. The first cut assumed the
+            // navigation bar composites its title view the way it composites a
+            // bar BUTTON item — through the system's own glass capsule, the
+            // rule `GlassSegmentRow` documents — and therefore rendered bare to
+            // avoid the double-bubble. It does not: bar items get a capsule,
+            // the title slot gets nothing, and scrolled content showed straight
+            // through the titles. See `-foryou-backdrop-off` for the A/B.
+            case .navigationTitle: !ProcessInfo.processInfo.arguments.contains("-foryou-backdrop-off")
+            }
+        }
+
+        /// Breathing room around a segment's title, which is what decides how
+        /// wide the strip is overall.
+        ///
+        /// Tighter in a title slot, and by measurement rather than taste: the
+        /// navigation bar hands the slot 258pt of the 290pt between the side
+        /// items (it reserves ~16pt either side), and at the floating bar's
+        /// padding three titles plus two badges need 269 — an 11pt shortfall
+        /// that makes the strip scroll and clip a title mid-word. 8pt buys back
+        /// 24pt, which is the difference between "fits" and "scrolls".
+        var segmentPadding: CGFloat {
+            switch self {
+            case .floating: Spacing.lg
+            case .navigationTitle: Spacing.sm
+            }
+        }
+
+        /// How hard a segment insists on the width its title measures — and so,
+        /// what gives when the host is narrower than the strip wants to be.
+        ///
+        /// A floating bar has the screen's width and a scroll view to fall back
+        /// on, so its minimums are required and the strip overflows and scrolls.
+        /// A title view has only what the side buttons leave it and nowhere to
+        /// scroll to that would not hide a tab, so its minimums are breakable
+        /// and the titles truncate where they stand. The badges never take part
+        /// in either: they refuse to compress at all.
+        var segmentWidthPriority: UILayoutPriority {
+            switch self {
+            case .floating: .required
+            case .navigationTitle: .defaultHigh
+            }
+        }
+
+        /// Whether the bar states a width, or takes whatever it is given.
+        ///
+        /// A floating bar spans the screen. A title view must HUG: the
+        /// navigation bar hands the slot whatever is left between the side
+        /// items, and a bar that claims all of it is a bar that can sit over
+        /// them.
+        var hugsContent: Bool {
+            switch self {
+            case .floating: false
+            case .navigationTitle: true
+            }
+        }
+
+        /// Total height including margins.
+        var height: CGFloat { capsuleHeight + topMargin + bottomMargin }
+    }
+
     private enum Metrics {
-        /// The floating capsule's own height.
-        static let capsuleHeight: CGFloat = 42
-        static let topMargin: CGFloat = 4
-        static let bottomMargin: CGFloat = 8
         /// Breathing room between the capsule's edge and the first segment.
         static let capsulePadding: CGFloat = 5
         /// Inset of the lens inside the capsule.
@@ -85,15 +203,16 @@ public final class PagedTabBar: UIControl {
         static let interSegmentSpacing: CGFloat = 2
     }
 
-    /// Total height the container reserves as safe area, margins included.
+    /// Total height a `.floating` host reserves as safe area, margins included.
     ///
     /// `nonisolated` because owners read it to size the bar and to set
     /// `additionalSafeAreaInsets.top`, often from a nested constants type that
     /// carries no actor isolation of its own — a `UIView` subclass's statics
     /// are `@MainActor` by inference and would be unreachable from there. The
     /// same reason `InlineFilterTrayView.height` states it.
-    public nonisolated static let height: CGFloat =
-        Metrics.capsuleHeight + Metrics.topMargin + Metrics.bottomMargin
+    public nonisolated static let height: CGFloat = Style.floating.height
+
+    public let style: Style
 
     /// The segment the bar is reporting — updated by taps AND by the pages
     /// moving under it, so it is never stale. Reading it is how a
@@ -131,29 +250,40 @@ public final class PagedTabBar: UIControl {
     /// Where `progress` stood when the current capsule drag began.
     private var scrubOrigin: CGFloat = 0
 
-    public init(titles: [String]) {
+    public init(titles: [String], style: Style = .floating) {
         self.titles = titles
+        self.style = style
         super.init(frame: .zero)
 
-        shadowHost.layer.shadowColor = UIColor.black.cgColor
-        shadowHost.layer.shadowOpacity = 0.12
-        shadowHost.layer.shadowRadius = 10
-        shadowHost.layer.shadowOffset = CGSize(width: 0, height: 3)
-        // Full width, standard margins — the capsule is a bar, not a badge, so
-        // it reads the same on every screen instead of growing and shrinking
-        // with whatever the segment titles happen to measure.
+        if style.carriesBackdrop {
+            shadowHost.layer.shadowColor = UIColor.black.cgColor
+            shadowHost.layer.shadowOpacity = 0.12
+            shadowHost.layer.shadowRadius = 10
+            shadowHost.layer.shadowOffset = CGSize(width: 0, height: 3)
+        }
+        // Full width, standard margins — a floating capsule is a bar, not a
+        // badge, so it reads the same on every screen instead of growing and
+        // shrinking with whatever the segment titles happen to measure. A title
+        // view is the opposite case and hugs; see `Style.hugsContent`.
         shadowHost.constrain(in: self) { parent in
-            shadowHost.topAnchor.constraint(equalTo: parent.topAnchor, constant: Metrics.topMargin)
-            shadowHost.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Metrics.bottomMargin)
+            shadowHost.topAnchor.constraint(equalTo: parent.topAnchor, constant: style.topMargin)
+            shadowHost.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -style.bottomMargin)
             shadowHost.leadingAnchor.constraint(
-                equalTo: parent.safeAreaLayoutGuide.leadingAnchor, constant: Spacing.lg
+                equalTo: parent.safeAreaLayoutGuide.leadingAnchor, constant: style.horizontalMargin
             )
             shadowHost.trailingAnchor.constraint(
-                equalTo: parent.safeAreaLayoutGuide.trailingAnchor, constant: -Spacing.lg
+                equalTo: parent.safeAreaLayoutGuide.trailingAnchor, constant: -style.horizontalMargin
             )
         }
 
         capsule.clipsToBounds = true
+        // Stated HERE, not left to the first layout pass. `layoutSubviews` also
+        // maintains the radius (the capsule's height is not constant — Dynamic
+        // Type moves it), but a shape that only exists after a layout pass is a
+        // shape that does not exist for the frame in which the material first
+        // renders, and the glass draws as a hard-cornered rectangle for it.
+        capsule.layer.cornerCurve = .continuous
+        capsule.layer.cornerRadius = effectiveCapsuleHeight / 2
         capsule.pin(to: shadowHost)
 
         scroller.showsHorizontalScrollIndicator = false
@@ -198,13 +328,35 @@ public final class PagedTabBar: UIControl {
             row.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Metrics.capsulePadding)
         }
 
-        // Fill the capsule, and overflow it when the titles demand more. Only a
-        // `>=` — the row's own minimums push `content` wider than this when
-        // they have to, and the scroll view takes it from there. An `==` would
-        // forbid that and clip instead.
+        // How the content relates to the capsule's width — and this is what
+        // decides whether "too much content" becomes SCROLLING or TRUNCATION.
+        //
+        // `.floating` uses `>=`: the row's own minimums push `content` wider
+        // than the capsule when they have to, and the scroll view takes it from
+        // there. That is right for a bar that spans the screen.
+        //
+        // `.navigationTitle` uses `==`, and it is load-bearing. A title view
+        // cannot grow past what the side buttons leave it (measured: the bar
+        // caps the slot at 258pt however much more the bar asks for), so a row
+        // allowed to exceed that does not scroll gracefully — the trailing
+        // badge is simply cropped by the capsule's edge, which is the one thing
+        // the badge rules exist to prevent. Pinning the content TO the capsule
+        // pushes the shortfall down into the segments, where the breakable
+        // width minimums and the labels' low compression resistance turn it
+        // into a truncated title and intact badges.
+        //
+        // Symptom this fixes, in numbers: after a pull-to-refresh the bar's
+        // request grew 245 → 258 (the cap) with 25pt of content still
+        // outstanding, and "Short 99" lost half its badge off the trailing edge
+        // while "Activity" sat there untruncated with room to give.
+        content.widthAnchor.constraint(
+            equalTo: scroller.frameLayoutGuide.widthAnchor,
+            multiplier: 1
+        ).isActive = style.hugsContent
         content.widthAnchor.constraint(
             greaterThanOrEqualTo: scroller.frameLayoutGuide.widthAnchor
-        ).isActive = true
+        ).isActive = !style.hugsContent
+
 
         // Grab anywhere. The capsule is one physical object, so dragging it
         // should move the pages whether the finger happens to land on a title,
@@ -218,22 +370,79 @@ public final class PagedTabBar: UIControl {
         accessibilityContainerType = .semanticGroup
         row.accessibilityTraits = .tabBar
 
+        // The segments re-pin their own widths on a text-size change; a hugging
+        // bar's total width is the sum of those, so it has to re-state its
+        // intrinsic size in the same breath or the navigation bar keeps sizing
+        // the slot from the old measurement.
+        if style.hugsContent {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(contentSizeCategoryChanged),
+                name: UIContentSizeCategory.didChangeNotification,
+                object: nil
+            )
+        }
+
         applyProgress()
     }
 
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// A floating bar states only its height and spans whatever it is pinned
+    /// to. A title view states BOTH, because the navigation bar sizes the slot
+    /// from this and nothing else: a scroll view has no intrinsic size of its
+    /// own, so without a width here the bar would measure zero and vanish, and
+    /// with an unbounded one it would claim room the side items need.
+    ///
+    /// The width is the row's fitted width — the segments' pinned minimums plus
+    /// their spacing — so the capsule is exactly as wide as its titles. It has
+    /// to be re-derived whenever a badge appears or a text size changes, which
+    /// is what the `invalidateIntrinsicContentSize` calls below are for.
     public override var intrinsicContentSize: CGSize {
-        CGSize(width: UIView.noIntrinsicMetric, height: Self.height)
+        guard style.hugsContent else {
+            return CGSize(width: UIView.noIntrinsicMetric, height: style.height)
+        }
+        // Derived from the segments' own pinned widths rather than measured off
+        // the row: `systemLayoutSizeFitting` answers from the row's CURRENTLY
+        // resolved constraints, which lag a badge by one layout pass, while a
+        // segment knows its target width the instant it is set.
+        //
+        // ⚠️ The row is `fillEqually`, so the width is the WIDEST segment times
+        // the count — not the sum of the individual minimums. Summing them
+        // under-measures by (widest − each) and the capsule asks for less room
+        // than its own contents need, which is a scrolling strip that clips a
+        // title mid-word ("Activity" → "tivity") with space going spare beside
+        // it. Measured both ways before believing it: summed 208pt vs 227pt
+        // actual on three titles.
+        let widest = segments.map(\.pinnedWidth).max() ?? 0
+        let spacing = Metrics.interSegmentSpacing * CGFloat(max(0, segments.count - 1))
+        return CGSize(
+            width: ceil(widest * CGFloat(segments.count) + spacing) + Metrics.capsulePadding * 2,
+            height: effectiveCapsuleHeight + style.topMargin + style.bottomMargin
+        )
     }
 
     /// Materialized in-window, never in init: creating a real effect off
     /// screen stalls the render server on headless CI simulators (the same
     /// rule `ChatInputBar` and `SnapGlassCardView` follow).
     private func materializeEffects() {
-        guard window != nil else { return }
+        guard window != nil, style.carriesBackdrop else { return }
         if capsule.effect == nil {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-tabbar-shape-trace") {
+                print(String(format: "[tabshape] materialize h=%.1f r=%.1f laidOut=%@",
+                             capsule.bounds.height, capsule.layer.cornerRadius,
+                             hasLaidOut ? "true" : "false"))
+            }
+            #endif
+            // Shape before material. This runs from `didMoveToWindow`, which can
+            // land before the first layout pass has given the capsule its real
+            // bounds — and a `UIGlassEffect` switched on over a zero-radius
+            // layer renders one frame of hard corners before the radius catches
+            // up. Enforcing it synchronously here means the first frame the
+            // material is ever drawn in is already a capsule.
+            enforceCapsuleShape()
             let glass = UIGlassEffect(style: .regular)
             // The system's own press response for glass: the material flexes
             // under a touch instead of sitting inert. This is the whole of the
@@ -256,20 +465,64 @@ public final class PagedTabBar: UIControl {
     /// `.quaternarySystemFill` was fainter than either and was discarded.
     private static let lensTint = UIColor.label.withAlphaComponent(0.18)
 
+    /// Whether a layout pass has ever run — the fact that decides whether the
+    /// capsule's bounds are real or still zero when the material goes live.
+    ///
+    /// `-tabbar-shape-trace` prints both moments, and they are the reason the
+    /// radius has a fallback rather than being derived from `bounds` alone.
+    /// Measured at launch: **the first layout pass runs at `h=0.0`, and the
+    /// glass is switched on at `h=0.0` as well** — so a radius computed only
+    /// from bounds would be `0/2` for the first frame the material is ever
+    /// drawn in, which is precisely the square flash. A display-link probe
+    /// cannot see this window: its first sample lands after both events.
+    private var hasLaidOut = false
+
     public override func layoutSubviews() {
         super.layoutSubviews()
-        capsule.layer.cornerRadius = capsule.bounds.height / 2
-        capsule.layer.cornerCurve = .continuous
-        shadowHost.layer.shadowPath = UIBezierPath(
-            roundedRect: shadowHost.bounds,
-            cornerRadius: shadowHost.bounds.height / 2
-        ).cgPath
+        #if DEBUG
+        if !hasLaidOut, ProcessInfo.processInfo.arguments.contains("-tabbar-shape-trace") {
+            print(String(format: "[tabshape] first layout h=%.1f r=%.1f glass=%@",
+                         capsule.bounds.height, capsule.layer.cornerRadius,
+                         capsule.effect != nil ? "on" : "off"))
+        }
+        #endif
+        hasLaidOut = true
+        enforceCapsuleShape()
+        if style.carriesBackdrop {
+            shadowHost.layer.shadowPath = UIBezierPath(
+                roundedRect: shadowHost.bounds,
+                cornerRadius: shadowHost.bounds.height / 2
+            ).cgPath
+        }
         applyProgress()
     }
 
     public override func didMoveToWindow() {
         super.didMoveToWindow()
         materializeEffects()
+    }
+
+    /// Rounds the capsule to a true capsule, from whatever bounds it currently
+    /// has — and from the style's stated height while it has none.
+    ///
+    /// Called from three places on purpose: `init` (so the shape exists before
+    /// anything is drawn), `didMoveToWindow` (before the material is switched
+    /// on), and every `layoutSubviews` (because the height is not a constant —
+    /// Dynamic Type moves it, and a stale radius on a taller capsule reads as a
+    /// lozenge). It is idempotent and costs two property writes.
+    private func enforceCapsuleShape() {
+        // The fallback matters: bounds are zero until the first layout pass, and
+        // `0 / 2` is a square. Falling back to the style's own height means the
+        // radius is never wrong, only occasionally early.
+        let height = capsule.bounds.height > 0 ? capsule.bounds.height : effectiveCapsuleHeight
+        capsule.layer.cornerCurve = .continuous
+        capsule.layer.cornerRadius = height / 2
+    }
+
+    /// The segments have re-measured themselves; a hugging bar's own size is
+    /// derived from theirs, so it re-states it.
+    @objc private func contentSizeCategoryChanged() {
+        invalidateIntrinsicContentSize()
     }
 
     // MARK: - Driven state
@@ -293,9 +546,20 @@ public final class PagedTabBar: UIControl {
         guard segments.indices.contains(index) else { return }
         segments[index].setBadge(count)
         // A badge changes the segment's pinned width, so the lens has to
-        // re-derive its geometry from the new frames.
+        // re-derive its geometry from the new frames — and a HUGGING bar has to
+        // re-state its whole size, because its width is the sum of those
+        // segments.
+        //
+        // ⚠️ ORDER: lay the row out FIRST, then invalidate. `intrinsicContentSize`
+        // measures the row, and the segment's width constraint was changed one
+        // line ago — invalidating before the row has resolved it publishes the
+        // PRE-badge measurement, and the host sizes the slot from that. Measured:
+        // the capsule asked for 258pt of a 290pt slot while its content needed
+        // 269, so it scrolled and cut "Activity" to "tivity" — with 32pt of room
+        // going spare beside it.
         setNeedsLayout()
         layoutIfNeeded()
+        invalidateIntrinsicContentSize()
         applyProgress()
     }
 
@@ -326,8 +590,37 @@ public final class PagedTabBar: UIControl {
             segment.isHidden = false
             segment.transform = .identity
         }
+        invalidateIntrinsicContentSize()
         setNeedsLayout()
         layoutIfNeeded()
+    }
+
+    /// How many points of segment strip the capsule cannot show at its current
+    /// width — zero when everything fits.
+    ///
+    /// A hosted bar has no other way to tell the difference between "the tabs
+    /// fit" and "the tabs are scrolled and the last badge is off the edge",
+    /// which look identical in a screenshot taken at the wrong moment.
+    public var debugOverflow: CGFloat {
+        max(0, scroller.contentSize.width - scroller.bounds.width)
+    }
+
+    /// The capsule's height in force. The style states it outright — there is
+    /// no host-supplied override, by decision: an earlier build derived it from
+    /// the navigation bar's own item views and was replaced with a stated
+    /// constant, because a geometric read of a private view tree is a lot of
+    /// machinery to keep correct for a number the system does not vary.
+    private var effectiveCapsuleHeight: CGFloat { style.capsuleHeight }
+
+    /// The capsule's rendered shape, for a host that wants to prove there is no
+    /// square-cornered frame rather than squint at a screen recording.
+    ///
+    /// A capsule holds `radius == height / 2` at every instant. Anything less is
+    /// a lozenge; zero is the square flash. Reported alongside whether the
+    /// material is live, because a shape is only visible once there is something
+    /// to shape.
+    public var debugCapsuleShape: (radius: CGFloat, height: CGFloat, hasEffect: Bool) {
+        (capsule.layer.cornerRadius, capsule.bounds.height, capsule.effect != nil)
     }
 
     /// Chooses a segment exactly as a tap would, `.valueChanged` and all — so
@@ -398,7 +691,11 @@ public final class PagedTabBar: UIControl {
 
     private func buildSegments() {
         segments = titles.enumerated().map { index, title in
-            let segment = SegmentView(title: title)
+            let segment = SegmentView(
+                title: title,
+                titlePadding: style.segmentPadding,
+                widthPriority: style.segmentWidthPriority
+            )
             segment.addAction(
                 UIAction { [weak self] _ in self?.selectSegment(index) },
                 // `.primaryActionTriggered` now that the segment is a real
@@ -502,10 +799,22 @@ private final class SegmentView: UIButton {
     private let badge = BadgeView()
     private let content = UIStackView()
     private let title: String
-    private var pinnedWidth: NSLayoutConstraint!
+    /// Breathing room added around the measured title; see `Style.segmentPadding`.
+    private let titlePadding: CGFloat
+    /// How hard this segment insists on its measured width; see where the
+    /// constraint is built for why the two hosts differ.
+    private let widthPriority: UILayoutPriority
+    private var pinnedWidthConstraint: NSLayoutConstraint!
 
-    init(title: String) {
+    /// The width this segment has just asked for — readable the instant it is
+    /// set, where the resolved frame is a layout pass behind. A hugging bar
+    /// sums these to state its own size.
+    var pinnedWidth: CGFloat { pinnedWidthConstraint.constant }
+
+    init(title: String, titlePadding: CGFloat, widthPriority: UILayoutPriority) {
         self.title = title
+        self.titlePadding = titlePadding
+        self.widthPriority = widthPriority
         super.init(frame: .zero)
 
         for (label, weight) in [(plainLabel, UIFont.Weight.regular), (boldLabel, .semibold)] {
@@ -514,6 +823,14 @@ private final class SegmentView: UIButton {
             label.adjustsFontForContentSizeCategory = true
             label.textAlignment = .center
             label.isUserInteractionEnabled = false
+            // The TITLE is what gives when there is not enough room. A title
+            // that loses its tail is still a title you can read and tap; a
+            // badge that loses its tail is a wrong number ("12" cropped to "1"
+            // is not a smaller count, it is a lie), and a badge cropped to a
+            // sliver is furniture. So the label truncates and the badge, below,
+            // refuses to compress at all.
+            label.lineBreakMode = .byTruncatingTail
+            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         }
         plainLabel.textColor = .secondaryLabel
         boldLabel.textColor = .label
@@ -531,12 +848,36 @@ private final class SegmentView: UIButton {
         content.constrain(in: self) { parent in
             content.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
             content.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
+            // Bounds the content to its segment, which is what turns "too
+            // narrow" into truncation. Centred content with no width bound does
+            // not compress — it simply overflows its segment and draws over the
+            // neighbouring one, so the compression-resistance priorities above
+            // would never come into play at all.
+            content.widthAnchor.constraint(lessThanOrEqualTo: parent.widthAnchor)
         }
         plainLabel.constrain(in: self) { _ in
             plainLabel.centerXAnchor.constraint(equalTo: boldLabel.centerXAnchor)
             plainLabel.centerYAnchor.constraint(equalTo: boldLabel.centerYAnchor)
+            // Truncation has to reach BOTH weights or it reaches neither: the
+            // regular label is centred on the semibold one and otherwise keeps
+            // its own intrinsic width, so under compression the semibold would
+            // shorten to "Activi…" while the regular kept drawing "Activity"
+            // through it at the crossfade's other end.
+            //
+            // ⚠️ `<=`, NEVER `==`. Equality pulls in both directions, and the
+            // regular label is the NARROWER of the pair — its own hugging then
+            // drags the semibold label down to the regular measurement and
+            // truncates every title with room to spare. Measured: "Activity"
+            // laid out at 51.0 needing 54.3, on a bar with 45pt of slack.
+            plainLabel.widthAnchor.constraint(lessThanOrEqualTo: boldLabel.widthAnchor)
         }
 
+        // The badge never yields. Required in BOTH directions: compression
+        // resistance so it cannot be squeezed into a wrong number, and hugging
+        // so a stack with room to spare hands the slack to the title instead of
+        // inflating the pill.
+        badge.setContentCompressionResistancePriority(.required, for: .horizontal)
+        badge.setContentHuggingPriority(.required, for: .horizontal)
         badge.isHidden = true
         isAccessibilityElement = true
         accessibilityLabel = title
@@ -562,9 +903,17 @@ private final class SegmentView: UIButton {
 
         // A MINIMUM, not an exact width: `fillEqually` on the row hands every
         // segment the same slot, and this only states how narrow that slot is
-        // allowed to get before the row has to overflow and scroll.
-        pinnedWidth = widthAnchor.constraint(greaterThanOrEqualToConstant: 0)
-        pinnedWidth.isActive = true
+        // allowed to get.
+        //
+        // Its PRIORITY is what decides what happens when the host is too narrow
+        // for that minimum, and the two hosts want opposite answers. A floating
+        // bar spans the screen and can scroll, so the minimum is required and
+        // the strip overflows. A title view cannot scroll out from between two
+        // bar buttons without hiding a tab, so its minimum is breakable and the
+        // titles truncate in place instead.
+        pinnedWidthConstraint = widthAnchor.constraint(greaterThanOrEqualToConstant: 0)
+        pinnedWidthConstraint.priority = widthPriority
+        pinnedWidthConstraint.isActive = true
         updatePinnedWidth()
 
         NotificationCenter.default.addObserver(
@@ -610,11 +959,11 @@ private final class SegmentView: UIButton {
     /// room, so the lens has somewhere to sit and the row never reflows.
     private func updatePinnedWidth() {
         let bold = UIFont.preferredFont(forTextStyle: .subheadline, weight: .semibold, maximumPointSize: Self.maximumTitlePointSize)
-        var width = ceil((title as NSString).size(withAttributes: [.font: bold]).width) + Spacing.lg
+        var width = ceil((title as NSString).size(withAttributes: [.font: bold]).width) + titlePadding
         if !badge.isHidden {
             width += badge.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width + Spacing.xs
         }
-        pinnedWidth.constant = width
+        pinnedWidthConstraint.constant = width
     }
 }
 
