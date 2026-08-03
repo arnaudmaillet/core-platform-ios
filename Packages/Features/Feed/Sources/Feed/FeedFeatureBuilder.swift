@@ -65,7 +65,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 // Its OWN namespace. The profile gallery persists the same
                 // format axis under `profile.gallery.*`; sharing the keys would
                 // make each surface yank the other's landing tab.
-                preferences: GalleryPreferences(keyPrefix: "foryou.gallery")
+                preferences: GalleryPreferences(keyPrefix: "foryou.gallery"),
+                contextStore: ContentContextStore()
             ),
             imagePipeline: imagePipeline,
             // Deliberately the SAME pool the snap feed uses. The grid parks a
@@ -75,7 +76,10 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             videoPlayback: videoPlayback,
             // The same seeded surface a Maps pin opens, from a tile instead.
             makeSnapFeed: { postIDs in makeSnapFeedViewController(postIDs: postIDs) },
-            prewarm: { ids in await repository.prewarm(ids) }
+            prewarm: { ids in await repository.prewarm(ids) },
+            // For the `+` item, which routes to the composer rather than
+            // building one.
+            router: router
         )
     }
 

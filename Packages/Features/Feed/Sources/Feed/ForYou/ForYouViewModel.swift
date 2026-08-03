@@ -63,6 +63,9 @@ public final class ForYouViewModel {
     /// is already this type's, and a badge derived anywhere else would be a
     /// second copy of the same fact.
     private let unreadStore: ForYouUnreadStore
+    /// Persists the context lens. Optional so a test can run without touching
+    /// the simulator's defaults.
+    private let contextStore: ContentContextStore?
 
     /// The tabs this screen has, in the pager's order. Stated here rather than
     /// read from `ForYouPagerView.pageOrder` because that static is `@MainActor`
@@ -75,6 +78,9 @@ public final class ForYouViewModel {
 
     public private(set) var format: GalleryFilter.Format = ForYouViewModel.defaultFormat
     public private(set) var source: DiscoverySource = .trending
+    /// The active lens. Restored from the store at init, so the surface opens
+    /// where the viewer left it.
+    public private(set) var context: ContentContext = .entertainment
 
     /// Everything loaded so far, **in the order it is displayed**. nil = the
     /// first page is still in flight (pages report loading); a failure records
@@ -102,11 +108,14 @@ public final class ForYouViewModel {
     public init(
         repository: any ForYouProviding,
         preferences: GalleryPreferences? = nil,
-        unreadStore: ForYouUnreadStore = ForYouUnreadStore()
+        unreadStore: ForYouUnreadStore = ForYouUnreadStore(),
+        contextStore: ContentContextStore? = nil
     ) {
         self.repository = repository
         self.preferences = preferences
         self.unreadStore = unreadStore
+        self.contextStore = contextStore
+        if let contextStore { context = contextStore.context }
         // Two conditions, and both were learned the hard way.
         //
         // `hasStoredFormat` — because `preferences.format` answers `.activity`
@@ -170,6 +179,22 @@ public final class ForYouViewModel {
         self.source = source
         // The one place the whole corpus legitimately reorders.
         corpus = corpus.map(source.ordering)
+        publish()
+    }
+
+    /// The lens the whole surface is read through. Local, like the ordering —
+    /// it narrows the corpus already in hand rather than asking for another.
+    ///
+    /// Both tabs move together, because the context is a statement about the
+    /// surface rather than about one page of it.
+    public func setContext(_ context: ContentContext) {
+        guard self.context != context else { return }
+        self.context = context
+        contextStore?.context = context
+        // The unread counts are derived from the VISIBLE corpus, so they have
+        // to be republished with it: a tab whose new posts are all filtered out
+        // is a tab with nothing new on it, and a dot left over from the wider
+        // context would be pointing at posts this context does not admit.
         publish()
     }
 
@@ -275,12 +300,22 @@ public final class ForYouViewModel {
         }
     }
 
-    /// The corpus under the active ordering and a given format — what a page
+    /// The corpus under the active ordering, context and format — what a page
     /// renders, and the ordered set a tile tap seeds its feed from.
+    ///
+    /// The CONTEXT is applied here, in the single read path, rather than by
+    /// narrowing `corpus` when it changes. Two reasons, and the second is the
+    /// one that matters: a stored corpus would have to be re-fetched to widen
+    /// again (switching back to Entertainment would show only what the narrower
+    /// lens had already admitted), and every derived answer in this type —
+    /// page states, empty messages, unread counts, the feed a tile seeds —
+    /// already comes through this method, so applying it once here is what
+    /// makes "the context filters both tabs" true by construction rather than
+    /// by remembering to filter in four places.
     public func posts(for format: GalleryFilter.Format) -> [GalleryPost] {
         // `corpus` is already in display order — see its note. Reading is a
         // pure filter, so nothing can reorder behind the viewer's back.
-        format.filtering(corpus ?? [])
+        format.filtering(context.filtering(corpus ?? []))
     }
 
     private func publish() {
@@ -288,7 +323,9 @@ public final class ForYouViewModel {
             if let failure { return .failed(message: failure) }
             guard corpus != nil else { return .loading }
             let posts = posts(for: format)
-            return posts.isEmpty ? .empty(message: Self.emptyMessage(format: format, source: source)) : .content(posts)
+            return posts.isEmpty
+                ? .empty(message: Self.emptyMessage(format: format, source: source, context: context))
+                : .content(posts)
         }
         onSnapshotChange?(Snapshot(activity: page(.activity), media: page(.media), short: page(.short)))
         publishUnread()
@@ -356,7 +393,11 @@ public final class ForYouViewModel {
     #endif
 
     /// Names the empty combination so the blank page reads as an answer.
-    nonisolated static func emptyMessage(format: GalleryFilter.Format, source: DiscoverySource) -> String {
+    nonisolated static func emptyMessage(
+        format: GalleryFilter.Format,
+        source: DiscoverySource,
+        context: ContentContext = .entertainment
+    ) -> String {
         let what = switch format {
         case .activity: "activity"
         case .media: "media"
@@ -367,9 +408,16 @@ public final class ForYouViewModel {
         // ("...from people you follow"), which is why this used to have two
         // shapes; if a source that is not an adjective returns, it will need
         // its own slot again rather than being forced into this one.
-        return switch source {
+        let sentence = switch source {
         case .trending: "No trending \(what) yet."
         case .recent: "No recent \(what) yet."
         }
+        // A narrowed context is very often the REASON a page is empty, and a
+        // blank screen that does not say so reads as a broken feed. Naming the
+        // lens turns "this is broken" into "this is filtered", which is the
+        // difference between a bug report and a menu tap. Entertainment adds
+        // nothing, because it filters nothing.
+        guard context != .entertainment else { return sentence }
+        return sentence + " Showing \(context.title) only."
     }
 }

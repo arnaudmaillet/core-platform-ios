@@ -23,6 +23,7 @@ full functionality.
 | 13 | Relationship lists: no privacy contract, no `RemoveFollower`, id-only edges | Followers/Following screen — privacy is client-inferred, Remove is mock-only, hydration is N+1 | **High** (privacy) |
 | 14 | No discovery / recommendation feed for the "For You" tab | For You is three client-side orderings of the following feed | Medium |
 | 15 | No lightweight-preview rendition, and `RadarPin` can't express video | Map pin live previews (**blocked**); gallery-grid autoplay at scale | **High** (map) |
+| 16 | No topic/category on a post | For You's `ContentContext` lens filters by caption keywords | Medium |
 
 ---
 
@@ -576,6 +577,49 @@ Note also that Instagram itself does **not** use `AVPlayer` (Meta's engineering
 blog describes a decoupled lower-level decode stack rendering into
 `AVSampleBufferDisplayLayer`), so our pooling design is justified by `AVPlayer`'s
 own cost model rather than by that comparison.
+
+---
+
+## 16. No topic, category or classification on a post — `ContentContext` is a caption search
+
+The For You surface has a **content context** lens in its navigation bar
+(Entertainment / Work / Focus / Gaming) which is meant to filter both tabs to
+what the viewer is currently here for.
+
+**Nothing in the contracts says what a post is ABOUT.** `post.v1` carries
+media, caption, author, timestamps and counters; there is no topic, category,
+tag, hashtag or classification field, and no endpoint that would rank or select
+by one (checked across all 20 generated services alongside the §14 discovery
+search).
+
+**What the client does meanwhile.** `ContentContext.matches(_:)` lowercases the
+caption and looks for a small hand-written keyword list per context, in one pure
+file (`Packages/Features/Feed/Sources/Feed/ForYou/ContentContext.swift`), the
+same way `MessageRequestPolicy` quarantines its own stand-in. Three consequences
+stated rather than hidden:
+
+1. **It misses and over-claims.** A gaming post that never types "game" is
+   invisible to Gaming; a work post that mentions one is claimed by it.
+2. **Contexts overlap** — "deep work" is both Work and Focus — because a caption
+   search cannot tell which sense was meant. `ContentContextTests` pins this as
+   expected behaviour so nobody "fixes" it by tuning word lists.
+3. **Entertainment deliberately filters nothing**, so the default experience is
+   the unfiltered corpus rather than a keyword-shaped slice of it. This is what
+   keeps the stand-in from quietly degrading the common case.
+
+**What we need.** A subject on the post — server-assigned, not client-inferred:
+
+```
+post.v1.Post {
+  ...
+  repeated Topic topics = N;   // or a single classification enum
+}
+```
+
+plus, ideally, the ability to ASK for one (`GetDiscoveryFeed(..., topics: [...])`
+from §14) so the filter happens where the corpus does, instead of thinning
+already-fetched pages — today a narrow context can empty a page that had plenty
+of posts, and the only remedy is to scroll for more.
 
 ---
 

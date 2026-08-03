@@ -18,12 +18,18 @@ import UIKit
 /// its height. Everything else — fractional progress driving the lens, the
 /// capsule scrubbing the pager, badges — is shared.
 ///
-/// The discovery axis (Trending / Recent) is a navigation bar item rather than
-/// a second floating control: with the tabs at the top there is nothing left
-/// for a bottom tray to hold, and a lone glass bubble over the grid reads as
-/// furniture the screen forgot to remove. It used to offer a third ordering
-/// called "Following", which collided with the TAB of that name — see
-/// `DiscoverySource` for why it went.
+/// **The bar items are one action and one state.** Leading is `+`, which opens
+/// the composer through `AppRoute.upload`. Trailing is the `ContentContext`
+/// lens, whose glyph IS the current context — it does not offer an action, it
+/// reports what the surface is currently showing, and tapping it opens the menu
+/// to change that.
+///
+/// ⚠️ **`DiscoverySource` (Trending / Recent) has no UI entry point any more.**
+/// It used to be the leading item; `+` took that slot. The ordering still
+/// applies — everything is served under `.trending` — but nothing on screen can
+/// change it. Either fold it into the context menu as a second section or
+/// retire it; leaving it reachable only from a debug argument is not a
+/// resting state.
 ///
 /// This is a **tab root**, so the tab bar stays — it is how the viewer leaves.
 final class ForYouViewController: UIViewController {
@@ -31,6 +37,9 @@ final class ForYouViewController: UIViewController {
     private let pager: ForYouPagerView
     private let makeSnapFeed: ([PostID]) -> UIViewController
     private let prewarm: ([PostID]) async -> Void
+    /// How this screen leaves itself. Weak, and held by the composition root —
+    /// the screen never builds a destination, it names one.
+    private weak var router: (any Router)?
 
     /// The tab titles, in `ForYouPagerView.pageOrder` order: Discover (the
     /// media grid) then Following (the unfiltered page).
@@ -44,31 +53,28 @@ final class ForYouViewController: UIViewController {
     /// why the lens is a tint rather than a second material.
     private let tabBar = PagedTabBar(titles: tabTitles, style: .navigationTitle)
 
-    /// The discovery axis's options, in menu order. One table so the menu, the
-    /// bubble's glyph and any programmatic selection cannot disagree about
-    /// what a source looks like.
-    private struct SourceOption {
-        let source: DiscoverySource
-        let title: String
-        let symbol: String
-    }
+    /// Compose. The leading item is an ACTION, so it is a plain glyph with a
+    /// target — no menu, no state.
+    private lazy var composeItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            image: UIImage(systemName: "plus"),
+            primaryAction: UIAction { [weak self] _ in self?.openComposer() }
+        )
+        item.accessibilityLabel = "New Post"
+        return item
+    }()
 
-    private static let sourceOptions: [SourceOption] = [
-        SourceOption(source: .trending, title: "Trending", symbol: "flame"),
-        SourceOption(source: .recent, title: "Recent", symbol: "clock")
-    ]
-
-    /// The discovery axis: the navigation bar's leading item, whose native
-    /// single-selection menu carries the options and whose glyph shows the
-    /// active one.
+    /// The content context: the trailing item, whose native single-selection
+    /// menu carries the four lenses and whose glyph shows the active one.
     ///
-    /// A bar item rather than the glass bubble this used to be, and that fixes
-    /// a documented wart for free: the menu is REBUILT on every source change,
-    /// so `.singleSelection`'s checkmark now follows a programmatic change too.
-    /// The old icon-only button could not be told where its checkmark went.
-    private lazy var sourceItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(image: UIImage(systemName: "line.3.horizontal.decrease"))
-        item.accessibilityLabel = "Discovery filter"
+    /// A bar item rather than a glass bubble, and the menu is REBUILT on every
+    /// change — which is what lets `.singleSelection`'s checkmark follow a
+    /// programmatic change as well as a tap. An icon-only button cannot be told
+    /// where its checkmark went.
+    private lazy var contextItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(image: UIImage(systemName: viewModel.context.symbol))
+        item.accessibilityLabel = "Content context"
+        item.accessibilityValue = viewModel.context.title
         return item
     }()
 
@@ -368,11 +374,13 @@ final class ForYouViewController: UIViewController {
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController? = nil,
         makeSnapFeed: @escaping ([PostID]) -> UIViewController,
-        prewarm: @escaping ([PostID]) async -> Void
+        prewarm: @escaping ([PostID]) async -> Void,
+        router: (any Router)? = nil
     ) {
         self.viewModel = viewModel
         self.makeSnapFeed = makeSnapFeed
         self.prewarm = prewarm
+        self.router = router
         pager = ForYouPagerView(imagePipeline: imagePipeline, videoPlayback: videoPlayback)
         super.init(nibName: nil, bundle: nil)
         // NOT hidesBottomBarWhenPushed: this is a tab root, and the bar is how
@@ -399,13 +407,9 @@ final class ForYouViewController: UIViewController {
         // Native bar items on both sides. They lay out in the bar itself, which
         // is also what bounds the title slot the capsule now sits in — UIKit
         // gives the slot what is left between them, so neither can be covered.
-        navigationItem.leftBarButtonItem = sourceItem
-        rebuildSourceMenu()
-        navigationItem.rightBarButtonItem = UIBarButtonItem(
-            image: UIImage(systemName: "magnifyingglass"),
-            style: .plain, target: self, action: #selector(headerRightTapped)
-        )
-        navigationItem.rightBarButtonItem?.accessibilityLabel = "Search"
+        navigationItem.leftBarButtonItem = composeItem
+        navigationItem.rightBarButtonItem = contextItem
+        rebuildContextMenu()
 
         pager.pin(to: view)
 
@@ -506,43 +510,51 @@ final class ForYouViewController: UIViewController {
         navigationController?.navigationBar.layoutIfNeeded()
     }
 
-    /// Rebuilds the discovery menu so `.singleSelection` marks the active
-    /// source. Cheap, and the only way the checkmark can follow a change this
-    /// screen made itself rather than one the menu made.
-    private func rebuildSourceMenu() {
-        // Closure form, not a bare `map(makeSourceAction)`: passing a
+    /// Opens the post composer.
+    ///
+    /// Through the ROUTE, not by building the composer here: `AppRoute.upload`
+    /// already presents it, and it is presented from several places. A screen
+    /// that constructed its own would be a second answer to "what is the
+    /// composer" the day one of them changes.
+    private func openComposer() {
+        router?.route(to: .upload)
+    }
+
+    /// Rebuilds the context menu so `.singleSelection` marks the active lens.
+    /// Cheap, and the only way the checkmark can follow a change this screen
+    /// made itself rather than one the menu made.
+    private func rebuildContextMenu() {
+        // Closure form, not a bare `map(makeContextAction)`: passing a
         // MainActor-isolated method as a function value strips its isolation
         // and Swift 6 rejects it.
-        sourceItem.menu = UIMenu(
+        contextItem.menu = UIMenu(
             options: .singleSelection,
-            children: Self.sourceOptions.map { makeSourceAction($0) }
+            children: ContentContext.allCases.map { makeContextAction($0) }
         )
     }
 
-    private func makeSourceAction(_ option: SourceOption) -> UIAction {
+    private func makeContextAction(_ context: ContentContext) -> UIAction {
         UIAction(
-            title: option.title,
-            image: UIImage(systemName: option.symbol),
-            state: option.source == viewModel.source ? .on : .off
+            title: context.title,
+            image: UIImage(systemName: context.symbol),
+            state: context == viewModel.context ? .on : .off
         ) { [weak self] _ in
-            self?.applySource(option.source)
+            self?.applyContext(context)
         }
     }
 
-    /// Adopts a source everywhere it shows: the glyph, the VoiceOver value, and
-    /// the menu's own checkmark.
+    /// Adopts a context everywhere it shows: the glyph, the VoiceOver value,
+    /// the menu's own checkmark, and the corpus both tabs are reading.
     ///
     /// Set HERE rather than in the menu action so that every path that changes
-    /// the source — a menu tap, a debug hook — moves all three together. The
-    /// rebuild is what lets a programmatic change carry the checkmark; the
-    /// glass bubble this replaced had no way to, and had to document the
-    /// discrepancy instead.
-    private func applySource(_ source: DiscoverySource) {
-        guard let option = Self.sourceOptions.first(where: { $0.source == source }) else { return }
-        viewModel.setSource(source)
-        sourceItem.image = UIImage(systemName: option.symbol)
-        sourceItem.accessibilityValue = option.title
-        rebuildSourceMenu()
+    /// the context — a menu tap, a debug hook, a restore — moves all of them
+    /// together. The rebuild is what lets a programmatic change carry the
+    /// checkmark.
+    private func applyContext(_ context: ContentContext) {
+        viewModel.setContext(context)
+        contextItem.image = UIImage(systemName: context.symbol)
+        contextItem.accessibilityValue = context.title
+        rebuildContextMenu()
     }
 
     /// Opens the full-screen feed on the tapped post, with the hero zoom.
@@ -839,12 +851,6 @@ final class ForYouViewController: UIViewController {
     }
     #endif
 
-    /// A placeholder: it exists to put a real bar item in the header, not to
-    /// add a feature. Wired to nothing on purpose rather than to a half-built
-    /// destination. (The leading item is no longer one of these — it carries
-    /// the discovery menu the bottom tray used to hold.)
-    @objc private func headerRightTapped() {}
-
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         pager.setAutoplayActive(true)
@@ -1112,8 +1118,8 @@ final class ForYouViewController: UIViewController {
                     late.append("segment \(index) unreachable (hit=\(hit.map { "\(type(of: $0))" } ?? "nil"))")
                 }
             }
-            for (name, item) in [("source", sourceItem), ("search", navigationItem.rightBarButtonItem)] {
-                guard let itemView = item?.value(forKey: "view") as? UIView else {
+            for (name, item) in [("compose", composeItem), ("context", contextItem)] {
+                guard let itemView = item.value(forKey: "view") as? UIView else {
                     late.append("\(name) item has no view")
                     continue
                 }
@@ -1155,7 +1161,7 @@ final class ForYouViewController: UIViewController {
         // The title-slot question, in numbers: how wide is the capsule allowed
         // to be, where do the side items start and end, and is the capsule
         // scrolling its own content (which is what silently crops a badge)?
-        let leftRect = (sourceItem.value(forKey: "view") as? UIView)
+        let leftRect = (composeItem.value(forKey: "view") as? UIView)
             .map { $0.convert($0.bounds, to: window) } ?? .zero
         let rightRect = (navigationItem.rightBarButtonItem?.value(forKey: "view") as? UIView)
             .map { $0.convert($0.bounds, to: window) } ?? .zero
@@ -1236,19 +1242,14 @@ final class ForYouViewController: UIViewController {
            position + 1 < arguments.count, let count = Int(arguments[position + 1]) {
             Self.remainingGrabCycles = count
         }
-        if let position = arguments.firstIndex(of: "-foryou-source"), position + 1 < arguments.count {
-            // "following" is deliberately absent: that ordering was removed
-            // when the tabs took the name. A script still passing it gets no
-            // source change rather than a silent substitution.
-            let source: DiscoverySource? = switch arguments[position + 1] {
-            case "trending": .trending
-            case "recent": .recent
-            default: nil
-            }
-            if let source {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                    self?.applySource(source)
-                }
+        // `-foryou-context <entertainment|work|focus|gaming>` drives the lens.
+        // A `UIMenu` needs a real tap to open, so this is the only way to reach
+        // a non-default context from a script.
+        if let position = arguments.firstIndex(of: "-foryou-context"),
+           position + 1 < arguments.count,
+           let context = ContentContext(rawValue: arguments[position + 1]) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.applyContext(context)
             }
         }
         // `-foryou-switch-format a,b,...` taps the format segments in order,
