@@ -54,6 +54,10 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
     /// builds the flight; the default answers nil, which degrades to the
     /// rail-only scrub.
     var flightCard: () -> (any ZoomFlightCard)? = { nil }
+    /// The staged flight's endpoint rects in animation order, for recovering
+    /// the caught fraction from the card's presentation size. Same wiring and
+    /// same degradation as `flightCard`.
+    var flightEndpoints: () -> (start: CGRect, end: CGRect)? = { nil }
 
     /// The interruption's state machine and channel math — pure, so the
     /// transitions and the follow-the-finger arithmetic are unit-tested
@@ -126,11 +130,7 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
             // Freezes the animator wherever the spring had got to.
             if handoff.touchDown() == .pauseFlight {
                 pause()
-                #if DEBUG
-                if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-                    print(String(format: "[zoom-live] CATCH freeze at=%.2f", percentComplete))
-                }
-                #endif
+                alignWithPresentation()
             }
         case .ended, .cancelled, .failed:
             if handoff.touchUp() == .resumeTowardEnd {
@@ -162,10 +162,12 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
         switch recogniser.state {
         case .began:
             guard container.window != nil else { return }
-            // Idempotent when the touch catcher froze the flight first; the
-            // pause is what makes `percentComplete` current either way.
+            // Idempotent when the touch catcher froze the flight first: the
+            // second alignment recomputes from a presentation the first one
+            // already posed, and lands on the same fraction.
             pause()
-            guard handoff.grabBegan(atFraction: percentComplete) else { return }
+            let caught = alignWithPresentation() ?? percentComplete
+            guard handoff.grabBegan(atFraction: caught) else { return }
             // The free channel rides `card.transform` — the one geometric
             // channel no pose touches — so it composes with the scrubbed
             // animation instead of fighting it.
@@ -176,7 +178,7 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
                 print(String(format: "[zoom-live] CATCH grab at=%.2f free=%@",
-                             percentComplete, grabbedCard == nil ? "no" : "yes"))
+                             caught, grabbedCard == nil ? "no" : "yes"))
             }
             #endif
         case .changed:
@@ -238,6 +240,55 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
     /// scrub mode does.
     private static func railPosition(of card: UIView) -> CGPoint {
         card.layer.presentation()?.position ?? card.layer.position
+    }
+
+    /// Re-aims the percent driver at the fraction the SCREEN is showing,
+    /// immediately after a `pause()`, and returns that fraction.
+    ///
+    /// `pause()` syncs `percentComplete` from the animator's
+    /// `fractionComplete`, and for a spring animator that number is
+    /// time-based and wrong — measured as 0.00 on a flight that was visibly
+    /// half-flown. Left uncorrected, the first scrub snapped the card
+    /// straight back to the start pose (tile-sized, on a present) the moment
+    /// it was caught. The card's presentation size recovers the true
+    /// fraction (`ZoomFlightGrabHandoff.caughtFraction` — every posed
+    /// property rides one shared scalar, so size determines the whole pose),
+    /// and one `update` re-poses the paused animator exactly where the eye
+    /// already has it: the catch changes nothing on screen.
+    ///
+    /// RETURNED rather than read back, because `percentComplete` does not
+    /// reflect an `update` within the same call (measured: 0.00 immediately
+    /// after `update(0.21)`, 0.21 by the next event) — a caller that anchored
+    /// the grab on the readback would measure the whole drag from zero and
+    /// snap the card on the first pan event. Nil when the seam is unwired,
+    /// the animation has no presentation, or the endpoints are the same size;
+    /// the synced value is then all there is.
+    @discardableResult
+    private func alignWithPresentation() -> CGFloat? {
+        var aligned: CGFloat?
+        defer {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                let card = flightCard()
+                let bounds = card?.layer.presentation()?.bounds.size ?? card?.bounds.size
+                print(String(format: "[zoom-live] CATCH freeze at=%.2f (synced=%.2f) card=%.0fx%.0f",
+                             aligned ?? percentComplete, percentComplete,
+                             bounds?.width ?? -1, bounds?.height ?? -1))
+            }
+            #endif
+        }
+        guard let card = flightCard(),
+              let endpoints = flightEndpoints(),
+              let presented = card.layer.presentation()?.bounds.size,
+              let fraction = ZoomFlightGrabHandoff.caughtFraction(
+                  presented: presented,
+                  start: endpoints.start.size,
+                  end: endpoints.end.size
+              )
+        else { return nil }
+        update(fraction)
+        aligned = fraction
+        return fraction
     }
 
     /// Springs the free channel's offset home alongside the percent driver's

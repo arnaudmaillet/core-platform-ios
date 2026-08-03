@@ -149,6 +149,37 @@ struct ZoomFlightGrabHandoff {
         )
     }
 
+    /// The transition fraction the SCREEN is actually showing, recovered from
+    /// the card's presentation-layer size against the flight's two endpoint
+    /// poses.
+    ///
+    /// Needed because `UIPercentDrivenInteractiveTransition.pause()` syncs
+    /// `percentComplete` from the animator's `fractionComplete`, and for a
+    /// SPRING animator that number is time-based and wrong — measured as 0.00
+    /// on a flight that was visibly half-flown. Scrubbing from the synced
+    /// value snapped the card straight to the start pose (tile-sized, on a
+    /// present) the instant a finger landed on it.
+    ///
+    /// Size is a faithful proxy for the whole pose: every property the flight
+    /// animates follows an affine path between the two poses under one shared
+    /// timing curve, so the visual state at any instant is a single scalar —
+    /// and scrubbing the paused animator (linearly) to that scalar reproduces
+    /// the exact geometry on screen. Solved on the axis with the longer
+    /// travel; nil when the endpoints are effectively the same size, where
+    /// no fraction is recoverable and the synced value is all there is.
+    static func caughtFraction(presented: CGSize, start: CGSize, end: CGSize) -> CGFloat? {
+        let widthTravel = end.width - start.width
+        let heightTravel = end.height - start.height
+        let fraction: CGFloat
+        if abs(heightTravel) >= abs(widthTravel) {
+            guard abs(heightTravel) > 1 else { return nil }
+            fraction = (presented.height - start.height) / heightTravel
+        } else {
+            fraction = (presented.width - start.width) / widthTravel
+        }
+        return min(max(fraction, 0), 1)
+    }
+
     /// The hand's points/second, projected onto transition progress and
     /// normalized to the remaining travel toward the outcome's target —
     /// UIKit's spring-velocity unit. Clamped so a wild flick cannot detonate

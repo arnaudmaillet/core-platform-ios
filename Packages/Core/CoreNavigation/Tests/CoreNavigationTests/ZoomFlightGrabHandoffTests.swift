@@ -181,6 +181,63 @@ struct ZoomFlightGrabHandoffTests {
         #expect(release?.completes == true)
     }
 
+    // MARK: - Caught fraction
+
+    /// The percent driver's synced fraction is time-based and wrong for a
+    /// spring (measured as 0.00 on a half-flown flight — the size snap on
+    /// catch). The screen's own fraction is recovered from the card's
+    /// presentation size instead; these pin that solve.
+    @Test func theCaughtFractionIsRecoveredFromThePresentedSize() {
+        // Present leg: tile 120x80 → page 400x880. Halfway in size IS the
+        // scalar the whole pose rides on.
+        let half = ZoomFlightGrabHandoff.caughtFraction(
+            presented: CGSize(width: 260, height: 480),
+            start: CGSize(width: 120, height: 80),
+            end: CGSize(width: 400, height: 880)
+        )
+        #expect(half != nil)
+        #expect(abs((half ?? -1) - 0.5) < 0.001)
+        // At an endpoint, exactly that endpoint.
+        #expect(ZoomFlightGrabHandoff.caughtFraction(
+            presented: CGSize(width: 120, height: 80),
+            start: CGSize(width: 120, height: 80),
+            end: CGSize(width: 400, height: 880)
+        ) == 0)
+    }
+
+    @Test func theCaughtFractionSolvesOnTheLongerAxisAndHandlesBothLegs() {
+        // Wide tile: width travels further than height, so width decides.
+        let wide = ZoomFlightGrabHandoff.caughtFraction(
+            presented: CGSize(width: 300, height: 862),
+            start: CGSize(width: 400, height: 874),
+            end: CGSize(width: 0, height: 826)
+        )
+        #expect(abs((wide ?? -1) - 0.25) < 0.001)
+        // Dismiss leg runs page → tile: a card near the tile reads near 1.
+        let landing = ZoomFlightGrabHandoff.caughtFraction(
+            presented: CGSize(width: 130, height: 100),
+            start: CGSize(width: 400, height: 880),
+            end: CGSize(width: 120, height: 80)
+        )
+        #expect((landing ?? 0) > 0.95)
+    }
+
+    @Test func theCaughtFractionIsClampedAndRefusesDegenerateEndpoints() {
+        // Overshoot past the page (spring bounce) clamps rather than escapes.
+        #expect(ZoomFlightGrabHandoff.caughtFraction(
+            presented: CGSize(width: 410, height: 900),
+            start: CGSize(width: 120, height: 80),
+            end: CGSize(width: 400, height: 880)
+        ) == 1)
+        // Same-sized endpoints: no fraction is recoverable — nil, so the
+        // caller keeps the synced value instead of dividing by nothing.
+        #expect(ZoomFlightGrabHandoff.caughtFraction(
+            presented: CGSize(width: 200, height: 200),
+            start: CGSize(width: 200, height: 200),
+            end: CGSize(width: 200, height: 200)
+        ) == nil)
+    }
+
     // MARK: - Continuation spring
 
     @Test func theContinuationVelocityPointsAtTheOutcome() {
