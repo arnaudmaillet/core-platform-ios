@@ -1,27 +1,43 @@
 import UIKit
 
-/// Lets the viewer catch a dismissal that is already flying and take it over.
+/// Lets the viewer catch a flight that is already flying and take it over —
+/// freeze on contact, follow the finger, decide at release.
 ///
 /// **Why a percent-driven controller for a transition that starts on a tap.**
 /// A running `UIView.animate` cannot be caught: there is no object to pause and
-/// no way to tell UIKit the pop should be reversed. `UIPercentDrivenInteractive
-/// Transition` with `wantsInteractiveStart == false` is exactly the shape this
-/// needs — the pop begins non-interactively, as a tap-back always did, and this
-/// sits dormant over it holding the right to interrupt. Nothing about an
-/// untouched flight changes.
+/// no way to tell UIKit the transition should be reversed. `UIPercentDriven
+/// InteractiveTransition` with `wantsInteractiveStart == false` is exactly the
+/// shape this needs — the flight begins non-interactively, as a tap always
+/// did, and this sits dormant over it holding the right to interrupt. Nothing
+/// about an untouched flight changes.
 ///
-/// It pairs with `ZoomAnimator.interruptibleAnimator(using:)`, which hands UIKit
-/// a `UIViewPropertyAnimator` instead of running the spring directly. `pause()`
-/// stops that animator wherever it is; `update(_:)` scrubs it; `finish()` and
-/// `cancel()` hand it back with the remaining distance re-timed.
+/// It pairs with `ZoomAnimator.interruptibleAnimator(using:)`, which hands
+/// UIKit a `UIViewPropertyAnimator` instead of running the spring directly.
+/// `pause()` stops that animator wherever it is; `update(_:)` scrubs it;
+/// `finish()` and `cancel()` hand it back with the remaining distance re-timed.
+///
+/// **Freeze on contact.** A zero-duration press recognises at touch-down —
+/// ~10pt of travel before any pan can — and pauses the flight under the
+/// finger, so touching a flying card stops it instantly rather than after a
+/// drag threshold. A finger that lifts without dragging resumes the flight
+/// toward its end: holding was an inspection, not a veto.
+///
+/// **Two channels once a drag begins**, the same split the grab-from-rest
+/// driver (`ZoomDismissInteractionController`) uses:
+/// - vertical travel scrubs the percent driver — the morph, dim, depth and
+///   navigation-bar rail;
+/// - the residual of the finger's travel (what the scrub did not spend moving
+///   the card) rides `card.transform`, the one geometric channel no pose
+///   touches, so the card tracks the finger 1:1 near the grab point. The
+///   arithmetic lives in `ZoomFlightGrabHandoff`, where it is unit-tested.
 ///
 /// **Direction is per leg, and both mean "down puts it back".** On a DISMISSAL
-/// downward advances, which is the direction that starts one from rest
-/// (`ZoomDismissInteractionController`), so catching a flight mid-air pushes it
-/// home the way it would have been thrown. On a PRESENT the same downward drag
-/// has to REVERSE the push, because down is the gesture for going back to the
-/// grid either way. One sign flip expresses that, and inverting the velocity
-/// with it keeps a flick meaning the same thing on both legs.
+/// downward advances, which is the direction that starts one from rest, so
+/// catching a flight mid-air pushes it home the way it would have been thrown.
+/// On a PRESENT the same downward drag has to REVERSE the push, because down
+/// is the gesture for going back to the grid either way. One sign flip
+/// expresses that, and inverting the velocity with it keeps a flick meaning
+/// the same thing on both legs.
 @MainActor
 final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
     /// The flight starts on its own. This object only ever interrupts one.
@@ -32,20 +48,32 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
 
     private weak var container: UIView?
     private weak var pan: UIPanGestureRecognizer?
-    /// `percentComplete` at the moment the flight was caught — the drag is
-    /// measured from there, not from zero, or grabbing a half-flown card would
-    /// snap it back to the page.
-    private var grabbedAt: CGFloat = 0
-    /// The travel that maps to the whole flight. The container's height rather
-    /// than the card's, so the gain does not change with the post's shape.
-    private var span: CGFloat = 1
-    private var isGrabbing = false
-    /// `+1` when a downward drag advances the transition (dismiss), `-1` when it
-    /// reverses one (present).
-    private let direction: CGFloat
+    private weak var touchCatcher: UILongPressGestureRecognizer?
+    /// Vends the card of the flight currently staged, for the free-position
+    /// channel. Wired by the transition controller from the animator that
+    /// builds the flight; the default answers nil, which degrades to the
+    /// rail-only scrub.
+    var flightCard: () -> (any ZoomFlightCard)? = { nil }
+
+    /// The interruption's state machine and channel math — pure, so the
+    /// transitions and the follow-the-finger arithmetic are unit-tested
+    /// without a live transition. Rebuilt per flight with the real span.
+    private var handoff: ZoomFlightGrabHandoff
+    /// The card under the finger, held for the free channel. Present leg
+    /// only: a dismissal may fly a hoisted surface above the card
+    /// (the map's return), and a transform on the card alone would shear the
+    /// two apart.
+    private weak var grabbedCard: UIView?
+    /// The card's rail position at grab-begin — presentation-layer truth, the
+    /// baseline `railDelta` is measured against.
+    private var railOrigin: CGPoint = .zero
+    private let advancesOnDownwardDrag: Bool
 
     init(advancesOnDownwardDrag: Bool) {
-        direction = advancesOnDownwardDrag ? 1 : -1
+        self.advancesOnDownwardDrag = advancesOnDownwardDrag
+        handoff = ZoomFlightGrabHandoff(
+            advancesOnDownwardDrag: advancesOnDownwardDrag, span: 1
+        )
         super.init()
     }
 
@@ -53,11 +81,27 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
         super.startInteractiveTransition(transitionContext)
         let container = transitionContext.containerView
         self.container = container
-        span = max(container.bounds.height, 1)
+        // The travel that maps to the whole flight: the container's height
+        // rather than the card's, so the gain does not change with the post's
+        // shape.
+        handoff = ZoomFlightGrabHandoff(
+            advancesOnDownwardDrag: advancesOnDownwardDrag,
+            span: container.bounds.height
+        )
 
         #if DEBUG
         scheduleScriptedInterruptIfNeeded()
         #endif
+
+        // Freeze on contact: recognises at touch-down, before the pan's
+        // ~10pt movement threshold, so the flight stops the instant it is
+        // touched. Coexists with the pan (delegate below); the pan takes over
+        // when movement starts.
+        let touch = UILongPressGestureRecognizer(target: self, action: #selector(handleTouch))
+        touch.minimumPressDuration = 0
+        touch.delegate = self
+        container.addGestureRecognizer(touch)
+        touchCatcher = touch
 
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
         // Never blocks anything: the flight's container has no other recogniser
@@ -67,34 +111,73 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
         self.pan = pan
     }
 
+    // MARK: - Touch catcher
+
+    @objc private func handleTouch(_ recogniser: UILongPressGestureRecognizer) {
+        // The container can outlive `completeTransition` by a beat; a touch
+        // in that window must not pause a transition that already reported.
+        guard container?.window != nil else { return }
+        switch recogniser.state {
+        case .began:
+            // Freezes the animator wherever the spring had got to.
+            if handoff.touchDown() == .pauseFlight { pause() }
+        case .ended, .cancelled, .failed:
+            if handoff.touchUp() == .resumeTowardEnd {
+                detach()
+                // Resume on the shared spring from rest — the same physics
+                // every other leg lands with, minus the hand's velocity a
+                // motionless hold does not have.
+                timingCurve = UISpringTimingParameters(
+                    dampingRatio: ZoomFlight.springDamping, initialVelocity: .zero
+                )
+                finish()
+            }
+        default:
+            break
+        }
+    }
+
+    // MARK: - Pan
+
     @objc private func handlePan(_ recogniser: UIPanGestureRecognizer) {
         guard let container else { return }
-        let translation = recogniser.translation(in: container).y
+        let translation = recogniser.translation(in: container)
 
         switch recogniser.state {
         case .began:
-            isGrabbing = true
-            // Freezes the animator wherever the spring had got to. Everything
-            // below is measured from that point.
+            guard container.window != nil else { return }
+            // Idempotent when the touch catcher froze the flight first; the
+            // pause is what makes `percentComplete` current either way.
             pause()
-            grabbedAt = percentComplete
+            guard handoff.grabBegan(atFraction: percentComplete) else { return }
+            // The free channel rides `card.transform` — the one geometric
+            // channel no pose touches — so it composes with the scrubbed
+            // animation instead of fighting it.
+            if !advancesOnDownwardDrag, let card = flightCard() {
+                grabbedCard = card
+                railOrigin = Self.railPosition(of: card)
+            }
         case .changed:
-            guard isGrabbing else { return }
-            update(progress(for: translation))
+            guard handoff.phase == .grabbing else { return }
+            update(handoff.fraction(forVerticalTranslation: translation.y))
+            if let card = grabbedCard {
+                // Measured AFTER the update, so the delta includes the scrub
+                // this very event performed and the residual never
+                // double-counts the rail's share of the travel.
+                let rail = Self.railPosition(of: card)
+                let offset = handoff.freeOffset(
+                    translation: translation,
+                    railDelta: CGPoint(x: rail.x - railOrigin.x, y: rail.y - railOrigin.y)
+                )
+                card.transform = CGAffineTransform(translationX: offset.x, y: offset.y)
+            }
         case .ended, .cancelled, .failed:
-            guard isGrabbing else { return }
-            isGrabbing = false
-            // Both flipped by `direction`, so the decision reads the same on
-            // either leg: "is this heading for the end, or back to the start".
-            let velocity = direction * recogniser.velocity(in: container).y
-            let progress = progress(for: translation)
-            // A flick decides regardless of distance, matching the grab-from-rest
-            // contract; otherwise the same completion threshold everything else
-            // in this transition uses.
-            let completes = ZoomTransitionGeometry.shouldCompleteDismissal(
-                progress: progress, velocity: velocity
-            )
+            guard let release = handoff.released(
+                verticalTranslation: translation.y,
+                verticalVelocity: recogniser.velocity(in: container).y
+            ) else { return }
             detach()
+            settleFreeChannel()
             // Without an explicit curve the percent driver continues a caught
             // flight with its default completion curve — ease-in-out from
             // rest — which is different physics from every other leg of this
@@ -102,12 +185,38 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
             // moment of release. Hand it the shared spring instead, seeded
             // with the hand's velocity, so a caught flight lands the way a
             // grab-from-rest release does.
-            timingCurve = continuationSpring(
-                rawVelocity: recogniser.velocity(in: container).y, towardEnd: completes
+            timingCurve = UISpringTimingParameters(
+                dampingRatio: ZoomFlight.springDamping,
+                initialVelocity: CGVector(dx: 0, dy: release.springVelocity)
             )
-            if completes { finish() } else { cancel() }
+            release.completes ? finish() : cancel()
         default:
             break
+        }
+    }
+
+    /// The card's scrubbed position — presentation-layer truth, so the rail
+    /// delta reflects what is actually on screen whatever the timing curve or
+    /// scrub mode does.
+    private static func railPosition(of card: UIView) -> CGPoint {
+        card.layer.presentation()?.position ?? card.layer.position
+    }
+
+    /// Springs the free channel's offset home alongside the percent driver's
+    /// continuation, on the same shared spring, so the 2D float and the rail
+    /// converge together — whichever outcome, the card's transform must be
+    /// identity by the time the animator's completion tears the stage down.
+    private func settleFreeChannel() {
+        guard let card = grabbedCard else { return }
+        grabbedCard = nil
+        guard card.transform != .identity else { return }
+        UIView.animate(
+            withDuration: ZoomFlight.springDuration, delay: 0,
+            usingSpringWithDamping: ZoomFlight.springDamping,
+            initialSpringVelocity: 0,
+            options: [.beginFromCurrentState, .allowUserInteraction]
+        ) {
+            card.transform = .identity
         }
     }
 
@@ -135,50 +244,48 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
                 // Zero velocity, but the SAME spring a hand's release hands
                 // over — the scripted path must exercise the physics it
                 // stands in for.
-                self.timingCurve = self.continuationSpring(rawVelocity: 0, towardEnd: mode != "cancel")
+                self.timingCurve = UISpringTimingParameters(
+                    dampingRatio: ZoomFlight.springDamping, initialVelocity: .zero
+                )
                 if mode == "cancel" { self.cancel() } else { self.finish() }
             }
         }
     }
     #endif
 
-    private func progress(for translation: CGFloat) -> CGFloat {
-        min(max(grabbedAt + direction * translation / span, 0), 1)
-    }
-
-    /// The timing the caught flight continues on: the transition's own spring,
-    /// seeded with the hand's release velocity in UIKit's spring units —
-    /// remaining-distances per second toward the outcome's target.
-    ///
-    /// `rawVelocity` is the pan's vertical points/second; `direction` maps it
-    /// onto transition progress (down advances a dismissal, reverses a
-    /// present), and the sign flips again for a cancel, whose target is the
-    /// START. Clamped like the grab-from-rest release, so a wild flick cannot
-    /// detonate the spring.
-    private func continuationSpring(rawVelocity: CGFloat, towardEnd: Bool) -> UISpringTimingParameters {
-        let travel = towardEnd ? max(1 - percentComplete, 0.001) : max(percentComplete, 0.001)
-        let towardTarget = (towardEnd ? 1 : -1) * direction * rawVelocity / (travel * span)
-        let unit = min(max(towardTarget, -3), 3)
-        return UISpringTimingParameters(
-            dampingRatio: ZoomFlight.springDamping,
-            initialVelocity: CGVector(dx: 0, dy: unit)
-        )
-    }
-
-    /// Takes the recogniser off the container once a decision is made, so the
-    /// same flight cannot be grabbed twice on its way out.
+    /// Takes both recognisers off the container once a decision is made, so
+    /// the same flight cannot be grabbed twice on its way out.
     private func detach() {
         if let pan { container?.removeGestureRecognizer(pan) }
+        if let touchCatcher { container?.removeGestureRecognizer(touchCatcher) }
         pan = nil
+        touchCatcher = nil
     }
 }
 
 extension ZoomFlightInterruptor: UIGestureRecognizerDelegate {
-    /// Vertical intent only. A horizontal drag over a flying card is not a
-    /// dismissal gesture, and claiming it would swallow it for no purpose.
+    /// The touch catcher always begins — freezing is what contact means over
+    /// a flying card. The pan begins for ANY direction on the present leg:
+    /// the whole point of the catch is that the finger takes the card
+    /// wherever it goes, and the free channel can honour every direction. The
+    /// dismiss leg keeps its vertical-intent gate — its card can fly a
+    /// hoisted surface the free channel cannot carry, so a horizontal drag
+    /// there would claim a gesture it cannot honour.
     nonisolated func gestureRecognizerShouldBegin(_ recogniser: UIGestureRecognizer) -> Bool {
         guard let pan = recogniser as? UIPanGestureRecognizer else { return true }
-        let velocity = pan.velocity(in: pan.view)
-        return abs(velocity.y) > abs(velocity.x)
+        return MainActor.assumeIsolated {
+            guard advancesOnDownwardDrag else { return true }
+            let velocity = pan.velocity(in: pan.view)
+            return abs(velocity.y) > abs(velocity.x)
+        }
+    }
+
+    /// The touch catcher and the pan are both ours and must coexist: the
+    /// freeze begins on contact, the pan takes over when movement starts.
+    nonisolated func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+    ) -> Bool {
+        true
     }
 }

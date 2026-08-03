@@ -55,6 +55,13 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     private var interruptible: UIViewPropertyAnimator?
     private weak var interruptibleContext: AnyObject?
 
+    /// The card of the flight this animator currently has staged. A mid-air
+    /// catch (`ZoomFlightInterruptor`) drives its transform directly — the
+    /// free-position channel — while the percent driver scrubs everything
+    /// else. Weak: the transition container owns the card for the flight's
+    /// lifetime, and this seam only borrows it.
+    private(set) weak var stagedFlightCard: (any ZoomFlightCard)?
+
     init(
         isPresenting: Bool,
         source: any ZoomTransitionSource,
@@ -184,6 +191,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let flight = ZoomFlight.build(
             source: source, destination: destination, sourceFrame: sourceFrame, pageFrame: pageFrame
         )
+        stagedFlightCard = flight.card
         container.insertSubview(flight.card, belowSubview: toView)
         container.insertSubview(flight.shadow, belowSubview: flight.card)
         // Resolve the chrome replica's full-screen layout (safe areas, text
@@ -729,6 +737,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let flight = ZoomFlight.build(
             source: source, destination: destination, sourceFrame: sourceFrame, pageFrame: pageFrame
         )
+        stagedFlightCard = flight.card
         // The card now renders the destination's player. Hand that player over
         // to whoever plays the same asset next — the source it is flying home
         // to — so the landing adopts a running item instead of starting a fresh

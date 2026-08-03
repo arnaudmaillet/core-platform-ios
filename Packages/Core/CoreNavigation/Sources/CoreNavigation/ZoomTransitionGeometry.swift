@@ -65,4 +65,25 @@ public enum ZoomTransitionGeometry {
     ) -> Bool {
         progress >= progressThreshold || velocity >= flickVelocity
     }
+
+    /// The release contract for a flight CAUGHT mid-air, where — unlike a
+    /// grab from rest — a decisive flick wins in EITHER direction.
+    ///
+    /// `shouldCompleteDismissal` lets progress trump a backward flick, which
+    /// is right for a grab from rest: the viewer dragged the whole distance
+    /// themselves, and the threshold measures that intent. A caught flight's
+    /// progress is mostly the ANIMATION's — the viewer may have touched at
+    /// 90% — so the hand's speed at release is the freshest statement of
+    /// intent and outranks where the machine happened to be. Below flick
+    /// speed, the same shared threshold decides.
+    public static func caughtReleaseCompletes(
+        progress: CGFloat,
+        velocityTowardEnd: CGFloat,
+        progressThreshold: CGFloat = completionThreshold,
+        flickVelocity: CGFloat = flickVelocity
+    ) -> Bool {
+        if velocityTowardEnd >= flickVelocity { return true }
+        if velocityTowardEnd <= -flickVelocity { return false }
+        return progress >= progressThreshold
+    }
 }

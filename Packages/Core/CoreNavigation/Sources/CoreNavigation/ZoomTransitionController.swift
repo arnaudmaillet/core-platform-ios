@@ -138,6 +138,10 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         // and holds the right to catch the flight mid-air.
         guard let zoom = animationController as? ZoomAnimator else { return nil }
         let interruptor = ZoomFlightInterruptor(advancesOnDownwardDrag: zoom.isDismissing)
+        // The free-position channel needs the flying card itself; the animator
+        // stages it only once the transition starts, so the seam is a closure
+        // resolved at grab time rather than a value captured now.
+        interruptor.flightCard = { [weak zoom] in zoom?.stagedFlightCard }
         flightInterruptor = interruptor
         return interruptor
     }
