@@ -1,5 +1,6 @@
 import ChatInterface
 import CoreNavigation
+import DesignSystem
 import UIKit
 
 /// The Messages tab's root: a fixed navigation bar over a glass category
@@ -19,7 +20,10 @@ import UIKit
 final class MessagesInboxViewController: UIViewController, MessagesInboxCategorySelecting {
     /// The inbox's surfaces, in paging order.
     private let surfaces: [any InboxSurface]
-    private let categoryBar: InboxCategoryBar
+    /// The shared glass tab capsule. It takes titles and reports an index —
+    /// the category is this container's vocabulary, not the bar's, so every
+    /// call site maps one to the other through `surfaces`.
+    private let categoryBar: PagedTabBar
     private let selectionFeedback = UISelectionFeedbackGenerator()
 
     /// Built in `viewDidLoad`, once the surfaces are children — reading a
@@ -79,7 +83,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         precondition(!surfaces.isEmpty, "The inbox needs at least one surface")
         self.surfaces = surfaces
         self.searchResults = searchResults
-        categoryBar = InboxCategoryBar(categories: surfaces.map(\.category))
+        categoryBar = PagedTabBar(titles: surfaces.map(\.category.title))
         initialIndex = surfaces.firstIndex { $0.category == initialCategory } ?? 0
         super.init(nibName: nil, bundle: nil)
     }
@@ -115,14 +119,14 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
         // The header's height is reserved as safe area, so every page's list
         // insets under it automatically.
-        additionalSafeAreaInsets.top = InboxCategoryBar.height
+        additionalSafeAreaInsets.top = PagedTabBar.height
         view.addSubview(categoryBar)
         categoryBar.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             categoryBarTop,
             categoryBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             categoryBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            categoryBar.heightAnchor.constraint(equalToConstant: InboxCategoryBar.height)
+            categoryBar.heightAnchor.constraint(equalToConstant: PagedTabBar.height)
         ])
 
         // Wired like any system control: the bar carries the chosen segment as
@@ -399,7 +403,9 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// the selection counter ticking while editing. Animating those would
     /// crossfade the whole bar on every row tap.
     private func apply(_ chrome: InboxSurfaceChrome, from surface: any InboxSurface) {
-        categoryBar.setBadge(chrome.badgeCount, for: surface.category)
+        if let index = surfaces.firstIndex(where: { $0.category == surface.category }) {
+            categoryBar.setBadge(chrome.badgeCount, at: index)
+        }
         guard surface.category == barOwner else { return }
         applyChrome(chrome, animated: false)
     }

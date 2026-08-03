@@ -22,15 +22,28 @@ final class ForYouPagerView: UIView {
 
     /// The tapped post's index into the *given format page's* posts.
     var onItemTapped: ((GalleryFilter.Format, Int) -> Void)?
-    /// Fired when a swipe settles on a page (not for programmatic paging) —
-    /// the selector mirrors it.
+    /// Fired when a page becomes active: a settled finger swipe or a finished
+    /// programmatic page. Not fired when the page is unchanged.
     var onPageSettled: ((GalleryFilter.Format) -> Void)?
+    /// Fractional page position (e.g. `1.42` — 42% of the way from Gallery to
+    /// Short), emitted on every scroll tick, drag or animation.
+    ///
+    /// This is what lets the top tab capsule's lens track the finger instead of
+    /// snapping at the end of a swipe, and it is why the pager is a plain
+    /// paging scroll view rather than a `UIPageViewController` — the latter
+    /// exposes no continuous position at all.
+    var onProgress: ((CGFloat) -> Void)?
     var onNearEnd: (() -> Void)?
     var onRefresh: (() -> Void)?
 
     private let scrollView = UIScrollView()
     private let pages: [ForYouGridPage]
     private var activeIndex = 0
+    /// The last index handed to `onPageSettled`. Tracked separately from
+    /// `activeIndex` because a tab tap sets the TARGET immediately and only
+    /// arrives a beat later — comparing the landing against `activeIndex`
+    /// alone would make every tap-driven page change look like a no-op.
+    private var reportedIndex = 0
 
     /// The posts a page is showing — what a tile tap seeds from.
     func posts(for format: GalleryFilter.Format) -> [GalleryPost] {
@@ -41,11 +54,6 @@ final class ForYouPagerView: UIView {
     func page(for format: GalleryFilter.Format) -> ForYouGridPage? {
         guard let index = Self.pageOrder.firstIndex(of: format) else { return nil }
         return pages[index]
-    }
-
-    /// Bottom inset every page keeps clear for the filter tray floating over it.
-    var trayClearance: CGFloat = 0 {
-        didSet { pages.forEach { $0.additionalBottomInset = trayClearance } }
     }
 
     init(imagePipeline: ImagePipeline, videoPlayback: VideoPlaybackController? = nil) {
@@ -116,12 +124,52 @@ final class ForYouPagerView: UIView {
         }
     }
 
-    /// Selector tap → smooth page.
+    /// Tab tap → smooth page. The scroll animation reports progress every
+    /// frame, so a tap drives the capsule's lens through exactly the same path
+    /// a finger does — a tap from Activity to Short visibly carries the lens
+    /// *through* Gallery.
     func setActivePage(_ format: GalleryFilter.Format, animated: Bool) {
         guard let index = Self.pageOrder.firstIndex(of: format), index != activeIndex else { return }
         activeIndex = index
-        scrollView.setContentOffset(CGPoint(x: CGFloat(index) * bounds.width, y: 0), animated: animated)
+        guard bounds.width > 0 else { return }
+        scrollView.setContentOffset(CGPoint(x: offsetX(for: index), y: 0), animated: animated)
         syncAutoplay()
+        if !animated {
+            onProgress?(CGFloat(index))
+            settle()
+        }
+    }
+
+    /// Drives the pager from something other than its own pan — the tab
+    /// capsule, which can be grabbed and dragged like the pages themselves.
+    /// Unanimated by design: this is called per frame of a finger.
+    ///
+    /// Lives here rather than in the caller so the index↔offset conversion (and
+    /// with it the RTL mirroring) stays in one place; a caller writing
+    /// `contentOffset` itself would be right in English and wrong in Arabic.
+    func scrub(to progress: CGFloat) {
+        guard bounds.width > 0, pages.count > 1 else { return }
+        let clamped = min(max(progress, 0), CGFloat(pages.count - 1))
+        let slot = isRTL ? CGFloat(pages.count - 1) - clamped : clamped
+        scrollView.setContentOffset(CGPoint(x: slot * bounds.width, y: 0), animated: false)
+    }
+
+    /// Ends a scrub on a whole page, carrying the fling through: a flick that
+    /// barely moved still lands on the next page, the same way the pager's own
+    /// pan behaves.
+    func settleAfterScrub(velocityInPages: CGFloat) {
+        guard bounds.width > 0, pages.count > 1 else { return }
+        // Half a page of "throw" per unit velocity — enough that a flick
+        // commits, small enough that a slow drag released mid-way falls back to
+        // whichever page it is actually nearest.
+        let projected = progress + velocityInPages * 0.5
+        let landing = min(max(Int(projected.rounded()), 0), pages.count - 1)
+        activeIndex = landing
+        syncAutoplay()
+        // Always animate, even when the landing is the page we started on:
+        // that case is a scrub that didn't commit, and it still has to travel
+        // back from wherever the finger left it.
+        scrollView.setContentOffset(CGPoint(x: offsetX(for: landing), y: 0), animated: true)
     }
 
     // MARK: - Autoplay
@@ -169,22 +217,65 @@ final class ForYouPagerView: UIView {
         super.layoutSubviews()
         // Keep the offset page-aligned through width changes (first layout,
         // rotation) — offsets are in points, not page indices.
-        guard bounds.width != lastLayoutWidth else { return }
+        guard bounds.width != lastLayoutWidth, bounds.width > 0 else { return }
         lastLayoutWidth = bounds.width
-        scrollView.contentOffset = CGPoint(x: CGFloat(activeIndex) * bounds.width, y: 0)
+        scrollView.contentOffset = CGPoint(x: offsetX(for: activeIndex), y: 0)
+        onProgress?(CGFloat(activeIndex))
+    }
+
+    // MARK: - Index ↔ offset
+
+    /// Right-to-left languages lay the pages out mirrored (the constraints use
+    /// leading/trailing), but `contentOffset.x` still counts from the left
+    /// edge. Every conversion goes through these, so the rest of the pager —
+    /// and the tab capsule above it — can think in logical page indices only.
+    private var isRTL: Bool { effectiveUserInterfaceLayoutDirection == .rightToLeft }
+
+    private func offsetX(for index: Int) -> CGFloat {
+        let slot = isRTL ? pages.count - 1 - index : index
+        return CGFloat(slot) * bounds.width
+    }
+
+    /// The fractional *logical* page position for the current offset.
+    private var progress: CGFloat {
+        guard bounds.width > 0 else { return CGFloat(activeIndex) }
+        let slot = scrollView.contentOffset.x / bounds.width
+        let clamped = min(max(slot, 0), CGFloat(pages.count - 1))
+        return isRTL ? CGFloat(pages.count - 1) - clamped : clamped
     }
 }
 
 // MARK: - UIScrollViewDelegate
 
 extension ForYouPagerView: UIScrollViewDelegate {
-    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-        // The pages own their own delegate (`ForYouGridPage`), so nothing
-        // vertical reaches this — only the horizontal pager settles here.
+    // The pages own their own delegate (`ForYouGridPage`), so nothing vertical
+    // reaches any of these — only the horizontal pager reports here.
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
         guard bounds.width > 0 else { return }
-        let landed = min(max(Int((scrollView.contentOffset.x / bounds.width).rounded()), 0), pages.count - 1)
-        guard landed != activeIndex else { return }
+        onProgress?(progress)
+    }
+
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        settle()
+    }
+
+    /// A drag released without enough velocity to decelerate still lands on a
+    /// page; without this the capsule would keep the old selection.
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        if !decelerate { settle() }
+    }
+
+    func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        settle()
+    }
+
+    private func settle() {
+        guard bounds.width > 0 else { return }
+        let landed = Int(progress.rounded())
+        guard pages.indices.contains(landed), landed != reportedIndex else { return }
         activeIndex = landed
+        reportedIndex = landed
         syncAutoplay()
         onPageSettled?(Self.pageOrder[landed])
     }

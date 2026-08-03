@@ -43,6 +43,14 @@ public final class ForYouViewModel {
     /// refresh control on this rather than inferring it from a snapshot that
     /// may be identical to the last one.
     public var onLoadSettled: (() -> Void)?
+    /// The per-format "new since you last looked" counts, for the tab
+    /// capsule's badges.
+    ///
+    /// Published separately from the snapshot even though both are recomputed
+    /// in `publish()`: a badge changes a segment's pinned width and moves the
+    /// lens, so the bar has to be told explicitly rather than left to infer it
+    /// from content it never sees.
+    public var onUnreadChange: (([GalleryFilter.Format: Int]) -> Void)?
 
     private let repository: any ForYouProviding
     /// Persists the format tab only. The discovery source is session state by
@@ -50,6 +58,11 @@ public final class ForYouViewModel {
     /// session, and a stale "Trending" from three days ago is a worse landing
     /// than the default.
     private let preferences: GalleryPreferences?
+    /// The badge watermarks. Owned here rather than by the view controller
+    /// because every input it needs — the loaded corpus, the active format —
+    /// is already this type's, and a badge derived anywhere else would be a
+    /// second copy of the same fact.
+    private let unreadStore: ForYouUnreadStore
 
     public private(set) var format: GalleryFilter.Format = .activity
     public private(set) var source: DiscoverySource = .trending
@@ -77,9 +90,14 @@ public final class ForYouViewModel {
     private var load: Task<Void, Never>?
     private var pageLoad: Task<Void, Never>?
 
-    public init(repository: any ForYouProviding, preferences: GalleryPreferences? = nil) {
+    public init(
+        repository: any ForYouProviding,
+        preferences: GalleryPreferences? = nil,
+        unreadStore: ForYouUnreadStore = ForYouUnreadStore()
+    ) {
         self.repository = repository
         self.preferences = preferences
+        self.unreadStore = unreadStore
         if let preferences {
             format = preferences.format
         }
@@ -96,9 +114,15 @@ public final class ForYouViewModel {
 
     /// Where the user is — a tab tap or a settled swipe. Pure state (every
     /// page is always computed), persisted for the next launch.
+    ///
+    /// Landing on a tab is also *reading* it, so this clears that tab's badge.
     public func setFormat(_ format: GalleryFilter.Format) {
         self.format = format
         preferences?.format = format
+        // Arriving on a tab IS reading it — and this is the one path a person
+        // drives, so it is also where a debug-forced badge is allowed to clear.
+        unreadStore.markSeen(format, in: posts(for: format), clearingOverride: true)
+        publishUnread()
     }
 
     /// The ordering modifier: recomputes every page locally, no round trip.
@@ -228,6 +252,25 @@ public final class ForYouViewModel {
             return posts.isEmpty ? .empty(message: Self.emptyMessage(format: format, source: source)) : .content(posts)
         }
         onSnapshotChange?(Snapshot(activity: page(.activity), media: page(.media), short: page(.short)))
+        publishUnread()
+    }
+
+    /// Recomputes every tab's badge from the corpus in hand.
+    ///
+    /// The active tab's watermark is advanced FIRST, before anything is
+    /// counted. The viewer is looking at that page, so a fetch landing under
+    /// their eyes has been seen by definition — and advancing it here means the
+    /// active tab reads zero through the same derivation as every other tab
+    /// rather than being special-cased to it. It also means leaving the tab
+    /// later cannot badge content that was on screen the whole time.
+    private func publishUnread() {
+        guard corpus != nil else { return }
+        unreadStore.markSeen(format, in: posts(for: format))
+        var counts: [GalleryFilter.Format: Int] = [:]
+        for page in GalleryFilter.Format.allCases {
+            counts[page] = unreadStore.count(for: page, in: posts(for: page))
+        }
+        onUnreadChange?(counts)
     }
 
     /// Names the empty combination so the blank page reads as an answer.

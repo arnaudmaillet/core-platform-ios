@@ -1,14 +1,17 @@
-import CoreNavigation
-import DesignSystem
 import UIKit
 
-/// The inbox's category header: a floating Liquid Glass capsule under the
-/// navigation bar, with a lens that slides between segments.
+/// A floating Liquid Glass tab capsule that tracks a horizontal pager: a lens
+/// slides between segments in step with the pages beneath it.
+///
+/// Built for the Messages inbox (All / Requests / Suggestions) and reused
+/// unchanged by the For You grid (Activity / Gallery / Short). It knows nothing
+/// about either — it takes titles and reports an index, so a third host is a
+/// `titles` array and two closures.
 ///
 /// **Anatomy.** A full-width capsule of `UIGlassEffect` inset by the standard
 /// margin, its own soft shadow, and a tinted overlay marking the active
-/// segment. The capsule floats and has no hairline, so the lists scroll
-/// *beneath* it and are seen through the glass. Segments share the width
+/// segment. The capsule floats and has no hairline, so content scrolls
+/// *beneath* it and is seen through the glass. Segments share the width
 /// equally, so the bar reads the same on every screen.
 ///
 /// **A control, not a view.** The bar is a `UIControl` carrying
@@ -33,8 +36,8 @@ import UIKit
 ///
 /// `UIGlassContainerEffect` is NOT the backdrop to reach for: it is a
 /// *grouping* effect for sibling glass elements that should merge, and used as
-/// the capsule's own effect it renders no backdrop whatsoever — message
-/// previews behind the bar collide with the segment titles at full contrast.
+/// the capsule's own effect it renders no backdrop whatsoever — content behind
+/// the bar collides with the segment titles at full contrast.
 ///
 /// ⚠️ **Semantic colours do not survive inside the glass content view.** The
 /// badge's `.systemBackground` text resolved to WHITE in dark mode, on a badge
@@ -45,7 +48,7 @@ import UIKit
 ///
 /// **Overflow.** The segments live in a scroll view. Below the capsule's width
 /// ceiling it never scrolls and is inert in every sense; past it — a fourth
-/// category, a three-digit badge, a large Dynamic Type size — the capsule stops
+/// segment, a three-digit badge, a large Dynamic Type size — the capsule stops
 /// growing and the strip scrolls, with the active segment kept in view. The
 /// margin was thin without it: three segments with two badges need 331pt of the
 /// 343pt a 375pt screen offers at XL text.
@@ -69,7 +72,7 @@ import UIKit
 /// the capsule into an ellipse; and any decay must have a tick source that
 /// outlives the last progress change, because `setProgress` early-returns on an
 /// unchanged position and will otherwise freeze the effect mid-stretch.
-final class InboxCategoryBar: UIControl {
+public final class PagedTabBar: UIControl {
     private enum Metrics {
         /// The floating capsule's own height.
         static let capsuleHeight: CGFloat = 42
@@ -83,22 +86,29 @@ final class InboxCategoryBar: UIControl {
     }
 
     /// Total height the container reserves as safe area, margins included.
-    static let height: CGFloat = Metrics.capsuleHeight + Metrics.topMargin + Metrics.bottomMargin
+    ///
+    /// `nonisolated` because owners read it to size the bar and to set
+    /// `additionalSafeAreaInsets.top`, often from a nested constants type that
+    /// carries no actor isolation of its own — a `UIView` subclass's statics
+    /// are `@MainActor` by inference and would be unreachable from there. The
+    /// same reason `InlineFilterTrayView.height` states it.
+    public nonisolated static let height: CGFloat =
+        Metrics.capsuleHeight + Metrics.topMargin + Metrics.bottomMargin
 
     /// The segment the bar is reporting — updated by taps AND by the pages
     /// moving under it, so it is never stale. Reading it is how a
     /// `.valueChanged` handler learns WHICH segment — the same shape
     /// `UISegmentedControl` has, so the owner registers a `UIAction` rather
     /// than being handed a closure to store.
-    private(set) var selectedIndex: Int = 0
+    public private(set) var selectedIndex: Int = 0
     /// A drag on the capsule itself, as a fractional page position. Fires every
     /// frame of the finger; the owner scrubs the pager to it.
-    var onScrub: ((CGFloat) -> Void)?
+    public var onScrub: ((CGFloat) -> Void)?
     /// That drag ended, with its velocity in pages per second, so the owner can
     /// let a flick carry to the next page instead of snapping back.
-    var onScrubEnd: ((CGFloat) -> Void)?
+    public var onScrubEnd: ((CGFloat) -> Void)?
 
-    private let categories: [MessagesCategory]
+    private let titles: [String]
     /// Carries the shadow; the capsule itself clips to its corner radius,
     /// which would clip a shadow set on the same layer.
     private let shadowHost = UIView()
@@ -121,8 +131,8 @@ final class InboxCategoryBar: UIControl {
     /// Where `progress` stood when the current capsule drag began.
     private var scrubOrigin: CGFloat = 0
 
-    init(categories: [MessagesCategory]) {
-        self.categories = categories
+    public init(titles: [String]) {
+        self.titles = titles
         super.init(frame: .zero)
 
         shadowHost.layer.shadowColor = UIColor.black.cgColor
@@ -212,9 +222,9 @@ final class InboxCategoryBar: UIControl {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override var intrinsicContentSize: CGSize {
+    public override var intrinsicContentSize: CGSize {
         CGSize(width: UIView.noIntrinsicMetric, height: Self.height)
     }
 
@@ -246,7 +256,7 @@ final class InboxCategoryBar: UIControl {
     /// `.quaternarySystemFill` was fainter than either and was discarded.
     private static let lensTint = UIColor.label.withAlphaComponent(0.18)
 
-    override func layoutSubviews() {
+    public override func layoutSubviews() {
         super.layoutSubviews()
         capsule.layer.cornerRadius = capsule.bounds.height / 2
         capsule.layer.cornerCurve = .continuous
@@ -257,17 +267,16 @@ final class InboxCategoryBar: UIControl {
         applyProgress()
     }
 
-    override func didMoveToWindow() {
+    public override func didMoveToWindow() {
         super.didMoveToWindow()
         materializeEffects()
     }
-
 
     // MARK: - Driven state
 
     /// The pager's fractional page position. Called every frame of a drag and
     /// every frame of a tap-driven scroll animation.
-    func setProgress(_ progress: CGFloat) {
+    public func setProgress(_ progress: CGFloat) {
         guard progress != self.progress else { return }
         self.progress = progress
         // The value tracks the pages, not just taps. Without this a swipe would
@@ -279,14 +288,60 @@ final class InboxCategoryBar: UIControl {
         applyProgress()
     }
 
-    func setBadge(_ count: Int, for category: MessagesCategory) {
-        guard let index = categories.firstIndex(of: category) else { return }
+    /// The count beside a segment's title; 0 hides it.
+    public func setBadge(_ count: Int, at index: Int) {
+        guard segments.indices.contains(index) else { return }
         segments[index].setBadge(count)
         // A badge changes the segment's pinned width, so the lens has to
         // re-derive its geometry from the new frames.
         setNeedsLayout()
         layoutIfNeeded()
         applyProgress()
+    }
+
+    /// Re-asserts the bar's appearance after an interactive transition.
+    ///
+    /// Interactive transitions rasterise and re-parent the views they carry,
+    /// and glass-hosted controls do not always come back whole — the observed
+    /// failure elsewhere in this app is a capsule that returns at full width
+    /// with only the selected title drawn. Nothing in our own code clears them,
+    /// so the repair cannot be "stop doing that"; it has to be "rebuild the
+    /// appearance once the transition is over". Idempotent and cheap, so hosts
+    /// call it on every completion including the ones that were fine.
+    ///
+    /// A plain method rather than a `TransitionRestorable` conformance: that
+    /// protocol lives in `PostGrid`, which depends on this module and cannot be
+    /// depended on from here.
+    public func restoreAfterTransition() {
+        alpha = 1
+        isHidden = false
+        transform = .identity
+        for view in [shadowHost, capsule, capsule.contentView, scroller, content, row] {
+            view.alpha = 1
+            view.isHidden = false
+            view.transform = .identity
+        }
+        for segment in segments {
+            segment.alpha = 1
+            segment.isHidden = false
+            segment.transform = .identity
+        }
+        setNeedsLayout()
+        layoutIfNeeded()
+    }
+
+    /// Chooses a segment exactly as a tap would, `.valueChanged` and all — so
+    /// a deep link or a scripted QA run drives the same path a finger does
+    /// instead of reaching past the bar to the pager and leaving the two to
+    /// agree by luck.
+    ///
+    /// There is deliberately no "silent" variant. The lens is driven by
+    /// `setProgress` off the pager's position, so a caller that wants to move
+    /// the bar without moving the pages is describing a state this control
+    /// cannot be in.
+    public func select(_ index: Int) {
+        guard segments.indices.contains(index) else { return }
+        selectSegment(index)
     }
 
     /// A segment was chosen. Publishes through `.valueChanged` rather than a
@@ -300,7 +355,7 @@ final class InboxCategoryBar: UIControl {
 
     // MARK: - Grab
 
-    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+    public override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         guard gestureRecognizer === scrubPan else {
             return super.gestureRecognizerShouldBegin(gestureRecognizer)
         }
@@ -309,7 +364,7 @@ final class InboxCategoryBar: UIControl {
         // answers to one gesture.
         guard scroller.contentSize.width <= scroller.bounds.width + 0.5 else { return false }
         // Horizontal intent only. A vertical drag that starts on the bar is
-        // someone reaching for the list underneath it.
+        // someone reaching for the content underneath it.
         let velocity = scrubPan.velocity(in: capsule)
         return abs(velocity.x) > abs(velocity.y)
     }
@@ -342,8 +397,8 @@ final class InboxCategoryBar: UIControl {
     }
 
     private func buildSegments() {
-        segments = categories.enumerated().map { index, category in
-            let segment = SegmentView(title: category.title)
+        segments = titles.enumerated().map { index, title in
+            let segment = SegmentView(title: title)
             segment.addAction(
                 UIAction { [weak self] _ in self?.selectSegment(index) },
                 // `.primaryActionTriggered` now that the segment is a real
@@ -425,19 +480,18 @@ final class InboxCategoryBar: UIControl {
             height: max(0, segment.height - Metrics.lensInset * 2)
         )
     }
-
 }
 
 /// Conformance only — the policy is an `override` in the class body, because
 /// `UIView` already declares `gestureRecognizerShouldBegin(_:)` and Swift will
 /// not let an extension override it.
-extension InboxCategoryBar: UIGestureRecognizerDelegate {}
+extension PagedTabBar: UIGestureRecognizerDelegate {}
 
 // MARK: - Segment
 
-/// One category segment: a stacked pair of labels (regular and semibold) that
-/// crossfade, plus an optional count badge. Its width is pinned to the
-/// SEMIBOLD measurement so selection can never reflow the row.
+/// One segment: a stacked pair of labels (regular and semibold) that crossfade,
+/// plus an optional count badge. Its width is pinned to the SEMIBOLD
+/// measurement so selection can never reflow the row.
 private final class SegmentView: UIButton {
     /// Titles scale with Dynamic Type up to here, then stop — four segments
     /// have to stay side by side in one fixed-height capsule.
@@ -541,6 +595,10 @@ private final class SegmentView: UIButton {
     func setBadge(_ count: Int) {
         badge.setCount(count)
         badge.isHidden = count == 0
+        // The badge is a sibling in the stack, so its own hidden state is what
+        // the accessibility label has to carry — VoiceOver reads the segment as
+        // one element, and a count nobody announces is a count nobody gets.
+        accessibilityValue = count == 0 ? nil : "\(count) new"
         updatePinnedWidth()
     }
 
