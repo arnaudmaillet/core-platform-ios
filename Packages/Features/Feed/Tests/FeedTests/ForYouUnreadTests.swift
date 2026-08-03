@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import Foundation
 import PostGrid
 import Testing
@@ -262,6 +263,37 @@ struct ForYouBadgeOverrideTests {
     }
 }
 #endif
+
+// MARK: - How the count is presented
+
+@MainActor
+struct ForYouBadgePresentationTests {
+    @Test func unreadIsShownAsPresenceNeverAsANumber() {
+        // The store keeps deriving a real count; this is where For You decides
+        // the number is not the useful part. Any positive count is one dot.
+        #expect(ForYouViewController.badgeStyle(forUnread: 1) == .dot(isVisible: true))
+        #expect(ForYouViewController.badgeStyle(forUnread: 3) == .dot(isVisible: true))
+        #expect(ForYouViewController.badgeStyle(forUnread: 99) == .dot(isVisible: true))
+    }
+
+    @Test func nothingUnreadShowsNothing() {
+        #expect(ForYouViewController.badgeStyle(forUnread: 0) == .dot(isVisible: false))
+    }
+
+    @Test func aNegativeCountIsNotAnIndicator() {
+        // Defensive: no path produces one today, but "anything non-zero shows a
+        // dot" would turn a future arithmetic slip into a badge that cannot be
+        // cleared.
+        #expect(ForYouViewController.badgeStyle(forUnread: -1) == .dot(isVisible: false))
+    }
+
+    @Test func theCountStyleStaysAvailableForHostsThatCount() {
+        // Messages renders numbers through the same component; removing that
+        // case is what this test exists to prevent.
+        #expect(PagedTabBar.BadgeStyle.count(11).isVisible)
+        #expect(PagedTabBar.BadgeStyle.count(0).isVisible == false)
+    }
+}
 
 // MARK: - Through the view model
 

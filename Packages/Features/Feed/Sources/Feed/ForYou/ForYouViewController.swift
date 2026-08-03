@@ -469,6 +469,21 @@ final class ForYouViewController: UIViewController {
         #endif
     }
 
+    /// How For You presents an unread count: as PRESENCE, never as a number.
+    ///
+    /// The store still derives a real count — the watermark machinery is
+    /// unchanged — and this is the one place it is deliberately thrown away.
+    /// "Following ③" invites arithmetic the viewer cannot act on: the three are
+    /// not three things to open, they are a page that has moved on since they
+    /// last looked, and the useful signal is entirely in whether it has. The
+    /// Messages inbox is the opposite case and keeps its numbers: there, each
+    /// count is a conversation you can open one at a time.
+    ///
+    /// Pure and internal so a test can pin the rule rather than a screenshot.
+    static func badgeStyle(forUnread count: Int) -> PagedTabBar.BadgeStyle {
+        .dot(isVisible: count > 0)
+    }
+
     /// Pushes the counts onto the capsule, in pager order.
     ///
     /// ⚠️ A badge changes the capsule's WIDTH, and a navigation bar caches the
@@ -484,7 +499,7 @@ final class ForYouViewController: UIViewController {
     /// bar's width is the screen's and nothing has to be told about it.
     private func applyBadges(_ counts: [GalleryFilter.Format: Int]) {
         for (index, format) in ForYouPagerView.pageOrder.enumerated() {
-            tabBar.setBadge(counts[format] ?? 0, at: index)
+            tabBar.setBadge(Self.badgeStyle(forUnread: counts[format] ?? 0), at: index)
         }
         tabBar.sizeToFit()
         navigationController?.navigationBar.setNeedsLayout()

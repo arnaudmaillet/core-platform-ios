@@ -558,10 +558,46 @@ public final class PagedTabBar: UIControl {
         applyProgress()
     }
 
-    /// The count beside a segment's title; 0 hides it.
+    /// What a segment shows beside its title, and how.
+    ///
+    /// The two cases are different ANSWERS, not two skins on one: a count says
+    /// "eleven conversations are waiting", a dot says "there is something here
+    /// you have not seen". A surface should pick the one it can honour. The
+    /// Messages inbox counts real, countable, individually-actionable rows and
+    /// shows the number; For You is telling you a page has moved on since you
+    /// looked, where the exact figure is noise the viewer cannot act on
+    /// item-by-item.
+    ///
+    /// The value carries the style rather than the bar holding a mode, so a
+    /// segment cannot be left rendering a stale presentation after its host
+    /// changes its mind — every update states both facts at once.
+    public enum BadgeStyle: Equatable, Sendable {
+        /// A numeric pill. Zero shows nothing.
+        case count(Int)
+        /// Presence only — a small dot, no number.
+        case dot(isVisible: Bool)
+
+        /// Whether anything is drawn at all — the one question both cases
+        /// answer the same way, and the one a host asks to decide whether a
+        /// segment currently carries a signal.
+        public var isVisible: Bool {
+            switch self {
+            case .count(let value): value > 0
+            case .dot(let visible): visible
+            }
+        }
+    }
+
+    /// The count beside a segment's title; 0 hides it. Numeric by definition —
+    /// the convenience for hosts that count things.
     public func setBadge(_ count: Int, at index: Int) {
+        setBadge(.count(count), at: index)
+    }
+
+    /// The badge beside a segment's title, count or dot.
+    public func setBadge(_ badge: BadgeStyle, at index: Int) {
         guard segments.indices.contains(index) else { return }
-        segments[index].setBadge(count)
+        segments[index].setBadge(badge)
         // A badge changes the segment's pinned width, so the lens has to
         // re-derive its geometry from the new frames — and a HUGGING bar has to
         // re-state its whole size, because its width is the sum of those
@@ -1021,13 +1057,18 @@ private final class SegmentView: UIButton {
         }
     }
 
-    func setBadge(_ count: Int) {
-        badge.setCount(count)
-        badge.isHidden = count == 0
+    func setBadge(_ style: PagedTabBar.BadgeStyle) {
+        badge.apply(style)
+        badge.isHidden = !style.isVisible
         // The badge is a sibling in the stack, so its own hidden state is what
         // the accessibility label has to carry — VoiceOver reads the segment as
-        // one element, and a count nobody announces is a count nobody gets.
-        accessibilityValue = count == 0 ? nil : "\(count) new"
+        // one element, and a badge nobody announces is a badge nobody gets. A
+        // dot has no number to read out, so it is announced as what it means
+        // rather than as what it looks like.
+        accessibilityValue = switch style {
+        case .count(let value): value > 0 ? "\(value) new" : nil
+        case .dot(let visible): visible ? "unread" : nil
+        }
         updatePinnedWidth()
     }
 
@@ -1073,7 +1114,20 @@ private final class BadgeView: UIView {
         backgroundColor = .secondaryLabel
         layer.cornerCurve = .continuous
         isUserInteractionEnabled = false
+
+        dotWidth = widthAnchor.constraint(equalToConstant: Self.dotDiameter)
+        dotHeight = heightAnchor.constraint(equalToConstant: Self.dotDiameter)
     }
+
+    /// A dot small enough to read as punctuation beside the title rather than
+    /// as a second element competing with it — the point of choosing presence
+    /// over a number is that it should barely interrupt the word.
+    private static let dotDiameter: CGFloat = 8
+
+    /// Sizing for dot mode. Inactive in count mode, where the label's own
+    /// insets are what size the pill.
+    private var dotWidth: NSLayoutConstraint!
+    private var dotHeight: NSLayoutConstraint!
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -1083,9 +1137,23 @@ private final class BadgeView: UIView {
         layer.cornerRadius = bounds.height / 2
     }
 
-    func setCount(_ count: Int) {
-        // Past 99 the capsule would out-measure its own segment title.
-        label.text = count > 99 ? "99+" : String(count)
+    func apply(_ style: PagedTabBar.BadgeStyle) {
+        switch style {
+        case .count(let count):
+            // Past 99 the pill would out-measure its own segment title.
+            label.text = count > 99 ? "99+" : String(count)
+            label.isHidden = false
+            dotWidth.isActive = false
+            dotHeight.isActive = false
+        case .dot:
+            // ⚠️ The label is hidden AND the size is stated. A hidden view
+            // still participates in Auto Layout outside a stack view, so its
+            // pinned insets would keep sizing the badge to a number nobody can
+            // see — a "dot" as wide as the count it replaced.
+            label.isHidden = true
+            dotWidth.isActive = true
+            dotHeight.isActive = true
+        }
         invalidateIntrinsicContentSize()
     }
 
