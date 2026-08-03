@@ -106,8 +106,14 @@ struct DiscoverySourceTests {
         tile("c", publishedAtMS: 20, reactions: 9)
     ]
 
-    @Test func followingPreservesServerOrder() {
-        #expect(DiscoverySource.following.ordering(posts).map(\.id.rawValue) == ["a", "b", "c"])
+    /// The menu offers exactly the orderings the enum has, and every one of
+    /// them reorders something. The removed `.following` case did not — it
+    /// returned the corpus untouched — which is part of why it went.
+    @Test func everySourceIsAnOrdering() {
+        #expect(DiscoverySource.allCases == [.trending, .recent])
+        for source in DiscoverySource.allCases {
+            #expect(source.ordering(posts).map(\.id.rawValue) != ["a", "b", "c"])
+        }
     }
 
     @Test func recentSortsByPublication() {
@@ -403,15 +409,20 @@ struct ForYouViewModelTests {
     }
 
     /// An empty combination has to name itself, and the sentence has to read
-    /// correctly in all nine — the source phrase sits in a different slot for
-    /// `.following` than for the two adjectives.
+    /// correctly in every one of them.
     @Test func emptyMessagesNameTheCombination() {
         #expect(ForYouViewModel.emptyMessage(format: .media, source: .trending) == "No trending media yet.")
-        #expect(ForYouViewModel.emptyMessage(format: .short, source: .recent) == "No recent short posts yet.")
-        #expect(
-            ForYouViewModel.emptyMessage(format: .activity, source: .following)
-                == "No activity from people you follow yet."
-        )
+        #expect(ForYouViewModel.emptyMessage(format: .activity, source: .recent) == "No recent activity yet.")
+        // Sweeps the whole grid rather than sampling it: the sentence is built
+        // from two enums, and a case added to either is a sentence nobody has
+        // read. Every one must name both halves and end in a full stop.
+        for format in GalleryFilter.Format.allCases {
+            for source in DiscoverySource.allCases {
+                let message = ForYouViewModel.emptyMessage(format: format, source: source)
+                #expect(message.hasPrefix("No "))
+                #expect(message.hasSuffix(" yet."))
+            }
+        }
     }
 
     @Test func theFormatChoicePersistsAcrossViewModels() async {

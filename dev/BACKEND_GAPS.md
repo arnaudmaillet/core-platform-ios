@@ -493,10 +493,12 @@ across all 20 services in `Packages/Kit/CoreContracts/Sources/CoreContracts/Gene
 
 **What the client does meanwhile.** `ForYouRepository` reads
 `GetFollowingFeed` through the existing `FeedRepository`, and the tab's source
-filter (Trending / Recent / Following) is three **orderings of that one
-corpus**, applied client-side: `.following` is the server's order, `.recent`
-sorts by `published_at`, `.trending` by the like counter. This is honest but
-thin, and it has two consequences worth naming:
+filter (Trending / Recent) is two **orderings of that one corpus**, applied
+client-side: `.recent` sorts by `published_at`, `.trending` by the like
+counter. (A third, `.following` — the server's own order, unmodified — was
+removed on 2026-08-03 when the screen's tabs became Discover / Following and
+the two "Following"s collided.) This is honest but thin, and it has two
+consequences worth naming:
 
 1. **"Trending" ranks only what has been loaded.** Ordering happens over the
    accumulated pages, not globally, so it is really "most-reacted among the

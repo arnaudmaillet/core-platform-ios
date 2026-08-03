@@ -362,12 +362,14 @@ public final class ForYouViewModel {
         case .media: "media"
         case .short: "short posts"
         }
-        // The source phrase sits in a different slot per case — "trending" and
-        // "recent" qualify the noun, "from people you follow" trails it.
+        // Both surviving sources are adjectives that qualify the noun. The
+        // removed `.following` case was the one that needed a trailing phrase
+        // ("...from people you follow"), which is why this used to have two
+        // shapes; if a source that is not an adjective returns, it will need
+        // its own slot again rather than being forced into this one.
         return switch source {
         case .trending: "No trending \(what) yet."
         case .recent: "No recent \(what) yet."
-        case .following: "No \(what) from people you follow yet."
         }
     }
 }

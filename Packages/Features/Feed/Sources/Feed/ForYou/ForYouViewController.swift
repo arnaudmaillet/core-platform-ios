@@ -18,13 +18,12 @@ import UIKit
 /// its height. Everything else — fractional progress driving the lens, the
 /// capsule scrubbing the pager, badges — is shared.
 ///
-/// The discovery axis (Trending / Recent / Following) is a navigation bar item
-/// rather than a second floating control: with the tabs at the top there is
-/// nothing left for a bottom tray to hold, and a lone glass bubble over the
-/// grid reads as furniture the screen forgot to remove. ⚠️ Note the word
-/// "Following" now names two different things — a TAB (an unfiltered page) and a
-/// SOURCE (an ordering of the corpus). They are independent axes and can be set
-/// to disagreeing values; worth resolving in naming before this ships.
+/// The discovery axis (Trending / Recent) is a navigation bar item rather than
+/// a second floating control: with the tabs at the top there is nothing left
+/// for a bottom tray to hold, and a lone glass bubble over the grid reads as
+/// furniture the screen forgot to remove. It used to offer a third ordering
+/// called "Following", which collided with the TAB of that name — see
+/// `DiscoverySource` for why it went.
 ///
 /// This is a **tab root**, so the tab bar stays — it is how the viewer leaves.
 final class ForYouViewController: UIViewController {
@@ -56,8 +55,7 @@ final class ForYouViewController: UIViewController {
 
     private static let sourceOptions: [SourceOption] = [
         SourceOption(source: .trending, title: "Trending", symbol: "flame"),
-        SourceOption(source: .recent, title: "Recent", symbol: "clock"),
-        SourceOption(source: .following, title: "Following", symbol: "person.2")
+        SourceOption(source: .recent, title: "Recent", symbol: "clock")
     ]
 
     /// The discovery axis: the navigation bar's leading item, whose native
@@ -1201,10 +1199,12 @@ final class ForYouViewController: UIViewController {
             Self.remainingGrabCycles = count
         }
         if let position = arguments.firstIndex(of: "-foryou-source"), position + 1 < arguments.count {
+            // "following" is deliberately absent: that ordering was removed
+            // when the tabs took the name. A script still passing it gets no
+            // source change rather than a silent substitution.
             let source: DiscoverySource? = switch arguments[position + 1] {
             case "trending": .trending
             case "recent": .recent
-            case "following": .following
             default: nil
             }
             if let source {
