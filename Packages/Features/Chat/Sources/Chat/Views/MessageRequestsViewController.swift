@@ -31,20 +31,33 @@ final class MessageRequestsViewController: UIViewController {
     // MARK: - Chrome
 
     /// Requests offers no multi-selection editing: every row already carries
-    /// its own accept/refuse pair, so the only bulk operation worth a bar item
-    /// is "make them all go away".
+    /// its own accept/refuse pair, so the only bulk operation worth offering is
+    /// "make them all go away".
     ///
-    /// It is destructive and irreversible for the session, so it asks first.
-    private lazy var clearAllItem = UIBarButtonItem(
-        title: "Clear All",
-        primaryAction: UIAction { [weak self] _ in self?.confirmClearAll() }
-    )
+    /// It lives in the TAB's long-press menu, not the navigation bar. A menu has
+    /// room for the whole sentence — the bar item had to shrink to "Clear" to
+    /// stop it eating the tab capsule beside it ("Clear All" measured 78pt
+    /// against "Clear"'s 40, and cost the capsule 38pt of a slot it could not
+    /// spare) — and a menu costs the header nothing at all.
+    ///
+    /// Destructive and irreversible for the session, so it still asks first.
+    private func makeMenu() -> UIMenu? {
+        guard viewModel.count > 0 else { return nil }
+        return UIMenu(children: [
+            UIAction(
+                title: "Clear All Requests",
+                image: UIImage(systemName: "trash"),
+                attributes: .destructive
+            ) { [weak self] _ in self?.confirmClearAll() }
+        ])
+    }
 
     private func publishChrome() {
-        clearAllItem.isEnabled = viewModel.count > 0
         chrome = InboxSurfaceChrome(
-            leadingBarItem: viewModel.count > 0 ? clearAllItem : nil,
-            badgeCount: viewModel.count
+            badgeCount: viewModel.count,
+            // Rebuilt on every count change, so an emptied Requests tab stops
+            // offering to clear what is no longer there.
+            contextMenu: makeMenu()
         )
     }
 

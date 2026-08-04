@@ -52,6 +52,12 @@ final class ConversationListViewController: UIViewController {
         // A mixed selection drops the pin item entirely rather than showing a
         // disabled one: a greyed button invites "why can't I?", an absent one
         // reads as "not applicable to this selection".
+        //
+        // ⚠️ EDITING ONLY. Out of the mode this is empty and the trailing slot
+        // is the container's fixed magnifier — the tab capsule is the navigation
+        // bar's title view, and a page that publishes its own words here changes
+        // the capsule's width as the viewer pages. Edit moved to the tab's
+        // long-press menu for exactly that reason.
         var trailing: [UIBarButtonItem] = []
         if isEditing {
             trailing.append(batchDeleteItem)
@@ -59,15 +65,47 @@ final class ConversationListViewController: UIViewController {
         }
         chrome = InboxSurfaceChrome(
             // The count lives in the title: it is the one place that can hold
-            // it without squeezing three bar items into a 402pt bar.
+            // it without squeezing three bar items into a 402pt bar. It also
+            // displaces the tab capsule, which is what the container reads a
+            // non-nil title as meaning.
             title: isEditing ? Self.selectionTitle(for: selection.count) : nil,
-            leadingBarItem: isEditing ? cancelItem : editButtonItem,
+            // Leading is the container's Compose unless we override it, which is
+            // only ever to leave editing — Cancel belongs on the left.
+            leadingBarItem: isEditing ? cancelItem : nil,
             trailingBarItems: trailing,
             // The tab carries the unread count, so "All 3" is legible without
             // opening anything.
             badgeCount: viewModel.unreadCount,
-            locksPaging: isEditing
+            locksPaging: isEditing,
+            contextMenu: makeMenu()
         )
+    }
+
+    /// What a long press on the All tab offers.
+    ///
+    /// This is where Edit went when the trailing bar slot became a fixed
+    /// magnifier — and it is a better home for it than a permanent word in the
+    /// header: multi-selection is a mode you enter occasionally, not a control
+    /// that needs to sit on screen at all times.
+    ///
+    /// ⚠️ Withheld while editing. The menu's own entry point is the tab, and the
+    /// tab is inert in that mode (paging is frozen), so a menu offered there
+    /// would be an action nobody can reach and "Select Messages" would be an
+    /// offer to enter the mode already running.
+    private func makeMenu() -> UIMenu? {
+        guard !isEditing else { return nil }
+        var actions: [UIAction] = []
+        if viewModel.unreadCount > 0 {
+            actions.append(UIAction(
+                title: "Mark All as Read",
+                image: UIImage(systemName: "envelope.open")
+            ) { [weak self] _ in self?.viewModel.markAllRead() })
+        }
+        actions.append(UIAction(
+            title: "Select Messages",
+            image: UIImage(systemName: "checkmark.circle")
+        ) { [weak self] _ in self?.setEditing(true, animated: true) })
+        return UIMenu(children: actions)
     }
 
     /// The editing title, which doubles as the selection counter.

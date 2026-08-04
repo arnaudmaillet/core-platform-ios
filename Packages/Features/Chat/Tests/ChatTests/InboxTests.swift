@@ -385,6 +385,61 @@ struct InboxCatalogTests {
         _ = token
     }
 
+    /// "Mark All as Read" is offered from the All tab's long-press menu, and it
+    /// has to be a real read — the rows clearing locally while the server still
+    /// holds them unread is a badge that comes back on the next launch.
+    @Test func markingAllReadClearsTheRowsAndWritesEveryCursor() async {
+        let provider = StubInboxProvider(conversations: [
+            conversation("a", peer: "friend", isUnread: true),
+            conversation("b", peer: "friend", isUnread: true),
+            conversation("c", peer: "friend", isUnread: false)
+        ])
+        let catalog = InboxCatalog(
+            repository: provider,
+            relations: StubRelations(followed: [ProfileID("friend")])
+        )
+        var latest: InboxCatalog.Snapshot?
+        let token = catalog.observe { latest = $0 }
+        catalog.reload()
+        await settle()
+        #expect(latest?.unreadIDs.count == 2)
+
+        catalog.markAllRead()
+        await settle()
+
+        #expect(latest?.unreadIDs.isEmpty == true)
+        // One write per unread conversation, each against that conversation's
+        // own latest message — `chat.v1` has no bulk cursor.
+        let calls = await provider.markReadCalls
+        #expect(Set(calls.map(\.0)) == [ConversationID("a"), ConversationID("b")])
+        #expect(calls.allSatisfy { $0.1 == "\($0.0.rawValue)-latest" })
+        _ = token
+    }
+
+    /// A write that fails puts its own row back, so a partial success leaves an
+    /// inbox that tells the truth about which conversations actually moved.
+    @Test func aFailedBulkReadRestoresOnlyTheRowThatFailed() async {
+        let provider = StubInboxProvider(conversations: [
+            conversation("a", peer: "friend", isUnread: true),
+            conversation("b", peer: "friend", isUnread: true)
+        ])
+        await provider.setMarkReadFailure(for: ConversationID("b"))
+        let catalog = InboxCatalog(
+            repository: provider,
+            relations: StubRelations(followed: [ProfileID("friend")])
+        )
+        var latest: InboxCatalog.Snapshot?
+        let token = catalog.observe { latest = $0 }
+        catalog.reload()
+        await settle()
+
+        catalog.markAllRead()
+        await settle()
+
+        #expect(latest?.unreadIDs == [ConversationID("b")])
+        _ = token
+    }
+
     @Test func decliningARequestRemovesItFromBothLists() async {
         let catalog = InboxCatalog(
             repository: StubInboxProvider(conversations: [conversation("request", peer: "stranger")]),

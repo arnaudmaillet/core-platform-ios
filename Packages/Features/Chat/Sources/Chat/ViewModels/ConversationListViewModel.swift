@@ -88,6 +88,10 @@ public final class ConversationListViewModel {
     public func toggleMute(_ id: ConversationID) { catalog.toggleMute(id) }
     public func delete(_ ids: Set<ConversationID>) { catalog.delete(ids) }
 
+    /// Clears every unread row at once — offered from the All tab's own menu,
+    /// since the top bar no longer carries per-tab actions.
+    public func markAllRead() { catalog.markAllRead() }
+
     // MARK: - Projection
 
     private func project(_ snapshot: InboxCatalog.Snapshot) {

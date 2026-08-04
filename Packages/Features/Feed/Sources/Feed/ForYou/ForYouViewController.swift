@@ -12,11 +12,11 @@ import UIKit
 ///
 /// **The capsule is the title.** It is `navigationItem.titleView`, not a strip
 /// beneath the bar, so this screen reserves no safe area of its own and the grid
-/// starts directly under the navigation bar — one row of chrome, not two. That
-/// is the one place it diverges from `MessagesInboxViewController`, which wears
-/// the same `PagedTabBar` floating over its content and therefore does reserve
-/// its height. Everything else — fractional progress driving the lens, the
-/// capsule scrubbing the pager, badges — is shared.
+/// starts directly under the navigation bar — one row of chrome, not two.
+/// `MessagesInboxViewController` wears the same `PagedTabBar` the same way, and
+/// everything else — fractional progress driving the lens, the capsule
+/// scrubbing the pager, badges — is shared. The one thing it does that this
+/// screen does not is stack a search field beneath the title row.
 ///
 /// **The bar items are one action and one state.** Leading is `+`, which opens
 /// the composer through `AppRoute.upload`. Trailing is the `ContentContext`
@@ -414,9 +414,7 @@ final class ForYouViewController: UIViewController {
         // NO `additionalSafeAreaInsets.top`, and no constraints for the bar:
         // the capsule is inside the navigation bar, so the navigation bar's own
         // height already accounts for it and the grid starts directly beneath
-        // it. This is the whole difference from `MessagesInboxViewController`,
-        // which reserves the bar's height as safe area because its copy floats
-        // over the content.
+        // it. `MessagesInboxViewController` does the same.
 
         // Wired like any system control: the bar carries the chosen segment as
         // its value and announces it, rather than handing back a closure.

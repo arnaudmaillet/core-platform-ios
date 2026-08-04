@@ -4,9 +4,15 @@ import UIKit
 /// slides between segments in step with the pages beneath it.
 ///
 /// Built for the Messages inbox (All / Requests / Suggestions) and reused
-/// unchanged by the For You grid (Activity / Gallery / Short). It knows nothing
-/// about either — it takes titles and reports an index, so a third host is a
-/// `titles` array and two closures.
+/// unchanged by the For You grid (Discover / Following). It knows nothing about
+/// either — it takes titles and reports an index, so a third host is a `titles`
+/// array and two closures.
+///
+/// Both hosts now wear it as `navigationItem.titleView` (`.navigationTitle`),
+/// which is why that style carries the measured constants: it is the one under
+/// daily use. `.floating` is the original arrangement and still complete —
+/// including the overflow scrolling a title view cannot do — but it currently
+/// has no host, so treat its numbers as unverified against real content.
 ///
 /// **Anatomy.** A full-width capsule of `UIGlassEffect` inset by the standard
 /// margin, its own soft shadow, and a tinted overlay marking the active
@@ -146,19 +152,46 @@ public final class PagedTabBar: UIControl {
             }
         }
 
-        /// Breathing room around a segment's title, which is what decides how
-        /// wide the strip is overall.
+        /// **The segment's horizontal rhythm: ONE number, used three times.**
         ///
-        /// Tighter in a title slot, and by measurement rather than taste: the
-        /// navigation bar hands the slot 258pt of the 290pt between the side
-        /// items (it reserves ~16pt either side), and at the floating bar's
-        /// padding three titles plus two badges need 269 — an 11pt shortfall
-        /// that makes the strip scroll and clip a title mid-word. 8pt buys back
-        /// 24pt, which is the difference between "fits" and "scrolls".
-        var segmentPadding: CGFloat {
+        /// It is the clearance from the lens's leading edge to the title, the
+        /// gap between the title and its badge, and the clearance from the
+        /// badge to the lens's trailing edge. Equal thirds are what make the
+        /// spacing read as balanced rather than as three unrelated numbers —
+        /// and before this they were exactly that: 4pt, 4pt and 4pt only by
+        /// coincidence, two of them derived from a padding constant and one
+        /// from `Spacing.xs`.
+        ///
+        /// 6pt in a title slot is as much of that rhythm as the bar can buy.
+        /// The navigation bar caps this title view at **258pt** (measured by
+        /// asking for more — it requested 269 and was given 258); the three
+        /// titles and two badges need 207 before any of this, and each point of
+        /// rhythm costs 8 more: 6 for the two ends of three segments, 2 for the
+        /// gaps beside the two badges. 6pt spends 48 of the 51 available.
+        var contentInset: CGFloat {
             switch self {
-            case .floating: Spacing.lg
-            case .navigationTitle: Spacing.sm
+            // Unchanged for a floating bar, which has the screen's width and
+            // no reason to economise: 8 here reproduces the `Spacing.lg`
+            // padding it has always had.
+            case .floating: Spacing.sm
+            case .navigationTitle: 6
+            }
+        }
+
+        /// Breathing room around a segment's contents — the rhythm applied at
+        /// both ends — which is what decides how wide the strip is overall.
+        var segmentPadding: CGFloat { contentInset * 2 }
+
+        /// The gap between a title and its badge.
+        ///
+        /// The same rhythm in a title slot, so the badge sits as far from the
+        /// word as the word sits from the lens. A floating bar keeps the
+        /// tighter `Spacing.xs` it was built with; it has never had a host to
+        /// re-tune it against.
+        var badgeSpacing: CGFloat {
+            switch self {
+            case .floating: Spacing.xs
+            case .navigationTitle: contentInset
             }
         }
 
@@ -175,6 +208,114 @@ public final class PagedTabBar: UIControl {
             switch self {
             case .floating: .required
             case .navigationTitle: .defaultHigh
+            }
+        }
+
+        /// The segment titles' type ramp, which differs because the two hosts
+        /// give the bar wildly different amounts of room.
+        ///
+        /// A FLOATING bar owns the screen's width and can afford `.subheadline`.
+        /// A TITLE VIEW gets only what the side bar items leave it, and at 15pt
+        /// this bar's own content simply does not fit there: measured on the
+        /// Messages inbox, three titles plus two badges needed 261pt of a slot
+        /// that tops out at ~252 with NOTHING beside it and hands over 229 when
+        /// the page publishes a trailing item. Every title truncated, and the
+        /// SELECTED one truncated first.
+        ///
+        /// `.footnote` is 13pt, which is not a nudge downward to make the sums
+        /// work — it is what UIKit itself sets on a `UISegmentedControl`, the
+        /// stock control for this exact placement. It buys ~23pt across three
+        /// titles, which is the difference between padded titles and clipped
+        /// ones.
+        var titleTextStyle: UIFont.TextStyle {
+            switch self {
+            case .floating: .subheadline
+            case .navigationTitle: .footnote
+            }
+        }
+
+        /// Where Dynamic Type stops growing the titles.
+        ///
+        /// A FLOATING bar has room to give and grows to 19pt before it stops.
+        ///
+        /// A TITLE VIEW does not grow AT ALL — 13 is `.footnote`'s own base
+        /// size, so the cap is reached before the first step. That matches the
+        /// bar it lives in: a navigation bar's title and its button items are
+        /// both fixed-size chrome, so a capsule that grew between them would be
+        /// the only thing on the row that moved, and it would move into space
+        /// that does not exist. Measured at `accessibility-medium` with a 17pt
+        /// cap: the slot is unchanged, every segment overruns it, and the
+        /// shortfall lands on one — "All 11" lost its title completely and
+        /// rendered as a bare badge in a lens.
+        ///
+        /// ⚠️ This is a real trade: viewers on large text sizes get tab titles
+        /// at 13pt. It is the same bargain UIKit strikes for every navigation
+        /// bar, and the CONTENT beneath still scales — but it is a bargain, not
+        /// a free win.
+        var maximumTitlePointSize: CGFloat {
+            switch self {
+            case .floating: 19
+            case .navigationTitle: 13
+            }
+        }
+
+        /// Where Dynamic Type stops growing a segment's badge. Capped for the
+        /// same reason as the titles, and it has to be capped in the SAME style
+        /// or the saving is spent: a badge refuses to compress, so every point
+        /// it grows comes straight off the title beside it.
+        var maximumBadgePointSize: CGFloat {
+            switch self {
+            case .floating: 15
+            case .navigationTitle: 11
+            }
+        }
+
+        /// The height of the lens — the selection pill — which is the capsule
+        /// minus its inset on each side. Every other vertical measurement in a
+        /// segment is expressed against THIS rather than against the capsule,
+        /// because the lens is what a viewer actually sees a badge sitting
+        /// inside.
+        var lensHeight: CGFloat { capsuleHeight - Metrics.lensInset * 2 }
+
+        /// The count pill's height: half the lens, which keeps it a small mark
+        /// beside the title rather than a second element competing with it.
+        ///
+        /// **Compactness wins over four-sided symmetry, deliberately.** Equal
+        /// margins on every side would mean `badgeHeight = lensHeight - 2 ×
+        /// clearance`, and at any clearance the slot can afford that puts the
+        /// pill at 28 of the lens's 36pt — a coin next to 13pt text, which is
+        /// louder than the count deserves. So the pill stays at 18 and its
+        /// vertical clearance (9pt) is simply larger than the horizontal
+        /// rhythm (`contentInset`, 6pt). The HORIZONTAL spacing is what is
+        /// balanced — see `contentInset`.
+        ///
+        /// STATED, not measured from the label's text box. A pill sized by its
+        /// text is as tall as the font's ascender plus descender, an asymmetric
+        /// box whose centre is not where the digits look centred, and at 3× it
+        /// lands on a half-pixel: measured 16.67pt tall with 10.3pt of lens
+        /// above it and 9.3pt below. An even, stated number puts the two gaps
+        /// on whole pixels and makes them equal by construction.
+        var badgeHeight: CGFloat { (lensHeight / 2).rounded() }
+
+        /// How the row divides itself between its segments — and it follows
+        /// directly from whether the bar spans the screen or hugs its titles.
+        ///
+        /// A FLOATING bar has the screen's width whatever its titles measure,
+        /// so equal slots are what make it read as one balanced control and
+        /// give a short title the same target as a long one.
+        ///
+        /// A TITLE VIEW is only as wide as its contents, and equal slots there
+        /// are actively expensive: `fillEqually` sizes every segment to the
+        /// WIDEST, so one long title inflates all of them. Measured on the
+        /// Messages inbox — All 41pt, Requests 89pt, Suggestions 98pt — equal
+        /// slots asked for 3 × 98 = 308pt of a 240pt slot and clipped two
+        /// titles, while "All" sat in a 75pt box it needed 41 of. Natural
+        /// widths need 242 of the same 240, which the segments' own padding
+        /// absorbs without a single character lost.
+        var segmentDistribution: UIStackView.Distribution {
+            switch self {
+            case .floating: .fillEqually
+            case .navigationTitle: .fill
             }
         }
 
@@ -195,11 +336,22 @@ public final class PagedTabBar: UIControl {
         var height: CGFloat { capsuleHeight + topMargin + bottomMargin }
     }
 
-    private enum Metrics {
-        /// Breathing room between the capsule's edge and the first segment.
-        static let capsulePadding: CGFloat = 5
-        /// Inset of the lens inside the capsule.
+    /// `fileprivate` so `SegmentView` can shape its own context-menu preview
+    /// from the same inset the lens uses — two numbers for one edge would drift.
+    fileprivate enum Metrics {
+        /// The lens's clearance inside the capsule, on EVERY side.
+        ///
+        /// One number, not two. It was 5 horizontally and 4 vertically, which
+        /// meant the selection pill sat closer to the capsule's top and bottom
+        /// than to its ends — invisible on a wide segment and obvious on a
+        /// round one, where the eye reads the pill against the capsule's own
+        /// curve. The horizontal figure is what gave way, because the vertical
+        /// one is what decides the lens's HEIGHT, and that height is the
+        /// diameter every disk in the bar is measured against.
         static let lensInset: CGFloat = 4
+        /// Breathing room between the capsule's edge and the first segment —
+        /// the same inset, seen from the horizontal axis.
+        static var capsulePadding: CGFloat { lensInset }
         static let interSegmentSpacing: CGFloat = 2
     }
 
@@ -316,12 +468,13 @@ public final class PagedTabBar: UIControl {
         row.axis = .horizontal
         row.spacing = Metrics.interSegmentSpacing
         row.alignment = .fill
-        // Equal slots, so the bar looks balanced at any width and a short title
-        // gets the same target as a long one. Segment widths are minimums
-        // (`>=`) rather than exact, which is what lets this distribute the
-        // slack — and what still lets the row out-measure the capsule and
-        // scroll when the titles genuinely need more room than the screen has.
-        row.distribution = .fillEqually
+        // Equal slots on a bar that spans the screen; natural widths on one that
+        // hugs its titles — see `Style.segmentDistribution`. Segment widths are
+        // minimums (`>=`) rather than exact in both cases, which is what lets a
+        // floating row distribute its slack, and what still lets it out-measure
+        // the capsule and scroll when the titles genuinely need more room than
+        // the screen has.
+        row.distribution = style.segmentDistribution
         // ⚠️ THE authoritative moment to size the lens. Everything else that
         // calls `applyProgress` is a hint that may be one pass early; this is
         // the one call that cannot be, because it fires after the row has
@@ -331,9 +484,42 @@ public final class PagedTabBar: UIControl {
         row.constrain(in: content) { parent in
             row.topAnchor.constraint(equalTo: parent.topAnchor)
             row.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
-            row.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Metrics.capsulePadding)
-            row.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Metrics.capsulePadding)
         }
+        // How the row sits between the capsule's ends.
+        //
+        // A floating bar PINS to both margins: it spans the screen, and equal
+        // slots across that width are the look.
+        //
+        // A title view CENTRES between them, and that is load-bearing. A
+        // navigation bar hands its title slot a width; it does not promise that
+        // width is the one the view asked for. Measured: the capsule's intrinsic
+        // width fell from 239 to 224 when a badge cleared, the bar kept handing
+        // it 239, and `.fill` gave the whole 15pt of slack to ONE segment —
+        // "All" rendered 52pt wide where its content needed 36, so a selection
+        // that should have been a disk was an oval, and which segment got fat
+        // was up to the stack. Centred, the slack lands where slack belongs: as
+        // equal margin at both ends. Segments keep exactly the widths they asked
+        // for, so the disk floor in `updatePinnedWidth` reaches the screen.
+        NSLayoutConstraint.activate(
+            style.hugsContent
+                ? [
+                    row.leadingAnchor.constraint(
+                        greaterThanOrEqualTo: content.leadingAnchor, constant: Metrics.capsulePadding
+                    ),
+                    row.trailingAnchor.constraint(
+                        lessThanOrEqualTo: content.trailingAnchor, constant: -Metrics.capsulePadding
+                    ),
+                    row.centerXAnchor.constraint(equalTo: content.centerXAnchor)
+                ]
+                : [
+                    row.leadingAnchor.constraint(
+                        equalTo: content.leadingAnchor, constant: Metrics.capsulePadding
+                    ),
+                    row.trailingAnchor.constraint(
+                        equalTo: content.trailingAnchor, constant: -Metrics.capsulePadding
+                    )
+                ]
+        )
 
         // How the content relates to the capsule's width — and this is what
         // decides whether "too much content" becomes SCROLLING or TRUNCATION.
@@ -415,17 +601,24 @@ public final class PagedTabBar: UIControl {
         // resolved constraints, which lag a badge by one layout pass, while a
         // segment knows its target width the instant it is set.
         //
-        // ⚠️ The row is `fillEqually`, so the width is the WIDEST segment times
-        // the count — not the sum of the individual minimums. Summing them
-        // under-measures by (widest − each) and the capsule asks for less room
-        // than its own contents need, which is a scrolling strip that clips a
-        // title mid-word ("Activity" → "tivity") with space going spare beside
-        // it. Measured both ways before believing it: summed 208pt vs 227pt
-        // actual on three titles.
-        let widest = segments.map(\.pinnedWidth).max() ?? 0
+        // ⚠️ The measurement follows the DISTRIBUTION, and getting it wrong in
+        // either direction is visible. Under `fillEqually` every segment is
+        // sized to the WIDEST, so the width is widest × count — summing the
+        // individual minimums there under-measures by (widest − each) and the
+        // capsule asks for less room than its own contents need, which is a
+        // scrolling strip that clips a title mid-word ("Activity" → "tivity")
+        // with space going spare beside it (measured: summed 208pt vs 227pt
+        // actual on three titles). Under `.fill` each segment keeps its own
+        // width, so the sum IS the answer and widest × count would claim room
+        // the side bar items need.
+        let widths = segments.map(\.pinnedWidth)
+        let total = switch style.segmentDistribution {
+        case .fillEqually: (widths.max() ?? 0) * CGFloat(segments.count)
+        default: widths.reduce(0, +)
+        }
         let spacing = Metrics.interSegmentSpacing * CGFloat(max(0, segments.count - 1))
         return CGSize(
-            width: ceil(widest * CGFloat(segments.count) + spacing) + Metrics.capsulePadding * 2,
+            width: ceil(total + spacing) + Metrics.capsulePadding * 2,
             height: effectiveCapsuleHeight + style.topMargin + style.bottomMargin
         )
     }
@@ -594,6 +787,23 @@ public final class PagedTabBar: UIControl {
         setBadge(.count(count), at: index)
     }
 
+    /// The menu a long press on a segment offers, or `nil` for none.
+    ///
+    /// A segment carries its own page's actions, and it carries them whether or
+    /// not that page is the one on screen — long-pressing "Requests" from the
+    /// All tab is a reasonable thing to do, and it works. That is the whole
+    /// reason these live on the BAR rather than in the navigation bar: bar
+    /// items can only ever belong to the active page, so an action published
+    /// there has to appear and disappear as the viewer pages, which is what
+    /// made the trailing slot change width from tab to tab.
+    ///
+    /// Re-read at press time, not captured: a count that changes between the
+    /// menu being set and the finger going down still shows the current number.
+    public func setMenu(_ menu: UIMenu?, at index: Int) {
+        guard segments.indices.contains(index) else { return }
+        segments[index].menuProvider = menu.map { stored in { stored } }
+    }
+
     /// The badge beside a segment's title, count or dot.
     public func setBadge(_ badge: BadgeStyle, at index: Int) {
         guard segments.indices.contains(index) else { return }
@@ -665,6 +875,30 @@ public final class PagedTabBar: UIControl {
         setNeedsLayout()
         layoutIfNeeded()
         resolveSegmentsThenApplyProgress()
+    }
+
+    /// What a long press on a segment would actually produce: the menu the host
+    /// has given it, and whether the interaction that would show it is
+    /// installed.
+    ///
+    /// Both halves are needed to believe the feature works. A menu with no
+    /// interaction never appears; an interaction with no menu answers a press
+    /// with nothing. Neither is distinguishable from the other — or from a
+    /// working bar — in a screenshot, and a long press cannot be injected into
+    /// the simulator at all.
+    public func debugMenu(at index: Int) -> (titles: [String], hasInteraction: Bool)? {
+        guard segments.indices.contains(index) else { return nil }
+        let segment = segments[index]
+        let titles = (segment.menuProvider?()?.children ?? []).compactMap { ($0 as? UIAction)?.title }
+        let installed = segment.interactions.contains { $0 is UIContextMenuInteraction }
+        return (titles, installed)
+    }
+
+    /// The size a segment's badge is actually drawing at — the pill whose
+    /// margins inside the lens are supposed to be equal on every side.
+    public func debugBadgeSize(at index: Int) -> CGSize? {
+        guard segments.indices.contains(index) else { return nil }
+        return segments[index].badgeSize
     }
 
     /// How many points of segment strip the capsule cannot show at its current
@@ -747,7 +981,12 @@ public final class PagedTabBar: UIControl {
     /// act on different objects, and each follows the one being touched.
     @objc private func handleScrub(_ pan: UIPanGestureRecognizer) {
         guard segments.count > 1 else { return }
-        let slot = max(1, segments[0].bounds.width + Metrics.interSegmentSpacing)
+        // The AVERAGE segment, not the first one. Under `fillEqually` they are
+        // the same number; under `.fill` the first segment can be less than half
+        // the width of its neighbours ("All" 41pt beside "Suggestions" 98pt), and
+        // measuring the drag against it would run the pages at more than twice
+        // the speed of the finger.
+        let slot = max(1, row.bounds.width / CGFloat(segments.count))
         switch pan.state {
         case .began:
             scrubOrigin = progress
@@ -766,7 +1005,13 @@ public final class PagedTabBar: UIControl {
             let segment = SegmentView(
                 title: title,
                 titlePadding: style.segmentPadding,
-                widthPriority: style.segmentWidthPriority
+                widthPriority: style.segmentWidthPriority,
+                textStyle: style.titleTextStyle,
+                maximumPointSize: style.maximumTitlePointSize,
+                maximumBadgePointSize: style.maximumBadgePointSize,
+                badgeHeight: style.badgeHeight,
+                badgeSpacing: style.badgeSpacing,
+                lensHeight: style.lensHeight
             )
             segment.addAction(
                 UIAction { [weak self] _ in self?.selectSegment(index) },
@@ -906,13 +1151,9 @@ private final class SegmentRow: UIStackView {
 /// plus an optional count badge. Its width is pinned to the SEMIBOLD
 /// measurement so selection can never reflow the row.
 private final class SegmentView: UIButton {
-    /// Titles scale with Dynamic Type up to here, then stop — four segments
-    /// have to stay side by side in one fixed-height capsule.
-    static let maximumTitlePointSize: CGFloat = 19
-
     private let plainLabel = UILabel()
     private let boldLabel = UILabel()
-    private let badge = BadgeView()
+    private let badge: BadgeView
     private let content = UIStackView()
     private let title: String
     /// Breathing room added around the measured title; see `Style.segmentPadding`.
@@ -920,6 +1161,12 @@ private final class SegmentView: UIButton {
     /// How hard this segment insists on its measured width; see where the
     /// constraint is built for why the two hosts differ.
     private let widthPriority: UILayoutPriority
+    /// The titles' type ramp, handed down by the host's style — see
+    /// `Style.titleTextStyle` for why a title slot runs smaller than a
+    /// floating bar.
+    private let textStyle: UIFont.TextStyle
+    /// Where Dynamic Type stops growing the titles; also from the style.
+    private let maximumPointSize: CGFloat
     private var pinnedWidthConstraint: NSLayoutConstraint!
 
     /// The width this segment has just asked for — readable the instant it is
@@ -927,15 +1174,56 @@ private final class SegmentView: UIButton {
     /// sums these to state its own size.
     var pinnedWidth: CGFloat { pinnedWidthConstraint.constant }
 
-    init(title: String, titlePadding: CGFloat, widthPriority: UILayoutPriority) {
+    /// Supplies this segment's long-press menu, asked at press time so the
+    /// menu reflects the counts as they stand when the finger goes down.
+    var menuProvider: (() -> UIMenu?)?
+
+    /// The pill's laid-out size, for a host asserting its margins.
+    var badgeSize: CGSize { badge.bounds.size }
+
+    /// The gap between the title and its badge — the segment's own share of the
+    /// horizontal rhythm, handed down by the style.
+    private let badgeSpacing: CGFloat
+
+    /// The lens's height inside this segment, which is also the smallest width
+    /// the segment may take — see `updatePinnedWidth`.
+    private let lensHeight: CGFloat
+
+    /// What the long-press menu lifts INSTEAD of the segment: a clear rectangle
+    /// over the lens. See `flatPreview()` for why the lift cannot simply be
+    /// switched off. Never drawn, never touchable, and it costs one view.
+    private lazy var menuAnchor: UIView = {
+        let anchor = UIView()
+        anchor.isUserInteractionEnabled = false
+        anchor.backgroundColor = .clear
+        addSubview(anchor)
+        return anchor
+    }()
+
+    init(
+        title: String,
+        titlePadding: CGFloat,
+        widthPriority: UILayoutPriority,
+        textStyle: UIFont.TextStyle,
+        maximumPointSize: CGFloat,
+        maximumBadgePointSize: CGFloat,
+        badgeHeight: CGFloat,
+        badgeSpacing: CGFloat,
+        lensHeight: CGFloat
+    ) {
         self.title = title
         self.titlePadding = titlePadding
         self.widthPriority = widthPriority
+        self.textStyle = textStyle
+        self.maximumPointSize = maximumPointSize
+        self.badgeSpacing = badgeSpacing
+        self.lensHeight = lensHeight
+        badge = BadgeView(maximumPointSize: maximumBadgePointSize, height: badgeHeight)
         super.init(frame: .zero)
 
         for (label, weight) in [(plainLabel, UIFont.Weight.regular), (boldLabel, .semibold)] {
             label.text = title
-            label.font = .preferredFont(forTextStyle: .subheadline, weight: weight, maximumPointSize: SegmentView.maximumTitlePointSize)
+            label.font = .preferredFont(forTextStyle: textStyle, weight: weight, maximumPointSize: maximumPointSize)
             label.adjustsFontForContentSizeCategory = true
             label.textAlignment = .center
             label.isUserInteractionEnabled = false
@@ -959,7 +1247,7 @@ private final class SegmentView: UIButton {
         content.addArrangedSubview(badge)
         content.axis = .horizontal
         content.alignment = .center
-        content.spacing = Spacing.xs
+        content.spacing = badgeSpacing
         content.isUserInteractionEnabled = false
         content.constrain(in: self) { parent in
             content.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
@@ -998,6 +1286,13 @@ private final class SegmentView: UIButton {
         isAccessibilityElement = true
         accessibilityLabel = title
         accessibilityTraits = .button
+
+        // Long press → this segment's own menu. A `UIContextMenuInteraction`
+        // rather than `UIButton.menu`: the button's primary action is choosing
+        // the tab, and a menu hung off the same control competes with it for
+        // the touch. The interaction has its own long-press recognizer, which
+        // UIKit arbitrates against both the tap and the capsule's scrub pan.
+        addInteraction(UIContextMenuInteraction(delegate: self))
 
         // A real button with a real configuration, so UIKit owns the control
         // state machine: when a touch is a press, when it is cancelled, when a
@@ -1043,6 +1338,66 @@ private final class SegmentView: UIButton {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    // MARK: - Long-press menu
+
+    /// ⚠️ `override`, not a protocol conformance in an extension: `UIButton`
+    /// ALREADY conforms to `UIContextMenuInteractionDelegate` (it is how
+    /// `UIButton.menu` is served), so an extension restating the conformance is
+    /// rejected as redundant and its methods as un-overridden. The same shape
+    /// `PagedTabBar.gestureRecognizerShouldBegin` is in, for the same reason.
+    ///
+    /// Returns no configuration at all when the host has given this segment no
+    /// menu, so a segment with nothing to offer does not answer a long press
+    /// with an empty platter.
+    override func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        configurationForMenuAtLocation location: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard let menuProvider, menuProvider() != nil else { return nil }
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
+            menuProvider()
+        }
+    }
+
+    /// **Nothing lifts.** The menu drops out from under the tab and the tab
+    /// itself does not move a pixel.
+    ///
+    /// The lift cannot be turned off — a context menu always raises whatever
+    /// view the preview targets, and returning `nil` opts INTO the default,
+    /// which raises a square crop of the segment. So the preview targets an
+    /// invisible stand-in pinned over the lens instead: UIKit lifts and hides
+    /// that, which is a clear rectangle and looks like nothing at all, while
+    /// the real segment stays exactly where it was drawn. The menu still
+    /// anchors to the lens's frame, so it drops from the right place.
+    ///
+    /// Both the highlight and the dismissal go through it. Answering only the
+    /// first leaves the segment to be lifted on the way OUT — the same jump,
+    /// played backwards.
+    override func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        configuration: UIContextMenuConfiguration,
+        highlightPreviewForItemWithIdentifier identifier: any NSCopying
+    ) -> UITargetedPreview? {
+        flatPreview()
+    }
+
+    override func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        configuration: UIContextMenuConfiguration,
+        dismissalPreviewForItemWithIdentifier identifier: any NSCopying
+    ) -> UITargetedPreview? {
+        flatPreview()
+    }
+
+    private func flatPreview() -> UITargetedPreview {
+        // Sized to the LENS, not to the whole segment: the menu should hang off
+        // the shape the viewer pressed.
+        menuAnchor.frame = bounds.insetBy(dx: 0, dy: PagedTabBar.Metrics.lensInset)
+        let parameters = UIPreviewParameters()
+        parameters.backgroundColor = .clear
+        return UITargetedPreview(view: menuAnchor, parameters: parameters)
+    }
+
     private var strength: CGFloat = 0
 
     /// 1 = fully selected, 0 = fully unselected, fractions mid-drag.
@@ -1078,13 +1433,27 @@ private final class SegmentView: UIButton {
 
     /// Width = the semibold title plus the badge (when shown) plus breathing
     /// room, so the lens has somewhere to sit and the row never reflows.
+    ///
+    /// ⚠️ The badge is measured from its own text metrics, NOT through
+    /// `systemLayoutSizeFitting`. That call resolves the badge's constraints at
+    /// `.fittingSizeLevel` and came back ~10pt short of the pill it actually
+    /// draws — invisible while `fillEqually` sized every segment to the widest
+    /// one, and the whole bug under `.fill`, where the segment gets exactly the
+    /// width stated here: "All 11" was pinned to 41pt, needed 51, and the title
+    /// compressed to a bare "…" beside an intact badge.
     private func updatePinnedWidth() {
-        let bold = UIFont.preferredFont(forTextStyle: .subheadline, weight: .semibold, maximumPointSize: Self.maximumTitlePointSize)
+        let bold = UIFont.preferredFont(forTextStyle: textStyle, weight: .semibold, maximumPointSize: maximumPointSize)
         var width = ceil((title as NSString).size(withAttributes: [.font: bold]).width) + titlePadding
         if !badge.isHidden {
-            width += badge.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width + Spacing.xs
+            width += badge.measuredWidth + badgeSpacing
         }
-        pinnedWidthConstraint.constant = width
+        // ⚠️ FLOOR at the lens's own height, which is what makes a short title's
+        // selection a DISK rather than a squashed oval. The lens is as tall as
+        // the segment minus its inset and as wide as the segment, so a segment
+        // narrower than that height cannot draw a round pill at any radius —
+        // its own corner rounding (height / 2) exceeds half its width and the
+        // shape degenerates. Below the floor the title simply sits in more air.
+        pinnedWidthConstraint.constant = max(lensHeight, width)
     }
 }
 
@@ -1092,12 +1461,23 @@ private final class SegmentView: UIButton {
 
 /// The pending count beside a segment title: a filled capsule that follows the
 /// segment's own selection strength, so it brightens with its label.
+///
+/// **Its height is given to it, not derived from its text.** The host states one
+/// number (`Style.badgeHeight`) and the pill is exactly that tall in both
+/// styles, so the clearance above and below it inside the selection lens is
+/// equal by construction and stays equal when the font changes. The text only
+/// ever decides how WIDE it is.
 private final class BadgeView: UIView {
     private let label = UILabel()
 
-    init() {
+    /// The pill's stated height; also its minimum width, so a single digit
+    /// draws a circle rather than a squat lozenge.
+    private let height: CGFloat
+
+    init(maximumPointSize: CGFloat, height: CGFloat) {
+        self.height = height
         super.init(frame: .zero)
-        label.font = .preferredFont(forTextStyle: .caption2, weight: .semibold, maximumPointSize: 15)
+        label.font = .preferredFont(forTextStyle: .caption2, weight: .semibold, maximumPointSize: maximumPointSize)
         label.adjustsFontForContentSizeCategory = true
         // `.systemBackground` does NOT survive inside a `UIGlassEffect` content
         // view — it resolved to white in dark mode, on a badge whose fill had
@@ -1110,13 +1490,27 @@ private final class BadgeView: UIView {
                 : UIColor(white: 1, alpha: 1)
         }
         label.textAlignment = .center
-        label.pin(to: self, insets: NSDirectionalEdgeInsets(top: 2, leading: 5, bottom: 2, trailing: 5))
+        // CENTRED, not pinned by insets. The pill's height is stated below and
+        // its width is stated by `countWidth`, so the label's job is only to sit
+        // in the middle of both — where pinning it by insets would make the text
+        // box the thing that sizes the pill, which is exactly the asymmetry this
+        // arrangement removes.
+        label.constrain(in: self) { parent in
+            label.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
+            label.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
+        }
         backgroundColor = .secondaryLabel
         layer.cornerCurve = .continuous
         isUserInteractionEnabled = false
 
-        dotWidth = widthAnchor.constraint(equalToConstant: Self.dotDiameter)
-        dotHeight = heightAnchor.constraint(equalToConstant: Self.dotDiameter)
+        // One pair of constraints, re-pointed per style: a count states the
+        // stated height and a text-derived width, a dot states its diameter on
+        // both axes. Keeping it to one pair means the two can never both be
+        // live and fight.
+        pillWidth = widthAnchor.constraint(equalToConstant: Self.dotDiameter)
+        pillHeight = heightAnchor.constraint(equalToConstant: Self.dotDiameter)
+        pillWidth.isActive = true
+        pillHeight.isActive = true
     }
 
     /// A dot small enough to read as punctuation beside the title rather than
@@ -1124,10 +1518,34 @@ private final class BadgeView: UIView {
     /// over a number is that it should barely interrupt the word.
     private static let dotDiameter: CGFloat = 8
 
-    /// Sizing for dot mode. Inactive in count mode, where the label's own
-    /// insets are what size the pill.
-    private var dotWidth: NSLayoutConstraint!
-    private var dotHeight: NSLayoutConstraint!
+    /// Clearance between the count and the pill's end caps, per side. Only ever
+    /// widens the pill — a one-digit count is already round at the stated
+    /// height, so this decides how a two- or three-digit one grows.
+    private static let labelInset: CGFloat = 5
+
+    /// The width this badge draws at, derived from its own text the instant the
+    /// text is set — where `systemLayoutSizeFitting` answers from constraints
+    /// that have not been resolved yet and under-reports by the label's whole
+    /// width. The segment that hosts it pins itself from this, so it has to be
+    /// right on the same turn of the run loop, not after a layout pass.
+    ///
+    /// Never narrower than the pill is tall: at that floor it is a circle, which
+    /// is what a single digit should look like beside a title.
+    var measuredWidth: CGFloat {
+        switch style {
+        case .count:
+            let text = label.text ?? ""
+            let width = (text as NSString).size(withAttributes: [.font: label.font as Any]).width
+            return max(height, ceil(width) + Self.labelInset * 2)
+        case .dot:
+            return Self.dotDiameter
+        }
+    }
+
+    /// The pill's own size, re-pointed between the stated count geometry and
+    /// the dot's diameter by `apply`.
+    private var pillWidth: NSLayoutConstraint!
+    private var pillHeight: NSLayoutConstraint!
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -1149,16 +1567,19 @@ private final class BadgeView: UIView {
             // Past 99 the pill would out-measure its own segment title.
             label.text = count > 99 ? "99+" : String(count)
             label.isHidden = false
-            dotWidth.isActive = false
-            dotHeight.isActive = false
+            // Height first, then width — `measuredWidth` reads the height as its
+            // floor, so a stale height would round a one-digit pill to the wrong
+            // size for one layout pass.
+            pillHeight.constant = height
+            pillWidth.constant = measuredWidth
         case .dot:
             // ⚠️ The label is hidden AND the size is stated. A hidden view
-            // still participates in Auto Layout outside a stack view, so its
-            // pinned insets would keep sizing the badge to a number nobody can
+            // still participates in Auto Layout outside a stack view, so a
+            // pill sized by its label would keep sizing to a number nobody can
             // see — a "dot" as wide as the count it replaced.
             label.isHidden = true
-            dotWidth.isActive = true
-            dotHeight.isActive = true
+            pillWidth.constant = Self.dotDiameter
+            pillHeight.constant = Self.dotDiameter
         }
         invalidateIntrinsicContentSize()
     }

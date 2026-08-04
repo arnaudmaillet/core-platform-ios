@@ -5,12 +5,11 @@ import UIKit
 /// once, presented over the whole inbox while the field is active.
 ///
 /// **Why a `searchResultsController` rather than filtering a page in place.**
-/// The inbox is three horizontally paged surfaces under a floating glass
-/// category bar. Narrowing one page would answer a global query with a local
-/// list, and would leave the category bar on screen asserting a scope the
+/// The inbox is three horizontally paged surfaces under a tab capsule that
+/// lives in the navigation bar. Narrowing one page would answer a global query
+/// with a local list, and would leave the tabs on screen asserting a scope the
 /// results don't have. A results controller is presented over the container's
-/// whole view — pager and category bar both — so while search is active there
-/// are no tabs to be confused by and no page to swipe. That is the answer to
+/// whole view, so while search is active there is no page to swipe. That is the answer to
 /// "which tab am I searching?": none of them, and the sections say where each
 /// hit came from.
 ///

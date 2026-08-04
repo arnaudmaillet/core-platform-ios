@@ -9,18 +9,37 @@ import UIKit
 /// reach for shared chrome) keeps the container the single writer of the
 /// navigation bar, which is what makes "who owns the header" answerable.
 struct InboxSurfaceChrome {
-    /// Navigation bar title while this surface is active; `nil` keeps the
-    /// inbox's own "Messages". Editing uses it for the selection count, which
-    /// is where a count belongs: hanging it off the action ("Delete (2)")
-    /// crowds the bar enough to truncate the title on a 402pt screen.
+    /// Navigation bar title while this surface is active, which DISPLACES the
+    /// tab capsule for as long as it is non-nil — the two share one slot.
+    ///
+    /// `nil` is the resting state and the tabs hold the slot. Editing is the
+    /// only caller: it puts the selection count there, which is where a count
+    /// belongs (hanging it off the action — "Delete (2)" — crowds the bar
+    /// enough to truncate on a 402pt screen), and paging is frozen while it
+    /// does, so the tabs are giving up nothing anyone could use.
     var title: String?
-    /// Leading bar item while this surface is active; `nil` for none.
+    /// Leading bar item while this surface is active, OVERRIDING the container's
+    /// Compose; `nil` leaves Compose in place, which is the resting state.
+    ///
+    /// ⚠️ **Editing only.** The resting bar is two fixed glyphs — Compose and
+    /// Search — on every tab, and nothing a page publishes may change that.
+    /// What a page offers goes in `contextMenu`.
     var leadingBarItem: UIBarButtonItem?
     /// Trailing bar items while active, in `rightBarButtonItems` order
-    /// (first = outermost). Empty yields the container's compose item, which
-    /// belongs to the inbox as a whole rather than to any page. Editing
-    /// surfaces publish their batch actions here, which is why this is a list:
-    /// every tab's edit mode offers two.
+    /// (first = outermost).
+    ///
+    /// ⚠️ **Editing only, same rule as `leadingBarItem`.** These are the batch
+    /// actions a multi-selection needs, and editing is a MODE — paging is
+    /// frozen, the capsule has stepped aside for the selection count, and the
+    /// bar's width is nobody's business but the mode's. In the resting state
+    /// this must be empty.
+    ///
+    /// **Why the rule exists, in numbers.** The tab capsule is the navigation
+    /// bar's title view, so it gets exactly what the side items leave it. When
+    /// pages published their own words here the slot measured 252pt with no
+    /// item, 239.7 with "Edit", 228.7 with "Clear" and ~190 with "Clear All" —
+    /// so the tabs were re-laid out, and truncated, according to which page you
+    /// happened to be on. Fixed glyphs make the slot one number.
     var trailingBarItems: [UIBarButtonItem] = []
     /// Count stamped beside this surface's segment title; 0 hides the badge.
     /// Honoured whether or not the surface is active — that is the point of a
@@ -29,6 +48,14 @@ struct InboxSurfaceChrome {
     /// Suspends paging while true (a half-made multi-selection has no sensible
     /// outcome if the page slides away under it).
     var locksPaging = false
+    /// What a long press on THIS surface's tab offers — "Clear All Requests" on
+    /// Requests, "Mark All as Read" and "Select Messages" on All.
+    ///
+    /// This is where a page's actions live now. It reaches the viewer without
+    /// touching the navigation bar at all, so it cannot change the header's
+    /// geometry, and it works from any tab: the menu hangs off the segment, not
+    /// off whichever page happens to be showing.
+    var contextMenu: UIMenu?
 }
 
 /// The contract between the inbox container and one of its paged surfaces.
