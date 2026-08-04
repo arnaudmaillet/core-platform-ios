@@ -1161,6 +1161,13 @@ final class ProfileViewController: UIViewController {
         // screens that wear this bar — the pager reports a fractional position
         // every frame and the capsule interpolates against it.
         galleryPager.onProgress = { [weak self] progress in self?.categoryBar.setProgress(progress) }
+        // The capsule is grabbable: dragging it scrubs the pages under the
+        // finger and releasing commits to whichever one it landed nearest. The
+        // same two lines the other two screens that wear this bar already have.
+        categoryBar.onScrub = { [weak self] progress in self?.galleryPager.scrub(to: progress) }
+        categoryBar.onScrubEnd = { [weak self] velocity in
+            self?.galleryPager.settleAfterScrub(velocityInPages: velocity)
+        }
 
         // Land on the user's global preference: tab selection and pager page
         // adopt the (possibly stored) filter before first layout, so the
