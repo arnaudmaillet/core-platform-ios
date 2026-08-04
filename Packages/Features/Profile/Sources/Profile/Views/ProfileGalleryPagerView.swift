@@ -184,7 +184,20 @@ final class ProfileGalleryPagerView: UIView {
         scrollView.clipsToBounds = !unclipped
     }
 
-    /// Pins the pager's height to the active page's fitted content height.
+    /// The shortest the pager may be, set by the owner — see
+    /// `ProfileViewController.updateGalleryFloor`. Zero means "as tall as the
+    /// content", which is what this screen wants whenever it can have it.
+    private var minimumHeight: CGFloat = 0
+
+    /// Raises or drops the floor, re-pinning the height to match.
+    func setMinimumHeight(_ height: CGFloat) {
+        guard minimumHeight != height else { return }
+        minimumHeight = height
+        syncHeight(animated: false)
+    }
+
+    /// Pins the pager's height to the active page's fitted content height, or
+    /// to the floor its owner is holding, whichever is taller.
     ///
     /// ⚠️ Clipping is restored on COMPLETION, not before the animation. A
     /// shrinking container that re-clipped first would cut the outgoing page to
@@ -202,11 +215,12 @@ final class ProfileGalleryPagerView: UIView {
             withHorizontalFittingPriority: .required,
             verticalFittingPriority: .fittingSizeLevel
         ).height
-        guard pagerHeight.constant != fitted else {
+        let target = max(fitted, minimumHeight)
+        guard pagerHeight.constant != target else {
             setPagesUnclipped(false)
             return
         }
-        pagerHeight.constant = fitted
+        pagerHeight.constant = target
         guard animated, let host = superview else {
             setPagesUnclipped(false)
             return

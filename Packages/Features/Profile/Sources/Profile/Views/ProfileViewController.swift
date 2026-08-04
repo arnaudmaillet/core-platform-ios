@@ -1264,6 +1264,37 @@ final class ProfileViewController: UIViewController {
         if shouldDock { dockBar() } else { undockBar() }
     }
 
+    /// Keeps a docked selector docked when the tab under it changes.
+    ///
+    /// ⚠️ **Switching tabs used to throw the whole profile back to the top**,
+    /// and nothing was scrolling it: a short tab makes the gallery shorter,
+    /// which makes the scroll view's CONTENT shorter, and a scroll view whose
+    /// content no longer reaches the current offset pulls the offset back. The
+    /// identity block reappearing was the clamp, not a scroll.
+    ///
+    /// So the gallery is held to at least a screenful — but ONLY while the
+    /// selector is docked, which is the only state that can be lost. A short
+    /// tab read from the top of the profile keeps its natural height and the
+    /// empty space that a floor would add underneath it.
+    ///
+    /// ⚠️ The floor is a CONSTANT — one viewport below the chrome — rather than
+    /// something derived from the current offset. An offset-derived floor grows
+    /// the content, which allows a larger offset, which grows the floor: the
+    /// page would scroll forever under a finger that never lifted.
+    ///
+    /// It is released only at the very top, where releasing it cannot clamp
+    /// anything. Dropping it the instant the selector undocks would shrink the
+    /// content while the viewer was still somewhere inside it — trading this
+    /// bug for a smaller version of itself.
+    private func updateGalleryFloor() {
+        guard viewModel.hasGallery else { return }
+        if isBarDocked {
+            galleryPager.setMinimumHeight(max(0, scrollView.bounds.height - view.safeAreaInsets.top))
+        } else if scrollView.contentOffset.y <= 0 {
+            galleryPager.setMinimumHeight(0)
+        }
+    }
+
     /// Shows the shared toolbar for this screen, riding the transition. The
     /// mechanics mirror the feed's `presentToolbar`: shown non-animated so the
     /// safe area is final immediately; the *visual* entrance is an alpha fade
@@ -1392,5 +1423,6 @@ final class ProfileViewController: UIViewController {
 extension ProfileViewController: UIScrollViewDelegate {
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         updateBarDocking()
+        updateGalleryFloor()
     }
 }

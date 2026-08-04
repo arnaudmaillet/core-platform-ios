@@ -226,3 +226,68 @@ struct ProfileGalleryClippingTests {
         #expect(pager.debugIsUnclipped == false)
     }
 }
+
+/// The floor that keeps a docked selector docked when the tab under it changes.
+///
+/// A short tab makes the gallery shorter, which makes the profile's scroll
+/// content shorter, and a scroll view whose content no longer reaches the
+/// current offset pulls the offset back — which looked like the page scrolling
+/// itself to the top. Holding the gallery to a screenful while the selector is
+/// docked removes the clamp; releasing it at the top keeps a short tab short.
+@MainActor
+struct ProfileGalleryFloorTests {
+    private struct SilentFetcher: ImageFetching {
+        func fetchImageData(for url: URL) async throws -> Data { Data() }
+    }
+
+    private func makePager() -> ProfileGalleryPagerView {
+        let pager = ProfileGalleryPagerView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()))
+        pager.frame = CGRect(x: 0, y: 0, width: 400, height: 600)
+        pager.layoutIfNeeded()
+        pager.debugSyncHeight()
+        return pager
+    }
+
+    /// With no floor the pager is its content's height — a short tab stays
+    /// short, which is what it should look like read from the top.
+    @Test func withoutAFloorThePagerFitsItsContent() {
+        let pager = makePager()
+        #expect(pager.debugPagerHeight < 700)
+    }
+
+    /// Raised, it holds the floor even though the content is far shorter — the
+    /// scroll content stays long enough for the offset to survive.
+    @Test func aRaisedFloorHoldsTheHeightUp() {
+        let pager = makePager()
+        pager.setMinimumHeight(700)
+        #expect(pager.debugPagerHeight == 700)
+    }
+
+    /// And dropping it gives the height back to the content, so nothing is left
+    /// padding a tab the viewer is reading from the top.
+    @Test func droppingTheFloorReturnsTheHeightToTheContent() {
+        let pager = makePager()
+        pager.setMinimumHeight(700)
+        let raised = pager.debugPagerHeight
+        pager.setMinimumHeight(0)
+        #expect(pager.debugPagerHeight < raised)
+    }
+
+    /// Content taller than the floor is unaffected by it — the floor is a
+    /// minimum, never a size.
+    @Test func aFloorShorterThanTheContentChangesNothing() {
+        let pager = makePager()
+        let natural = pager.debugPagerHeight
+        pager.setMinimumHeight(natural / 2)
+        #expect(pager.debugPagerHeight == natural)
+    }
+
+    /// Re-stating the same floor is a no-op, so a scroll tick that changes
+    /// nothing cannot churn the layout.
+    @Test func restatingTheFloorDoesNothing() {
+        let pager = makePager()
+        pager.setMinimumHeight(700)
+        pager.setMinimumHeight(700)
+        #expect(pager.debugPagerHeight == 700)
+    }
+}
