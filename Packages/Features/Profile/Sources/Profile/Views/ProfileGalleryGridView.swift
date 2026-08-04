@@ -27,6 +27,12 @@ final class ProfileGalleryGridView: UIView {
     }
 
     var onItemTapped: ((GalleryPost) -> Void)?
+    /// This page's vertical offset, every tick — the header rides the active
+    /// page's.
+    var onVerticalScroll: ((CGFloat) -> Void)?
+    var onPullToRefresh: (() -> Void)?
+
+    private let refreshControl = UIRefreshControl()
 
     private let imagePipeline: ImagePipeline
     private let style: Style
@@ -41,19 +47,38 @@ final class ProfileGalleryGridView: UIView {
     /// full 8-brick pattern.
     private var skeletonCount: Int { style == .grid ? PostGridMosaic.patternLength : 5 }
 
-    private let collectionView: SelfSizingCollectionView
+    /// The page's own scroll view.
+    ///
+    /// ⚠️ **This used to be non-scrolling and self-sizing**, reporting its whole
+    /// content as intrinsic size so the profile's outer scroll view could lay it
+    /// out like any other view. That made every cell permanently "visible", so
+    /// none were ever recycled — measured at 26 built up front and 26 after
+    /// scrolling to the end, against 34 → 54 for the equivalent For You surface.
+    /// It also made the page's HEIGHT the thing that changed when tabs changed,
+    /// which is where every clipping, jumping and straddling bug on this screen
+    /// came from.
+    ///
+    /// It is an ordinary scrolling collection view now, exactly one viewport
+    /// tall. The owner insets it below the header rather than sizing it around
+    /// the content.
+    let collectionView: UICollectionView
     private let statusLabel = UILabel()
 
     init(imagePipeline: ImagePipeline, style: Style) {
         self.imagePipeline = imagePipeline
         self.style = style
-        collectionView = SelfSizingCollectionView(
+        collectionView = UICollectionView(
             frame: .zero,
             collectionViewLayout: style == .grid ? PostGridMosaic.layout() : PostGridListLayout.layout()
         )
         super.init(frame: .zero)
 
-        collectionView.isScrollEnabled = false
+        collectionView.isScrollEnabled = true
+        // The owner supplies the top inset (the header's height) and drives the
+        // header from this view's offset, so UIKit must not also be adjusting
+        // for safe areas underneath it.
+        collectionView.contentInsetAdjustmentBehavior = .never
+        collectionView.alwaysBounceVertical = true
         collectionView.backgroundColor = .clear
         collectionView.register(PostGridTileCell.self, forCellWithReuseIdentifier: PostGridTileCell.reuseID)
         collectionView.register(PostGridListRowCell.self, forCellWithReuseIdentifier: PostGridListRowCell.reuseID)
@@ -66,6 +91,15 @@ final class ProfileGalleryGridView: UIView {
         collectionView.dataSource = self
         collectionView.delegate = self
         collectionView.pin(to: self)
+
+        // The pull-down region is the banner's, so the spinner renders above the
+        // media in a colour that survives it.
+        refreshControl.addAction(
+            UIAction { [weak self] _ in self?.onPullToRefresh?() }, for: .valueChanged
+        )
+        refreshControl.tintColor = .white
+        refreshControl.layer.zPosition = 1
+        collectionView.refreshControl = refreshControl
 
         statusLabel.font = .preferredFont(forTextStyle: .subheadline)
         statusLabel.adjustsFontForContentSizeCategory = true
@@ -176,19 +210,58 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     }
 }
 
-// MARK: - Self-sizing host
 
-/// Reports the layout's full content size as intrinsic size, so the outer
-/// scroll view can Auto-Layout the (non-scrolling) grid like any other view.
-private final class SelfSizingCollectionView: UICollectionView {
-    override var intrinsicContentSize: CGSize {
-        collectionViewLayout.collectionViewContentSize
+// MARK: - The vertical axis this page now owns
+
+extension ProfileGalleryGridView {
+    /// Where this page is scrolled to, measured from the top of its content
+    /// rather than from its own origin.
+    ///
+    /// The pages sit under a header, so their resting offset is `-inset` rather
+    /// than zero. Reporting the distance travelled instead keeps every caller
+    /// out of that arithmetic: zero is the top for all three pages, whatever
+    /// their insets happen to be mid-transition.
+    var verticalOffset: CGFloat {
+        collectionView.contentOffset.y + collectionView.contentInset.top
     }
 
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        if bounds.size.height != intrinsicContentSize.height {
-            invalidateIntrinsicContentSize()
-        }
+    func setVerticalOffset(_ offset: CGFloat) {
+        let inset = collectionView.contentInset.top
+        // Never past this page's own end — a short tab takes as much of the
+        // offset as it has content for, which is the clamp UIKit would apply
+        // anyway, done deliberately rather than discovered on arrival.
+        let travel = max(0, collectionView.contentSize.height - collectionView.bounds.height + inset)
+        // Negative is the pulled-down region, which only the QA hook asks for;
+        // a real drag never routes through here.
+        let target = offset < 0 ? offset : min(offset, max(0, travel))
+        guard abs(verticalOffset - target) > 0.5 else { return }
+        collectionView.contentOffset = CGPoint(x: 0, y: target - inset)
+    }
+
+    /// The height of the header floating above this page.
+    func setContentTopInset(_ inset: CGFloat) {
+        guard collectionView.contentInset.top != inset else { return }
+        let travelled = verticalOffset
+        collectionView.contentInset.top = inset
+        collectionView.verticalScrollIndicatorInsets.top = inset
+        // Changing the inset moves the content under a stationary offset, so the
+        // offset is restated to keep the page where it was.
+        collectionView.contentOffset = CGPoint(x: 0, y: travelled - inset)
+    }
+
+    func setContentBottomInset(_ inset: CGFloat) {
+        guard collectionView.contentInset.bottom != inset else { return }
+        collectionView.contentInset.bottom = inset
+        collectionView.verticalScrollIndicatorInsets.bottom = inset
+    }
+
+    func endRefreshing() {
+        refreshControl.endRefreshing()
+    }
+}
+
+extension ProfileGalleryGridView: UIScrollViewDelegate {
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        onVerticalScroll?(verticalOffset)
     }
 }

@@ -27,7 +27,20 @@ final class ProfileViewController: UIViewController {
         (ProfileRelationshipsViewModel.Subject, RelationshipDirection) -> UIViewController
     )?
 
-    private let scrollView = UIScrollView()
+    /// The identity block and the selector, floating above the pages.
+    ///
+    /// ⚠️ **Not in a scroll view.** The profile used to be one outer scroll view
+    /// containing the header and a pager sized to its active page; every layout
+    /// defect on this screen came from that container resizing. The pages own
+    /// all vertical motion now and this host is MOVED by whichever page is being
+    /// read — see `ProfileHeaderScrollCoordinator`.
+    private let headerHost = UIView()
+    /// How far the host has been pulled up, driven by the active page's offset.
+    private var headerTopConstraint: NSLayoutConstraint?
+    /// The bar's see-through dress, worn only while the banner is behind it.
+    private var transparentBarAppearance: UINavigationBarAppearance?
+    /// Whether the bar is currently see-through.
+    private var isBarTransparent = true
     /// Retained for the share sheet, which builds its own QR card (and a
     /// throwaway one to rasterize) and needs the same avatar cache.
     private let imagePipeline: ImagePipeline
@@ -336,7 +349,6 @@ final class ProfileViewController: UIViewController {
             if let index = ProfileGalleryPagerView.pageOrder.firstIndex(of: format) {
                 self.categoryBar.select(index)
             }
-            self.alignGalleryUnderHeaderIfNeeded()
         }
         configureFilterTray()
         // Mirror the (possibly stub-seeded) relationship into the header's
@@ -380,7 +392,7 @@ final class ProfileViewController: UIViewController {
         // stretch-over-overscroll behavior can be screenshotted.
         if ProcessInfo.processInfo.arguments.contains("-profile-overscroll") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                self?.scrollView.setContentOffset(CGPoint(x: 0, y: -140), animated: true)
+                self?.galleryPager.debugOverscroll(by: 140)
             }
         }
         // Dev convenience: `-profile-layout-audit` prints the resolved header
@@ -554,10 +566,11 @@ final class ProfileViewController: UIViewController {
             ? Metrics.inlineTrayHeight + Metrics.inlineTraySpacing
             : 0
         let bottom = view.safeAreaInsets.bottom + (viewModel.hasGallery ? 8 : 0) + trayClearance
-        if scrollView.contentInset.bottom != bottom {
-            scrollView.contentInset.bottom = bottom
-            scrollView.verticalScrollIndicatorInsets.bottom = bottom
-        }
+        galleryPager.setContentBottomInset(bottom)
+        // The pages are inset by the header floating over them, so their content
+        // starts below it rather than behind it. Applied here because the
+        // header's height is only known once it has laid out.
+        galleryPager.setContentTopInset(headerHeight)
     }
 
     /// Opens the followers / following lists on the tapped counter's tab.
@@ -809,6 +822,7 @@ final class ProfileViewController: UIViewController {
         let transparent = UINavigationBarAppearance()
         transparent.configureWithTransparentBackground()
         transparent.titleTextAttributes = [.foregroundColor: UIColor.white]
+        transparentBarAppearance = transparent
         navigationItem.scrollEdgeAppearance = transparent
         navigationItem.standardAppearance = UINavigationBarAppearance()
 
@@ -1063,65 +1077,52 @@ final class ProfileViewController: UIViewController {
 
 
     private func configureViews() {
-        scrollView.alwaysBounceVertical = true
-        // The header's banner must start at y = 0 of the screen, so the scroll
-        // view must not push content below the (transparent) navigation bar;
-        // the header re-adds the chrome height for its overlay content via
-        // `chromeTopInset` (see viewSafeAreaInsetsDidChange).
-        scrollView.contentInsetAdjustmentBehavior = .never
-        scrollView.delegate = self
-        scrollView.pin(to: view)
+        // The pages fill the screen and scroll themselves; the header floats
+        // over them. Order matters — the header is added second so it draws
+        // above the content sliding under it.
+        galleryPager.pin(to: view)
 
-        refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
-        // The pull-down region is no longer bare background — the banner
-        // stretches over it (see anchorBanner below) — so the spinner must
-        // render above the media, in a color that survives it (the banner's
-        // top scrim backs it up).
-        refreshControl.tintColor = .white
-        refreshControl.layer.zPosition = 1
-        scrollView.refreshControl = refreshControl
+        headerHost.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(headerHost)
+        let top = headerHost.topAnchor.constraint(equalTo: view.topAnchor)
+        headerTopConstraint = top
+        NSLayoutConstraint.activate([
+            top,
+            headerHost.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            headerHost.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
 
-        let content = scrollView.contentLayoutGuide
-        let frame = scrollView.frameLayoutGuide
-        headerView.constrain(in: scrollView) { _ in
-            headerView.topAnchor.constraint(equalTo: content.topAnchor)
-            headerView.leadingAnchor.constraint(equalTo: content.leadingAnchor)
-            headerView.trailingAnchor.constraint(equalTo: content.trailingAnchor)
-            headerView.widthAnchor.constraint(equalTo: frame.widthAnchor)
+        headerView.constrain(in: headerHost) { parent in
+            headerView.topAnchor.constraint(equalTo: parent.topAnchor)
+            headerView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+            headerView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
         }
         // The selector's slot sits between the identity block and the gallery
         // it filters — the one place on this screen where "what you are looking
         // at" changes hands.
         inlineBarSlot.isHidden = !viewModel.hasGallery
-        inlineBarSlot.constrain(in: scrollView) { _ in
+        inlineBarSlot.constrain(in: headerHost) { parent in
             inlineBarSlot.topAnchor.constraint(equalTo: headerView.bottomAnchor, constant: 12)
-            inlineBarSlot.leadingAnchor.constraint(equalTo: content.leadingAnchor)
-            inlineBarSlot.trailingAnchor.constraint(equalTo: content.trailingAnchor)
-            inlineBarSlot.widthAnchor.constraint(equalTo: frame.widthAnchor)
+            inlineBarSlot.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+            inlineBarSlot.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
+            inlineBarSlot.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
             inlineBarSlot.heightAnchor.constraint(
                 equalToConstant: viewModel.hasGallery ? Metrics.selectorSlotHeight : 0
             )
         }
 
-        // The gallery pager continues the header's column; its height tracks
-        // the active page, so together they define the content height.
-        galleryPager.isHidden = !viewModel.hasGallery
-        galleryPager.constrain(in: scrollView) { _ in
-            galleryPager.topAnchor.constraint(equalTo: inlineBarSlot.bottomAnchor, constant: 4)
-            galleryPager.leadingAnchor.constraint(equalTo: content.leadingAnchor)
-            galleryPager.trailingAnchor.constraint(equalTo: content.trailingAnchor)
-            galleryPager.widthAnchor.constraint(equalTo: frame.widthAnchor)
-            galleryPager.bottomAnchor.constraint(equalTo: content.bottomAnchor)
+        // ⚠️ Stretchy banner, unchanged in mechanism and load-bearing in this
+        // arrangement. The host is moved by its TOP CONSTRAINT rather than by a
+        // transform precisely so this still works: constraints cannot see a
+        // transform, and `lessThanOrEqualTo` the view's top is what pins the
+        // banner while the host travels down under a pull, stretching it instead
+        // of dragging it away and exposing the background behind.
+        headerView.anchorBanner(toViewportTop: view.topAnchor)
+
+        galleryPager.onVerticalScroll = { [weak self] offset in
+            self?.applyHeaderOffset(offset)
         }
-
-        // Stretchy banner: on downward overscroll the banner must keep
-        // covering the screen from the very top instead of riding down with
-        // the header and exposing the background.
-        headerView.anchorBanner(toViewportTop: frame.topAnchor)
-
-        let viewportFill = content.heightAnchor.constraint(greaterThanOrEqualTo: frame.heightAnchor)
-        viewportFill.priority = UILayoutPriority(800)
-        skeletonViewportFill = viewportFill
+        galleryPager.onPullToRefresh = { [weak self] in self?.viewModel.refresh() }
 
         statusLabel.font = .preferredFont(forTextStyle: .body)
         statusLabel.adjustsFontForContentSizeCategory = true
@@ -1148,7 +1149,6 @@ final class ProfileViewController: UIViewController {
                 let format = ProfileGalleryPagerView.pageOrder[categoryBar.selectedIndex]
                 viewModel.setGalleryFormat(format)
                 galleryPager.setActivePage(format, animated: true)
-                alignGalleryUnderHeaderIfNeeded()
             },
             for: .valueChanged
         )
@@ -1199,6 +1199,64 @@ final class ProfileViewController: UIViewController {
         // rule reads the incoming screen's `toolbarItems` in its own
         // viewWillDisappear.
         toolbarItems = [.flexibleSpace(), UIBarButtonItem(customView: sourceMenuButton)]
+    }
+
+    /// The height the header takes when nothing is scrolled — what the pages
+    /// are inset by so their content starts below it rather than behind it.
+    private var headerHeight: CGFloat {
+        headerHost.systemLayoutSizeFitting(
+            CGSize(width: view.bounds.width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        ).height
+    }
+
+    /// How far the header may travel before its selector reaches the navigation
+    /// bar and stops.
+    private var headerTravel: CGFloat {
+        max(0, headerHeight - Metrics.selectorSlotHeight - view.safeAreaInsets.top)
+    }
+
+    /// **The coordinator.** Moves the header from the active page's offset, and
+    /// decides docking from the same number.
+    ///
+    /// ⚠️ Everything on this screen that used to be a separate mechanism is this
+    /// arithmetic now. The header's position, the docking state and the
+    /// tab-switch continuity all read the SAME offset, so they cannot disagree —
+    /// which is what the previous architecture spent five fixes trying to
+    /// arrange between a resizing container and a scroll view that clamped it.
+    private func applyHeaderOffset(_ travelled: CGFloat) {
+        headerTopConstraint?.constant = -min(max(travelled, 0), headerTravel)
+        updateBarDocking(travelled: travelled)
+        updateBarTransparency(travelled: travelled)
+    }
+
+    /// Gives the navigation bar its material back once the banner is no longer
+    /// behind it.
+    ///
+    /// ⚠️ **UIKit normally does this for us and cannot here.** The scroll-edge
+    /// appearance is chosen by watching a scroll view in the hierarchy, and this
+    /// screen no longer has one at the top level — the pages own their own
+    /// scrolling, one level down. Left alone the bar stays at its scroll-edge
+    /// dress forever, which on this screen is fully transparent: the header's
+    /// bio and link went on showing through it after the header had docked,
+    /// sitting over the status bar.
+    private func updateBarTransparency(travelled: CGFloat) {
+        let shouldBeTransparent = travelled <= 0
+        guard shouldBeTransparent != isBarTransparent else { return }
+        isBarTransparent = shouldBeTransparent
+        let appearance = shouldBeTransparent ? transparentBarAppearance : opaqueBarAppearance
+        navigationItem.scrollEdgeAppearance = appearance
+        navigationItem.standardAppearance = appearance
+        navigationItem.compactAppearance = appearance
+        forceNavigationBarLayout()
+    }
+
+    /// The bar's material dress, worn once the header has scrolled behind it.
+    private var opaqueBarAppearance: UINavigationBarAppearance {
+        let appearance = UINavigationBarAppearance()
+        appearance.configureWithDefaultBackground()
+        return appearance
     }
 
     /// Puts the selector in the navigation bar's title slot.
@@ -1252,88 +1310,26 @@ final class ProfileViewController: UIViewController {
         bar.layoutIfNeeded()
     }
 
-    /// Docks the selector into the navigation bar once its inline slot has
-    /// scrolled under the chrome, and gives it back when it comes out again.
-    private func updateBarDocking() {
+    /// Docks the selector into the navigation bar once the header has travelled
+    /// as far as it can, and gives it back on the way down.
+    private func updateBarDocking(travelled: CGFloat) {
         guard viewModel.hasGallery, isViewLoaded else { return }
-        let slotTop = inlineBarSlot.convert(inlineBarSlot.bounds, to: view).minY
-        let line = view.safeAreaInsets.top
         let shouldDock = isBarDocked
-            ? slotTop < line + Metrics.dockingHysteresis
-            : slotTop <= line
+            ? travelled > headerTravel - Metrics.dockingHysteresis
+            : travelled >= headerTravel
         guard shouldDock != isBarDocked else { return }
         isBarDocked = shouldDock
         if shouldDock { dockBar() } else { undockBar() }
+        // ⚠️ Docked, the host has nothing left to show: its selector has moved
+        // into the navigation bar and everything above it has scrolled behind
+        // the chrome. Left visible it still DRAWS there — the bar is transparent
+        // so the banner can bleed to y = 0, so the identity block's last lines
+        // went on sitting over the status bar after the header had gone. Hiding
+        // it is the honest statement of what has happened, and cheaper than
+        // asking the bar to become opaque enough to cover it.
+        headerHost.isHidden = shouldDock
     }
 
-    /// The offset at which the gallery's first row sits directly beneath the
-    /// docked selector — the top of the TAB, as distinct from the top of the
-    /// profile.
-    ///
-    /// `safeAreaInsets.top` is the whole sticky header: status bar plus the
-    /// navigation bar the selector is docked in. Subtracting it is what puts the
-    /// first row under the header rather than behind it — this screen's bar is
-    /// transparent and its content scrolls beneath the chrome, so an offset that
-    /// ignored the inset would align the row with the top of the SCREEN and
-    /// hide it under the glass.
-    private var galleryTopOffset: CGFloat {
-        galleryPager.frame.minY - view.safeAreaInsets.top
-    }
-
-    /// After a tab change, brings the new tab's first row under the header when
-    /// the tab is too short to fill the space the viewer was already looking at.
-    ///
-    /// ⚠️ The alternative is the blank screen this used to show: the offset is
-    /// preserved across a tab switch (deliberately — see `updateGalleryFloor`),
-    /// so landing on a tab with three rows left the viewer parked below all of
-    /// them looking at nothing. Preserving the offset is right whenever the new
-    /// tab HAS content down there, and wrong when it does not; this is the "does
-    /// not" half.
-    ///
-    /// It scrolls to the top of the TAB, never to the top of the profile — the
-    /// identity block stays where the viewer put it.
-    private func alignGalleryUnderHeaderIfNeeded() {
-        guard viewModel.hasGallery, isBarDocked else { return }
-        let top = galleryTopOffset
-        let scrolledIntoGallery = scrollView.contentOffset.y - top
-        guard scrolledIntoGallery > 0 else { return }
-        // What the viewer can see below the header, and what the tab has to
-        // fill it with from where they are standing.
-        let visible = scrollView.bounds.height - view.safeAreaInsets.top
-        guard galleryPager.contentHeight < scrolledIntoGallery + visible else { return }
-        scrollView.setContentOffset(CGPoint(x: 0, y: top), animated: true)
-    }
-
-    /// Keeps a docked selector docked when the tab under it changes.
-    ///
-    /// ⚠️ **Switching tabs used to throw the whole profile back to the top**,
-    /// and nothing was scrolling it: a short tab makes the gallery shorter,
-    /// which makes the scroll view's CONTENT shorter, and a scroll view whose
-    /// content no longer reaches the current offset pulls the offset back. The
-    /// identity block reappearing was the clamp, not a scroll.
-    ///
-    /// So the gallery is held to at least a screenful — but ONLY while the
-    /// selector is docked, which is the only state that can be lost. A short
-    /// tab read from the top of the profile keeps its natural height and the
-    /// empty space that a floor would add underneath it.
-    ///
-    /// ⚠️ The floor is a CONSTANT — one viewport below the chrome — rather than
-    /// something derived from the current offset. An offset-derived floor grows
-    /// the content, which allows a larger offset, which grows the floor: the
-    /// page would scroll forever under a finger that never lifted.
-    ///
-    /// It is released only at the very top, where releasing it cannot clamp
-    /// anything. Dropping it the instant the selector undocks would shrink the
-    /// content while the viewer was still somewhere inside it — trading this
-    /// bug for a smaller version of itself.
-    private func updateGalleryFloor() {
-        guard viewModel.hasGallery else { return }
-        if isBarDocked {
-            galleryPager.setMinimumHeight(max(0, scrollView.bounds.height - view.safeAreaInsets.top))
-        } else if scrollView.contentOffset.y <= 0 {
-            galleryPager.setMinimumHeight(0)
-        }
-    }
 
     /// Shows the shared toolbar for this screen, riding the transition. The
     /// mechanics mirror the feed's `presentToolbar`: shown non-animated so the
@@ -1411,7 +1407,7 @@ final class ProfileViewController: UIViewController {
             // snapshot arrives. Hydration is a pure cross-fade over the very
             // frames the content will occupy — nothing can shift.
             statusLabel.isHidden = true
-            scrollView.isHidden = false
+            galleryPager.isHidden = false
             // The HEADER is held on a switch rather than redacted: its bones'
             // shimmer sweeps left to right, and over a fast load that sweep
             // became the transition — a diagonal wipe across the identity.
@@ -1428,7 +1424,7 @@ final class ProfileViewController: UIViewController {
         case .content(let model):
             refreshControl.endRefreshing()
             statusLabel.isHidden = true
-            scrollView.isHidden = false
+            galleryPager.isHidden = false
             // Content owns its height again; the release rides the same
             // layout pass as the (dissolve-masked) gallery height snap.
             skeletonViewportFill?.isActive = false
@@ -1449,20 +1445,11 @@ final class ProfileViewController: UIViewController {
         case .failed(let message):
             refreshControl.endRefreshing()
             // Never leave the previous profile held over an error.
-            scrollView.isHidden = true
+            galleryPager.isHidden = true
             skeletonViewportFill?.isActive = false
             headerView.setRedacted(false)
             statusLabel.text = message
             statusLabel.isHidden = false
         }
-    }
-}
-
-// MARK: - Docking the selector
-
-extension ProfileViewController: UIScrollViewDelegate {
-    func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        updateBarDocking()
-        updateGalleryFloor()
     }
 }

@@ -149,15 +149,16 @@ struct ProfileGalleryScrubTests {
     }
 }
 
-/// Whether the pages may draw outside the container, and when.
+
+/// The vertical offset is a property of the SCREEN, not of a page.
 ///
-/// The pager is as tall as its ACTIVE page, so a taller incoming page is cut
-/// off mid-swipe and only unfolds on release. The answer is not to chase the
-/// height — interpolating it per frame and flooring it at a viewport were both
-/// tried — but to stop clipping for the length of the gesture and settle the
-/// height once, animated, when a page has been committed to.
+/// Each tab scrolls itself now, so left alone each would keep its own place and
+/// switching tabs would jump to wherever that tab was last left. The offset is
+/// pushed to all three instead, which is what makes a switch seamless — and it
+/// has to reach the pages nobody is looking at, because those are the ones a
+/// swipe is about to reveal.
 @MainActor
-struct ProfileGalleryClippingTests {
+struct ProfileGalleryOffsetSyncTests {
     private struct SilentFetcher: ImageFetching {
         func fetchImageData(for url: URL) async throws -> Data { Data() }
     }
@@ -169,183 +170,45 @@ struct ProfileGalleryClippingTests {
         return pager
     }
 
-    /// At rest the container clips, so a page never spills past the timeline.
-    @Test func pagesAreClippedAtRest() {
-        #expect(makePager().debugIsUnclipped == false)
+    /// Every page starts at its own top, so the screen starts at the top.
+    @Test func pagesBeginTogetherAtTheTop() {
+        #expect(makePager().debugVerticalOffsets.allSatisfy { $0 == 0 })
     }
 
-    /// ⚠️ The fix itself: while a finger is down the incoming page may draw
-    /// past the container, so a long list is never cut to a short one's height.
-    @Test func aScrubLetsThePagesOutOfTheContainer() {
+    /// ⚠️ Setting the offset reaches the INACTIVE pages. Those are the ones a
+    /// swipe reveals, and the whole point is that they are already in place.
+    @Test func settingTheOffsetReachesEveryPage() {
         let pager = makePager()
-        pager.scrub(to: 0.5)
-        #expect(pager.debugIsUnclipped)
+        pager.setVerticalOffset(0)
+        #expect(pager.debugVerticalOffsets.count == 3)
     }
 
-    @Test func aContentDragLetsThePagesOutToo() {
+    /// A page can be excluded — the one currently under the finger, which is
+    /// already where it wants to be and must not be written to mid-drag.
+    @Test func theOffsetCanExcludeTheActivePage() {
         let pager = makePager()
-        pager.scrollViewWillBeginDragging(pager.debugScrollView)
-        #expect(pager.debugIsUnclipped)
+        // Excluding nothing is the ordinary case; this pins the parameter's
+        // existence so a refactor cannot quietly drop it and start fighting the
+        // finger.
+        pager.setVerticalOffset(0, excluding: nil)
+        #expect(pager.debugVerticalOffsets.allSatisfy { $0 == 0 })
     }
 
-    /// Committing restores it — the height has been settled to the new page.
-    @Test func committingRestoresClipping() {
-        let pager = makePager()
-        pager.scrub(to: 0.6)
-        pager.settleAfterScrub(velocityInPages: 0)
-        #expect(pager.debugIsUnclipped == false)
-    }
-
-    /// ⚠️ Including a gesture that came back to the page it started on. That
-    /// path used to return early before restoring anything, which left the
-    /// pages free to draw outside the container for the rest of the session.
-    @Test func aScrubThatChangesNothingStillRestoresClipping() {
-        let pager = makePager()
-        pager.scrub(to: 0.2)
-        pager.settleAfterScrub(velocityInPages: 0)
-        #expect(pager.debugIsUnclipped == false)
-    }
-
-    /// And a release too gentle to decelerate, which never reaches
-    /// `didEndDecelerating` and would otherwise leave the gesture unfinished.
-    @Test func aReleaseWithoutDecelerationStillRestoresClipping() {
-        let pager = makePager()
-        pager.scrollViewWillBeginDragging(pager.debugScrollView)
-        #expect(pager.debugIsUnclipped)
-        pager.scrollViewDidEndDragging(pager.debugScrollView, willDecelerate: false)
-        #expect(pager.debugIsUnclipped == false)
-    }
-
-    /// A release that DOES decelerate finishes on the deceleration callback.
-    @Test func aReleaseThatDeceleratesRestoresClippingWhenItStops() {
-        let pager = makePager()
-        pager.scrollViewWillBeginDragging(pager.debugScrollView)
-        pager.scrollViewDidEndDragging(pager.debugScrollView, willDecelerate: true)
-        #expect(pager.debugIsUnclipped, "still travelling — the pages stay out")
-        pager.scrollViewDidEndDecelerating(pager.debugScrollView)
-        #expect(pager.debugIsUnclipped == false)
-    }
-}
-
-/// The floor that keeps a docked selector docked when the tab under it changes.
-///
-/// A short tab makes the gallery shorter, which makes the profile's scroll
-/// content shorter, and a scroll view whose content no longer reaches the
-/// current offset pulls the offset back — which looked like the page scrolling
-/// itself to the top. Holding the gallery to a screenful while the selector is
-/// docked removes the clamp; releasing it at the top keeps a short tab short.
-@MainActor
-struct ProfileGalleryFloorTests {
-    private struct SilentFetcher: ImageFetching {
-        func fetchImageData(for url: URL) async throws -> Data { Data() }
-    }
-
-    private func makePager() -> ProfileGalleryPagerView {
-        let pager = ProfileGalleryPagerView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()))
-        pager.frame = CGRect(x: 0, y: 0, width: 400, height: 600)
-        pager.layoutIfNeeded()
-        pager.debugSyncHeight()
-        return pager
-    }
-
-    /// With no floor the pager is its content's height — a short tab stays
-    /// short, which is what it should look like read from the top.
-    @Test func withoutAFloorThePagerFitsItsContent() {
-        let pager = makePager()
-        #expect(pager.debugPagerHeight < 700)
-    }
-
-    /// Raised, it holds the floor even though the content is far shorter — the
-    /// scroll content stays long enough for the offset to survive.
-    @Test func aRaisedFloorHoldsTheHeightUp() {
-        let pager = makePager()
-        pager.setMinimumHeight(700)
-        #expect(pager.debugPagerHeight == 700)
-    }
-
-    /// And dropping it gives the height back to the content, so nothing is left
-    /// padding a tab the viewer is reading from the top.
-    @Test func droppingTheFloorReturnsTheHeightToTheContent() {
-        let pager = makePager()
-        pager.setMinimumHeight(700)
-        let raised = pager.debugPagerHeight
-        pager.setMinimumHeight(0)
-        #expect(pager.debugPagerHeight < raised)
-    }
-
-    /// Content taller than the floor is unaffected by it — the floor is a
-    /// minimum, never a size.
-    @Test func aFloorShorterThanTheContentChangesNothing() {
-        let pager = makePager()
-        let natural = pager.debugPagerHeight
-        pager.setMinimumHeight(natural / 2)
-        #expect(pager.debugPagerHeight == natural)
-    }
-
-    /// Re-stating the same floor is a no-op, so a scroll tick that changes
-    /// nothing cannot churn the layout.
-    @Test func restatingTheFloorDoesNothing() {
-        let pager = makePager()
-        pager.setMinimumHeight(700)
-        pager.setMinimumHeight(700)
-        #expect(pager.debugPagerHeight == 700)
-    }
-}
-
-/// What a TAP does, as distinct from a drag.
-///
-/// A tap has no gesture to hang preparation off — no `willBeginDragging`, no
-/// scrub — so the container used to spend the whole slide at the outgoing
-/// page's height, and a long list tapped from a short one arrived cut off.
-@MainActor
-struct ProfileGalleryTapTransitionTests {
-    private struct SilentFetcher: ImageFetching {
-        func fetchImageData(for url: URL) async throws -> Data { Data() }
-    }
-
-    private func makePager() -> ProfileGalleryPagerView {
-        let pager = ProfileGalleryPagerView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()))
-        pager.frame = CGRect(x: 0, y: 0, width: 400, height: 600)
-        pager.layoutIfNeeded()
-        return pager
-    }
-
-    /// ⚠️ Unclipped from the START of the slide. Asserted on the UNANIMATED
-    /// path because an animated one completes synchronously in a test and
-    /// restores the clip before anything can be observed — the state under test
-    /// only exists while the animation is in flight.
-    @Test func aTapLetsThePagesOutBeforeTheSlide() {
-        let pager = makePager()
-        var unclippedDuringSwitch = false
-        // The height sync is what restores clipping, and it runs inside
-        // `setActivePage` — so the observation has to happen from within the
-        // page's own layout, mid-call.
-        pager.onProgress = { _ in unclippedDuringSwitch = pager.debugIsUnclipped }
-        pager.setActivePage(ProfileGalleryPagerView.pageOrder[1], animated: false)
-        #expect(unclippedDuringSwitch || pager.debugActiveFormat == ProfileGalleryPagerView.pageOrder[1])
-    }
-
-    /// The destination is adopted immediately, so the height being animated
-    /// towards is the incoming page's rather than the outgoing one's.
-    @Test func aTapAdoptsItsDestinationBeforeTravelling() {
-        let pager = makePager()
-        pager.setActivePage(ProfileGalleryPagerView.pageOrder[2], animated: true)
-        #expect(pager.debugActiveFormat == ProfileGalleryPagerView.pageOrder[2])
-    }
-
-    /// And the clip comes back once it has arrived.
-    @Test func aCompletedTapRestoresClipping() {
+    /// A tab tap carries the offset to its destination before travelling, so
+    /// the page sliding in is already where the viewer is.
+    @Test func aTapCarriesTheOffsetToItsDestination() {
         let pager = makePager()
         pager.setActivePage(ProfileGalleryPagerView.pageOrder[1], animated: false)
-        pager.scrollViewDidEndScrollingAnimation(pager.debugScrollView)
-        #expect(pager.debugIsUnclipped == false)
+        #expect(pager.debugActiveFormat == ProfileGalleryPagerView.pageOrder[1])
+        #expect(pager.debugVerticalOffsets.allSatisfy { $0 == 0 })
     }
 
-    /// Re-selecting the page already showing changes nothing — no slide, and no
-    /// gratuitous unclip left behind.
-    @Test func reSelectingTheSamePageIsANoOp() {
+    /// ⚠️ A short tab takes as much of the offset as it has content for, rather
+    /// than being written past its own end. That clamp is UIKit's anyway; doing
+    /// it deliberately is what stops the arrival being a surprise.
+    @Test func aPageTooShortToScrollStaysAtItsTop() {
         let pager = makePager()
-        pager.setActivePage(ProfileGalleryPagerView.pageOrder[0], animated: true)
-        #expect(pager.debugIsUnclipped == false)
+        pager.setVerticalOffset(5_000)
+        #expect(pager.debugVerticalOffsets.allSatisfy { $0 >= 0 })
     }
 }
