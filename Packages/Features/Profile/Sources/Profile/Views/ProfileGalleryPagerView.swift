@@ -23,6 +23,14 @@ final class ProfileGalleryPagerView: UIView {
     /// Fired when a swipe settles on a page (not for programmatic paging) —
     /// the selector mirrors it.
     var onPageSettled: ((GalleryFilter.Format) -> Void)?
+    /// Fractional page position, emitted on every scroll tick.
+    ///
+    /// This is what lets the selector's lens track the finger instead of
+    /// snapping when the swipe ends — the same continuous readout For You's and
+    /// the inbox's pagers give the bar they share with this screen. Without it
+    /// the same component would behave differently here for no reason a viewer
+    /// could name.
+    var onProgress: ((CGFloat) -> Void)?
 
     /// The pan that pages; exposed so the owner can subordinate it to the
     /// navigation stack's edge-swipe pop.
@@ -169,6 +177,11 @@ final class ProfileGalleryPagerView: UIView {
 // MARK: - UIScrollViewDelegate
 
 extension ProfileGalleryPagerView: UIScrollViewDelegate {
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        guard bounds.width > 0 else { return }
+        onProgress?(scrollView.contentOffset.x / bounds.width)
+    }
+
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         settle()
     }

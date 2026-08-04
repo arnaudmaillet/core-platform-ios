@@ -35,16 +35,19 @@ final class ProfileViewController: UIViewController {
     private let shareTargeting: (any ProfileShareTargeting)?
     private let headerView: ProfileHeaderView
     private let galleryPager: ProfileGalleryPagerView
-    /// The filter tray's two selectors, hosted as custom bar items in the
-    /// navigation controller's native toolbar. They carry no material of
-    /// their own: the iOS 26 bar wraps each item in the system's Liquid
-    /// Glass capsule (same rule as the nav-bar items — see
-    /// `updateActionBarItem`). Ownership of the shared toolbar is handed
-    /// over between screens by the successor rule — see
-    /// `concealFilterToolbar` and `SnapFeedViewController.concealToolbar`.
-    private let formatRow = GlassSegmentRow(segments: [
-        .title("Activity"), .title("Gallery"), .title("Short")
-    ])
+    /// The gallery's format selector — the SAME `PagedTabBar` For You and
+    /// Messages wear, so a viewer meets one selector in three places rather
+    /// than three selectors doing one job.
+    ///
+    /// It starts inline, under the identity block where it belongs to the
+    /// profile, and docks into the navigation bar's title slot as the identity
+    /// scrolls away — see `updateBarDocking`. That is why it is built in the
+    /// `.navigationTitle` style even though it spends most of its life inline:
+    /// the docked size is the constrained one, and a bar that only fits in the
+    /// place it is not going is no use.
+    private let categoryBar = PagedTabBar(
+        titles: ["Activity", "Gallery", "Short"], style: .navigationTitle
+    )
     /// The source filter: one drop-down button — the native single-selection
     /// menu carries the options (checkmark on the active one), and the button
     /// shows the pick's glyph. Lazy: the menu actions capture self.
@@ -157,21 +160,39 @@ final class ProfileViewController: UIViewController {
     private var isSwitchingProfile = false
 
     private enum Metrics {
-        /// `GlassSegmentRow`'s resting height — the inline tray's own height.
-        static let inlineTrayHeight = InlineFilterTrayView.height
+        /// The height the selector's slot holds in the scrolling column,
+        /// whether or not the selector is in it.
+        static let selectorSlotHeight: CGFloat = 52
+        /// How far past the navigation bar the slot has to travel before the
+        /// selector docks, and how far back before it returns.
+        ///
+        /// ⚠️ Hysteresis, not a threshold. One line would flap: docking removes
+        /// the bar from the slot, which is a layout change, which arrives as
+        /// another scroll callback — and a viewer resting a finger exactly on
+        /// the line would watch it flicker between the two homes.
+        static let dockingHysteresis: CGFloat = 12
         /// How long the outgoing profile takes to dissolve into the new one.
         static let switchCrossfade: TimeInterval = 0.28
-        /// Between the tray and the bar beneath it, so the two glass rows read
-        /// as separate objects rather than one stack.
-        static let inlineTraySpacing = InlineFilterTrayView.spacingBelow
     }
 
-    /// Hosts the tray under `.aboveBottomSafeArea`. `InlineFilterTrayView`
-    /// supplies the one `UIGlassEffect` per control that the bare
-    /// `GlassSegmentRow`/`GlassMenuButton` need outside a toolbar — see its
-    /// doc for why that material must never be doubled.
-    private lazy var inlineTrayView: UIView =
-        InlineFilterTrayView(leading: formatRow, trailing: sourceMenuButton)
+    /// Holds the selector's place in the scrolling column whether or not the
+    /// selector is currently in it.
+    ///
+    /// ⚠️ **The slot keeps its height when the bar leaves.** Docking moves one
+    /// view between two parents; if the vacated slot collapsed, the content
+    /// below would jump up by its height at the exact moment the viewer is
+    /// scrolling through it, and the scroll would fight the layout for as long
+    /// as they stayed near the threshold.
+    private let inlineBarSlot = UIView()
+    /// The navigation bar's title view, empty until the bar docks into it.
+    ///
+    /// A container rather than assigning the bar to `titleView` directly: the
+    /// nav bar caches its title view's size, and handing it a view that comes
+    /// and goes made it cache the absent one. A stable container that is
+    /// sometimes empty is a size it can hold on to.
+    private let dockedBarSlot = UIView()
+    /// Whether the selector is currently in the navigation bar.
+    private var isBarDocked = false
 
     init(
         viewModel: ProfileViewModel,
@@ -305,7 +326,7 @@ final class ProfileViewController: UIViewController {
             guard let self else { return }
             self.viewModel.setGalleryFormat(format)
             if let index = ProfileGalleryPagerView.pageOrder.firstIndex(of: format) {
-                self.formatRow.select(index, notify: false)
+                self.categoryBar.select(index)
             }
         }
         configureFilterTray()
@@ -517,13 +538,9 @@ final class ProfileViewController: UIViewController {
         // toolbar while it shows — is re-added by hand, plus breathing room
         // so the grid's last row scrolls clear of the transparent bar's glass
         // capsules.
-        // Inline placement puts the tray inside this view rather than in the
-        // navigation toolbar, so its height is ours to clear as well — the
-        // toolbar's was already folded into `safeAreaInsets.bottom` by UIKit.
-        let trayClearance = trayPlacement == .aboveBottomSafeArea && viewModel.hasGallery
-            ? Metrics.inlineTrayHeight + Metrics.inlineTraySpacing
-            : 0
-        let bottom = view.safeAreaInsets.bottom + (viewModel.hasGallery ? 8 : 0) + trayClearance
+        // The selector rides in the scrolling column now, so there is no tray
+        // at the bottom to clear — only the bar's own glass capsules.
+        let bottom = view.safeAreaInsets.bottom + (viewModel.hasGallery ? 8 : 0)
         if scrollView.contentInset.bottom != bottom {
             scrollView.contentInset.bottom = bottom
             scrollView.verticalScrollIndicatorInsets.bottom = bottom
@@ -897,13 +914,13 @@ final class ProfileViewController: UIViewController {
     /// composition), viewWillAppear (synchronous pre-transition bind), and the
     /// async data callbacks (via `alongsideTransition`).
     private func applyNavigationState() {
-        // Guarded, like the bar items below: re-assigning an identical title
-        // still asks the bar to re-lay-out its centre, which during a pop is a
-        // change it has to animate from nothing.
-        let resolvedTitle = currentHandle ?? "Profile"
-        if title != resolvedTitle {
-            title = resolvedTitle
-        }
+        // ⚠️ **No title.** The bar used to carry the @handle, which said again
+        // what the identity block says in full a finger's width below it — and
+        // once the format selector docks into the title slot, a name there
+        // would be competing with the one control this screen's chrome exists
+        // to hold. The handle is not lost: it is on the profile, where the
+        // viewer is already looking.
+        if title != nil { title = nil }
         updateActionBarItem(followButtonState)
     }
 
@@ -1039,6 +1056,7 @@ final class ProfileViewController: UIViewController {
         // the header re-adds the chrome height for its overlay content via
         // `chromeTopInset` (see viewSafeAreaInsetsDidChange).
         scrollView.contentInsetAdjustmentBehavior = .never
+        scrollView.delegate = self
         scrollView.pin(to: view)
 
         refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
@@ -1058,11 +1076,25 @@ final class ProfileViewController: UIViewController {
             headerView.trailingAnchor.constraint(equalTo: content.trailingAnchor)
             headerView.widthAnchor.constraint(equalTo: frame.widthAnchor)
         }
+        // The selector's slot sits between the identity block and the gallery
+        // it filters — the one place on this screen where "what you are looking
+        // at" changes hands.
+        inlineBarSlot.isHidden = !viewModel.hasGallery
+        inlineBarSlot.constrain(in: scrollView) { _ in
+            inlineBarSlot.topAnchor.constraint(equalTo: headerView.bottomAnchor, constant: 12)
+            inlineBarSlot.leadingAnchor.constraint(equalTo: content.leadingAnchor)
+            inlineBarSlot.trailingAnchor.constraint(equalTo: content.trailingAnchor)
+            inlineBarSlot.widthAnchor.constraint(equalTo: frame.widthAnchor)
+            inlineBarSlot.heightAnchor.constraint(
+                equalToConstant: viewModel.hasGallery ? Metrics.selectorSlotHeight : 0
+            )
+        }
+
         // The gallery pager continues the header's column; its height tracks
         // the active page, so together they define the content height.
         galleryPager.isHidden = !viewModel.hasGallery
         galleryPager.constrain(in: scrollView) { _ in
-            galleryPager.topAnchor.constraint(equalTo: headerView.bottomAnchor, constant: 12)
+            galleryPager.topAnchor.constraint(equalTo: inlineBarSlot.bottomAnchor, constant: 4)
             galleryPager.leadingAnchor.constraint(equalTo: content.leadingAnchor)
             galleryPager.trailingAnchor.constraint(equalTo: content.trailingAnchor)
             galleryPager.widthAnchor.constraint(equalTo: frame.widthAnchor)
@@ -1091,52 +1123,91 @@ final class ProfileViewController: UIViewController {
         }
     }
 
-    /// Wires the bottom filter tray and installs it as this screen's toolbar
-    /// items: a format tab records the selection and pages the gallery; a
-    /// source pick re-filters every page in place. The items must exist by
-    /// the time a push starts — the feed's handover rule reads the incoming
-    /// screen's `toolbarItems` in its own viewWillDisappear.
+    /// Wires the selector and the source filter, and puts the selector in its
+    /// inline slot: a format tab records the selection and pages the gallery; a
+    /// source pick re-filters every page in place.
     private func configureFilterTray() {
         guard viewModel.hasGallery else { return }
 
-        formatRow.onSelect = { [weak self] index in
-            guard let self else { return }
-            let format = ProfileGalleryPagerView.pageOrder[index]
-            self.viewModel.setGalleryFormat(format)
-            self.galleryPager.setActivePage(format, animated: true)
-        }
+        categoryBar.addAction(
+            UIAction { [weak self] _ in
+                guard let self else { return }
+                let format = ProfileGalleryPagerView.pageOrder[categoryBar.selectedIndex]
+                viewModel.setGalleryFormat(format)
+                galleryPager.setActivePage(format, animated: true)
+            },
+            for: .valueChanged
+        )
+        // The lens tracks the finger, exactly as it does on the other two
+        // screens that wear this bar — the pager reports a fractional position
+        // every frame and the capsule interpolates against it.
+        galleryPager.onProgress = { [weak self] progress in self?.categoryBar.setProgress(progress) }
+
         // Land on the user's global preference: tab selection and pager page
         // adopt the (possibly stored) filter before first layout, so the
         // screen OPENS there — no visible jump.
         let format = viewModel.galleryFilter.format
         if let index = ProfileGalleryPagerView.pageOrder.firstIndex(of: format) {
-            formatRow.select(index, notify: false)
+            categoryBar.select(index)
         }
         galleryPager.setActivePage(format, animated: false)
 
-        // Inline: the tray is ours to place, above the bottom safe area — which
-        // inside a tab bar controller is the top of the tab bar, so the two sit
-        // flush without either knowing the other's height. Same idiom as the
-        // map's filter bars.
-        guard trayPlacement == .navigationToolbar else {
-            view.addSubview(inlineTrayView)
-            NSLayoutConstraint.activate([
-                inlineTrayView.leadingAnchor.constraint(equalTo: view.layoutMarginsGuide.leadingAnchor),
-                inlineTrayView.trailingAnchor.constraint(equalTo: view.layoutMarginsGuide.trailingAnchor),
-                inlineTrayView.heightAnchor.constraint(equalToConstant: Metrics.inlineTrayHeight),
-                inlineTrayView.bottomAnchor.constraint(
-                    equalTo: view.safeAreaLayoutGuide.bottomAnchor,
-                    constant: -Metrics.inlineTraySpacing
-                )
-            ])
-            return
-        }
+        navigationItem.titleView = dockedBarSlot
+        placeBar(inSlot: inlineBarSlot)
 
-        toolbarItems = [
-            UIBarButtonItem(customView: formatRow),
-            .flexibleSpace(),
-            UIBarButtonItem(customView: sourceMenuButton)
-        ]
+        // The source filter keeps its own place at the trailing end of the
+        // selector's row. It is a lower-frequency control than the format tabs
+        // — a viewer picks "Reposts" once and then browses — so it stays with
+        // the identity block and scrolls away with it, rather than competing
+        // for the navigation bar's title slot on the way past.
+        sourceMenuButton.translatesAutoresizingMaskIntoConstraints = false
+        inlineBarSlot.addSubview(sourceMenuButton)
+        NSLayoutConstraint.activate([
+            sourceMenuButton.trailingAnchor.constraint(
+                equalTo: inlineBarSlot.layoutMarginsGuide.trailingAnchor
+            ),
+            sourceMenuButton.centerYAnchor.constraint(equalTo: inlineBarSlot.centerYAnchor)
+        ])
+    }
+
+    /// Moves the selector into a slot, filling it.
+    ///
+    /// One bar, re-parented — not two kept in step. The bar owns its selection,
+    /// its lens position and its badge geometry, and a second copy would be a
+    /// second answer to every one of those, correct only for as long as
+    /// somebody remembered to forward the next change to both.
+    private func placeBar(inSlot slot: UIView) {
+        guard categoryBar.superview !== slot else { return }
+        categoryBar.removeFromSuperview()
+        categoryBar.translatesAutoresizingMaskIntoConstraints = false
+        slot.addSubview(categoryBar)
+        NSLayoutConstraint.activate([
+            categoryBar.leadingAnchor.constraint(
+                greaterThanOrEqualTo: slot.layoutMarginsGuide.leadingAnchor
+            ),
+            categoryBar.centerYAnchor.constraint(equalTo: slot.centerYAnchor),
+            categoryBar.centerXAnchor.constraint(equalTo: slot.centerXAnchor)
+        ])
+        // The nav bar caches its title view's size, so a bar arriving in or
+        // leaving the title slot has to re-state it — the same re-measure the
+        // other two screens do whenever a badge changes their bar's width.
+        categoryBar.sizeToFit()
+        dockedBarSlot.frame.size = categoryBar.intrinsicContentSize
+        navigationController?.navigationBar.setNeedsLayout()
+    }
+
+    /// Docks the selector into the navigation bar once its inline slot has
+    /// scrolled under the chrome, and gives it back when it comes out again.
+    private func updateBarDocking() {
+        guard viewModel.hasGallery, isViewLoaded else { return }
+        let slotTop = inlineBarSlot.convert(inlineBarSlot.bounds, to: view).minY
+        let line = view.safeAreaInsets.top
+        let shouldDock = isBarDocked
+            ? slotTop < line + Metrics.dockingHysteresis
+            : slotTop <= line
+        guard shouldDock != isBarDocked else { return }
+        isBarDocked = shouldDock
+        placeBar(inSlot: shouldDock ? dockedBarSlot : inlineBarSlot)
     }
 
     /// Shows the shared toolbar for this screen, riding the transition. The
@@ -1259,5 +1330,13 @@ final class ProfileViewController: UIViewController {
             statusLabel.text = message
             statusLabel.isHidden = false
         }
+    }
+}
+
+// MARK: - Docking the selector
+
+extension ProfileViewController: UIScrollViewDelegate {
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        updateBarDocking()
     }
 }
