@@ -10,16 +10,21 @@ public struct ConversationDisplayModel: Equatable, Sendable, Identifiable {
     public let monogram: String
     public let isPinned: Bool
     public let isMuted: Bool
-    /// Drives the row's whole unread treatment — bold text and a dot — rather
+    /// Drives the row's whole unread treatment — bold text and a badge — rather
     /// than sorting the conversation into a list of its own.
     public let isUnread: Bool
+    /// How many messages are waiting, for the badge on the avatar. Zero
+    /// whenever `isUnread` is false; see `Conversation.unreadCount` for what
+    /// bounds it.
+    public let unreadCount: Int
 
     public init(
         conversation: Conversation,
         now: Date = Date(),
         isPinned: Bool = false,
         isMuted: Bool = false,
-        isUnread: Bool = false
+        isUnread: Bool = false,
+        unreadCount: Int = 0
     ) {
         id = conversation.id
         title = conversation.title
@@ -29,6 +34,7 @@ public struct ConversationDisplayModel: Equatable, Sendable, Identifiable {
         self.isPinned = isPinned
         self.isMuted = isMuted
         self.isUnread = isUnread
+        self.unreadCount = unreadCount
     }
 
     static func monogram(_ title: String) -> String {

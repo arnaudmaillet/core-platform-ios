@@ -254,8 +254,11 @@ extension ConversationListViewController: InboxSurface {
     /// Paging back here re-checks for new messages. `refresh()` no-ops while a
     /// load is already in flight, so this is free on the appear path.
     func surfaceDidBecomeActive() {
-        // Being looked at is what clears this tab's badge.
-        viewModel.didBecomeVisible()
         viewModel.refresh()
+    }
+
+    /// Leaving is what clears this tab's badge — see `didLeave`.
+    func surfaceWillResignActive() {
+        viewModel.didLeave()
     }
 }

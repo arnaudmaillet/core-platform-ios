@@ -65,7 +65,7 @@ public final class MockChatService: @unchecked Sendable {
             // inbox derives its Unread tab from — so it has to be real state,
             // not a blank field, and MarkRead below has to move it.
             response.members = [
-                member(viewer, lastRead: store.lastRead(in: request.conversationID, for: viewer)),
+                member(viewer, lastRead: viewerLastRead(in: request.conversationID)),
                 member(otherMember[request.conversationID] ?? viewer)
             ]
             return .success(response)
@@ -73,7 +73,12 @@ public final class MockChatService: @unchecked Sendable {
         bff.register(path: "/chat.v1.ChatService/GetHistory") { [self] (request: Chat_V1_GetHistoryRequest) in
             var response = Chat_V1_GetHistoryResponse()
             let all = store.messages(for: request.conversationID, seed: seedHistory(for: request.conversationID))
-            response.messages = request.limit == 1 ? Array(all.suffix(1)) : all
+            // A real page: the newest `limit` messages, not a special case for
+            // 1. The inbox now asks for a window rather than a single message,
+            // because it counts the unread tail inside it — answering that with
+            // the whole history would make the mock the only place the count is
+            // unbounded.
+            response.messages = request.limit > 0 ? Array(all.suffix(Int(request.limit))) : all
             return .success(response)
         }
         bff.register(path: "/chat.v1.ChatService/SendMessage") { [self] (request: Chat_V1_SendMessageRequest) in
@@ -99,6 +104,23 @@ public final class MockChatService: @unchecked Sendable {
         bff.register(path: "/chat.v1.ChatService/Subscribe") { (_: Chat_V1_SubscribeRequest) in
             .success(Chat_V1_CommandResponse())
         }
+    }
+
+    /// Where the viewer's read cursor sits: what `MarkRead` recorded, or — for
+    /// a thread they have never opened in this session — their own newest
+    /// message.
+    ///
+    /// ⚠️ The fallback is what makes the seeded unread COUNTS realistic. With a
+    /// blank cursor every inbound message in a thread is unread, including ones
+    /// the viewer demonstrably read: the seeds have them REPLYING mid-thread,
+    /// so a blank cursor made a conversation they answered read as two unread
+    /// messages rather than the one that arrived after their reply. Sending is
+    /// reading, and the fixture now says so.
+    private func viewerLastRead(in conversationID: String) -> String {
+        let stored = store.lastRead(in: conversationID, for: viewer)
+        guard stored.isEmpty else { return stored }
+        let all = store.messages(for: conversationID, seed: seedHistory(for: conversationID))
+        return all.last { $0.senderID == viewer }?.messageID ?? ""
     }
 
     private func member(_ profileID: String, lastRead: String = "") -> Chat_V1_MemberView {

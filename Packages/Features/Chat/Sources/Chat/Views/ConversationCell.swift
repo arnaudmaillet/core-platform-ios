@@ -35,6 +35,10 @@ final class ConversationCell: UITableViewCell {
         timeLabel.text = model.timeText
         mutedIcon.isHidden = !model.isMuted
         applyUnreadStyle(model.isUnread)
+        // The COUNT, not just presence — `chat.v1` still serves no
+        // `unread_count`, so this is counted from the history tail the inbox
+        // already fetches (`Conversation.unreadCount`).
+        avatarView.setBadge(model.isUnread ? .count(model.unreadCount) : .none)
         // Pinned reads twice, at two distances: a translucent band that
         // separates the pinned block at a glance (Telegram idiom; system fill
         // colors are translucent and adapt to dark mode), and a pin glyph
@@ -64,11 +68,6 @@ final class ConversationCell: UITableViewCell {
             : .preferredFont(forTextStyle: .subheadline)
         previewLabel.textColor = isUnread ? .label : .secondaryLabel
         timeLabel.textColor = isUnread ? .label : .secondaryLabel
-        // The mark rides the AVATAR now, not the trailing edge — see
-        // `BadgedAvatarView`. A dot rather than a number because a number is
-        // not available: `chat.v1` says whether a conversation is unread, not
-        // how many messages are waiting in it.
-        avatarView.setBadge(isUnread ? .dot : .none)
     }
 
     private func configure() {

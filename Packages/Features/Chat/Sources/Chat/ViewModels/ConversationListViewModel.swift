@@ -84,8 +84,12 @@ public final class ConversationListViewModel {
         return now
     }
 
-    public func didBecomeVisible() {
-        watermark.visit(at: now())
+    /// The viewer has LEFT this tab — paged away, or left the screen. Only now
+    /// does the badge clear, and with it the marks on the rows it counted:
+    /// while the viewer was here, those were the thing they came to read. A
+    /// badge that empties on the tap that reveals it is a badge nobody sees.
+    public func didLeave() {
+        watermark.leave(at: now())
         // No explicit zero: re-projecting recomputes the count against the
         // watermark that just moved, so the badge clears through the SAME path
         // it is ever set by. Publishing zero first as well let an observer see
@@ -152,7 +156,11 @@ public final class ConversationListViewModel {
                     now: now,
                     isPinned: snapshot.pinned.contains($0.id),
                     isMuted: snapshot.muted.contains($0.id),
-                    isUnread: snapshot.unreadIDs.contains($0.id)
+                    isUnread: snapshot.unreadIDs.contains($0.id),
+                    // Suppressed with the flag: the catalog's read bridge can
+                    // clear a row ahead of the server, and a count left behind
+                    // would be a number beside a row that reads as read.
+                    unreadCount: snapshot.unreadIDs.contains($0.id) ? $0.unreadCount : 0
                 )
             })
         }

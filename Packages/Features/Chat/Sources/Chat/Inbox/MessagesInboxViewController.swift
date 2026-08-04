@@ -37,6 +37,10 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// Built in `viewDidLoad`, once the surfaces are children — reading a
     /// child's `view` before containment would load it outside its parent.
     private var pagerView: InboxPagerView!
+    /// The page currently being shown, as last announced. The pager's own index
+    /// has already moved by the time a settle is handled, so this is what says
+    /// which surface is being left.
+    private var activeCategory: MessagesCategory?
     private var didSubordinatePagerToPop = false
     private var hasActivatedInitialSurface = false
     #if DEBUG
@@ -172,6 +176,14 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         if let surface = activeSurface { apply(surface.chrome, from: surface) }
     }
 
+    /// Leaving the screen counts as leaving the tab: a thread pushed over the
+    /// inbox, a switch to another root tab, a pop. Whatever was new has been
+    /// seen by the time the viewer walks away from it.
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        activeSurface?.surfaceWillResignActive()
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         // The pager's horizontal pan yields to the stack's edge-swipe pop, so
@@ -185,6 +197,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // on a lazy surface); later pages wake on settle.
         if !hasActivatedInitialSurface {
             hasActivatedInitialSurface = true
+            activeCategory = activeSurface?.category
             activeSurface?.surfaceDidBecomeActive()
         }
         #if DEBUG
@@ -367,10 +380,19 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     private func didSettle(on index: Int) {
         selectionFeedback.selectionChanged()
         categoryBar.setProgress(CGFloat(index))
-        if let surface = activeSurface {
-            apply(surface.chrome, from: surface)
-            surface.surfaceDidBecomeActive()
+        guard let surface = activeSurface else { return }
+        // The page being left hears about it FIRST, and that is what clears its
+        // badge — see `InboxSurface.surfaceWillResignActive`. It is tracked
+        // separately from the pager's index because by the time this runs the
+        // pager has already moved: the surface that resigned is the one we
+        // announced last, not the one at any index the pager can report.
+        if let previous = activeCategory, previous != surface.category,
+           let leaving = surfaces.first(where: { $0.category == previous }) {
+            leaving.surfaceWillResignActive()
         }
+        activeCategory = surface.category
+        apply(surface.chrome, from: surface)
+        surface.surfaceDidBecomeActive()
     }
 
     // MARK: - Chrome

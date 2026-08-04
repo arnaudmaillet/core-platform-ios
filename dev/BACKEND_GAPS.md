@@ -625,25 +625,33 @@ of posts, and the only remedy is to scroll for more.
 
 ## 17. No per-conversation unread count — `isUnread` is a Bool
 
-**What the client wants.** The All tab's rows carry a badge on the sender's
-avatar. The design is a COUNT ("3 messages waiting in this thread"); the badge
-component takes one (`BadgedAvatarView.Style.count`).
+**What the client wants.** The All list badges each row's avatar with how many
+messages are waiting in that conversation.
 
-**What `chat.v1` offers.** `MemberView.last_read` — a read *cursor*, from which
-the client derives a single Bool per conversation (`Conversation.isUnread`).
-There is no `unread_count` field anywhere in the generated messages, and no RPC
-that returns one. Counting client-side is not an option either: it would mean
-fetching every conversation's history past its cursor on every inbox load, and
-`loadConversations()` already costs a `ListMembers` + `GetHistory` round trip
-per conversation.
+**What `chat.v1` offers.** `MemberView.last_read` — a read *cursor*. There is no
+`unread_count` field anywhere in the generated messages, and no RPC that returns
+one.
 
-**What ships instead.** A DOT, not a number — presence is what the contract can
-honestly support. `BadgedAvatarView.Style.count` is implemented and unused, so
-the day the field lands the change is one call site and no layout work.
+**What ships.** The client COUNTS IT ITSELF, from the tail of the history the
+inbox already fetches, against the cursor the member view already carries
+(`ChatRepository.unreadCount`). This costs no extra round trip — the
+`GetHistory` call was already being made per conversation — only a larger page:
+the limit went from 1 message to `unreadWindow` (20).
 
-**What we need.** `unread_count` on the conversation/member view, computed
-server-side from `last_read`. A count that the client derives is a count that
-disagrees with the server the moment a device reads a thread elsewhere.
+**Why the gap stays open anyway.**
+- **It saturates.** Past 20 messages the true figure is unknowable from one
+  call, so the badge reads "20+" and means it. A server-side count has the whole
+  thread.
+- **It is a second opinion.** The count is derived on each device from a window
+  that device fetched. Two devices reading the same inbox can disagree, and
+  neither is wrong about what it saw — which is exactly the class of bug a
+  server-computed figure does not have.
+- **It costs payload per conversation.** Twenty messages × every conversation on
+  every inbox load, to produce one integer per row.
+
+**What we need.** `unread_count` on the conversation or member view, computed
+server-side from `last_read`. Then the window drops back to 1 and the client
+stops counting.
 
 ---
 

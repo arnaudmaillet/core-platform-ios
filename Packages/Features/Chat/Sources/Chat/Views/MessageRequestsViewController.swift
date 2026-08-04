@@ -160,11 +160,14 @@ extension MessageRequestsViewController: InboxSurface {
     var category: MessagesCategory { .requests }
 
     /// The catalog is already loaded by the time this surface is reachable
-    /// (the conversation list loads it on appear), so becoming active asks for
-    /// a refresh — which no-ops while one is in flight — and tells the view
-    /// model it has been seen, which is what clears the tab's badge.
+    /// (the conversation list loads it on appear), so becoming active only
+    /// asks for a refresh — which no-ops while one is in flight.
     func surfaceDidBecomeActive() {
-        viewModel.didBecomeVisible()
         viewModel.refresh()
+    }
+
+    /// Leaving is what clears this tab's badge — see `didLeave`.
+    func surfaceWillResignActive() {
+        viewModel.didLeave()
     }
 }

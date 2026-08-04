@@ -6,50 +6,51 @@ import Foundation
 /// The tab badges used to report totals — every unread conversation, every
 /// pending request — which meant a number that sat there for as long as the
 /// state did. A watermark answers the question a badge is actually asked:
-/// *has anything arrived since I last looked?* Visiting the tab answers it, so
-/// the badge clears on selection and only comes back when something new lands.
+/// *has anything arrived since I last looked?* — and only a new arrival brings
+/// it back.
 ///
-/// **Two baselines, and the second one is the point.** `badge` moves to now on
-/// every visit, so the count goes to zero the moment the tab is selected.
-/// `rows` keeps the PREVIOUS visit's baseline for the length of this one, so
-/// the rows that were new stay marked while the viewer is reading them. Moving
-/// both together would clear the badge and un-mark every row in the same frame,
-/// which is a tab that tells you something arrived and then hides which one.
+/// **The baseline moves when the viewer LEAVES, never when they arrive.** A
+/// badge that cleared on selection was gone before it had been read: the tap
+/// that shows you the tab is the same tap that empties its count, so the number
+/// you were reacting to is the one thing you cannot then look at. Moving it on
+/// the way out means the badge — and the marks on the rows it counted — stay up
+/// for as long as the viewer is actually there, and the next arrival is what
+/// brings them back.
+///
+/// One baseline does both jobs, because they now change at the same moment: the
+/// count and the row marks are the same question asked of the same instant.
 ///
 /// Time comes from the conversation's own `lastActivityAt`, so this is a pure
 /// function of the corpus and a stored watermark — the same shape
 /// `ForYouUnread` uses, and for the same reason: a count that is DERIVED cannot
 /// drift out of step with the rows it counts.
 struct InboxTabWatermark: Equatable {
-    /// Everything after this counts toward the badge.
-    private(set) var badge: Date
-    /// Everything after this is marked on its row.
-    private(set) var rows: Date
+    /// Everything that arrived after this is new: counted on the tab, marked
+    /// on its row.
+    private(set) var baseline: Date
 
-    /// Opens both baselines at the moment the screen did, so nothing already on
+    /// Opens at the moment the screen did, so nothing already on
     /// screen when the viewer arrived is announced as new. A first sight is
     /// never "all new" — the trap `ForYouUnread` documents.
     init(openedAt: Date) {
-        badge = openedAt
-        rows = openedAt
+        baseline = openedAt
     }
 
-    /// The tab was selected: clear its badge, and hand the rows the baseline
-    /// the badge was counting against so they keep showing WHICH items the
-    /// count was about.
-    mutating func visit(at now: Date) {
-        rows = badge
-        badge = now
+    /// The viewer has left the tab — paged away, or left the screen. What was
+    /// new has now been seen, so the next arrival is measured from here.
+    mutating func leave(at now: Date) {
+        baseline = now
     }
 
-    /// How many of these arrived since the last visit.
+    /// How many of these arrived since the viewer last left.
     func newCount(in conversations: [Conversation]) -> Int {
-        conversations.count { isNewer($0, than: badge) }
+        conversations.count { isNewer($0, than: baseline) }
     }
 
-    /// Whether this row should carry a mark for the length of this visit.
+    /// Whether this row carries a mark — the same question the count asks, of
+    /// one row.
     func isNewOnRow(_ conversation: Conversation) -> Bool {
-        isNewer(conversation, than: rows)
+        isNewer(conversation, than: baseline)
     }
 
     /// A conversation with no activity at all has no arrival time, so it cannot

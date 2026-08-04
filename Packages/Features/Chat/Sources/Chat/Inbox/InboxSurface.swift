@@ -39,6 +39,19 @@ protocol InboxSurface: UIViewController {
     /// again every time the user pages back, so surfaces that load eagerly
     /// simply no-op here and lazy ones guard their first load.
     func surfaceDidBecomeActive()
+
+    /// The page is no longer the active one: another tab was chosen, or the
+    /// whole screen is going away.
+    ///
+    /// This is where a tab's badge clears. It deliberately is NOT
+    /// `surfaceDidBecomeActive`'s counterpart in timing — a badge that empties
+    /// the moment its tab is opened is one the viewer never gets to read.
+    func surfaceWillResignActive()
+}
+
+extension InboxSurface {
+    /// Most surfaces have nothing to settle on the way out.
+    func surfaceWillResignActive() {}
 }
 
 extension MessagesCategory {

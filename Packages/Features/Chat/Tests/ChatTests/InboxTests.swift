@@ -962,8 +962,8 @@ struct InboxSurfaceViewModelTests {
         #expect(rows.map(\.isUnread) == [false, true])
     }
 
-    /// The Requests badge counts ARRIVALS SINCE THE LAST VISIT, not pending
-    /// totals — and visiting the tab is what clears it.
+    /// The Requests badge counts ARRIVALS SINCE THE VIEWER LAST LEFT, not
+    /// pending totals — and LEAVING the tab is what clears it.
     ///
     /// The watermark opens at the view model's `now`, so a `now` before the
     /// fixtures' activity time is what makes them read as having arrived since.
@@ -984,17 +984,17 @@ struct InboxSurfaceViewModelTests {
         #expect(counts == [2])
         #expect(requests.newCount == 2)
 
-        // Looking at the tab is the whole reset mechanism — and the look
-        // happens after the arrivals it clears.
+        // Leaving is the whole reset mechanism, and it happens after the
+        // arrivals it clears.
         clock.now = Date(timeIntervalSince1970: 10_000)
-        requests.didBecomeVisible()
+        requests.didLeave()
         #expect(requests.newCount == 0)
         #expect(counts == [2, 0])
     }
 
-    /// Rows stay marked for the length of the visit that cleared the badge —
-    /// otherwise the tab says two things arrived and then hides which two.
-    @Test func aVisitClearsTheBadgeButKeepsTheNewRowsMarked() async {
+    /// While the viewer is ON the tab, the badge and the row marks both stay:
+    /// they are what the viewer came to read.
+    @Test func theBadgeAndRowMarksSurviveWhileTheTabIsOpen() async {
         let catalog = InboxCatalog(
             repository: StubInboxProvider(conversations: [
                 conversation("r1", peer: "a"), conversation("r2", peer: "b")
@@ -1008,14 +1008,12 @@ struct InboxSurfaceViewModelTests {
         requests.refresh()
         await settle()
 
-        clock.now = Date(timeIntervalSince1970: 10_000)
-        requests.didBecomeVisible()
-
+        // No exit: the viewer is still here.
         guard case .content(let rows) = phase else {
             Issue.record("expected content, got \(String(describing: phase))")
             return
         }
-        #expect(requests.newCount == 0)
+        #expect(requests.newCount == 2)
         #expect(rows.map(\.isUnread) == [true, true])
     }
 
@@ -1221,28 +1219,27 @@ struct InboxTabWatermarkTests {
         #expect(watermark.newCount(in: [conversation("c", hasActivity: false)]) == 0)
     }
 
-    /// The whole point of the two baselines: visiting clears the COUNT while
-    /// the rows the count was about stay marked for the length of the visit.
-    @Test func visitingClearsTheCountButNotTheRowMarks() {
+    /// LEAVING is what clears it, not arriving — the count and the row marks
+    /// survive for as long as the viewer is on the tab reading them.
+    @Test func leavingClearsTheCountAndTheRowMarksTogether() {
         var watermark = InboxTabWatermark(openedAt: opened)
         let arrival = conversationAt(1_500)
         #expect(watermark.newCount(in: [arrival]) == 1)
+        #expect(watermark.isNewOnRow(arrival))
 
-        watermark.visit(at: Date(timeIntervalSince1970: 2_000))
+        watermark.leave(at: Date(timeIntervalSince1970: 2_000))
 
         #expect(watermark.newCount(in: [arrival]) == 0)
-        #expect(watermark.isNewOnRow(arrival))
+        #expect(!watermark.isNewOnRow(arrival))
     }
 
-    /// The NEXT visit is what retires a row's mark — by then it has been seen.
-    @Test func theFollowingVisitRetiresTheRowMark() {
+    /// What arrives AFTER the exit is what brings the badge back.
+    @Test func anArrivalAfterLeavingCountsAgain() {
         var watermark = InboxTabWatermark(openedAt: opened)
-        let arrival = conversationAt(1_500)
-        watermark.visit(at: Date(timeIntervalSince1970: 2_000))
-        watermark.visit(at: Date(timeIntervalSince1970: 3_000))
+        watermark.leave(at: Date(timeIntervalSince1970: 2_000))
 
-        #expect(!watermark.isNewOnRow(arrival))
-        #expect(watermark.newCount(in: [arrival]) == 0)
+        #expect(watermark.newCount(in: [conversationAt(1_500)]) == 0)
+        #expect(watermark.newCount(in: [conversationAt(2_500)]) == 1)
     }
 }
 
