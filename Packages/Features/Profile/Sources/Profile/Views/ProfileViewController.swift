@@ -571,6 +571,10 @@ final class ProfileViewController: UIViewController {
         // starts below it rather than behind it. Applied here because the
         // header's height is only known once it has laid out.
         galleryPager.setContentTopInset(headerHeight)
+        // Every tab must be able to absorb the header's whole travel, or a
+        // short one cannot hold the position a long one was left at and the
+        // header follows the clamp back up. See `setMinimumScrollTravel`.
+        galleryPager.setMinimumScrollTravel(headerTravel)
     }
 
     /// Opens the followers / following lists on the tapped counter's tab.

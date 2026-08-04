@@ -120,6 +120,11 @@ final class ProfileGalleryPagerView: UIView {
         pages.forEach { $0.setContentBottomInset(inset) }
     }
 
+    /// How far every page must be able to travel — the header's distance.
+    func setMinimumScrollTravel(_ travel: CGFloat) {
+        pages.forEach { $0.setMinimumScrollTravel(travel) }
+    }
+
     /// The active page's vertical offset.
     var verticalOffset: CGFloat {
         pages[activeIndex].verticalOffset

@@ -212,3 +212,62 @@ struct ProfileGalleryOffsetSyncTests {
         #expect(pager.debugVerticalOffsets.allSatisfy { $0 >= 0 })
     }
 }
+
+/// The room a tab reserves so it can hold the header's position.
+///
+/// A page too short to reach the offset a long tab was left at clamps to its own
+/// end — and the header, which rides that offset, follows the clamp back up.
+/// Nothing auto-scrolls; the short tab simply has nowhere to put the viewer.
+/// Given room to travel the header's whole distance, every tab can hold any
+/// position the header can be in and a switch moves it by nothing.
+@MainActor
+struct ProfileGalleryTravelFloorTests {
+    private struct SilentFetcher: ImageFetching {
+        func fetchImageData(for url: URL) async throws -> Data { Data() }
+    }
+
+    private func makePage() -> ProfileGalleryGridView {
+        let page = ProfileGalleryGridView(
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list
+        )
+        page.frame = CGRect(x: 0, y: 0, width: 400, height: 600)
+        page.layoutIfNeeded()
+        return page
+    }
+
+    /// An empty page can still travel the distance the header needs.
+    @Test func anEmptyPageCanStillHoldTheHeadersTravel() {
+        let page = makePage()
+        page.setMinimumScrollTravel(400)
+        page.setVerticalOffset(400)
+        #expect(page.verticalOffset == 400)
+    }
+
+    /// ⚠️ Including the exact position that leaves the header docked. This is
+    /// the assertion the bug failed: the room was being reserved as bottom
+    /// inset and then not counted as travel, so the clamp took a shorter number
+    /// and the header moved.
+    @Test func reservedRoomCountsAsTravel() {
+        let page = makePage()
+        page.setMinimumScrollTravel(250)
+        page.setVerticalOffset(250)
+        #expect(page.verticalOffset == 250)
+    }
+
+    /// Past the reserved distance a short page still stops — the floor is what
+    /// the header needs, not a licence to scroll forever.
+    @Test func thereIsNoRoomBeyondWhatTheHeaderNeeds() {
+        let page = makePage()
+        page.setMinimumScrollTravel(200)
+        page.setVerticalOffset(5_000)
+        #expect(page.verticalOffset <= 200 + 1)
+    }
+
+    /// With no header to hold, an empty page does not reserve anything.
+    @Test func withoutAHeaderThereIsNothingToReserve() {
+        let page = makePage()
+        page.setMinimumScrollTravel(0)
+        page.setVerticalOffset(300)
+        #expect(page.verticalOffset == 0)
+    }
+}

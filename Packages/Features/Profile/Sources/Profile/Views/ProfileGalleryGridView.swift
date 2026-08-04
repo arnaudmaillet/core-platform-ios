@@ -33,6 +33,10 @@ final class ProfileGalleryGridView: UIView {
     var onPullToRefresh: (() -> Void)?
 
     private let refreshControl = UIRefreshControl()
+    /// Clearance the owner asked for — the tab bar, the tray.
+    private var baseBottomInset: CGFloat = 0
+    /// The header's travel, which this page must always be able to absorb.
+    private var minimumTravel: CGFloat = 0
 
     private let imagePipeline: ImagePipeline
     private let style: Style
@@ -122,6 +126,15 @@ final class ProfileGalleryGridView: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // The room a page needs below its last row depends on how much content
+        // it has and how tall it is, and both settle after layout — a page
+        // measured before its rows exist would reserve the wrong amount and
+        // stop being able to hold the header.
+        applyBottomInset()
+    }
 
     func render(_ state: ProfileViewModel.GalleryPageState) {
         switch state {
@@ -226,11 +239,25 @@ extension ProfileGalleryGridView {
     }
 
     func setVerticalOffset(_ offset: CGFloat) {
+        // ⚠️ **Make room BEFORE asking the page to travel.** The room a page
+        // needs is computed from its content size, and on a tab switch the page
+        // being handed the offset may not have laid out since its content
+        // arrived — so it clamps against a range that has not been extended yet,
+        // and the header follows the clamp. Laying out first is what makes the
+        // floor arrive before the question rather than after the answer.
+        collectionView.layoutIfNeeded()
+        applyBottomInset()
         let inset = collectionView.contentInset.top
-        // Never past this page's own end — a short tab takes as much of the
-        // offset as it has content for, which is the clamp UIKit would apply
-        // anyway, done deliberately rather than discovered on arrival.
-        let travel = max(0, collectionView.contentSize.height - collectionView.bounds.height + inset)
+        // ⚠️ **The bottom inset is part of how far a page can travel**, and
+        // leaving it out is why the header still moved on a tab switch. The room
+        // reserved by `setMinimumScrollTravel` IS bottom inset — so a clamp that
+        // ignored it measured the page as unable to hold the offset, took the
+        // shorter number, and the header followed it back up. The floor was
+        // being reserved and then not counted.
+        let travel = collectionView.contentSize.height
+            + inset
+            + collectionView.contentInset.bottom
+            - collectionView.bounds.height
         // Negative is the pulled-down region, which only the QA hook asks for;
         // a real drag never routes through here.
         let target = offset < 0 ? offset : min(offset, max(0, travel))
@@ -250,9 +277,39 @@ extension ProfileGalleryGridView {
     }
 
     func setContentBottomInset(_ inset: CGFloat) {
-        guard collectionView.contentInset.bottom != inset else { return }
-        collectionView.contentInset.bottom = inset
-        collectionView.verticalScrollIndicatorInsets.bottom = inset
+        guard baseBottomInset != inset else { return }
+        baseBottomInset = inset
+        applyBottomInset()
+    }
+
+    /// How far this page must be ABLE to scroll, whatever it holds.
+    ///
+    /// ⚠️ **This is what freezes the header across a tab switch.** The header
+    /// rides the active page's offset, and a page with three rows cannot reach
+    /// the offset a page with thirty was sitting at — so switching to it
+    /// clamped, and the header followed the clamp back up. Nothing was
+    /// auto-scrolling; the short tab simply had nowhere to put the viewer.
+    ///
+    /// Given room to travel the header's full distance, every tab can hold any
+    /// position the header can be in, and a switch moves it by nothing at all.
+    /// The room is empty space below the last row — which is exactly what the
+    /// other apps show under a sparse tab, and only ever as much as the header
+    /// actually needs.
+    func setMinimumScrollTravel(_ travel: CGFloat) {
+        guard minimumTravel != travel else { return }
+        minimumTravel = travel
+        applyBottomInset()
+    }
+
+    private func applyBottomInset() {
+        let needed = minimumTravel
+            + collectionView.bounds.height
+            - collectionView.contentSize.height
+            - collectionView.contentInset.top
+        let bottom = max(baseBottomInset, needed)
+        guard abs(collectionView.contentInset.bottom - bottom) > 0.5 else { return }
+        collectionView.contentInset.bottom = bottom
+        collectionView.verticalScrollIndicatorInsets.bottom = baseBottomInset
     }
 
     func endRefreshing() {
