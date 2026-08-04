@@ -164,55 +164,60 @@ final class ProfileGalleryPagerView: UIView {
 
     /// Pins the pager's height to the active page's fitted content height, so
     /// the outer timeline ends exactly where the visible grid does.
-    /// The shortest a page is allowed to be: the viewport it is read in.
+    /// Lets the pages draw outside the pager while a gesture is in flight.
     ///
-    /// ⚠️ **This replaced a per-frame interpolation between the two pages a
-    /// drag spans**, which existed because a pager sized to its active page
-    /// crops the incoming one mid-swipe. Interpolating fixed the crop and
-    /// bought a moving target: two `systemLayoutSizeFitting` passes to prime,
-    /// a cache that went stale whenever a page had not laid out yet, and a
-    /// container whose height changed on every scroll tick.
+    /// ⚠️ **This is the whole fix for the mid-swipe crop, and it is a rendering
+    /// change rather than a layout one.** The pager is as tall as its ACTIVE
+    /// page, so during a drag the incoming page — which may be five times
+    /// taller — is cut off at the outgoing one's height and only unfolds on
+    /// release. Two earlier answers changed the HEIGHT to suit: interpolating
+    /// it per frame (a moving target, two layout passes to prime, and a cache
+    /// that went stale whenever a page had not laid out yet) and flooring it at
+    /// a viewport (no crop, but a screen of dead space under every short tab).
     ///
-    /// A floor of one viewport removes the problem instead of tracking it. No
-    /// page is ever shorter than the screen, so no page can crop its neighbour,
-    /// and the height only changes when the CONTENT does. A short tab pays for
-    /// it with empty space below its last row — which is what a profile tab
-    /// with three posts should look like anyway, rather than a timeline that
-    /// ends halfway up the screen.
-    private var viewportFloor: CGFloat {
-        var view: UIView? = superview
-        while let current = view {
-            if let scrollView = current as? UIScrollView { return scrollView.bounds.height }
-            view = current.superview
-        }
-        return 0
+    /// Not clipping costs neither. The height is left alone for the length of
+    /// the gesture — no per-tick recalculation at all — and the incoming page
+    /// simply draws past the container into the space below it, which on this
+    /// screen is empty background. The height is then settled ONCE, animated,
+    /// when the finger has committed to a page.
+    private func setPagesUnclipped(_ unclipped: Bool) {
+        scrollView.clipsToBounds = !unclipped
     }
 
-    /// The height to hold for a page: its content, or the viewport, whichever
-    /// is taller. Pure and static so the rule can be read and tested without a
-    /// view hierarchy.
-    static func height(forContent fitted: CGFloat, viewport: CGFloat) -> CGFloat {
-        max(fitted, viewport)
-    }
-
+    /// Pins the pager's height to the active page's fitted content height.
+    ///
+    /// ⚠️ Clipping is restored on COMPLETION, not before the animation. A
+    /// shrinking container that re-clipped first would cut the outgoing page to
+    /// the new height instantly and animate an empty box down; letting the two
+    /// finish together is what makes the settle read as the page arriving
+    /// rather than as content being trimmed.
     private func syncHeight(animated: Bool) {
         guard bounds.width > 0 else { return }
+        // The grid's reported size is its layout's content size, which is
+        // only current after a pass at the target width — force one first.
         let page = pages[activeIndex]
-        // The grid's reported size is its layout's content size, which is only
-        // current after a pass at the target width — force one first.
         page.layoutIfNeeded()
-        let content = page.systemLayoutSizeFitting(
+        let fitted = page.systemLayoutSizeFitting(
             CGSize(width: bounds.width, height: UIView.layoutFittingCompressedSize.height),
             withHorizontalFittingPriority: .required,
             verticalFittingPriority: .fittingSizeLevel
         ).height
-        let fitted = Self.height(forContent: content, viewport: viewportFloor)
-        guard pagerHeight.constant != fitted else { return }
-        pagerHeight.constant = fitted
-        guard animated, let host = superview else { return }
-        UIView.animate(withDuration: 0.3, delay: 0, options: [.curveEaseInOut, .beginFromCurrentState]) {
-            host.layoutIfNeeded()
+        guard pagerHeight.constant != fitted else {
+            setPagesUnclipped(false)
+            return
         }
+        pagerHeight.constant = fitted
+        guard animated, let host = superview else {
+            setPagesUnclipped(false)
+            return
+        }
+        UIView.animate(
+            withDuration: 0.3,
+            delay: 0,
+            options: [.curveEaseInOut, .beginFromCurrentState],
+            animations: { host.layoutIfNeeded() },
+            completion: { [weak self] _ in self?.setPagesUnclipped(false) }
+        )
     }
 }
 
@@ -230,6 +235,8 @@ extension ProfileGalleryPagerView {
     /// The height the container is currently holding, and the per-page heights
     /// it interpolates between.
     var debugPagerHeight: CGFloat { pagerHeight.constant }
+    /// Whether the pages may currently draw outside the container.
+    var debugIsUnclipped: Bool { !scrollView.clipsToBounds }
     func debugSyncHeight() { syncHeight(animated: false) }
 }
 #endif
@@ -242,6 +249,9 @@ extension ProfileGalleryPagerView {
     /// Unanimated by design: this is called per frame of a finger.
     func scrub(to progress: CGFloat) {
         guard bounds.width > 0, pages.count > 1 else { return }
+        // The selector's drag has no `willBeginDragging` of its own, so the
+        // first frame of one is where the pages are let out of the container.
+        setPagesUnclipped(true)
         isScrubbing = true
         let clamped = min(max(progress, 0), CGFloat(pages.count - 1))
         scrollView.setContentOffset(CGPoint(x: clamped * bounds.width, y: 0), animated: false)
@@ -284,8 +294,9 @@ extension ProfileGalleryPagerView {
             // Nothing to travel: an animation that has no distance to cover may
             // never report a finish, and waiting for one would leave the flag
             // raised for the life of the screen — with the re-alignment that
-            // depends on it switched off.
+            // depends on it switched off, and the pages still unclipped.
             isScrubbing = false
+            syncHeight(animated: true)
         } else {
             // Always animate, even when the landing is the page it started on:
             // that case is a scrub that did not commit, and it still has to
@@ -301,9 +312,23 @@ extension ProfileGalleryPagerView {
 // MARK: - UIScrollViewDelegate
 
 extension ProfileGalleryPagerView: UIScrollViewDelegate {
+    /// A finger has taken hold: let the pages out of the container for as long
+    /// as it is down.
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        setPagesUnclipped(true)
+    }
+
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         guard bounds.width > 0 else { return }
         onProgress?(scrollView.contentOffset.x / bounds.width)
+    }
+
+    /// A release that does not throw the pages far enough to decelerate never
+    /// reaches `didEndDecelerating`, so it settles from here instead. Missing
+    /// it leaves the gesture unfinished: no height, and no clipping.
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        guard !decelerate else { return }
+        settle()
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
@@ -324,9 +349,15 @@ extension ProfileGalleryPagerView: UIScrollViewDelegate {
         guard bounds.width > 0 else { return }
         let landed = Int((scrollView.contentOffset.x / bounds.width).rounded())
             .clamped(to: 0...(pages.count - 1))
-        guard landed != activeIndex else { return }
+        let changedPage = landed != activeIndex
         activeIndex = landed
+        // ⚠️ Unconditionally, even when the drag came back to the page it
+        // started on. `syncHeight` is what restores clipping, so an early
+        // return here — which is what this had — left the pages free to draw
+        // outside the container for the rest of the session, and the first
+        // short tab after that overlapped whatever was beneath it.
         syncHeight(animated: true)
+        guard changedPage else { return }
         onPageSettled?(Self.pageOrder[landed])
     }
 }

@@ -149,58 +149,80 @@ struct ProfileGalleryScrubTests {
     }
 }
 
-/// How tall the pager is, whatever page it is showing.
+/// Whether the pages may draw outside the container, and when.
 ///
-/// A pager sized to its active page crops the incoming one during a swipe: the
-/// taller list arrives clipped to the shorter one's height and only unfolds on
-/// release, which reads as content loading late. A floor of one viewport
-/// removes that instead of tracking it — no page is ever shorter than the
-/// screen, so no page can crop its neighbour, and the height changes only when
-/// the content does.
+/// The pager is as tall as its ACTIVE page, so a taller incoming page is cut
+/// off mid-swipe and only unfolds on release. The answer is not to chase the
+/// height — interpolating it per frame and flooring it at a viewport were both
+/// tried — but to stop clipping for the length of the gesture and settle the
+/// height once, animated, when a page has been committed to.
 @MainActor
-struct ProfileGalleryHeightTests {
+struct ProfileGalleryClippingTests {
     private struct SilentFetcher: ImageFetching {
         func fetchImageData(for url: URL) async throws -> Data { Data() }
     }
 
-    /// The rule itself, with no view hierarchy in the way.
-    @Test func contentShorterThanTheViewportIsRaisedToIt() {
-        #expect(ProfileGalleryPagerView.height(forContent: 140, viewport: 800) == 800)
-    }
-
-    @Test func contentTallerThanTheViewportKeepsItsOwnHeight() {
-        #expect(ProfileGalleryPagerView.height(forContent: 1308, viewport: 800) == 1308)
-    }
-
-    /// ⚠️ The case the floor exists for: two pages of very different content
-    /// resolve to the SAME height while either is shorter than the screen, so a
-    /// swipe between them cannot crop anything.
-    @Test func shortPagesAgreeOnTheirHeightHoweverDifferentTheirContent() {
-        let short = ProfileGalleryPagerView.height(forContent: 140, viewport: 800)
-        let medium = ProfileGalleryPagerView.height(forContent: 268, viewport: 800)
-        #expect(short == medium)
-    }
-
-    /// An empty tab still fills the screen rather than ending halfway up it.
-    @Test func anEmptyPageStillFillsTheViewport() {
-        #expect(ProfileGalleryPagerView.height(forContent: 0, viewport: 800) == 800)
-    }
-
-    /// Exactly at the boundary the content wins, which is the same number
-    /// either way — stated so the comparison cannot drift into a strict one.
-    @Test func contentEqualToTheViewportIsUnchanged() {
-        #expect(ProfileGalleryPagerView.height(forContent: 800, viewport: 800) == 800)
-    }
-
-    /// And the rule reaches the live pager: hosted in a scroll view, it holds
-    /// that scroll view's height even with nothing to show.
-    @Test func aHostedPagerAdoptsItsScrollViewsHeight() {
-        let outer = UIScrollView(frame: CGRect(x: 0, y: 0, width: 400, height: 700))
+    private func makePager() -> ProfileGalleryPagerView {
         let pager = ProfileGalleryPagerView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()))
-        outer.addSubview(pager)
-        pager.frame = CGRect(x: 0, y: 0, width: 400, height: 100)
+        pager.frame = CGRect(x: 0, y: 0, width: 400, height: 600)
         pager.layoutIfNeeded()
-        pager.debugSyncHeight()
-        #expect(pager.debugPagerHeight == 700)
+        return pager
+    }
+
+    /// At rest the container clips, so a page never spills past the timeline.
+    @Test func pagesAreClippedAtRest() {
+        #expect(makePager().debugIsUnclipped == false)
+    }
+
+    /// ⚠️ The fix itself: while a finger is down the incoming page may draw
+    /// past the container, so a long list is never cut to a short one's height.
+    @Test func aScrubLetsThePagesOutOfTheContainer() {
+        let pager = makePager()
+        pager.scrub(to: 0.5)
+        #expect(pager.debugIsUnclipped)
+    }
+
+    @Test func aContentDragLetsThePagesOutToo() {
+        let pager = makePager()
+        pager.scrollViewWillBeginDragging(pager.debugScrollView)
+        #expect(pager.debugIsUnclipped)
+    }
+
+    /// Committing restores it — the height has been settled to the new page.
+    @Test func committingRestoresClipping() {
+        let pager = makePager()
+        pager.scrub(to: 0.6)
+        pager.settleAfterScrub(velocityInPages: 0)
+        #expect(pager.debugIsUnclipped == false)
+    }
+
+    /// ⚠️ Including a gesture that came back to the page it started on. That
+    /// path used to return early before restoring anything, which left the
+    /// pages free to draw outside the container for the rest of the session.
+    @Test func aScrubThatChangesNothingStillRestoresClipping() {
+        let pager = makePager()
+        pager.scrub(to: 0.2)
+        pager.settleAfterScrub(velocityInPages: 0)
+        #expect(pager.debugIsUnclipped == false)
+    }
+
+    /// And a release too gentle to decelerate, which never reaches
+    /// `didEndDecelerating` and would otherwise leave the gesture unfinished.
+    @Test func aReleaseWithoutDecelerationStillRestoresClipping() {
+        let pager = makePager()
+        pager.scrollViewWillBeginDragging(pager.debugScrollView)
+        #expect(pager.debugIsUnclipped)
+        pager.scrollViewDidEndDragging(pager.debugScrollView, willDecelerate: false)
+        #expect(pager.debugIsUnclipped == false)
+    }
+
+    /// A release that DOES decelerate finishes on the deceleration callback.
+    @Test func aReleaseThatDeceleratesRestoresClippingWhenItStops() {
+        let pager = makePager()
+        pager.scrollViewWillBeginDragging(pager.debugScrollView)
+        pager.scrollViewDidEndDragging(pager.debugScrollView, willDecelerate: true)
+        #expect(pager.debugIsUnclipped, "still travelling — the pages stay out")
+        pager.scrollViewDidEndDecelerating(pager.debugScrollView)
+        #expect(pager.debugIsUnclipped == false)
     }
 }
