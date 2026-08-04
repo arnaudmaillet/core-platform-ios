@@ -12,7 +12,7 @@ import Foundation
 public final class MessageRequestsViewModel {
     public nonisolated enum Phase: Equatable, Sendable {
         case loading
-        case content([ConversationDisplayModel])
+        case content(InboxListSections)
         case empty
         case failed(message: String)
     }
@@ -144,13 +144,16 @@ public final class MessageRequestsViewModel {
             // treatment (bold preview, a dot on the avatar) is the treatment an
             // unread conversation gets. One flag, so both cells stay honest
             // about meaning the same thing: new to you.
-            phase = .content(snapshot.requests.map {
+            let models = snapshot.requests.map {
                 ConversationDisplayModel(
                     conversation: $0,
                     now: now,
                     isUnread: watermark.isNewOnRow($0)
                 )
-            })
+            }
+            // `isUnread` IS the split here: on a request it means unviewed, and
+            // unviewed is exactly what the badge counts.
+            phase = .content(InboxListSections(rows: models, isNew: \.isUnread))
         }
     }
 }

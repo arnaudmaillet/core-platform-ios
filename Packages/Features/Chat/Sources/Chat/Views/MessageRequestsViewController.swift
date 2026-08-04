@@ -9,8 +9,6 @@ import UIKit
 /// decision here lands in All without a refetch, and the header's badge is
 /// driven by the same projection that fills this table.
 final class MessageRequestsViewController: UIViewController {
-    fileprivate enum Section { case main }
-
     private let viewModel: MessageRequestsViewModel
 
     private let tableView = UITableView(frame: .zero, style: .plain)
@@ -18,7 +16,7 @@ final class MessageRequestsViewController: UIViewController {
     private let skeletonView = ConversationListSkeletonView()
     private let statusView = InboxStatusView()
 
-    private var dataSource: UITableViewDiffableDataSource<Section, ConversationID>!
+    private var dataSource: SectionedConversationDataSource!
     private var modelsByID: [ConversationID: ConversationDisplayModel] = [:]
     private var hasRenderedContent = false
 
@@ -66,7 +64,7 @@ final class MessageRequestsViewController: UIViewController {
         refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
         tableView.refreshControl = refreshControl
 
-        dataSource = UITableViewDiffableDataSource(tableView: tableView) {
+        dataSource = SectionedConversationDataSource(tableView: tableView) {
             [weak self] tableView, indexPath, id in
             let cell = tableView.dequeueReusableCell(
                 withIdentifier: MessageRequestCell.reuseIdentifier, for: indexPath
@@ -78,6 +76,7 @@ final class MessageRequestsViewController: UIViewController {
             cell.onDismiss = { [weak self] in self?.viewModel.decline(id) }
             return cell
         }
+        dataSource.titles = [.new: "New Requests", .earlier: "Earlier"]
     }
 
     private func configureStatusViews() {
@@ -98,13 +97,19 @@ final class MessageRequestsViewController: UIViewController {
             skeletonView.isHidden = false
             tableView.isHidden = true
             statusView.isHidden = true
-        case .content(let models):
+        case .content(let sections):
             refreshControl.endRefreshing()
             statusView.isHidden = true
-            var snapshot = NSDiffableDataSourceSnapshot<Section, ConversationID>()
-            snapshot.appendSections([.main])
-            snapshot.appendItems(models.map(\.id), toSection: .main)
-            modelsByID = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
+            var snapshot = NSDiffableDataSourceSnapshot<InboxListSection, ConversationID>()
+            if !sections.new.isEmpty {
+                snapshot.appendSections([.new])
+                snapshot.appendItems(sections.new.map(\.id), toSection: .new)
+            }
+            if !sections.earlier.isEmpty {
+                snapshot.appendSections([.earlier])
+                snapshot.appendItems(sections.earlier.map(\.id), toSection: .earlier)
+            }
+            modelsByID = Dictionary(uniqueKeysWithValues: sections.all.map { ($0.id, $0) })
             // Animate only while visible — an off-screen change would replay
             // its animation after the next transition.
             dataSource.apply(snapshot, animatingDifferences: hasRenderedContent && view.window != nil)

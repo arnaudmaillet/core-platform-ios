@@ -15,8 +15,6 @@ import UIKit
 /// actions: the horizontal axis belongs to paging between inbox categories,
 /// and a row that also claims it would make every page swipe a coin flip.
 final class ConversationListViewController: UIViewController {
-    fileprivate enum Section { case main }
-
     private let viewModel: ConversationListViewModel
 
     private let tableView = UITableView(frame: .zero, style: .plain)
@@ -24,7 +22,7 @@ final class ConversationListViewController: UIViewController {
     private let skeletonView = ConversationListSkeletonView()
     private let statusView = InboxStatusView()
 
-    private var dataSource: UITableViewDiffableDataSource<Section, ConversationID>!
+    private var dataSource: SectionedConversationDataSource!
     private var modelsByID: [ConversationID: ConversationDisplayModel] = [:]
     private var hasRenderedContent = false
 
@@ -103,7 +101,7 @@ final class ConversationListViewController: UIViewController {
         refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
         tableView.refreshControl = refreshControl
 
-        dataSource = UITableViewDiffableDataSource(tableView: tableView) {
+        dataSource = SectionedConversationDataSource(tableView: tableView) {
             [weak self] tableView, indexPath, id in
             let cell = tableView.dequeueReusableCell(
                 withIdentifier: ConversationCell.reuseIdentifier, for: indexPath
@@ -111,6 +109,7 @@ final class ConversationListViewController: UIViewController {
             if let model = self?.modelsByID[id] { cell.configure(with: model) }
             return cell
         }
+        dataSource.titles = [.new: "Unread", .earlier: "Recent"]
     }
 
     private func configureStatusViews() {
@@ -131,12 +130,21 @@ final class ConversationListViewController: UIViewController {
             skeletonView.isHidden = false
             tableView.isHidden = true
             statusView.isHidden = true
-        case .content(let models):
+        case .content(let sections):
             refreshControl.endRefreshing()
             statusView.isHidden = true
-            var snapshot = NSDiffableDataSourceSnapshot<Section, ConversationID>()
-            snapshot.appendSections([.main])
-            snapshot.appendItems(models.map(\.id), toSection: .main)
+            let models = sections.all
+            var snapshot = NSDiffableDataSourceSnapshot<InboxListSection, ConversationID>()
+            // Empty sections are never appended, so a list with no arrivals is
+            // one plain list rather than a header over nothing.
+            if !sections.new.isEmpty {
+                snapshot.appendSections([.new])
+                snapshot.appendItems(sections.new.map(\.id), toSection: .new)
+            }
+            if !sections.earlier.isEmpty {
+                snapshot.appendSections([.earlier])
+                snapshot.appendItems(sections.earlier.map(\.id), toSection: .earlier)
+            }
             // Same-identity rows whose content changed (pin/mute flags)
             // re-render in place; identity moves/removals animate, so swipe
             // outcomes read as system row animations, not reloads.

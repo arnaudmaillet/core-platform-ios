@@ -67,10 +67,11 @@ struct ChatViewModelTests {
         viewModel.viewWillAppear()
         await settle()
 
-        guard case .content(let models) = last else {
+        guard case .content(let modelsSections) = last else {
             Issue.record("expected content, got \(String(describing: last))")
             return
         }
+        let models = modelsSections.all
         #expect(models.map(\.id) == [ConversationID("c1"), ConversationID("c2")])
     }
 
@@ -104,10 +105,11 @@ struct ChatViewModelTests {
 
         viewModel.togglePin(ConversationID("c2"))
 
-        guard case .content(let models) = last else {
+        guard case .content(let modelsSections) = last else {
             Issue.record("expected content, got \(String(describing: last))")
             return
         }
+        let models = modelsSections.all
         #expect(models.map(\.id) == [ConversationID("c2"), ConversationID("c1")])
         #expect(models[0].isPinned)
         #expect(!models[1].isPinned)
@@ -125,10 +127,11 @@ struct ChatViewModelTests {
 
         viewModel.toggleMute(ConversationID("c1"))
 
-        guard case .content(let models) = last else {
+        guard case .content(let modelsSections) = last else {
             Issue.record("expected content, got \(String(describing: last))")
             return
         }
+        let models = modelsSections.all
         #expect(models.map(\.id) == [ConversationID("c1"), ConversationID("c2")])
         #expect(models[0].isMuted)
         #expect(viewModel.isMuted(ConversationID("c1")))
@@ -144,20 +147,22 @@ struct ChatViewModelTests {
         await settle()
 
         viewModel.delete([ConversationID("c1")])
-        guard case .content(let afterDelete) = last else {
+        guard case .content(let afterDeleteSections) = last else {
             Issue.record("expected content, got \(String(describing: last))")
             return
         }
+        let afterDelete = afterDeleteSections.all
         #expect(afterDelete.map(\.id) == [ConversationID("c2")])
 
         // A refresh re-fetches both from the repository; the local delete
         // filter must keep the row out for the session.
         viewModel.refresh()
         await settle()
-        guard case .content(let afterReload) = last else {
+        guard case .content(let afterReloadSections) = last else {
             Issue.record("expected content, got \(String(describing: last))")
             return
         }
+        let afterReload = afterReloadSections.all
         #expect(afterReload.map(\.id) == [ConversationID("c2")])
     }
 

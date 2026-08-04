@@ -13,7 +13,7 @@ import Foundation
 public final class ConversationListViewModel {
     public nonisolated enum Phase: Equatable, Sendable {
         case loading
-        case content([ConversationDisplayModel])
+        case content(InboxListSections)
         case empty
         case failed(message: String)
     }
@@ -150,7 +150,12 @@ public final class ConversationListViewModel {
                 return
             }
             let now = now()
-            phase = .content(rows.map {
+            // The watermark decides the split, and it is the same watermark
+            // the badge is counted from — see `InboxListSections`.
+            let isNew = Dictionary(
+                uniqueKeysWithValues: rows.map { ($0.id, watermark.isNewOnRow($0)) }
+            )
+            let models = rows.map {
                 ConversationDisplayModel(
                     conversation: $0,
                     now: now,
@@ -162,7 +167,8 @@ public final class ConversationListViewModel {
                     // would be a number beside a row that reads as read.
                     unreadCount: snapshot.unreadIDs.contains($0.id) ? $0.unreadCount : 0
                 )
-            })
+            }
+            phase = .content(InboxListSections(rows: models) { isNew[$0.id] ?? false })
         }
     }
 }

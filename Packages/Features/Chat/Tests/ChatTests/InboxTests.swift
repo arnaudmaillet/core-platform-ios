@@ -891,17 +891,19 @@ struct InboxSurfaceViewModelTests {
         list.viewWillAppear()
         await settle()
         #expect(listPhase == .empty)
-        guard case .content(let pending) = requestsPhase else {
+        guard case .content(let pendingSections) = requestsPhase else {
             Issue.record("expected a pending request, got \(String(describing: requestsPhase))")
             return
         }
+        let pending = pendingSections.all
         #expect(pending.map(\.id) == [ConversationID("request")])
 
         requests.accept(ConversationID("request"))
-        guard case .content(let rows) = listPhase else {
+        guard case .content(let rowsSections) = listPhase else {
             Issue.record("expected content, got \(String(describing: listPhase))")
             return
         }
+        let rows = rowsSections.all
         #expect(rows.map(\.id) == [ConversationID("request")])
         #expect(requestsPhase == .empty)
     }
@@ -926,10 +928,11 @@ struct InboxSurfaceViewModelTests {
         list.viewWillAppear()
         await settle()
 
-        guard case .content(let rows) = phase else {
+        guard case .content(let rowsSections) = phase else {
             Issue.record("expected content, got \(String(describing: phase))")
             return
         }
+        let rows = rowsSections.all
         // Both rows are present; only one is flagged.
         #expect(rows.map(\.id) == [ConversationID("read"), ConversationID("unread")])
         #expect(rows.map(\.isUnread) == [false, true])
@@ -954,10 +957,11 @@ struct InboxSurfaceViewModelTests {
 
         catalog.markRead(ConversationID("a"))
 
-        guard case .content(let rows) = phase else {
+        guard case .content(let rowsSections) = phase else {
             Issue.record("expected content, got \(String(describing: phase))")
             return
         }
+        let rows = rowsSections.all
         #expect(rows.count == 2)
         #expect(rows.map(\.isUnread) == [false, true])
     }
@@ -1009,10 +1013,11 @@ struct InboxSurfaceViewModelTests {
         await settle()
 
         // No exit: the viewer is still here.
-        guard case .content(let rows) = phase else {
+        guard case .content(let rowsSections) = phase else {
             Issue.record("expected content, got \(String(describing: phase))")
             return
         }
+        let rows = rowsSections.all
         #expect(requests.newCount == 2)
         #expect(rows.map(\.isUnread) == [true, true])
     }
@@ -1186,6 +1191,84 @@ struct MessageRequestCellTests {
     /// separator dangling after the name.
     @Test func aConversationWithNoActivityHasNoTimestampAtAll() {
         #expect(MessageRequestCell.timestampText(for: model(preview: "hi", hasActivity: false)) == nil)
+    }
+}
+
+// MARK: - List sections
+
+/// The split, and the one property that makes it trustworthy: the first
+/// section's row count IS the tab badge's number.
+@MainActor
+struct InboxListSectionTests {
+    private func settle() async {
+        for _ in 0..<8 {
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+    }
+
+    /// Section one and the badge come from one watermark in one view model, so
+    /// they cannot disagree — this is the assertion that says so out loud.
+    @Test func theFirstSectionHoldsExactlyWhatTheBadgeCounts() async {
+        let catalog = InboxCatalog(
+            repository: StubInboxProvider(conversations: [
+                conversation("r1", peer: "a"), conversation("r2", peer: "b")
+            ]),
+            relations: StubRelations()
+        )
+        let requests = MessageRequestsViewModel(
+            catalog: catalog, now: { Date(timeIntervalSince1970: -1) }
+        )
+        var phase: MessageRequestsViewModel.Phase?
+        requests.onPhaseChange = { phase = $0 }
+        requests.refresh()
+        await settle()
+
+        guard case .content(let sections) = phase else {
+            Issue.record("expected content, got \(String(describing: phase))")
+            return
+        }
+        #expect(sections.new.count == requests.newCount)
+        #expect(sections.earlier.isEmpty)
+    }
+
+    /// Nothing new means ONE section, not an empty header over the list.
+    @Test func anInboxWithNoArrivalsIsASingleSection() async {
+        let catalog = InboxCatalog(
+            repository: StubInboxProvider(conversations: [
+                conversation("r1", peer: "a"), conversation("r2", peer: "b")
+            ]),
+            relations: StubRelations()
+        )
+        // A `now` after the fixtures' activity: they were already there.
+        let requests = MessageRequestsViewModel(
+            catalog: catalog, now: { Date(timeIntervalSince1970: 10_000) }
+        )
+        var phase: MessageRequestsViewModel.Phase?
+        requests.onPhaseChange = { phase = $0 }
+        requests.refresh()
+        await settle()
+
+        guard case .content(let sections) = phase else {
+            Issue.record("expected content, got \(String(describing: phase))")
+            return
+        }
+        #expect(sections.new.isEmpty)
+        #expect(sections.earlier.count == 2)
+        #expect(requests.newCount == 0)
+    }
+
+    /// The split preserves the list's order, so a row does not jump when it
+    /// crosses between sections.
+    @Test func theSplitKeepsTheListsOrder() {
+        let rows = ["a", "b", "c", "d"].map {
+            ConversationDisplayModel(conversation: conversation($0), isUnread: $0 < "c")
+        }
+        let sections = InboxListSections(rows: rows, isNew: \.isUnread)
+
+        #expect(sections.new.map(\.id) == [ConversationID("a"), ConversationID("b")])
+        #expect(sections.earlier.map(\.id) == [ConversationID("c"), ConversationID("d")])
+        #expect(sections.all.map(\.id) == rows.map(\.id))
     }
 }
 
