@@ -295,6 +295,33 @@ struct ContentContextMenuTests {
         #expect(sizes[0] < sizes[2])
     }
 
+    /// ⚠️ A single digit is a DISK — width exactly equal to height, not a
+    /// capsule a point or two wider that reads as a rendering mistake. The
+    /// image's own width carries the reserved pill plus the glyph, so the pill
+    /// is measured by the difference every count shares.
+    @Test func aSingleDigitPillIsACircle() {
+        for count in 1...9 {
+            #expect(
+                ContextMenuRowIcon.pillSize(for: count).width
+                    == ContextMenuRowIcon.pillSize(for: count).height,
+                "count \(count) is not a disk"
+            )
+        }
+    }
+
+    /// Two digits no longer fit inside the height, so the shape elongates —
+    /// the only case that should.
+    @Test func aTwoDigitPillBecomesACapsule() {
+        let two = ContextMenuRowIcon.pillSize(for: 12)
+        #expect(two.width > two.height)
+    }
+
+    /// Zero reserves a disk's worth of space so the glyph column does not move
+    /// between a row with news and a row without.
+    @Test func zeroReservesTheDisksWidth() {
+        #expect(ContextMenuRowIcon.pillSize(for: 0) == ContextMenuRowIcon.pillSize(for: 5))
+    }
+
     /// The unfiltered lens is named after the screen, not after the absence of
     /// a filter — it has to work as a tab item's title too, where "All" says
     /// nothing about what the tab holds.

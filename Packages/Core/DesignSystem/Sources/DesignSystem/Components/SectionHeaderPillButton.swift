@@ -33,11 +33,23 @@ public final class SectionHeaderPillButton: UIButton {
         /// Around the pill, symmetric: it floats in the band rather than
         /// hanging from either edge of it.
         public static let float = Spacing.sm
+        /// Extra space above a header that FOLLOWS another section.
+        ///
+        /// ⚠️ The first header never gets it, and the asymmetry is the point.
+        /// It sits directly under the navigation bar's tab capsule, where a gap
+        /// reads as the screen failing to fill — there is nothing above it to be
+        /// separated from. Every later header IS separating two runs of content,
+        /// and without this its pill crowds the last row of the section before
+        /// it, reading as part of that section rather than the start of the next.
+        public static let sectionGap = Spacing.lg
     }
 
     /// Fires when the capsule is tapped. Re-assigned on every configure, since
     /// the hosting view is reused across sections.
     public var onTap: (() -> Void)?
+
+    /// Held so the section gap can be applied per header — see `setLeadsList`.
+    private var topConstraint: NSLayoutConstraint?
 
     public init() {
         super.init(frame: .zero)
@@ -69,12 +81,33 @@ public final class SectionHeaderPillButton: UIButton {
     /// floating clear of the band's top and bottom, and free to be narrower
     /// than the host is wide.
     public func pinAsHeader(in host: UIView) {
-        constrain(in: host) { parent in
-            leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor)
-            topAnchor.constraint(equalTo: parent.topAnchor, constant: Metrics.float)
-            bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Metrics.float)
-            trailingAnchor.constraint(lessThanOrEqualTo: parent.layoutMarginsGuide.trailingAnchor)
-        }
+        translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(self)
+        let top = topAnchor.constraint(equalTo: host.topAnchor, constant: Metrics.float)
+        topConstraint = top
+        NSLayoutConstraint.activate([
+            leadingAnchor.constraint(equalTo: host.layoutMarginsGuide.leadingAnchor),
+            top,
+            bottomAnchor.constraint(equalTo: host.bottomAnchor, constant: -Metrics.float),
+            trailingAnchor.constraint(lessThanOrEqualTo: host.layoutMarginsGuide.trailingAnchor)
+        ])
+    }
+
+    /// Whether this header opens the list or follows another section — which is
+    /// the only thing that decides its top margin. See `Metrics.sectionGap`.
+    ///
+    /// Set on every configure, not once: header views are recycled across
+    /// sections, so a view that carried the gap for "Recent" would carry it
+    /// into "New" the moment it was reused.
+    public func setLeadsList(_ leadsList: Bool) {
+        let constant = Metrics.float + (leadsList ? 0 : Metrics.sectionGap)
+        guard topConstraint?.constant != constant else { return }
+        topConstraint?.constant = constant
+        // The host has to re-measure: this changes the header's HEIGHT, not
+        // just the pill's position inside it, and a recycled header that is
+        // never asked again keeps whatever height it was dequeued with.
+        setNeedsLayout()
+        superview?.setNeedsLayout()
     }
 }
 

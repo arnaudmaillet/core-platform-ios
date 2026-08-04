@@ -108,7 +108,10 @@ final class InboxSearchResultsViewController: UIViewController {
             // section it names survives the snapshots that reshuffle rows
             // beneath it.
             let section = self?.visibleSections[safe: indexPath.section]
-            header.setTitle(section.flatMap { self?.sectionTitles[$0] })
+            header.setTitle(
+                section.flatMap { self?.sectionTitles[$0] },
+                leadsList: indexPath.section == 0
+            )
             header.onTap = { [weak self] in
                 guard let self, let section else { return }
                 self.scrollToTop(of: section)

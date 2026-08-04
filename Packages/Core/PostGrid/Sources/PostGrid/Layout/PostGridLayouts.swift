@@ -246,8 +246,18 @@ public enum PostGridListLayout {
             // Only for sectioned lists. The profile gallery hosts this same
             // layout as a non-scrolling self-sizing grid, where a trailing
             // margin is height it did not ask for.
+            //
+            // The SAME constant the pill applies as its own top margin in the
+            // inbox's tables — one number for one rule, expressed through
+            // whichever lever the host actually has. A table has no per-section
+            // content inset, so there the header grows; here a pinned boundary
+            // item resolves its own position and would ignore a top inset, so
+            // the margin goes on the section above.
             section.contentInsets = NSDirectionalEdgeInsets(
-                top: 0, leading: 16, bottom: hasHeader == nil ? 0 : Spacing.lg, trailing: 16
+                top: 0,
+                leading: 16,
+                bottom: hasHeader == nil ? 0 : SectionHeaderPillButton.Metrics.sectionGap,
+                trailing: 16
             )
             if hasHeader?(index) == true {
                 let header = NSCollectionLayoutBoundarySupplementaryItem(

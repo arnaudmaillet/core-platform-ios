@@ -24,10 +24,19 @@ enum ContextMenuRowIcon {
     private enum Metrics {
         /// Tall enough for two digits at the menu's own type size, short enough
         /// not to set the row height itself.
-        static let pillHeight: CGFloat = 18
-        /// The pill's minimum width — a single digit sits in a circle rather
-        /// than a squashed capsule.
-        static let pillMinWidth: CGFloat = 18
+        static let pillHeight: CGFloat = 22
+        /// ⚠️ **The inset is what makes a single digit a DISK.** The pill's
+        /// width is `max(height, text + 2 × inset)`, so as long as one digit
+        /// plus its insets fits inside the height, the max clamps to the height
+        /// and width == height exactly — a circle, not a nearly-circular
+        /// capsule. At 13pt a digit is ~8pt wide, so 8 + 12 = 20 < 22 and the
+        /// clamp holds. Two digits (~16 + 12 = 28) exceed it and the shape
+        /// elongates into a capsule, which is the only case that should.
+        ///
+        /// Raising the font or the inset without raising the height would
+        /// silently break the circle — it degrades into a capsule a point or
+        /// two wider than it is tall, which reads as a rendering mistake rather
+        /// than a shape.
         static let pillTextInset: CGFloat = 6
         static let glyphSize: CGFloat = 17
         /// Between the pill and the glyph.
@@ -38,7 +47,7 @@ enum ContextMenuRowIcon {
         /// drew and the glyph column came out ragged by a point. Tabular digits
         /// make width a function of how MANY digits there are and nothing else —
         /// which is also what stops a pill twitching as a count ticks 7 → 8.
-        static let font = UIFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+        static let font = UIFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
     }
 
     /// `count` of zero reserves the pill's space and draws nothing in it.
@@ -78,13 +87,25 @@ enum ContextMenuRowIcon {
         .withRenderingMode(.alwaysOriginal)
     }
 
-    /// Reserved for every row, sized by the WIDEST count in the menu so one
-    /// three-digit mode cannot shunt the other four's glyphs out of line.
-    /// Callers pass their own count; the width only grows with digits.
+    /// A disk for one digit, a capsule for more.
+    ///
+    /// The floor is the pill's own HEIGHT rather than a separate minimum-width
+    /// constant: a shape whose width is clamped to its height is a circle by
+    /// definition, where a hand-picked minimum is only a circle by coincidence
+    /// and stops being one the moment the font moves.
+    ///
+    /// Reserved for every row, including the ones drawing nothing, so the
+    /// glyphs stay in a column.
+    /// The pill's own footprint, exposed so a test can assert the SHAPE rather
+    /// than infer it from the composite image's width.
+    static func pillSize(for count: Int) -> CGSize {
+        CGSize(width: pillWidth(for: count), height: Metrics.pillHeight)
+    }
+
     private static func pillWidth(for count: Int) -> CGFloat {
         let text = String(max(count, 0))
         let width = (text as NSString).size(withAttributes: [.font: Metrics.font]).width
-        return max(Metrics.pillMinWidth, width + Metrics.pillTextInset * 2)
+        return max(Metrics.pillHeight, width + Metrics.pillTextInset * 2)
     }
 
     private static func drawPill(_ count: Int, in rect: CGRect, context: CGContext) {
