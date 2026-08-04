@@ -136,34 +136,54 @@ public final class SectionHeaderPillButton: UIButton {
 
     // MARK: - Deciding the shape
 
-    /// Adopts a shape, crossfading between them.
+    /// Adopts a shape as a plain opacity crossfade: the header stays exactly
+    /// where it is and one dressing dissolves into the other.
     ///
-    /// ⚠️ `UIView.transition` rather than an alpha ramp. Glass cannot be faded:
-    /// animating a visual effect's `alpha` is the house rule this codebase
-    /// states in three places, because a partially transparent material samples
-    /// the wrong backdrop and darkens as it goes. A crossfade snapshots both
-    /// shapes and dissolves between them, which is also what makes ONE
-    /// transition carry the background, the type size, the weight and the
+    /// One dissolve carries the background, the type size, the weight and the
     /// colour together — four properties that would otherwise need four
-    /// animations agreeing on a curve.
+    /// animations agreeing on a curve, and any disagreement between them reads
+    /// as the header doing something rather than becoming something.
     public func setPresentation(_ presentation: Presentation, animated: Bool = true) {
         guard presentation != self.presentation else { return }
         self.presentation = presentation
-        let apply = { [weak self] in
-            guard let self else { return }
+        guard animated, window != nil else {
+            return UIView.performWithoutAnimation { applyConfiguration(for: presentation) }
+        }
+        // ⚠️ The fade is added FIRST and everything under it is then changed
+        // with animation off. Both halves matter, and the second is the one that
+        // was missing: a crossfade whose contents are ALSO animating is a
+        // crossfade with a slide underneath it.
+        //
+        // Two things slide if left alone. The header hugs its title and is
+        // anchored on its leading edge, so a type-size change moves the
+        // trailing edge — the capsule appears to grow out of the left margin
+        // rather than fade in. And `UIButton.Configuration` animates its own
+        // title change, which reveals the new text left-to-right on top of
+        // that. Neither is geometry the viewer asked to watch: the header is in
+        // the same place before and after, only dressed differently.
+        //
+        // `CATransition` rather than `UIView.transition` because it dissolves
+        // the layer's RENDERED RESULT and takes no view-level animation with
+        // it, so suppressing the inner animations cannot also suppress the
+        // fade. Not an alpha ramp on the glass either — the house rule against
+        // fading a visual effect's `alpha` is about the material sampling a
+        // wrong backdrop at partial opacity, which a render-level dissolve
+        // never does.
+        let fade = CATransition()
+        fade.type = .fade
+        fade.duration = Metrics.morphDuration
+        fade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.add(fade, forKey: Self.morphAnimationKey)
+        UIView.performWithoutAnimation {
             applyConfiguration(for: presentation)
-            // Inside the transition, so the width change dissolves with
-            // everything else instead of snapping a frame mid-fade.
+            // Settled inside the same pass, so the new width is in place before
+            // the fade renders a single frame — the geometry cuts, the pixels
+            // dissolve.
             superview?.layoutIfNeeded()
         }
-        guard animated, window != nil else { return apply() }
-        UIView.transition(
-            with: self,
-            duration: Metrics.morphDuration,
-            options: [.transitionCrossDissolve, .allowUserInteraction, .beginFromCurrentState],
-            animations: apply
-        )
     }
+
+    private static let morphAnimationKey = "sectionHeaderMorph"
 
     /// Re-decides the shape from where this header sits in `scrollView`.
     ///
