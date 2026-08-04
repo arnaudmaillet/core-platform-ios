@@ -336,6 +336,7 @@ final class ProfileViewController: UIViewController {
             if let index = ProfileGalleryPagerView.pageOrder.firstIndex(of: format) {
                 self.categoryBar.select(index)
             }
+            self.alignGalleryUnderHeaderIfNeeded()
         }
         configureFilterTray()
         // Mirror the (possibly stub-seeded) relationship into the header's
@@ -1147,6 +1148,7 @@ final class ProfileViewController: UIViewController {
                 let format = ProfileGalleryPagerView.pageOrder[categoryBar.selectedIndex]
                 viewModel.setGalleryFormat(format)
                 galleryPager.setActivePage(format, animated: true)
+                alignGalleryUnderHeaderIfNeeded()
             },
             for: .valueChanged
         )
@@ -1262,6 +1264,44 @@ final class ProfileViewController: UIViewController {
         guard shouldDock != isBarDocked else { return }
         isBarDocked = shouldDock
         if shouldDock { dockBar() } else { undockBar() }
+    }
+
+    /// The offset at which the gallery's first row sits directly beneath the
+    /// docked selector — the top of the TAB, as distinct from the top of the
+    /// profile.
+    ///
+    /// `safeAreaInsets.top` is the whole sticky header: status bar plus the
+    /// navigation bar the selector is docked in. Subtracting it is what puts the
+    /// first row under the header rather than behind it — this screen's bar is
+    /// transparent and its content scrolls beneath the chrome, so an offset that
+    /// ignored the inset would align the row with the top of the SCREEN and
+    /// hide it under the glass.
+    private var galleryTopOffset: CGFloat {
+        galleryPager.frame.minY - view.safeAreaInsets.top
+    }
+
+    /// After a tab change, brings the new tab's first row under the header when
+    /// the tab is too short to fill the space the viewer was already looking at.
+    ///
+    /// ⚠️ The alternative is the blank screen this used to show: the offset is
+    /// preserved across a tab switch (deliberately — see `updateGalleryFloor`),
+    /// so landing on a tab with three rows left the viewer parked below all of
+    /// them looking at nothing. Preserving the offset is right whenever the new
+    /// tab HAS content down there, and wrong when it does not; this is the "does
+    /// not" half.
+    ///
+    /// It scrolls to the top of the TAB, never to the top of the profile — the
+    /// identity block stays where the viewer put it.
+    private func alignGalleryUnderHeaderIfNeeded() {
+        guard viewModel.hasGallery, isBarDocked else { return }
+        let top = galleryTopOffset
+        let scrolledIntoGallery = scrollView.contentOffset.y - top
+        guard scrolledIntoGallery > 0 else { return }
+        // What the viewer can see below the header, and what the tab has to
+        // fill it with from where they are standing.
+        let visible = scrollView.bounds.height - view.safeAreaInsets.top
+        guard galleryPager.contentHeight < scrolledIntoGallery + visible else { return }
+        scrollView.setContentOffset(CGPoint(x: 0, y: top), animated: true)
     }
 
     /// Keeps a docked selector docked when the tab under it changes.

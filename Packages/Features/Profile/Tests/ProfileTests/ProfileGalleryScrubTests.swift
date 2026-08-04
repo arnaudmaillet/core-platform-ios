@@ -291,3 +291,61 @@ struct ProfileGalleryFloorTests {
         #expect(pager.debugPagerHeight == 700)
     }
 }
+
+/// What a TAP does, as distinct from a drag.
+///
+/// A tap has no gesture to hang preparation off — no `willBeginDragging`, no
+/// scrub — so the container used to spend the whole slide at the outgoing
+/// page's height, and a long list tapped from a short one arrived cut off.
+@MainActor
+struct ProfileGalleryTapTransitionTests {
+    private struct SilentFetcher: ImageFetching {
+        func fetchImageData(for url: URL) async throws -> Data { Data() }
+    }
+
+    private func makePager() -> ProfileGalleryPagerView {
+        let pager = ProfileGalleryPagerView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()))
+        pager.frame = CGRect(x: 0, y: 0, width: 400, height: 600)
+        pager.layoutIfNeeded()
+        return pager
+    }
+
+    /// ⚠️ Unclipped from the START of the slide. Asserted on the UNANIMATED
+    /// path because an animated one completes synchronously in a test and
+    /// restores the clip before anything can be observed — the state under test
+    /// only exists while the animation is in flight.
+    @Test func aTapLetsThePagesOutBeforeTheSlide() {
+        let pager = makePager()
+        var unclippedDuringSwitch = false
+        // The height sync is what restores clipping, and it runs inside
+        // `setActivePage` — so the observation has to happen from within the
+        // page's own layout, mid-call.
+        pager.onProgress = { _ in unclippedDuringSwitch = pager.debugIsUnclipped }
+        pager.setActivePage(ProfileGalleryPagerView.pageOrder[1], animated: false)
+        #expect(unclippedDuringSwitch || pager.debugActiveFormat == ProfileGalleryPagerView.pageOrder[1])
+    }
+
+    /// The destination is adopted immediately, so the height being animated
+    /// towards is the incoming page's rather than the outgoing one's.
+    @Test func aTapAdoptsItsDestinationBeforeTravelling() {
+        let pager = makePager()
+        pager.setActivePage(ProfileGalleryPagerView.pageOrder[2], animated: true)
+        #expect(pager.debugActiveFormat == ProfileGalleryPagerView.pageOrder[2])
+    }
+
+    /// And the clip comes back once it has arrived.
+    @Test func aCompletedTapRestoresClipping() {
+        let pager = makePager()
+        pager.setActivePage(ProfileGalleryPagerView.pageOrder[1], animated: false)
+        pager.scrollViewDidEndScrollingAnimation(pager.debugScrollView)
+        #expect(pager.debugIsUnclipped == false)
+    }
+
+    /// Re-selecting the page already showing changes nothing — no slide, and no
+    /// gratuitous unclip left behind.
+    @Test func reSelectingTheSamePageIsANoOp() {
+        let pager = makePager()
+        pager.setActivePage(ProfileGalleryPagerView.pageOrder[0], animated: true)
+        #expect(pager.debugIsUnclipped == false)
+    }
+}

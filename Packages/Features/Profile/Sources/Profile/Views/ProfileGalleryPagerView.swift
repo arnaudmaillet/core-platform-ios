@@ -123,8 +123,19 @@ final class ProfileGalleryPagerView: UIView {
     func setActivePage(_ format: GalleryFilter.Format, animated: Bool) {
         guard let index = Self.pageOrder.firstIndex(of: format), index != activeIndex else { return }
         activeIndex = index
+        // ⚠️ **Both of these happen BEFORE the slide, not after it.** A tap has
+        // no gesture to hang them off — there is no `willBeginDragging` and no
+        // scrub — so the container spent the whole animation at the OUTGOING
+        // page's height, and a long list tapped from a short one arrived cut
+        // off, filling in only once the slide had finished.
+        //
+        // Unclipping covers the travel and the height animates alongside it, so
+        // the incoming page is whole from the first frame. `syncHeight` restores
+        // the clip when its animation completes, which is the same moment the
+        // slide lands.
+        setPagesUnclipped(true)
+        syncHeight(animated: animated)
         scrollView.setContentOffset(CGPoint(x: CGFloat(index) * bounds.width, y: 0), animated: animated)
-        if !animated { syncHeight(animated: false) }
     }
 
     private var lastLayoutWidth: CGFloat = 0
@@ -182,6 +193,20 @@ final class ProfileGalleryPagerView: UIView {
     /// when the finger has committed to a page.
     private func setPagesUnclipped(_ unclipped: Bool) {
         scrollView.clipsToBounds = !unclipped
+    }
+
+    /// The active page's own content height, ignoring any floor — what the
+    /// owner asks when deciding whether this page can fill the screen under a
+    /// docked header.
+    var contentHeight: CGFloat {
+        guard bounds.width > 0 else { return 0 }
+        let page = pages[activeIndex]
+        page.layoutIfNeeded()
+        return page.systemLayoutSizeFitting(
+            CGSize(width: bounds.width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        ).height
     }
 
     /// The shortest the pager may be, set by the owner — see
@@ -251,6 +276,7 @@ extension ProfileGalleryPagerView {
     var debugPagerHeight: CGFloat { pagerHeight.constant }
     /// Whether the pages may currently draw outside the container.
     var debugIsUnclipped: Bool { !scrollView.clipsToBounds }
+    var debugActiveFormat: GalleryFilter.Format { Self.pageOrder[activeIndex] }
     func debugSyncHeight() { syncHeight(animated: false) }
 }
 #endif
