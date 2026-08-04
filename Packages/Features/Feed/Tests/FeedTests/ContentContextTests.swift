@@ -259,15 +259,40 @@ struct ContentContextMenuTests {
     @Test func theMenuOffersEveryContext() {
         let actions = makeScreen().makeContextActions()
         #expect(actions.count == ContentContext.allCases.count)
-        #expect(actions.map(\.title) == ContentContext.allCases.map { "\($0.title) (0)" })
+        // ⚠️ The title is the mode's NAME and nothing else. The count used to be
+        // parenthesised into it — "Work (3)" — which put a number where a name
+        // goes; it is a badge now and lives in the row's image.
+        #expect(actions.map(\.title) == ContentContext.allCases.map(\.title))
     }
 
-    /// Every row states a count, including zero. The menu's job is to let
-    /// someone compare five modes at a glance, and a row with nothing beside it
-    /// would be ambiguous between "nothing new" and "not counted".
-    @Test func everyRowCarriesACount() {
-        let actions = makeScreen().makeContextActions()
-        #expect(actions.allSatisfy { $0.title.hasSuffix(" (0)") })
+    /// Every row reserves the pill's width whether or not it has a pill, so the
+    /// glyphs line up in a column. A menu whose icons shift depending on which
+    /// modes have activity is harder to read than one with a gap in it.
+    @Test func everyRowReservesTheSameLeadingWidth() {
+        let zero = ContextMenuRowIcon.image(count: 0, symbol: "briefcase.fill", traits: .current)
+        let one = ContextMenuRowIcon.image(count: 7, symbol: "briefcase.fill", traits: .current)
+        #expect(zero?.size.width == one?.size.width)
+    }
+
+    /// A red `0` is a badge claiming there is nothing to report. The space is
+    /// held; nothing is drawn in it.
+    @Test func zeroDrawsNoPill() {
+        let zero = ContextMenuRowIcon.image(count: 0, symbol: "target", traits: .current)
+        let some = ContextMenuRowIcon.image(count: 3, symbol: "target", traits: .current)
+        #expect(zero != nil)
+        // Same footprint, different pixels — the pill is the only difference.
+        #expect(zero?.size == some?.size)
+        #expect(zero?.pngData() != some?.pngData())
+    }
+
+    /// Two digits are wider than one; three wider still. The pill grows with
+    /// its number rather than clipping it.
+    @Test func thePillGrowsWithItsNumber() {
+        let sizes = [7, 42, 128].map {
+            ContextMenuRowIcon.image(count: $0, symbol: "sparkles", traits: .current)?.size.width ?? 0
+        }
+        #expect(sizes == sizes.sorted())
+        #expect(sizes[0] < sizes[2])
     }
 
     /// The unfiltered lens is named after the screen, not after the absence of

@@ -87,6 +87,21 @@ public final class ForYouViewModel {
     /// "the first section and the badge agree" is not a thing worth keeping in
     /// step — it is a thing worth making true once.
     public var onNewCountChange: ((Int) -> Void)?
+    /// Fires immediately BEFORE a publish whose corpus was re-derived rather
+    /// than extended — a lens change or a re-ordering.
+    ///
+    /// ⚠️ The pages cannot work this out for themselves, and trying to crashed
+    /// the app. A page treats "same posts plus some new ones" as an append and
+    /// expresses it as an insert, which is what keeps the mosaic from
+    /// reshuffling when Trending re-ranks a landing page. Widening the lens
+    /// produces exactly that shape — every Work post is still there, plus
+    /// thirty more — but it is NOT an append: the newcomers belong all through
+    /// the list, not after it. Inserted at the end they mis-order the timeline,
+    /// and when the sectioning moves in the same pass `performBatchUpdates`
+    /// takes the whole app down with an inconsistency exception.
+    ///
+    /// So the distinction is stated by the only type that knows which it is.
+    public var onCorpusReset: (() -> Void)?
 
     private let repository: any ForYouProviding
     /// Persists the format tab only. The discovery source is session state by
@@ -218,6 +233,7 @@ public final class ForYouViewModel {
         self.source = source
         // The one place the whole corpus legitimately reorders.
         corpus = corpus.map(source.ordering)
+        onCorpusReset?()
         publish()
     }
 
@@ -232,8 +248,12 @@ public final class ForYouViewModel {
         contextStore?.context = context
         // The unread counts are derived from the VISIBLE corpus, so they have
         // to be republished with it: a tab whose new posts are all filtered out
-        // is a tab with nothing new on it, and a dot left over from the wider
+        // is a tab with nothing new on it, and a count left over from the wider
         // context would be pointing at posts this context does not admit.
+        //
+        // A lens change RE-DERIVES the corpus rather than extending it, and the
+        // pages have to be told before they see it — see `onCorpusReset`.
+        onCorpusReset?()
         publish()
     }
 

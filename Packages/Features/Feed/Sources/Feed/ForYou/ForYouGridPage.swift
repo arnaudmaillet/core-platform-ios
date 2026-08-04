@@ -97,6 +97,17 @@ final class ForYouGridPage: UIView {
         indexPath.section == 0 ? indexPath.item : split + indexPath.item
     }
 
+    /// Armed when the next content to arrive is a re-derived corpus rather than
+    /// an extended one. Consumed by the `apply` that follows.
+    private var mustReload = false
+
+    /// The corpus this page is about to be handed was RE-DERIVED — a lens
+    /// change or a re-ordering — so whatever similarity it bears to what is on
+    /// screen is a coincidence, not an append. See `ForYouViewModel.onCorpusReset`.
+    func invalidateIncrementalUpdates() {
+        mustReload = true
+    }
+
     /// Whether appending `count` posts leaves the section structure alone, so
     /// the append can stay an insert rather than becoming a reload.
     private func splitWouldHold(afterAppending count: Int, to current: Int) -> Bool {
@@ -1061,6 +1072,10 @@ final class ForYouGridPage: UIView {
     }
 
     private func apply(_ incoming: [GalleryPost], skeleton: Bool) {
+        // Consumed here whatever happens next: it describes THIS delivery, and
+        // leaving it armed would force the next genuine page landing to reload.
+        let mustReload = mustReload
+        self.mustReload = false
         guard rawPosts != incoming || showsSkeleton != skeleton else { return }
         // Hydration retires the skeleton with a cross-dissolve, the same
         // in-place hand-off the profile gallery uses.
@@ -1089,7 +1104,7 @@ final class ForYouGridPage: UIView {
         // is the classic inconsistency exception, so that case takes the
         // reload path below instead.
         let splitBefore = split
-        if let added, !added.isEmpty, !showsSkeleton, !skeleton, !dissolving,
+        if let added, !added.isEmpty, !showsSkeleton, !skeleton, !dissolving, !mustReload,
            splitWouldHold(afterAppending: added.count, to: splitBefore) {
             // Arrange only the newcomers, against the absolute slots they will
             // occupy. Placement depends solely on the absolute index, so the

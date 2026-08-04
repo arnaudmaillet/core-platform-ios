@@ -1,4 +1,5 @@
 import CoreModels
+import Foundation
 import PostGrid
 import Testing
 @testable import Feed
@@ -70,5 +71,117 @@ struct ForYouGridAppendTests {
     /// preserve, and the skeleton cross-dissolve owns that transition.
     @Test func fillingAnEmptyListIsNotAnAppend() {
         #expect(ForYouGridPage.addedPosts(from: [], to: [post("a")]) == nil)
+    }
+
+    /// ⚠️ **Widening a lens has the exact shape of an append and is not one.**
+    /// Every Work post is still present plus thirty more, so `addedPosts`
+    /// reports them — correctly, by its own rule, which is about MEMBERSHIP so
+    /// that a Trending re-rank still counts as an addition. The newcomers
+    /// belong all through the list rather than after it, and inserting them at
+    /// the end mis-orders the timeline; when the sectioning moves in the same
+    /// pass, `performBatchUpdates` throws and takes the app down.
+    ///
+    /// So the shape alone cannot decide it, and this test says so rather than
+    /// pretending otherwise. The page is TOLD, by `onCorpusReset` — see
+    /// `ForYouCorpusResetTests`.
+    @Test func aWidenedLensLooksExactlyLikeAnAppend() {
+        let narrow = [post("w1"), post("w2")]
+        let wide = [post("a"), post("w1"), post("b"), post("w2"), post("c")]
+        #expect(ForYouGridPage.addedPosts(from: narrow, to: wide) != nil)
+    }
+}
+
+private final class ResetStubProvider: ForYouProviding, @unchecked Sendable {
+    let posts: [GalleryPost]
+    init(posts: [GalleryPost]) { self.posts = posts }
+    func firstPage() async throws -> ForYouPage {
+        ForYouPage(posts: posts, nextPageToken: "next")
+    }
+    func page(after token: String) async throws -> ForYouPage {
+        ForYouPage(posts: [], nextPageToken: nil)
+    }
+}
+
+private func settleReset() async {
+    for _ in 0..<12 { await Task.yield() }
+}
+
+/// The signal that stops a re-derived corpus being mistaken for an extended one.
+@MainActor
+struct ForYouCorpusResetTests {
+    private func page(_ id: String, caption: String) -> GalleryPost {
+        GalleryPost(
+            id: PostID(id), kind: .photo, isRepost: false, thumbnailURL: nil,
+            caption: caption, publishedAtMS: 0
+        )
+    }
+
+    private func makeModel() -> ForYouViewModel {
+        ForYouViewModel(
+            repository: ResetStubProvider(posts: [
+                page("w", caption: "office deadline"),
+                page("g", caption: "boss level speedrun")
+            ]),
+            preferences: nil,
+            unreadStore: ForYouUnreadStore(
+                defaults: UserDefaults(suiteName: "foryou.reset.tests.\(UUID().uuidString)")!,
+                keyPrefix: "test.reset",
+                arguments: []
+            )
+        )
+    }
+
+    /// A lens change announces itself BEFORE the content it changes, so the
+    /// pages have already dropped their incremental path by the time the new
+    /// corpus arrives.
+    @Test func changingTheLensAnnouncesAResetFirst() async {
+        let model = makeModel()
+        var events: [String] = []
+        model.onCorpusReset = { events.append("reset") }
+        model.onSnapshotChange = { _ in events.append("snapshot") }
+        model.viewDidLoad()
+        await settleReset()
+        events.removeAll()
+
+        model.setContext(.work)
+        #expect(events.first == "reset")
+        #expect(events.contains("snapshot"))
+    }
+
+    /// Re-ordering re-derives the corpus too — same rule, same announcement.
+    @Test func changingTheOrderingAnnouncesAReset() async {
+        let model = makeModel()
+        model.viewDidLoad()
+        await settleReset()
+        var resets = 0
+        model.onCorpusReset = { resets += 1 }
+        model.setSource(.recent)
+        #expect(resets == 1)
+    }
+
+    /// A page LANDING is a genuine extension and must not reset — that is the
+    /// whole reason the incremental path exists, and resetting here would put
+    /// the mosaic's reshuffle back.
+    @Test func aPageLandingIsNotAReset() async {
+        let model = makeModel()
+        model.viewDidLoad()
+        await settleReset()
+        var resets = 0
+        model.onCorpusReset = { resets += 1 }
+        model.loadNextPageIfNeeded()
+        await settleReset()
+        #expect(resets == 0)
+    }
+
+    /// Choosing the lens already selected changes nothing, so it announces
+    /// nothing — a reset would reload both pages for a tap that did nothing.
+    @Test func reselectingTheSameLensAnnouncesNothing() async {
+        let model = makeModel()
+        model.viewDidLoad()
+        await settleReset()
+        var resets = 0
+        model.onCorpusReset = { resets += 1 }
+        model.setContext(.all)
+        #expect(resets == 0)
     }
 }

@@ -464,6 +464,7 @@ final class ForYouViewController: UIViewController {
             pager.render(snapshot)
             prewarmVisible()
         }
+        viewModel.onCorpusReset = { [weak self] in self?.pager.invalidateIncrementalUpdates() }
         viewModel.onLoadSettled = { [weak self] in self?.pager.endRefreshing() }
         viewModel.onPagingChange = { [weak self] paging in self?.pager.setPaging(paging) }
         viewModel.onUnreadChange = { [weak self] counts in self?.applyBadges(counts) }
@@ -584,18 +585,22 @@ final class ForYouViewController: UIViewController {
         ContentContext.allCases.map { makeContextAction($0) }
     }
 
-    /// One row: the mode, its glyph, and how much is waiting under it.
+    /// One row: `[count] [glyph] Mode`.
     ///
-    /// The count is in the TITLE rather than a subtitle because the menu is a
-    /// list of choices and the number is part of what makes one of them worth
-    /// choosing — a subtitle would put it on a second line and half the width.
-    /// Zero is shown too, not hidden: the menu's job here is to let someone
-    /// compare five modes at a glance, and a row with nothing beside it would
-    /// be ambiguous between "nothing new" and "not counted".
+    /// ⚠️ The count used to be parenthesised into the title — "Work (3)" — which
+    /// put a number where a name goes and made the rows read as five sentences
+    /// rather than five choices. It is a badge, so it is drawn as one, in the
+    /// only slot a menu row has for it: see `ContextMenuRowIcon` for why the
+    /// pill and the glyph have to be a single image, and why every row reserves
+    /// the pill's width even at zero.
     private func makeContextAction(_ context: ContentContext) -> UIAction {
         UIAction(
-            title: "\(context.title) (\(contextCounts[context] ?? 0))",
-            image: UIImage(systemName: context.symbol)
+            title: context.title,
+            image: ContextMenuRowIcon.image(
+                count: contextCounts[context] ?? 0,
+                symbol: context.symbol,
+                traits: traitCollection
+            )
         ) { [weak self] _ in
             self?.applyContext(context)
         }

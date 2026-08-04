@@ -124,6 +124,12 @@ final class ForYouPagerView: UIView {
         }
     }
 
+    /// The next snapshot is a re-derived corpus, not an extended one — told to
+    /// BOTH pages, because a lens applies across the surface.
+    func invalidateIncrementalUpdates() {
+        pages.forEach { $0.invalidateIncrementalUpdates() }
+    }
+
     /// How many of a page's leading posts arrived since the session baseline —
     /// the split it puts a "New" header above.
     func setNewCount(_ count: Int, for format: GalleryFilter.Format) {

@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// The two shapes a post grid page can take, as bare compositional layouts.
@@ -224,7 +225,30 @@ public enum PostGridListLayout {
             )
             let section = NSCollectionLayoutSection(group: group)
             section.interGroupSpacing = 10
-            section.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16)
+            // The margin that separates two sections is on the TRAILING edge of
+            // the one above, never the leading edge of the one below.
+            //
+            // ⚠️ A top inset does not do this, and looks like it should. It was
+            // tried: `supplementariesFollowContentInsets` defaults to true, so a
+            // top inset reads as if it will carry the header down with the rows —
+            // and measured in-sim it moved the ROWS 15pt and left the header
+            // exactly where it was, opening the gap *under* the pill instead of
+            // above it. The pill went on crowding the card it was supposed to be
+            // separated from. A pinned boundary item resolves its own position
+            // against the section's content, not against the inset.
+            //
+            // A bottom inset has no such ambiguity: it is space after the last
+            // row, which is precisely where the separation belongs. It also
+            // leaves the FIRST header flush under the navigation bar's tab
+            // capsule — there is nothing above it to be separated from, and a
+            // gap there reads as the screen failing to fill.
+            //
+            // Only for sectioned lists. The profile gallery hosts this same
+            // layout as a non-scrolling self-sizing grid, where a trailing
+            // margin is height it did not ask for.
+            section.contentInsets = NSDirectionalEdgeInsets(
+                top: 0, leading: 16, bottom: hasHeader == nil ? 0 : Spacing.lg, trailing: 16
+            )
             if hasHeader?(index) == true {
                 let header = NSCollectionLayoutBoundarySupplementaryItem(
                     layoutSize: .init(
