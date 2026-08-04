@@ -192,6 +192,9 @@ extension ProfileGalleryPagerView {
     /// thing a screenshot cannot check at the ends.
     var debugActiveIndex: Int { activeIndex }
     var debugContentOffsetX: CGFloat { scrollView.contentOffset.x }
+    /// Whether layout is currently forbidden from re-owning the offset.
+    var debugIsScrubbing: Bool { isScrubbing }
+    var debugScrollView: UIScrollView { scrollView }
 }
 #endif
 
@@ -215,8 +218,10 @@ extension ProfileGalleryPagerView {
     /// written directly, frame by frame, so releasing mid-way would leave the
     /// pager parked between two pages with no callback coming to rescue it.
     func settleAfterScrub(velocityInPages: CGFloat) {
-        isScrubbing = false
-        guard bounds.width > 0, pages.count > 1 else { return }
+        guard bounds.width > 0, pages.count > 1 else {
+            isScrubbing = false
+            return
+        }
         // Half a page of "throw" per unit velocity — enough that a flick
         // commits, small enough that a slow drag released mid-way falls back to
         // whichever page it is actually nearest.
@@ -225,12 +230,33 @@ extension ProfileGalleryPagerView {
             .rounded()
             .clamped(to: 0...CGFloat(pages.count - 1))
         let index = Int(landing)
-        // Always animate, even when the landing is the page it started on: that
-        // case is a scrub that did not commit, and it still has to travel back
-        // from wherever the finger left it.
-        scrollView.setContentOffset(CGPoint(x: landing * bounds.width, y: 0), animated: true)
-        guard index != activeIndex else { return }
+        let changedPage = index != activeIndex
+        // ⚠️ **`activeIndex` first, and the scrub flag last.** This ordering IS
+        // the fix for pages left straddling two tabs.
+        //
+        // `layoutSubviews` re-aligns the offset to `activeIndex` whenever the
+        // scroll view is neither dragging nor decelerating — which an ANIMATED
+        // `setContentOffset` is not. Updating the index after starting that
+        // animation left a window where any layout pass (a self-sizing row
+        // settling, the height re-pin below) yanked the offset back to the page
+        // being left, mid-flight; clearing the flag before it opened that window
+        // in the first place. So the index is true before the animation starts,
+        // and the flag stays up until the animation reports itself finished.
         activeIndex = index
+        let target = landing * bounds.width
+        if scrollView.contentOffset.x == target {
+            // Nothing to travel: an animation that has no distance to cover may
+            // never report a finish, and waiting for one would leave the flag
+            // raised for the life of the screen — with the re-alignment that
+            // depends on it switched off.
+            isScrubbing = false
+        } else {
+            // Always animate, even when the landing is the page it started on:
+            // that case is a scrub that did not commit, and it still has to
+            // travel back from wherever the finger left it.
+            scrollView.setContentOffset(CGPoint(x: target, y: 0), animated: true)
+        }
+        guard changedPage else { return }
         syncHeight(animated: true)
         onPageSettled?(Self.pageOrder[index])
     }
@@ -249,7 +275,11 @@ extension ProfileGalleryPagerView: UIScrollViewDelegate {
     }
 
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
-        // Programmatic paging (selector tap) lands here.
+        // The settle animation has arrived, so the offset is the active page's
+        // again and layout may resume owning it. Programmatic paging (a
+        // selector tap) also lands here, where clearing an already-clear flag
+        // costs nothing.
+        isScrubbing = false
         syncHeight(animated: true)
     }
 

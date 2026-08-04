@@ -189,13 +189,6 @@ final class ProfileViewController: UIViewController {
     /// scrolling through it, and the scroll would fight the layout for as long
     /// as they stayed near the threshold.
     private let inlineBarSlot = UIView()
-    /// The navigation bar's title view, empty until the bar docks into it.
-    ///
-    /// A container rather than assigning the bar to `titleView` directly: the
-    /// nav bar caches its title view's size, and handing it a view that comes
-    /// and goes made it cache the absent one. A stable container that is
-    /// sometimes empty is a size it can hold on to.
-    private let dockedBarSlot = UIView()
     /// Whether the selector is currently in the navigation bar.
     private var isBarDocked = false
 
@@ -1178,8 +1171,7 @@ final class ProfileViewController: UIViewController {
         }
         galleryPager.setActivePage(format, animated: false)
 
-        navigationItem.titleView = dockedBarSlot
-        placeBar(inSlot: inlineBarSlot)
+        undockBar()
 
         placeSourceTray()
     }
@@ -1207,30 +1199,55 @@ final class ProfileViewController: UIViewController {
         toolbarItems = [.flexibleSpace(), UIBarButtonItem(customView: sourceMenuButton)]
     }
 
-    /// Moves the selector into a slot, filling it.
+    /// Puts the selector in the navigation bar's title slot.
+    ///
+    /// ⚠️ **The bar IS the title view — it is not put inside one.** It was
+    /// wrapped in a container at first, so the container could hold a stable
+    /// size for the bar cache. That container was positioned by hand, its frame
+    /// never grew to the bar's, and a `UIView` clips its own hit-testing to its
+    /// bounds — so most of the docked capsule took no touches at all and the
+    /// drag gesture appeared dead. Handing UIKit the bar directly is also what
+    /// the other two screens do; there is no wrapper on either of them.
+    ///
+    /// A title view is positioned by FRAME, so autoresizing has to come back on
+    /// for the trip — the inline slot lays it out with constraints, and a view
+    /// cannot be laid out both ways at once.
+    private func dockBar() {
+        categoryBar.removeFromSuperview()
+        categoryBar.translatesAutoresizingMaskIntoConstraints = true
+        categoryBar.sizeToFit()
+        navigationItem.titleView = categoryBar
+        forceNavigationBarLayout()
+    }
+
+    /// Returns the selector to its slot in the scrolling column.
     ///
     /// One bar, re-parented — not two kept in step. The bar owns its selection,
     /// its lens position and its badge geometry, and a second copy would be a
     /// second answer to every one of those, correct only for as long as
     /// somebody remembered to forward the next change to both.
-    private func placeBar(inSlot slot: UIView) {
-        guard categoryBar.superview !== slot else { return }
+    private func undockBar() {
+        navigationItem.titleView = nil
         categoryBar.removeFromSuperview()
         categoryBar.translatesAutoresizingMaskIntoConstraints = false
-        slot.addSubview(categoryBar)
+        inlineBarSlot.addSubview(categoryBar)
         NSLayoutConstraint.activate([
             categoryBar.leadingAnchor.constraint(
-                greaterThanOrEqualTo: slot.layoutMarginsGuide.leadingAnchor
+                greaterThanOrEqualTo: inlineBarSlot.layoutMarginsGuide.leadingAnchor
             ),
-            categoryBar.centerYAnchor.constraint(equalTo: slot.centerYAnchor),
-            categoryBar.centerXAnchor.constraint(equalTo: slot.centerXAnchor)
+            categoryBar.centerYAnchor.constraint(equalTo: inlineBarSlot.centerYAnchor),
+            categoryBar.centerXAnchor.constraint(equalTo: inlineBarSlot.centerXAnchor)
         ])
-        // The nav bar caches its title view's size, so a bar arriving in or
-        // leaving the title slot has to re-state it — the same re-measure the
-        // other two screens do whenever a badge changes their bar's width.
-        categoryBar.sizeToFit()
-        dockedBarSlot.frame.size = categoryBar.intrinsicContentSize
-        navigationController?.navigationBar.setNeedsLayout()
+        forceNavigationBarLayout()
+    }
+
+    /// The nav bar caches its title view's size, so a bar arriving in or leaving
+    /// the title slot has to make it re-measure — the same re-layout the other
+    /// two screens force whenever a badge changes their bar's width.
+    private func forceNavigationBarLayout() {
+        guard let bar = navigationController?.navigationBar else { return }
+        bar.setNeedsLayout()
+        bar.layoutIfNeeded()
     }
 
     /// Docks the selector into the navigation bar once its inline slot has
@@ -1244,7 +1261,7 @@ final class ProfileViewController: UIViewController {
             : slotTop <= line
         guard shouldDock != isBarDocked else { return }
         isBarDocked = shouldDock
-        placeBar(inSlot: shouldDock ? dockedBarSlot : inlineBarSlot)
+        if shouldDock { dockBar() } else { undockBar() }
     }
 
     /// Shows the shared toolbar for this screen, riding the transition. The

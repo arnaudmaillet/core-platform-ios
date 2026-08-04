@@ -99,4 +99,52 @@ struct ProfileGalleryScrubTests {
         pager.settleAfterScrub(velocityInPages: 0)
         #expect(settled.isEmpty)
     }
+
+    /// ⚠️ **The page the pager is settling TOWARDS has to be true before the
+    /// travel starts.** `layoutSubviews` re-aligns the offset to `activeIndex`
+    /// whenever the scroll view is neither dragging nor decelerating — which an
+    /// animated `setContentOffset` is not — so a stale index during the settle
+    /// animation drags the pages back to the tab being left, and the gesture
+    /// ends straddling two of them. Laying out mid-settle is what a self-sizing
+    /// row or the pager's own height re-pin does routinely.
+    @Test func aLayoutMidSettleCannotDragThePagesBack() {
+        let pager = makePager(width: 400)
+        pager.scrub(to: 0.9)
+        pager.settleAfterScrub(velocityInPages: 0)
+        // Exactly what a row settling under the finger would trigger.
+        pager.setNeedsLayout()
+        pager.layoutIfNeeded()
+        #expect(pager.debugActiveIndex == 1)
+        #expect(pager.debugContentOffsetX == 400)
+    }
+
+    /// ⚠️ **A released gesture NEVER leaves the pages between two tabs.** This
+    /// is the whole complaint the settle exists to answer, so it is asserted
+    /// across the release points that produce it rather than at one convenient
+    /// value — including the ones a hair either side of the midpoint, where the
+    /// rounding decides, and past both ends, where the clamp does.
+    @Test(arguments: [
+        CGFloat(0), 0.1, 0.49, 0.5, 0.51, 0.9, 1, 1.4, 1.6, 1.99, 2, 2.4, -0.6
+    ])
+    func aReleasedScrubAlwaysLandsOnATab(release: CGFloat) {
+        let pager = makePager(width: 400)
+        pager.scrub(to: release)
+        pager.settleAfterScrub(velocityInPages: 0)
+        let offset = pager.debugContentOffsetX
+        #expect(offset.truncatingRemainder(dividingBy: 400) == 0, "left straddling at \(offset)")
+        #expect(offset == CGFloat(pager.debugActiveIndex) * 400)
+        #expect((0...800).contains(offset))
+    }
+
+    /// And the claim on the offset is always released, whether the settle had
+    /// distance to travel or none: a claim left raised switches layout's
+    /// ownership off for the life of the screen.
+    @Test(arguments: [CGFloat(0.4), 1, 1.7, 2])
+    func aReleasedScrubAlwaysReleasesItsClaim(release: CGFloat) {
+        let pager = makePager(width: 400)
+        pager.scrub(to: release)
+        #expect(pager.debugIsScrubbing)
+        pager.settleAfterScrub(velocityInPages: 0)
+        #expect(pager.debugIsScrubbing == false)
+    }
 }
