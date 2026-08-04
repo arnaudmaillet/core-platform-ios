@@ -1371,11 +1371,12 @@ private final class SegmentView: UIButton {
 
 // MARK: - Badge
 
-/// The pending count beside a segment title: a filled capsule in the app's
-/// accent, the same colour the avatar badges wear on the rows it counts.
+/// The pending count beside a segment title: a filled capsule in notification
+/// red, the same colour the bottom tab bar badges the app with.
 ///
 /// It does NOT follow its segment's selection — see `applyFill` for why the
-/// count stopped being chrome that dims with its title.
+/// count stopped being chrome that dims with its title, and for why it matches
+/// the bar below rather than the rows it summarises.
 ///
 /// **Its height is given to it, not derived from its text.** The host states one
 /// number (`Style.badgeHeight`) and the pill is exactly that tall in both
@@ -1398,10 +1399,11 @@ private final class BadgeView: UIView {
         //
         // This was a dynamic colour — the inverse of `.label`, dark-on-light and
         // light-on-dark — which is the right rule for a fill that FLIPS with the
-        // appearance, as `.label` does. The fill is the accent now, and an
-        // accent does not flip: it is blue in both, so an inverting text colour
-        // put near-black on saturated blue every dark-mode night and called it
-        // contrast.
+        // appearance, as `.label` does. The fill is notification red now, and it
+        // does not flip: it is red in both, so an inverting text colour put
+        // near-black on saturated red every dark-mode night and called it
+        // contrast. White is also what the system's own badges use, which is the
+        // pairing this is matching.
         //
         // Static rather than semantic on purpose. `.systemBackground` does not
         // survive inside a `UIGlassEffect` content view — it resolved to white
@@ -1504,37 +1506,42 @@ private final class BadgeView: UIView {
         invalidateIntrinsicContentSize()
     }
 
-    /// The badge's fill: the accent, whichever mark it is.
+    /// The badge's fill: notification red, whichever mark it is.
+    ///
+    /// **Red is what this app already calls "a number of things waiting".** The
+    /// bottom tab bar's badges are the system's own red, and the count pills in
+    /// For You's mode menu are drawn to match them. A tab capsule sitting a
+    /// finger's width above that bar, saying the same kind of thing in a
+    /// different colour, made the viewer resolve two palettes to learn one
+    /// fact.
+    ///
+    /// ⚠️ **This was the accent for one revision, on the argument that the same
+    /// number appears on the avatar of every row it counts and those badges are
+    /// the accent.** That argument is real and it lost: matching DOWN to the
+    /// bar the tabs live on beats matching ACROSS to the rows they summarise,
+    /// because the bar is the thing a viewer sees in the same glance. The cost
+    /// is stated rather than hidden — a count is red on the tab and blue on the
+    /// row it counts, and `BadgedAvatarView` is where that would be reconciled
+    /// if it ever should be.
     ///
     /// ⚠️ **A count used to be chrome** — it followed its segment's selection,
     /// brightening from `secondaryLabel` to `label` alongside the title it
-    /// belonged to, so a row of counts read as one control. That was right while
-    /// the count was a property OF the tab. It is not any more: the same number
-    /// appears on the avatar of every row it counts, and those badges have
-    /// always been the accent. A grey pill on the bar and a blue one on the row
-    /// beneath it were two colours for one fact, and the tab's was the one that
-    /// looked like part of the furniture rather than something waiting.
+    /// belonged to, so a row of counts read as one control. It is not chrome any
+    /// more, and what goes with it is deliberate: an unselected tab no longer
+    /// dims its count, because a count on the tab you are NOT looking at is
+    /// exactly the one worth noticing. That is the argument the dot has always
+    /// made for itself, and both marks now make it together.
     ///
-    /// What is lost with it: an unselected tab's count no longer dims with its
-    /// title. That is the point — a count on the tab you are NOT looking at is
-    /// exactly the one worth noticing, which is the argument the dot has always
-    /// made for itself below.
-    ///
-    /// A DOT is an alert on the same reasoning, and holds the accent whether or
-    /// not its segment is selected.
-    ///
-    /// ⚠️ `.tintColor` rather than `.systemBlue`, so both marks follow the app's
-    /// accent and match `BadgedAvatarView`'s — the badge these now stand beside.
-    /// It is a semantic colour inside a `UIGlassEffect` content view, the
+    /// ⚠️ A semantic colour inside a `UIGlassEffect` content view — the
     /// arrangement that once resolved `.systemBackground` to the wrong end of
-    /// the spectrum in dark mode (see the type comment), so it was checked in
+    /// the spectrum in dark mode (see the type comment) — so it was checked in
     /// both appearances rather than reasoned about.
     private func applyFill() {
         switch style {
         case .count:
-            backgroundColor = .tintColor
+            backgroundColor = .systemRed
         case .dot:
-            backgroundColor = .tintColor
+            backgroundColor = .systemRed
         }
     }
 }
