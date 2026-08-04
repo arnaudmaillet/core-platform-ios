@@ -13,17 +13,22 @@ import Foundation
 public final class ConversationListViewModel {
     public nonisolated enum Phase: Equatable, Sendable {
         case loading
-        case content([ConversationDisplayModel])
+        case content(InboxListSections)
         case empty
         case failed(message: String)
     }
 
     public var onPhaseChange: ((Phase) -> Void)?
-    /// How many conversations are unread, published so the container can put
-    /// the count on the All tab.
-    public var onUnreadCountChange: ((Int) -> Void)?
+    /// How many conversations have arrived since the tab was last visited,
+    /// published so the container can put the count on the All tab.
+    public var onNewCountChange: ((Int) -> Void)?
 
-    public private(set) var unreadCount = 0
+    /// NOT the unread total. This is what the badge reports: new since the last
+    /// visit, cleared by visiting — see `InboxTabWatermark`. The unread total
+    /// still exists and still marks the rows; it simply is not a badge, because
+    /// a number that only goes down when you read everything is a number that
+    /// sits there.
+    public private(set) var newCount = 0
 
     private let catalog: InboxCatalog
     private let router: (any Router)?
@@ -31,6 +36,7 @@ public final class ConversationListViewModel {
 
     private var phase: Phase = .loading { didSet { onPhaseChange?(phase) } }
     private var observation: InboxCatalog.ObservationToken?
+    private var watermark: InboxTabWatermark
 
     init(
         catalog: InboxCatalog,
@@ -40,6 +46,7 @@ public final class ConversationListViewModel {
         self.catalog = catalog
         self.router = router
         self.now = now
+        watermark = InboxTabWatermark(openedAt: Self.openingBaseline(now()))
         observation = catalog.observe { [weak self] snapshot in self?.project(snapshot) }
     }
 
@@ -56,6 +63,25 @@ public final class ConversationListViewModel {
             router: router,
             now: now
         )
+    }
+
+    /// The tab was selected. Clears its badge — that is what selecting a tab
+    /// means — and re-projects so the rows settle on the new baseline.
+    /// Where the watermark starts, which is "now" outside a QA run.
+    ///
+    /// ⚠️ `-inbox-mock-new-activity` back-dates it far enough that the seeded
+    /// inbox reads as having arrived since. Mock conversations are STATIC — the
+    /// fixtures never gain a message while the app is running — so without this
+    /// a watermark badge can only ever be zero, and the feature is unverifiable
+    /// in the simulator. The same shape `-foryou-mock-new-activity` uses, and
+    /// for the same reason.
+    private static func openingBaseline(_ now: Date) -> Date {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-inbox-mock-new-activity") {
+            return .distantPast
+        }
+        #endif
+        return now
     }
 
     public func viewWillAppear() {
@@ -90,12 +116,15 @@ public final class ConversationListViewModel {
 
     // MARK: - Projection
 
+    private func publishNewCount(_ count: Int) {
+        guard newCount != count else { return }
+        newCount = count
+        onNewCountChange?(count)
+    }
+
     private func project(_ snapshot: InboxCatalog.Snapshot) {
         let rows = snapshot.active
-        if unreadCount != snapshot.unreadIDs.count {
-            unreadCount = snapshot.unreadIDs.count
-            onUnreadCountChange?(unreadCount)
-        }
+        publishNewCount(watermark.newCount(in: rows))
         switch snapshot.phase {
         case .loading:
             phase = .loading
@@ -107,15 +136,25 @@ public final class ConversationListViewModel {
                 return
             }
             let now = now()
-            phase = .content(rows.map {
+            // The watermark decides the split, and it is the same watermark
+            // the badge is counted from — see `InboxListSections`.
+            let isNew = Dictionary(
+                uniqueKeysWithValues: rows.map { ($0.id, watermark.isNewOnRow($0)) }
+            )
+            let models = rows.map {
                 ConversationDisplayModel(
                     conversation: $0,
                     now: now,
                     isPinned: snapshot.pinned.contains($0.id),
                     isMuted: snapshot.muted.contains($0.id),
-                    isUnread: snapshot.unreadIDs.contains($0.id)
+                    isUnread: snapshot.unreadIDs.contains($0.id),
+                    // Suppressed with the flag: the catalog's read bridge can
+                    // clear a row ahead of the server, and a count left behind
+                    // would be a number beside a row that reads as read.
+                    unreadCount: snapshot.unreadIDs.contains($0.id) ? $0.unreadCount : 0
                 )
-            })
+            }
+            phase = .content(InboxListSections(rows: models) { isNew[$0.id] ?? false })
         }
     }
 }

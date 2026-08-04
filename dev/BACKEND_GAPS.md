@@ -23,6 +23,7 @@ full functionality.
 | 13 | Relationship lists: no privacy contract, no `RemoveFollower`, id-only edges | Followers/Following screen — privacy is client-inferred, Remove is mock-only, hydration is N+1 | **High** (privacy) |
 | 14 | No discovery / recommendation feed for the "For You" tab | For You is three client-side orderings of the following feed | Medium |
 | 15 | No lightweight-preview rendition, and `RadarPin` can't express video | Map pin live previews (**blocked**); gallery-grid autoplay at scale | **High** (map) |
+| 16 | No topic/category on a post | For You's `ContentContext` lens filters by caption keywords | Medium |
 
 ---
 
@@ -493,10 +494,12 @@ across all 20 services in `Packages/Kit/CoreContracts/Sources/CoreContracts/Gene
 
 **What the client does meanwhile.** `ForYouRepository` reads
 `GetFollowingFeed` through the existing `FeedRepository`, and the tab's source
-filter (Trending / Recent / Following) is three **orderings of that one
-corpus**, applied client-side: `.following` is the server's order, `.recent`
-sorts by `published_at`, `.trending` by the like counter. This is honest but
-thin, and it has two consequences worth naming:
+filter (Trending / Recent) is two **orderings of that one corpus**, applied
+client-side: `.recent` sorts by `published_at`, `.trending` by the like
+counter. (A third, `.following` — the server's own order, unmodified — was
+removed on 2026-08-03 when the screen's tabs became Discover / Following and
+the two "Following"s collided.) This is honest but thin, and it has two
+consequences worth naming:
 
 1. **"Trending" ranks only what has been loaded.** Ordering happens over the
    accumulated pages, not globally, so it is really "most-reacted among the
@@ -574,6 +577,81 @@ Note also that Instagram itself does **not** use `AVPlayer` (Meta's engineering
 blog describes a decoupled lower-level decode stack rendering into
 `AVSampleBufferDisplayLayer`), so our pooling design is justified by `AVPlayer`'s
 own cost model rather than by that comparison.
+
+---
+
+## 16. No topic, category or classification on a post — `ContentContext` is a caption search
+
+The For You surface has a **content context** lens in its navigation bar
+(Entertainment / Work / Focus / Gaming) which is meant to filter both tabs to
+what the viewer is currently here for.
+
+**Nothing in the contracts says what a post is ABOUT.** `post.v1` carries
+media, caption, author, timestamps and counters; there is no topic, category,
+tag, hashtag or classification field, and no endpoint that would rank or select
+by one (checked across all 20 generated services alongside the §14 discovery
+search).
+
+**What the client does meanwhile.** `ContentContext.matches(_:)` lowercases the
+caption and looks for a small hand-written keyword list per context, in one pure
+file (`Packages/Features/Feed/Sources/Feed/ForYou/ContentContext.swift`), the
+same way `MessageRequestPolicy` quarantines its own stand-in. Three consequences
+stated rather than hidden:
+
+1. **It misses and over-claims.** A gaming post that never types "game" is
+   invisible to Gaming; a work post that mentions one is claimed by it.
+2. **Contexts overlap** — "deep work" is both Work and Focus — because a caption
+   search cannot tell which sense was meant. `ContentContextTests` pins this as
+   expected behaviour so nobody "fixes" it by tuning word lists.
+3. **Entertainment deliberately filters nothing**, so the default experience is
+   the unfiltered corpus rather than a keyword-shaped slice of it. This is what
+   keeps the stand-in from quietly degrading the common case.
+
+**What we need.** A subject on the post — server-assigned, not client-inferred:
+
+```
+post.v1.Post {
+  ...
+  repeated Topic topics = N;   // or a single classification enum
+}
+```
+
+plus, ideally, the ability to ASK for one (`GetDiscoveryFeed(..., topics: [...])`
+from §14) so the filter happens where the corpus does, instead of thinning
+already-fetched pages — today a narrow context can empty a page that had plenty
+of posts, and the only remedy is to scroll for more.
+
+---
+
+## 17. No per-conversation unread count — `isUnread` is a Bool
+
+**What the client wants.** The All list badges each row's avatar with how many
+messages are waiting in that conversation.
+
+**What `chat.v1` offers.** `MemberView.last_read` — a read *cursor*. There is no
+`unread_count` field anywhere in the generated messages, and no RPC that returns
+one.
+
+**What ships.** The client COUNTS IT ITSELF, from the tail of the history the
+inbox already fetches, against the cursor the member view already carries
+(`ChatRepository.unreadCount`). This costs no extra round trip — the
+`GetHistory` call was already being made per conversation — only a larger page:
+the limit went from 1 message to `unreadWindow` (20).
+
+**Why the gap stays open anyway.**
+- **It saturates.** Past 20 messages the true figure is unknowable from one
+  call, so the badge reads "20+" and means it. A server-side count has the whole
+  thread.
+- **It is a second opinion.** The count is derived on each device from a window
+  that device fetched. Two devices reading the same inbox can disagree, and
+  neither is wrong about what it saw — which is exactly the class of bug a
+  server-computed figure does not have.
+- **It costs payload per conversation.** Twenty messages × every conversation on
+  every inbox load, to produce one integer per row.
+
+**What we need.** `unread_count` on the conversation or member view, computed
+server-side from `last_read`. Then the window drops back to 1 and the client
+stops counting.
 
 ---
 

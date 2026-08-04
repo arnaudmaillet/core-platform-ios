@@ -43,6 +43,19 @@ public struct Conversation: Equatable, Sendable, Identifiable {
     /// when a thread is opened) clears it server-side. A conversation whose
     /// last message is the viewer's own is never unread.
     public let isUnread: Bool
+    /// How many of the newest messages the viewer has not read — the number the
+    /// All list puts on the sender's avatar.
+    ///
+    /// Derived, not served: `chat.v1` has no `unread_count`
+    /// (`dev/BACKEND_GAPS.md` §17). It is counted from the tail of the history
+    /// this hydration already fetches, against the read cursor the member view
+    /// already carries, so it costs no extra round trip — only a bigger page.
+    ///
+    /// ⚠️ **Bounded by that page.** Past `unreadWindow` messages the true figure
+    /// is unknowable from one call, and this saturates rather than guessing:
+    /// the badge reads "20+" and means it. Zero exactly when `isUnread` is
+    /// false, so the two can never disagree about whether anything is waiting.
+    public let unreadCount: Int
 
     public init(
         id: ConversationID,
@@ -53,7 +66,8 @@ public struct Conversation: Equatable, Sendable, Identifiable {
         directPeerHandle: String? = nil,
         lastMessageIsMine: Bool = false,
         lastMessageID: String = "",
-        isUnread: Bool = false
+        isUnread: Bool = false,
+        unreadCount: Int = 0
     ) {
         self.id = id
         self.title = title
@@ -64,6 +78,7 @@ public struct Conversation: Equatable, Sendable, Identifiable {
         self.lastMessageIsMine = lastMessageIsMine
         self.lastMessageID = lastMessageID
         self.isUnread = isUnread
+        self.unreadCount = unreadCount
     }
 
     /// The DM correspondent: the single other member. `nil` for group shapes,
@@ -224,13 +239,21 @@ public actor ChatRepository: ChatProviding {
         guard let members = membersResponse.message?.members else { return nil }
         let otherIDs = members.map { ProfileID($0.profileID) }.filter { $0 != viewer }
 
-        // Last message → preview + activity time.
+        // Last message → preview + activity time. And the tail behind it →
+        // how many messages are waiting.
+        //
+        // ⚠️ The limit was 1. It is a WINDOW now, and the difference is payload,
+        // not round trips: this call already happens once per conversation
+        // (which is why the inbox is expensive at all), so counting the unread
+        // tail costs a bigger page rather than another request. The window is
+        // what bounds the count — see `Conversation.unreadCount`.
         var historyRequest = Chat_V1_GetHistoryRequest()
         historyRequest.conversationID = id.rawValue
         historyRequest.requesterID = viewer.rawValue
-        historyRequest.limit = 1
+        historyRequest.limit = Int32(Self.unreadWindow)
         let historyResponse = await chatClient.getHistory(request: historyRequest, headers: [:])
-        let latest = historyResponse.message?.messages.max { $0.createdAtMs < $1.createdAtMs }
+        let window = historyResponse.message?.messages ?? []
+        let latest = window.max { $0.createdAtMs < $1.createdAtMs }
 
         await hydrateNames(for: otherIDs)
         let title = otherIDs.isEmpty
@@ -252,7 +275,13 @@ public actor ChatRepository: ChatProviding {
             directPeerHandle: otherIDs.count == 1 ? handleCache[otherIDs[0]] : nil,
             lastMessageIsMine: latestIsMine,
             lastMessageID: latest?.messageID ?? "",
-            isUnread: Self.isUnread(latest: latest, viewerLastRead: viewerLastRead, latestIsMine: latestIsMine)
+            isUnread: Self.isUnread(latest: latest, viewerLastRead: viewerLastRead, latestIsMine: latestIsMine),
+            unreadCount: Self.unreadCount(
+                in: window,
+                viewer: viewer,
+                viewerLastRead: viewerLastRead,
+                isUnread: Self.isUnread(latest: latest, viewerLastRead: viewerLastRead, latestIsMine: latestIsMine)
+            )
         )
     }
 
@@ -404,6 +433,40 @@ public actor ChatRepository: ChatProviding {
     ) -> Bool {
         guard let latest, !latestIsMine else { return false }
         return viewerLastRead != latest.messageID
+    }
+
+    /// How many messages the inbox reads per conversation, and so how far the
+    /// unread count can see. Twenty is well past the point where a badge stops
+    /// being a number anyone reads and starts being "a lot".
+    static let unreadWindow = 20
+
+    /// The unread tail: inbound messages newer than the viewer's read cursor.
+    ///
+    /// Anchored on the CURSOR's position rather than on timestamps — the cursor
+    /// is a message id, and comparing ids is exact where comparing times has to
+    /// pick a side when two messages share a millisecond. A cursor that is not
+    /// in the window means the viewer has read nothing recent, so everything in
+    /// the window that is not theirs counts.
+    ///
+    /// Gated on `isUnread` so the count and the flag can never disagree: that
+    /// flag already knows the cases a raw count does not, such as a thread whose
+    /// newest message is the viewer's own.
+    static func unreadCount(
+        in window: [Chat_V1_MessageView],
+        viewer: ProfileID,
+        viewerLastRead: String?,
+        isUnread: Bool
+    ) -> Int {
+        guard isUnread else { return 0 }
+        let ordered = window.sorted { $0.createdAtMs < $1.createdAtMs }
+        let tail: [Chat_V1_MessageView]
+        if let cursor = viewerLastRead, !cursor.isEmpty,
+           let readIndex = ordered.firstIndex(where: { $0.messageID == cursor }) {
+            tail = Array(ordered[ordered.index(after: readIndex)...])
+        } else {
+            tail = ordered
+        }
+        return tail.count { ProfileID($0.senderID) != viewer }
     }
 
     private static func makeMessage(from view: Chat_V1_MessageView, viewer: ProfileID) -> ChatMessage {

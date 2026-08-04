@@ -15,8 +15,6 @@ import UIKit
 /// actions: the horizontal axis belongs to paging between inbox categories,
 /// and a row that also claims it would make every page swipe a coin flip.
 final class ConversationListViewController: UIViewController {
-    fileprivate enum Section { case main }
-
     private let viewModel: ConversationListViewModel
 
     private let tableView = UITableView(frame: .zero, style: .plain)
@@ -24,7 +22,7 @@ final class ConversationListViewController: UIViewController {
     private let skeletonView = ConversationListSkeletonView()
     private let statusView = InboxStatusView()
 
-    private var dataSource: UITableViewDiffableDataSource<Section, ConversationID>!
+    private var dataSource: SectionedConversationDataSource!
     private var modelsByID: [ConversationID: ConversationDisplayModel] = [:]
     private var hasRenderedContent = false
 
@@ -40,71 +38,11 @@ final class ConversationListViewController: UIViewController {
 
     var onChromeChange: ((InboxSurfaceChrome) -> Void)?
 
-    /// Recomputes what the container should show for this surface: the Edit
-    /// toggle, its batch actions while editing, and the unread count that
-    /// rides the tab.
+    /// Recomputes what the container should show for this surface: the count
+    /// on its tab.
     private func publishChrome() {
-        let selection = selectedIDs
-        let pinAction = BatchPinAction.resolve(selected: selection) { [viewModel] in viewModel.isPinned($0) }
-        batchDeleteItem.isEnabled = !selection.isEmpty
-        batchPinItem.title = pinAction.title
-
-        // A mixed selection drops the pin item entirely rather than showing a
-        // disabled one: a greyed button invites "why can't I?", an absent one
-        // reads as "not applicable to this selection".
-        var trailing: [UIBarButtonItem] = []
-        if isEditing {
-            trailing.append(batchDeleteItem)
-            if pinAction != .unavailable { trailing.append(batchPinItem) }
-        }
-        chrome = InboxSurfaceChrome(
-            // The count lives in the title: it is the one place that can hold
-            // it without squeezing three bar items into a 402pt bar.
-            title: isEditing ? Self.selectionTitle(for: selection.count) : nil,
-            leadingBarItem: isEditing ? cancelItem : editButtonItem,
-            trailingBarItems: trailing,
-            // The tab carries the unread count, so "All 3" is legible without
-            // opening anything.
-            badgeCount: viewModel.unreadCount,
-            locksPaging: isEditing
-        )
+        chrome = InboxSurfaceChrome(badgeCount: viewModel.newCount)
     }
-
-    /// The editing title, which doubles as the selection counter.
-    static func selectionTitle(for count: Int) -> String {
-        switch count {
-        case 0: "Select Messages"
-        case 1: "1 Selected"
-        default: "\(count) Selected"
-        }
-    }
-
-    /// Batch pin toggle. Only ever shown for a uniform selection, so its title
-    /// always names exactly what it is about to do.
-    private lazy var batchPinItem = UIBarButtonItem(
-        title: "Pin",
-        primaryAction: UIAction { [weak self] _ in self?.togglePinOnSelectedRows() }
-    )
-
-    /// Batch delete for multi-selection mode, enabled only with a non-empty
-    /// selection.
-    private lazy var batchDeleteItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(
-            title: "Delete",
-            primaryAction: UIAction { [weak self] _ in self?.deleteSelectedRows() }
-        )
-        item.tintColor = .systemRed
-        item.isEnabled = false
-        return item
-    }()
-
-    /// Native "Cancel" shown in place of the Edit/Done toggle while editing;
-    /// leaves multi-selection (deletes already commit immediately via the
-    /// trailing Delete item, so there's nothing to discard).
-    private lazy var cancelItem = UIBarButtonItem(
-        title: "Cancel",
-        primaryAction: UIAction { [weak self] _ in self?.setEditing(false, animated: true) }
-    )
 
     init(viewModel: ConversationListViewModel) {
         self.viewModel = viewModel
@@ -122,7 +60,7 @@ final class ConversationListViewController: UIViewController {
         publishChrome()
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
-        viewModel.onUnreadCountChange = { [weak self] _ in self?.publishChrome() }
+        viewModel.onNewCountChange = { [weak self] _ in self?.publishChrome() }
         render(.loading)
 
         #if DEBUG
@@ -156,17 +94,25 @@ final class ConversationListViewController: UIViewController {
     private func configureTableView() {
         tableView.register(ConversationCell.self, forCellReuseIdentifier: ConversationCell.reuseIdentifier)
         tableView.delegate = self
+        tableView.register(
+            InboxSectionHeaderView.self,
+            forHeaderFooterViewReuseIdentifier: InboxSectionHeaderView.reuseIdentifier
+        )
+        tableView.estimatedSectionHeaderHeight = 44
+        // A plain table reserves ~22pt above every section header by default,
+        // which under a floating pill is a band of nothing between the tab
+        // capsule and the first row. The pill carries its own breathing room
+        // (`SectionHeaderPillButton.Metrics.float`), so this is padding on top
+        // of padding.
+        tableView.sectionHeaderTopPadding = 0
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 72
-        // Native multi-selection: editing mode shows the system's circled
-        // checkmarks, animated in by `setEditing` — no custom selection UI.
-        tableView.allowsMultipleSelectionDuringEditing = true
         tableView.pin(to: view)
 
         refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
         tableView.refreshControl = refreshControl
 
-        dataSource = EditableDiffableDataSource(tableView: tableView) {
+        dataSource = SectionedConversationDataSource(tableView: tableView) {
             [weak self] tableView, indexPath, id in
             let cell = tableView.dequeueReusableCell(
                 withIdentifier: ConversationCell.reuseIdentifier, for: indexPath
@@ -174,40 +120,6 @@ final class ConversationListViewController: UIViewController {
             if let model = self?.modelsByID[id] { cell.configure(with: model) }
             return cell
         }
-    }
-
-    // MARK: - Editing (multi-selection)
-
-    /// `editButtonItem` (and the `Cancel` item) funnel here. While editing, the
-    /// leading toggle becomes a native `Cancel` and the trailing slot becomes
-    /// this tab's batch actions; UIKit animates the selection affordances and
-    /// clears any selection when the mode ends, so exit needs no manual
-    /// cleanup beyond republishing the chrome.
-    override func setEditing(_ editing: Bool, animated: Bool) {
-        super.setEditing(editing, animated: animated)
-        tableView.setEditing(editing, animated: animated)
-        publishChrome()
-    }
-
-    private var selectedIDs: [ConversationID] {
-        (tableView.indexPathsForSelectedRows ?? []).compactMap { dataSource.itemIdentifier(for: $0) }
-    }
-
-    private func deleteSelectedRows() {
-        let ids = selectedIDs
-        guard !ids.isEmpty else { return }
-        viewModel.delete(Set(ids))
-        setEditing(false, animated: true)
-    }
-
-    /// Pins or unpins the selection. The button is only present for a uniform
-    /// selection, so every selected row flips the same way.
-    private func togglePinOnSelectedRows() {
-        let ids = selectedIDs
-        guard BatchPinAction.resolve(selected: ids, isPinned: { [viewModel] in viewModel.isPinned($0) }) != .unavailable
-        else { return }
-        for id in ids { viewModel.togglePin(id) }
-        setEditing(false, animated: true)
     }
 
     private func configureStatusViews() {
@@ -228,16 +140,26 @@ final class ConversationListViewController: UIViewController {
             skeletonView.isHidden = false
             tableView.isHidden = true
             statusView.isHidden = true
-        case .content(let models):
+        case .content(let sections):
             refreshControl.endRefreshing()
             statusView.isHidden = true
-            var snapshot = NSDiffableDataSourceSnapshot<Section, ConversationID>()
-            snapshot.appendSections([.main])
-            snapshot.appendItems(models.map(\.id), toSection: .main)
-            // Same-identity rows whose content changed (pin/mute flags)
-            // re-render in place; identity moves/removals animate, so swipe
-            // outcomes read as system row animations, not reloads.
-            snapshot.reconfigureItems(models.filter { modelsByID[$0.id] != nil && modelsByID[$0.id] != $0 }.map(\.id))
+            let models = sections.all
+            var snapshot = NSDiffableDataSourceSnapshot<InboxListSection, ConversationID>()
+            // Empty sections are never appended, so a list with no arrivals is
+            // one plain list rather than a header over nothing.
+            if !sections.new.isEmpty {
+                snapshot.appendSections([.new])
+                snapshot.appendItems(sections.new.map(\.id), toSection: .new)
+            }
+            if !sections.earlier.isEmpty {
+                snapshot.appendSections([.earlier])
+                snapshot.appendItems(sections.earlier.map(\.id), toSection: .earlier)
+            }
+            // Same-identity rows whose content changed (pin/mute flags, a read
+            // that cleared the bold preview) re-render in place; identity
+            // moves/removals animate, so swipe outcomes read as system row
+            // animations, not reloads. See `InboxRowDiff`.
+            snapshot.reconfigureItems(InboxRowDiff.changedRows(in: models, against: modelsByID))
             modelsByID = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
             // Animate only while visible. A change that arrives while a thread
             // is pushed over the inbox — reading one, say — would otherwise
@@ -281,22 +203,57 @@ final class ConversationListViewController: UIViewController {
             self.tableView.isHidden = false
         }
     }
+    #if DEBUG
+    /// `-inbox-tap-section new|recent` fires a header pill's own action ~2s in.
+    ///
+    /// A tap cannot be injected in the simulator, and driving one through
+    /// CGEvent needs the Simulator window's geometry — which changes the moment
+    /// the window is resized or reopened, and a mis-mapped tap looks exactly
+    /// like a header that does not respond. This calls what the pill calls.
+    private func runSectionTapDebugSequence() {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-inbox-tap-section"),
+              let name = arguments.dropFirst(index + 1).first
+        else { return }
+        let section: InboxListSection = name == "new" ? .new : .earlier
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            guard let self, let target = dataSource.index(of: section) else { return }
+            dataSource.scroll(tableView, toSectionAt: target)
+        }
+    }
+    #endif
 }
 
 extension ConversationListViewController: UITableViewDelegate {
-    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        // In multi-selection mode a tap is a selection, not navigation.
-        if tableView.isEditing {
-            publishChrome()
-            return
+    // MARK: - Section headers
+
+    /// The glass pill, and the tap that scrolls to the section it names.
+    func tableView(_ tableView: UITableView, viewForHeaderInSection index: Int) -> UIView? {
+        guard let section = dataSource.headedSection(at: index) else { return nil }
+        let header = tableView.dequeueReusableHeaderFooterView(
+            withIdentifier: InboxSectionHeaderView.reuseIdentifier
+        ) as? InboxSectionHeaderView
+        header?.setTitle(section.title)
+        // The section's own first row, so tapping "Recent" puts Recent under
+        // the header rather than wherever the list happened to be.
+        header?.onTap = { [weak self] in
+            guard let self else { return }
+            dataSource.scroll(tableView, toSectionAt: index)
         }
+        return header
+    }
+
+    /// Zero for an unheaded list — a table gives an unclaimed plain-style
+    /// section a default height even when its header view is nil, which would
+    /// leave a blank band above a list that has no header at all.
+    func tableView(_ tableView: UITableView, heightForHeaderInSection index: Int) -> CGFloat {
+        dataSource.headedSection(at: index) == nil ? .leastNormalMagnitude : UITableView.automaticDimension
+    }
+
+    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         guard let id = dataSource.itemIdentifier(for: indexPath) else { return }
         viewModel.didSelect(id)
-    }
-
-    func tableView(_ tableView: UITableView, didDeselectRowAt indexPath: IndexPath) {
-        if tableView.isEditing { publishChrome() }
     }
 
     // MARK: - Context menu (haptic long-press)
@@ -309,7 +266,7 @@ extension ConversationListViewController: UITableViewDelegate {
         contextMenuConfigurationForRowAt indexPath: IndexPath,
         point: CGPoint
     ) -> UIContextMenuConfiguration? {
-        guard !tableView.isEditing, let id = dataSource.itemIdentifier(for: indexPath) else { return nil }
+        guard let id = dataSource.itemIdentifier(for: indexPath) else { return nil }
         let makePreview = threadPreviewProvider
         return UIContextMenuConfiguration(
             identifier: id.rawValue as NSString,
@@ -361,5 +318,8 @@ extension ConversationListViewController: InboxSurface {
     /// load is already in flight, so this is free on the appear path.
     func surfaceDidBecomeActive() {
         viewModel.refresh()
+        #if DEBUG
+        runSectionTapDebugSequence()
+        #endif
     }
 }

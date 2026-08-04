@@ -117,3 +117,89 @@ struct ChatRepositoryTests {
         #expect(id.rawValue.hasPrefix("conv-created-"))
     }
 }
+
+// MARK: - Unread count
+
+/// The count the All list badges an avatar with, derived from the history
+/// window and the read cursor — because `chat.v1` serves no `unread_count`
+/// (`dev/BACKEND_GAPS.md` §17).
+struct UnreadCountTests {
+    private let viewer = ProfileID("me")
+
+    private func message(_ id: String, from sender: String, at ms: Int64) -> Chat_V1_MessageView {
+        var view = Chat_V1_MessageView()
+        view.messageID = id
+        view.senderID = sender
+        view.createdAtMs = ms
+        return view
+    }
+
+    private func count(
+        _ window: [Chat_V1_MessageView],
+        lastRead: String?,
+        isUnread: Bool = true
+    ) -> Int {
+        ChatRepository.unreadCount(
+            in: window, viewer: viewer, viewerLastRead: lastRead, isUnread: isUnread
+        )
+    }
+
+    /// Only what arrived AFTER the cursor, and only what someone else sent.
+    @Test func countsInboundMessagesPastTheCursor() {
+        let window = [
+            message("m0", from: "peer", at: 10),
+            message("m1", from: "me", at: 20),
+            message("m2", from: "peer", at: 30),
+            message("m3", from: "peer", at: 40)
+        ]
+        #expect(count(window, lastRead: "m1") == 2)
+    }
+
+    /// A thread the viewer has never opened: everything inbound is waiting.
+    @Test func anEmptyCursorCountsTheWholeWindow() {
+        let window = [
+            message("m0", from: "peer", at: 10),
+            message("m1", from: "peer", at: 20)
+        ]
+        #expect(count(window, lastRead: "") == 2)
+        #expect(count(window, lastRead: nil) == 2)
+    }
+
+    /// The viewer's own messages are never unread, wherever they sit.
+    @Test func theViewersOwnMessagesNeverCount() {
+        let window = [
+            message("m0", from: "peer", at: 10),
+            message("m1", from: "me", at: 20),
+            message("m2", from: "me", at: 30)
+        ]
+        #expect(count(window, lastRead: "m0") == 0)
+    }
+
+    /// Order comes from timestamps, not from the order the transport happened
+    /// to return: the cursor's POSITION is what splits read from unread.
+    @Test func theWindowIsOrderedBeforeItIsSplit() {
+        let window = [
+            message("m2", from: "peer", at: 30),
+            message("m0", from: "peer", at: 10),
+            message("m1", from: "me", at: 20)
+        ]
+        #expect(count(window, lastRead: "m1") == 1)
+    }
+
+    /// A cursor pointing outside the window means nothing recent has been read,
+    /// so the window is the answer — never a negative or a crash.
+    @Test func aCursorOutsideTheWindowCountsEverythingInIt() {
+        let window = [
+            message("m8", from: "peer", at: 80),
+            message("m9", from: "peer", at: 90)
+        ]
+        #expect(count(window, lastRead: "m0-long-since-paged-out") == 2)
+    }
+
+    /// Gated on the flag, so the badge and the row treatment can never disagree
+    /// about whether anything is waiting.
+    @Test func aReadConversationCountsZeroWhateverTheWindowHolds() {
+        let window = [message("m0", from: "peer", at: 10)]
+        #expect(count(window, lastRead: "", isUnread: false) == 0)
+    }
+}

@@ -12,18 +12,22 @@ import Foundation
 public final class MessageRequestsViewModel {
     public nonisolated enum Phase: Equatable, Sendable {
         case loading
-        case content([ConversationDisplayModel])
+        case content(InboxListSections)
         case empty
         case failed(message: String)
     }
 
     public var onPhaseChange: ((Phase) -> Void)?
-    /// The number of pending requests, for the header badge. Emitted on every
-    /// projection — including while the surface is off screen, which is when a
-    /// badge matters most.
-    public var onCountChange: ((Int) -> Void)?
+    /// How many requests have arrived since the tab was last visited, for its
+    /// badge. Emitted on every projection — including while the surface is off
+    /// screen, which is when a badge matters most.
+    public var onNewCountChange: ((Int) -> Void)?
 
-    private(set) public var count = 0
+    /// NOT the pending total. The badge reports arrivals since the last visit
+    /// and clears when the tab is selected — see `InboxTabWatermark`. The
+    /// pending requests themselves stay on the tab until they are answered;
+    /// they simply stop being announced once they have been seen.
+    private(set) public var newCount = 0
 
     private let catalog: InboxCatalog
     private let router: (any Router)?
@@ -31,6 +35,7 @@ public final class MessageRequestsViewModel {
 
     private var phase: Phase = .loading { didSet { onPhaseChange?(phase) } }
     private var observation: InboxCatalog.ObservationToken?
+    private var watermark: InboxTabWatermark
 
     init(
         catalog: InboxCatalog,
@@ -40,6 +45,7 @@ public final class MessageRequestsViewModel {
         self.catalog = catalog
         self.router = router
         self.now = now
+        watermark = InboxTabWatermark(openedAt: Self.openingBaseline(now()))
         observation = catalog.observe { [weak self] snapshot in self?.project(snapshot) }
     }
 
@@ -80,18 +86,34 @@ public final class MessageRequestsViewModel {
         catalog.decline(id)
     }
 
-    /// Declines every pending request at once. One projection for the whole
-    /// set rather than one per row, so the table animates a single change.
-    /// The caller is responsible for confirming first — this does not ask.
-    public func clearAll() {
-        catalog.declineAll()
+    /// The tab was selected: clear its badge, and re-project so the rows adopt
+    /// the baseline that badge was counting against — the requests that were
+    /// new stay marked for the length of this visit.
+    /// Where the watermark starts, which is "now" outside a QA run.
+    ///
+    /// ⚠️ `-inbox-mock-new-activity` back-dates it far enough that the seeded
+    /// inbox reads as having arrived since. Mock conversations are STATIC — the
+    /// fixtures never gain a message while the app is running — so without this
+    /// a watermark badge can only ever be zero, and the feature is unverifiable
+    /// in the simulator. The same shape `-foryou-mock-new-activity` uses, and
+    /// for the same reason.
+    private static func openingBaseline(_ now: Date) -> Date {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-inbox-mock-new-activity") {
+            return .distantPast
+        }
+        #endif
+        return now
+    }
+
+    private func publishNewCount(_ count: Int) {
+        guard newCount != count else { return }
+        newCount = count
+        onNewCountChange?(count)
     }
 
     private func project(_ snapshot: InboxCatalog.Snapshot) {
-        if count != snapshot.requests.count {
-            count = snapshot.requests.count
-            onCountChange?(count)
-        }
+        publishNewCount(watermark.newCount(in: snapshot.requests))
         switch snapshot.phase {
         case .loading:
             phase = .loading
@@ -103,7 +125,33 @@ public final class MessageRequestsViewModel {
                 return
             }
             let now = now()
-            phase = .content(snapshot.requests.map { ConversationDisplayModel(conversation: $0, now: now) })
+            // `isUnread` carries "unviewed" here. A request has no read cursor
+            // — nothing in `chat.v1` records that you looked at one — so what
+            // marks it is the same watermark that counts it, and the row's
+            // treatment (bold preview, a dot on the avatar) is the treatment an
+            // unread conversation gets. One flag, so both cells stay honest
+            // about meaning the same thing: new to you.
+            // Identical to the All list's projection, and deliberately so: a
+            // request wears the same bold preview and the same numeric badge on
+            // the same corner of the same avatar, and it stops wearing them for
+            // the same reason — the viewer opened it, which moved the read
+            // cursor. `isUnread` used to be the watermark here, which meant a
+            // request stayed marked after being read.
+            let isNew = Dictionary(
+                uniqueKeysWithValues: snapshot.requests.map { ($0.id, watermark.isNewOnRow($0)) }
+            )
+            let models = snapshot.requests.map {
+                ConversationDisplayModel(
+                    conversation: $0,
+                    now: now,
+                    isUnread: snapshot.unreadIDs.contains($0.id),
+                    unreadCount: snapshot.unreadIDs.contains($0.id) ? $0.unreadCount : 0
+                )
+            }
+            // The SECTION is the watermark's question — what arrived since the
+            // app opened — which is a different question from whether a row has
+            // been read, and the two now have separate answers.
+            phase = .content(InboxListSections(rows: models) { isNew[$0.id] ?? false })
         }
     }
 }

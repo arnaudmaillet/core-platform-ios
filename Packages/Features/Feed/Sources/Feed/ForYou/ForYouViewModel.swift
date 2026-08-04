@@ -11,10 +11,30 @@ public final class ForYouViewModel {
     public nonisolated enum PageState: Equatable, Sendable {
         case loading
         case content([GalleryPost])
-        /// The combination has nothing to show; `message` names it so the
-        /// blank page reads intentional, not broken.
-        case empty(message: String)
+        /// The combination has nothing to show, said in two parts so the page
+        /// reads intentional rather than broken.
+        case empty(EmptyState)
         case failed(message: String)
+    }
+
+    /// An empty page, in the two pieces the viewer needs separately.
+    ///
+    /// The split is not cosmetic. The TITLE is the finding — "No activity yet"
+    /// — and is true regardless of how the viewer got here. The SUBTITLE is the
+    /// reason the page might be narrower than they expected, and it is the only
+    /// part that tells them there is something they can change. Running them
+    /// into one sentence made the actionable half look like punctuation.
+    public nonisolated struct EmptyState: Equatable, Sendable {
+        public let title: String
+        /// Absent when nothing is narrowing the page — an unfiltered surface
+        /// with no content has no explanation to offer, and inventing one would
+        /// be noise.
+        public let subtitle: String?
+
+        public init(title: String, subtitle: String? = nil) {
+            self.title = title
+            self.subtitle = subtitle
+        }
     }
 
     public nonisolated struct Snapshot: Equatable, Sendable {
@@ -43,6 +63,14 @@ public final class ForYouViewModel {
     /// refresh control on this rather than inferring it from a snapshot that
     /// may be identical to the last one.
     public var onLoadSettled: (() -> Void)?
+    /// The per-format "new since you last looked" counts, for the tab
+    /// capsule's badges.
+    ///
+    /// Published separately from the snapshot even though both are recomputed
+    /// in `publish()`: a badge changes a segment's pinned width and moves the
+    /// lens, so the bar has to be told explicitly rather than left to infer it
+    /// from content it never sees.
+    public var onUnreadChange: (([GalleryFilter.Format: Int]) -> Void)?
 
     private let repository: any ForYouProviding
     /// Persists the format tab only. The discovery source is session state by
@@ -50,9 +78,29 @@ public final class ForYouViewModel {
     /// session, and a stale "Trending" from three days ago is a worse landing
     /// than the default.
     private let preferences: GalleryPreferences?
+    /// The badge watermarks. Owned here rather than by the view controller
+    /// because every input it needs — the loaded corpus, the active format —
+    /// is already this type's, and a badge derived anywhere else would be a
+    /// second copy of the same fact.
+    private let unreadStore: ForYouUnreadStore
+    /// Persists the context lens. Optional so a test can run without touching
+    /// the simulator's defaults.
+    private let contextStore: ContentContextStore?
 
-    public private(set) var format: GalleryFilter.Format = .activity
+    /// The tabs this screen has, in the pager's order. Stated here rather than
+    /// read from `ForYouPagerView.pageOrder` because that static is `@MainActor`
+    /// by inference (a `UIView` subclass's are) and this type answers off it in
+    /// tests; `ForYouTabOrderTests` pins the two together.
+    nonisolated static let tabs: [GalleryFilter.Format] = [.media, .activity]
+
+    /// Where the screen opens. Discover — the media grid — is the landing tab.
+    nonisolated static let defaultFormat: GalleryFilter.Format = .media
+
+    public private(set) var format: GalleryFilter.Format = ForYouViewModel.defaultFormat
     public private(set) var source: DiscoverySource = .trending
+    /// The active lens. Restored from the store at init, so the surface opens
+    /// where the viewer left it.
+    public private(set) var context: ContentContext = .all
 
     /// Everything loaded so far, **in the order it is displayed**. nil = the
     /// first page is still in flight (pages report loading); a failure records
@@ -77,13 +125,50 @@ public final class ForYouViewModel {
     private var load: Task<Void, Never>?
     private var pageLoad: Task<Void, Never>?
 
-    public init(repository: any ForYouProviding, preferences: GalleryPreferences? = nil) {
+    public init(
+        repository: any ForYouProviding,
+        preferences: GalleryPreferences? = nil,
+        unreadStore: ForYouUnreadStore = ForYouUnreadStore(),
+        contextStore: ContentContextStore? = nil
+    ) {
         self.repository = repository
         self.preferences = preferences
-        if let preferences {
+        self.unreadStore = unreadStore
+        self.contextStore = contextStore
+        if let contextStore { context = contextStore.context }
+        // Two conditions, and both were learned the hard way.
+        //
+        // `hasStoredFormat` — because `preferences.format` answers `.activity`
+        // when NOTHING has been stored, which is indistinguishable from a
+        // viewer who chose Following. Without this every fresh install opened
+        // on Following rather than on Discover (seen in-sim after a clean
+        // reinstall, which is the only way to see it at all).
+        //
+        // `tabs.contains` — because an install that last sat on Short has a
+        // stored format this screen no longer has a tab for, and paging to a
+        // page the pager does not own would leave the capsule pointing at
+        // nothing.
+        if let preferences, preferences.hasStoredFormat, Self.tabs.contains(preferences.format) {
             format = preferences.format
         }
+        #if DEBUG
+        // The mock stages unread on FOLLOWING, and the tab you are looking at
+        // can never have unread by construction — everything on it has been
+        // seen. So the demo lands on Discover, which is what makes the badge it
+        // stages honest rather than a contradiction the code has to special-
+        // case. Not persisted: this is a launch argument's opinion, not the
+        // viewer's.
+        if ProcessInfo.processInfo.arguments.contains("-foryou-mock-new-activity"),
+           format == Self.badgedTab {
+            format = Self.defaultFormat
+        }
+        #endif
     }
+
+    /// The tab that carries the unread badge: Following, where new posts from
+    /// the accounts you follow land. Discover is a ranked surface with no
+    /// "since you last looked" to speak of, so it is not badged.
+    nonisolated static let badgedTab: GalleryFilter.Format = .activity
 
     public func viewDidLoad() {
         loadFirstPage(reset: false)
@@ -91,14 +176,21 @@ public final class ForYouViewModel {
 
     /// Pull-to-refresh: drops the corpus and the cursor and starts over.
     public func refresh() {
+        rearmMockNewActivity()
         loadFirstPage(reset: true)
     }
 
     /// Where the user is — a tab tap or a settled swipe. Pure state (every
     /// page is always computed), persisted for the next launch.
+    ///
+    /// Landing on a tab is also *reading* it, so this clears that tab's badge.
     public func setFormat(_ format: GalleryFilter.Format) {
         self.format = format
         preferences?.format = format
+        // Arriving on a tab IS reading it — and this is the one path a person
+        // drives, so it is also where a debug-forced badge is allowed to clear.
+        unreadStore.markSeen(format, in: posts(for: format), clearingOverride: true)
+        publishUnread()
     }
 
     /// The ordering modifier: recomputes every page locally, no round trip.
@@ -107,6 +199,22 @@ public final class ForYouViewModel {
         self.source = source
         // The one place the whole corpus legitimately reorders.
         corpus = corpus.map(source.ordering)
+        publish()
+    }
+
+    /// The lens the whole surface is read through. Local, like the ordering —
+    /// it narrows the corpus already in hand rather than asking for another.
+    ///
+    /// Both tabs move together, because the context is a statement about the
+    /// surface rather than about one page of it.
+    public func setContext(_ context: ContentContext) {
+        guard self.context != context else { return }
+        self.context = context
+        contextStore?.context = context
+        // The unread counts are derived from the VISIBLE corpus, so they have
+        // to be republished with it: a tab whose new posts are all filtered out
+        // is a tab with nothing new on it, and a dot left over from the wider
+        // context would be pointing at posts this context does not admit.
         publish()
     }
 
@@ -212,12 +320,22 @@ public final class ForYouViewModel {
         }
     }
 
-    /// The corpus under the active ordering and a given format — what a page
+    /// The corpus under the active ordering, context and format — what a page
     /// renders, and the ordered set a tile tap seeds its feed from.
+    ///
+    /// The CONTEXT is applied here, in the single read path, rather than by
+    /// narrowing `corpus` when it changes. Two reasons, and the second is the
+    /// one that matters: a stored corpus would have to be re-fetched to widen
+    /// again (switching back to Entertainment would show only what the narrower
+    /// lens had already admitted), and every derived answer in this type —
+    /// page states, empty messages, unread counts, the feed a tile seeds —
+    /// already comes through this method, so applying it once here is what
+    /// makes "the context filters both tabs" true by construction rather than
+    /// by remembering to filter in four places.
     public func posts(for format: GalleryFilter.Format) -> [GalleryPost] {
         // `corpus` is already in display order — see its note. Reading is a
         // pure filter, so nothing can reorder behind the viewer's back.
-        format.filtering(corpus ?? [])
+        format.filtering(context.filtering(corpus ?? []))
     }
 
     private func publish() {
@@ -225,24 +343,104 @@ public final class ForYouViewModel {
             if let failure { return .failed(message: failure) }
             guard corpus != nil else { return .loading }
             let posts = posts(for: format)
-            return posts.isEmpty ? .empty(message: Self.emptyMessage(format: format, source: source)) : .content(posts)
+            return posts.isEmpty
+                ? .empty(Self.emptyState(format: format, source: source, context: context))
+                : .content(posts)
         }
         onSnapshotChange?(Snapshot(activity: page(.activity), media: page(.media), short: page(.short)))
+        publishUnread()
     }
 
+    /// Recomputes every tab's badge from the corpus in hand.
+    ///
+    /// The active tab's watermark is advanced FIRST, before anything is
+    /// counted. The viewer is looking at that page, so a fetch landing under
+    /// their eyes has been seen by definition — and advancing it here means the
+    /// active tab reads zero through the same derivation as every other tab
+    /// rather than being special-cased to it. It also means leaving the tab
+    /// later cannot badge content that was on screen the whole time.
+    private func publishUnread() {
+        guard corpus != nil else { return }
+        applyMockNewActivityIfNeeded()
+        unreadStore.markSeen(format, in: posts(for: format))
+        // Only the tabs this screen HAS, not every case of the shared enum —
+        // `.short` has no tab here, and publishing a count for it would invite
+        // a badge with nowhere to sit.
+        var counts: [GalleryFilter.Format: Int] = [:]
+        for page in Self.tabs {
+            // Discover carries no badge by product decision, not by accident:
+            // a ranked feed has no "since you last looked" to count against.
+            counts[page] = page == Self.badgedTab
+                ? unreadStore.count(for: page, in: posts(for: page))
+                : 0
+        }
+        onUnreadChange?(counts)
+    }
+
+    #if DEBUG
+    /// `-foryou-mock-new-activity [n]` (n defaults to 3): back-dates the
+    /// Activity watermark so the n newest activity posts read as new.
+    ///
+    /// Armed once per LOAD, not once per publish — every page that lands would
+    /// otherwise re-back-date and the badge would never settle. A pull-to-refresh
+    /// re-arms it, which is the point: pull, and three new things are waiting.
+    ///
+    /// The badge it produces is a real derived count, so tapping Activity clears
+    /// it through `markSeen` exactly as a genuine one would.
+    private var hasArmedMockActivity = false
+
+    private func applyMockNewActivityIfNeeded() {
+        guard !hasArmedMockActivity else { return }
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let position = arguments.firstIndex(of: "-foryou-mock-new-activity") else { return }
+        let count = position + 1 < arguments.count ? Int(arguments[position + 1]) ?? 3 : 3
+        hasArmedMockActivity = true
+        // Belt and braces: `init` already moves the landing tab off Following
+        // for exactly this reason, so reaching here on Following means someone
+        // navigated there — in which case the posts really have been seen and
+        // staging them as new would be a lie the badge tells.
+        guard format != Self.badgedTab else { return }
+        unreadStore.stageUnread(count, for: Self.badgedTab, in: posts(for: Self.badgedTab))
+    }
+
+    /// Re-arms the mock so a pull produces a fresh badge.
+    private func rearmMockNewActivity() {
+        hasArmedMockActivity = false
+    }
+    #else
+    private func applyMockNewActivityIfNeeded() {}
+    private func rearmMockNewActivity() {}
+    #endif
+
     /// Names the empty combination so the blank page reads as an answer.
-    nonisolated static func emptyMessage(format: GalleryFilter.Format, source: DiscoverySource) -> String {
+    nonisolated static func emptyState(
+        format: GalleryFilter.Format,
+        source: DiscoverySource,
+        context: ContentContext = .all
+    ) -> EmptyState {
         let what = switch format {
         case .activity: "activity"
         case .media: "media"
         case .short: "short posts"
         }
-        // The source phrase sits in a different slot per case — "trending" and
-        // "recent" qualify the noun, "from people you follow" trails it.
-        return switch source {
+        // Both surviving sources are adjectives that qualify the noun. The
+        // removed `.following` case was the one that needed a trailing phrase
+        // ("...from people you follow"), which is why this used to have two
+        // shapes; if a source that is not an adjective returns, it will need
+        // its own slot again rather than being forced into this one.
+        let title = switch source {
         case .trending: "No trending \(what) yet."
         case .recent: "No recent \(what) yet."
-        case .following: "No \(what) from people you follow yet."
         }
+        // A narrowed context is very often the REASON a page is empty, and a
+        // blank screen that does not say so reads as a broken feed. Naming the
+        // lens turns "this is broken" into "this is filtered", which is the
+        // difference between a bug report and a menu tap. All adds nothing,
+        // because it filters nothing.
+        guard !context.isUnfiltered else { return EmptyState(title: title) }
+        return EmptyState(
+            title: title,
+            subtitle: "Showing \(context.title) only. Change the context to see everything."
+        )
     }
 }

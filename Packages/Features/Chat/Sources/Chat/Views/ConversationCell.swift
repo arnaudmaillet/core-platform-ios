@@ -11,16 +11,14 @@ final class ConversationCell: UITableViewCell {
     static let reuseIdentifier = "ConversationCell"
 
     private enum Metrics {
-        static let unreadDotDiameter: CGFloat = 10
     }
 
-    private let avatarView = MonogramAvatarView()
+    private let avatarView = BadgedAvatarView()
     private let titleLabel = UILabel()
     private let previewLabel = UILabel()
     private let timeLabel = UILabel()
     private let mutedIcon = UIImageView(image: UIImage(systemName: "bell.slash.fill"))
     private let pinnedIcon = UIImageView(image: UIImage(systemName: "pin.fill"))
-    private let unreadDot = UIView()
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
@@ -37,6 +35,10 @@ final class ConversationCell: UITableViewCell {
         timeLabel.text = model.timeText
         mutedIcon.isHidden = !model.isMuted
         applyUnreadStyle(model.isUnread)
+        // The COUNT, not just presence — `chat.v1` still serves no
+        // `unread_count`, so this is counted from the history tail the inbox
+        // already fetches (`Conversation.unreadCount`).
+        avatarView.setBadge(model.isUnread ? .count(model.unreadCount) : .none)
         // Pinned reads twice, at two distances: a translucent band that
         // separates the pinned block at a glance (Telegram idiom; system fill
         // colors are translucent and adapt to dark mode), and a pin glyph
@@ -66,7 +68,6 @@ final class ConversationCell: UITableViewCell {
             : .preferredFont(forTextStyle: .subheadline)
         previewLabel.textColor = isUnread ? .label : .secondaryLabel
         timeLabel.textColor = isUnread ? .label : .secondaryLabel
-        unreadDot.isHidden = !isUnread
     }
 
     private func configure() {
@@ -82,7 +83,7 @@ final class ConversationCell: UITableViewCell {
         applyUnreadStyle(false)
 
         // Status glyphs (all hidden by default): muted sits inline after the
-        // title; the unread dot and the pin share the line under the time.
+        // title, the pin under the time.
         for icon in [mutedIcon, pinnedIcon] {
             icon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .caption1)
             icon.tintColor = .secondaryLabel
@@ -91,15 +92,6 @@ final class ConversationCell: UITableViewCell {
             icon.setContentHuggingPriority(.required, for: .horizontal)
             icon.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
-
-        // The dot is the accent-tinted mark the eye catches while scanning.
-        unreadDot.backgroundColor = .tintColor
-        unreadDot.layer.cornerRadius = Metrics.unreadDotDiameter / 2
-        unreadDot.isHidden = true
-        NSLayoutConstraint.activate([
-            unreadDot.widthAnchor.constraint(equalToConstant: Metrics.unreadDotDiameter),
-            unreadDot.heightAnchor.constraint(equalToConstant: Metrics.unreadDotDiameter)
-        ])
 
         let titleRow = UIStackView(arrangedSubviews: [titleLabel, mutedIcon])
         titleRow.axis = .horizontal
@@ -111,15 +103,10 @@ final class ConversationCell: UITableViewCell {
         textColumn.axis = .vertical
         textColumn.spacing = 2
 
-        // Time over the state glyphs, all pushed to the row's trailing edge.
-        // The stack keeps its width when a glyph hides, so toggling pin or
-        // unread can never reflow the title/preview column beside it.
-        let glyphRow = UIStackView(arrangedSubviews: [pinnedIcon, unreadDot])
-        glyphRow.axis = .horizontal
-        glyphRow.alignment = .center
-        glyphRow.spacing = Spacing.xs
-
-        let statusColumn = UIStackView(arrangedSubviews: [timeLabel, glyphRow])
+        // Time over the pin, pushed to the row's trailing edge. The stack keeps
+        // its width when the glyph hides, so toggling pin can never reflow the
+        // title/preview column beside it.
+        let statusColumn = UIStackView(arrangedSubviews: [timeLabel, pinnedIcon])
         statusColumn.axis = .vertical
         statusColumn.alignment = .trailing
         statusColumn.spacing = Spacing.xs

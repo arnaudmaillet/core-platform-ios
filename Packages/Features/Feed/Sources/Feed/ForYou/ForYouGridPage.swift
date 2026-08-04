@@ -89,7 +89,9 @@ final class ForYouGridPage: UIView {
     private let playback: GridVideoPlaybackCoordinator?
     private let style: Style
     private let collectionView: UICollectionView
-    private let statusLabel = UILabel()
+    /// The centred "nothing here" block, shared with every other surface that
+    /// has to say it. Hidden unless the page is genuinely empty or failed.
+    private let emptyState = EmptyStateView()
     private let refreshControl = UIRefreshControl()
     private var showsSkeleton = false
     /// The post whose cell is standing in for a flight card and must stay
@@ -162,16 +164,17 @@ final class ForYouGridPage: UIView {
         collectionView.refreshControl = refreshControl
         collectionView.pin(to: self)
 
-        statusLabel.font = .preferredFont(forTextStyle: .subheadline)
-        statusLabel.adjustsFontForContentSizeCategory = true
-        statusLabel.textColor = .secondaryLabel
-        statusLabel.textAlignment = .center
-        statusLabel.numberOfLines = 0
-        statusLabel.constrain(in: self) { parent in
-            statusLabel.topAnchor.constraint(equalTo: parent.topAnchor, constant: 120)
-            statusLabel.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor)
-            statusLabel.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor)
-        }
+        // Centred in the page, and pinned to the page rather than to the
+        // collection view: a scroll view's centre moves with its content
+        // insets, so an empty state hung inside one drifts down as chrome is
+        // added above it. The page's own bounds do not move.
+        //
+        // Not user-interactive, so a pull-to-refresh started on top of the
+        // message still reaches the scroll view underneath — the empty state is
+        // exactly where someone reaches to pull.
+        emptyState.isUserInteractionEnabled = false
+        emptyState.isHidden = true
+        emptyState.pin(to: self)
     }
 
     @available(*, unavailable)
@@ -929,17 +932,33 @@ final class ForYouGridPage: UIView {
     func render(_ state: ForYouViewModel.PageState) {
         switch state {
         case .loading:
-            statusLabel.isHidden = true
+            emptyState.isHidden = true
             // A refresh keeps the existing rows under the spinner rather than
             // blanking to skeletons — the content is still valid until the
             // new page lands.
             apply(posts, skeleton: !refreshControl.isRefreshing && posts.isEmpty)
         case .content(let posts):
-            statusLabel.isHidden = true
+            emptyState.isHidden = true
             apply(posts, skeleton: false)
-        case .empty(let message), .failed(let message):
-            statusLabel.text = message
-            statusLabel.isHidden = false
+        case .empty(let empty):
+            emptyState.configure(
+                symbolName: style == .grid ? "photo.on.rectangle.angled" : "tray",
+                title: empty.title,
+                subtitle: empty.subtitle
+            )
+            emptyState.isHidden = false
+            apply([], skeleton: false)
+        case .failed(let message):
+            // A failure gets the one thing an empty page does not: something to
+            // press. Pull-to-refresh is already here, but a page with no rows
+            // is a page with nothing to pull, so the retry has to be visible.
+            emptyState.configure(
+                symbolName: "exclamationmark.triangle",
+                title: message,
+                actionTitle: "Try Again",
+                actionHandler: { [weak self] in self?.onRefresh?() }
+            )
+            emptyState.isHidden = false
             apply([], skeleton: false)
         }
     }

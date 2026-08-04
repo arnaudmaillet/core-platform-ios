@@ -33,7 +33,7 @@ final class MessageRequestCell: UITableViewCell {
     var onAccept: (() -> Void)?
     var onDismiss: (() -> Void)?
 
-    private let avatarView = MonogramAvatarView()
+    private let avatarView = BadgedAvatarView()
     private let nameLabel = UILabel()
     private let previewLabel = UILabel()
     private let timeLabel = UILabel()
@@ -56,6 +56,10 @@ final class MessageRequestCell: UITableViewCell {
 
     func configure(with model: ConversationDisplayModel) {
         avatarView.setMonogram(model.monogram)
+        // The same count, on the same corner, as an All row — and it clears the
+        // same way, when the viewer opens the thread and the read cursor moves.
+        avatarView.setBadge(model.isUnread ? .count(model.unreadCount) : .none)
+        applyUnreadStyle(model.isUnread)
         nameLabel.text = model.title
         previewLabel.text = Self.previewText(for: model)
         // The separator belongs to the timestamp, so a conversation with no
@@ -84,6 +88,18 @@ final class MessageRequestCell: UITableViewCell {
     /// conversation has no activity to date, so nothing is rendered at all.
     static func timestampText(for model: ConversationDisplayModel) -> String? {
         model.timeText.isEmpty ? nil : "· \(model.timeText)"
+    }
+
+    /// An unread request carries its preview in full strength and weight — the
+    /// same treatment an unread conversation gets in the All list, because it is
+    /// the same statement. Only the font and colour change, so a row settling
+    /// from unread to read cannot move the rows around it.
+    private func applyUnreadStyle(_ isUnread: Bool) {
+        let plain = UIFont.preferredFont(forTextStyle: .subheadline)
+        previewLabel.font = isUnread
+            ? UIFont.systemFont(ofSize: plain.pointSize, weight: .semibold)
+            : plain
+        previewLabel.textColor = isUnread ? .label : .secondaryLabel
     }
 
     private func configure() {

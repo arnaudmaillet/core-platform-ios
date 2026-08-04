@@ -1,25 +1,42 @@
 import ChatInterface
 import CoreNavigation
+import DesignSystem
 import UIKit
 
-/// The Messages tab's root: a fixed navigation bar over a glass category
-/// header over a set of horizontally paged surfaces.
+/// The Messages tab's root: one navigation bar carrying the tab capsule as its
+/// title, and a set of horizontally paged surfaces beneath it.
 ///
-/// The container owns exactly three things — the pager, the header, and the
-/// navigation bar's contents — and drives all of them from one signal, the
+/// The container owns exactly three things — the pager, the tab capsule, and
+/// the navigation bar's contents — and drives all of them from one signal, the
 /// pager's fractional page position. It holds no inbox data and knows nothing
 /// about how a page renders; every surface arrives as an `InboxSurface` and is
 /// otherwise opaque.
 ///
-/// Layout: the pager fills the whole view and the header floats above it, with
-/// `additionalSafeAreaInsets.top` reserving the header's height. Each page's
-/// list therefore insets itself below the header through the standard safe
-/// area — content scrolls *under* the glass rather than starting after it, and
-/// no page needs a single line of header-aware layout code.
+/// **The capsule is the title.** It is `navigationItem.titleView`, the same
+/// arrangement `ForYouViewController` uses, so this screen reserves no safe
+/// area of its own: the navigation bar's height already accounts for it, and
+/// each page's list insets itself through the standard safe area. Nothing
+/// floats over the content, so there is no header geometry to maintain here.
+///
+/// **Badges are a fact about the session.** Nothing here retires one: not
+/// paging between tabs, not pushing a thread, not leaving for another root tab.
+/// A cold launch builds new view models and with them new watermarks, and that
+/// is the only reset there is — see `InboxTabWatermark`.
+///
+/// **The bar is written once and never again.** Leading is Compose, trailing is
+/// the search magnifier, and both belong to the inbox as a whole rather than to
+/// any page — which is the whole point: a title view gets what the side items
+/// leave it, so a page publishing its own word there would re-measure the
+/// capsule on every tab change. What a page contributes rides its own tab: a
+/// badge, and the menu its long press offers.
 final class MessagesInboxViewController: UIViewController, MessagesInboxCategorySelecting {
     /// The inbox's surfaces, in paging order.
     private let surfaces: [any InboxSurface]
-    private let categoryBar: InboxCategoryBar
+    /// The shared glass tab capsule, hosted in the navigation bar's title slot.
+    /// It takes titles and reports an index — the category is this container's
+    /// vocabulary, not the bar's, so every call site maps one to the other
+    /// through `surfaces`.
+    private let categoryBar: PagedTabBar
     private let selectionFeedback = UISelectionFeedbackGenerator()
 
     /// Built in `viewDidLoad`, once the surfaces are children — reading a
@@ -31,19 +48,11 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// Latches the launch-argument QA sequence to one run per screen.
     private var hasRunDebugSequence = false
     #endif
-    /// Whose chrome the navigation bar is currently showing.
-    ///
-    /// This tracks the pager's DOMINANT page — the one a drag is more than
-    /// half way onto — rather than the settled page. Bar items therefore hand
-    /// over mid-drag, at the same moment the header's lens passes the halfway
-    /// mark, instead of snapping into place after the page lands.
-    private var barOwner: MessagesCategory?
-
-    private lazy var categoryBarTop = categoryBar.topAnchor.constraint(equalTo: view.topAnchor)
-
     /// Compose belongs to the inbox, not to a page: it starts a new message
     /// regardless of which surface is showing, and rides the same route seam
     /// as row selection so the contact-selection flow lands resolver-side.
+    ///
+    /// It holds the leading slot permanently — no page can displace it.
     private lazy var composeItem: UIBarButtonItem = {
         let item = UIBarButtonItem(
             image: UIImage(systemName: "square.and.pencil"),
@@ -56,6 +65,22 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// Wired by the feature builder to the router, so this view controller
     /// never navigates.
     var onCompose: (() -> Void)?
+
+    /// Every tab's badge added together, for the shell's own bar item.
+    ///
+    /// Published from here rather than computed in the shell because this is
+    /// where the parts already are: each surface reports its count as chrome,
+    /// and the tab-bar badge is that same set summed. A shell that recomputed
+    /// it would need the surfaces, their watermarks, and the rule for when a
+    /// watermark moves — three things it has no business knowing.
+    ///
+    /// It therefore follows the same lifecycle for free: arrivals raise it, and
+    /// leaving the screen retires every surface, which zeroes it.
+    var onTotalNewCountChange: ((Int) -> Void)?
+
+    /// The last count each surface published, so the total can be re-summed
+    /// without asking every surface to re-derive its own.
+    private var newCountsByCategory: [MessagesCategory: Int] = [:]
 
     /// Global search across every category, or `nil` in a composition without
     /// it (the surfaces still page, and no magnifier appears).
@@ -79,7 +104,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         precondition(!surfaces.isEmpty, "The inbox needs at least one surface")
         self.surfaces = surfaces
         self.searchResults = searchResults
-        categoryBar = InboxCategoryBar(categories: surfaces.map(\.category))
+        categoryBar = PagedTabBar(titles: surfaces.map(\.category.title), style: .navigationTitle)
         initialIndex = surfaces.firstIndex { $0.category == initialCategory } ?? 0
         super.init(nibName: nil, bundle: nil)
     }
@@ -94,7 +119,12 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Messages"
+        // No title string: the capsule occupies the slot one would have taken.
+        // The tab's own name still reads "Messages" — that lives on the `UITab`,
+        // not here.
+        navigationItem.title = nil
+        navigationItem.largeTitleDisplayMode = .never
+        navigationItem.titleView = categoryBar
         view.backgroundColor = .systemBackground
         configureSearch()
 
@@ -113,17 +143,13 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         pagerView.pin(to: view)
         for surface in surfaces { surface.didMove(toParent: self) }
 
-        // The header's height is reserved as safe area, so every page's list
-        // insets under it automatically.
-        additionalSafeAreaInsets.top = InboxCategoryBar.height
-        view.addSubview(categoryBar)
-        categoryBar.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            categoryBarTop,
-            categoryBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            categoryBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            categoryBar.heightAnchor.constraint(equalToConstant: InboxCategoryBar.height)
-        ])
+        // The bar's contents, stated once. Nothing else writes them.
+        navigationItem.leftBarButtonItem = composeItem
+
+        // NO `additionalSafeAreaInsets.top`, and no constraints for the capsule:
+        // it lives INSIDE the navigation bar, whose height already covers it.
+        // Every page's list insets under the header through the standard safe
+        // area, with nothing of ours to keep in step with it.
 
         // Wired like any system control: the bar carries the chosen segment as
         // its value and announces it, rather than handing back a closure.
@@ -147,13 +173,9 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         categoryBar.onScrubEnd = { [weak self] velocity in
             self?.pagerView.settleAfterScrub(velocityInPages: velocity)
         }
-        pagerView.onProgress = { [weak self] progress in
-            self?.categoryBar.setProgress(progress)
-            self?.updateBarOwner(forProgress: progress)
-        }
+        pagerView.onProgress = { [weak self] progress in self?.categoryBar.setProgress(progress) }
         pagerView.onSettled = { [weak self] index in self?.didSettle(on: index) }
 
-        barOwner = surfaces[pagerView.activeIndex].category
         for surface in surfaces {
             apply(surface.chrome, from: surface)
             surface.onChromeChange = { [weak self] chrome in self?.apply(chrome, from: surface) }
@@ -162,23 +184,11 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         categoryBar.setProgress(CGFloat(pagerView.activeIndex))
     }
 
-    override func viewSafeAreaInsetsDidChange() {
-        super.viewSafeAreaInsetsDidChange()
-        // `view.safeAreaInsets.top` already contains the header height added
-        // above; removing it again lands the bar exactly on the navigation
-        // bar's bottom edge, whatever chrome is present.
-        categoryBarTop.constant = view.safeAreaInsets.top - additionalSafeAreaInsets.top
-    }
-
     /// Fires at the START of a pop — including the interactive one, before any
-    /// frame is drawn — so everything the transition reveals is already in
-    /// agreement: the page shown, the lens over it, and the bar items above.
+    /// frame is drawn — so what the transition reveals is already in agreement:
+    /// the page shown and the lens over it.
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        // Claim ownership BEFORE re-asserting: that republishes progress, and
-        // an owner change there would crossfade the bar in the middle of the
-        // pop — motion the transition is already providing.
-        barOwner = activeSurface?.category
         pagerView?.reassertActivePage()
         if let surface = activeSurface { apply(surface.chrome, from: surface) }
     }
@@ -220,14 +230,31 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         }
         runSearchDebugSequence(arguments)
 
-        // `-inbox-edit` puts the active surface into multi-selection editing ~2s
-        // in, through the surface's own `setEditing` — the same path its Edit
-        // item takes. Bar items can't be tapped headlessly, and this is the one
-        // state where the container has to WITHDRAW the magnifier rather than
-        // just redraw around it.
-        if arguments.contains("-inbox-edit") {
+        // `-tabbar-shape-watch` samples the capsule's shape twice a second and
+        // prints it. The shape's two halves fail SEPARATELY — clipping switched
+        // off leaves the radius reading correct while the bar draws as a
+        // rectangle — so a screenshot cannot tell you which one broke, and the
+        // context menu's lift is the thing that breaks one of them.
+        if arguments.contains("-tabbar-shape-watch") {
+            Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+                guard let self else { return }
+                let shape = categoryBar.debugCapsuleShape
+                print(String(
+                    format: "[capsule] radius=%.1f height=%.1f effect=%@ clips=%@",
+                    shape.radius, shape.height,
+                    shape.hasEffect ? "yes" : "NO", shape.clips ? "yes" : "NO"
+                ))
+            }
+        }
+
+        // `-inbox-compose` fires the leading item's action ~2s in, through the
+        // same closure the button invokes. Compose moved from the trailing slot
+        // to the leading one when the tabs took the title, and a bar item that
+        // renders in its new place but no longer reaches the router looks
+        // identical in a screenshot.
+        if arguments.contains("-inbox-compose") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                self?.activeSurface?.setEditing(true, animated: true)
+                self?.onCompose?()
             }
         }
         #endif
@@ -265,18 +292,26 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
     // MARK: - Search
 
-    /// Global search, collapsed to a magnifier in the bar's trailing slot until
-    /// tapped — `.integratedButton`, which is UIKit's own name for exactly that
-    /// behaviour.
+    /// Global search, as a magnifier in the bar's trailing slot that expands in
+    /// place when tapped — `.integratedButton`, UIKit's own name for that.
     ///
-    /// The placement is chosen for this screen specifically. A `.stacked` field
-    /// would be the obvious pick on a plain list root, but its collapse is driven
-    /// by the navigation controller's tracked scroll view — and the first one
-    /// UIKit finds here is the PAGER's, whose vertical offset never moves. The
-    /// field would sit permanently expanded, costing ~52pt on top of the 54pt
-    /// the glass header already reserves. `.integratedButton` has no relationship
-    /// to any scroll view, so the pager is simply irrelevant to it, and it costs
-    /// nothing at rest.
+    /// **It is the trailing item, on every tab, and it never changes size.**
+    /// That is the point: a glyph measures the same whatever page is showing,
+    /// so the title slot the tab capsule lives in is one number instead of four
+    /// (252 / 239.7 / 228.7 / ~190pt, depending on which page's word was in the
+    /// slot). The capsule is therefore laid out once and never re-measured by
+    /// paging.
+    ///
+    /// A `.stacked` field — a permanent row under the title — was built and
+    /// removed. It cost a whole row of chrome for an affordance that is one tap
+    /// away here, and it brought a defect with it: its collapse is driven by
+    /// the tracked scroll view, which on this screen is the PAGER's, whose
+    /// `contentOffset.y` never moves. So the field could be collapsed by a
+    /// push and had nothing that could ever scroll it back open — it vanished
+    /// for good after backing out of a thread, and only
+    /// `hidesSearchBarWhenScrolling = false` held it in place.
+    /// `.integratedButton` has no scroll-view relationship at all, so that
+    /// whole class of bug is simply absent.
     private func configureSearch() {
         guard let searchResults else { return }
         searchController.searchBar.placeholder = "Search"
@@ -287,9 +322,10 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // back out via `updateSearchResults`, so an emptied field returns to the
         // prompt by the same path typing narrowed it.
         searchController.searchBar.searchTextField.clearButtonMode = .whileEditing
-        // The bar stays put while the field is active — under `.integratedButton`
-        // the field expands INSIDE it, so hiding the bar would take the field
-        // being typed into with it.
+        // The bar STAYS while the field is active: under `.integratedButton` the
+        // field expands inside the bar itself, so hiding the bar would take the
+        // field being typed into with it. The results are presented over
+        // everything anyway, so the tabs behind them assert nothing.
         searchController.hidesNavigationBarDuringPresentation = false
         // Left to UIKit deliberately: touching `showsCancelButton` flips this to
         // NO and hands us the job of showing and hiding it. Under
@@ -308,29 +344,14 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         searchResults.onWillOpenResult = { [weak self] in self?.searchController.isActive = false }
 
         // Presented in THIS view controller's context, which is what puts the
-        // results over the pager and the floating category bar both, rather than
-        // over the window. Nothing has to hide the header: it is simply covered,
-        // and with it every suggestion that the query has a tab-shaped scope.
+        // results over the pager rather than over the window. Nothing has to hide
+        // the header: it is simply covered, and with it every suggestion that the
+        // query has a tab-shaped scope.
         definesPresentationContext = true
-        setSearchAvailable(true)
-    }
 
-    /// Shows or withholds the magnifier. Idempotent; re-run on every chrome change.
-    ///
-    /// Withheld while a surface is editing. That surface publishes two batch
-    /// actions into the trailing slot, and a magnifier beside them makes three
-    /// items plus a title — which truncates on a 402pt bar, the same crowding
-    /// `InboxSurfaceChrome.title` was shaped around. Editing is also a mode about
-    /// the rows in front of you, so a global search is the wrong offer to make.
-    private func setSearchAvailable(_ available: Bool) {
-        guard searchResults != nil else { return }
-        guard available else {
-            guard navigationItem.searchController != nil else { return }
-            searchController.isActive = false
-            navigationItem.searchController = nil
-            return
-        }
-        guard navigationItem.searchController == nil else { return }
+        // Mounted once. Nothing withdraws it any more: the magnifier is the
+        // trailing item on every tab, in every state, which is what makes the
+        // title slot beside it a fixed width.
         navigationItem.searchController = searchController
         navigationItem.preferredSearchBarPlacement = .integratedButton
         // No toolbar hand-off: `UINavigationController` transfers a screen's
@@ -367,78 +388,47 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     private func didSettle(on index: Int) {
         selectionFeedback.selectionChanged()
         categoryBar.setProgress(CGFloat(index))
-        if let surface = activeSurface {
-            apply(surface.chrome, from: surface)
-            surface.surfaceDidBecomeActive()
-        }
+        guard let surface = activeSurface else { return }
+        // ⚠️ Paging between tabs does NOT resign anything. A badge is how the
+        // header answers "what happened while I was away", and the tabs are
+        // read against each other — switching to Requests to see what is there
+        // and finding All's count gone is losing the comparison you switched
+        // for. Only leaving the screen retires them; see `viewWillDisappear`.
+        apply(surface.chrome, from: surface)
+        surface.surfaceDidBecomeActive()
     }
 
     // MARK: - Chrome
 
-    /// Hands the navigation bar over to whichever page the drag is now more
-    /// than half onto, crossfading as it goes.
+    /// Applies one surface's published chrome: the count on its tab.
     ///
-    /// Driven by the pager's fractional position rather than its settle, so
-    /// "Edit" and "Clear All" trade places at the same moment the header's
-    /// lens crosses between their segments — and dragging back and forth
-    /// crossfades back and forth with it, instead of holding the old items and
-    /// snapping once the page lands.
-    private func updateBarOwner(forProgress progress: CGFloat) {
-        let index = Int(progress.rounded())
-        guard surfaces.indices.contains(index) else { return }
-        let surface = surfaces[index]
-        guard surface.category != barOwner else { return }
-        barOwner = surface.category
-        applyChrome(surface.chrome, animated: true)
-    }
-
-    /// Applies one surface's published chrome. Badges land whoever sent them;
-    /// bar items belong to whichever surface currently owns the bar.
-    ///
-    /// Not animated: this is the in-place path — a badge count arriving, or
-    /// the selection counter ticking while editing. Animating those would
-    /// crossfade the whole bar on every row tap.
+    /// It lands on the SEGMENT that published it, so it works whether or not
+    /// that page is the one on screen — and it does not touch the navigation
+    /// bar. The bar is written once, in `viewDidLoad`, and never again: its two
+    /// glyphs belong to the inbox rather than to any page, which is what keeps
+    /// the capsule between them one width instead of four. A page that wants to
+    /// offer something offers it on its own tab.
     private func apply(_ chrome: InboxSurfaceChrome, from surface: any InboxSurface) {
-        categoryBar.setBadge(chrome.badgeCount, for: surface.category)
-        guard surface.category == barOwner else { return }
-        applyChrome(chrome, animated: false)
+        guard let index = surfaces.firstIndex(where: { $0.category == surface.category }) else { return }
+        setBadge(chrome.badgeCount, at: index)
+        newCountsByCategory[surface.category] = chrome.badgeCount
+        onTotalNewCountChange?(newCountsByCategory.values.reduce(0, +))
     }
 
-    private func applyChrome(_ chrome: InboxSurfaceChrome, animated: Bool) {
-        let write = {
-            self.title = chrome.title ?? "Messages"
-            self.navigationItem.leftBarButtonItem = chrome.leadingBarItem
-            self.navigationItem.rightBarButtonItems = chrome.trailingBarItems.isEmpty
-                ? [self.composeItem]
-                : chrome.trailingBarItems
-            // Inside the crossfade with everything else in the bar: the
-            // magnifier arriving or leaving is the same kind of change as
-            // Edit becoming Cancel, and animating it separately would put two
-            // animations on one bar in one frame.
-            self.setSearchAvailable(!chrome.locksPaging)
-        }
-        // Editing freezes paging: a half-made selection has no good outcome if
-        // the page slides away under it, and the batch actions on screen
-        // belong to the surface being edited. Outside the crossfade — it is
-        // state, not appearance.
-        pagerView?.isPagingEnabled = !chrome.locksPaging
-        categoryBar.isUserInteractionEnabled = !chrome.locksPaging
-
-        // The bar is crossfaded as a whole rather than each item's alpha being
-        // driven: a `UIBarButtonItem` has no alpha, and wrapping items in
-        // custom views to get one would forfeit the system's Liquid Glass
-        // capsules — the same double-material trap `GlassSegmentRow`
-        // documents. `.allowUserInteraction` keeps the swipe under the
-        // viewer's control while the fade runs.
-        guard animated, view.window != nil, let bar = navigationController?.navigationBar else {
-            write()
-            return
-        }
-        UIView.transition(
-            with: bar,
-            duration: 0.22,
-            options: [.transitionCrossDissolve, .allowUserInteraction, .beginFromCurrentState],
-            animations: write
-        )
+    /// Stamps a count on a segment and re-settles the navigation bar around it.
+    ///
+    /// ⚠️ A badge changes the capsule's WIDTH, and a navigation bar caches the
+    /// size of its title view — the capsule's own `invalidateIntrinsicContentSize`
+    /// is not enough, and frame and content drift apart the moment a count
+    /// appears or clears (`ForYouViewController.applyBadges` documents the
+    /// measured symptom). This has no equivalent in the floating arrangement
+    /// this screen used to wear, where the bar's width was the screen's and
+    /// nothing had to be told about it.
+    private func setBadge(_ count: Int, at index: Int) {
+        categoryBar.setBadge(count, at: index)
+        categoryBar.sizeToFit()
+        navigationController?.navigationBar.setNeedsLayout()
+        navigationController?.navigationBar.layoutIfNeeded()
     }
+
 }

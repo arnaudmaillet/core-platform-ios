@@ -3,38 +3,44 @@ import Foundation
 import MediaCore
 import PostGrid
 
-/// The For You tab's source axis — what the filter tray's drop-down picks.
+/// The For You tab's source axis — what the navigation bar's drop-down picks.
 ///
 /// This is the discovery counterpart of the profile gallery's
 /// `GalleryFilter.Source`, and deliberately a separate enum: the profile asks
 /// "whose posts am I looking at" (own / reposts / tagged), which means nothing
-/// on a curated surface. The *format* axis (Activity / Media / Short) is shared
-/// — see `GalleryFilter.Format`.
+/// on a curated surface. The *format* axis is shared — see
+/// `GalleryFilter.Format`.
 ///
-/// ⚠️ **All three read the same corpus today.** There is no recommendation or
+/// ⚠️ **Both read the same corpus today.** There is no recommendation or
 /// discovery RPC in the contracts — `timeline.v1` exposes only
 /// `GetFollowingFeed` and `GetAudioFeed` — so the tab is served by the
-/// following timeline and these are three ORDERINGS of it, not three feeds.
-/// `.following` is the timeline's own order, `.recent` sorts by publication and
-/// `.trending` by reactions. See `dev/BACKEND_GAPS.md` §14; when a real
-/// discovery endpoint lands, this enum is the seam that picks between corpora
-/// and the ordering falls away.
+/// following timeline and these are ORDERINGS of it, not separate feeds.
+/// `.recent` sorts by publication and `.trending` by reactions. See
+/// `dev/BACKEND_GAPS.md` §14; when a real discovery endpoint lands, this enum
+/// is the seam that picks between corpora and the ordering falls away.
+///
+/// ❌ **There was a third case, `.following` — the timeline's own order,
+/// unmodified — and it was REMOVED (2026-08-03), not lost.** The screen's tabs
+/// became Discover / Following in the same change, and a source called
+/// "Following" sitting beside a tab called "Following" named two independent
+/// axes with one word: the pair could be set to disagree (the Following tab
+/// showing Trending-ordered posts) and no label on screen explained which was
+/// which. Re-adding it needs a different name, not a different menu position —
+/// and note it was also the only case that ordered nothing, so what it offered
+/// was "however the server happened to answer", which is not a choice a viewer
+/// can reason about.
 public enum DiscoverySource: Equatable, Sendable, CaseIterable {
     /// Most-reacted first. Ranked over what has been LOADED, not globally —
     /// see the note above.
     case trending
     /// Newest first.
     case recent
-    /// The timeline's own order, unmodified.
-    case following
 
     /// Applies the ordering. Stable within equal keys (`sorted(by:)` is not
     /// guaranteed stable, so ties break on publication then id — otherwise a
     /// page append could reshuffle rows the user is already looking at).
     func ordering(_ posts: [GalleryPost]) -> [GalleryPost] {
         switch self {
-        case .following:
-            posts
         case .recent:
             posts.sorted { ($0.publishedAtMS, $0.id.rawValue) > ($1.publishedAtMS, $1.id.rawValue) }
         case .trending:

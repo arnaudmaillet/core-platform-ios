@@ -3,32 +3,17 @@ import UIKit
 
 /// Everything a surface asks the inbox container to render on its behalf.
 ///
-/// Bar items live here rather than on the surface's own `navigationItem`
-/// because a paged child has no navigation bar of its own — the container's is
-/// the only one on screen. Publishing them as data (instead of letting pages
-/// reach for shared chrome) keeps the container the single writer of the
-/// navigation bar, which is what makes "who owns the header" answerable.
+/// It is deliberately small, and it got smaller: pages used to publish bar
+/// items too, and a paged child has no navigation bar of its own, so the
+/// container wrote them on its behalf. That is gone. The navigation bar's two
+/// glyphs belong to the inbox as a whole and never change, which is what keeps
+/// the tab capsule between them a fixed width — so what a PAGE contributes is
+/// only what rides its own tab.
 struct InboxSurfaceChrome {
-    /// Navigation bar title while this surface is active; `nil` keeps the
-    /// inbox's own "Messages". Editing uses it for the selection count, which
-    /// is where a count belongs: hanging it off the action ("Delete (2)")
-    /// crowds the bar enough to truncate the title on a 402pt screen.
-    var title: String?
-    /// Leading bar item while this surface is active; `nil` for none.
-    var leadingBarItem: UIBarButtonItem?
-    /// Trailing bar items while active, in `rightBarButtonItems` order
-    /// (first = outermost). Empty yields the container's compose item, which
-    /// belongs to the inbox as a whole rather than to any page. Editing
-    /// surfaces publish their batch actions here, which is why this is a list:
-    /// every tab's edit mode offers two.
-    var trailingBarItems: [UIBarButtonItem] = []
     /// Count stamped beside this surface's segment title; 0 hides the badge.
     /// Honoured whether or not the surface is active — that is the point of a
     /// badge.
     var badgeCount: Int = 0
-    /// Suspends paging while true (a half-made multi-selection has no sensible
-    /// outcome if the page slides away under it).
-    var locksPaging = false
 }
 
 /// The contract between the inbox container and one of its paged surfaces.
@@ -45,8 +30,8 @@ protocol InboxSurface: UIViewController {
     /// The current chrome. Read when the surface becomes active, and again on
     /// every `onChromeChange`.
     var chrome: InboxSurfaceChrome { get }
-    /// Fired whenever the chrome changes — entering editing, a badge count
-    /// landing, a selection emptying.
+    /// Fired whenever the chrome changes — which today means a badge count
+    /// landing.
     var onChromeChange: ((InboxSurfaceChrome) -> Void)? { get set }
 
     /// The page became the active one (settled swipe, header tap, or the
@@ -54,6 +39,7 @@ protocol InboxSurface: UIViewController {
     /// again every time the user pages back, so surfaces that load eagerly
     /// simply no-op here and lazy ones guard their first load.
     func surfaceDidBecomeActive()
+
 }
 
 extension MessagesCategory {

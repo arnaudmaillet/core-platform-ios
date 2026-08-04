@@ -14,6 +14,7 @@ private func conversation(
     lastMessageIsMine: Bool = false,
     hasActivity: Bool = true,
     isUnread: Bool = false,
+    unreadCount: Int = 0,
     activityAt: Date = Date(timeIntervalSince1970: 0)
 ) -> Conversation {
     Conversation(
@@ -24,7 +25,16 @@ private func conversation(
         otherMemberIDs: (peers ?? [peer].compactMap(\.self)).map { ProfileID($0) },
         lastMessageIsMine: lastMessageIsMine,
         lastMessageID: "\(id)-latest",
-        isUnread: isUnread
+        isUnread: isUnread,
+        unreadCount: unreadCount
+    )
+}
+
+private func displayModel(_ id: String, isUnread: Bool) -> ConversationDisplayModel {
+    ConversationDisplayModel(
+        conversation: conversation(id, isUnread: isUnread, unreadCount: isUnread ? 1 : 0),
+        isUnread: isUnread,
+        unreadCount: isUnread ? 1 : 0
     )
 }
 
@@ -123,6 +133,14 @@ private struct StubRelations: PeerRelationProviding {
 }
 
 private struct StubError: Error {}
+
+/// A clock a test can move, for the view models that take `now` as a closure.
+/// A frozen one cannot express "…and then the viewer came back", which is the
+/// only interesting thing about a watermark.
+private final class MovableClock: @unchecked Sendable {
+    var now: Date
+    init(_ now: Date) { self.now = now }
+}
 
 private extension Conversation {
     /// The same conversation with its unread flag cleared, as a server that
@@ -346,9 +364,33 @@ struct SuggestionRankerTests {
 
 @MainActor
 struct InboxCatalogTests {
+    /// ⚠️ Fixed-duration, and therefore a source of flakiness: it waits for the
+    /// CLOCK, not for the work. 50ms was enough until it wasn't — on the first
+    /// run after a build, four different tests in this file have been seen to
+    /// fail with empty snapshots (the load simply had not landed yet), each
+    /// passing on every re-run. The budget is now spread over several rounds,
+    /// which covers the observed window with room to spare.
+    ///
+    /// Prefer `settle(until:)` for anything new: it waits for the condition the
+    /// test is actually about, and returns as soon as it holds.
     private func settle() async {
-        await Task.yield()
-        try? await Task.sleep(for: .milliseconds(50))
+        for _ in 0..<8 {
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+    }
+
+    /// Waits for a condition instead of for the clock.
+    ///
+    /// `settle()` sleeps a fixed 50ms, which is enough right up until the
+    /// machine is busy. Polling also means the work has LANDED when the test
+    /// ends, rather than being left in flight to slow whatever runs next.
+    private func settle(until condition: @escaping () async -> Bool) async {
+        for _ in 0..<200 {
+            if await condition() { return }
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(5))
+        }
     }
 
     @Test func loadPartitionsActiveConversationsFromRequests() async {
@@ -494,7 +536,11 @@ struct InboxCatalogTests {
         _ = token
     }
 
-    @Test func unreadIsTheUnreadSubsetOfTheActiveList() async {
+    /// Unread spans BOTH partitions. It was active-only while unread was a
+    /// question only the All list asked; the Requests rows now wear the same
+    /// bold preview and avatar count, and a request nobody has opened is unread
+    /// by exactly the same test.
+    @Test func unreadCoversRequestsAsWellAsActiveConversations() async {
         let catalog = InboxCatalog(
             repository: StubInboxProvider(conversations: [
                 conversation("read", peer: "friend"),
@@ -509,8 +555,8 @@ struct InboxCatalogTests {
         await settle()
 
         #expect(latest?.active.map(\.id) == [ConversationID("read"), ConversationID("unread")])
-        #expect(latest?.unreadIDs == [ConversationID("unread")])
         #expect(latest?.requests.map(\.id) == [ConversationID("unread-request")])
+        #expect(latest?.unreadIDs == [ConversationID("unread"), ConversationID("unread-request")])
         _ = token
     }
 
@@ -803,29 +849,6 @@ struct InboxCatalogTests {
         _ = token
     }
 
-    @Test func clearingAllRequestsEmptiesThemInOneProjection() async {
-        let catalog = InboxCatalog(
-            repository: StubInboxProvider(conversations: [
-                conversation("r1", peer: "a"), conversation("r2", peer: "b"),
-                conversation("active", peer: "friend", lastMessageIsMine: true)
-            ]),
-            relations: StubRelations(followed: [ProfileID("friend")])
-        )
-        var emissions = 0
-        var latest: InboxCatalog.Snapshot?
-        let token = catalog.observe { latest = $0; emissions += 1 }
-        catalog.reload()
-        await settle()
-        let before = emissions
-
-        catalog.declineAll()
-
-        #expect(latest?.requests.isEmpty == true)
-        #expect(latest?.active.map(\.id) == [ConversationID("active")]) // untouched
-        #expect(emissions == before + 1) // one projection, not one per request
-        _ = token
-    }
-
     @Test func pinningHoistsWithinTheActiveListOnly() async {
         let catalog = InboxCatalog(
             repository: StubInboxProvider(conversations: [
@@ -849,9 +872,20 @@ struct InboxCatalogTests {
 
 @MainActor
 struct InboxSurfaceViewModelTests {
+    /// ⚠️ Fixed-duration, and therefore a source of flakiness: it waits for the
+    /// CLOCK, not for the work. 50ms was enough until it wasn't — on the first
+    /// run after a build, four different tests in this file have been seen to
+    /// fail with empty snapshots (the load simply had not landed yet), each
+    /// passing on every re-run. The budget is now spread over several rounds,
+    /// which covers the observed window with room to spare.
+    ///
+    /// Prefer `settle(until:)` for anything new: it waits for the condition the
+    /// test is actually about, and returns as soon as it holds.
     private func settle() async {
-        await Task.yield()
-        try? await Task.sleep(for: .milliseconds(50))
+        for _ in 0..<8 {
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(25))
+        }
     }
 
     /// The whole point of the shared catalog: one load, two projections, and a
@@ -871,21 +905,28 @@ struct InboxSurfaceViewModelTests {
         list.viewWillAppear()
         await settle()
         #expect(listPhase == .empty)
-        #expect(requests.count == 1)
+        guard case .content(let pendingSections) = requestsPhase else {
+            Issue.record("expected a pending request, got \(String(describing: requestsPhase))")
+            return
+        }
+        let pending = pendingSections.all
+        #expect(pending.map(\.id) == [ConversationID("request")])
 
         requests.accept(ConversationID("request"))
-        guard case .content(let rows) = listPhase else {
+        guard case .content(let rowsSections) = listPhase else {
             Issue.record("expected content, got \(String(describing: listPhase))")
             return
         }
+        let rows = rowsSections.all
         #expect(rows.map(\.id) == [ConversationID("request")])
         #expect(requestsPhase == .empty)
-        #expect(requests.count == 0)
     }
 
-    /// Unread is marked IN the All list now, not split into a tab: the rows
-    /// stay put and carry a flag, and the count rides the All tab.
-    @Test func unreadRowsAreFlaggedInPlaceAndCounted() async {
+    /// Unread is marked IN the All list, not split into a tab: the rows stay
+    /// put and carry a flag. That flag is what the row's avatar badge and bold
+    /// text are drawn from — it is NOT what the tab badge counts, which is
+    /// arrivals since the last visit (`InboxTabWatermark`).
+    @Test func unreadRowsAreFlaggedInPlace() async {
         let provider = StubInboxProvider(conversations: [
             conversation("read", peer: "friend"),
             conversation("unread", peer: "friend", isUnread: true)
@@ -895,23 +936,20 @@ struct InboxSurfaceViewModelTests {
             relations: StubRelations(followed: [ProfileID("friend")])
         )
         let list = ConversationListViewModel(catalog: catalog)
-        var counts: [Int] = []
         var phase: ConversationListViewModel.Phase?
-        list.onUnreadCountChange = { counts.append($0) }
         list.onPhaseChange = { phase = $0 }
 
         list.viewWillAppear()
         await settle()
 
-        guard case .content(let rows) = phase else {
+        guard case .content(let rowsSections) = phase else {
             Issue.record("expected content, got \(String(describing: phase))")
             return
         }
+        let rows = rowsSections.all
         // Both rows are present; only one is flagged.
         #expect(rows.map(\.id) == [ConversationID("read"), ConversationID("unread")])
         #expect(rows.map(\.isUnread) == [false, true])
-        #expect(counts == [1])
-        #expect(list.unreadCount == 1)
     }
 
     /// Reading it clears the flag and the count without removing the row —
@@ -933,31 +971,132 @@ struct InboxSurfaceViewModelTests {
 
         catalog.markRead(ConversationID("a"))
 
-        guard case .content(let rows) = phase else {
+        guard case .content(let rowsSections) = phase else {
             Issue.record("expected content, got \(String(describing: phase))")
             return
         }
+        let rows = rowsSections.all
         #expect(rows.count == 2)
         #expect(rows.map(\.isUnread) == [false, true])
-        #expect(list.unreadCount == 1)
     }
 
-    @Test func requestCountEmitsForTheHeaderBadge() async {
+    /// The Requests badge counts ARRIVALS SINCE THE APP OPENED, not pending
+    /// totals — and nothing in the session takes it away.
+    ///
+    /// The watermark opens at the view model's `now`, so a `now` before the
+    /// fixtures' activity is what makes them read as having arrived since.
+    @Test func theRequestsBadgeCountsArrivalsAndHoldsThem() async {
         let catalog = InboxCatalog(
             repository: StubInboxProvider(conversations: [
                 conversation("r1", peer: "a"), conversation("r2", peer: "b")
             ]),
             relations: StubRelations()
         )
-        let requests = MessageRequestsViewModel(catalog: catalog)
+        let requests = MessageRequestsViewModel(
+            catalog: catalog, now: { Date(timeIntervalSince1970: -1) }
+        )
         var counts: [Int] = []
-        requests.onCountChange = { counts.append($0) }
+        requests.onNewCountChange = { counts.append($0) }
         requests.refresh()
         await settle()
 
         #expect(counts == [2])
-        requests.decline(ConversationID("r1"))
-        #expect(counts == [2, 1])
+        #expect(requests.newCount == 2)
+
+        // A reload is the closest thing to "the viewer did something": the
+        // count must come back the same.
+        requests.refresh()
+        await settle()
+        #expect(requests.newCount == 2)
+        #expect(counts == [2])
+    }
+
+    /// The badge and the SECTION are the watermark's answer — what arrived
+    /// since the app opened — and nothing in the session takes either away.
+    ///
+    /// ⚠️ Deliberately not asserted through `isUnread` any more. That flag is
+    /// the READ CURSOR now, the same as on the All list, so a request the
+    /// fixtures never marked unread is not bold — and the row's section is a
+    /// different question with a different answer.
+    @Test func theBadgeAndItsSectionSurviveWhileTheTabIsOpen() async {
+        let catalog = InboxCatalog(
+            repository: StubInboxProvider(conversations: [
+                conversation("r1", peer: "a"), conversation("r2", peer: "b")
+            ]),
+            relations: StubRelations()
+        )
+        let clock = MovableClock(Date(timeIntervalSince1970: -1))
+        let requests = MessageRequestsViewModel(catalog: catalog, now: { clock.now })
+        var phase: MessageRequestsViewModel.Phase?
+        requests.onPhaseChange = { phase = $0 }
+        requests.refresh()
+        await settle()
+
+        guard case .content(let sections) = phase else {
+            Issue.record("expected content, got \(String(describing: phase))")
+            return
+        }
+        #expect(requests.newCount == 2)
+        #expect(sections.new.count == 2)
+        #expect(sections.earlier.isEmpty)
+    }
+
+    /// Opening a request is what un-bolds it: the thread moves the read cursor,
+    /// the catalog drops it from the unread set, and the row comes back plain
+    /// with no count on its avatar — exactly what an All row does.
+    @Test func readingARequestClearsItsBoldPreviewAndCount() async {
+        let catalog = InboxCatalog(
+            repository: StubInboxProvider(conversations: [
+                conversation("r1", peer: "a", isUnread: true, unreadCount: 3),
+                conversation("r2", peer: "b", isUnread: true, unreadCount: 2)
+            ]),
+            relations: StubRelations()
+        )
+        let requests = MessageRequestsViewModel(catalog: catalog)
+        var phase: MessageRequestsViewModel.Phase?
+        requests.onPhaseChange = { phase = $0 }
+        requests.refresh()
+        await settle()
+
+        guard case .content(let before) = phase else {
+            Issue.record("expected content, got \(String(describing: phase))")
+            return
+        }
+        #expect(before.all.map(\.isUnread) == [true, true])
+        #expect(before.all.map(\.unreadCount) == [3, 2])
+
+        // What the thread screen reports when it is opened.
+        catalog.markRead(ConversationID("r1"))
+
+        guard case .content(let after) = phase else {
+            Issue.record("expected content, got \(String(describing: phase))")
+            return
+        }
+        #expect(after.all.map(\.isUnread) == [false, true])
+        #expect(after.all.map(\.unreadCount) == [0, 2])
+        // The row stays put: reading it is not the same as it never arriving.
+        #expect(after.all.map(\.id) == before.all.map(\.id))
+
+        // ⚠️ And because it stays put, the LIST has to be told. The row's id is
+        // unchanged, so the diff between these two states is empty and a
+        // diffable list re-renders nothing unless the changed row is named. A
+        // correct projection that never reaches the cell is the bug this half
+        // of the round trip exists to catch — it is what actually shipped on
+        // Requests while every model-level assertion above passed.
+        let previous = Dictionary(uniqueKeysWithValues: before.all.map { ($0.id, $0) })
+        #expect(
+            InboxRowDiff.changedRows(in: after.all, against: previous) == [ConversationID("r1")]
+        )
+    }
+
+    @Test func anUnchangedRowIsNotReRendered() {
+        let rows = [displayModel("r1", isUnread: true), displayModel("r2", isUnread: false)]
+        let previous = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
+        #expect(InboxRowDiff.changedRows(in: rows, against: previous).isEmpty)
+        // A row the list has never shown is inserted by the diff, not
+        // reconfigured — asking for both is a UIKit exception waiting to happen.
+        let arrival = rows + [displayModel("r3", isUnread: true)]
+        #expect(InboxRowDiff.changedRows(in: arrival, against: previous).isEmpty)
     }
 
     @Test func openingARequestRoutesToItsThread() async {
@@ -979,9 +1118,20 @@ struct InboxSurfaceViewModelTests {
 
 @MainActor
 struct SuggestionsViewModelTests {
+    /// ⚠️ Fixed-duration, and therefore a source of flakiness: it waits for the
+    /// CLOCK, not for the work. 50ms was enough until it wasn't — on the first
+    /// run after a build, four different tests in this file have been seen to
+    /// fail with empty snapshots (the load simply had not landed yet), each
+    /// passing on every re-run. The budget is now spread over several rounds,
+    /// which covers the observed window with room to spare.
+    ///
+    /// Prefer `settle(until:)` for anything new: it waits for the condition the
+    /// test is actually about, and returns as soon as it holds.
     private func settle() async {
-        await Task.yield()
-        try? await Task.sleep(for: .milliseconds(50))
+        for _ in 0..<8 {
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(25))
+        }
     }
 
     @Test func loadIsPerformedOnceOnFirstActivation() async {
@@ -1121,41 +1271,190 @@ struct MessageRequestCellTests {
     }
 }
 
-// MARK: - Batch pin resolution
+// MARK: - List sections
 
-struct BatchPinActionTests {
-    private func resolve(_ ids: [String], pinned: Set<String>) -> BatchPinAction {
-        BatchPinAction.resolve(selected: ids.map { ConversationID($0) }) { pinned.contains($0.rawValue) }
+/// The split, and the one property that makes it trustworthy: the first
+/// section's row count IS the tab badge's number.
+@MainActor
+struct InboxListSectionTests {
+    private func settle() async {
+        for _ in 0..<8 {
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(25))
+        }
     }
 
-    @Test func anAllUnpinnedSelectionOffersPin() {
-        #expect(resolve(["a", "b"], pinned: []) == .pin)
-        #expect(resolve(["a", "b"], pinned: []).title == "Pin")
+    /// Section one and the badge come from one watermark in one view model, so
+    /// they cannot disagree — this is the assertion that says so out loud.
+    @Test func theFirstSectionHoldsExactlyWhatTheBadgeCounts() async {
+        let catalog = InboxCatalog(
+            repository: StubInboxProvider(conversations: [
+                conversation("r1", peer: "a"), conversation("r2", peer: "b")
+            ]),
+            relations: StubRelations()
+        )
+        let requests = MessageRequestsViewModel(
+            catalog: catalog, now: { Date(timeIntervalSince1970: -1) }
+        )
+        var phase: MessageRequestsViewModel.Phase?
+        requests.onPhaseChange = { phase = $0 }
+        requests.refresh()
+        await settle()
+
+        guard case .content(let sections) = phase else {
+            Issue.record("expected content, got \(String(describing: phase))")
+            return
+        }
+        #expect(sections.new.count == requests.newCount)
+        #expect(sections.earlier.isEmpty)
     }
 
-    @Test func anAllPinnedSelectionOffersUnpin() {
-        #expect(resolve(["a", "b"], pinned: ["a", "b"]) == .unpin)
-        #expect(resolve(["a", "b"], pinned: ["a", "b"]).title == "Unpin")
+    /// Nothing new means ONE section, not an empty header over the list.
+    @Test func anInboxWithNoArrivalsIsASingleSection() async {
+        let catalog = InboxCatalog(
+            repository: StubInboxProvider(conversations: [
+                conversation("r1", peer: "a"), conversation("r2", peer: "b")
+            ]),
+            relations: StubRelations()
+        )
+        // A `now` after the fixtures' activity: they were already there.
+        let requests = MessageRequestsViewModel(
+            catalog: catalog, now: { Date(timeIntervalSince1970: 10_000) }
+        )
+        var phase: MessageRequestsViewModel.Phase?
+        requests.onPhaseChange = { phase = $0 }
+        requests.refresh()
+        await settle()
+
+        guard case .content(let sections) = phase else {
+            Issue.record("expected content, got \(String(describing: phase))")
+            return
+        }
+        #expect(sections.new.isEmpty)
+        #expect(sections.earlier.count == 2)
+        #expect(requests.newCount == 0)
     }
 
-    /// The rule that matters: neither verb is honest about a mixed selection —
-    /// "Pin" would skip the pinned rows and "Unpin" would silently drop pins
-    /// the viewer never chose to lose. The button withdraws instead.
-    @Test func aMixedSelectionOffersNothing() {
-        #expect(resolve(["a", "b"], pinned: ["a"]) == .unavailable)
-        #expect(resolve(["a", "b", "c"], pinned: ["b"]) == .unavailable)
-        #expect(resolve(["a", "b", "c"], pinned: ["a", "c"]) == .unavailable)
-        #expect(resolve(["a", "b"], pinned: ["a"]).title == nil)
+    /// The split preserves the list's order, so a row does not jump when it
+    /// crosses between sections.
+    @Test func theSplitKeepsTheListsOrder() {
+        let rows = ["a", "b", "c", "d"].map {
+            ConversationDisplayModel(conversation: conversation($0), isUnread: $0 < "c")
+        }
+        let sections = InboxListSections(rows: rows, isNew: \.isUnread)
+
+        #expect(sections.new.map(\.id) == [ConversationID("a"), ConversationID("b")])
+        #expect(sections.earlier.map(\.id) == [ConversationID("c"), ConversationID("d")])
+        #expect(sections.all.map(\.id) == rows.map(\.id))
+    }
+}
+
+// MARK: - Avatar badge
+
+/// The pill on a conversation's avatar. Its geometry is otherwise only
+/// checkable by measuring a screenshot, and every failure here still renders
+/// something badge-shaped.
+@MainActor
+struct BadgedAvatarViewTests {
+    private func laidOut(_ style: BadgedAvatarView.Style) -> CGSize {
+        let view = BadgedAvatarView()
+        view.frame = CGRect(x: 0, y: 0, width: 48, height: 48)
+        view.setBadge(style)
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+        return view.badgeSize
     }
 
-    @Test func anEmptySelectionOffersNothing() {
-        #expect(resolve([], pinned: []) == .unavailable)
-        #expect(resolve([], pinned: ["a"]) == .unavailable)
+    /// One digit is a CIRCLE: the height floor wins, because a capsule narrower
+    /// than it is tall has a corner radius exceeding half its width and
+    /// degenerates — the same floor the tab capsule's lens states.
+    @Test func aSingleDigitDrawsACircle() {
+        let size = laidOut(.count(3))
+        #expect(size.width == size.height)
     }
 
-    @Test func aSingleRowResolvesByItsOwnState() {
-        #expect(resolve(["a"], pinned: []) == .pin)
-        #expect(resolve(["a"], pinned: ["a"]) == .unpin)
+    /// Two digits WIDEN it — that is the whole reason it is a capsule — without
+    /// changing its height, so a row whose count crosses ten does not move.
+    @Test func aSecondDigitWidensThePillWithoutHeighteningIt() {
+        let one = laidOut(.count(3))
+        let two = laidOut(.count(11))
+
+        #expect(two.width > one.width)
+        #expect(two.height == one.height)
+    }
+
+    /// Past 99 the text stops growing, so the pill stops too rather than
+    /// running across the face behind it.
+    @Test func theCountSaturatesRatherThanGrowingWithoutBound() {
+        let hundred = laidOut(.count(100))
+        let thousand = laidOut(.count(4_000))
+
+        #expect(hundred.width == thousand.width)
+    }
+
+    /// A dot is the same height as a count — they occupy one slot, so a surface
+    /// switching between them cannot shift the avatar beneath.
+    @Test func aDotMatchesACountsHeight() {
+        #expect(laidOut(.dot).height == laidOut(.count(1)).height)
+        #expect(laidOut(.dot).width == laidOut(.dot).height)
+    }
+}
+
+// MARK: - Tab watermark
+
+/// The rule the tab badges are built on, in isolation from any view model.
+struct InboxTabWatermarkTests {
+    private let opened = Date(timeIntervalSince1970: 1_000)
+
+    private func conversationAt(_ seconds: TimeInterval) -> Conversation {
+        conversation("c", activityAt: Date(timeIntervalSince1970: seconds))
+    }
+
+    /// A first sight is never "all new": whatever was already there when the
+    /// app opened is not an arrival. The trap `ForYouUnread` documents, and the
+    /// reason the baseline starts at the opening moment rather than at zero.
+    @Test func nothingAlreadyOnScreenCountsAsNew() {
+        let watermark = InboxTabWatermark(openedAt: opened)
+        #expect(watermark.newCount(in: [conversationAt(500), conversationAt(999)]) == 0)
+    }
+
+    @Test func anArrivalAfterTheBaselineCounts() {
+        let watermark = InboxTabWatermark(openedAt: opened)
+        #expect(watermark.newCount(in: [conversationAt(1_001), conversationAt(500)]) == 1)
+    }
+
+    /// A conversation with no activity has no arrival time, so it is a row that
+    /// has always been there rather than a new one.
+    @Test func aConversationWithNoActivityIsNeverNew() {
+        let watermark = InboxTabWatermark(openedAt: opened)
+        #expect(watermark.newCount(in: [conversation("c", hasActivity: false)]) == 0)
+    }
+
+    /// The count and the row marks are one question asked of one instant, so
+    /// they always agree about a given row.
+    @Test func theCountAndTheRowMarksAgree() {
+        let watermark = InboxTabWatermark(openedAt: opened)
+        let arrival = conversationAt(1_500)
+        let old = conversationAt(500)
+
+        #expect(watermark.newCount(in: [arrival, old]) == 1)
+        #expect(watermark.isNewOnRow(arrival))
+        #expect(!watermark.isNewOnRow(old))
+    }
+
+    /// ⚠️ There is NO way to move the baseline, and that is the design: nothing
+    /// in a session retires a badge, so the only reset is a cold launch
+    /// building a new watermark. This asserts the absence of the mutation two
+    /// earlier designs had — clearing on selection, then on leaving the screen —
+    /// both of which took the count away as a side effect of an action the
+    /// viewer took for some other reason.
+    @Test func anArrivalStaysNewForTheWholeSession() {
+        let watermark = InboxTabWatermark(openedAt: opened)
+        let arrival = conversationAt(1_500)
+
+        #expect(watermark.newCount(in: [arrival]) == 1)
+        #expect(watermark.isNewOnRow(arrival))
+        #expect(watermark.newCount(in: [arrival]) == 1)
     }
 }
 
@@ -1182,6 +1481,44 @@ struct InboxPagerTests {
 
         #expect(settled == [1])
         #expect(pager.activeIndex == 1)
+    }
+
+    /// ⚠️ A page chosen BEFORE the pager has ever been laid out — which is
+    /// every launch-time route, `-open-messages requests` and push payloads
+    /// alike — still has to be the page on screen once there is a screen.
+    ///
+    /// A zero-width pager has no offset to scroll to, so `setActivePage` can
+    /// only record the index and wait. Nothing used to pick it back up: the
+    /// header's lens sat on the routed tab while the first tab's list stayed
+    /// visible, and only a manual swipe reconciled them.
+    @Test func aPageChosenBeforeLayoutIsTheOneShownAfterIt() {
+        let pager = InboxPagerView(pages: (0..<3).map { _ in UIView() })
+        var reported: [CGFloat] = []
+        pager.onProgress = { reported.append($0) }
+
+        pager.setActivePage(1, animated: false)
+        #expect(pager.pagingScrollView.contentOffset.x == 0)
+
+        pager.frame = CGRect(x: 0, y: 0, width: 300, height: 600)
+        pager.layoutIfNeeded()
+
+        #expect(pager.pagingScrollView.contentOffset.x == 300)
+        // The lens is told too — a page the header disagrees with is the same
+        // bug wearing the other half of its face.
+        #expect(reported.last == 1)
+    }
+
+    /// Rotation moves the offset a page index does not: the same index is a
+    /// different number of points at a different width.
+    @Test func aWidthChangeKeepsTheActivePageAligned() {
+        let pager = makePager(width: 300)
+        pager.setActivePage(2, animated: false)
+        #expect(pager.pagingScrollView.contentOffset.x == 600)
+
+        pager.frame = CGRect(x: 0, y: 0, width: 500, height: 600)
+        pager.layoutIfNeeded()
+
+        #expect(pager.pagingScrollView.contentOffset.x == 1000)
     }
 
     /// Progress is continuous, not stepped: it is what the header interpolates

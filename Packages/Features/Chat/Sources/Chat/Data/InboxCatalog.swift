@@ -57,9 +57,16 @@ final class InboxCatalog {
         var phase: Phase = .loading
         /// Active conversations, most recent first, pinned hoisted to the top.
         var active: [Conversation] = []
-        /// Which of `active` the viewer hasn't read. Ids rather than rows: the
-        /// unread set marks conversations in place — a bold row, a dot, and a
-        /// count on the All tab — rather than forming a list of its own.
+        /// Which conversations the viewer hasn't read, across BOTH partitions.
+        ///
+        /// Requests are in here too. They were not, back when unread was only
+        /// ever asked about the All list — but a request nobody has opened is
+        /// unread by exactly the same test, and the Requests rows now wear the
+        /// same bold preview and avatar count the All rows do. One definition,
+        /// one read-ahead bridge, both lists.
+        ///
+        /// Ids rather than rows: the unread set marks conversations in place
+        /// rather than forming a list of its own.
         var unreadIDs: Set<ConversationID> = []
         /// Pending requests, most recent first.
         var requests: [Conversation] = []
@@ -312,15 +319,6 @@ final class InboxCatalog {
         emit()
     }
 
-    /// Declines everything currently pending, in one projection.
-    func declineAll() {
-        let pending = snapshot.requests.map(\.id)
-        guard !pending.isEmpty else { return }
-        accepted.subtract(pending)
-        declined.formUnion(pending)
-        emit()
-    }
-
     // MARK: - Projection
 
     /// One projection of the loaded conversations through every piece of
@@ -336,16 +334,16 @@ final class InboxCatalog {
         )
         let active = partition.active
         snapshot.active = active.filter { pinned.contains($0.id) } + active.filter { !pinned.contains($0.id) }
-        let readAhead = readAheadOfServer
-        snapshot.unreadIDs = Set(
-            snapshot.active.lazy
-                .filter { $0.isUnread && !readAhead.contains($0.id) }
-                .map(\.id)
-        )
         // Sorted here rather than inherited from whatever order the load
         // happened to produce: the Requests projection states its own key, so
         // its row order can't drift with an upstream change.
         snapshot.requests = partition.requests.sorted(by: Conversation.isOrderedBefore)
+        let readAhead = readAheadOfServer
+        snapshot.unreadIDs = Set(
+            (snapshot.active + snapshot.requests).lazy
+                .filter { $0.isUnread && !readAhead.contains($0.id) }
+                .map(\.id)
+        )
         snapshot.pinned = pinned
         snapshot.muted = muted
         for observer in observers.values { observer(snapshot) }

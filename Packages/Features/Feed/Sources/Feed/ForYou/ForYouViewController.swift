@@ -6,61 +6,79 @@ import MediaPlayback
 import PostGrid
 import UIKit
 
-/// The For You tab root: curated content in the shared three-format grid, with
-/// a discovery filter tray, and a tile tap opening the full-screen feed.
+/// The For You tab root: two paged surfaces — **Discover** (the media grid) and
+/// **Following** — under a tab capsule that lives IN the navigation bar, with a
+/// tile tap opening the full-screen feed.
 ///
-/// This is a **tab root**, which settles two things that would otherwise be
-/// style choices. The filter tray is hosted in this screen's own view above the
-/// bottom safe area — the navigation toolbar cannot be made to clear a tab bar
-/// (measured three ways; see `InlineFilterTrayView`) — and the tab bar stays,
-/// because it is how the viewer leaves.
+/// **The capsule is the title.** It is `navigationItem.titleView`, not a strip
+/// beneath the bar, so this screen reserves no safe area of its own and the grid
+/// starts directly under the navigation bar — one row of chrome, not two.
+/// `MessagesInboxViewController` wears the same `PagedTabBar` the same way, and
+/// everything else — fractional progress driving the lens, the capsule
+/// scrubbing the pager, badges — is shared. The one thing it does that this
+/// screen does not is stack a search field beneath the title row.
+///
+/// **The bar items are one action and one state.** Leading is `+`, which opens
+/// the composer through `AppRoute.upload`. Trailing is the `ContentContext`
+/// lens, whose glyph IS the current context — it does not offer an action, it
+/// reports what the surface is currently showing, and tapping it opens the menu
+/// to change that.
+///
+/// ⚠️ **`DiscoverySource` (Trending / Recent) has no UI entry point any more.**
+/// It used to be the leading item; `+` took that slot. The ordering still
+/// applies — everything is served under `.trending` — but nothing on screen can
+/// change it. Either fold it into the context menu as a second section or
+/// retire it; leaving it reachable only from a debug argument is not a
+/// resting state.
+///
+/// This is a **tab root**, so the tab bar stays — it is how the viewer leaves.
 final class ForYouViewController: UIViewController {
     private let viewModel: ForYouViewModel
     private let pager: ForYouPagerView
     private let makeSnapFeed: ([PostID]) -> UIViewController
     private let prewarm: ([PostID]) async -> Void
+    /// How this screen leaves itself. Weak, and held by the composition root —
+    /// the screen never builds a destination, it names one.
+    private weak var router: (any Router)?
 
-    /// The format tabs. Bare by design — `InlineFilterTrayView` supplies the
-    /// one glass capsule each control gets outside a toolbar.
-    private let formatRow = GlassSegmentRow(segments: [
-        .title("Activity"), .title("Gallery"), .title("Short")
-    ])
+    /// The tab titles, in `ForYouPagerView.pageOrder` order: Discover (the
+    /// media grid) then Following (the unfiltered page).
+    ///
+    /// They deliberately do not echo `GalleryFilter.Format`'s case names. The
+    /// enum names the content SHAPE, these name the product idea; the audit
+    /// reads this array rather than a second copy of the strings.
+    private static let tabTitles = ["Discover", "Following"]
 
-    /// The discovery axis's options, in menu order. One table so the menu, the
-    /// bubble's glyph and any programmatic selection cannot disagree about
-    /// what a source looks like.
-    private struct SourceOption {
-        let source: DiscoverySource
-        let title: String
-        let symbol: String
-    }
+    /// The tab capsule. Shared with the Messages inbox — see `PagedTabBar` for
+    /// why the lens is a tint rather than a second material.
+    private let tabBar = PagedTabBar(titles: tabTitles, style: .navigationTitle)
 
-    private static let sourceOptions: [SourceOption] = [
-        SourceOption(source: .trending, title: "Trending", symbol: "flame"),
-        SourceOption(source: .recent, title: "Recent", symbol: "clock"),
-        SourceOption(source: .following, title: "Following", symbol: "person.2")
-    ]
+    /// Compose. The leading item is an ACTION, so it is a plain glyph with a
+    /// target — no menu, no state.
+    private lazy var composeItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            image: UIImage(systemName: "plus"),
+            primaryAction: UIAction { [weak self] _ in self?.openComposer() }
+        )
+        item.accessibilityLabel = "New Post"
+        return item
+    }()
 
-    /// The discovery axis: one drop-down whose native single-selection menu
-    /// carries the options and whose bubble shows the active one's glyph.
-    /// Lazy — the menu actions capture self.
-    private lazy var sourceMenuButton = GlassMenuButton(
-        // Closure form, not a bare `map(makeSourceAction)`: passing a
-        // MainActor-isolated method as a function value strips its isolation
-        // and Swift 6 rejects it.
-        menu: UIMenu(options: .singleSelection, children: Self.sourceOptions.map { makeSourceAction($0) }),
-        accessibilityLabel: "Discovery filter"
-    )
-
-    private lazy var trayView = InlineFilterTrayView(leading: formatRow, trailing: sourceMenuButton)
+    /// The content context: the trailing item, whose menu carries the lenses
+    /// and whose GLYPH is the active one.
+    ///
+    /// The glyph doing that job is what lets the menu stay plain — see
+    /// `makeContextMenu` for why there is no checkmark in it.
+    private lazy var contextItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(image: UIImage(systemName: viewModel.context.symbol))
+        item.accessibilityLabel = "Content context"
+        item.accessibilityValue = viewModel.context.title
+        return item
+    }()
 
     /// Retains the navigation-controller delegate for the life of a flight —
     /// the stack holds its delegate weakly.
     private var activeTransition: ZoomTransitionController?
-
-    /// The tray's offset from the view's raw bottom edge. Owned rather than
-    /// delegated to the safe-area guide; see `syncTrayPosition`.
-    private var trayBottomConstraint: NSLayoutConstraint!
 
     /// How many posts a tile tap hands the feed, counting from the tapped one.
     ///
@@ -354,11 +372,13 @@ final class ForYouViewController: UIViewController {
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController? = nil,
         makeSnapFeed: @escaping ([PostID]) -> UIViewController,
-        prewarm: @escaping ([PostID]) async -> Void
+        prewarm: @escaping ([PostID]) async -> Void,
+        router: (any Router)? = nil
     ) {
         self.viewModel = viewModel
         self.makeSnapFeed = makeSnapFeed
         self.prewarm = prewarm
+        self.router = router
         pager = ForYouPagerView(imagePipeline: imagePipeline, videoPlayback: videoPlayback)
         super.init(nibName: nil, bundle: nil)
         // NOT hidesBottomBarWhenPushed: this is a tab root, and the bar is how
@@ -375,63 +395,52 @@ final class ForYouViewController: UIViewController {
         // tab here, and removing it also removes the large-title content-area
         // layout from the transition's path — which is the second reason for
         // this change, see below.
+        // No title, because the tabs ARE the title: the capsule occupies the
+        // slot a title string would have. Removing the large title also keeps
+        // the large-title content-area layout out of the hero flight's path,
+        // which is the second reason for it — see below.
         navigationItem.title = nil
         navigationItem.largeTitleDisplayMode = .never
-        // Native bar items on both sides.
-        //
-        // Partly product, partly a probe: a large title renders in the CONTENT
-        // area rather than the bar, so it participates in the layout the hero
-        // flight animates over, and the question was whether its passes were
-        // invalidating views mid-transition. Plain bar items lay out in the bar
-        // itself and cannot, so if the dismissal's frame-0 artifact survives
-        // this it is not the header — which is a real answer either way.
-        navigationItem.leftBarButtonItem = UIBarButtonItem(
-            image: UIImage(systemName: "line.3.horizontal.decrease"),
-            style: .plain, target: self, action: #selector(headerLeftTapped)
-        )
-        navigationItem.leftBarButtonItem?.accessibilityLabel = "Filters"
-        navigationItem.rightBarButtonItem = UIBarButtonItem(
-            image: UIImage(systemName: "magnifyingglass"),
-            style: .plain, target: self, action: #selector(headerRightTapped)
-        )
-        navigationItem.rightBarButtonItem?.accessibilityLabel = "Search"
+        navigationItem.titleView = tabBar
+        // Native bar items on both sides. They lay out in the bar itself, which
+        // is also what bounds the title slot the capsule now sits in — UIKit
+        // gives the slot what is left between them, so neither can be covered.
+        navigationItem.leftBarButtonItem = composeItem
+        navigationItem.rightBarButtonItem = contextItem
+        contextItem.menu = makeContextMenu()
 
         pager.pin(to: view)
-        // The tray floats over the pages, so they must be able to scroll their
-        // last row clear of it.
-        pager.trayClearance = InlineFilterTrayView.height + InlineFilterTrayView.spacingBelow * 2
 
-        view.addSubview(trayView)
-        // Pinned to the view's RAW bottom with a constant this screen owns, not
-        // to `safeAreaLayoutGuide.bottomAnchor`. The safe area animates through a
-        // pop — and worse, it reads a few points off its resting value while the
-        // pop is in flight (measured: bottom inset 86 mid-flight against 83 at
-        // rest), so a tray tied to it sits 3pt high for the whole drag and snaps
-        // down when the layout finally settles. `syncTrayPosition` tracks the
-        // safe area only while nothing is flying, which makes the constant a
-        // *resting* measurement the gesture cannot disturb.
-        trayBottomConstraint = trayView.bottomAnchor.constraint(
-            equalTo: view.bottomAnchor, constant: -InlineFilterTrayView.spacingBelow
+        // NO `additionalSafeAreaInsets.top`, and no constraints for the bar:
+        // the capsule is inside the navigation bar, so the navigation bar's own
+        // height already accounts for it and the grid starts directly beneath
+        // it. `MessagesInboxViewController` does the same.
+
+        // Wired like any system control: the bar carries the chosen segment as
+        // its value and announces it, rather than handing back a closure.
+        tabBar.addAction(
+            UIAction { [weak self] _ in
+                guard let self else { return }
+                // ONE animation drives both. The pager scrolls to the target and
+                // reports fractional progress every frame; the lens interpolates
+                // off that, so page and lens cannot disagree and there is
+                // nothing to keep in sync. The bar runs no animation of its own.
+                let format = ForYouPagerView.pageOrder[tabBar.selectedIndex]
+                viewModel.setFormat(format)
+                pager.setActivePage(format, animated: true)
+            },
+            for: .valueChanged
         )
-        NSLayoutConstraint.activate([
-            trayView.leadingAnchor.constraint(equalTo: view.layoutMarginsGuide.leadingAnchor),
-            trayView.trailingAnchor.constraint(equalTo: view.layoutMarginsGuide.trailingAnchor),
-            trayView.heightAnchor.constraint(equalToConstant: InlineFilterTrayView.height),
-            trayBottomConstraint
-        ])
-
-        formatRow.onSelect = { [weak self] index in
-            guard let self else { return }
-            let format = ForYouPagerView.pageOrder[index]
-            viewModel.setFormat(format)
-            pager.setActivePage(format, animated: true)
+        // Dragging the capsule IS dragging the pages: the bar reports a
+        // fractional page position and the pager is scrubbed to it, so the same
+        // `onProgress` loop that answers a content swipe answers this too.
+        tabBar.onScrub = { [weak self] progress in self?.pager.scrub(to: progress) }
+        tabBar.onScrubEnd = { [weak self] velocity in
+            self?.pager.settleAfterScrub(velocityInPages: velocity)
         }
+        pager.onProgress = { [weak self] progress in self?.tabBar.setProgress(progress) }
         pager.onPageSettled = { [weak self] format in
-            guard let self else { return }
-            viewModel.setFormat(format)
-            if let index = ForYouPagerView.pageOrder.firstIndex(of: format) {
-                formatRow.select(index, notify: false)
-            }
+            self?.viewModel.setFormat(format)
         }
         pager.onItemTapped = { [weak self] format, index in
             self?.openFeed(from: format, at: index)
@@ -446,14 +455,11 @@ final class ForYouViewController: UIViewController {
         }
         viewModel.onLoadSettled = { [weak self] in self?.pager.endRefreshing() }
         viewModel.onPagingChange = { [weak self] paging in self?.pager.setPaging(paging) }
+        viewModel.onUnreadChange = { [weak self] counts in self?.applyBadges(counts) }
 
         // Land on the stored format before first layout, so the screen OPENS
         // there with no visible jump.
-        let format = viewModel.format
-        if let index = ForYouPagerView.pageOrder.firstIndex(of: format) {
-            formatRow.select(index, notify: false)
-        }
-        pager.setActivePage(format, animated: false)
+        pager.setActivePage(viewModel.format, animated: false)
 
         viewModel.viewDidLoad()
 
@@ -463,29 +469,91 @@ final class ForYouViewController: UIViewController {
         #endif
     }
 
-    private func makeSourceAction(_ option: SourceOption) -> UIAction {
+    /// How For You presents an unread count: as PRESENCE, never as a number.
+    ///
+    /// The store still derives a real count — the watermark machinery is
+    /// unchanged — and this is the one place it is deliberately thrown away.
+    /// "Following ③" invites arithmetic the viewer cannot act on: the three are
+    /// not three things to open, they are a page that has moved on since they
+    /// last looked, and the useful signal is entirely in whether it has. The
+    /// Messages inbox is the opposite case and keeps its numbers: there, each
+    /// count is a conversation you can open one at a time.
+    ///
+    /// Pure and internal so a test can pin the rule rather than a screenshot.
+    static func badgeStyle(forUnread count: Int) -> PagedTabBar.BadgeStyle {
+        .dot(isVisible: count > 0)
+    }
+
+    /// Pushes the counts onto the capsule, in pager order.
+    ///
+    /// ⚠️ A badge changes the capsule's WIDTH, and a navigation bar caches the
+    /// size of its title view: `invalidateIntrinsicContentSize` alone is not
+    /// enough, and the frame and the content drift apart the moment a count
+    /// appears or clears. Measured symptom, with the strip measuring zero
+    /// overflow at rest: scrubbing to Short cleared its badge, the bar resized
+    /// the slot to the new narrower intrinsic width, the row inside kept the
+    /// old one — and the leading title rendered as "tivity".
+    ///
+    /// Re-stating the size and forcing the bar to lay out is what makes the two
+    /// agree. This has no equivalent in the floating arrangement, where the
+    /// bar's width is the screen's and nothing has to be told about it.
+    private func applyBadges(_ counts: [GalleryFilter.Format: Int]) {
+        for (index, format) in ForYouPagerView.pageOrder.enumerated() {
+            tabBar.setBadge(Self.badgeStyle(forUnread: counts[format] ?? 0), at: index)
+        }
+        tabBar.sizeToFit()
+        navigationController?.navigationBar.setNeedsLayout()
+        navigationController?.navigationBar.layoutIfNeeded()
+    }
+
+    /// Opens the post composer.
+    ///
+    /// Through the ROUTE, not by building the composer here: `AppRoute.upload`
+    /// already presents it, and it is presented from several places. A screen
+    /// that constructed its own would be a second answer to "what is the
+    /// composer" the day one of them changes.
+    private func openComposer() {
+        router?.route(to: .upload)
+    }
+
+    /// The context menu: plain actions, **no `.singleSelection` and no
+    /// checkmark**.
+    ///
+    /// The selection is already on screen — the bar item's glyph IS the active
+    /// context, which is the whole reason it is a state item rather than an
+    /// action. A tick beside the matching row says the same thing a second
+    /// time, in a place you have to open a menu to read.
+    ///
+    /// Built ONCE, and that follows directly. The rebuild this used to do on
+    /// every change existed solely to move the checkmark; with nothing stateful
+    /// left in the menu, rebuilding it would be work whose only output nobody
+    /// can see. `applyContext` moves the glyph instead.
+    func makeContextMenu() -> UIMenu {
+        // Closure form, not a bare `map(makeContextAction)`: passing a
+        // MainActor-isolated method as a function value strips its isolation
+        // and Swift 6 rejects it.
+        UIMenu(children: ContentContext.allCases.map { makeContextAction($0) })
+    }
+
+    private func makeContextAction(_ context: ContentContext) -> UIAction {
         UIAction(
-            title: option.title,
-            image: UIImage(systemName: option.symbol),
-            state: option.source == viewModel.source ? .on : .off
+            title: context.title,
+            image: UIImage(systemName: context.symbol)
         ) { [weak self] _ in
-            self?.applySource(option.source)
+            self?.applyContext(context)
         }
     }
 
-    /// Adopts a source everywhere it shows. The icon-only bubble carries no
-    /// system mirroring, so the glyph and the VoiceOver value are set by hand —
-    /// and they are set HERE rather than in the menu action so that every path
-    /// that changes the source (including the debug hook) moves the bubble too.
-    /// A menu tap additionally moves its own checkmark, which `.singleSelection`
-    /// owns; a programmatic change cannot, so the checkmark can lag until the
-    /// menu is next rebuilt. That is a debug-only discrepancy — the bubble,
-    /// which is what's on screen, is always right.
-    private func applySource(_ source: DiscoverySource) {
-        guard let option = Self.sourceOptions.first(where: { $0.source == source }) else { return }
-        viewModel.setSource(source)
-        sourceMenuButton.button.configuration?.image = UIImage(systemName: option.symbol)
-        sourceMenuButton.button.accessibilityValue = option.title
+    /// Adopts a context everywhere it shows: the glyph, the VoiceOver value,
+    /// and the corpus both tabs are reading.
+    ///
+    /// Set HERE rather than in the menu action so that every path that changes
+    /// the context — a menu tap, a debug hook, a restore — moves all of them
+    /// together.
+    private func applyContext(_ context: ContentContext) {
+        viewModel.setContext(context)
+        contextItem.image = UIImage(systemName: context.symbol)
+        contextItem.accessibilityValue = context.title
     }
 
     /// Opens the full-screen feed on the tapped post, with the hero zoom.
@@ -633,7 +701,7 @@ final class ForYouViewController: UIViewController {
             // Idempotent close-out: the state and the alpha are already correct
             // by now, this just guarantees it if a leg was skipped.
             self?.showTabBar(alpha: 1)
-            self?.restoreTrayAfterTransition()
+            self?.restoreChromeAfterTransition()
             // Close the handoff scope. This is the single act that restores the
             // grid: it clears the flight's state and reconciles once, so every
             // qualifying visible tile gets a slot again rather than whatever
@@ -646,7 +714,7 @@ final class ForYouViewController: UIViewController {
             }
             self?.pager.endPlaybackHandoff()
             #if DEBUG
-            self?.debugAuditTray("returned")
+            self?.debugAuditTabBar("returned")
             self?.debugAdvanceGrabCycleIfNeeded()
             #endif
         }
@@ -655,9 +723,9 @@ final class ForYouViewController: UIViewController {
             // the restored page by now, so nothing renders the change.
             self?.tabBarController?.setTabBarHidden(true, animated: false)
             self?.tabBarController?.tabBar.alpha = 1
-            self?.restoreTrayAfterTransition()
+            self?.restoreChromeAfterTransition()
             #if DEBUG
-            self?.debugAuditTray("cancelled")
+            self?.debugAuditTabBar("cancelled")
             #endif
         }
         transition.onPresentationCancelled = { [weak self] in
@@ -670,7 +738,7 @@ final class ForYouViewController: UIViewController {
             self?.navigationController?.delegate = nil
             self?.activeTransition = nil
             self?.showTabBar(alpha: 1)
-            self?.restoreTrayAfterTransition()
+            self?.restoreChromeAfterTransition()
             self?.pager.endPlaybackHandoff()
         }
         // Accessing `view` loads it so the grab-to-dismiss pan can attach.
@@ -726,52 +794,22 @@ final class ForYouViewController: UIViewController {
         #endif
     }
 
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        syncTrayPosition()
-    }
-
-    /// Re-pins the tray to the CURRENT safe area — but only while no flight is
-    /// in progress.
-    ///
-    /// This is the whole fix for the tray's landing snap. A pop animates the safe
-    /// area, and mid-flight it does not merely interpolate, it reads a few points
-    /// off its own resting value: measured at a bottom inset of 86 during the
-    /// drag against 83 once settled. Anything pinned to the safe-area guide
-    /// therefore sits 3pt out of place for the length of the gesture and corrects
-    /// the instant the layout settles — a small, very visible jump right at the
-    /// end of the hero.
-    ///
-    /// Skipping the update while a flight is alive means the constant in force
-    /// during a gesture is always the last *resting* measurement, so there is
-    /// nothing left to correct at teardown. The tray is then immune to the
-    /// transition by construction rather than by having its own animation
-    /// cancelled.
-    /// Rebuilds the tray's appearance after any transition ends.
+    /// Rebuilds the capsule's appearance after any transition ends.
     ///
     /// Called on a completed hero return, a cancelled grab, and every appearance
     /// — all three, because the failure it repairs has been seen after an
     /// interactive dismissal and a cancelled grab reaches none of the completion
     /// callbacks. It is idempotent and costs a layout pass, so running it when
     /// nothing was wrong is not worth guarding against.
-    private func restoreTrayAfterTransition() {
-        (trayView as? TransitionRestorable)?.restoreAfterTransition()
+    private func restoreChromeAfterTransition() {
+        tabBar.restoreAfterTransition()
     }
 
-    /// Points the segment row at the view model's format, without echoing the
-    /// change back out as a user selection.
-    private func syncFormatRowSelection() {
-        guard let index = ForYouPagerView.pageOrder.firstIndex(of: viewModel.format) else { return }
-        formatRow.select(index, notify: false)
+    /// Points the pager at the view model's format, without echoing the change
+    /// back out as a user selection. The capsule follows through the pager's
+    /// own progress, so it is never written directly.
+    private func syncFormatSelection() {
         pager.setActivePage(viewModel.format, animated: false)
-    }
-
-    private func syncTrayPosition() {
-        guard activeTransition == nil else { return }
-        let target = -(view.safeAreaInsets.bottom + InlineFilterTrayView.spacingBelow)
-        // Guarded: assigning inside a layout pass schedules another one.
-        guard abs(trayBottomConstraint.constant - target) > 0.01 else { return }
-        trayBottomConstraint.constant = target
     }
 
     /// Reconciles autoplay once the grid has actually laid out.
@@ -811,12 +849,6 @@ final class ForYouViewController: UIViewController {
         }
     }
     #endif
-
-    /// Placeholders: these exist to put real bar items in the header, not to
-    /// add features. Wired to nothing on purpose rather than to a half-built
-    /// destination.
-    @objc private func headerLeftTapped() {}
-    @objc private func headerRightTapped() {}
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
@@ -858,8 +890,8 @@ final class ForYouViewController: UIViewController {
         // row highlighting a segment the pager is not on. Re-asserting from the
         // view model on every appearance makes the model the single authority and
         // costs nothing when they already agree.
-        syncFormatRowSelection()
-        restoreTrayAfterTransition()
+        syncFormatSelection()
+        restoreChromeAfterTransition()
         // The grid owns the screen again, so its bricks may play again. Runs
         // before the topViewController guard below: a tab switch back lands
         // here too, and autoplay should resume on either path.
@@ -929,35 +961,51 @@ final class ForYouViewController: UIViewController {
     /// Remaining automatic open→grab→return cycles for `-foryou-grab-cycles`.
     private static var remainingGrabCycles = 0
 
-    /// `-foryou-audit-tray`: reports any view in the tray's subtree that is not
-    /// fully visible or not reachable by a tap, at the end of every dismissal.
+    /// `-foryou-audit-tabs`: reports any part of the tab capsule that is not
+    /// drawable or not reachable by a tap, at the end of every dismissal.
     ///
-    /// "Did the transition leak a hidden state into the tray?" is answerable
+    /// "Did the transition leak a hidden state into the chrome?" is answerable
     /// exactly, so it is answered exactly instead of by squinting at a
-    /// screenshot: walk the subtree for `alpha < 1`, `isHidden` or a zero-area
-    /// frame, then hit-test each segment to prove nothing is sitting over it.
-    /// Pair with `-foryou-grab-cycles` — a leak that survives one return is one
-    /// anybody would catch, so the interesting ones need several round trips.
-    func debugAuditTray(_ label: String) {
-        guard ProcessInfo.processInfo.arguments.contains("-foryou-audit-tray") else { return }
+    /// screenshot. Pair with `-foryou-grab-cycles` — a leak that survives one
+    /// return is one anybody would catch, so the interesting ones need several
+    /// round trips.
+    ///
+    /// ⚠️ **Neither `alpha` nor `isHidden` is an offence on its own here**,
+    /// unlike in the filter tray this replaced — auditing either reports a
+    /// perfectly clean bar as broken on every call. Selection is a crossfade
+    /// between a regular and a semibold label per segment, so at rest three of
+    /// the six titles are legitimately at alpha 0; and a segment with no count
+    /// hides its badge, whose label then measures zero. The audit is therefore
+    /// scoped to the thing that must never be missing — the TITLES — plus
+    /// clipping and reachability, which is where the real failure lives.
+    func debugAuditTabBar(_ label: String) {
+        guard ProcessInfo.processInfo.arguments.contains("-foryou-audit-tabs") else { return }
+        let titles = Self.tabTitles
+        func carriesTitle(_ v: UIView) -> Bool {
+            if let label = v as? UILabel, titles.contains(label.text ?? "") { return true }
+            return v.subviews.contains(where: carriesTitle)
+        }
         var offenders: [String] = []
         func walk(_ view: UIView, _ path: String) {
             let name = "\(path)/\(type(of: view))"
-            if view.isHidden { offenders.append("\(name) isHidden") }
-            if view.alpha < 0.999 { offenders.append(String(format: "%@ alpha=%.3f", name, view.alpha)) }
+            if view.isHidden {
+                // Stop here. A hidden badge is a tab with nothing to report;
+                // only a hidden TITLE means the bar came back broken.
+                if carriesTitle(view) { offenders.append("\(name) isHidden") }
+                return
+            }
             if view.frame.width == 0 || view.frame.height == 0 {
                 offenders.append("\(name) zero-frame")
             }
             view.subviews.forEach { walk($0, name) }
         }
-        walk(trayView, "tray")
-        // Every label the tray is drawing, with its text and width. A segment
-        // whose title has gone missing or collapsed to zero width is invisible
-        // while passing every alpha/isHidden check above, so it has to be
-        // checked as its own thing.
+        walk(tabBar, "tabs")
+        // Every TITLE the bar is drawing, with its width. A title that has gone
+        // missing or collapsed to zero width is invisible while passing every
+        // check above, so it is checked as its own thing.
         var labels: [String] = []
         func collectLabels(_ v: UIView) {
-            if let label = v as? UILabel {
+            if let label = v as? UILabel, titles.contains(label.text ?? "") {
                 // Clipping is `laid-out width < the width the text needs`, which
                 // is the only test that distinguishes "small label" from
                 // "truncated label".
@@ -974,41 +1022,120 @@ final class ForYouViewController: UIViewController {
                     ))
                 }
                 if label.isHidden { offenders.append("'\(label.text ?? "nil")' label hidden") }
-                if label.alpha < 0.999 { offenders.append("'\(label.text ?? "nil")' label alpha") }
             }
             v.subviews.forEach(collectLabels)
         }
-        collectLabels(trayView)
-        // A clipping ancestor is exactly what would cut the outer segments off,
-        // and none of them has any business clipping: the capsules are shaped
-        // with `cornerConfiguration` precisely so they never need to.
-        var node: UIView? = trayView
-        while let current = node, current !== view {
+        collectLabels(tabBar)
+        // The capsule clips ON PURPOSE (it is a rounded material with a scroll
+        // view inside it), so the walk starts at its superview: what must not
+        // clip is anything BETWEEN the bar and the screen.
+        //
+        // The walk stops AT the navigation bar. The bar lives in its subtree
+        // now, so `view` is not on the ancestor chain at all and stopping there
+        // would never stop — but walking all the way to the window is just as
+        // wrong the other way: `UILayoutContainerView` and `UITransitionView`
+        // clip on purpose, and reporting them buries the one clip that would
+        // actually cut a segment off. What can crop the capsule is what sits
+        // between it and its host.
+        var node = tabBar.superview
+        while let current = node, !(current is UINavigationBar), !(current is UIWindow) {
             if current.clipsToBounds { offenders.append("\(type(of: current)) clipsToBounds") }
             if current.layer.mask != nil { offenders.append("\(type(of: current)) masked") }
             node = current.superview
         }
-        if labels.count != 3 { offenders.append("label count \(labels.count) != 3") }
-        for expected in ["Activity", "Gallery", "Short"] where !labels.contains(where: { $0.hasPrefix(expected) }) {
-            offenders.append("missing '\(expected)'")
+        // Six, not three: each segment carries a regular/semibold pair so
+        // selection can change weight without re-measuring the row.
+        // Two labels per segment — a regular/semibold pair that crossfades —
+        // so the expected count follows the tab count rather than a constant.
+        let expectedLabels = titles.count * 2
+        if labels.count != expectedLabels {
+            offenders.append("label count \(labels.count) != \(expectedLabels)")
         }
-        // Visible is not the same as reachable: something left over the tray
-        // (an undismissed dim, a stale transition container) would pass every
-        // check above and still swallow every tap. Hit-test each segment's
-        // centre and confirm the tray is what answers.
-        for (index, segment) in ["Activity", "Gallery", "Short"].enumerated() {
-            let row = formatRow
-            guard index < row.subviews.first?.subviews.count ?? 0,
-                  let button = row.subviews.first?.subviews[index] as? UIButton
-            else { continue }
-            let point = button.convert(CGPoint(x: button.bounds.midX, y: button.bounds.midY), to: view)
-            let hit = view.hitTest(point, with: nil)
-            let reachable = hit.map { $0 === button || $0.isDescendant(of: button) } ?? false
-            if !reachable {
-                offenders.append("\(segment) unreachable (hit=\(hit.map { "\(type(of: $0))" } ?? "nil"))")
+        for expected in titles where labels.filter({ $0.hasPrefix(expected) }).count != 2 {
+            offenders.append("'\(expected)' not drawn twice")
+        }
+        // Visible is not the same as reachable: something left over the bar (an
+        // undismissed dim, a stale transition container) would pass every check
+        // above and still swallow every tap. Collect the segment buttons by
+        // walking — they sit several materials deep, and a path spelled out by
+        // index would break the day the capsule gains a layer.
+        var buttons: [UIButton] = []
+        func collectButtons(_ v: UIView) {
+            if let button = v as? UIButton { buttons.append(button) }
+            v.subviews.forEach(collectButtons)
+        }
+        collectButtons(tabBar)
+        if buttons.count != titles.count {
+            offenders.append("segment count \(buttons.count) != \(titles.count)")
+        }
+        // The selection pill must frame the segment it claims to select — badge
+        // and all. This is checkable rather than a matter of taste, and it is
+        // the one defect a screenshot hides until a badge changes a width: the
+        // segment grows to fit "Following 99" and the lens keeps its old size,
+        // leaving the count outside its own pill.
+        if let alignment = tabBar.debugLensAlignment {
+            let drift = max(
+                abs(alignment.lens.minX - alignment.segment.minX),
+                abs(alignment.lens.width - alignment.segment.width)
+            )
+            if drift > 0.5 {
+                offenders.append(String(
+                    format: "lens off by %.1f (lens %.1fx%.1f@%.1f vs segment %.1fx%.1f@%.1f)",
+                    drift, alignment.lens.width, alignment.lens.height, alignment.lens.minX,
+                    alignment.segment.width, alignment.segment.height, alignment.segment.minX
+                ))
             }
         }
-        print("[trayaudit \(label)] sel=\(formatRow.selectedIndex) labels=\(labels.joined(separator: " ")) "
+        // Hit-tested from the WINDOW, because a bar inside the navigation bar
+        // is not reachable from this screen's `view` at all and testing there
+        // would call every segment unreachable — a false alarm indistinguishable
+        // from the real thing. The side bar items go through the same path and
+        // answer the same question, because the risk this arrangement
+        // introduces is precisely that a title view sized wrong sits over one.
+        //
+        // ⚠️ Deferred one turn of the run loop. This is called from a
+        // transition's completion, and UIKit's own `TouchBlocker` is still
+        // installed over the whole window at that instant — a window-level hit
+        // test run inline reports EVERYTHING unreachable, every time. (The
+        // earlier `view`-rooted test never saw it: the blocker is a sibling
+        // above `view`, not inside it.) One hop later it is gone and the
+        // reading is of the screen, not of the transition.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            var late: [String] = []
+            defer {
+                if !late.isEmpty {
+                    print("[tabsaudit \(label)] REACHABILITY: " + late.joined(separator: " | "))
+                }
+            }
+            guard let window = view.window else { return }
+            for (index, button) in buttons.enumerated() {
+                let point = button.convert(CGPoint(x: button.bounds.midX, y: button.bounds.midY), to: window)
+                let hit = window.hitTest(point, with: nil)
+                let reachable = hit.map { $0 === button || $0.isDescendant(of: button) } ?? false
+                if !reachable {
+                    late.append("segment \(index) unreachable (hit=\(hit.map { "\(type(of: $0))" } ?? "nil"))")
+                }
+            }
+            for (name, item) in [("compose", composeItem), ("context", contextItem)] {
+                guard let itemView = item.value(forKey: "view") as? UIView else {
+                    late.append("\(name) item has no view")
+                    continue
+                }
+                let point = itemView.convert(
+                    CGPoint(x: itemView.bounds.midX, y: itemView.bounds.midY), to: window
+                )
+                let hit = window.hitTest(point, with: nil)
+                let reachable = hit.map { $0 === itemView || $0.isDescendant(of: itemView) } ?? false
+                if !reachable {
+                    late.append("\(name) item unreachable (hit=\(hit.map { "\(type(of: $0))" } ?? "nil"))")
+                }
+                if itemView.frame.intersects(tabBar.convert(tabBar.bounds, to: itemView.superview)) {
+                    late.append("\(name) item OVERLAPS the capsule")
+                }
+            }
+        }
+        print("[tabsaudit \(label)] sel=\(tabBar.selectedIndex) labels=\(labels.joined(separator: " ")) "
             + (offenders.isEmpty ? "clean" : "OFFENDERS: " + offenders.joined(separator: " | ")))
     }
 
@@ -1026,40 +1153,60 @@ final class ForYouViewController: UIViewController {
         // snap at teardown is only visible as "settled != during the drag".
         guard let window = view.window else { return }
         let phase = activeTransition == nil ? "rest" : "flight"
-        let tray = trayView.convert(trayView.bounds, to: window)
-        let safeBottom = view.safeAreaInsets.bottom
+        let tabs = tabBar.convert(tabBar.bounds, to: window)
+        let safeTop = view.safeAreaInsets.top
         let bar = navigationController?.navigationBar
         let barRect = bar.map { $0.convert($0.bounds, to: window) } ?? .zero
-        // Find whatever is actually drawing the big "For You" — it is not in the
-        // 54pt compact bar, so measuring `navigationBar` alone proves nothing.
-        var titleRect = CGRect.zero
-        var titleOwner = "none"
-        func findTitle(_ v: UIView) {
-            if let label = v as? UILabel, label.text == "For You", label.bounds.height > 20 {
-                titleRect = label.convert(label.bounds, to: window)
-                titleOwner = "\(type(of: label.superview ?? label))"
+        // The title-slot question, in numbers: how wide is the capsule allowed
+        // to be, where do the side items start and end, and is the capsule
+        // scrolling its own content (which is what silently crops a badge)?
+        let leftRect = (composeItem.value(forKey: "view") as? UIView)
+            .map { $0.convert($0.bounds, to: window) } ?? .zero
+        let rightRect = (navigationItem.rightBarButtonItem?.value(forKey: "view") as? UIView)
+            .map { $0.convert($0.bounds, to: window) } ?? .zero
+        let leftEnd = leftRect.maxX
+        let rightStart = rightRect.minX
+        // The height the capsule has to match, and where the item's own glass
+        // sits — "same height" is only right if they also share a centre line.
+        let itemH = leftRect.height
+        let itemY = leftRect.minY
+        let overflow = tabBar.debugOverflow
+        // The square-flash check, as a number rather than an impression: a
+        // capsule holds radius == height/2 on every frame it is drawn. The
+        // display link starts in `viewDidLoad`, so the first sample is the first
+        // frame this screen has ever had.
+        let shape = tabBar.debugCapsuleShape
+        let lensDrift = tabBar.debugLensAlignment.map {
+            max(abs($0.lens.minX - $0.segment.minX), abs($0.lens.width - $0.segment.width))
+        } ?? -1
+        let lensRect = tabBar.debugLensAlignment?.lens ?? .zero
+        // What the nav bar is actually drawing its item capsules with, by class
+        // and geometry — the search space for a dynamic height match.
+        if ProcessInfo.processInfo.arguments.contains("-foryou-dump-bar"), let bar {
+            var rows: [String] = []
+            func walk(_ v: UIView, _ depth: Int) {
+                guard depth < 8 else { return }
+                let r = v.convert(v.bounds, to: window)
+                if r.height > 1, r.width > 1 {
+                    rows.append(String(format: "%d:%@ %.0fx%.0f@%.0f,%.0f%@",
+                                       depth, "\(type(of: v))", r.width, r.height, r.minX, r.minY,
+                                       v is UIVisualEffectView ? " EFFECT" : ""))
+                }
+                v.subviews.forEach { walk($0, depth + 1) }
             }
-            v.subviews.forEach(findTitle)
+            walk(bar, 0)
+            print("[bardump] " + rows.joined(separator: " | "))
         }
-        findTitle(window)
-        // The navigation bar's ENTIRE subtree, not just its direct children: an
-        // item that slides inside a container at a fixed position would
-        // otherwise go unseen.
-        var rows: [String] = []
-        func walkBar(_ v: UIView, _ depth: Int) {
-            guard depth < 6 else { return }
-            let r = v.convert(v.bounds, to: window)
-            if r.width > 1, r.height > 1 {
-                rows.append(String(format: "%.0f:%.1f/%.1f", Double(depth), r.minX, r.minY))
-            }
-            v.subviews.forEach { walkBar($0, depth + 1) }
-        }
-        if let bar { walkBar(bar, 0) }
-        let items = rows.joined(separator: ",")
+        let round = shape.height > 0 && abs(shape.radius - shape.height / 2) < 0.01
         print(String(
-            format: "[chrome:%@] trayY=%.2f trayH=%.2f safeB=%.2f navY=%.2f titleY=%.2f t=%@ items=%@",
-            phase, tray.minY, tray.height, safeBottom, barRect.minY,
-            titleRect.minY, NSCoder.string(for: view.transform), items
+            format: "[chrome:%@] tabsX=%.1f tabsW=%.1f tabsY=%.2f tabsH=%.2f itemH=%.2f itemY=%.2f "
+                + "leftEnd=%.1f rightStart=%.1f slot=%.1f overflow=%.1f safeT=%.2f navY=%.2f navH=%.2f "
+                + "lensW=%.1f lensX=%.1f drift=%.2f r=%.2f/%.2f glass=%@ CAPSULE=%@",
+            phase, tabs.minX, tabs.width, tabs.minY, tabs.height, itemH, itemY,
+            leftEnd, rightStart, rightStart - leftEnd, overflow, safeTop,
+            barRect.minY, barRect.height,
+            lensRect.width, lensRect.minX, lensDrift,
+            shape.radius, shape.height, shape.hasEffect ? "on" : "off", round ? "yes" : "NO"
         ))
     }
 
@@ -1094,23 +1241,20 @@ final class ForYouViewController: UIViewController {
            position + 1 < arguments.count, let count = Int(arguments[position + 1]) {
             Self.remainingGrabCycles = count
         }
-        if let position = arguments.firstIndex(of: "-foryou-source"), position + 1 < arguments.count {
-            let source: DiscoverySource? = switch arguments[position + 1] {
-            case "trending": .trending
-            case "recent": .recent
-            case "following": .following
-            default: nil
-            }
-            if let source {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                    self?.applySource(source)
-                }
+        // `-foryou-context <entertainment|work|focus|gaming>` drives the lens.
+        // A `UIMenu` needs a real tap to open, so this is the only way to reach
+        // a non-default context from a script.
+        if let position = arguments.firstIndex(of: "-foryou-context"),
+           position + 1 < arguments.count,
+           let context = ContentContext(rawValue: arguments[position + 1]) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.applyContext(context)
             }
         }
         // `-foryou-switch-format a,b,...` taps the format segments in order,
-        // ~0.8s apart, through the very path a finger drives (`select(notify:)`
-        // -> `onSelect`). The reported bug needs a *sequence* of switches before
-        // the dismissal, so the sequence has to be reproducible.
+        // ~0.8s apart, through the very path a finger drives (`select` ->
+        // `.valueChanged`). The reported bug needs a *sequence* of switches
+        // before the dismissal, so the sequence has to be reproducible.
         if let position = arguments.firstIndex(of: "-foryou-switch-format"),
            position + 1 < arguments.count {
             let names = arguments[position + 1].split(separator: ",").map(String.init)
@@ -1118,15 +1262,17 @@ final class ForYouViewController: UIViewController {
             // of order and proves nothing.
             openDelay = 1.5 + 0.8 * Double(names.count)
             for (step, name) in names.enumerated() {
+                // Product names first, content-shape names kept as aliases so
+                // scripts written against the three-tab layout still drive the
+                // page they meant. "short" is gone with its tab.
                 let format: GalleryFilter.Format? = switch name {
-                case "activity": .activity
-                case "media", "gallery": .media
-                case "short": .short
+                case "discover", "media", "gallery": .media
+                case "following", "activity": .activity
                 default: nil
                 }
                 guard let format, let index = ForYouPagerView.pageOrder.firstIndex(of: format) else { continue }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5 + 0.8 * Double(step)) { [weak self] in
-                    self?.formatRow.select(index, notify: true)
+                    self?.tabBar.select(index)
                 }
             }
         }

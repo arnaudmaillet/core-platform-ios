@@ -256,11 +256,18 @@ final class AppCoordinator: Coordinator {
                     router.route(to: .newMessage)
                 }
             }
-            // `-auto-pop` pops the active stack ~2.5s after launch — pairs with
+            // `-auto-pop [seconds]` pops the active stack — pairs with
             // the `-open-*` args above to verify pop-side behavior (nav chrome,
             // tab bar restoration) since taps can't be injected in-sim.
-            if arguments.contains("-auto-pop") {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak tabCoordinator] in
+            // ⚠️ The delay is a parameter because 2.5s is not always enough to
+            // be ON the pushed screen long enough for it to DO anything. A
+            // thread marks its conversation read once its messages have loaded;
+            // popped half a second after being pushed it never gets that far,
+            // and the list underneath looks unchanged for a reason that has
+            // nothing to do with the code under test.
+            if let index = arguments.firstIndex(of: "-auto-pop") {
+                let delay = arguments.dropFirst(index + 1).first.flatMap(Double.init) ?? 2.5
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak tabCoordinator] in
                     tabCoordinator?.activeNavigationController?.popViewController(animated: true)
                 }
             }

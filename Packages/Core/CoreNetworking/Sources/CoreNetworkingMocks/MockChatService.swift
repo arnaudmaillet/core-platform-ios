@@ -33,19 +33,40 @@ public final class MockChatService: @unchecked Sendable {
     /// `conv-15` are with authors they do NOT follow but HAVE answered, which
     /// keeps them out of Requests by the other half of the partition rule.
     private var otherMember: [String: String] {
-        var members: [String: String] = [
-            "conv-req-0": dataset.authors[16].profileID,
-            "conv-req-1": dataset.authors[17].profileID
-        ]
+        var members: [String: String] = [:]
+        for (offset, id) in Self.requestIDs.enumerated() {
+            members[id] = dataset.authors[16 + offset].profileID
+        }
         for index in 0..<16 {
             members["conv-\(index)"] = dataset.authors[index].profileID
         }
         return members
     }
 
+    /// The pending requests, and what each one says.
+    ///
+    /// FIVE, with two arriving live and three sitting in the past — which is
+    /// what makes the Requests tab render BOTH of its sections. With every
+    /// request the same age the list is one undivided block, and the split that
+    /// the badge is supposed to describe has nothing to describe.
+    private static let requests: [(id: String, opener: String, closer: String, minutesAgo: Int64)] = [
+        ("conv-req-0", "Hi! Loved your shot of the pier — any chance you sell prints?",
+         "No pressure either way 🙂", justArrived),
+        ("conv-req-1", "Hey, we're putting together a small show next month and I'd love to include your work.",
+         "Happy to send over the details.", justArrived + 1),
+        ("conv-req-2", "Following you from the print fair — your process posts are great.",
+         "Do you ever run workshops?", 3 * 60),
+        ("conv-req-3", "We're commissioning covers for a short story collection.",
+         "Budget is modest but the brief is open.", 26 * 60),
+        ("conv-req-4", "Quick one — what film stock was the harbour series shot on?",
+         "Asking for a very jealous friend.", 4 * 24 * 60)
+    ]
+
+    private static let requestIDs = requests.map(\.id)
+
     /// Every seeded conversation id, newest activity first.
     private var conversationIDs: [String] {
-        (0..<16).map { "conv-\($0)" } + ["conv-req-0", "conv-req-1"]
+        (0..<16).map { "conv-\($0)" } + Self.requestIDs
     }
     private let viewer = MockSocialDataset.viewerProfileID
 
@@ -65,7 +86,7 @@ public final class MockChatService: @unchecked Sendable {
             // inbox derives its Unread tab from — so it has to be real state,
             // not a blank field, and MarkRead below has to move it.
             response.members = [
-                member(viewer, lastRead: store.lastRead(in: request.conversationID, for: viewer)),
+                member(viewer, lastRead: viewerLastRead(in: request.conversationID)),
                 member(otherMember[request.conversationID] ?? viewer)
             ]
             return .success(response)
@@ -73,11 +94,19 @@ public final class MockChatService: @unchecked Sendable {
         bff.register(path: "/chat.v1.ChatService/GetHistory") { [self] (request: Chat_V1_GetHistoryRequest) in
             var response = Chat_V1_GetHistoryResponse()
             let all = store.messages(for: request.conversationID, seed: seedHistory(for: request.conversationID))
-            response.messages = request.limit == 1 ? Array(all.suffix(1)) : all
+            // A real page: the newest `limit` messages, not a special case for
+            // 1. The inbox now asks for a window rather than a single message,
+            // because it counts the unread tail inside it — answering that with
+            // the whole history would make the mock the only place the count is
+            // unbounded.
+            response.messages = request.limit > 0 ? Array(all.suffix(Int(request.limit))) : all
             return .success(response)
         }
         bff.register(path: "/chat.v1.ChatService/SendMessage") { [self] (request: Chat_V1_SendMessageRequest) in
-            let id = store.append(request)
+            let existing = store.messages(
+                for: request.conversationID, seed: seedHistory(for: request.conversationID)
+            )
+            let id = store.append(request, after: existing.map(\.createdAtMs).max() ?? 0)
             var response = Chat_V1_SendMessageResponse()
             response.messageID = id
             return .success(response)
@@ -101,12 +130,44 @@ public final class MockChatService: @unchecked Sendable {
         }
     }
 
+    /// Where the viewer's read cursor sits: what `MarkRead` recorded, or — for
+    /// a thread they have never opened in this session — their own newest
+    /// message.
+    ///
+    /// ⚠️ The fallback is what makes the seeded unread COUNTS realistic. With a
+    /// blank cursor every inbound message in a thread is unread, including ones
+    /// the viewer demonstrably read: the seeds have them REPLYING mid-thread,
+    /// so a blank cursor made a conversation they answered read as two unread
+    /// messages rather than the one that arrived after their reply. Sending is
+    /// reading, and the fixture now says so.
+    private func viewerLastRead(in conversationID: String) -> String {
+        let stored = store.lastRead(in: conversationID, for: viewer)
+        guard stored.isEmpty else { return stored }
+        let all = store.messages(for: conversationID, seed: seedHistory(for: conversationID))
+        return all.last { $0.senderID == viewer }?.messageID ?? ""
+    }
+
     private func member(_ profileID: String, lastRead: String = "") -> Chat_V1_MemberView {
         var view = Chat_V1_MemberView()
         view.profileID = profileID
         view.lastRead = lastRead
         return view
     }
+
+    /// "Minutes ago" for a message that must read as having arrived AFTER the
+    /// inbox opened — a negative age, so its timestamp lands ahead of the epoch
+    /// every other seed counts back from.
+    ///
+    /// ⚠️ This is what makes the All tab's badge reachable in mock mode. That
+    /// badge counts arrivals since the viewer last left the tab, and on a cold
+    /// launch the baseline is the moment the screen opened — so a fixture whose
+    /// every message predates the launch can only ever total zero, and the
+    /// feature looks broken when it is the data that is silent. Three
+    /// conversations therefore arrive a few minutes into the future, which
+    /// covers the seconds between launch and first render whatever the
+    /// simulator is doing, and renders as "now" (`relativeShort` clamps a
+    /// future date rather than counting backwards).
+    private static let justArrived: Int64 = -5
 
     private func seedHistory(for conversationID: String) -> [Chat_V1_MessageView] {
         let other = otherMember[conversationID] ?? viewer
@@ -119,12 +180,10 @@ public final class MockChatService: @unchecked Sendable {
         // Request threads are inbound-only and unanswered by construction —
         // that IS the partition rule, so seeding a viewer reply here would
         // quietly move the row into the active inbox.
-        if conversationID.hasPrefix("conv-req-") {
-            let opener = conversationID == "conv-req-0"
-                ? "Hi! Loved your shot of the pier — any chance you sell prints?"
-                : "Hey, we're putting together a small show next month and I'd love to include your work."
+        if let request = Self.requests.first(where: { $0.id == conversationID }) {
             let inbound: [(String, String, Int64)] = [
-                (other, opener, 90), (other, "No pressure either way 🙂", 88)
+                (other, request.opener, request.minutesAgo + 2),
+                (other, request.closer, request.minutesAgo)
             ]
             return inbound
                 .enumerated()
@@ -140,8 +199,8 @@ public final class MockChatService: @unchecked Sendable {
         if conversationID == "conv-2" {
             let inbound: [(String, String, Int64)] = [
                 (viewer, "Sent you the venue list", 200),
-                (other, "Perfect, thanks! One more thing —", 40),
-                (other, "can you make Thursday instead?", 38)
+                (other, "Perfect, thanks! One more thing —", Self.justArrived + 1),
+                (other, "can you make Thursday instead?", Self.justArrived)
             ]
             return inbound.enumerated().map { index, spec in
                 var view = Chat_V1_MessageView()
@@ -181,7 +240,27 @@ public final class MockChatService: @unchecked Sendable {
                 (viewer, replies[index % replies.count], base + 6)
             ]
             if !answered {
-                thread.append((other, "👍", base))
+                // `conv-3` lands its reply as a live arrival; the rest sit in
+                // the past. Three arrivals total, so the All badge reads "3"
+                // out of the box and the rows under it say which three.
+                thread.append((other, "👍", index == 3 ? Self.justArrived : base))
+            }
+            // `conv-4` is the BURST: one peer talking into the silence, which
+            // is the only seeded state that pushes a row's unread count into
+            // two digits. Without it every avatar badge is a single digit and
+            // the pill's widening — the whole reason it is a capsule and not a
+            // circle — goes unexercised.
+            if index == 4 {
+                let burst = [
+                    "Actually, one more thing", "Sorry, several more things",
+                    "The venue wants a deposit by Friday", "And a rider",
+                    "Do we have a rider?", "I'll assume no",
+                    "Also parking is a nightmare", "Bring cash for it",
+                    "Load-in is 4pm sharp", "They were very firm about that"
+                ]
+                for (offset, body) in burst.enumerated() {
+                    thread.append((other, body, base - Int64(offset) - 1))
+                }
             }
             return thread.enumerated().map { position, spec in
                 var view = Chat_V1_MessageView()
@@ -213,7 +292,7 @@ public final class MockChatService: @unchecked Sendable {
             : [
                 (other, "Hey! Did you see the new build?", 60),
                 (viewer, "Yeah, shipping it today 🚀", 58),
-                (other, "Nice — ping me when it's live", 55)
+                (other, "Nice — ping me when it's live", Self.justArrived)
             ]
         // Seeded threaded replies (message index → the index it answers), so
         // the quoted-reply rendering is present in the dense demo thread
@@ -258,7 +337,17 @@ public final class MockChatService: @unchecked Sendable {
             lock.withLock { seed + (sent[conversationID] ?? []) }
         }
 
-        func append(_ request: Chat_V1_SendMessageRequest) -> String {
+        /// Appends at `now` — or one millisecond past the newest message there
+        /// already is, whichever is later.
+        ///
+        /// ⚠️ The clamp is not paranoia. Some conversations are seeded as having
+        /// arrived a few minutes into the FUTURE (see `justArrived`, which is
+        /// what lets the All tab's badge have anything to count on a cold
+        /// launch), and a reply stamped with the wall clock would sort BEFORE
+        /// the message it is answering. Sending something and watching it land
+        /// second-from-last is a bug in any inbox; a mock that produces it is a
+        /// mock that teaches the wrong thing.
+        func append(_ request: Chat_V1_SendMessageRequest, after newest: Int64) -> String {
             lock.withLock {
                 let id = "\(request.conversationID)-sent-\(sent[request.conversationID]?.count ?? 0)"
                 var view = Chat_V1_MessageView()
@@ -266,7 +355,7 @@ public final class MockChatService: @unchecked Sendable {
                 view.senderID = request.senderID
                 view.body = request.body
                 view.replyTo = request.replyTo
-                view.createdAtMs = Int64(Date().timeIntervalSince1970 * 1000)
+                view.createdAtMs = max(Int64(Date().timeIntervalSince1970 * 1000), newest + 1)
                 sent[request.conversationID, default: []].append(view)
                 return id
             }

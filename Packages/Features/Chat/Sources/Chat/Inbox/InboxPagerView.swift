@@ -75,6 +75,25 @@ final class InboxPagerView: UIView {
         buildPageChain()
     }
 
+    /// Keeps the offset page-aligned through width changes — the first real
+    /// layout and rotation — because offsets are in points and `activeIndex` is
+    /// not.
+    ///
+    /// ⚠️ **This is what makes a launch-time route land on the right page.**
+    /// `-open-messages requests`, and a push payload opening a category, reach
+    /// `setCategory` after the view exists but before it has ever been laid
+    /// out. `setActivePage` records the index and returns without scrolling,
+    /// since a zero-width pager has no offset to scroll to — so without this
+    /// the header's lens sat on Requests while the All list stayed on screen,
+    /// and only a manual swipe put the two back in agreement. Same override,
+    /// for the same reason, as `ForYouPagerView`.
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard bounds.width != lastLayoutWidth, bounds.width > 0 else { return }
+        lastLayoutWidth = bounds.width
+        reassertActivePage()
+    }
+
     /// Re-states where the pager is: snaps the offset onto the active page and
     /// republishes its progress.
     ///
@@ -119,9 +138,19 @@ final class InboxPagerView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// Header tap → smooth page. The scroll animation reports progress every
-    /// frame, so a tap drives the header through exactly the same path a
-    /// finger does; `onSettled` fires on arrival, so lazy surfaces wake the
-    /// same way they do after a swipe.
+    /// frame, so a tap drives the header through exactly the same path a finger
+    /// does; `onSettled` fires on arrival, so lazy surfaces wake the same way
+    /// they do after a swipe.
+    ///
+    /// ⚠️ **`setContentOffset(animated:)`, and it must stay that way** — this is
+    /// character-for-character what `ForYouPagerView` does, and the two screens
+    /// wear the same `PagedTabBar`. A display-link spring was built here and
+    /// removed: it moved the lens just as continuously (34 fractional samples
+    /// across the flight, monotonic) but on a different curve to the other
+    /// screen's, and one tab bar that eases differently depending on which tab
+    /// you are in is worse than either curve on its own. The claim it was built
+    /// on — that UIKit's scroll animation does not report intermediate offsets
+    /// to `scrollViewDidScroll` — was simply wrong.
     func setActivePage(_ index: Int, animated: Bool) {
         guard pages.indices.contains(index), index != activeIndex else { return }
         activeIndex = index
@@ -161,18 +190,8 @@ final class InboxPagerView: UIView {
         // Always animate, even when the landing is the page we started on:
         // that case is a scrub that didn't commit, and it still has to travel
         // back from wherever the finger left it.
+        //
         scrollView.setContentOffset(CGPoint(x: offsetX(for: landing), y: 0), animated: true)
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        // Offsets are points, not page indices: re-align through every width
-        // change (first layout, rotation, split-view resize) or the pager
-        // drifts off-page.
-        guard bounds.width != lastLayoutWidth, bounds.width > 0 else { return }
-        lastLayoutWidth = bounds.width
-        scrollView.contentOffset = CGPoint(x: offsetX(for: activeIndex), y: 0)
-        onProgress?(CGFloat(activeIndex))
     }
 
     // MARK: - Index ↔ offset

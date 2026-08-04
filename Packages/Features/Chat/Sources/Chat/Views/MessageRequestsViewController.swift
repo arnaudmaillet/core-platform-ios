@@ -9,8 +9,6 @@ import UIKit
 /// decision here lands in All without a refetch, and the header's badge is
 /// driven by the same projection that fills this table.
 final class MessageRequestsViewController: UIViewController {
-    fileprivate enum Section { case main }
-
     private let viewModel: MessageRequestsViewModel
 
     private let tableView = UITableView(frame: .zero, style: .plain)
@@ -18,7 +16,7 @@ final class MessageRequestsViewController: UIViewController {
     private let skeletonView = ConversationListSkeletonView()
     private let statusView = InboxStatusView()
 
-    private var dataSource: UITableViewDiffableDataSource<Section, ConversationID>!
+    private var dataSource: SectionedConversationDataSource!
     private var modelsByID: [ConversationID: ConversationDisplayModel] = [:]
     private var hasRenderedContent = false
 
@@ -30,39 +28,8 @@ final class MessageRequestsViewController: UIViewController {
 
     // MARK: - Chrome
 
-    /// Requests offers no multi-selection editing: every row already carries
-    /// its own accept/refuse pair, so the only bulk operation worth a bar item
-    /// is "make them all go away".
-    ///
-    /// It is destructive and irreversible for the session, so it asks first.
-    private lazy var clearAllItem = UIBarButtonItem(
-        title: "Clear All",
-        primaryAction: UIAction { [weak self] _ in self?.confirmClearAll() }
-    )
-
     private func publishChrome() {
-        clearAllItem.isEnabled = viewModel.count > 0
-        chrome = InboxSurfaceChrome(
-            leadingBarItem: viewModel.count > 0 ? clearAllItem : nil,
-            badgeCount: viewModel.count
-        )
-    }
-
-    private func confirmClearAll() {
-        let count = viewModel.count
-        guard count > 0 else { return }
-        let alert = UIAlertController(
-            title: "Clear All Requests?",
-            message: count == 1
-                ? "This removes the pending request. The sender won't be notified."
-                : "This removes all \(count) pending requests. The senders won't be notified.",
-            preferredStyle: .alert
-        )
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Clear All", style: .destructive) { [weak self] _ in
-            self?.viewModel.clearAll()
-        })
-        present(alert, animated: true)
+        chrome = InboxSurfaceChrome(badgeCount: viewModel.newCount)
     }
 
     init(viewModel: MessageRequestsViewModel) {
@@ -80,9 +47,9 @@ final class MessageRequestsViewController: UIViewController {
         configureStatusViews()
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
-        // The badge rides the same chrome the bar items do, so a count landing
-        // while this surface is off screen can't drop its Edit item.
-        viewModel.onCountChange = { [weak self] _ in self?.publishChrome() }
+        // Published from off screen too — a request landing while the viewer is
+        // on another tab is exactly what the badge is for.
+        viewModel.onNewCountChange = { [weak self] _ in self?.publishChrome() }
         publishChrome()
         render(.loading)
     }
@@ -90,6 +57,17 @@ final class MessageRequestsViewController: UIViewController {
     private func configureTableView() {
         tableView.register(MessageRequestCell.self, forCellReuseIdentifier: MessageRequestCell.reuseIdentifier)
         tableView.delegate = self
+        tableView.register(
+            InboxSectionHeaderView.self,
+            forHeaderFooterViewReuseIdentifier: InboxSectionHeaderView.reuseIdentifier
+        )
+        tableView.estimatedSectionHeaderHeight = 44
+        // A plain table reserves ~22pt above every section header by default,
+        // which under a floating pill is a band of nothing between the tab
+        // capsule and the first row. The pill carries its own breathing room
+        // (`SectionHeaderPillButton.Metrics.float`), so this is padding on top
+        // of padding.
+        tableView.sectionHeaderTopPadding = 0
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 84
         tableView.pin(to: view)
@@ -97,7 +75,7 @@ final class MessageRequestsViewController: UIViewController {
         refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
         tableView.refreshControl = refreshControl
 
-        dataSource = UITableViewDiffableDataSource(tableView: tableView) {
+        dataSource = SectionedConversationDataSource(tableView: tableView) {
             [weak self] tableView, indexPath, id in
             let cell = tableView.dequeueReusableCell(
                 withIdentifier: MessageRequestCell.reuseIdentifier, for: indexPath
@@ -129,12 +107,23 @@ final class MessageRequestsViewController: UIViewController {
             skeletonView.isHidden = false
             tableView.isHidden = true
             statusView.isHidden = true
-        case .content(let models):
+        case .content(let sections):
             refreshControl.endRefreshing()
             statusView.isHidden = true
-            var snapshot = NSDiffableDataSourceSnapshot<Section, ConversationID>()
-            snapshot.appendSections([.main])
-            snapshot.appendItems(models.map(\.id), toSection: .main)
+            var snapshot = NSDiffableDataSourceSnapshot<InboxListSection, ConversationID>()
+            if !sections.new.isEmpty {
+                snapshot.appendSections([.new])
+                snapshot.appendItems(sections.new.map(\.id), toSection: .new)
+            }
+            if !sections.earlier.isEmpty {
+                snapshot.appendSections([.earlier])
+                snapshot.appendItems(sections.earlier.map(\.id), toSection: .earlier)
+            }
+            // Same-identity rows whose content changed re-render in place —
+            // reading a request clears its bold preview and its count without
+            // moving it. See `InboxRowDiff`.
+            let models = sections.all
+            snapshot.reconfigureItems(InboxRowDiff.changedRows(in: models, against: modelsByID))
             modelsByID = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
             // Animate only while visible — an off-screen change would replay
             // its animation after the next transition.
@@ -175,9 +164,53 @@ final class MessageRequestsViewController: UIViewController {
             self.tableView.isHidden = false
         }
     }
+    #if DEBUG
+    /// `-inbox-tap-section new|recent` fires a header pill's own action ~2s in.
+    ///
+    /// A tap cannot be injected in the simulator, and driving one through
+    /// CGEvent needs the Simulator window's geometry — which changes the moment
+    /// the window is resized or reopened, and a mis-mapped tap looks exactly
+    /// like a header that does not respond. This calls what the pill calls.
+    private func runSectionTapDebugSequence() {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-inbox-tap-section"),
+              let name = arguments.dropFirst(index + 1).first
+        else { return }
+        let section: InboxListSection = name == "new" ? .new : .earlier
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            guard let self, let target = dataSource.index(of: section) else { return }
+            dataSource.scroll(tableView, toSectionAt: target)
+        }
+    }
+    #endif
 }
 
 extension MessageRequestsViewController: UITableViewDelegate {
+    // MARK: - Section headers
+
+    /// The glass pill, and the tap that scrolls to the section it names.
+    func tableView(_ tableView: UITableView, viewForHeaderInSection index: Int) -> UIView? {
+        guard let section = dataSource.headedSection(at: index) else { return nil }
+        let header = tableView.dequeueReusableHeaderFooterView(
+            withIdentifier: InboxSectionHeaderView.reuseIdentifier
+        ) as? InboxSectionHeaderView
+        header?.setTitle(section.title)
+        // The section's own first row, so tapping "Recent" puts Recent under
+        // the header rather than wherever the list happened to be.
+        header?.onTap = { [weak self] in
+            guard let self else { return }
+            dataSource.scroll(tableView, toSectionAt: index)
+        }
+        return header
+    }
+
+    /// Zero for an unheaded list — a table gives an unclaimed plain-style
+    /// section a default height even when its header view is nil, which would
+    /// leave a blank band above a list that has no header at all.
+    func tableView(_ tableView: UITableView, heightForHeaderInSection index: Int) -> CGFloat {
+        dataSource.headedSection(at: index) == nil ? .leastNormalMagnitude : UITableView.automaticDimension
+    }
+
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         guard let id = dataSource.itemIdentifier(for: indexPath) else { return }
@@ -195,5 +228,8 @@ extension MessageRequestsViewController: InboxSurface {
     /// asks for a refresh — which no-ops while one is in flight.
     func surfaceDidBecomeActive() {
         viewModel.refresh()
+        #if DEBUG
+        runSectionTapDebugSequence()
+        #endif
     }
 }

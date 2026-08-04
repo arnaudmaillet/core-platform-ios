@@ -106,8 +106,14 @@ struct DiscoverySourceTests {
         tile("c", publishedAtMS: 20, reactions: 9)
     ]
 
-    @Test func followingPreservesServerOrder() {
-        #expect(DiscoverySource.following.ordering(posts).map(\.id.rawValue) == ["a", "b", "c"])
+    /// The menu offers exactly the orderings the enum has, and every one of
+    /// them reorders something. The removed `.following` case did not — it
+    /// returned the corpus untouched — which is part of why it went.
+    @Test func everySourceIsAnOrdering() {
+        #expect(DiscoverySource.allCases == [.trending, .recent])
+        for source in DiscoverySource.allCases {
+            #expect(source.ordering(posts).map(\.id.rawValue) != ["a", "b", "c"])
+        }
     }
 
     @Test func recentSortsByPublication() {
@@ -403,15 +409,23 @@ struct ForYouViewModelTests {
     }
 
     /// An empty combination has to name itself, and the sentence has to read
-    /// correctly in all nine — the source phrase sits in a different slot for
-    /// `.following` than for the two adjectives.
+    /// correctly in every one of them.
     @Test func emptyMessagesNameTheCombination() {
-        #expect(ForYouViewModel.emptyMessage(format: .media, source: .trending) == "No trending media yet.")
-        #expect(ForYouViewModel.emptyMessage(format: .short, source: .recent) == "No recent short posts yet.")
-        #expect(
-            ForYouViewModel.emptyMessage(format: .activity, source: .following)
-                == "No activity from people you follow yet."
-        )
+        #expect(ForYouViewModel.emptyState(format: .media, source: .trending).title == "No trending media yet.")
+        #expect(ForYouViewModel.emptyState(format: .activity, source: .recent).title == "No recent activity yet.")
+        // Sweeps the whole grid rather than sampling it: the sentence is built
+        // from two enums, and a case added to either is a sentence nobody has
+        // read. Every one must name both halves and end in a full stop.
+        for format in GalleryFilter.Format.allCases {
+            for source in DiscoverySource.allCases {
+                let empty = ForYouViewModel.emptyState(format: format, source: source)
+                #expect(empty.title.hasPrefix("No "))
+                #expect(empty.title.hasSuffix(" yet."))
+                // Nothing is narrowing an unfiltered page, so there is no
+                // reason to offer — and inventing one would be noise.
+                #expect(empty.subtitle == nil)
+            }
+        }
     }
 
     @Test func theFormatChoicePersistsAcrossViewModels() async {
@@ -422,12 +436,43 @@ struct ForYouViewModelTests {
 
         let provider = StubForYouProvider(first: ForYouPage(posts: mixed, nextPageToken: nil))
         let first = ForYouViewModel(repository: provider, preferences: preferences)
-        first.setFormat(.short)
+        first.setFormat(.activity)
 
         let second = ForYouViewModel(repository: provider, preferences: preferences)
-        #expect(second.format == .short)
+        #expect(second.format == .activity)
         // The source is deliberately NOT persisted — one screen, session state.
         #expect(second.source == .trending)
+    }
+
+    /// A fresh install opens on Discover — the case that `GalleryPreferences`'
+    /// own `.activity` default silently hid, because an unwritten preference
+    /// reads exactly like a viewer who chose Following.
+    @Test func anUntouchedPreferenceOpensOnDiscover() async {
+        let suiteName = "foryou-prefs-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferences = GalleryPreferences(defaults: defaults, keyPrefix: "foryou.gallery")
+        #expect(preferences.hasStoredFormat == false)
+
+        let provider = StubForYouProvider(first: ForYouPage(posts: mixed, nextPageToken: nil))
+        let model = ForYouViewModel(repository: provider, preferences: preferences)
+        #expect(model.format == .media)
+    }
+
+    /// An install that last sat on a tab this screen no longer has must land on
+    /// Discover, not on a page the pager cannot show — which would leave the
+    /// capsule pointing at nothing.
+    @Test func aRetiredTabInTheStoreFallsBackToDiscover() async {
+        let suiteName = "foryou-prefs-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferences = GalleryPreferences(defaults: defaults, keyPrefix: "foryou.gallery")
+        // Written by a build that still had a Short tab.
+        preferences.format = .short
+
+        let provider = StubForYouProvider(first: ForYouPage(posts: mixed, nextPageToken: nil))
+        let model = ForYouViewModel(repository: provider, preferences: preferences)
+        #expect(model.format == .media)
     }
 
     /// The profile gallery persists the same format axis. The two stores must
@@ -437,16 +482,23 @@ struct ForYouViewModelTests {
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
+        // `.short` on purpose: a value For You has no tab for, so adopting it
+        // would be unmistakable. (`.media` would prove nothing now that it is
+        // also For You's own landing tab.)
         let profile = GalleryPreferences(defaults: defaults)
-        profile.filter = GalleryFilter(format: .media, source: .reposts)
+        profile.filter = GalleryFilter(format: .short, source: .reposts)
 
         let discovery = GalleryPreferences(defaults: defaults, keyPrefix: "foryou.gallery")
+        // Reading does not cross over: For You's own key is untouched, so it
+        // lands on Discover rather than inheriting the profile's choice.
+        #expect(discovery.hasStoredFormat == false)
         let viewModel = ForYouViewModel(
             repository: StubForYouProvider(first: ForYouPage(posts: [], nextPageToken: nil)),
             preferences: discovery
         )
-        #expect(viewModel.format == .activity) // not the profile's .media
-        viewModel.setFormat(.short)
-        #expect(profile.filter == GalleryFilter(format: .media, source: .reposts))
+        #expect(viewModel.format == .media)
+        // And writing does not cross over either.
+        viewModel.setFormat(.activity)
+        #expect(profile.filter == GalleryFilter(format: .short, source: .reposts))
     }
 }

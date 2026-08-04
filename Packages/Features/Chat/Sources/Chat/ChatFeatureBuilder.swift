@@ -45,7 +45,16 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     /// Assembles the inbox: one catalog shared by the two conversation-backed
     /// surfaces (so the inbox loads once, not once per tab), an independent
     /// suggestions surface, and the container that pages between them.
-    public func makeInboxViewController(initialCategory: MessagesCategory) -> UIViewController {
+    /// Loads the inbox in the background so the tab bar's badge is right on a
+    /// cold launch. See `ChatFeatureBuilding.primeInbox`.
+    public func primeInbox() {
+        catalog.reload()
+    }
+
+    public func makeInboxViewController(
+        initialCategory: MessagesCategory,
+        onUnreadCountChange: ((Int) -> Void)? = nil
+    ) -> UIViewController {
         let conversations = ConversationListViewController(
             viewModel: ConversationListViewModel(catalog: catalog, router: router)
         )
@@ -104,6 +113,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             initialCategory: initialCategory
         )
         inbox.onCompose = { [router] in router?.route(to: .newMessage) }
+        inbox.onTotalNewCountChange = onUnreadCountChange
         return inbox
     }
 

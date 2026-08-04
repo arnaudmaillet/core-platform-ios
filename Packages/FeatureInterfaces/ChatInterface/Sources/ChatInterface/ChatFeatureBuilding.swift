@@ -8,7 +8,13 @@ import UIKit
 public protocol ChatFeatureBuilding {
     /// The Messages inbox: the paged All / Requests / Suggestions container,
     /// opened on `initialCategory`. Selecting a conversation routes to it.
-    func makeInboxViewController(initialCategory: MessagesCategory) -> UIViewController
+    /// `onUnreadCountChange` reports every tab's badge added together, for the
+    /// shell's own bar item. It fires whenever any of them changes — including
+    /// while the inbox is off screen, which is the case the bar item is for.
+    func makeInboxViewController(
+        initialCategory: MessagesCategory,
+        onUnreadCountChange: ((Int) -> Void)?
+    ) -> UIViewController
     /// A single conversation thread — the destination the router pushes for a
     /// `.conversation` route.
     func makeConversationViewController(for conversationID: ConversationID) -> UIViewController
@@ -32,6 +38,16 @@ public protocol ChatFeatureBuilding {
     /// onto the caller's stack like any other destination; picking a row emits
     /// a route, so the caller arranges nothing.
     func makeNewMessageViewController() -> UIViewController
+
+    /// Starts the inbox loading without showing it, so the shell's bar-item
+    /// badge has something to say before the viewer has opened Messages.
+    ///
+    /// Returns immediately; the load runs as a task and reports through the
+    /// same observation the inbox itself uses. ⚠️ It is not free — a
+    /// `ListMembers` plus a `GetHistory` per conversation — so it is a call the
+    /// shell makes deliberately at launch rather than something the inbox does
+    /// to itself on construction.
+    func primeInbox()
 }
 
 extension ChatFeatureBuilding {
@@ -45,7 +61,15 @@ extension ChatFeatureBuilding {
 
     /// The plain "open Messages" case.
     public func makeInboxViewController() -> UIViewController {
-        makeInboxViewController(initialCategory: .all)
+        makeInboxViewController(initialCategory: .all, onUnreadCountChange: nil)
+    }
+
+    public func makeInboxViewController(initialCategory: MessagesCategory) -> UIViewController {
+        makeInboxViewController(initialCategory: initialCategory, onUnreadCountChange: nil)
+    }
+
+    public func makeInboxViewController(onUnreadCountChange: @escaping (Int) -> Void) -> UIViewController {
+        makeInboxViewController(initialCategory: .all, onUnreadCountChange: onUnreadCountChange)
     }
 }
 
