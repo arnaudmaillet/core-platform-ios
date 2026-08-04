@@ -254,6 +254,23 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
             }
         }
 
+        // `-tabbar-shape-watch` samples the capsule's shape twice a second and
+        // prints it. The shape's two halves fail SEPARATELY — clipping switched
+        // off leaves the radius reading correct while the bar draws as a
+        // rectangle — so a screenshot cannot tell you which one broke, and the
+        // context menu's lift is the thing that breaks one of them.
+        if arguments.contains("-tabbar-shape-watch") {
+            Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+                guard let self else { return }
+                let shape = categoryBar.debugCapsuleShape
+                print(String(
+                    format: "[capsule] radius=%.1f height=%.1f effect=%@ clips=%@",
+                    shape.radius, shape.height,
+                    shape.hasEffect ? "yes" : "NO", shape.clips ? "yes" : "NO"
+                ))
+            }
+        }
+
         // `-inbox-compose` fires the leading item's action ~2s in, through the
         // same closure the button invokes. Compose moved from the trailing slot
         // to the leading one when the tabs took the title, and a bar item that
