@@ -23,6 +23,13 @@ final class MessagesTabCoordinator: TabCoordinator {
     }
 
     func start() {
-        navigationController.viewControllers = [container.chatFeature.makeInboxViewController()]
+        // The inbox reports every tab's badge summed; the bar item wears it.
+        // Nothing here counts anything — see
+        // `MessagesInboxViewController.onTotalNewCountChange` for why the sum
+        // is published from where its parts already are.
+        let inbox = container.chatFeature.makeInboxViewController { [weak self] total in
+            self?.tab.badgeValue = total > 0 ? String(total) : nil
+        }
+        navigationController.viewControllers = [inbox]
     }
 }

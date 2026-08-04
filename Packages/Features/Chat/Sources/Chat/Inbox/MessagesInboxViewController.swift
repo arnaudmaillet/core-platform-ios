@@ -61,6 +61,22 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// never navigates.
     var onCompose: (() -> Void)?
 
+    /// Every tab's badge added together, for the shell's own bar item.
+    ///
+    /// Published from here rather than computed in the shell because this is
+    /// where the parts already are: each surface reports its count as chrome,
+    /// and the tab-bar badge is that same set summed. A shell that recomputed
+    /// it would need the surfaces, their watermarks, and the rule for when a
+    /// watermark moves — three things it has no business knowing.
+    ///
+    /// It therefore follows the same lifecycle for free: arrivals raise it, and
+    /// leaving the screen retires every surface, which zeroes it.
+    var onTotalNewCountChange: ((Int) -> Void)?
+
+    /// The last count each surface published, so the total can be re-summed
+    /// without asking every surface to re-derive its own.
+    private var newCountsByCategory: [MessagesCategory: Int] = [:]
+
     /// Global search across every category, or `nil` in a composition without
     /// it (the surfaces still page, and no magnifier appears).
     ///
@@ -403,6 +419,8 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     private func apply(_ chrome: InboxSurfaceChrome, from surface: any InboxSurface) {
         guard let index = surfaces.firstIndex(where: { $0.category == surface.category }) else { return }
         setBadge(chrome.badgeCount, at: index)
+        newCountsByCategory[surface.category] = chrome.badgeCount
+        onTotalNewCountChange?(newCountsByCategory.values.reduce(0, +))
     }
 
     /// Stamps a count on a segment and re-settles the navigation bar around it.

@@ -33,19 +33,40 @@ public final class MockChatService: @unchecked Sendable {
     /// `conv-15` are with authors they do NOT follow but HAVE answered, which
     /// keeps them out of Requests by the other half of the partition rule.
     private var otherMember: [String: String] {
-        var members: [String: String] = [
-            "conv-req-0": dataset.authors[16].profileID,
-            "conv-req-1": dataset.authors[17].profileID
-        ]
+        var members: [String: String] = [:]
+        for (offset, id) in Self.requestIDs.enumerated() {
+            members[id] = dataset.authors[16 + offset].profileID
+        }
         for index in 0..<16 {
             members["conv-\(index)"] = dataset.authors[index].profileID
         }
         return members
     }
 
+    /// The pending requests, and what each one says.
+    ///
+    /// FIVE, with two arriving live and three sitting in the past — which is
+    /// what makes the Requests tab render BOTH of its sections. With every
+    /// request the same age the list is one undivided block, and the split that
+    /// the badge is supposed to describe has nothing to describe.
+    private static let requests: [(id: String, opener: String, closer: String, minutesAgo: Int64)] = [
+        ("conv-req-0", "Hi! Loved your shot of the pier — any chance you sell prints?",
+         "No pressure either way 🙂", justArrived),
+        ("conv-req-1", "Hey, we're putting together a small show next month and I'd love to include your work.",
+         "Happy to send over the details.", justArrived + 1),
+        ("conv-req-2", "Following you from the print fair — your process posts are great.",
+         "Do you ever run workshops?", 3 * 60),
+        ("conv-req-3", "We're commissioning covers for a short story collection.",
+         "Budget is modest but the brief is open.", 26 * 60),
+        ("conv-req-4", "Quick one — what film stock was the harbour series shot on?",
+         "Asking for a very jealous friend.", 4 * 24 * 60)
+    ]
+
+    private static let requestIDs = requests.map(\.id)
+
     /// Every seeded conversation id, newest activity first.
     private var conversationIDs: [String] {
-        (0..<16).map { "conv-\($0)" } + ["conv-req-0", "conv-req-1"]
+        (0..<16).map { "conv-\($0)" } + Self.requestIDs
     }
     private let viewer = MockSocialDataset.viewerProfileID
 
@@ -159,12 +180,10 @@ public final class MockChatService: @unchecked Sendable {
         // Request threads are inbound-only and unanswered by construction —
         // that IS the partition rule, so seeding a viewer reply here would
         // quietly move the row into the active inbox.
-        if conversationID.hasPrefix("conv-req-") {
-            let opener = conversationID == "conv-req-0"
-                ? "Hi! Loved your shot of the pier — any chance you sell prints?"
-                : "Hey, we're putting together a small show next month and I'd love to include your work."
+        if let request = Self.requests.first(where: { $0.id == conversationID }) {
             let inbound: [(String, String, Int64)] = [
-                (other, opener, 90), (other, "No pressure either way 🙂", 88)
+                (other, request.opener, request.minutesAgo + 2),
+                (other, request.closer, request.minutesAgo)
             ]
             return inbound
                 .enumerated()
