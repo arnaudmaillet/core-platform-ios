@@ -62,6 +62,12 @@ final class MessageRequestsViewController: UIViewController {
             forHeaderFooterViewReuseIdentifier: InboxSectionHeaderView.reuseIdentifier
         )
         tableView.estimatedSectionHeaderHeight = 44
+        // A plain table reserves ~22pt above every section header by default,
+        // which under a floating pill is a band of nothing between the tab
+        // capsule and the first row. The pill carries its own breathing room
+        // (`SectionHeaderPillButton.Metrics.float`), so this is padding on top
+        // of padding.
+        tableView.sectionHeaderTopPadding = 0
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 84
         tableView.pin(to: view)
@@ -220,10 +226,5 @@ extension MessageRequestsViewController: InboxSurface {
         #if DEBUG
         runSectionTapDebugSequence()
         #endif
-    }
-
-    /// Leaving is what clears this tab's badge — see `didLeave`.
-    func surfaceWillResignActive() {
-        viewModel.didLeave()
     }
 }

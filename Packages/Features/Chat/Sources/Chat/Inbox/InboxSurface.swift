@@ -40,19 +40,6 @@ protocol InboxSurface: UIViewController {
     /// simply no-op here and lazy ones guard their first load.
     func surfaceDidBecomeActive()
 
-    /// The SCREEN is going away — another root tab, a pushed thread, a pop.
-    ///
-    /// This is where a tab's badge retires, and it is deliberately not the
-    /// counterpart of `surfaceDidBecomeActive`: paging between tabs fires
-    /// neither, because the badges are read against each other and a count that
-    /// vanishes when you switch to compare it is a count you cannot use. It
-    /// reaches EVERY surface, not just the one that was forward.
-    func surfaceWillResignActive()
-}
-
-extension InboxSurface {
-    /// Most surfaces have nothing to settle on the way out.
-    func surfaceWillResignActive() {}
 }
 
 extension MessagesCategory {

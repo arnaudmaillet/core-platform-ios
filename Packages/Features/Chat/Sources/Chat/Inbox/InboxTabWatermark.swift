@@ -9,16 +9,22 @@ import Foundation
 /// *has anything arrived since I last looked?* — and only a new arrival brings
 /// it back.
 ///
-/// **The baseline moves when the viewer LEAVES, never when they arrive.** A
-/// badge that cleared on selection was gone before it had been read: the tap
-/// that shows you the tab is the same tap that empties its count, so the number
-/// you were reacting to is the one thing you cannot then look at. Moving it on
-/// the way out means the badge — and the marks on the rows it counted — stay up
-/// for as long as the viewer is actually there, and the next arrival is what
-/// brings them back.
+/// **The baseline is set once, at launch, and never moves again.** Nothing the
+/// viewer does inside a session retires a badge — not opening the tab, not
+/// reading a conversation, not leaving for another tab. It went through two
+/// narrower rules first (clear on selection, then clear on leaving the screen)
+/// and both had the same defect at different sizes: the count vanished as a
+/// side effect of an action taken for some other reason. Pushing a thread is
+/// not a statement about the other fifteen.
 ///
-/// One baseline does both jobs, because they now change at the same moment: the
-/// count and the row marks are the same question asked of the same instant.
+/// So the reset is a COLD LAUNCH, and it needs no code: a launch builds new
+/// view models, each opening a watermark at that moment. What survives a
+/// session is a fact about the session — "this is what arrived since you opened
+/// the app" — which is a sentence a badge can hold up for as long as the app is
+/// running.
+///
+/// One baseline serves the count and the row marks both, because they are the
+/// same question asked of the same instant.
 ///
 /// Time comes from the conversation's own `lastActivityAt`, so this is a pure
 /// function of the corpus and a stored watermark — the same shape
@@ -26,8 +32,9 @@ import Foundation
 /// drift out of step with the rows it counts.
 struct InboxTabWatermark: Equatable {
     /// Everything that arrived after this is new: counted on the tab, marked
-    /// on its row.
-    private(set) var baseline: Date
+    /// on its row. Immutable for the life of the watermark — see the type's
+    /// comment for why a session never moves it.
+    let baseline: Date
 
     /// Opens at the moment the screen did, so nothing already on
     /// screen when the viewer arrived is announced as new. A first sight is
@@ -36,29 +43,13 @@ struct InboxTabWatermark: Equatable {
         baseline = openedAt
     }
 
-    /// The viewer has left the tab — paged away, or left the screen. What was
-    /// on it has now been seen, so the next arrival is measured from here.
-    ///
-    /// ⚠️ **Not simply `now`.** Leaving means "I have seen what is here", and
-    /// what is here can carry a timestamp AHEAD of this device's clock: server
-    /// and device clocks disagree by seconds routinely, and the mock stages
-    /// arrivals minutes ahead on purpose. A baseline set to the wall clock
-    /// leaves anything stamped past it permanently new — the badge survives the
-    /// exit that was supposed to clear it, which is exactly the bug this
-    /// signature exists to make impossible. Taking the later of the two means
-    /// the exit clears what was on screen no matter whose clock is ahead.
-    mutating func leave(at now: Date, having conversations: [Conversation]) {
-        let newest = conversations.compactMap(\.lastActivityAt).max()
-        baseline = max(now, newest ?? .distantPast)
-    }
-
-    /// How many of these arrived since the viewer last left.
+    /// How many of these arrived since the app was opened.
     func newCount(in conversations: [Conversation]) -> Int {
         conversations.count { isNewer($0, than: baseline) }
     }
 
-    /// Whether this row carries a mark — the same question the count asks, of
-    /// one row.
+    /// Whether this row carries a mark — the same question the count asks,
+    /// of one row.
     func isNewOnRow(_ conversation: Conversation) -> Bool {
         isNewer(conversation, than: baseline)
     }

@@ -966,20 +966,21 @@ struct InboxSurfaceViewModelTests {
         #expect(rows.map(\.isUnread) == [false, true])
     }
 
-    /// The Requests badge counts ARRIVALS SINCE THE VIEWER LAST LEFT, not
-    /// pending totals — and LEAVING the tab is what clears it.
+    /// The Requests badge counts ARRIVALS SINCE THE APP OPENED, not pending
+    /// totals — and nothing in the session takes it away.
     ///
     /// The watermark opens at the view model's `now`, so a `now` before the
-    /// fixtures' activity time is what makes them read as having arrived since.
-    @Test func theRequestsBadgeCountsArrivalsAndClearsOnVisit() async {
+    /// fixtures' activity is what makes them read as having arrived since.
+    @Test func theRequestsBadgeCountsArrivalsAndHoldsThem() async {
         let catalog = InboxCatalog(
             repository: StubInboxProvider(conversations: [
                 conversation("r1", peer: "a"), conversation("r2", peer: "b")
             ]),
             relations: StubRelations()
         )
-        let clock = MovableClock(Date(timeIntervalSince1970: -1))
-        let requests = MessageRequestsViewModel(catalog: catalog, now: { clock.now })
+        let requests = MessageRequestsViewModel(
+            catalog: catalog, now: { Date(timeIntervalSince1970: -1) }
+        )
         var counts: [Int] = []
         requests.onNewCountChange = { counts.append($0) }
         requests.refresh()
@@ -988,12 +989,12 @@ struct InboxSurfaceViewModelTests {
         #expect(counts == [2])
         #expect(requests.newCount == 2)
 
-        // Leaving is the whole reset mechanism, and it happens after the
-        // arrivals it clears.
-        clock.now = Date(timeIntervalSince1970: 10_000)
-        requests.didLeave()
-        #expect(requests.newCount == 0)
-        #expect(counts == [2, 0])
+        // A reload is the closest thing to "the viewer did something": the
+        // count must come back the same.
+        requests.refresh()
+        await settle()
+        #expect(requests.newCount == 2)
+        #expect(counts == [2])
     }
 
     /// While the viewer is ON the tab, the badge and the row marks both stay:
@@ -1334,8 +1335,8 @@ struct InboxTabWatermarkTests {
     }
 
     /// A first sight is never "all new": whatever was already there when the
-    /// screen opened is not an arrival. The trap `ForYouUnread` documents, and
-    /// the reason the baseline starts at the opening moment rather than at zero.
+    /// app opened is not an arrival. The trap `ForYouUnread` documents, and the
+    /// reason the baseline starts at the opening moment rather than at zero.
     @Test func nothingAlreadyOnScreenCountsAsNew() {
         let watermark = InboxTabWatermark(openedAt: opened)
         #expect(watermark.newCount(in: [conversationAt(500), conversationAt(999)]) == 0)
@@ -1353,42 +1354,31 @@ struct InboxTabWatermarkTests {
         #expect(watermark.newCount(in: [conversation("c", hasActivity: false)]) == 0)
     }
 
-    /// LEAVING is what clears it, not arriving — the count and the row marks
-    /// survive for as long as the viewer is on the tab reading them.
-    @Test func leavingClearsTheCountAndTheRowMarksTogether() {
-        var watermark = InboxTabWatermark(openedAt: opened)
+    /// The count and the row marks are one question asked of one instant, so
+    /// they always agree about a given row.
+    @Test func theCountAndTheRowMarksAgree() {
+        let watermark = InboxTabWatermark(openedAt: opened)
         let arrival = conversationAt(1_500)
+        let old = conversationAt(500)
+
+        #expect(watermark.newCount(in: [arrival, old]) == 1)
+        #expect(watermark.isNewOnRow(arrival))
+        #expect(!watermark.isNewOnRow(old))
+    }
+
+    /// ⚠️ There is NO way to move the baseline, and that is the design: nothing
+    /// in a session retires a badge, so the only reset is a cold launch
+    /// building a new watermark. This asserts the absence of the mutation two
+    /// earlier designs had — clearing on selection, then on leaving the screen —
+    /// both of which took the count away as a side effect of an action the
+    /// viewer took for some other reason.
+    @Test func anArrivalStaysNewForTheWholeSession() {
+        let watermark = InboxTabWatermark(openedAt: opened)
+        let arrival = conversationAt(1_500)
+
         #expect(watermark.newCount(in: [arrival]) == 1)
         #expect(watermark.isNewOnRow(arrival))
-
-        watermark.leave(at: Date(timeIntervalSince1970: 2_000), having: [arrival])
-
-        #expect(watermark.newCount(in: [arrival]) == 0)
-        #expect(!watermark.isNewOnRow(arrival))
-    }
-
-    /// ⚠️ Leaving clears what was on screen even when its timestamp is AHEAD of
-    /// this device's clock — server skew, or a fixture staging an arrival.
-    /// A baseline pinned to the wall clock left those permanently new, so the
-    /// badge survived the exit that was meant to clear it.
-    @Test func leavingClearsRowsStampedAheadOfTheClock() {
-        var watermark = InboxTabWatermark(openedAt: opened)
-        let fromTheFuture = conversationAt(9_000)
-        #expect(watermark.newCount(in: [fromTheFuture]) == 1)
-
-        // The viewer leaves at 2_000 — long before the row claims to exist.
-        watermark.leave(at: Date(timeIntervalSince1970: 2_000), having: [fromTheFuture])
-
-        #expect(watermark.newCount(in: [fromTheFuture]) == 0)
-    }
-
-    /// What arrives AFTER the exit is what brings the badge back.
-    @Test func anArrivalAfterLeavingCountsAgain() {
-        var watermark = InboxTabWatermark(openedAt: opened)
-        watermark.leave(at: Date(timeIntervalSince1970: 2_000), having: [conversationAt(1_500)])
-
-        #expect(watermark.newCount(in: [conversationAt(1_500)]) == 0)
-        #expect(watermark.newCount(in: [conversationAt(2_500)]) == 1)
+        #expect(watermark.newCount(in: [arrival]) == 1)
     }
 }
 

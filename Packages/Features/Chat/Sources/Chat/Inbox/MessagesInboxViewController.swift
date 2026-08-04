@@ -18,6 +18,11 @@ import UIKit
 /// each page's list insets itself through the standard safe area. Nothing
 /// floats over the content, so there is no header geometry to maintain here.
 ///
+/// **Badges are a fact about the session.** Nothing here retires one: not
+/// paging between tabs, not pushing a thread, not leaving for another root tab.
+/// A cold launch builds new view models and with them new watermarks, and that
+/// is the only reset there is — see `InboxTabWatermark`.
+///
 /// **The bar is written once and never again.** Leading is Compose, trailing is
 /// the search magnifier, and both belong to the inbox as a whole rather than to
 /// any page — which is the whole point: a title view gets what the side items
@@ -186,19 +191,6 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         super.viewWillAppear(animated)
         pagerView?.reassertActivePage()
         if let surface = activeSurface { apply(surface.chrome, from: surface) }
-    }
-
-    /// Leaving the SCREEN is what retires the badges — a switch to another root
-    /// tab, a pushed thread, a pop. Not a page change: see `didSettle`.
-    ///
-    /// **Every surface, not just the active one.** The badges are one row of
-    /// header the viewer reads as a set — All beside Requests beside
-    /// Suggestions — and they were all on screen for as long as this screen
-    /// was. Retiring only the tab that happened to be forward would leave the
-    /// others announcing arrivals the viewer has already been shown.
-    override func viewWillDisappear(_ animated: Bool) {
-        super.viewWillDisappear(animated)
-        for surface in surfaces { surface.surfaceWillResignActive() }
     }
 
     override func viewDidAppear(_ animated: Bool) {

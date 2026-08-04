@@ -106,19 +106,6 @@ public final class MessageRequestsViewModel {
         return now
     }
 
-    /// The viewer has LEFT this tab — paged away, or left the screen. Only now
-    /// does the badge clear, and with it the marks on the rows it counted:
-    /// while the viewer was here, those were the thing they came to read. A
-    /// badge that empties on the tap that reveals it is a badge nobody sees.
-    public func didLeave() {
-        watermark.leave(at: now(), having: catalog.snapshot.requests)
-        // No explicit zero: re-projecting recomputes the count against the
-        // watermark that just moved, so the badge clears through the SAME path
-        // it is ever set by. Publishing zero first as well let an observer see
-        // it twice — zero, then whatever the projection made of it.
-        project(catalog.snapshot)
-    }
-
     private func publishNewCount(_ count: Int) {
         guard newCount != count else { return }
         newCount = count
