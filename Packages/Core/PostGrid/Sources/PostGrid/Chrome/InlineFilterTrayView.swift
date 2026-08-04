@@ -84,23 +84,35 @@ public final class InlineFilterTrayView: UIView {
     private let contents: [UIView]
     private var capsules: [UIVisualEffectView] = []
 
-    public init(leading: UIView, trailing: UIView) {
-        contents = [leading, trailing]
+    /// `leading` is optional because a tray can hold one control.
+    ///
+    /// ⚠️ **Absent, not empty.** Passing a blank spacer would still wrap it in
+    /// a glass capsule, and an empty pill sitting at the leading edge reads as a
+    /// control that failed to load rather than as a control that is not there.
+    /// The trailing capsule keeps its own corner of the screen either way, so a
+    /// one-control tray is the two-control tray minus one object — not a
+    /// different layout.
+    public init(leading: UIView? = nil, trailing: UIView) {
+        contents = [leading, trailing].compactMap(\.self)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        let leadingCapsule = GlassCapsule.wrap(leading)
         let trailingCapsule = GlassCapsule.wrap(trailing)
-        capsules = [leadingCapsule, trailingCapsule]
-        addSubview(leadingCapsule)
+        capsules = [trailingCapsule]
         addSubview(trailingCapsule)
+        NSLayoutConstraint.activate([
+            trailingCapsule.trailingAnchor.constraint(equalTo: trailingAnchor),
+            trailingCapsule.topAnchor.constraint(equalTo: topAnchor),
+            trailingCapsule.bottomAnchor.constraint(equalTo: bottomAnchor),
+            trailingCapsule.widthAnchor.constraint(equalTo: trailingCapsule.heightAnchor)
+        ])
+        guard let leading else { return }
+        let leadingCapsule = GlassCapsule.wrap(leading)
+        capsules.insert(leadingCapsule, at: 0)
+        addSubview(leadingCapsule)
         NSLayoutConstraint.activate([
             leadingCapsule.leadingAnchor.constraint(equalTo: leadingAnchor),
             leadingCapsule.topAnchor.constraint(equalTo: topAnchor),
             leadingCapsule.bottomAnchor.constraint(equalTo: bottomAnchor),
-            trailingCapsule.trailingAnchor.constraint(equalTo: trailingAnchor),
-            trailingCapsule.topAnchor.constraint(equalTo: topAnchor),
-            trailingCapsule.bottomAnchor.constraint(equalTo: bottomAnchor),
-            trailingCapsule.widthAnchor.constraint(equalTo: trailingCapsule.heightAnchor),
             trailingCapsule.leadingAnchor.constraint(
                 greaterThanOrEqualTo: leadingCapsule.trailingAnchor, constant: Spacing.sm
             )

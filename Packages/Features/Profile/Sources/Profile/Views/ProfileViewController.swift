@@ -173,6 +173,11 @@ final class ProfileViewController: UIViewController {
         static let dockingHysteresis: CGFloat = 12
         /// How long the outgoing profile takes to dissolve into the new one.
         static let switchCrossfade: TimeInterval = 0.28
+        /// The bottom tray's own height.
+        static let inlineTrayHeight = InlineFilterTrayView.height
+        /// Between the tray and the bar beneath it, so the two glass rows read
+        /// as separate objects rather than one stack.
+        static let inlineTraySpacing = InlineFilterTrayView.spacingBelow
     }
 
     /// Holds the selector's place in the scrolling column whether or not the
@@ -193,6 +198,16 @@ final class ProfileViewController: UIViewController {
     private let dockedBarSlot = UIView()
     /// Whether the selector is currently in the navigation bar.
     private var isBarDocked = false
+
+    /// The bottom tray, holding the source filter and nothing else now that the
+    /// format tabs have moved to the top of the screen.
+    ///
+    /// The two filters answer different questions and are asked at different
+    /// rates: the format tabs are navigation — tapped and swiped constantly —
+    /// while the source is a setting, chosen once and then left alone. Splitting
+    /// them puts each where its traffic is, and leaves the source where this
+    /// screen's viewers have always reached for it.
+    private lazy var inlineTrayView: UIView = InlineFilterTrayView(trailing: sourceMenuButton)
 
     init(
         viewModel: ProfileViewModel,
@@ -538,9 +553,13 @@ final class ProfileViewController: UIViewController {
         // toolbar while it shows — is re-added by hand, plus breathing room
         // so the grid's last row scrolls clear of the transparent bar's glass
         // capsules.
-        // The selector rides in the scrolling column now, so there is no tray
-        // at the bottom to clear — only the bar's own glass capsules.
-        let bottom = view.safeAreaInsets.bottom + (viewModel.hasGallery ? 8 : 0)
+        // Inline placement puts the tray inside this view rather than in the
+        // navigation toolbar, so its height is ours to clear as well — the
+        // toolbar's was already folded into `safeAreaInsets.bottom` by UIKit.
+        let trayClearance = trayPlacement == .aboveBottomSafeArea && viewModel.hasGallery
+            ? Metrics.inlineTrayHeight + Metrics.inlineTraySpacing
+            : 0
+        let bottom = view.safeAreaInsets.bottom + (viewModel.hasGallery ? 8 : 0) + trayClearance
         if scrollView.contentInset.bottom != bottom {
             scrollView.contentInset.bottom = bottom
             scrollView.verticalScrollIndicatorInsets.bottom = bottom
@@ -1155,19 +1174,30 @@ final class ProfileViewController: UIViewController {
         navigationItem.titleView = dockedBarSlot
         placeBar(inSlot: inlineBarSlot)
 
-        // The source filter keeps its own place at the trailing end of the
-        // selector's row. It is a lower-frequency control than the format tabs
-        // — a viewer picks "Reposts" once and then browses — so it stays with
-        // the identity block and scrolls away with it, rather than competing
-        // for the navigation bar's title slot on the way past.
-        sourceMenuButton.translatesAutoresizingMaskIntoConstraints = false
-        inlineBarSlot.addSubview(sourceMenuButton)
-        NSLayoutConstraint.activate([
-            sourceMenuButton.trailingAnchor.constraint(
-                equalTo: inlineBarSlot.layoutMarginsGuide.trailingAnchor
-            ),
-            sourceMenuButton.centerYAnchor.constraint(equalTo: inlineBarSlot.centerYAnchor)
-        ])
+        placeSourceTray()
+    }
+
+    /// Puts the source filter back at the bottom of the screen — in this view
+    /// above the safe area when this is the Profile tab, or in the navigation
+    /// controller's shared toolbar when the screen was pushed.
+    private func placeSourceTray() {
+        guard trayPlacement == .navigationToolbar else {
+            view.addSubview(inlineTrayView)
+            NSLayoutConstraint.activate([
+                inlineTrayView.leadingAnchor.constraint(equalTo: view.layoutMarginsGuide.leadingAnchor),
+                inlineTrayView.trailingAnchor.constraint(equalTo: view.layoutMarginsGuide.trailingAnchor),
+                inlineTrayView.heightAnchor.constraint(equalToConstant: Metrics.inlineTrayHeight),
+                inlineTrayView.bottomAnchor.constraint(
+                    equalTo: view.safeAreaLayoutGuide.bottomAnchor,
+                    constant: -Metrics.inlineTraySpacing
+                )
+            ])
+            return
+        }
+        // The items must exist by the time a push starts — the feed's handover
+        // rule reads the incoming screen's `toolbarItems` in its own
+        // viewWillDisappear.
+        toolbarItems = [.flexibleSpace(), UIBarButtonItem(customView: sourceMenuButton)]
     }
 
     /// Moves the selector into a slot, filling it.
