@@ -37,6 +37,10 @@ final class ProfileGalleryGridView: UIView {
     private var baseBottomInset: CGFloat = 0
     /// The header's travel, which this page must always be able to absorb.
     private var minimumTravel: CGFloat = 0
+    /// Positions the empty state as though it were the first row.
+    private var statusTopConstraint: NSLayoutConstraint?
+    /// Clearance between the content's top and the empty state.
+    private static let statusClearance: CGFloat = 48
 
     private let imagePipeline: ImagePipeline
     private let style: Style
@@ -110,11 +114,21 @@ final class ProfileGalleryGridView: UIView {
         statusLabel.textColor = .secondaryLabel
         statusLabel.textAlignment = .center
         statusLabel.numberOfLines = 0
-        statusLabel.constrain(in: self) { parent in
-            statusLabel.topAnchor.constraint(equalTo: parent.topAnchor, constant: 48)
-            statusLabel.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor)
-            statusLabel.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor)
-        }
+        // ⚠️ The empty state is NOT in the collection view, so it does not
+        // scroll on its own — and this page is inset below a header now, so a
+        // constant from the page's top puts it behind the chrome. Its position
+        // is driven from the same two numbers the content uses, which makes it
+        // behave as though it were content: below the header at rest, scrolling
+        // away with everything else.
+        statusLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(statusLabel)
+        let statusTop = statusLabel.topAnchor.constraint(equalTo: topAnchor, constant: 48)
+        statusTopConstraint = statusTop
+        NSLayoutConstraint.activate([
+            statusTop,
+            statusLabel.leadingAnchor.constraint(equalTo: layoutMarginsGuide.leadingAnchor),
+            statusLabel.trailingAnchor.constraint(equalTo: layoutMarginsGuide.trailingAnchor)
+        ])
 
         // Statuses (empty / failed) need visible height even though the
         // collection view is empty then; the grid provides a floor and
@@ -274,6 +288,13 @@ extension ProfileGalleryGridView {
         // Changing the inset moves the content under a stationary offset, so the
         // offset is restated to keep the page where it was.
         collectionView.contentOffset = CGPoint(x: 0, y: travelled - inset)
+        positionStatusLabel()
+    }
+
+    /// Puts the empty state where the first row would be.
+    private func positionStatusLabel() {
+        statusTopConstraint?.constant =
+            collectionView.contentInset.top + Self.statusClearance - verticalOffset
     }
 
     func setContentBottomInset(_ inset: CGFloat) {
@@ -319,6 +340,7 @@ extension ProfileGalleryGridView {
 
 extension ProfileGalleryGridView: UIScrollViewDelegate {
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        positionStatusLabel()
         onVerticalScroll?(verticalOffset)
     }
 }

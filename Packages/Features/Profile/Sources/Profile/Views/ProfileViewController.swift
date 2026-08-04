@@ -574,7 +574,7 @@ final class ProfileViewController: UIViewController {
         // Every tab must be able to absorb the header's whole travel, or a
         // short one cannot hold the position a long one was left at and the
         // header follows the clamp back up. See `setMinimumScrollTravel`.
-        galleryPager.setMinimumScrollTravel(headerTravel)
+        galleryPager.setMinimumScrollTravel(contentTravel)
     }
 
     /// Opens the followers / following lists on the tapped counter's tab.
@@ -1215,10 +1215,28 @@ final class ProfileViewController: UIViewController {
         ).height
     }
 
-    /// How far the header may travel before its selector reaches the navigation
-    /// bar and stops.
+    /// How far the header travels before its selector reaches the navigation
+    /// bar — the moment it docks.
     private var headerTravel: CGFloat {
         max(0, headerHeight - Metrics.selectorSlotHeight - view.safeAreaInsets.top)
+    }
+
+    /// How far a tab must be able to scroll for its first row to sit directly
+    /// beneath the navigation bar.
+    ///
+    /// ⚠️ **A slot's height further than the header travels, and the difference
+    /// is the whole bug.** The pages are inset by the header's full height,
+    /// selector slot included. Once the selector DOCKS, that slot is empty — its
+    /// occupant is in the navigation bar — but the inset still reserves it, so a
+    /// tab resting at the docked position sat a slot's height below the bar with
+    /// nothing in the gap. One number was being asked two questions: when does
+    /// the selector dock, and how far must the content come up. They differ by
+    /// exactly the slot that changed hands.
+    ///
+    /// Only the FLOOR uses this. Docking still happens where it did, and the
+    /// header still stops where it did — it is hidden past that point anyway.
+    private var contentTravel: CGFloat {
+        max(0, headerHeight - view.safeAreaInsets.top)
     }
 
     /// **The coordinator.** Moves the header from the active page's offset, and
