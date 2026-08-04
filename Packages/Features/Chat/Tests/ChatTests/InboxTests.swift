@@ -346,9 +346,35 @@ struct SuggestionRankerTests {
 
 @MainActor
 struct InboxCatalogTests {
+    /// ⚠️ Fixed-duration, and therefore a source of flakiness: it waits for the
+    /// CLOCK, not for the work. 50ms was enough until it wasn't — on the first
+    /// run after a build, four different tests in this file have been seen to
+    /// fail with empty snapshots (the load simply had not landed yet), each
+    /// passing on every re-run. The budget is now spread over several rounds,
+    /// which covers the observed window with room to spare.
+    ///
+    /// Prefer `settle(until:)` for anything new: it waits for the condition the
+    /// test is actually about, and returns as soon as it holds.
     private func settle() async {
-        await Task.yield()
-        try? await Task.sleep(for: .milliseconds(50))
+        for _ in 0..<8 {
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+    }
+
+    /// Waits for a condition instead of for the clock.
+    ///
+    /// `settle()` sleeps a fixed 50ms, which is enough right up until the
+    /// machine is busy — and `markAllRead` fans out one detached write per
+    /// unread row, so these tests are exactly the ones that outrun it. Polling
+    /// also means the writes have LANDED when the test ends, rather than being
+    /// left in flight to slow whatever runs next.
+    private func settle(until condition: @escaping () async -> Bool) async {
+        for _ in 0..<200 {
+            if await condition() { return }
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(5))
+        }
     }
 
     @Test func loadPartitionsActiveConversationsFromRequests() async {
@@ -405,7 +431,8 @@ struct InboxCatalogTests {
         #expect(latest?.unreadIDs.count == 2)
 
         catalog.markAllRead()
-        await settle()
+        // Waits for the writes themselves, not for a fixed interval.
+        await settle(until: { await provider.markReadCalls.count == 2 })
 
         #expect(latest?.unreadIDs.isEmpty == true)
         // One write per unread conversation, each against that conversation's
@@ -434,7 +461,9 @@ struct InboxCatalogTests {
         await settle()
 
         catalog.markAllRead()
-        await settle()
+        // The failing write has to land AND roll its row back before this can
+        // be judged, which is two hops rather than one.
+        await settle(until: { latest?.unreadIDs == [ConversationID("b")] })
 
         #expect(latest?.unreadIDs == [ConversationID("b")])
         _ = token
@@ -904,9 +933,20 @@ struct InboxCatalogTests {
 
 @MainActor
 struct InboxSurfaceViewModelTests {
+    /// ⚠️ Fixed-duration, and therefore a source of flakiness: it waits for the
+    /// CLOCK, not for the work. 50ms was enough until it wasn't — on the first
+    /// run after a build, four different tests in this file have been seen to
+    /// fail with empty snapshots (the load simply had not landed yet), each
+    /// passing on every re-run. The budget is now spread over several rounds,
+    /// which covers the observed window with room to spare.
+    ///
+    /// Prefer `settle(until:)` for anything new: it waits for the condition the
+    /// test is actually about, and returns as soon as it holds.
     private func settle() async {
-        await Task.yield()
-        try? await Task.sleep(for: .milliseconds(50))
+        for _ in 0..<8 {
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(25))
+        }
     }
 
     /// The whole point of the shared catalog: one load, two projections, and a
@@ -1034,9 +1074,20 @@ struct InboxSurfaceViewModelTests {
 
 @MainActor
 struct SuggestionsViewModelTests {
+    /// ⚠️ Fixed-duration, and therefore a source of flakiness: it waits for the
+    /// CLOCK, not for the work. 50ms was enough until it wasn't — on the first
+    /// run after a build, four different tests in this file have been seen to
+    /// fail with empty snapshots (the load simply had not landed yet), each
+    /// passing on every re-run. The budget is now spread over several rounds,
+    /// which covers the observed window with room to spare.
+    ///
+    /// Prefer `settle(until:)` for anything new: it waits for the condition the
+    /// test is actually about, and returns as soon as it holds.
     private func settle() async {
-        await Task.yield()
-        try? await Task.sleep(for: .milliseconds(50))
+        for _ in 0..<8 {
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(25))
+        }
     }
 
     @Test func loadIsPerformedOnceOnFirstActivation() async {
