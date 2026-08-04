@@ -85,27 +85,46 @@ struct PagedTabBarGeometryTests {
         #expect(bar.debugMenu(at: 2)?.hasInteraction == true)
     }
 
-    /// The three horizontal gaps inside a segment are ONE number: lens edge to
-    /// title, title to badge, badge to lens edge. Equal thirds are what make
-    /// the spacing read as balanced instead of as three unrelated constants.
-    @Test func theSegmentsHorizontalRhythmIsASingleNumber() {
+    /// A badge clears the lens's trailing edge by MORE than the title clears
+    /// its leading one, and the pair sits tighter together than either.
+    ///
+    /// The pill ends exactly where it is drawn where a letter carries its own
+    /// side bearing, so matched insets read as crowding; and a count belongs to
+    /// the word beside it, so the gap between them is the smallest number of
+    /// the three.
+    @Test func theBadgeClearsTheLensByMoreThanTheTitleDoes() {
         let style = PagedTabBar.Style.navigationTitle
 
-        #expect(style.segmentPadding / 2 == style.contentInset)
-        #expect(style.badgeSpacing == style.contentInset)
+        #expect(style.trailingInset > style.leadingInset)
+        #expect(style.badgeSpacing < style.leadingInset)
+        #expect(style.segmentPadding == style.leadingInset + style.trailingInset)
+    }
+
+    /// Unequal insets only come out right if the contents are shifted off the
+    /// segment's centre by half their difference; centred, each end would get
+    /// the mean of the two instead.
+    @Test func unequalInsetsShiftTheContentsOffCentre() {
+        let style = PagedTabBar.Style.navigationTitle
+
+        #expect(style.contentOffset == (style.leadingInset - style.trailingInset) / 2)
+        // Toward the leading edge, and by little enough that the titles still
+        // read as centred.
+        #expect(style.contentOffset < 0)
+        #expect(abs(style.contentOffset) <= 1)
     }
 
     /// The pill stays SMALL beside a 13pt title — no more than half the lens.
     ///
     /// This is the constraint that rules out four-sided symmetry: equal margins
     /// would force `badgeHeight = lensHeight - 2 × clearance`, which at any
-    /// affordable clearance is a 28pt coin. Compactness won; the vertical
-    /// clearance is therefore larger than the horizontal rhythm, on purpose.
+    /// affordable clearance is a 28pt coin. Compactness won; the pill's
+    /// vertical clearance is therefore larger than either horizontal inset, on
+    /// purpose.
     @Test func theCountPillStaysCompact() {
         let style = PagedTabBar.Style.navigationTitle
 
         #expect(style.badgeHeight <= style.lensHeight / 2)
-        #expect((style.lensHeight - style.badgeHeight) / 2 > style.contentInset)
+        #expect((style.lensHeight - style.badgeHeight) / 2 > style.trailingInset)
     }
 
     /// A pill can never be narrower than it is tall: its corner radius is half

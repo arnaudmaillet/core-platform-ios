@@ -152,48 +152,62 @@ public final class PagedTabBar: UIControl {
             }
         }
 
-        /// **The segment's horizontal rhythm: ONE number, used three times.**
-        ///
-        /// It is the clearance from the lens's leading edge to the title, the
-        /// gap between the title and its badge, and the clearance from the
-        /// badge to the lens's trailing edge. Equal thirds are what make the
-        /// spacing read as balanced rather than as three unrelated numbers —
-        /// and before this they were exactly that: 4pt, 4pt and 4pt only by
-        /// coincidence, two of them derived from a padding constant and one
-        /// from `Spacing.xs`.
-        ///
-        /// 6pt in a title slot is as much of that rhythm as the bar can buy.
-        /// The navigation bar caps this title view at **258pt** (measured by
-        /// asking for more — it requested 269 and was given 258); the three
-        /// titles and two badges need 207 before any of this, and each point of
-        /// rhythm costs 8 more: 6 for the two ends of three segments, 2 for the
-        /// gaps beside the two badges. 6pt spends 48 of the 51 available.
-        var contentInset: CGFloat {
+        /// Clearance from the lens's LEADING edge to the title.
+        var leadingInset: CGFloat {
             switch self {
             // Unchanged for a floating bar, which has the screen's width and
-            // no reason to economise: 8 here reproduces the `Spacing.lg`
-            // padding it has always had.
+            // no reason to economise: 8 at both ends reproduces the
+            // `Spacing.lg` padding it has always had.
             case .floating: Spacing.sm
             case .navigationTitle: 6
             }
         }
 
-        /// Breathing room around a segment's contents — the rhythm applied at
-        /// both ends — which is what decides how wide the strip is overall.
-        var segmentPadding: CGFloat { contentInset * 2 }
+        /// Clearance from the last thing in the segment — the badge, when there
+        /// is one — to the lens's TRAILING edge.
+        ///
+        /// **Deliberately larger than the leading inset**, because the thing it
+        /// clears is different. A title's leading edge is a letter, which has
+        /// its own side bearing built in; a badge's trailing edge is a filled
+        /// pill that ends exactly where it is drawn, so at matched insets it
+        /// reads as crowding the lens. 8pt against 6 is the difference between
+        /// the pill sitting inside the selection and touching it.
+        ///
+        /// The cost of the extra 2pt is 6 (three segments), and it is paid for
+        /// out of `badgeSpacing` — see there. ⚠️ It cannot simply be raised:
+        /// the navigation bar caps this title view at **258pt** (measured by
+        /// asking for more — the bar requested 269 and was given 258), and the
+        /// arrangement below already needs 257. 9pt needs 260 and truncates.
+        var trailingInset: CGFloat {
+            switch self {
+            case .floating: leadingInset
+            case .navigationTitle: 8
+            }
+        }
+
+        /// Breathing room around a segment's contents, which is what decides
+        /// how wide the strip is overall.
+        var segmentPadding: CGFloat { leadingInset + trailingInset }
+
+        /// How far the contents sit from the segment's centre, so that the two
+        /// unequal insets both come out right.
+        ///
+        /// A segment is as wide as its contents plus both insets, so contents
+        /// centred in it would split the difference and give each end the mean.
+        /// Shifting by half the difference restores the two stated numbers —
+        /// 1pt toward the leading edge, at the values above, which is why the
+        /// titles still read as centred.
+        var contentOffset: CGFloat { (leadingInset - trailingInset) / 2 }
 
         /// The gap between a title and its badge.
         ///
-        /// The same rhythm in a title slot, so the badge sits as far from the
-        /// word as the word sits from the lens. A floating bar keeps the
-        /// tighter `Spacing.xs` it was built with; it has never had a host to
-        /// re-tune it against.
-        var badgeSpacing: CGFloat {
-            switch self {
-            case .floating: Spacing.xs
-            case .navigationTitle: contentInset
-            }
-        }
+        /// Tighter than either inset, and that is the point: the count belongs
+        /// to the word beside it, and the pair reads as one object with air
+        /// around it rather than as three evenly spaced things. It is also
+        /// where the trailing inset's extra points come from — the two badged
+        /// segments give up 2pt each here to buy 2pt at every segment's
+        /// trailing edge, which is what keeps the total at 257 of 258.
+        var badgeSpacing: CGFloat { Spacing.xs }
 
         /// How hard a segment insists on the width its title measures — and so,
         /// what gives when the host is narrower than the strip wants to be.
@@ -286,8 +300,8 @@ public final class PagedTabBar: UIControl {
         /// pill at 28 of the lens's 36pt — a coin next to 13pt text, which is
         /// louder than the count deserves. So the pill stays at 18 and its
         /// vertical clearance (9pt) is simply larger than the horizontal
-        /// rhythm (`contentInset`, 6pt). The HORIZONTAL spacing is what is
-        /// balanced — see `contentInset`.
+        /// insets (6pt leading, 8pt trailing). The HORIZONTAL spacing is what
+        /// is balanced — see `leadingInset` and `trailingInset`.
         ///
         /// STATED, not measured from the label's text box. A pill sized by its
         /// text is as tall as the font's ascender plus descender, an asymmetric
@@ -1011,6 +1025,7 @@ public final class PagedTabBar: UIControl {
                 maximumBadgePointSize: style.maximumBadgePointSize,
                 badgeHeight: style.badgeHeight,
                 badgeSpacing: style.badgeSpacing,
+                contentOffset: style.contentOffset,
                 lensHeight: style.lensHeight
             )
             segment.addAction(
@@ -1181,9 +1196,12 @@ private final class SegmentView: UIButton {
     /// The pill's laid-out size, for a host asserting its margins.
     var badgeSize: CGSize { badge.bounds.size }
 
-    /// The gap between the title and its badge — the segment's own share of the
-    /// horizontal rhythm, handed down by the style.
+    /// The gap between the title and its badge, handed down by the style.
     private let badgeSpacing: CGFloat
+
+    /// How far the contents sit from the segment's centre, so that unequal
+    /// leading and trailing insets both come out at their stated values.
+    private let contentOffset: CGFloat
 
     /// The lens's height inside this segment, which is also the smallest width
     /// the segment may take — see `updatePinnedWidth`.
@@ -1209,6 +1227,7 @@ private final class SegmentView: UIButton {
         maximumBadgePointSize: CGFloat,
         badgeHeight: CGFloat,
         badgeSpacing: CGFloat,
+        contentOffset: CGFloat,
         lensHeight: CGFloat
     ) {
         self.title = title
@@ -1217,6 +1236,7 @@ private final class SegmentView: UIButton {
         self.textStyle = textStyle
         self.maximumPointSize = maximumPointSize
         self.badgeSpacing = badgeSpacing
+        self.contentOffset = contentOffset
         self.lensHeight = lensHeight
         badge = BadgeView(maximumPointSize: maximumBadgePointSize, height: badgeHeight)
         super.init(frame: .zero)
@@ -1250,7 +1270,10 @@ private final class SegmentView: UIButton {
         content.spacing = badgeSpacing
         content.isUserInteractionEnabled = false
         content.constrain(in: self) { parent in
-            content.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
+            // Offset, not centred: the two horizontal insets differ, and this
+            // half-difference is what makes each of them come out at its stated
+            // value. See `Style.contentOffset`.
+            content.centerXAnchor.constraint(equalTo: parent.centerXAnchor, constant: contentOffset)
             content.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
             // Bounds the content to its segment, which is what turns "too
             // narrow" into truncation. Centred content with no width bound does
