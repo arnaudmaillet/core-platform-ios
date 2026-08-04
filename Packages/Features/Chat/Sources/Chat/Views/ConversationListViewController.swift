@@ -94,6 +94,11 @@ final class ConversationListViewController: UIViewController {
     private func configureTableView() {
         tableView.register(ConversationCell.self, forCellReuseIdentifier: ConversationCell.reuseIdentifier)
         tableView.delegate = self
+        tableView.register(
+            InboxSectionHeaderView.self,
+            forHeaderFooterViewReuseIdentifier: InboxSectionHeaderView.reuseIdentifier
+        )
+        tableView.estimatedSectionHeaderHeight = 44
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 72
         tableView.pin(to: view)
@@ -109,7 +114,6 @@ final class ConversationListViewController: UIViewController {
             if let model = self?.modelsByID[id] { cell.configure(with: model) }
             return cell
         }
-        dataSource.titles = [.new: "New", .earlier: "Recent"]
     }
 
     private func configureStatusViews() {
@@ -192,9 +196,53 @@ final class ConversationListViewController: UIViewController {
             self.tableView.isHidden = false
         }
     }
+    #if DEBUG
+    /// `-inbox-tap-section new|recent` fires a header pill's own action ~2s in.
+    ///
+    /// A tap cannot be injected in the simulator, and driving one through
+    /// CGEvent needs the Simulator window's geometry — which changes the moment
+    /// the window is resized or reopened, and a mis-mapped tap looks exactly
+    /// like a header that does not respond. This calls what the pill calls.
+    private func runSectionTapDebugSequence() {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-inbox-tap-section"),
+              let name = arguments.dropFirst(index + 1).first
+        else { return }
+        let section: InboxListSection = name == "new" ? .new : .earlier
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            guard let self, let target = dataSource.index(of: section) else { return }
+            dataSource.scroll(tableView, toSectionAt: target)
+        }
+    }
+    #endif
 }
 
 extension ConversationListViewController: UITableViewDelegate {
+    // MARK: - Section headers
+
+    /// The glass pill, and the tap that scrolls to the section it names.
+    func tableView(_ tableView: UITableView, viewForHeaderInSection index: Int) -> UIView? {
+        guard let section = dataSource.headedSection(at: index) else { return nil }
+        let header = tableView.dequeueReusableHeaderFooterView(
+            withIdentifier: InboxSectionHeaderView.reuseIdentifier
+        ) as? InboxSectionHeaderView
+        header?.setTitle(section.title)
+        // The section's own first row, so tapping "Recent" puts Recent under
+        // the header rather than wherever the list happened to be.
+        header?.onTap = { [weak self] in
+            guard let self else { return }
+            dataSource.scroll(tableView, toSectionAt: index)
+        }
+        return header
+    }
+
+    /// Zero for an unheaded list — a table gives an unclaimed plain-style
+    /// section a default height even when its header view is nil, which would
+    /// leave a blank band above a list that has no header at all.
+    func tableView(_ tableView: UITableView, heightForHeaderInSection index: Int) -> CGFloat {
+        dataSource.headedSection(at: index) == nil ? .leastNormalMagnitude : UITableView.automaticDimension
+    }
+
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         guard let id = dataSource.itemIdentifier(for: indexPath) else { return }
@@ -263,6 +311,9 @@ extension ConversationListViewController: InboxSurface {
     /// load is already in flight, so this is free on the appear path.
     func surfaceDidBecomeActive() {
         viewModel.refresh()
+        #if DEBUG
+        runSectionTapDebugSequence()
+        #endif
     }
 
     /// Leaving is what clears this tab's badge — see `didLeave`.

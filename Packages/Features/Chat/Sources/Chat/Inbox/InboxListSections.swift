@@ -50,21 +50,48 @@ enum InboxListSection: Hashable {
     case earlier
 }
 
-/// A diffable source that can title its sections.
+/// The two words every sectioned inbox list uses.
 ///
-/// `UITableViewDiffableDataSource` answers the data source protocol itself, so
-/// a `titleForHeaderInSection` on the delegate is never asked — the header has
-/// to come from here or not at all.
-final class SectionedConversationDataSource: UITableViewDiffableDataSource<InboxListSection, ConversationID> {
-    /// What each section is called. Both lists say "New" and "Recent" — the
-    /// same split deserves the same two words, and a viewer paging between the
-    /// tabs should not have to re-read a header to work out that it means what
-    /// the last one meant.
-    var titles: [InboxListSection: String] = [:]
+/// Both lists say "New" and "Recent" — the same split deserves the same pair,
+/// and a viewer paging between the tabs should not have to re-read a header to
+/// work out that it means what the last one meant.
+extension InboxListSection {
+    var title: String {
+        switch self {
+        case .new: "New"
+        case .earlier: "Recent"
+        }
+    }
+}
 
-    override func tableView(_ tableView: UITableView, titleForHeaderInSection index: Int) -> String? {
-        // A single section is the whole list; titling it says nothing.
-        guard snapshot().numberOfSections > 1 else { return nil }
-        return titles[snapshot().sectionIdentifiers[index]]
+typealias SectionedConversationDataSource =
+    UITableViewDiffableDataSource<InboxListSection, ConversationID>
+
+extension UITableViewDiffableDataSource<InboxListSection, ConversationID> {
+    /// The section at an index, or `nil` when the list is a single unlabelled
+    /// block — titling the whole list says nothing, so it goes unheaded.
+    func headedSection(at index: Int) -> InboxListSection? {
+        let current = snapshot()
+        guard current.numberOfSections > 1 else { return nil }
+        return current.sectionIdentifiers[index]
+    }
+
+    /// Puts a section's first row directly under the header, which is what
+    /// tapping that header's pill means: "show me this part".
+    ///
+    /// A no-op for a section with no rows, and for a list too short to scroll —
+    /// `scrollToRow` cannot invent content, so a two-section list that already
+    /// fits on screen simply stays where it is. That is correct, and it is also
+    /// why this is verified on the longest list rather than the shortest.
+    func scroll(_ tableView: UITableView, toSectionAt index: Int) {
+        guard snapshot().numberOfSections > index,
+              tableView.numberOfRows(inSection: index) > 0
+        else { return }
+        tableView.scrollToRow(at: IndexPath(row: 0, section: index), at: .top, animated: true)
+    }
+
+    /// Where a section currently sits, or `nil` if the list does not have one.
+    func index(of section: InboxListSection) -> Int? {
+        snapshot().sectionIdentifiers.firstIndex(of: section)
     }
 }
