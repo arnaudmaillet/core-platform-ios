@@ -114,7 +114,6 @@ final class ProfileGalleryPagerView: UIView {
         if bounds.width == 0, pages[activeIndex].showsSkeleton {
             pagerHeight.constant = 640
         }
-        measurePages()
         syncHeight(animated: window != nil && !dissolving)
     }
 
@@ -153,10 +152,8 @@ final class ProfileGalleryPagerView: UIView {
         // the first sized pass must re-run it or the pager sticks at its floor.
         if bounds.width != lastLayoutWidth {
             lastLayoutWidth = bounds.width
-            measurePages()
             syncHeight(animated: false)
         } else if !isScrubbing, !scrollView.isDragging, !scrollView.isDecelerating {
-            measurePages()
             // The text list's rows self-size (estimated heights), so the
             // active page's true height can settle a pass or two after
             // render. Re-pin quietly whenever layout runs; `syncHeight`
@@ -167,58 +164,49 @@ final class ProfileGalleryPagerView: UIView {
 
     /// Pins the pager's height to the active page's fitted content height, so
     /// the outer timeline ends exactly where the visible grid does.
-    /// Each page's fitted height, measured together and kept until the content
-    /// or the width changes.
+    /// The shortest a page is allowed to be: the viewport it is read in.
     ///
-    /// Cached because the interpolation below needs TWO pages' heights on every
-    /// scroll tick, and `systemLayoutSizeFitting` forces a layout pass to answer
-    /// — measuring both, thirty times a second, for the length of a swipe.
-    private var fittedHeights: [CGFloat] = []
-
-    private func measurePages() {
-        guard bounds.width > 0 else { return }
-        fittedHeights = pages.map { page in
-            // The grid's reported size is its layout's content size, which is
-            // only current after a pass at the target width — force one first.
-            page.layoutIfNeeded()
-            return page.systemLayoutSizeFitting(
-                CGSize(width: bounds.width, height: UIView.layoutFittingCompressedSize.height),
-                withHorizontalFittingPriority: .required,
-                verticalFittingPriority: .fittingSizeLevel
-            ).height
+    /// ⚠️ **This replaced a per-frame interpolation between the two pages a
+    /// drag spans**, which existed because a pager sized to its active page
+    /// crops the incoming one mid-swipe. Interpolating fixed the crop and
+    /// bought a moving target: two `systemLayoutSizeFitting` passes to prime,
+    /// a cache that went stale whenever a page had not laid out yet, and a
+    /// container whose height changed on every scroll tick.
+    ///
+    /// A floor of one viewport removes the problem instead of tracking it. No
+    /// page is ever shorter than the screen, so no page can crop its neighbour,
+    /// and the height only changes when the CONTENT does. A short tab pays for
+    /// it with empty space below its last row — which is what a profile tab
+    /// with three posts should look like anyway, rather than a timeline that
+    /// ends halfway up the screen.
+    private var viewportFloor: CGFloat {
+        var view: UIView? = superview
+        while let current = view {
+            if let scrollView = current as? UIScrollView { return scrollView.bounds.height }
+            view = current.superview
         }
+        return 0
     }
 
-    private func fittedHeight(at index: Int) -> CGFloat? {
-        fittedHeights.indices.contains(index) ? fittedHeights[index] : nil
-    }
-
-    /// Grows and shrinks the pager BETWEEN the two pages a drag spans, so the
-    /// incoming one is never cropped to the outgoing one's height.
-    ///
-    /// ⚠️ The pager is exactly as tall as its ACTIVE page — a deliberate rule,
-    /// so the profile's single vertical timeline always fits the page being
-    /// read. Held literally during a drag it means the taller page arrives
-    /// clipped to the shorter one's height and only unfolds on release, which
-    /// reads as content loading late rather than as a page sliding in. The
-    /// height belongs to whatever is actually on screen, and mid-drag that is
-    /// two pages at once.
-    private func applyInterpolatedHeight() {
-        guard bounds.width > 0, !fittedHeights.isEmpty else { return }
-        let progress = (scrollView.contentOffset.x / bounds.width)
-            .clamped(to: 0...CGFloat(pages.count - 1))
-        let lower = Int(progress.rounded(.down))
-        let upper = Int(progress.rounded(.up))
-        guard let from = fittedHeight(at: lower), let to = fittedHeight(at: upper) else { return }
-        let height = from + (to - from) * (progress - CGFloat(lower))
-        guard pagerHeight.constant != height else { return }
-        pagerHeight.constant = height
+    /// The height to hold for a page: its content, or the viewport, whichever
+    /// is taller. Pure and static so the rule can be read and tested without a
+    /// view hierarchy.
+    static func height(forContent fitted: CGFloat, viewport: CGFloat) -> CGFloat {
+        max(fitted, viewport)
     }
 
     private func syncHeight(animated: Bool) {
         guard bounds.width > 0 else { return }
-        if fittedHeights.isEmpty { measurePages() }
-        guard let fitted = fittedHeight(at: activeIndex) else { return }
+        let page = pages[activeIndex]
+        // The grid's reported size is its layout's content size, which is only
+        // current after a pass at the target width — force one first.
+        page.layoutIfNeeded()
+        let content = page.systemLayoutSizeFitting(
+            CGSize(width: bounds.width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        ).height
+        let fitted = Self.height(forContent: content, viewport: viewportFloor)
         guard pagerHeight.constant != fitted else { return }
         pagerHeight.constant = fitted
         guard animated, let host = superview else { return }
@@ -242,12 +230,7 @@ extension ProfileGalleryPagerView {
     /// The height the container is currently holding, and the per-page heights
     /// it interpolates between.
     var debugPagerHeight: CGFloat { pagerHeight.constant }
-    func debugSetFittedHeights(_ heights: [CGFloat]) { fittedHeights = heights }
-    /// Parks the offset without going through `scrub`, which re-measures the
-    /// pages — so a test can state the two heights it is interpolating between
-    /// instead of depending on what empty fixture pages happen to measure.
-    func debugSetOffsetX(_ x: CGFloat) { scrollView.contentOffset = CGPoint(x: x, y: 0) }
-    func debugApplyInterpolatedHeight() { applyInterpolatedHeight() }
+    func debugSyncHeight() { syncHeight(animated: false) }
 }
 #endif
 
@@ -259,9 +242,6 @@ extension ProfileGalleryPagerView {
     /// Unanimated by design: this is called per frame of a finger.
     func scrub(to progress: CGFloat) {
         guard bounds.width > 0, pages.count > 1 else { return }
-        // The selector's drag has no `willBeginDragging` of its own, so the
-        // first frame of one is where its heights get taken.
-        if !isScrubbing { measurePages() }
         isScrubbing = true
         let clamped = min(max(progress, 0), CGFloat(pages.count - 1))
         scrollView.setContentOffset(CGPoint(x: clamped * bounds.width, y: 0), animated: false)
@@ -321,36 +301,8 @@ extension ProfileGalleryPagerView {
 // MARK: - UIScrollViewDelegate
 
 extension ProfileGalleryPagerView: UIScrollViewDelegate {
-    /// ⚠️ **Re-measured at the start of every gesture, not just when content
-    /// lands.** The cache is filled when a snapshot renders and when the width
-    /// changes — and at both of those moments a page may still be empty or
-    /// unlaid-out, so the height recorded for it is whatever it happened to be
-    /// then. Interpolating towards a stale number is what left the incoming page
-    /// cropped even with the interpolation in place: the arithmetic was right
-    /// and one of its inputs was a page that had no rows yet. A drag is the last
-    /// moment before the heights matter and the cheapest place to be sure of
-    /// them — once per gesture, not once per frame.
-    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
-        measurePages()
-        #if DEBUG
-        // `-profile-height-audit` prints the per-page heights this drag will
-        // interpolate between.
-        //
-        // Worth keeping: "the incoming page looks cropped" and "the incoming
-        // page is genuinely short" are the same picture, and the only way to
-        // tell them apart is the numbers. Chasing this by eye cost a round of
-        // wrong conclusions — the Gallery grid measures 268pt against
-        // Activity's 1308, so most of what looked like clipping was a two-row
-        // grid being two rows tall.
-        if ProcessInfo.processInfo.arguments.contains("-profile-height-audit") {
-            print("HEIGHT-AUDIT width=\(bounds.width) fitted=\(fittedHeights) pager=\(pagerHeight.constant)")
-        }
-        #endif
-    }
-
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         guard bounds.width > 0 else { return }
-        applyInterpolatedHeight()
         onProgress?(scrollView.contentOffset.x / bounds.width)
     }
 
