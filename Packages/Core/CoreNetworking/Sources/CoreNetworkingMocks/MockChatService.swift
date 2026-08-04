@@ -82,7 +82,10 @@ public final class MockChatService: @unchecked Sendable {
             return .success(response)
         }
         bff.register(path: "/chat.v1.ChatService/SendMessage") { [self] (request: Chat_V1_SendMessageRequest) in
-            let id = store.append(request)
+            let existing = store.messages(
+                for: request.conversationID, seed: seedHistory(for: request.conversationID)
+            )
+            let id = store.append(request, after: existing.map(\.createdAtMs).max() ?? 0)
             var response = Chat_V1_SendMessageResponse()
             response.messageID = id
             return .success(response)
@@ -130,6 +133,21 @@ public final class MockChatService: @unchecked Sendable {
         return view
     }
 
+    /// "Minutes ago" for a message that must read as having arrived AFTER the
+    /// inbox opened — a negative age, so its timestamp lands ahead of the epoch
+    /// every other seed counts back from.
+    ///
+    /// ⚠️ This is what makes the All tab's badge reachable in mock mode. That
+    /// badge counts arrivals since the viewer last left the tab, and on a cold
+    /// launch the baseline is the moment the screen opened — so a fixture whose
+    /// every message predates the launch can only ever total zero, and the
+    /// feature looks broken when it is the data that is silent. Three
+    /// conversations therefore arrive a few minutes into the future, which
+    /// covers the seconds between launch and first render whatever the
+    /// simulator is doing, and renders as "now" (`relativeShort` clamps a
+    /// future date rather than counting backwards).
+    private static let justArrived: Int64 = -5
+
     private func seedHistory(for conversationID: String) -> [Chat_V1_MessageView] {
         let other = otherMember[conversationID] ?? viewer
         let minute: Int64 = 60_000
@@ -162,8 +180,8 @@ public final class MockChatService: @unchecked Sendable {
         if conversationID == "conv-2" {
             let inbound: [(String, String, Int64)] = [
                 (viewer, "Sent you the venue list", 200),
-                (other, "Perfect, thanks! One more thing —", 40),
-                (other, "can you make Thursday instead?", 38)
+                (other, "Perfect, thanks! One more thing —", Self.justArrived + 1),
+                (other, "can you make Thursday instead?", Self.justArrived)
             ]
             return inbound.enumerated().map { index, spec in
                 var view = Chat_V1_MessageView()
@@ -203,7 +221,27 @@ public final class MockChatService: @unchecked Sendable {
                 (viewer, replies[index % replies.count], base + 6)
             ]
             if !answered {
-                thread.append((other, "👍", base))
+                // `conv-3` lands its reply as a live arrival; the rest sit in
+                // the past. Three arrivals total, so the All badge reads "3"
+                // out of the box and the rows under it say which three.
+                thread.append((other, "👍", index == 3 ? Self.justArrived : base))
+            }
+            // `conv-4` is the BURST: one peer talking into the silence, which
+            // is the only seeded state that pushes a row's unread count into
+            // two digits. Without it every avatar badge is a single digit and
+            // the pill's widening — the whole reason it is a capsule and not a
+            // circle — goes unexercised.
+            if index == 4 {
+                let burst = [
+                    "Actually, one more thing", "Sorry, several more things",
+                    "The venue wants a deposit by Friday", "And a rider",
+                    "Do we have a rider?", "I'll assume no",
+                    "Also parking is a nightmare", "Bring cash for it",
+                    "Load-in is 4pm sharp", "They were very firm about that"
+                ]
+                for (offset, body) in burst.enumerated() {
+                    thread.append((other, body, base - Int64(offset) - 1))
+                }
             }
             return thread.enumerated().map { position, spec in
                 var view = Chat_V1_MessageView()
@@ -235,7 +273,7 @@ public final class MockChatService: @unchecked Sendable {
             : [
                 (other, "Hey! Did you see the new build?", 60),
                 (viewer, "Yeah, shipping it today 🚀", 58),
-                (other, "Nice — ping me when it's live", 55)
+                (other, "Nice — ping me when it's live", Self.justArrived)
             ]
         // Seeded threaded replies (message index → the index it answers), so
         // the quoted-reply rendering is present in the dense demo thread
@@ -280,7 +318,17 @@ public final class MockChatService: @unchecked Sendable {
             lock.withLock { seed + (sent[conversationID] ?? []) }
         }
 
-        func append(_ request: Chat_V1_SendMessageRequest) -> String {
+        /// Appends at `now` — or one millisecond past the newest message there
+        /// already is, whichever is later.
+        ///
+        /// ⚠️ The clamp is not paranoia. Some conversations are seeded as having
+        /// arrived a few minutes into the FUTURE (see `justArrived`, which is
+        /// what lets the All tab's badge have anything to count on a cold
+        /// launch), and a reply stamped with the wall clock would sort BEFORE
+        /// the message it is answering. Sending something and watching it land
+        /// second-from-last is a bug in any inbox; a mock that produces it is a
+        /// mock that teaches the wrong thing.
+        func append(_ request: Chat_V1_SendMessageRequest, after newest: Int64) -> String {
             lock.withLock {
                 let id = "\(request.conversationID)-sent-\(sent[request.conversationID]?.count ?? 0)"
                 var view = Chat_V1_MessageView()
@@ -288,7 +336,7 @@ public final class MockChatService: @unchecked Sendable {
                 view.senderID = request.senderID
                 view.body = request.body
                 view.replyTo = request.replyTo
-                view.createdAtMs = Int64(Date().timeIntervalSince1970 * 1000)
+                view.createdAtMs = max(Int64(Date().timeIntervalSince1970 * 1000), newest + 1)
                 sent[request.conversationID, default: []].append(view)
                 return id
             }

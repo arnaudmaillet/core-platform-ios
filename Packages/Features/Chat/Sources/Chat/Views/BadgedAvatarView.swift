@@ -40,19 +40,34 @@ final class BadgedAvatarView: UIView {
     }
 
     private enum Metrics {
-        /// The dot's diameter, and the badge's minimum in both axes — a pill
-        /// narrower than it is tall degenerates, the rule the tab capsule's own
-        /// badge states.
-        static let dotDiameter: CGFloat = 14
+        /// The pill's height, and the diameter a bare dot draws at.
+        ///
+        /// 20pt against a 48pt disc. It was 14, which is the right size for a
+        /// DOT and too small for a number: at 14 the digits had 1.5pt of air
+        /// above and below them and the pill read as a smudge with something in
+        /// it. The badge is a thing to be READ now, so it is sized to be read.
+        static let height: CGFloat = 20
+        /// Clearance between the digits and the pill's end caps.
+        ///
+        /// Generous on purpose: this is what turns a two-digit count into a
+        /// capsule rather than a circle with the number wedged into it. A
+        /// single digit never reaches it — the height floor wins, so one digit
+        /// is a circle — and it only ever describes how a count GROWS. 7 put a
+        /// one-digit pill at 22 against a 20pt height, which is neither a
+        /// circle nor obviously a capsule; 6 lets the floor bind.
+        static let labelInset: CGFloat = 6
         /// The ring that separates the badge from the disc beneath it. Drawn in
         /// the list's own background colour, so the badge reads as sitting ON
         /// the avatar rather than being part of it.
-        static let ringWidth: CGFloat = 2
-        /// How far the badge's centre sits inside the disc's corner. The disc
-        /// is a circle, so its bottom-right "corner" is at 45°: pulling in by
-        /// this much puts the badge across the edge rather than floating off it.
-        static let cornerInset: CGFloat = 4
-        static let labelInset: CGFloat = 4
+        ///
+        /// 2.5pt: at 2 the ring disappeared into the disc's own edge at the one
+        /// place they cross, which is exactly where it has work to do.
+        static let ringWidth: CGFloat = 2.5
+        /// How far the badge sits inside the disc's bounding box. The disc is a
+        /// circle inscribed in that box, so its bottom-right "corner" is empty:
+        /// a small inset puts the pill ACROSS the circle's edge rather than
+        /// floating off it or swallowing it.
+        static let cornerInset: CGFloat = 2
     }
 
     private let avatar = MonogramAvatarView()
@@ -73,8 +88,10 @@ final class BadgedAvatarView: UIView {
         // CGColors. `traitCollectionDidChange` is where it is refreshed.
         applyRingColour()
 
+        // `.caption1` rather than `.caption2`: the pill grew, and a number in
+        // it should look deliberate rather than lost.
         label.font = UIFont.systemFont(
-            ofSize: UIFont.preferredFont(forTextStyle: .caption2).pointSize, weight: .semibold
+            ofSize: UIFont.preferredFont(forTextStyle: .caption1).pointSize, weight: .semibold
         )
         label.adjustsFontForContentSizeCategory = true
         label.textAlignment = .center
@@ -92,7 +109,7 @@ final class BadgedAvatarView: UIView {
         ))
 
         badge.constrain(in: self) { parent in
-            badge.heightAnchor.constraint(equalToConstant: Metrics.dotDiameter)
+            badge.heightAnchor.constraint(equalToConstant: Metrics.height)
             badge.trailingAnchor.constraint(
                 equalTo: parent.trailingAnchor, constant: -Metrics.cornerInset
             )
@@ -102,7 +119,7 @@ final class BadgedAvatarView: UIView {
         }
         // Held, because a count re-states it: the pill widens for two digits
         // and returns to a circle for one.
-        badgeWidth = badge.widthAnchor.constraint(equalToConstant: Metrics.dotDiameter)
+        badgeWidth = badge.widthAnchor.constraint(equalToConstant: Metrics.height)
         badgeWidth.isActive = true
     }
 
@@ -124,6 +141,10 @@ final class BadgedAvatarView: UIView {
         badge.layer.borderColor = UIColor.systemBackground.resolvedColor(with: traitCollection).cgColor
     }
 
+    /// The pill's laid-out size, so a test can assert the shape rather than
+    /// measure it in a screenshot.
+    var badgeSize: CGSize { badge.bounds.size }
+
     func setMonogram(_ monogram: String) {
         avatar.setMonogram(monogram)
     }
@@ -133,14 +154,18 @@ final class BadgedAvatarView: UIView {
         switch style {
         case .none, .dot:
             label.isHidden = true
-            badgeWidth.constant = Metrics.dotDiameter
+            badgeWidth.constant = Metrics.height
         case .count(let value):
             label.isHidden = false
             label.text = value > 99 ? "99+" : String(value)
-            // Never narrower than it is tall: a single digit draws a circle.
+            // Never narrower than it is tall — below that a capsule's own
+            // corner radius exceeds half its width and the shape degenerates,
+            // the same floor the tab capsule's lens and badge both state. So a
+            // single digit is a circle, and every digit after it widens the
+            // pill by exactly what that digit measures.
             let text = (label.text ?? "") as NSString
             let measured = ceil(text.size(withAttributes: [.font: label.font as Any]).width)
-            badgeWidth.constant = max(Metrics.dotDiameter, measured + Metrics.labelInset * 2)
+            badgeWidth.constant = max(Metrics.height, measured + Metrics.labelInset * 2)
         }
     }
 }
