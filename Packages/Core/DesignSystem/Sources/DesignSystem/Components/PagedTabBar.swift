@@ -1318,7 +1318,6 @@ private final class SegmentView: UIButton {
         self.strength = strength
         boldLabel.alpha = strength
         plainLabel.alpha = 1 - strength
-        badge.setSelectionStrength(strength)
         let selected = strength > 0.5
         if selected != accessibilityTraits.contains(.selected) {
             accessibilityTraits = selected ? [.button, .selected] : [.button]
@@ -1372,8 +1371,11 @@ private final class SegmentView: UIButton {
 
 // MARK: - Badge
 
-/// The pending count beside a segment title: a filled capsule that follows the
-/// segment's own selection strength, so it brightens with its label.
+/// The pending count beside a segment title: a filled capsule in the app's
+/// accent, the same colour the avatar badges wear on the rows it counts.
+///
+/// It does NOT follow its segment's selection — see `applyFill` for why the
+/// count stopped being chrome that dims with its title.
 ///
 /// **Its height is given to it, not derived from its text.** The host states one
 /// number (`Style.badgeHeight`) and the pill is exactly that tall in both
@@ -1392,16 +1394,21 @@ private final class BadgeView: UIView {
         super.init(frame: .zero)
         label.font = .preferredFont(forTextStyle: .caption2, weight: .semibold, maximumPointSize: maximumPointSize)
         label.adjustsFontForContentSizeCategory = true
-        // `.systemBackground` does NOT survive inside a `UIGlassEffect` content
-        // view — it resolved to white in dark mode, on a badge whose fill had
-        // correctly resolved to white, erasing the count. An explicit dynamic
-        // colour carries the same intent (the inverse of `.label`) in values
-        // the effect can't reinterpret.
-        label.textColor = UIColor { traits in
-            traits.userInterfaceStyle == .dark
-                ? UIColor(white: 0.06, alpha: 1)
-                : UIColor(white: 1, alpha: 1)
-        }
+        // ⚠️ **White in both appearances, and stated outright.**
+        //
+        // This was a dynamic colour — the inverse of `.label`, dark-on-light and
+        // light-on-dark — which is the right rule for a fill that FLIPS with the
+        // appearance, as `.label` does. The fill is the accent now, and an
+        // accent does not flip: it is blue in both, so an inverting text colour
+        // put near-black on saturated blue every dark-mode night and called it
+        // contrast.
+        //
+        // Static rather than semantic on purpose. `.systemBackground` does not
+        // survive inside a `UIGlassEffect` content view — it resolved to white
+        // in dark mode on a badge whose fill had also resolved to white, erasing
+        // the count — and the lesson generalises: a colour the effect can
+        // reinterpret is a colour that can disappear.
+        label.textColor = .white
         label.textAlignment = .center
         // CENTRED, not pinned by insets. The pill's height is stated below and
         // its width is stated by `countWidth`, so the label's job is only to sit
@@ -1497,37 +1504,37 @@ private final class BadgeView: UIView {
         invalidateIntrinsicContentSize()
     }
 
-    func setSelectionStrength(_ strength: CGFloat) {
-        self.strength = strength
-        applyFill()
-    }
-
-    private var strength: CGFloat = 0
-
-    /// The badge's fill, which differs by style because the two say different
-    /// things.
+    /// The badge's fill: the accent, whichever mark it is.
     ///
-    /// A COUNT is chrome: it follows its segment's selection, brightening from
-    /// `secondaryLabel` to `label` alongside the title it belongs to, so a row
-    /// of counts reads as one control.
+    /// ⚠️ **A count used to be chrome** — it followed its segment's selection,
+    /// brightening from `secondaryLabel` to `label` alongside the title it
+    /// belonged to, so a row of counts read as one control. That was right while
+    /// the count was a property OF the tab. It is not any more: the same number
+    /// appears on the avatar of every row it counts, and those badges have
+    /// always been the accent. A grey pill on the bar and a blue one on the row
+    /// beneath it were two colours for one fact, and the tab's was the one that
+    /// looked like part of the furniture rather than something waiting.
     ///
-    /// A DOT is an alert. It is the only mark on this bar that means "look
-    /// here", so it takes the tint rather than the text colour and holds it
-    /// whether or not its segment is selected — a dot that dimmed with its
-    /// segment would be quietest exactly when it is the only thing worth
-    /// noticing.
+    /// What is lost with it: an unselected tab's count no longer dims with its
+    /// title. That is the point — a count on the tab you are NOT looking at is
+    /// exactly the one worth noticing, which is the argument the dot has always
+    /// made for itself below.
     ///
-    /// ⚠️ `.systemBlue` is a semantic colour inside a `UIGlassEffect` content
-    /// view, which is the arrangement that once resolved `.systemBackground` to
-    /// the wrong end of the spectrum in dark mode (see the type comment). It was
-    /// therefore checked in both appearances rather than reasoned about, and it
-    /// resolves correctly in each.
+    /// A DOT is an alert on the same reasoning, and holds the accent whether or
+    /// not its segment is selected.
+    ///
+    /// ⚠️ `.tintColor` rather than `.systemBlue`, so both marks follow the app's
+    /// accent and match `BadgedAvatarView`'s — the badge these now stand beside.
+    /// It is a semantic colour inside a `UIGlassEffect` content view, the
+    /// arrangement that once resolved `.systemBackground` to the wrong end of
+    /// the spectrum in dark mode (see the type comment), so it was checked in
+    /// both appearances rather than reasoned about.
     private func applyFill() {
         switch style {
         case .count:
-            backgroundColor = strength > 0.5 ? .label : .secondaryLabel
+            backgroundColor = .tintColor
         case .dot:
-            backgroundColor = .systemBlue
+            backgroundColor = .tintColor
         }
     }
 }
