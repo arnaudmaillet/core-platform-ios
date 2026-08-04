@@ -56,8 +56,10 @@ enum InboxListSection: Hashable {
 /// a `titleForHeaderInSection` on the delegate is never asked — the header has
 /// to come from here or not at all.
 final class SectionedConversationDataSource: UITableViewDiffableDataSource<InboxListSection, ConversationID> {
-    /// What each section is called, set by the list that owns it: "Unread" and
-    /// "Recent" in All, "New Requests" and "Earlier" in Requests.
+    /// What each section is called. Both lists say "New" and "Recent" — the
+    /// same split deserves the same two words, and a viewer paging between the
+    /// tabs should not have to re-read a header to work out that it means what
+    /// the last one meant.
     var titles: [InboxListSection: String] = [:]
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection index: Int) -> String? {

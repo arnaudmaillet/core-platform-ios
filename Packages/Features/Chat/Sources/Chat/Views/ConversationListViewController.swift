@@ -109,7 +109,7 @@ final class ConversationListViewController: UIViewController {
             if let model = self?.modelsByID[id] { cell.configure(with: model) }
             return cell
         }
-        dataSource.titles = [.new: "Unread", .earlier: "Recent"]
+        dataSource.titles = [.new: "New", .earlier: "Recent"]
     }
 
     private func configureStatusViews() {

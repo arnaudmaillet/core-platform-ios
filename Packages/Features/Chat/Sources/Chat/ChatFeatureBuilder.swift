@@ -45,6 +45,12 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     /// Assembles the inbox: one catalog shared by the two conversation-backed
     /// surfaces (so the inbox loads once, not once per tab), an independent
     /// suggestions surface, and the container that pages between them.
+    /// Loads the inbox in the background so the tab bar's badge is right on a
+    /// cold launch. See `ChatFeatureBuilding.primeInbox`.
+    public func primeInbox() {
+        catalog.reload()
+    }
+
     public func makeInboxViewController(
         initialCategory: MessagesCategory,
         onUnreadCountChange: ((Int) -> Void)? = nil

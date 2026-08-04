@@ -76,7 +76,7 @@ final class MessageRequestsViewController: UIViewController {
             cell.onDismiss = { [weak self] in self?.viewModel.decline(id) }
             return cell
         }
-        dataSource.titles = [.new: "New Requests", .earlier: "Earlier"]
+        dataSource.titles = [.new: "New", .earlier: "Recent"]
     }
 
     private func configureStatusViews() {

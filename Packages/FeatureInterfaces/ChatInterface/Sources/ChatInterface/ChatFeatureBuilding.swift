@@ -38,6 +38,16 @@ public protocol ChatFeatureBuilding {
     /// onto the caller's stack like any other destination; picking a row emits
     /// a route, so the caller arranges nothing.
     func makeNewMessageViewController() -> UIViewController
+
+    /// Starts the inbox loading without showing it, so the shell's bar-item
+    /// badge has something to say before the viewer has opened Messages.
+    ///
+    /// Returns immediately; the load runs as a task and reports through the
+    /// same observation the inbox itself uses. ⚠️ It is not free — a
+    /// `ListMembers` plus a `GetHistory` per conversation — so it is a call the
+    /// shell makes deliberately at launch rather than something the inbox does
+    /// to itself on construction.
+    func primeInbox()
 }
 
 extension ChatFeatureBuilding {

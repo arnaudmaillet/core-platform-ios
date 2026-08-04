@@ -31,5 +31,11 @@ final class MessagesTabCoordinator: TabCoordinator {
             self?.tab.badgeValue = total > 0 ? String(total) : nil
         }
         navigationController.viewControllers = [inbox]
+        // Loaded now, not on first appearance. The inbox's own reload happens
+        // in `viewWillAppear`, which never fires on a launch that lands on
+        // another tab — so without this the badge that exists to say "there is
+        // something in Messages" is blank until Messages has been opened, which
+        // is the one moment it has nothing left to tell anyone.
+        container.chatFeature.primeInbox()
     }
 }
