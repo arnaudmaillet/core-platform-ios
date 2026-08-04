@@ -39,6 +39,17 @@ final class ForYouTabCoordinator: TabCoordinator {
         navigationController.viewControllers = [forYou]
     }
 
+    /// The lens menu this tab's root offers, for the shell to hang off a
+    /// long press on the bar item.
+    ///
+    /// Read through the stack ROOT rather than held, because the root is the
+    /// only thing that owns a lens — a thread or a post pushed on top of it
+    /// does not, and asking `topViewController` would hand back nothing the
+    /// moment the viewer navigated anywhere.
+    var modeMenu: UIMenu? {
+        (navigationController.viewControllers.first as? any ForYouModeMenuProviding)?.makeModeMenu()
+    }
+
     /// The tab item follows the screen's content lens: its name, its glyph and
     /// how much is waiting under it.
     ///

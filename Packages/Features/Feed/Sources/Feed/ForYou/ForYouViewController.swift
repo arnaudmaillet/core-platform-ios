@@ -1390,3 +1390,15 @@ final class ForYouViewController: UIViewController {
     }
     #endif
 }
+
+// MARK: - The mode menu, offered elsewhere
+
+/// The app's tab bar offers this screen's lens menu under a long press. It is
+/// the SAME menu object the navigation bar's own item carries — same rows, same
+/// pills, same glyphs — so the two can never drift into disagreeing about what
+/// the modes are or how much is waiting under each.
+extension ForYouViewController: ForYouModeMenuProviding {
+    func makeModeMenu() -> UIMenu {
+        makeContextMenu()
+    }
+}

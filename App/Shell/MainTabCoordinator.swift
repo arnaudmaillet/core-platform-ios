@@ -98,6 +98,33 @@ final class MainTabCoordinator: NSObject, Coordinator {
         button.addAction(UIAction { [weak self] _ in self?.selectTab(.profile) }, for: .primaryActionTriggered)
         return button
     }()
+    /// The For You root. Held so its lens menu can be hung off a long press on
+    /// the bar item, the way the Profile tab's switcher is.
+    private var forYouTab: ForYouTabCoordinator?
+
+    /// An invisible button laid over the For You tab, carrying the lens menu.
+    ///
+    /// Everything `profileMenuOverlay` documents applies here unchanged — a
+    /// control rather than a `UIContextMenuInteraction` because the interaction
+    /// LIFTS its source and would float a scaled copy of the tab icon over
+    /// fixed chrome, `isContextMenuInteractionEnabled` on and
+    /// `showsMenuAsPrimaryAction` off so the gesture is a long press and a
+    /// plain tap still selects the tab.
+    ///
+    /// ⚠️ Its accessibility label is NOT fixed: this tab is renamed by whichever
+    /// lens is active ("For You", "Work", "Focus"), and the button that finds it
+    /// in the bar matches on that title — so the label is re-stated on every
+    /// alignment pass rather than set once here.
+    private lazy var forYouMenuOverlay: UIButton = {
+        let button = UIButton(type: .custom)
+        button.backgroundColor = .clear
+        button.isContextMenuInteractionEnabled = true
+        button.showsMenuAsPrimaryAction = false
+        button.accessibilityHint = "Double tap and hold to choose what to see"
+        button.addAction(UIAction { [weak self] _ in self?.selectTab(.forYou) }, for: .primaryActionTriggered)
+        return button
+    }()
+
     /// Tabs paired with their `AppTab`, in bar order — the lookup `selectTab`
     /// resolves against. Every bar button is in here now that the Feed action
     /// slot has become the For You root.
@@ -135,6 +162,8 @@ final class MainTabCoordinator: NSObject, Coordinator {
 
         let profileTab = ProfileTabCoordinator(container: container, onLogout: onLogout)
         self.profileTab = profileTab
+        let forYouTab = ForYouTabCoordinator(container: container)
+        self.forYouTab = forYouTab
         // Ordered before Search deliberately: `UISearchTab` is pinned to the
         // trailing edge by the system, so this array reads as bar order rather
         // than relying on that.
@@ -143,7 +172,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
                 container: container,
                 notificationsButtonItem: notificationsBarItem
             )),
-            (.forYou, ForYouTabCoordinator(container: container)),
+            (.forYou, forYouTab),
             (.messages, MessagesTabCoordinator(container: container)),
             (.profile, profileTab),
             (.search, SearchTabCoordinator(container: container))
@@ -374,20 +403,44 @@ extension MainTabCoordinator {
     /// Runs on every layout pass, so it is cheap and idempotent: it re-adds
     /// nothing already added and writes the frame only when it moved.
     fileprivate func alignProfileMenuOverlay() {
+        align(profileMenuOverlay, over: profileTab?.tab.title)
+        alignForYouMenuOverlay()
+    }
+
+    /// Keeps the lens-menu overlay over the For You tab, and installs the menu
+    /// the first time the root exists to supply one.
+    ///
+    /// ⚠️ The menu is attached HERE rather than at `start()`, because the tab's
+    /// root view controller is built when its stack is populated and the shell
+    /// assembles the bar before that has happened. Attaching once and only once
+    /// matters: the menu resolves its own rows at presentation, so re-fetching
+    /// it on every layout pass would buy nothing and cost a build per frame.
+    private func alignForYouMenuOverlay() {
+        // The tab is renamed by the active lens, so both the lookup and the
+        // label follow it rather than a constant.
+        let title = forYouTab?.tab.title
+        forYouMenuOverlay.accessibilityLabel = title
+        if forYouMenuOverlay.menu == nil { forYouMenuOverlay.menu = forYouTab?.modeMenu }
+        align(forYouMenuOverlay, over: title)
+    }
+
+    /// Puts an overlay exactly over the bar button titled `title`.
+    ///
+    /// Runs on every layout pass, so it is cheap and idempotent: it re-adds
+    /// nothing already added and writes the frame only when it moved.
+    private func align(_ overlay: UIButton, over title: String?) {
         let bar = tabBarController.tabBar
-        guard let title = profileTab?.tab.title,
-              let button = tabButton(labelled: title, in: bar)
-        else { return }
+        guard let title, let button = tabButton(labelled: title, in: bar) else { return }
         let frame = button.convert(button.bounds, to: bar)
         // A zero frame means the bar has not placed its buttons yet; leaving the
         // overlay unplaced is right, and a later pass will catch it.
         guard !frame.isEmpty else { return }
-        if profileMenuOverlay.superview !== bar { bar.addSubview(profileMenuOverlay) }
-        if profileMenuOverlay.frame != frame { profileMenuOverlay.frame = frame }
+        if overlay.superview !== bar { bar.addSubview(overlay) }
+        if overlay.frame != frame { overlay.frame = frame }
         // Keep it topmost: UIKit re-adds its own subviews during a layout pass
         // and would otherwise bury the overlay, which silently costs the
         // long-press with nothing on screen to explain why.
-        bar.bringSubviewToFront(profileMenuOverlay)
+        bar.bringSubviewToFront(overlay)
     }
 
     /// Installs the switcher menu from the factory's current snapshot.
@@ -409,9 +462,9 @@ extension MainTabCoordinator {
         var queue = bar.subviews
         while !queue.isEmpty {
             let view = queue.removeFirst()
-            // The overlay carries the same label by design; skip it or it would
-            // match itself and pin its own frame.
-            if view === profileMenuOverlay { continue }
+            // The overlays carry the same labels by design; skip them or one
+            // would match itself and pin its own frame.
+            if view === profileMenuOverlay || view === forYouMenuOverlay { continue }
             if view.accessibilityLabel == title { return view }
             queue.append(contentsOf: view.subviews)
         }

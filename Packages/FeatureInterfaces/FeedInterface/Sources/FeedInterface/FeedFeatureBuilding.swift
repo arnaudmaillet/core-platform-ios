@@ -41,6 +41,28 @@ public struct ForYouTabPresentation: Equatable, Sendable {
     }
 }
 
+/// A For You root that can hand its content-lens menu to whatever else wants
+/// to offer it.
+///
+/// The screen's own navigation bar carries this menu; the app's tab bar wants
+/// the identical one under a long press, so that a viewer who has learned the
+/// modes in one place finds the same five rows, the same glyphs and the same
+/// counts in the other. Building it twice would be two menus that agree until
+/// someone edits one.
+///
+/// ⚠️ The returned menu resolves its rows AT PRESENTATION, so it can be
+/// attached once and left alone — the counts it shows are whatever they are
+/// when the long press opens it, not when the shell asked. Rebuilding it on
+/// every count change would be a write per page load to a menu nobody has open.
+///
+/// Choosing a row switches the lens for the whole feature, exactly as choosing
+/// it from the screen's own header does: there is one active context, and it
+/// does not matter which surface asked.
+@MainActor
+public protocol ForYouModeMenuProviding: UIViewController {
+    func makeModeMenu() -> UIMenu
+}
+
 /// Entry point contract for the Feed feature. Other modules (the app shell,
 /// or features that embed feed surfaces) depend on this interface package —
 /// never on the Feed implementation — so editing Feed internals recompiles
