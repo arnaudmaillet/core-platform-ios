@@ -148,3 +148,71 @@ struct ProfileGalleryScrubTests {
         #expect(pager.debugIsScrubbing == false)
     }
 }
+
+/// How tall the pager is while a drag is between two pages.
+///
+/// The pager is exactly as tall as its ACTIVE page, so the profile's single
+/// vertical timeline always fits what is being read. Held literally through a
+/// drag, that rule crops the incoming page to the outgoing one's height and
+/// makes a long list appear to load late. Mid-drag the height belongs to both.
+@MainActor
+struct ProfileGalleryHeightTests {
+    private struct SilentFetcher: ImageFetching {
+        func fetchImageData(for url: URL) async throws -> Data { Data() }
+    }
+
+    /// A pager whose three pages are 100, 500 and 300 tall.
+    private func makePager() -> ProfileGalleryPagerView {
+        let pager = ProfileGalleryPagerView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()))
+        pager.frame = CGRect(x: 0, y: 0, width: 400, height: 600)
+        pager.layoutIfNeeded()
+        pager.debugSetFittedHeights([100, 500, 300])
+        return pager
+    }
+
+    @Test func restingOnAPageIsThatPagesHeight() {
+        let pager = makePager()
+        pager.debugSetOffsetX(400 * 1)
+        pager.debugApplyInterpolatedHeight()
+        #expect(pager.debugPagerHeight == 500)
+    }
+
+    /// ⚠️ The case the fix exists for: halfway from the SHORT page to the long
+    /// one, the container must already be taller than the short page — holding
+    /// 100 here is the crop that made the long list pop in on release.
+    @Test func halfwayToATallerPageIsHalfwayToItsHeight() {
+        let pager = makePager()
+        pager.debugSetOffsetX(400 * 0.5)
+        pager.debugApplyInterpolatedHeight()
+        #expect(pager.debugPagerHeight == 300)
+    }
+
+    @Test func aQuarterOfTheWayIsAQuarterOfTheGrowth() {
+        let pager = makePager()
+        pager.debugSetOffsetX(400 * 0.25)
+        pager.debugApplyInterpolatedHeight()
+        #expect(pager.debugPagerHeight == 200)
+    }
+
+    /// It shrinks as well as grows — leaving a tall page for a short one must
+    /// not leave the container tall, or the timeline below it keeps a gap.
+    @Test func movingToAShorterPageContracts() {
+        let pager = makePager()
+        pager.debugSetOffsetX(400 * 1.5)
+        pager.debugApplyInterpolatedHeight()
+        #expect(pager.debugPagerHeight == 400)
+    }
+
+    /// Dragged past the ends there is no next page to interpolate towards, and
+    /// the height stays with the page that is actually there.
+    @Test func draggingPastTheEndsHoldsTheEndPagesHeight() {
+        let pager = makePager()
+        pager.debugSetOffsetX(400 * -1)
+        pager.debugApplyInterpolatedHeight()
+        #expect(pager.debugPagerHeight == 100)
+
+        pager.debugSetOffsetX(400 * 9)
+        pager.debugApplyInterpolatedHeight()
+        #expect(pager.debugPagerHeight == 300)
+    }
+}
