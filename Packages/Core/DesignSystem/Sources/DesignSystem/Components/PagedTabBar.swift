@@ -15,9 +15,13 @@ import UIKit
 /// has no host, so treat its numbers as unverified against real content.
 ///
 /// **Anatomy.** A full-width capsule of `UIGlassEffect` inset by the standard
-/// margin, its own soft shadow, and a tinted overlay marking the active
-/// segment. The capsule floats and has no hairline, so content scrolls
-/// *beneath* it and is seen through the glass. Segments share the width
+/// margin, with a tinted overlay marking the active segment. **No shadow and no
+/// hairline** — the material is the whole of the edge, so content scrolls
+/// *beneath* the capsule and is seen through the glass rather than being fenced
+/// off from it. A drop shadow was carried here until it was removed for a flat
+/// finish; nothing in the bar sets one now, and the wrapper view that existed
+/// only to hold it (a shadow on the capsule's own layer would have been clipped
+/// by its corner radius) went with it. Segments share the width
 /// equally, so the bar reads the same on every screen.
 ///
 /// **A control, not a view.** The bar is a `UIControl` carrying
@@ -89,7 +93,7 @@ public final class PagedTabBar: UIControl {
     /// part that costs a material — it already composites what it holds.
     public enum Style: Sendable {
         /// A free-floating strip under the navigation bar, on the screen's own
-        /// margins. Carries its own glass and its own shadow.
+        /// margins. Carries its own glass.
         case floating
         /// `navigationItem.titleView`. Compact, marginless, and BARE: the
         /// navigation bar supplies the backdrop, so the bar contributes only
@@ -137,7 +141,7 @@ public final class PagedTabBar: UIControl {
             }
         }
 
-        /// Whether the bar draws its own material and shadow.
+        /// Whether the bar draws a material of its own.
         var carriesBackdrop: Bool {
             switch self {
             case .floating: true
@@ -394,9 +398,6 @@ public final class PagedTabBar: UIControl {
     public var onScrubEnd: ((CGFloat) -> Void)?
 
     private let titles: [String]
-    /// Carries the shadow; the capsule itself clips to its corner radius,
-    /// which would clip a shadow set on the same layer.
-    private let shadowHost = UIView()
     private let capsule = UIVisualEffectView(effect: nil)
     /// Scrolls the segments when they out-measure the capsule. Below that
     /// width it never scrolls and is invisible in every sense.
@@ -423,27 +424,6 @@ public final class PagedTabBar: UIControl {
         self.style = style
         super.init(frame: .zero)
 
-        if style.carriesBackdrop {
-            shadowHost.layer.shadowColor = UIColor.black.cgColor
-            shadowHost.layer.shadowOpacity = 0.12
-            shadowHost.layer.shadowRadius = 10
-            shadowHost.layer.shadowOffset = CGSize(width: 0, height: 3)
-        }
-        // Full width, standard margins — a floating capsule is a bar, not a
-        // badge, so it reads the same on every screen instead of growing and
-        // shrinking with whatever the segment titles happen to measure. A title
-        // view is the opposite case and hugs; see `Style.hugsContent`.
-        shadowHost.constrain(in: self) { parent in
-            shadowHost.topAnchor.constraint(equalTo: parent.topAnchor, constant: style.topMargin)
-            shadowHost.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -style.bottomMargin)
-            shadowHost.leadingAnchor.constraint(
-                equalTo: parent.safeAreaLayoutGuide.leadingAnchor, constant: style.horizontalMargin
-            )
-            shadowHost.trailingAnchor.constraint(
-                equalTo: parent.safeAreaLayoutGuide.trailingAnchor, constant: -style.horizontalMargin
-            )
-        }
-
         capsule.clipsToBounds = true
         // Stated HERE, not left to the first layout pass. `layoutSubviews` also
         // maintains the radius (the capsule's height is not constant — Dynamic
@@ -452,7 +432,26 @@ public final class PagedTabBar: UIControl {
         // renders, and the glass draws as a hard-cornered rectangle for it.
         capsule.layer.cornerCurve = .continuous
         capsule.layer.cornerRadius = effectiveCapsuleHeight / 2
-        capsule.pin(to: shadowHost)
+        // Full width, standard margins — a floating capsule is a bar, not a
+        // badge, so it reads the same on every screen instead of growing and
+        // shrinking with whatever the segment titles happen to measure. A title
+        // view is the opposite case and hugs; see `Style.hugsContent`.
+        //
+        // The capsule is constrained DIRECTLY, with no wrapper. There used to be
+        // one, for a single reason: the capsule clips to its corner radius, and
+        // a shadow set on the same layer would have been clipped away with it.
+        // With no shadow to host, the wrapper was a view that existed to hold a
+        // property nothing sets.
+        capsule.constrain(in: self) { parent in
+            capsule.topAnchor.constraint(equalTo: parent.topAnchor, constant: style.topMargin)
+            capsule.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -style.bottomMargin)
+            capsule.leadingAnchor.constraint(
+                equalTo: parent.safeAreaLayoutGuide.leadingAnchor, constant: style.horizontalMargin
+            )
+            capsule.trailingAnchor.constraint(
+                equalTo: parent.safeAreaLayoutGuide.trailingAnchor, constant: -style.horizontalMargin
+            )
+        }
 
         scroller.showsHorizontalScrollIndicator = false
         scroller.showsVerticalScrollIndicator = false
@@ -702,12 +701,6 @@ public final class PagedTabBar: UIControl {
         #endif
         hasLaidOut = true
         enforceCapsuleShape()
-        if style.carriesBackdrop {
-            shadowHost.layer.shadowPath = UIBezierPath(
-                roundedRect: shadowHost.bounds,
-                cornerRadius: shadowHost.bounds.height / 2
-            ).cgPath
-        }
         resolveSegmentsThenApplyProgress()
     }
 
@@ -875,7 +868,7 @@ public final class PagedTabBar: UIControl {
         alpha = 1
         isHidden = false
         transform = .identity
-        for view in [shadowHost, capsule, capsule.contentView, scroller, content, row] {
+        for view in [capsule, capsule.contentView, scroller, content, row] {
             view.alpha = 1
             view.isHidden = false
             view.transform = .identity
