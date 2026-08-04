@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNavigation
 import DesignSystem
+import FeedInterface
 import MediaCore
 import MediaPlayback
 import PostGrid
@@ -63,6 +64,16 @@ final class ForYouViewController: UIViewController {
         item.accessibilityLabel = "New Post"
         return item
     }()
+
+    /// Reports how the app's own tab item should read — see
+    /// `ForYouTabPresentation`.
+    var onTabPresentationChange: ((ForYouTabPresentation) -> Void)?
+
+    /// Every lens's count, as of the last publish. Read by the context menu
+    /// when it opens and by the tab item when either half changes; held here
+    /// rather than asked for because a menu opening is not a moment to run a
+    /// derivation over the corpus.
+    private var contextCounts: [ContentContext: Int] = [:]
 
     /// The content context: the trailing item, whose menu carries the lenses
     /// and whose GLYPH is the active one.
@@ -456,6 +467,19 @@ final class ForYouViewController: UIViewController {
         viewModel.onLoadSettled = { [weak self] in self?.pager.endRefreshing() }
         viewModel.onPagingChange = { [weak self] paging in self?.pager.setPaging(paging) }
         viewModel.onUnreadChange = { [weak self] counts in self?.applyBadges(counts) }
+        viewModel.onContextCountsChange = { [weak self] counts in
+            guard let self else { return }
+            contextCounts = counts
+            // The menu reads `contextCounts` when it opens, so it needs no
+            // telling — but the tab item is a fact about the app's chrome and
+            // has to be pushed.
+            publishTabPresentation()
+        }
+        // The badged tab's rows split on this number. Only that page has
+        // sections; Discover is a ranked mosaic with no "since" to divide on.
+        viewModel.onNewCountChange = { [weak self] count in
+            self?.pager.setNewCount(count, for: ForYouViewModel.badgedTab)
+        }
 
         // Land on the stored format before first layout, so the screen OPENS
         // there with no visible jump.
@@ -469,19 +493,24 @@ final class ForYouViewController: UIViewController {
         #endif
     }
 
-    /// How For You presents an unread count: as PRESENCE, never as a number.
+    /// How For You presents an unread count: as a NUMBER.
     ///
-    /// The store still derives a real count — the watermark machinery is
-    /// unchanged — and this is the one place it is deliberately thrown away.
-    /// "Following ③" invites arithmetic the viewer cannot act on: the three are
-    /// not three things to open, they are a page that has moved on since they
-    /// last looked, and the useful signal is entirely in whether it has. The
-    /// Messages inbox is the opposite case and keeps its numbers: there, each
-    /// count is a conversation you can open one at a time.
+    /// ⚠️ This was a dot, on the argument that "Following ③" invites arithmetic
+    /// the viewer cannot act on — three posts are not three things to open, and
+    /// the useful signal is only that the page has moved on. That argument held
+    /// while the count answered one question. It no longer does: the count is
+    /// now the size of the "New" section the viewer is about to scroll through
+    /// AND the number beside each mode in the context menu, so the badge is the
+    /// short form of something they can see spelled out in two other places. A
+    /// dot over a section holding four posts is the screen disagreeing with
+    /// itself.
+    ///
+    /// Zero renders nothing — `.count` already says so — so the presence signal
+    /// the dot carried is not lost, it just arrived with a size attached.
     ///
     /// Pure and internal so a test can pin the rule rather than a screenshot.
     static func badgeStyle(forUnread count: Int) -> PagedTabBar.BadgeStyle {
-        .dot(isVisible: count > 0)
+        .count(count)
     }
 
     /// Pushes the counts onto the capsule, in pager order.
@@ -524,20 +553,48 @@ final class ForYouViewController: UIViewController {
     /// action. A tick beside the matching row says the same thing a second
     /// time, in a place you have to open a menu to read.
     ///
-    /// Built ONCE, and that follows directly. The rebuild this used to do on
-    /// every change existed solely to move the checkmark; with nothing stateful
-    /// left in the menu, rebuilding it would be work whose only output nobody
-    /// can see. `applyContext` moves the glyph instead.
+    /// Attached ONCE, and its contents are built fresh every time it opens.
+    ///
+    /// The rows now carry counts, which are live state — the thing this menu
+    /// deliberately had none of. Rather than re-assigning `contextItem.menu` on
+    /// every publish (a write per page load, to a menu nobody has open), the
+    /// children come from a `UIDeferredMenuElement.uncached`: UIKit asks for
+    /// them at the moment of presentation, so they are current by construction
+    /// and there is nothing to keep in step. `.uncached` specifically —
+    /// `.init(_:)` caches the first build, which is exactly the stale menu this
+    /// avoids.
     func makeContextMenu() -> UIMenu {
+        UIMenu(children: [
+            UIDeferredMenuElement.uncached { [weak self] completion in
+                completion(self?.makeContextActions() ?? [])
+            }
+        ])
+    }
+
+    /// The rows the menu shows, built fresh on every presentation.
+    ///
+    /// Separate from `makeContextMenu` because a `UIDeferredMenuElement`'s
+    /// provider cannot be invoked from outside UIKit — so a test asserting what
+    /// the menu offers would have nothing to read but the deferred element
+    /// itself. This is the seam those tests use.
+    func makeContextActions() -> [UIAction] {
         // Closure form, not a bare `map(makeContextAction)`: passing a
         // MainActor-isolated method as a function value strips its isolation
         // and Swift 6 rejects it.
-        UIMenu(children: ContentContext.allCases.map { makeContextAction($0) })
+        ContentContext.allCases.map { makeContextAction($0) }
     }
 
+    /// One row: the mode, its glyph, and how much is waiting under it.
+    ///
+    /// The count is in the TITLE rather than a subtitle because the menu is a
+    /// list of choices and the number is part of what makes one of them worth
+    /// choosing — a subtitle would put it on a second line and half the width.
+    /// Zero is shown too, not hidden: the menu's job here is to let someone
+    /// compare five modes at a glance, and a row with nothing beside it would
+    /// be ambiguous between "nothing new" and "not counted".
     private func makeContextAction(_ context: ContentContext) -> UIAction {
         UIAction(
-            title: context.title,
+            title: "\(context.title) (\(contextCounts[context] ?? 0))",
             image: UIImage(systemName: context.symbol)
         ) { [weak self] _ in
             self?.applyContext(context)
@@ -554,6 +611,25 @@ final class ForYouViewController: UIViewController {
         viewModel.setContext(context)
         contextItem.image = UIImage(systemName: context.symbol)
         contextItem.accessibilityValue = context.title
+        publishTabPresentation()
+    }
+
+    /// Tells the shell how its own bar item should read.
+    ///
+    /// Sent from here rather than from the view model because it is a
+    /// PRESENTATION fact — a title, a glyph, a badge — and the view model
+    /// deals in contexts and counts. It also means the two callers that can
+    /// change it (a lens tap, a fresh set of counts) go through one place, so
+    /// the item can never carry one mode's name and another's number.
+    private func publishTabPresentation() {
+        let context = viewModel.context
+        onTabPresentationChange?(
+            ForYouTabPresentation(
+                title: context.title,
+                symbol: context.symbol,
+                badgeCount: contextCounts[context] ?? 0
+            )
+        )
     }
 
     /// Opens the full-screen feed on the tapped post, with the hero zoom.

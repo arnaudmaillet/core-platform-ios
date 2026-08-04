@@ -1,17 +1,15 @@
-import DesignSystem
 import UIKit
 
-/// The floating glass capsule every sectioned list in Chat wears as its header:
+/// The floating glass capsule every sectioned list wears as its header:
 /// leading-aligned, sized by its title, and tapping it scrolls its section back
 /// to the top.
 ///
 /// A capsule rather than a full-width frosted band. The band read as structural
 /// chrome dividing the list into slabs, where these screens' other floating
-/// elements — the search dock, the header's category lens — are all discrete
+/// elements — the search dock, a header's category lens — are all discrete
 /// glass objects sitting *over* content. The capsule is the same kind of
 /// object, so a screen reads as one system rather than two ideas about what a
-/// header is. `DayHeaderView` does this for the transcript's day markers; this
-/// is its leading-aligned, tappable sibling.
+/// header is.
 ///
 /// **A real `UIButton` on `UIButton.Configuration.glass()`**, not a
 /// `UIVisualEffectView` with a tap recognizer bolted on. That is what buys the
@@ -19,28 +17,29 @@ import UIKit
 /// highlight, the accessibility treatment of a control — none of which a
 /// recognizer over an effect view would produce.
 ///
-/// It exists as its own type because two different list machineries need the
-/// same pill: the compose picker's collection view takes it inside a
-/// `UICollectionReusableView`, the inbox's tables inside a
-/// `UITableViewHeaderFooterView`. Both host it; neither owns how it looks.
-final class SectionHeaderPillButton: UIButton {
-    enum Metrics {
+/// It lives here rather than in any one feature because three different list
+/// machineries need the same pill: the compose picker's collection view and the
+/// inbox's tables take it inside their reusable header views, and For You's
+/// Following grid takes it inside a collection supplementary. All of them host
+/// it; none of them owns how it looks.
+public final class SectionHeaderPillButton: UIButton {
+    public enum Metrics {
         /// Inside the pill. Horizontal is twice the vertical so the text clears
         /// the corner curve instead of crowding into it — at this line height
         /// the radius lands at 18pt, just outside the 16pt inset.
-        static let textInsets = NSDirectionalEdgeInsets(
+        public static let textInsets = NSDirectionalEdgeInsets(
             top: Spacing.sm, leading: Spacing.lg, bottom: Spacing.sm, trailing: Spacing.lg
         )
         /// Around the pill, symmetric: it floats in the band rather than
         /// hanging from either edge of it.
-        static let float = Spacing.sm
+        public static let float = Spacing.sm
     }
 
     /// Fires when the capsule is tapped. Re-assigned on every configure, since
     /// the hosting view is reused across sections.
-    var onTap: (() -> Void)?
+    public var onTap: (() -> Void)?
 
-    init() {
+    public init() {
         super.init(frame: .zero)
         var configuration = UIButton.Configuration.glass()
         configuration.cornerStyle = .capsule
@@ -57,9 +56,9 @@ final class SectionHeaderPillButton: UIButton {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func setPillTitle(_ title: String?) {
+    public func setPillTitle(_ title: String?) {
         var attributes = AttributeContainer()
-        attributes.font = .preferredFont(forTextStyle: .subheadline).withWeight(.semibold)
+        attributes.font = .preferredFont(forTextStyle: .subheadline).withSemiboldWeight()
         configuration?.attributedTitle = (title?.isEmpty == false)
             ? AttributedString(title!, attributes: attributes)
             : nil
@@ -69,12 +68,23 @@ final class SectionHeaderPillButton: UIButton {
     /// Pins the pill into a host header: leading-aligned on the host's margins,
     /// floating clear of the band's top and bottom, and free to be narrower
     /// than the host is wide.
-    func pinAsHeader(in host: UIView) {
+    public func pinAsHeader(in host: UIView) {
         constrain(in: host) { parent in
             leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor)
             topAnchor.constraint(equalTo: parent.topAnchor, constant: Metrics.float)
             bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Metrics.float)
             trailingAnchor.constraint(lessThanOrEqualTo: parent.layoutMarginsGuide.trailingAnchor)
         }
+    }
+}
+
+private extension UIFont {
+    /// Semibold at this font's own size, keeping whatever Dynamic Type has
+    /// already scaled it to — a descriptor edit, so the size is never restated.
+    func withSemiboldWeight() -> UIFont {
+        let descriptor = fontDescriptor.addingAttributes([
+            .traits: [UIFontDescriptor.TraitKey.weight: UIFont.Weight.semibold]
+        ])
+        return UIFont(descriptor: descriptor, size: pointSize)
     }
 }

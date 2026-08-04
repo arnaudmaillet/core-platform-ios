@@ -14,6 +14,33 @@ public enum PostDetailMode: Sendable, Equatable {
     case commentsOnly
 }
 
+/// How the For You tab should present ITSELF in the app's tab bar, given
+/// whatever the viewer has the screen set to.
+///
+/// The tab item is not decoration here — For You is a lens over a corpus, and
+/// which lens is active is a mode the viewer chose and can forget they chose.
+/// A bar item that still says "For You" with a sparkle while the screen is
+/// filtered to Work is the one place that state is invisible, and it is the
+/// place someone looks to decide whether to come back.
+///
+/// Carried as plain data across the interface boundary — a title, an SF Symbol
+/// name and a count — so the shell can build a `UITab` from it without
+/// importing Feed or knowing that `ContentContext` exists.
+public struct ForYouTabPresentation: Equatable, Sendable {
+    /// The active lens's name — what the tab item should read.
+    public let title: String
+    /// The active lens's SF Symbol name, for the item's image.
+    public let symbol: String
+    /// How much is waiting under that lens. Zero means no badge.
+    public let badgeCount: Int
+
+    public init(title: String, symbol: String, badgeCount: Int) {
+        self.title = title
+        self.symbol = symbol
+        self.badgeCount = badgeCount
+    }
+}
+
 /// Entry point contract for the Feed feature. Other modules (the app shell,
 /// or features that embed feed surfaces) depend on this interface package —
 /// never on the Feed implementation — so editing Feed internals recompiles
@@ -21,15 +48,22 @@ public enum PostDetailMode: Sendable, Equatable {
 @MainActor
 public protocol FeedFeatureBuilding {
     func makeFeedViewController() -> UIViewController
-    /// The For You discovery tab's root: curated content in a three-format
-    /// grid (Activity / Media / Short), where tapping a tile opens the
-    /// full-screen feed seeded from that page's ordered posts.
+    /// The For You tab's root: a Discover mosaic and a Following timeline under
+    /// one content lens, where tapping a tile opens the full-screen feed seeded
+    /// from that page's ordered posts.
     ///
     /// It lives behind the *feed* builder rather than a feature of its own
     /// because the destination it opens (`makeSnapFeedViewController`) and the
     /// read path it shares are both here — one repository, one post cache, so
     /// a tapped tile is already warm in the feed it expands into.
-    func makeForYouViewController() -> UIViewController
+    ///
+    /// `onTabPresentationChange` reports how the shell's own bar item should
+    /// read — see `ForYouTabPresentation`. It fires on the first load and on
+    /// every lens change after it, including while the tab is off screen, which
+    /// is the case the bar item exists for.
+    func makeForYouViewController(
+        onTabPresentationChange: ((ForYouTabPresentation) -> Void)?
+    ) -> UIViewController
     /// The detail screen for a single post. `.full` for the `.post` route (e.g.
     /// from a notification); `.commentsOnly` for the `.comments` route (the snap
     /// feed's comment button).
@@ -45,4 +79,11 @@ public protocol FeedFeatureBuilding {
     /// the network — used by Maps to prefetch the visible pins on viewport
     /// settle, eliminating the metadata desync on tap. Safe for ids never opened.
     func prewarmPosts(_ ids: [PostID]) async
+}
+
+extension FeedFeatureBuilding {
+    /// The ordinary case: a For You tab nobody is listening to.
+    public func makeForYouViewController() -> UIViewController {
+        makeForYouViewController(onTabPresentationChange: nil)
+    }
 }

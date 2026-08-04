@@ -15,6 +15,13 @@ import UIKit
 /// must recycle cells — so it hosts the same pattern in an ordinary scrolling
 /// collection view instead. The pattern and the cells are shared; the host is
 /// not.
+/// Lets a layout built in `init` ask the page that owns it a question, without
+/// either holding the other alive. See `ForYouGridPage.init`.
+@MainActor
+private final class WeakPageBox {
+    weak var page: ForYouGridPage?
+}
+
 final class ForYouGridPage: UIView {
     /// The page's fixed shape, chosen by its format at init.
     enum Style {
@@ -34,6 +41,81 @@ final class ForYouGridPage: UIView {
     /// The order the view model handed over, kept so an append can be
     /// recognised as one before arrangement permutes it.
     private var rawPosts: [GalleryPost] = []
+
+    /// How many leading posts arrived since the session opened — the size of
+    /// the "New" section, and the number the tab badge shows. See
+    /// `ForYouSessionWatermark`; the page is TOLD this rather than deriving it,
+    /// so the header and the badge cannot be two answers to one question.
+    private var newCount = 0
+
+    /// Where the "New" section ends, or 0 for a list that is one plain run.
+    ///
+    /// Three conditions, and each removes a header that would say nothing:
+    /// a grid page is a ranked mosaic with no "since" to divide on; a skeleton
+    /// has no posts to have arrived; and a corpus that is ENTIRELY new (`>=`,
+    /// not `>`) would put "New" over everything and "Recent" over nothing —
+    /// which is a label, not a division. The inbox lists follow the same rule
+    /// for the same reason.
+    private var split: Int {
+        guard style == .list, !showsSkeleton, newCount > 0, newCount < posts.count else { return 0 }
+        return newCount
+    }
+
+    /// The sections this page currently has, in order.
+    private var sections: [Section] {
+        split > 0 ? [.new, .earlier] : [.earlier]
+    }
+
+    /// The two halves of a sectioned list, and the words they wear.
+    ///
+    /// The SAME pair the inbox uses — "New" and "Recent". A viewer moving
+    /// between Messages and For You should not have to re-read a header to
+    /// learn that it means what the last one meant.
+    private enum Section {
+        case new
+        case earlier
+
+        var title: String {
+            switch self {
+            case .new: "New"
+            case .earlier: "Recent"
+            }
+        }
+    }
+
+    /// Where a flat index into `posts` lives in the sectioned list.
+    private func indexPath(for index: Int) -> IndexPath {
+        let split = split
+        guard split > 0 else { return IndexPath(item: index, section: 0) }
+        return index < split
+            ? IndexPath(item: index, section: 0)
+            : IndexPath(item: index - split, section: 1)
+    }
+
+    /// The flat index into `posts` an index path names.
+    private func flatIndex(for indexPath: IndexPath) -> Int {
+        indexPath.section == 0 ? indexPath.item : split + indexPath.item
+    }
+
+    /// Whether appending `count` posts leaves the section structure alone, so
+    /// the append can stay an insert rather than becoming a reload.
+    private func splitWouldHold(afterAppending count: Int, to current: Int) -> Bool {
+        guard style == .list else { return true }
+        let after = (newCount > 0 && newCount < posts.count + count) ? newCount : 0
+        return after == current
+    }
+
+    /// Adopts a new split. Reloads only when the SECTIONING changes — the count
+    /// arrives on every publish and is usually the same number it was.
+    func setNewCount(_ count: Int) {
+        guard newCount != count else { return }
+        let before = split
+        newCount = count
+        guard split != before else { return }
+        // The section count itself changed, so this cannot be an item-level
+        // update: the layout has to re-ask which sections carry headers.
+        collectionView.reloadData()
+    }
 
     /// Grid pages steer each post into the block whose shape crops it least;
     /// list pages are a timeline, where order carries meaning and must not be
@@ -138,11 +220,21 @@ final class ForYouGridPage: UIView {
         self.imagePipeline = imagePipeline
         playback = style == .grid ? videoPlayback.map { GridVideoPlaybackCoordinator(pool: $0) } : nil
         self.style = style
+        // `headerHost` breaks the chicken-and-egg: the layout needs to ask the
+        // page which sections are titled, and the page does not exist until
+        // after `super.init`. The box is filled in below, and the layout only
+        // ever asks during a layout pass — long after that.
+        let headerHost = WeakPageBox()
         collectionView = UICollectionView(
             frame: .zero,
-            collectionViewLayout: style == .grid ? ChaoticSliceLayout() : PostGridListLayout.layout()
+            collectionViewLayout: style == .grid
+                ? ChaoticSliceLayout()
+                : PostGridListLayout.layout(hasHeader: { [headerHost] index in
+                    headerHost.page?.hasHeader(inSection: index) ?? false
+                })
         )
         super.init(frame: .zero)
+        headerHost.page = self
 
         sliceLayout?.onPlanInvalidated = { [weak self] in self?.replanArrangement() }
         pagingSpinner.alpha = 0
@@ -157,6 +249,11 @@ final class ForYouGridPage: UIView {
         )
         collectionView.register(
             PostGridSkeletonListCell.self, forCellWithReuseIdentifier: PostGridSkeletonListCell.reuseID
+        )
+        collectionView.register(
+            ForYouSectionHeaderView.self,
+            forSupplementaryViewOfKind: PostGridListLayout.headerElementKind,
+            withReuseIdentifier: ForYouSectionHeaderView.reuseID
         )
         collectionView.dataSource = self
         collectionView.delegate = self
@@ -279,8 +376,8 @@ final class ForYouGridPage: UIView {
         let centreY = viewport.midY
         let candidates = collectionView.indexPathsForVisibleItems.compactMap {
             indexPath -> GridVideoPlaybackCoordinator.Candidate? in
-            guard !showsSkeleton, posts.indices.contains(indexPath.item) else { return nil }
-            let post = posts[indexPath.item]
+            guard !showsSkeleton, posts.indices.contains(flatIndex(for: indexPath)) else { return nil }
+            let post = posts[flatIndex(for: indexPath)]
             // `autoplaysInGrid` is the shape rule: video, with a stream, and
             // not square. Square bricks stay still.
             guard post.autoplaysInGrid, let url = post.videoURL,
@@ -492,7 +589,7 @@ final class ForYouGridPage: UIView {
     /// card costs nothing visible.
     func finalizeLandingLayout(for postID: PostID) {
         guard let index = posts.firstIndex(where: { $0.id == postID }),
-              let cell = collectionView.cellForItem(at: IndexPath(item: index, section: 0))
+              let cell = collectionView.cellForItem(at: indexPath(for: index))
         else { return }
         cell.setNeedsLayout()
         cell.layoutIfNeeded()
@@ -521,7 +618,7 @@ final class ForYouGridPage: UIView {
         guard let index = posts.firstIndex(where: { $0.id == postID }) else { return true }
         let post = posts[index]
         let cell = collectionView.cellForItem(
-            at: IndexPath(item: index, section: 0)
+            at: indexPath(for: index)
         ) as? PostGridTileCell
         if let playback, post.videoURL != nil,
            post.autoplaysInGrid || cell?.loadedVideoRenderView != nil {
@@ -541,7 +638,7 @@ final class ForYouGridPage: UIView {
               let index = posts.firstIndex(where: { $0.id == postID }),
               let url = posts[index].videoURL,
               let cell = collectionView.cellForItem(
-                  at: IndexPath(item: index, section: 0)
+                  at: indexPath(for: index)
               ) as? PostGridTileCell
         else { return false }
         let adopted = playback.adoptHostedSurface(view, for: postID, url: url, cell: cell)
@@ -560,7 +657,7 @@ final class ForYouGridPage: UIView {
     /// `nil` once the tile is no longer realized.
     func tileRect(for postID: PostID, in space: UICoordinateSpace) -> CGRect? {
         guard let index = posts.firstIndex(where: { $0.id == postID }),
-              let cell = collectionView.cellForItem(at: IndexPath(item: index, section: 0))
+              let cell = collectionView.cellForItem(at: indexPath(for: index))
         else { return nil }
         return cell.convert(cell.bounds, to: space)
     }
@@ -586,7 +683,7 @@ final class ForYouGridPage: UIView {
               let index = posts.firstIndex(where: { $0.id == postID }),
               let url = posts[index].videoURL,
               let cell = collectionView.cellForItem(
-                  at: IndexPath(item: index, section: 0)
+                  at: indexPath(for: index)
               ) as? PostGridTileCell
         else { return }
         // Same rule as the present leg: the surface must land in a VISIBLE
@@ -742,7 +839,7 @@ final class ForYouGridPage: UIView {
         // where a tile used to be, for as long as the refetch takes. Both cells
         // are on screen during a dismissal, so both would show it.
         let carried = [slot, current].reduce(into: [Int: UIImage]()) { covers, index in
-            let path = IndexPath(item: index, section: 0)
+            let path = indexPath(for: index)
             if let cover = (collectionView.cellForItem(at: path) as? PostGridTileCell)?.renderedCover {
                 covers[index] = cover
             }
@@ -753,8 +850,8 @@ final class ForYouGridPage: UIView {
         // video surface and play one post's motion under another's cover.
         UIView.performWithoutAnimation {
             collectionView.reloadItems(at: [
-                IndexPath(item: slot, section: 0),
-                IndexPath(item: current, section: 0)
+                indexPath(for: slot),
+                indexPath(for: current)
             ])
             // Force the pass NOW. `reloadItems` only marks the items dirty; the
             // cells are rebuilt on the next layout, and the caller reads the
@@ -767,7 +864,7 @@ final class ForYouGridPage: UIView {
             // already found its image, so a cache hit still wins.
             for (index, cover) in carried {
                 let moved = index == slot ? current : slot
-                (collectionView.cellForItem(at: IndexPath(item: moved, section: 0))
+                (collectionView.cellForItem(at: indexPath(for: moved))
                     as? PostGridTileCell)?.applyCover(cover)
             }
             // Both swapped cells are on screen for the whole return, and both
@@ -777,7 +874,7 @@ final class ForYouGridPage: UIView {
             // rebuild left until something else happened to touch it.
             for index in [slot, current] {
                 guard let cell = collectionView.cellForItem(
-                    at: IndexPath(item: index, section: 0)
+                    at: indexPath(for: index)
                 ) else { continue }
                 cell.isHidden = false
                 cell.alpha = 1
@@ -926,7 +1023,7 @@ final class ForYouGridPage: UIView {
 
     private func cell(for postID: PostID) -> UICollectionViewCell? {
         guard let index = posts.firstIndex(where: { $0.id == postID }) else { return nil }
-        return collectionView.cellForItem(at: IndexPath(item: index, section: 0))
+        return collectionView.cellForItem(at: indexPath(for: index))
     }
 
     func render(_ state: ForYouViewModel.PageState) {
@@ -985,7 +1082,15 @@ final class ForYouGridPage: UIView {
         let added = Self.addedPosts(from: rawPosts, to: incoming)
         rawPosts = incoming
         showsSkeleton = skeleton
-        if let added, !added.isEmpty, !showsSkeleton, !skeleton, !dissolving {
+        // ⚠️ An append can change the SECTIONING, not just the item count: a
+        // corpus that was entirely new is one unlabelled run, and the first
+        // older page landing under it splits the list in two. Inserting items
+        // into a collection view whose section count changed in the same pass
+        // is the classic inconsistency exception, so that case takes the
+        // reload path below instead.
+        let splitBefore = split
+        if let added, !added.isEmpty, !showsSkeleton, !skeleton, !dissolving,
+           splitWouldHold(afterAppending: added.count, to: splitBefore) {
             // Arrange only the newcomers, against the absolute slots they will
             // occupy. Placement depends solely on the absolute index, so the
             // items already on screen cannot move — which is what keeps this an
@@ -998,7 +1103,7 @@ final class ForYouGridPage: UIView {
             posts += arrange(added, startingAt: start)
             collectionView.performBatchUpdates {
                 collectionView.insertItems(
-                    at: (start..<posts.count).map { IndexPath(item: $0, section: 0) }
+                    at: (start..<posts.count).map { indexPath(for: $0) }
                 )
             }
             DispatchQueue.main.async { [weak self] in self?.updateAutoplay() }
@@ -1028,8 +1133,52 @@ final class ForYouGridPage: UIView {
 // MARK: - Data source / delegate
 
 extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
+    /// Whether a section carries a pill. False for a single unlabelled run —
+    /// see `split`. Asked by the LAYOUT, which is why it is not private.
+    func hasHeader(inSection index: Int) -> Bool {
+        split > 0 && sections.indices.contains(index)
+    }
+
+    func numberOfSections(in collectionView: UICollectionView) -> Int {
+        showsSkeleton ? 1 : sections.count
+    }
+
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
-        showsSkeleton ? skeletonCount : posts.count
+        guard !showsSkeleton else { return skeletonCount }
+        let split = split
+        guard split > 0 else { return posts.count }
+        return section == 0 ? split : posts.count - split
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        viewForSupplementaryElementOfKind kind: String,
+        at indexPath: IndexPath
+    ) -> UICollectionReusableView {
+        let header = collectionView.dequeueReusableSupplementaryView(
+            ofKind: kind,
+            withReuseIdentifier: ForYouSectionHeaderView.reuseID,
+            for: indexPath
+        ) as! ForYouSectionHeaderView
+        let section = sections.indices.contains(indexPath.section) ? sections[indexPath.section] : .earlier
+        header.setTitle(section.title)
+        // Tapping a header means "show me this part" — the same gesture the
+        // inbox's pills answer.
+        header.onTap = { [weak self] in self?.scrollToSection(indexPath.section) }
+        return header
+    }
+
+    /// Puts a section's first row directly under its header.
+    ///
+    /// A no-op for a list too short to scroll: `scrollToItem` cannot invent
+    /// content, so a two-section list that already fits stays where it is.
+    private func scrollToSection(_ index: Int) {
+        guard collectionView.numberOfSections > index,
+              collectionView.numberOfItems(inSection: index) > 0
+        else { return }
+        collectionView.scrollToItem(
+            at: IndexPath(item: 0, section: index), at: .top, animated: true
+        )
     }
 
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
@@ -1051,7 +1200,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
                 return cell
             }
         }
-        let post = posts[indexPath.item]
+        let post = posts[flatIndex(for: indexPath)]
         // Set on EVERY dequeue, both ways: the flight's stand-in stays hidden
         // across reloads, and a recycled cell can never carry a stale hide to
         // another tile.
@@ -1081,9 +1230,9 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        guard !showsSkeleton, posts.indices.contains(indexPath.item) else { return }
+        guard !showsSkeleton, posts.indices.contains(flatIndex(for: indexPath)) else { return }
         collectionView.deselectItem(at: indexPath, animated: false)
-        onItemTapped?(indexPath.item)
+        onItemTapped?(flatIndex(for: indexPath))
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {

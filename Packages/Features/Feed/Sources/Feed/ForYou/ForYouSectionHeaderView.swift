@@ -1,15 +1,15 @@
 import DesignSystem
 import UIKit
 
-/// The compose picker's section header: `SectionHeaderPillButton` in the shape
-/// a collection view can use.
+/// The Following list's section header: the same `SectionHeaderPillButton` the
+/// inbox and the compose picker wear, in the shape a collection view can use.
 ///
-/// The pill itself — its glass, its metrics, its tap behaviour — lives in that
-/// type, because the inbox's tables need the identical object inside a
-/// `UITableViewHeaderFooterView` instead. This is a host, not a design.
-final class SectionHeaderCapsuleView: UICollectionReusableView {
-    /// Fires when the capsule is tapped. Re-assigned on every configure, since
-    /// the view is reused across sections.
+/// A reusable view with no background of its own — the pill IS the header, and
+/// the rows scroll underneath it. The layout pins it to the visible bounds, so
+/// it behaves like a plain table's pinned header without a band to pin.
+final class ForYouSectionHeaderView: UICollectionReusableView {
+    static let reuseID = "ForYouSectionHeaderView"
+
     var onTap: (() -> Void)? {
         get { pill.onTap }
         set { pill.onTap = newValue }

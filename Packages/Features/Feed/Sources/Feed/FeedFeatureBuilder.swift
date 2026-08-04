@@ -57,9 +57,11 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         await repository.prewarm(ids)
     }
 
-    public func makeForYouViewController() -> UIViewController {
+    public func makeForYouViewController(
+        onTabPresentationChange: ((ForYouTabPresentation) -> Void)?
+    ) -> UIViewController {
         let repository = repository
-        return ForYouViewController(
+        let forYou = ForYouViewController(
             viewModel: ForYouViewModel(
                 repository: ForYouRepository(feed: repository),
                 // Its OWN namespace. The profile gallery persists the same
@@ -81,6 +83,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // building one.
             router: router
         )
+        forYou.onTabPresentationChange = onTabPresentationChange
+        return forYou
     }
 
     public func makeSnapFeedViewController(postIDs: [PostID]) -> UIViewController {

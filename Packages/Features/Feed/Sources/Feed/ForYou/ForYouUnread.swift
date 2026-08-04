@@ -130,6 +130,33 @@ public final class ForYouUnreadStore {
         defaults.set(newest, forKey: key(for: format))
     }
 
+    /// The instant a format currently counts from, seeding it on first sight
+    /// so an unvisited format reports "everything loaded is already seen"
+    /// rather than nothing at all.
+    ///
+    /// This is what a SESSION freezes a copy of — see `ForYouSessionWatermark`
+    /// for why the visible counts cannot be read from here directly. Returns
+    /// nil only when there is nothing to seed from either (an empty corpus on a
+    /// format that has never been seen), which is the one case with no instant
+    /// to name.
+    public func sessionBaseline(for format: GalleryFilter.Format, in posts: [GalleryPost]) -> Int64? {
+        if let stored = watermark(for: format) { return stored }
+        seedIfUnseen(format, in: posts)
+        return watermark(for: format)
+    }
+
+    /// A count this store has been TOLD to report, rather than one it derived
+    /// — `-foryou-badges` only. Nil in release, and nil for any format the
+    /// argument did not name.
+    ///
+    /// Exposed so the badge can honour the override while the sections, which
+    /// need real posts to put in them, go on deriving from the session
+    /// watermark. A forced badge is a geometry probe: it is a claim about
+    /// nothing, and nothing is what it can section.
+    public func forcedCount(for format: GalleryFilter.Format) -> Int? {
+        forced[format]
+    }
+
     /// Records a watermark for a format that has never had one, without
     /// reporting anything as unread.
     private func seedIfUnseen(_ format: GalleryFilter.Format, in posts: [GalleryPost]) {

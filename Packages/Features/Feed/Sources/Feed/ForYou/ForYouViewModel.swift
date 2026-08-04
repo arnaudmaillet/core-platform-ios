@@ -71,6 +71,22 @@ public final class ForYouViewModel {
     /// lens, so the bar has to be told explicitly rather than left to infer it
     /// from content it never sees.
     public var onUnreadChange: (([GalleryFilter.Format: Int]) -> Void)?
+    /// Every context's count, for the menu that offers them.
+    ///
+    /// The menu names five modes, and the whole point of putting a number
+    /// beside each is that a viewer can see where the activity is WITHOUT
+    /// switching to find out. So this answers for all of them at once, against
+    /// the same session baseline the active one is counted against — the
+    /// selected mode's entry and the tab badge are then the same number
+    /// arriving by the same route.
+    public var onContextCountsChange: (([ContentContext: Int]) -> Void)?
+    /// How many of the badged tab's posts lead the list as "new", so the page
+    /// can put them under their own header.
+    ///
+    /// The SAME number the badge shows, published from the same place, because
+    /// "the first section and the badge agree" is not a thing worth keeping in
+    /// step — it is a thing worth making true once.
+    public var onNewCountChange: ((Int) -> Void)?
 
     private let repository: any ForYouProviding
     /// Persists the format tab only. The discovery source is session state by
@@ -120,6 +136,9 @@ public final class ForYouViewModel {
     /// `dev/BACKEND_GAPS.md` §14). A source change re-sorts everything, because
     /// there the viewer asked for exactly that.
     private var corpus: [GalleryPost]?
+    /// The instant this session counts from, frozen the first time a corpus
+    /// lands and never moved again. See `ForYouSessionWatermark`.
+    private var sessionWatermark: ForYouSessionWatermark?
     private var failure: String?
     private var nextPageToken: String?
     private var load: Task<Void, Never>?
@@ -347,8 +366,36 @@ public final class ForYouViewModel {
                 ? .empty(Self.emptyState(format: format, source: source, context: context))
                 : .content(posts)
         }
-        onSnapshotChange?(Snapshot(activity: page(.activity), media: page(.media), short: page(.short)))
+        // ⚠️ Counts FIRST, then content. The Following page splits its rows into
+        // "New" and "Recent" using the count published here, so a page that
+        // received content first would render one flat list and re-section
+        // itself a moment later — a visible restructure on every load. Nothing
+        // in `publishUnread` reads the snapshot, so the order is free.
         publishUnread()
+        onSnapshotChange?(Snapshot(activity: page(.activity), media: page(.media), short: page(.short)))
+    }
+
+    /// What the badged tab counts against this session, frozen on first sight.
+    ///
+    /// Taken from the persisted cursor BEFORE this visit advances it — see
+    /// `ForYouSessionWatermark`. Read against the UNFILTERED corpus on purpose:
+    /// a baseline is an instant, not a subject, and freezing it while a narrow
+    /// context happened to be selected would date the whole session from
+    /// whatever that context's newest post was.
+    private func sessionWatermark(against posts: [GalleryPost]) -> ForYouSessionWatermark? {
+        if let sessionWatermark { return sessionWatermark }
+        guard let baseline = unreadStore.sessionBaseline(for: Self.badgedTab, in: posts) else { return nil }
+        let watermark = ForYouSessionWatermark(baselineMS: baseline)
+        sessionWatermark = watermark
+        return watermark
+    }
+
+    /// The badged tab's count under a given lens.
+    private func newCount(in context: ContentContext) -> Int {
+        guard let corpus, let watermark = sessionWatermark(against: Self.badgedTab.filtering(corpus)) else {
+            return 0
+        }
+        return watermark.count(in: Self.badgedTab.filtering(context.filtering(corpus)))
     }
 
     /// Recomputes every tab's badge from the corpus in hand.
@@ -362,6 +409,9 @@ public final class ForYouViewModel {
     private func publishUnread() {
         guard corpus != nil else { return }
         applyMockNewActivityIfNeeded()
+        // The session's baseline is frozen here, BEFORE the visit advances the
+        // persisted cursor — that ordering is the whole mechanism.
+        let count = newCount(in: context)
         unreadStore.markSeen(format, in: posts(for: format))
         // Only the tabs this screen HAS, not every case of the shared enum —
         // `.short` has no tab here, and publishing a count for it would invite
@@ -370,11 +420,19 @@ public final class ForYouViewModel {
         for page in Self.tabs {
             // Discover carries no badge by product decision, not by accident:
             // a ranked feed has no "since you last looked" to count against.
+            // A forced count is `-foryou-badges` only, and overrides the
+            // derivation for the BADGE alone — see `forcedCount`.
             counts[page] = page == Self.badgedTab
-                ? unreadStore.count(for: page, in: posts(for: page))
+                ? (unreadStore.forcedCount(for: page) ?? count)
                 : 0
         }
         onUnreadChange?(counts)
+        onNewCountChange?(count)
+        onContextCountsChange?(
+            ContentContext.allCases.reduce(into: [:]) { result, lens in
+                result[lens] = newCount(in: lens)
+            }
+        )
     }
 
     #if DEBUG

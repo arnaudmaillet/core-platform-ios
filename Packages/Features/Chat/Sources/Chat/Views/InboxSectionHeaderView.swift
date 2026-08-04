@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// The inbox lists' section header: the same `SectionHeaderPillButton` the

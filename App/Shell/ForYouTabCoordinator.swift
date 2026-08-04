@@ -33,6 +33,24 @@ final class ForYouTabCoordinator: TabCoordinator {
     }
 
     func start() {
-        navigationController.viewControllers = [container.feedFeature.makeForYouViewController()]
+        let forYou = container.feedFeature.makeForYouViewController { [weak self] presentation in
+            self?.apply(presentation)
+        }
+        navigationController.viewControllers = [forYou]
+    }
+
+    /// The tab item follows the screen's content lens: its name, its glyph and
+    /// how much is waiting under it.
+    ///
+    /// ⚠️ **The `UITab` is built lazily and its title/image are `var`s on the
+    /// live object**, so this must not re-create it — `tabs` is assigned once
+    /// in `MainTabCoordinator` and a replacement item would never reach the bar.
+    /// Touching `tab` here is also what forces the lazy build if the shell has
+    /// not asked for it yet, which is harmless: the provider closure only runs
+    /// when the tab is selected.
+    private func apply(_ presentation: ForYouTabPresentation) {
+        tab.title = presentation.title
+        tab.image = UIImage(systemName: presentation.symbol)
+        tab.badgeValue = presentation.badgeCount > 0 ? String(presentation.badgeCount) : nil
     }
 }

@@ -257,9 +257,34 @@ struct ContentContextMenuTests {
     }
 
     @Test func theMenuOffersEveryContext() {
+        let actions = makeScreen().makeContextActions()
+        #expect(actions.count == ContentContext.allCases.count)
+        #expect(actions.map(\.title) == ContentContext.allCases.map { "\($0.title) (0)" })
+    }
+
+    /// Every row states a count, including zero. The menu's job is to let
+    /// someone compare five modes at a glance, and a row with nothing beside it
+    /// would be ambiguous between "nothing new" and "not counted".
+    @Test func everyRowCarriesACount() {
+        let actions = makeScreen().makeContextActions()
+        #expect(actions.allSatisfy { $0.title.hasSuffix(" (0)") })
+    }
+
+    /// The unfiltered lens is named after the screen, not after the absence of
+    /// a filter — it has to work as a tab item's title too, where "All" says
+    /// nothing about what the tab holds.
+    @Test func theUnfilteredLensIsCalledForYou() {
+        #expect(ContentContext.all.title == "For You")
+    }
+
+    /// The menu's contents are built at PRESENTATION time, not attached once.
+    /// The rows carry live counts now, so a menu whose children were baked in
+    /// at `viewDidLoad` would show whatever the counts were before the first
+    /// page landed — which is zero, forever.
+    @Test func theMenuDefersItsChildren() {
         let children = makeScreen().makeContextMenu().children
-        #expect(children.count == ContentContext.allCases.count)
-        #expect(children.compactMap { ($0 as? UIAction)?.title } == ContentContext.allCases.map(\.title))
+        #expect(children.count == 1)
+        #expect(children.first is UIDeferredMenuElement)
     }
 
     @Test func noItemCarriesACheckmark() {
@@ -267,14 +292,12 @@ struct ContentContextMenuTests {
         // matching row says the same thing again, somewhere you have to open a
         // menu to read. This is the regression guard for that decision — the
         // default `.off` is easy to undo by adding `.singleSelection` back.
-        let children = makeScreen().makeContextMenu().children
-        #expect(children.compactMap { $0 as? UIAction }.allSatisfy { $0.state == .off })
+        #expect(makeScreen().makeContextActions().allSatisfy { $0.state == .off })
     }
 
     @Test func everyItemCarriesItsIcon() {
         // Without checkmarks the icon is the only thing distinguishing the rows
         // at a glance, so a missing one costs more than it used to.
-        let children = makeScreen().makeContextMenu().children
-        #expect(children.compactMap { $0 as? UIAction }.allSatisfy { $0.image != nil })
+        #expect(makeScreen().makeContextActions().allSatisfy { $0.image != nil })
     }
 }

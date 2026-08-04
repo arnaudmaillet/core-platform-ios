@@ -193,8 +193,24 @@ public enum PostGridMosaic {
 /// The 1-column timeline shape (Activity, Short): rows self-size to
 /// their content, with reading margins instead of the grid's full bleed.
 public enum PostGridListLayout {
-    public static func layout() -> UICollectionViewCompositionalLayout {
-        UICollectionViewCompositionalLayout { _, _ in
+    /// The element kind a sectioned list's header is registered and dequeued
+    /// under. Stated here, beside the layout that asks for it, so a host cannot
+    /// register one string and supply another.
+    public static let headerElementKind = "PostGridListLayout.header"
+
+    /// Headers FLOAT over the rows rather than pushing them down: the header is
+    /// a capsule, not a band, and a pinned capsule reads as an object sitting on
+    /// the list — the same treatment the inbox's plain tables give theirs.
+    ///
+    /// `hasHeader` is asked PER SECTION, not set once for the layout, because
+    /// whether a list is titled at all is content-dependent: a list with
+    /// nothing new in it is one unlabelled run of rows, and a layout that
+    /// reserved header space anyway would leave a gap above the first row that
+    /// no header ever fills. Nil means no section is titled.
+    public static func layout(
+        hasHeader: (@MainActor (Int) -> Bool)? = nil
+    ) -> UICollectionViewCompositionalLayout {
+        UICollectionViewCompositionalLayout { index, _ in
             let item = NSCollectionLayoutItem(layoutSize: .init(
                 widthDimension: .fractionalWidth(1),
                 heightDimension: .estimated(88)
@@ -209,6 +225,21 @@ public enum PostGridListLayout {
             let section = NSCollectionLayoutSection(group: group)
             section.interGroupSpacing = 10
             section.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16)
+            if hasHeader?(index) == true {
+                let header = NSCollectionLayoutBoundarySupplementaryItem(
+                    layoutSize: .init(
+                        widthDimension: .fractionalWidth(1),
+                        heightDimension: .estimated(44)
+                    ),
+                    elementKind: headerElementKind,
+                    alignment: .top
+                )
+                header.pinToVisibleBounds = true
+                // Above the cells, or the rows scrolling under a glass capsule
+                // would draw on top of it.
+                header.zIndex = 2
+                section.boundarySupplementaryItems = [header]
+            }
             return section
         }
     }

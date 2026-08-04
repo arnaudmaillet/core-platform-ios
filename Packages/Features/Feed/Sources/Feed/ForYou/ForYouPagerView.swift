@@ -124,6 +124,12 @@ final class ForYouPagerView: UIView {
         }
     }
 
+    /// How many of a page's leading posts arrived since the session baseline —
+    /// the split it puts a "New" header above.
+    func setNewCount(_ count: Int, for format: GalleryFilter.Format) {
+        page(for: format)?.setNewCount(count)
+    }
+
     func endRefreshing() {
         pages.forEach { $0.endRefreshing() }
     }
