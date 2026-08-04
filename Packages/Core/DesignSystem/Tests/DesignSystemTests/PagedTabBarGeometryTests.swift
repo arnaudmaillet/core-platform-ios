@@ -85,32 +85,27 @@ struct PagedTabBarGeometryTests {
         #expect(bar.debugMenu(at: 2)?.hasInteraction == true)
     }
 
-    /// A badge clears the lens's trailing edge by MORE than the title clears
-    /// its leading one, and the pair sits tighter together than either.
-    ///
-    /// The pill ends exactly where it is drawn where a letter carries its own
-    /// side bearing, so matched insets read as crowding; and a count belongs to
-    /// the word beside it, so the gap between them is the smallest number of
-    /// the three.
-    @Test func theBadgeClearsTheLensByMoreThanTheTitleDoes() {
+    /// A segment's two ends clear the lens by the SAME amount, so its contents
+    /// sit dead centre — and the title and its count sit closer to each other
+    /// than either sits to an end, so the pair reads as one object.
+    @Test func aSegmentClearsTheLensEquallyAtBothEnds() {
         let style = PagedTabBar.Style.navigationTitle
 
-        #expect(style.trailingInset > style.leadingInset)
+        #expect(style.leadingInset == style.trailingInset)
         #expect(style.badgeSpacing < style.leadingInset)
         #expect(style.segmentPadding == style.leadingInset + style.trailingInset)
     }
 
-    /// Unequal insets only come out right if the contents are shifted off the
-    /// segment's centre by half their difference; centred, each end would get
-    /// the mean of the two instead.
-    @Test func unequalInsetsShiftTheContentsOffCentre() {
+    /// Equal insets mean no shift at all. The offset stays DERIVED rather than
+    /// hard-coded to zero: a segment is as wide as its contents plus both
+    /// insets, so centred contents hand each end the mean of the two, and only
+    /// a shift of half their difference gives each the number it claims. Zero
+    /// is that formula's answer today, not a separate rule.
+    @Test func equalInsetsLeaveTheContentsCentred() {
         let style = PagedTabBar.Style.navigationTitle
 
         #expect(style.contentOffset == (style.leadingInset - style.trailingInset) / 2)
-        // Toward the leading edge, and by little enough that the titles still
-        // read as centred.
-        #expect(style.contentOffset < 0)
-        #expect(abs(style.contentOffset) <= 1)
+        #expect(style.contentOffset == 0)
     }
 
     /// The pill stays SMALL beside a 13pt title — no more than half the lens.

@@ -156,51 +156,50 @@ public final class PagedTabBar: UIControl {
             }
         }
 
-        /// Clearance from the lens's LEADING edge to the title.
+        /// Clearance from the lens's LEADING edge to the title — and, at
+        /// `trailingInset`, the same number at the other end, so a segment's
+        /// contents sit dead centre in it.
+        ///
+        /// **7pt is what symmetry costs here, and it is free.** The two ends
+        /// were 6 and 8 for a while, on the argument that a filled badge ends
+        /// exactly where it is drawn where a letter carries its own side
+        /// bearing. True as far as it goes, but it left the contents 1pt off
+        /// centre, and a tab bar's segments are read as a row — an even margin
+        /// on both sides is the stronger signal. Meeting in the middle is
+        /// exactly cost-neutral: each segment gains a point at one end and
+        /// gives one back at the other.
+        ///
+        /// ⚠️ 8pt on BOTH ends is not available. The navigation bar caps this
+        /// title view at **258pt** (measured by asking for more — the bar
+        /// requested 269 and was given 258), and 8/8 needs 263; buying it would
+        /// mean squeezing `badgeSpacing` to 2pt or zeroing the gap between
+        /// segments, which spends two constants to move one edge.
         var leadingInset: CGFloat {
             switch self {
             // Unchanged for a floating bar, which has the screen's width and
             // no reason to economise: 8 at both ends reproduces the
             // `Spacing.lg` padding it has always had.
             case .floating: Spacing.sm
-            case .navigationTitle: 6
+            case .navigationTitle: 7
             }
         }
 
         /// Clearance from the last thing in the segment — the badge, when there
-        /// is one — to the lens's TRAILING edge.
-        ///
-        /// **Deliberately larger than the leading inset**, because the thing it
-        /// clears is different. A title's leading edge is a letter, which has
-        /// its own side bearing built in; a badge's trailing edge is a filled
-        /// pill that ends exactly where it is drawn, so at matched insets it
-        /// reads as crowding the lens. 8pt against 6 is the difference between
-        /// the pill sitting inside the selection and touching it.
-        ///
-        /// The cost of the extra 2pt is 6 (three segments), and it is paid for
-        /// out of `badgeSpacing` — see there. ⚠️ It cannot simply be raised:
-        /// the navigation bar caps this title view at **258pt** (measured by
-        /// asking for more — the bar requested 269 and was given 258), and the
-        /// arrangement below already needs 257. 9pt needs 260 and truncates.
-        var trailingInset: CGFloat {
-            switch self {
-            case .floating: leadingInset
-            case .navigationTitle: 8
-            }
-        }
+        /// is one — to the lens's TRAILING edge. Equal to the leading inset;
+        /// see there for why they meet in the middle rather than at 8.
+        var trailingInset: CGFloat { leadingInset }
 
         /// Breathing room around a segment's contents, which is what decides
         /// how wide the strip is overall.
         var segmentPadding: CGFloat { leadingInset + trailingInset }
 
-        /// How far the contents sit from the segment's centre, so that the two
-        /// unequal insets both come out right.
+        /// How far the contents sit from the segment's centre.
         ///
-        /// A segment is as wide as its contents plus both insets, so contents
-        /// centred in it would split the difference and give each end the mean.
-        /// Shifting by half the difference restores the two stated numbers —
-        /// 1pt toward the leading edge, at the values above, which is why the
-        /// titles still read as centred.
+        /// Zero while the two insets match, which is the point — but derived
+        /// rather than stated, so that unequal insets stay expressible: a
+        /// segment is as wide as its contents plus both insets, so centred
+        /// contents would hand each end the MEAN of the two, and only a shift
+        /// of half their difference gives each the number it claims.
         var contentOffset: CGFloat { (leadingInset - trailingInset) / 2 }
 
         /// The gap between a title and its badge.
@@ -804,11 +803,12 @@ public final class PagedTabBar: UIControl {
     /// there has to appear and disappear as the viewer pages, which is what
     /// made the trailing slot change width from tab to tab.
     ///
-    /// Re-read at press time, not captured: a count that changes between the
-    /// menu being set and the finger going down still shows the current number.
+    /// Set on the segment's own `UIButton.menu`, which is what anchors the
+    /// presentation to the segment — see the button's configuration for the two
+    /// properties that have to accompany it.
     public func setMenu(_ menu: UIMenu?, at index: Int) {
         guard segments.indices.contains(index) else { return }
-        segments[index].menuProvider = menu.map { stored in { stored } }
+        segments[index].menu = menu
     }
 
     /// The badge beside a segment's title, count or dot.
@@ -896,9 +896,10 @@ public final class PagedTabBar: UIControl {
     public func debugMenu(at index: Int) -> (titles: [String], hasInteraction: Bool)? {
         guard segments.indices.contains(index) else { return nil }
         let segment = segments[index]
-        let titles = (segment.menuProvider?()?.children ?? []).compactMap { ($0 as? UIAction)?.title }
-        let installed = segment.interactions.contains { $0 is UIContextMenuInteraction }
-        return (titles, installed)
+        let titles = (segment.menu?.children ?? []).compactMap { ($0 as? UIAction)?.title }
+        // A menu on a `UIControl` is inert unless this is switched on, and the
+        // two failures are indistinguishable from the outside.
+        return (titles, segment.isContextMenuInteractionEnabled)
     }
 
     /// The size a segment's badge is actually drawing at — the pill whose
@@ -1182,10 +1183,6 @@ private final class SegmentView: UIButton {
     /// sums these to state its own size.
     var pinnedWidth: CGFloat { pinnedWidthConstraint.constant }
 
-    /// Supplies this segment's long-press menu, asked at press time so the
-    /// menu reflects the counts as they stand when the finger goes down.
-    var menuProvider: (() -> UIMenu?)?
-
     /// The pill's laid-out size, for a host asserting its margins.
     var badgeSize: CGSize { badge.bounds.size }
 
@@ -1303,12 +1300,22 @@ private final class SegmentView: UIButton {
         accessibilityLabel = title
         accessibilityTraits = .button
 
-        // Long press → this segment's own menu. A `UIContextMenuInteraction`
-        // rather than `UIButton.menu`: the button's primary action is choosing
-        // the tab, and a menu hung off the same control competes with it for
-        // the touch. The interaction has its own long-press recognizer, which
-        // UIKit arbitrates against both the tap and the capsule's scrub pan.
-        addInteraction(UIContextMenuInteraction(delegate: self))
+        // Long press → this segment's own menu, through the BUTTON's own menu
+        // rather than an interaction of ours. This is the arrangement the
+        // Profile tab's long-press switcher uses (`MainTabCoordinator`), and
+        // matching it matters for more than consistency: a hand-added
+        // `UIContextMenuInteraction` anchors its menu to the interaction's
+        // view, and the menu opened a long way below the bar. The button's own
+        // menu anchors to the button.
+        //
+        // ⚠️ Two properties, and both are load-bearing — the same pair
+        // `MainTabCoordinator` documents. `UIControl` ships with
+        // `isContextMenuInteractionEnabled == false`, so a `menu` alone is
+        // inert and nothing happens on a long press. And
+        // `showsMenuAsPrimaryAction` must stay FALSE, or the menu opens on TAP
+        // and swallows the tab selection this button exists for.
+        isContextMenuInteractionEnabled = true
+        showsMenuAsPrimaryAction = false
 
         // A real button with a real configuration, so UIKit owns the control
         // state machine: when a touch is a press, when it is cancelled, when a
@@ -1355,25 +1362,6 @@ private final class SegmentView: UIButton {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     // MARK: - Long-press menu
-
-    /// ⚠️ `override`, not a protocol conformance in an extension: `UIButton`
-    /// ALREADY conforms to `UIContextMenuInteractionDelegate` (it is how
-    /// `UIButton.menu` is served), so an extension restating the conformance is
-    /// rejected as redundant and its methods as un-overridden. The same shape
-    /// `PagedTabBar.gestureRecognizerShouldBegin` is in, for the same reason.
-    ///
-    /// Returns no configuration at all when the host has given this segment no
-    /// menu, so a segment with nothing to offer does not answer a long press
-    /// with an empty platter.
-    override func contextMenuInteraction(
-        _ interaction: UIContextMenuInteraction,
-        configurationForMenuAtLocation location: CGPoint
-    ) -> UIContextMenuConfiguration? {
-        guard let menuProvider, menuProvider() != nil else { return nil }
-        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
-            menuProvider()
-        }
-    }
 
     /// **Nothing lifts.** The menu drops out from under the tab and the tab
     /// itself does not move a pixel.
