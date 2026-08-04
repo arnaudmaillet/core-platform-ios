@@ -40,109 +40,33 @@ final class ConversationListViewController: UIViewController {
 
     var onChromeChange: ((InboxSurfaceChrome) -> Void)?
 
-    /// Recomputes what the container should show for this surface: the Edit
-    /// toggle, its batch actions while editing, and the unread count that
-    /// rides the tab.
+    /// Recomputes what the container should show for this surface: the unread
+    /// count that rides the tab, and what a long press on that tab offers.
     private func publishChrome() {
-        let selection = selectedIDs
-        let pinAction = BatchPinAction.resolve(selected: selection) { [viewModel] in viewModel.isPinned($0) }
-        batchDeleteItem.isEnabled = !selection.isEmpty
-        batchPinItem.title = pinAction.title
-
-        // A mixed selection drops the pin item entirely rather than showing a
-        // disabled one: a greyed button invites "why can't I?", an absent one
-        // reads as "not applicable to this selection".
-        //
-        // ⚠️ EDITING ONLY. Out of the mode this is empty and the trailing slot
-        // is the container's fixed magnifier — the tab capsule is the navigation
-        // bar's title view, and a page that publishes its own words here changes
-        // the capsule's width as the viewer pages. Edit moved to the tab's
-        // long-press menu for exactly that reason.
-        var trailing: [UIBarButtonItem] = []
-        if isEditing {
-            trailing.append(batchDeleteItem)
-            if pinAction != .unavailable { trailing.append(batchPinItem) }
-        }
         chrome = InboxSurfaceChrome(
-            // The count lives in the title: it is the one place that can hold
-            // it without squeezing three bar items into a 402pt bar. It also
-            // displaces the tab capsule, which is what the container reads a
-            // non-nil title as meaning.
-            title: isEditing ? Self.selectionTitle(for: selection.count) : nil,
-            // Leading is the container's Compose unless we override it, which is
-            // only ever to leave editing — Cancel belongs on the left.
-            leadingBarItem: isEditing ? cancelItem : nil,
-            trailingBarItems: trailing,
             // The tab carries the unread count, so "All 3" is legible without
             // opening anything.
             badgeCount: viewModel.unreadCount,
-            locksPaging: isEditing,
             contextMenu: makeMenu()
         )
     }
 
     /// What a long press on the All tab offers.
     ///
-    /// This is where Edit went when the trailing bar slot became a fixed
-    /// magnifier — and it is a better home for it than a permanent word in the
-    /// header: multi-selection is a mode you enter occasionally, not a control
-    /// that needs to sit on screen at all times.
-    ///
-    /// ⚠️ Withheld while editing. The menu's own entry point is the tab, and the
-    /// tab is inert in that mode (paging is frozen), so a menu offered there
-    /// would be an action nobody can reach and "Select Messages" would be an
-    /// offer to enter the mode already running.
+    /// `nil` when there is nothing to offer — an inbox with everything read has
+    /// no bulk action worth a platter, and a menu with no items is worse than
+    /// no menu. Per-row management (pin, mute, delete) is not here: it lives on
+    /// the row's own long press, which is where the row you mean is the row
+    /// under your finger.
     private func makeMenu() -> UIMenu? {
-        guard !isEditing else { return nil }
-        var actions: [UIAction] = []
-        if viewModel.unreadCount > 0 {
-            actions.append(UIAction(
+        guard viewModel.unreadCount > 0 else { return nil }
+        return UIMenu(children: [
+            UIAction(
                 title: "Mark All as Read",
                 image: UIImage(systemName: "envelope.open")
-            ) { [weak self] _ in self?.viewModel.markAllRead() })
-        }
-        actions.append(UIAction(
-            title: "Select Messages",
-            image: UIImage(systemName: "checkmark.circle")
-        ) { [weak self] _ in self?.setEditing(true, animated: true) })
-        return UIMenu(children: actions)
+            ) { [weak self] _ in self?.viewModel.markAllRead() }
+        ])
     }
-
-    /// The editing title, which doubles as the selection counter.
-    static func selectionTitle(for count: Int) -> String {
-        switch count {
-        case 0: "Select Messages"
-        case 1: "1 Selected"
-        default: "\(count) Selected"
-        }
-    }
-
-    /// Batch pin toggle. Only ever shown for a uniform selection, so its title
-    /// always names exactly what it is about to do.
-    private lazy var batchPinItem = UIBarButtonItem(
-        title: "Pin",
-        primaryAction: UIAction { [weak self] _ in self?.togglePinOnSelectedRows() }
-    )
-
-    /// Batch delete for multi-selection mode, enabled only with a non-empty
-    /// selection.
-    private lazy var batchDeleteItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(
-            title: "Delete",
-            primaryAction: UIAction { [weak self] _ in self?.deleteSelectedRows() }
-        )
-        item.tintColor = .systemRed
-        item.isEnabled = false
-        return item
-    }()
-
-    /// Native "Cancel" shown in place of the Edit/Done toggle while editing;
-    /// leaves multi-selection (deletes already commit immediately via the
-    /// trailing Delete item, so there's nothing to discard).
-    private lazy var cancelItem = UIBarButtonItem(
-        title: "Cancel",
-        primaryAction: UIAction { [weak self] _ in self?.setEditing(false, animated: true) }
-    )
 
     init(viewModel: ConversationListViewModel) {
         self.viewModel = viewModel
@@ -196,15 +120,12 @@ final class ConversationListViewController: UIViewController {
         tableView.delegate = self
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 72
-        // Native multi-selection: editing mode shows the system's circled
-        // checkmarks, animated in by `setEditing` — no custom selection UI.
-        tableView.allowsMultipleSelectionDuringEditing = true
         tableView.pin(to: view)
 
         refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
         tableView.refreshControl = refreshControl
 
-        dataSource = EditableDiffableDataSource(tableView: tableView) {
+        dataSource = UITableViewDiffableDataSource(tableView: tableView) {
             [weak self] tableView, indexPath, id in
             let cell = tableView.dequeueReusableCell(
                 withIdentifier: ConversationCell.reuseIdentifier, for: indexPath
@@ -212,40 +133,6 @@ final class ConversationListViewController: UIViewController {
             if let model = self?.modelsByID[id] { cell.configure(with: model) }
             return cell
         }
-    }
-
-    // MARK: - Editing (multi-selection)
-
-    /// `editButtonItem` (and the `Cancel` item) funnel here. While editing, the
-    /// leading toggle becomes a native `Cancel` and the trailing slot becomes
-    /// this tab's batch actions; UIKit animates the selection affordances and
-    /// clears any selection when the mode ends, so exit needs no manual
-    /// cleanup beyond republishing the chrome.
-    override func setEditing(_ editing: Bool, animated: Bool) {
-        super.setEditing(editing, animated: animated)
-        tableView.setEditing(editing, animated: animated)
-        publishChrome()
-    }
-
-    private var selectedIDs: [ConversationID] {
-        (tableView.indexPathsForSelectedRows ?? []).compactMap { dataSource.itemIdentifier(for: $0) }
-    }
-
-    private func deleteSelectedRows() {
-        let ids = selectedIDs
-        guard !ids.isEmpty else { return }
-        viewModel.delete(Set(ids))
-        setEditing(false, animated: true)
-    }
-
-    /// Pins or unpins the selection. The button is only present for a uniform
-    /// selection, so every selected row flips the same way.
-    private func togglePinOnSelectedRows() {
-        let ids = selectedIDs
-        guard BatchPinAction.resolve(selected: ids, isPinned: { [viewModel] in viewModel.isPinned($0) }) != .unavailable
-        else { return }
-        for id in ids { viewModel.togglePin(id) }
-        setEditing(false, animated: true)
     }
 
     private func configureStatusViews() {
@@ -323,18 +210,9 @@ final class ConversationListViewController: UIViewController {
 
 extension ConversationListViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        // In multi-selection mode a tap is a selection, not navigation.
-        if tableView.isEditing {
-            publishChrome()
-            return
-        }
         tableView.deselectRow(at: indexPath, animated: true)
         guard let id = dataSource.itemIdentifier(for: indexPath) else { return }
         viewModel.didSelect(id)
-    }
-
-    func tableView(_ tableView: UITableView, didDeselectRowAt indexPath: IndexPath) {
-        if tableView.isEditing { publishChrome() }
     }
 
     // MARK: - Context menu (haptic long-press)
@@ -347,7 +225,7 @@ extension ConversationListViewController: UITableViewDelegate {
         contextMenuConfigurationForRowAt indexPath: IndexPath,
         point: CGPoint
     ) -> UIContextMenuConfiguration? {
-        guard !tableView.isEditing, let id = dataSource.itemIdentifier(for: indexPath) else { return nil }
+        guard let id = dataSource.itemIdentifier(for: indexPath) else { return nil }
         let makePreview = threadPreviewProvider
         return UIContextMenuConfiguration(
             identifier: id.rawValue as NSString,

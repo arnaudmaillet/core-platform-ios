@@ -1227,44 +1227,6 @@ struct MessageRequestCellTests {
     }
 }
 
-// MARK: - Batch pin resolution
-
-struct BatchPinActionTests {
-    private func resolve(_ ids: [String], pinned: Set<String>) -> BatchPinAction {
-        BatchPinAction.resolve(selected: ids.map { ConversationID($0) }) { pinned.contains($0.rawValue) }
-    }
-
-    @Test func anAllUnpinnedSelectionOffersPin() {
-        #expect(resolve(["a", "b"], pinned: []) == .pin)
-        #expect(resolve(["a", "b"], pinned: []).title == "Pin")
-    }
-
-    @Test func anAllPinnedSelectionOffersUnpin() {
-        #expect(resolve(["a", "b"], pinned: ["a", "b"]) == .unpin)
-        #expect(resolve(["a", "b"], pinned: ["a", "b"]).title == "Unpin")
-    }
-
-    /// The rule that matters: neither verb is honest about a mixed selection —
-    /// "Pin" would skip the pinned rows and "Unpin" would silently drop pins
-    /// the viewer never chose to lose. The button withdraws instead.
-    @Test func aMixedSelectionOffersNothing() {
-        #expect(resolve(["a", "b"], pinned: ["a"]) == .unavailable)
-        #expect(resolve(["a", "b", "c"], pinned: ["b"]) == .unavailable)
-        #expect(resolve(["a", "b", "c"], pinned: ["a", "c"]) == .unavailable)
-        #expect(resolve(["a", "b"], pinned: ["a"]).title == nil)
-    }
-
-    @Test func anEmptySelectionOffersNothing() {
-        #expect(resolve([], pinned: []) == .unavailable)
-        #expect(resolve([], pinned: ["a"]) == .unavailable)
-    }
-
-    @Test func aSingleRowResolvesByItsOwnState() {
-        #expect(resolve(["a"], pinned: []) == .pin)
-        #expect(resolve(["a"], pinned: ["a"]) == .unpin)
-    }
-}
-
 // MARK: - Pager
 
 @MainActor

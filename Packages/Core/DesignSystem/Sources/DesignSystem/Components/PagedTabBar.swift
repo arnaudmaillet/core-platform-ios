@@ -1403,12 +1403,16 @@ private final class SegmentView: UIButton {
 
     // MARK: - Long-press menu
 
-    /// The menu is going away — put the capsule's shape back.
+    /// The menu is going away — put the capsule's shape back, DURING the
+    /// dismissal and again after it.
     ///
-    /// ⚠️ Inside the animator's COMPLETION, not alongside the call. UIKit is
-    /// still unwinding the lift when this fires, and anything asserted before
-    /// it finishes is asserted onto views it is about to restore over. The
-    /// completion is the first moment the arrangement is ours again.
+    /// Both, and for different reasons. The completion is the first moment the
+    /// arrangement is ours again, so it is what makes the repair stick. But a
+    /// repair that only happens at the end is a repair the viewer watches
+    /// arrive: the closing animation is itself a frame-by-frame sequence, and a
+    /// capsule that spends it unclipped is a blurry rectangle that snaps round
+    /// at the last instant. Adding the same assertion to the animation block
+    /// puts it in force for every frame of the transition instead.
     ///
     /// The `nil` animator is not hypothetical — a dismissal with nothing to
     /// animate still has to repair, so it repairs immediately.
@@ -1422,6 +1426,7 @@ private final class SegmentView: UIButton {
             onMenuDismissed?()
             return
         }
+        animator.addAnimations { [weak self] in self?.onMenuDismissed?() }
         animator.addCompletion { [weak self] in self?.onMenuDismissed?() }
     }
 
@@ -1461,6 +1466,16 @@ private final class SegmentView: UIButton {
         menuAnchor.frame = bounds.insetBy(dx: 0, dy: PagedTabBar.Metrics.lensInset)
         let parameters = UIPreviewParameters()
         parameters.backgroundColor = .clear
+        // A ROUNDED visible path, stated rather than left to default. Without
+        // one UIKit takes the target's rectangular bounds as the shape it
+        // animates back into place — a square-cornered platter crossing the
+        // capsule on its way out, which is the same rectangle the shape bug
+        // looks like and would be mistaken for it. Radius is half the rect's
+        // height, so the path is the capsule the lens itself draws.
+        let rounded = CGRect(origin: .zero, size: menuAnchor.bounds.size)
+        parameters.visiblePath = UIBezierPath(
+            roundedRect: rounded, cornerRadius: rounded.height / 2
+        )
         return UITargetedPreview(view: menuAnchor, parameters: parameters)
     }
 
