@@ -1,3 +1,4 @@
+import CoreModels
 import Foundation
 import PostGrid
 
@@ -80,13 +81,20 @@ public final class ForYouViewModel {
     /// selected mode's entry and the tab badge are then the same number
     /// arriving by the same route.
     public var onContextCountsChange: (([ContentContext: Int]) -> Void)?
-    /// How many of the badged tab's posts lead the list as "new", so the page
-    /// can put them under their own header.
+    /// WHICH of the badged tab's posts arrived since the session opened, so the
+    /// page can put exactly those under their own header.
     ///
-    /// The SAME number the badge shows, published from the same place, because
-    /// "the first section and the badge agree" is not a thing worth keeping in
-    /// step — it is a thing worth making true once.
-    public var onNewCountChange: ((Int) -> Void)?
+    /// ⚠️ **The identities, not the count.** This published a count first, and
+    /// the page took "the leading N rows" — which is only the same thing when
+    /// the list is in date order. It is not: Trending ranks the corpus, so the
+    /// five newest posts sit wherever their reactions put them, and the "New"
+    /// header ended up over five arbitrary rows while the genuinely new ones
+    /// were somewhere below it. The badge was right and the section under it
+    /// was a lie, which is worse than either being wrong alone.
+    ///
+    /// The count the badge shows is this set's size, so the two still cannot
+    /// disagree — that property is what the whole design is for.
+    public var onNewPostsChange: ((Set<PostID>) -> Void)?
     /// Fires immediately BEFORE a publish whose corpus was re-derived rather
     /// than extended — a lens change or a re-ordering.
     ///
@@ -410,12 +418,18 @@ public final class ForYouViewModel {
         return watermark
     }
 
-    /// The badged tab's count under a given lens.
-    private func newCount(in context: ContentContext) -> Int {
+    /// The badged tab's arrivals under a given lens, in display order.
+    private func newPosts(in context: ContentContext) -> [GalleryPost] {
         guard let corpus, let watermark = sessionWatermark(against: Self.badgedTab.filtering(corpus)) else {
-            return 0
+            return []
         }
-        return watermark.count(in: Self.badgedTab.filtering(context.filtering(corpus)))
+        return watermark.partition(Self.badgedTab.filtering(context.filtering(corpus))).new
+    }
+
+    /// The badged tab's count under a given lens — the size of the set above,
+    /// never derived separately.
+    private func newCount(in context: ContentContext) -> Int {
+        newPosts(in: context).count
     }
 
     /// Recomputes every tab's badge from the corpus in hand.
@@ -431,7 +445,8 @@ public final class ForYouViewModel {
         applyMockNewActivityIfNeeded()
         // The session's baseline is frozen here, BEFORE the visit advances the
         // persisted cursor — that ordering is the whole mechanism.
-        let count = newCount(in: context)
+        let arrivals = newPosts(in: context)
+        let count = arrivals.count
         unreadStore.markSeen(format, in: posts(for: format))
         // Only the tabs this screen HAS, not every case of the shared enum —
         // `.short` has no tab here, and publishing a count for it would invite
@@ -447,7 +462,7 @@ public final class ForYouViewModel {
                 : 0
         }
         onUnreadChange?(counts)
-        onNewCountChange?(count)
+        onNewPostsChange?(Set(arrivals.map(\.id)))
         onContextCountsChange?(
             ContentContext.allCases.reduce(into: [:]) { result, lens in
                 result[lens] = newCount(in: lens)

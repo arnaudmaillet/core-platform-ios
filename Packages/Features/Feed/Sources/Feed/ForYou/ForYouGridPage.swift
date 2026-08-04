@@ -42,23 +42,44 @@ final class ForYouGridPage: UIView {
     /// recognised as one before arrangement permutes it.
     private var rawPosts: [GalleryPost] = []
 
-    /// How many leading posts arrived since the session opened — the size of
-    /// the "New" section, and the number the tab badge shows. See
-    /// `ForYouSessionWatermark`; the page is TOLD this rather than deriving it,
-    /// so the header and the badge cannot be two answers to one question.
-    private var newCount = 0
+    /// WHICH posts arrived since the session opened. The page is TOLD this
+    /// rather than deriving it, so the header and the tab badge cannot be two
+    /// answers to one question — see `ForYouViewModel.onNewPostsChange`.
+    private var newPostIDs: Set<PostID> = []
 
     /// Where the "New" section ends, or 0 for a list that is one plain run.
     ///
-    /// Three conditions, and each removes a header that would say nothing:
-    /// a grid page is a ranked mosaic with no "since" to divide on; a skeleton
-    /// has no posts to have arrived; and a corpus that is ENTIRELY new (`>=`,
-    /// not `>`) would put "New" over everything and "Recent" over nothing —
-    /// which is a label, not a division. The inbox lists follow the same rule
-    /// for the same reason.
+    /// Read off `posts` rather than stored, because `posts` is kept partitioned
+    /// — the arrivals lead it. Three conditions, and each removes a header that
+    /// would say nothing: a grid page is a ranked mosaic with no "since" to
+    /// divide on; a skeleton has no posts to have arrived; and a corpus that is
+    /// ENTIRELY new would put "New" over everything and "Recent" over nothing,
+    /// which is a label rather than a division. The inbox lists follow the same
+    /// rule for the same reason.
     private var split: Int {
-        guard style == .list, !showsSkeleton, newCount > 0, newCount < posts.count else { return 0 }
-        return newCount
+        guard style == .list, !showsSkeleton, !newPostIDs.isEmpty else { return 0 }
+        let leading = posts.prefix { newPostIDs.contains($0.id) }.count
+        return leading < posts.count ? leading : 0
+    }
+
+    /// Arrivals first, everything else after, each half keeping the order it
+    /// arrived in.
+    ///
+    /// ⚠️ **This reorders the list, and it has to.** The display order is
+    /// whatever the discovery source ranked — Trending puts the most-reacted
+    /// posts on top — so the arrivals are scattered through it. A "New" header
+    /// over the leading rows would then be over the wrong rows. Sections mean
+    /// the list is grouped, and grouping is a reordering; the inbox's lists do
+    /// exactly this. Within each half nothing moves, so the ranking still
+    /// decides everything it can still decide.
+    private func partitioned(_ list: [GalleryPost]) -> [GalleryPost] {
+        guard style == .list, !newPostIDs.isEmpty else { return list }
+        var arrivals: [GalleryPost] = []
+        var earlier: [GalleryPost] = []
+        for post in list {
+            if newPostIDs.contains(post.id) { arrivals.append(post) } else { earlier.append(post) }
+        }
+        return arrivals + earlier
     }
 
     /// The sections this page currently has, in order.
@@ -110,21 +131,23 @@ final class ForYouGridPage: UIView {
 
     /// Whether appending `count` posts leaves the section structure alone, so
     /// the append can stay an insert rather than becoming a reload.
+    ///
+    /// A page landing is always OLDER content, so it joins the second half and
+    /// the leading run of arrivals is untouched. The only structural move is a
+    /// list that was entirely new gaining its first non-new row.
     private func splitWouldHold(afterAppending count: Int, to current: Int) -> Bool {
         guard style == .list else { return true }
-        let after = (newCount > 0 && newCount < posts.count + count) ? newCount : 0
+        let leading = posts.prefix { newPostIDs.contains($0.id) }.count
+        let after = leading < posts.count + count ? leading : 0
         return after == current
     }
 
-    /// Adopts a new split. Reloads only when the SECTIONING changes — the count
-    /// arrives on every publish and is usually the same number it was.
-    func setNewCount(_ count: Int) {
-        guard newCount != count else { return }
-        let before = split
-        newCount = count
-        guard split != before else { return }
-        // The section count itself changed, so this cannot be an item-level
-        // update: the layout has to re-ask which sections carry headers.
+    /// Adopts a new set of arrivals. Re-groups the rows and reloads, because
+    /// both which section a row is in and how many sections there are can move.
+    func setNewPosts(_ ids: Set<PostID>) {
+        guard newPostIDs != ids else { return }
+        newPostIDs = ids
+        posts = partitioned(posts)
         collectionView.reloadData()
     }
 
@@ -1124,7 +1147,7 @@ final class ForYouGridPage: UIView {
             DispatchQueue.main.async { [weak self] in self?.updateAutoplay() }
             return
         }
-        posts = arrange(incoming, startingAt: 0)
+        posts = partitioned(arrange(incoming, startingAt: 0))
         // Kick the leading covers before any cell exists. `preloadAutoplayCovers`
         // keys off visible index paths, which are empty on a first load — the
         // one moment the grid is coldest and the fetch has the most latency to

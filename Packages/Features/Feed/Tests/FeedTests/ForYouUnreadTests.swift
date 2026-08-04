@@ -432,6 +432,79 @@ struct ForYouViewModelUnreadTests {
     }
 }
 
+// MARK: - Seeding a baseline for the first time
+
+@MainActor
+struct ForYouFirstSightTests {
+    private func store(now: Date, arguments: [String] = []) -> ForYouUnreadStore {
+        ForYouUnreadStore(
+            defaults: UserDefaults(suiteName: "foryou.firstsight.\(UUID().uuidString)")!,
+            keyPrefix: "test.firstsight",
+            arguments: arguments,
+            now: { now }
+        )
+    }
+
+    private let now = Date(timeIntervalSince1970: 1_000)
+    private var nowMS: Int64 { 1_000_000 }
+
+    /// The ordinary case, unchanged: a corpus entirely in the past seeds at its
+    /// own newest post, so nothing already loaded is announced as new.
+    @Test func aPastCorpusSeedsAtItsNewestPost() {
+        let store = store(now: now)
+        let posts = [post("a", at: nowMS - 5_000), post("b", at: nowMS - 9_000)]
+        #expect(store.sessionBaseline(for: .activity, in: posts) == nowMS - 5_000)
+    }
+
+    /// ⚠️ The rule that makes a badge possible at all against a fixed corpus,
+    /// and the one that protects a real one from clock skew: a baseline is
+    /// never set to a moment that has not happened yet.
+    @Test func aFutureDatedPostCannotSetTheBaseline() {
+        let store = store(now: now)
+        let posts = [post("arrival", at: nowMS + 300_000), post("old", at: nowMS - 5_000)]
+        #expect(store.sessionBaseline(for: .activity, in: posts) == nowMS)
+    }
+
+    /// And so it counts. Seeding at the raw maximum made this zero, which is
+    /// why the badge never appeared out of the box.
+    @Test func aFutureDatedPostCountsAsAnArrival() {
+        let store = store(now: now)
+        let posts = [post("arrival", at: nowMS + 300_000), post("old", at: nowMS - 5_000)]
+        let baseline = store.sessionBaseline(for: .activity, in: posts)!
+        #expect(ForYouSessionWatermark(baselineMS: baseline).count(in: posts) == 1)
+    }
+
+    /// Reading a tab records "caught up to now", never "caught up to a moment
+    /// that has not happened".
+    ///
+    /// ⚠️ Without the cap, a session that saw a future-dated post recorded ITS
+    /// timestamp — marking as seen everything due to arrive before then. Against
+    /// the mock's staged arrivals that meant a badge of 5 on the first launch
+    /// and 1 on the next, decaying to nothing as the launches drew level.
+    @Test func readingNeverRecordsAWatermarkInTheFuture() {
+        let store = store(now: now)
+        store.markSeen(.activity, in: [post("arrival", at: nowMS + 300_000)])
+        // The next session's arrivals, ahead of ITS clock, still clear this.
+        #expect(store.sessionBaseline(for: .activity, in: []) == nowMS)
+    }
+
+    @Test func readingStillRecordsAPastPost() {
+        let store = store(now: now)
+        store.markSeen(.activity, in: [post("seen", at: nowMS - 4_000)])
+        #expect(store.sessionBaseline(for: .activity, in: []) == nowMS - 4_000)
+    }
+
+    /// A baseline is written once. A second sight reads what the first stored
+    /// rather than re-seeding against a clock that has moved on.
+    @Test func theBaselineIsSeededOnlyOnce() {
+        let store = store(now: now)
+        let posts = [post("a", at: nowMS - 5_000)]
+        let first = store.sessionBaseline(for: .activity, in: posts)
+        let second = store.sessionBaseline(for: .activity, in: [post("b", at: nowMS - 1)])
+        #expect(first == second)
+    }
+}
+
 // MARK: - The session baseline
 
 @MainActor
@@ -546,19 +619,37 @@ struct ForYouContextCountTests {
         #expect(counts[.all] == 2)
     }
 
-    /// The badge and the section split are published together and are the same
-    /// number — the invariant the sectioned list depends on.
-    @Test func theNewCountMatchesTheBadge() async {
+    /// The badge and the section are published together and describe the same
+    /// posts — the invariant the sectioned list depends on.
+    @Test func theBadgeIsTheSizeOfTheNewSection() async {
         let store = makeStore()
         store.markSeen(.activity, in: [post("old", at: 1)])
         let model = makeModel(posts: [post("a", at: 100), post("b", at: 200)], store: store)
         var badge: Int?
-        var newCount: Int?
+        var arrivals: Set<PostID>?
         model.onUnreadChange = { badge = $0[.activity] }
-        model.onNewCountChange = { newCount = $0 }
+        model.onNewPostsChange = { arrivals = $0 }
         model.viewDidLoad()
         await settle()
         #expect(badge == 2)
-        #expect(newCount == badge)
+        #expect(arrivals?.count == badge)
+    }
+
+    /// ⚠️ And it names WHICH posts, not just how many. The page used to take the
+    /// leading N rows, which is only the same set when the list happens to be in
+    /// date order — Trending ranks it, so the arrivals sit wherever their
+    /// reactions put them and the "New" header landed over the wrong rows.
+    @Test func theNewSectionNamesTheArrivalsThemselves() async {
+        let store = makeStore()
+        store.markSeen(.activity, in: [post("seen", at: 100)])
+        let model = makeModel(
+            posts: [post("seen", at: 100), post("fresh", at: 500), post("older", at: 50)],
+            store: store
+        )
+        var arrivals: Set<PostID>?
+        model.onNewPostsChange = { arrivals = $0 }
+        model.viewDidLoad()
+        await settle()
+        #expect(arrivals == [PostID("fresh")])
     }
 }

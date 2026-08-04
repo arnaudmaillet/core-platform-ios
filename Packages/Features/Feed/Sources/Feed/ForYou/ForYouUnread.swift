@@ -53,14 +53,19 @@ public final class ForYouUnreadStore {
     /// Consumed by the first `markSeen` for that format, so a QA run can watch
     /// a badge render AND watch it clear.
     private var forced: [GalleryFilter.Format: Int]
+    /// Reads the clock, which the seeding rule is capped against. Injectable so
+    /// a test can put the corpus on either side of "now" deliberately.
+    private let now: @Sendable () -> Date
 
     public init(
         defaults: UserDefaults = .standard,
         keyPrefix: String = "foryou.unread",
-        arguments: [String] = ProcessInfo.processInfo.arguments
+        arguments: [String] = ProcessInfo.processInfo.arguments,
+        now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.defaults = defaults
         self.keyPrefix = keyPrefix
+        self.now = now
         forced = Self.forcedCounts(from: arguments)
     }
 
@@ -122,12 +127,25 @@ public final class ForYouUnreadStore {
     ) {
         if clearingOverride { forced[format] = nil }
         guard let newest = ForYouUnread.watermark(of: posts) else { return }
+        // ⚠️ Capped at the present moment, for the same reason seeding is: a
+        // watermark is a point you have CAUGHT UP TO, and nobody has caught up
+        // to the future. Storing a future timestamp marks as seen everything
+        // that arrives between now and then — which is how the mock's staged
+        // arrivals quietly stopped counting after one launch. The first session
+        // recorded "seen up to now + 5 minutes", so the next session's
+        // arrivals, five minutes ahead of ITS clock, cleared that bar by only
+        // the gap between the two launches: a badge of 5 decayed to 1 a minute
+        // later, then to nothing.
+        //
+        // Costs nothing in the ordinary case, where the newest loaded post is
+        // already in the past.
+        let seen = min(newest, nowMS())
         // Never move a watermark BACKWARDS. A source change re-filters the
         // corpus, and a narrower ordering can leave a tab whose newest loaded
         // post is older than one already seen — rewinding there would resurrect
         // a badge for posts the viewer has read.
-        guard newest > (watermark(for: format) ?? .min) else { return }
-        defaults.set(newest, forKey: key(for: format))
+        guard seen > (watermark(for: format) ?? .min) else { return }
+        defaults.set(seen, forKey: key(for: format))
     }
 
     /// The instant a format currently counts from, seeding it on first sight
@@ -159,9 +177,25 @@ public final class ForYouUnreadStore {
 
     /// Records a watermark for a format that has never had one, without
     /// reporting anything as unread.
+    ///
+    /// ⚠️ **Capped at the present moment.** A first sight means "everything you
+    /// could have seen by now has been seen", and a post stamped in the FUTURE
+    /// is not something anyone could have seen — it is either clock skew or, in
+    /// the mock, an arrival being staged. Seeding at the raw corpus maximum
+    /// swallowed both: one skewed post would set the baseline past every
+    /// genuine arrival for as long as the skew lasted, silently retiring the
+    /// badge; and against a fixture corpus it meant the badge could only ever
+    /// read zero, because the newest post is always exactly the baseline.
+    ///
+    /// The cap costs nothing in the ordinary case — a corpus whose newest post
+    /// is in the past seeds exactly as it did before.
     private func seedIfUnseen(_ format: GalleryFilter.Format, in posts: [GalleryPost]) {
         guard watermark(for: format) == nil, let newest = ForYouUnread.watermark(of: posts) else { return }
-        defaults.set(newest, forKey: key(for: format))
+        defaults.set(min(newest, nowMS()), forKey: key(for: format))
+    }
+
+    private func nowMS() -> Int64 {
+        Int64(now().timeIntervalSince1970 * 1000)
     }
 
     private func watermark(for format: GalleryFilter.Format) -> Int64? {

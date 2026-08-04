@@ -130,10 +130,10 @@ final class ForYouPagerView: UIView {
         pages.forEach { $0.invalidateIncrementalUpdates() }
     }
 
-    /// How many of a page's leading posts arrived since the session baseline —
-    /// the split it puts a "New" header above.
-    func setNewCount(_ count: Int, for format: GalleryFilter.Format) {
-        page(for: format)?.setNewCount(count)
+    /// Which of a page's posts arrived since the session baseline — the rows it
+    /// puts a "New" header above.
+    func setNewPosts(_ ids: Set<PostID>, for format: GalleryFilter.Format) {
+        page(for: format)?.setNewPosts(ids)
     }
 
     func endRefreshing() {

@@ -478,8 +478,8 @@ final class ForYouViewController: UIViewController {
         }
         // The badged tab's rows split on this number. Only that page has
         // sections; Discover is a ranked mosaic with no "since" to divide on.
-        viewModel.onNewCountChange = { [weak self] count in
-            self?.pager.setNewCount(count, for: ForYouViewModel.badgedTab)
+        viewModel.onNewPostsChange = { [weak self] ids in
+            self?.pager.setNewPosts(ids, for: ForYouViewModel.badgedTab)
         }
 
         // Land on the stored format before first layout, so the screen OPENS
