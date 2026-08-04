@@ -124,6 +124,14 @@ private struct StubRelations: PeerRelationProviding {
 
 private struct StubError: Error {}
 
+/// A clock a test can move, for the view models that take `now` as a closure.
+/// A frozen one cannot express "…and then the viewer came back", which is the
+/// only interesting thing about a watermark.
+private final class MovableClock: @unchecked Sendable {
+    var now: Date
+    init(_ now: Date) { self.now = now }
+}
+
 private extension Conversation {
     /// The same conversation with its unread flag cleared, as a server that
     /// advanced the read cursor would report it.
@@ -365,10 +373,8 @@ struct InboxCatalogTests {
     /// Waits for a condition instead of for the clock.
     ///
     /// `settle()` sleeps a fixed 50ms, which is enough right up until the
-    /// machine is busy — and `markAllRead` fans out one detached write per
-    /// unread row, so these tests are exactly the ones that outrun it. Polling
-    /// also means the writes have LANDED when the test ends, rather than being
-    /// left in flight to slow whatever runs next.
+    /// machine is busy. Polling also means the work has LANDED when the test
+    /// ends, rather than being left in flight to slow whatever runs next.
     private func settle(until condition: @escaping () async -> Bool) async {
         for _ in 0..<200 {
             if await condition() { return }
@@ -408,64 +414,6 @@ struct InboxCatalogTests {
         catalog.accept(ConversationID("request"))
         #expect(latest?.active.map(\.id) == [ConversationID("request")])
         #expect(latest?.requests.isEmpty == true)
-        _ = token
-    }
-
-    /// "Mark All as Read" is offered from the All tab's long-press menu, and it
-    /// has to be a real read — the rows clearing locally while the server still
-    /// holds them unread is a badge that comes back on the next launch.
-    @Test func markingAllReadClearsTheRowsAndWritesEveryCursor() async {
-        let provider = StubInboxProvider(conversations: [
-            conversation("a", peer: "friend", isUnread: true),
-            conversation("b", peer: "friend", isUnread: true),
-            conversation("c", peer: "friend", isUnread: false)
-        ])
-        let catalog = InboxCatalog(
-            repository: provider,
-            relations: StubRelations(followed: [ProfileID("friend")])
-        )
-        var latest: InboxCatalog.Snapshot?
-        let token = catalog.observe { latest = $0 }
-        catalog.reload()
-        await settle()
-        #expect(latest?.unreadIDs.count == 2)
-
-        catalog.markAllRead()
-        // Waits for the writes themselves, not for a fixed interval.
-        await settle(until: { await provider.markReadCalls.count == 2 })
-
-        #expect(latest?.unreadIDs.isEmpty == true)
-        // One write per unread conversation, each against that conversation's
-        // own latest message — `chat.v1` has no bulk cursor.
-        let calls = await provider.markReadCalls
-        #expect(Set(calls.map(\.0)) == [ConversationID("a"), ConversationID("b")])
-        #expect(calls.allSatisfy { $0.1 == "\($0.0.rawValue)-latest" })
-        _ = token
-    }
-
-    /// A write that fails puts its own row back, so a partial success leaves an
-    /// inbox that tells the truth about which conversations actually moved.
-    @Test func aFailedBulkReadRestoresOnlyTheRowThatFailed() async {
-        let provider = StubInboxProvider(conversations: [
-            conversation("a", peer: "friend", isUnread: true),
-            conversation("b", peer: "friend", isUnread: true)
-        ])
-        await provider.setMarkReadFailure(for: ConversationID("b"))
-        let catalog = InboxCatalog(
-            repository: provider,
-            relations: StubRelations(followed: [ProfileID("friend")])
-        )
-        var latest: InboxCatalog.Snapshot?
-        let token = catalog.observe { latest = $0 }
-        catalog.reload()
-        await settle()
-
-        catalog.markAllRead()
-        // The failing write has to land AND roll its row back before this can
-        // be judged, which is two hops rather than one.
-        await settle(until: { latest?.unreadIDs == [ConversationID("b")] })
-
-        #expect(latest?.unreadIDs == [ConversationID("b")])
         _ = token
     }
 
@@ -887,29 +835,6 @@ struct InboxCatalogTests {
         _ = token
     }
 
-    @Test func clearingAllRequestsEmptiesThemInOneProjection() async {
-        let catalog = InboxCatalog(
-            repository: StubInboxProvider(conversations: [
-                conversation("r1", peer: "a"), conversation("r2", peer: "b"),
-                conversation("active", peer: "friend", lastMessageIsMine: true)
-            ]),
-            relations: StubRelations(followed: [ProfileID("friend")])
-        )
-        var emissions = 0
-        var latest: InboxCatalog.Snapshot?
-        let token = catalog.observe { latest = $0; emissions += 1 }
-        catalog.reload()
-        await settle()
-        let before = emissions
-
-        catalog.declineAll()
-
-        #expect(latest?.requests.isEmpty == true)
-        #expect(latest?.active.map(\.id) == [ConversationID("active")]) // untouched
-        #expect(emissions == before + 1) // one projection, not one per request
-        _ = token
-    }
-
     @Test func pinningHoistsWithinTheActiveListOnly() async {
         let catalog = InboxCatalog(
             repository: StubInboxProvider(conversations: [
@@ -966,7 +891,11 @@ struct InboxSurfaceViewModelTests {
         list.viewWillAppear()
         await settle()
         #expect(listPhase == .empty)
-        #expect(requests.count == 1)
+        guard case .content(let pending) = requestsPhase else {
+            Issue.record("expected a pending request, got \(String(describing: requestsPhase))")
+            return
+        }
+        #expect(pending.map(\.id) == [ConversationID("request")])
 
         requests.accept(ConversationID("request"))
         guard case .content(let rows) = listPhase else {
@@ -975,12 +904,13 @@ struct InboxSurfaceViewModelTests {
         }
         #expect(rows.map(\.id) == [ConversationID("request")])
         #expect(requestsPhase == .empty)
-        #expect(requests.count == 0)
     }
 
-    /// Unread is marked IN the All list now, not split into a tab: the rows
-    /// stay put and carry a flag, and the count rides the All tab.
-    @Test func unreadRowsAreFlaggedInPlaceAndCounted() async {
+    /// Unread is marked IN the All list, not split into a tab: the rows stay
+    /// put and carry a flag. That flag is what the row's avatar badge and bold
+    /// text are drawn from — it is NOT what the tab badge counts, which is
+    /// arrivals since the last visit (`InboxTabWatermark`).
+    @Test func unreadRowsAreFlaggedInPlace() async {
         let provider = StubInboxProvider(conversations: [
             conversation("read", peer: "friend"),
             conversation("unread", peer: "friend", isUnread: true)
@@ -990,9 +920,7 @@ struct InboxSurfaceViewModelTests {
             relations: StubRelations(followed: [ProfileID("friend")])
         )
         let list = ConversationListViewModel(catalog: catalog)
-        var counts: [Int] = []
         var phase: ConversationListViewModel.Phase?
-        list.onUnreadCountChange = { counts.append($0) }
         list.onPhaseChange = { phase = $0 }
 
         list.viewWillAppear()
@@ -1005,8 +933,6 @@ struct InboxSurfaceViewModelTests {
         // Both rows are present; only one is flagged.
         #expect(rows.map(\.id) == [ConversationID("read"), ConversationID("unread")])
         #expect(rows.map(\.isUnread) == [false, true])
-        #expect(counts == [1])
-        #expect(list.unreadCount == 1)
     }
 
     /// Reading it clears the flag and the count without removing the row —
@@ -1034,25 +960,63 @@ struct InboxSurfaceViewModelTests {
         }
         #expect(rows.count == 2)
         #expect(rows.map(\.isUnread) == [false, true])
-        #expect(list.unreadCount == 1)
     }
 
-    @Test func requestCountEmitsForTheHeaderBadge() async {
+    /// The Requests badge counts ARRIVALS SINCE THE LAST VISIT, not pending
+    /// totals — and visiting the tab is what clears it.
+    ///
+    /// The watermark opens at the view model's `now`, so a `now` before the
+    /// fixtures' activity time is what makes them read as having arrived since.
+    @Test func theRequestsBadgeCountsArrivalsAndClearsOnVisit() async {
         let catalog = InboxCatalog(
             repository: StubInboxProvider(conversations: [
                 conversation("r1", peer: "a"), conversation("r2", peer: "b")
             ]),
             relations: StubRelations()
         )
-        let requests = MessageRequestsViewModel(catalog: catalog)
+        let clock = MovableClock(Date(timeIntervalSince1970: -1))
+        let requests = MessageRequestsViewModel(catalog: catalog, now: { clock.now })
         var counts: [Int] = []
-        requests.onCountChange = { counts.append($0) }
+        requests.onNewCountChange = { counts.append($0) }
         requests.refresh()
         await settle()
 
         #expect(counts == [2])
-        requests.decline(ConversationID("r1"))
-        #expect(counts == [2, 1])
+        #expect(requests.newCount == 2)
+
+        // Looking at the tab is the whole reset mechanism — and the look
+        // happens after the arrivals it clears.
+        clock.now = Date(timeIntervalSince1970: 10_000)
+        requests.didBecomeVisible()
+        #expect(requests.newCount == 0)
+        #expect(counts == [2, 0])
+    }
+
+    /// Rows stay marked for the length of the visit that cleared the badge —
+    /// otherwise the tab says two things arrived and then hides which two.
+    @Test func aVisitClearsTheBadgeButKeepsTheNewRowsMarked() async {
+        let catalog = InboxCatalog(
+            repository: StubInboxProvider(conversations: [
+                conversation("r1", peer: "a"), conversation("r2", peer: "b")
+            ]),
+            relations: StubRelations()
+        )
+        let clock = MovableClock(Date(timeIntervalSince1970: -1))
+        let requests = MessageRequestsViewModel(catalog: catalog, now: { clock.now })
+        var phase: MessageRequestsViewModel.Phase?
+        requests.onPhaseChange = { phase = $0 }
+        requests.refresh()
+        await settle()
+
+        clock.now = Date(timeIntervalSince1970: 10_000)
+        requests.didBecomeVisible()
+
+        guard case .content(let rows) = phase else {
+            Issue.record("expected content, got \(String(describing: phase))")
+            return
+        }
+        #expect(requests.newCount == 0)
+        #expect(rows.map(\.isUnread) == [true, true])
     }
 
     @Test func openingARequestRoutesToItsThread() async {
@@ -1224,6 +1188,61 @@ struct MessageRequestCellTests {
     /// separator dangling after the name.
     @Test func aConversationWithNoActivityHasNoTimestampAtAll() {
         #expect(MessageRequestCell.timestampText(for: model(preview: "hi", hasActivity: false)) == nil)
+    }
+}
+
+// MARK: - Tab watermark
+
+/// The rule the tab badges are built on, in isolation from any view model.
+struct InboxTabWatermarkTests {
+    private let opened = Date(timeIntervalSince1970: 1_000)
+
+    private func conversationAt(_ seconds: TimeInterval) -> Conversation {
+        conversation("c", activityAt: Date(timeIntervalSince1970: seconds))
+    }
+
+    /// A first sight is never "all new": whatever was already there when the
+    /// screen opened is not an arrival. The trap `ForYouUnread` documents, and
+    /// the reason the baseline starts at the opening moment rather than at zero.
+    @Test func nothingAlreadyOnScreenCountsAsNew() {
+        let watermark = InboxTabWatermark(openedAt: opened)
+        #expect(watermark.newCount(in: [conversationAt(500), conversationAt(999)]) == 0)
+    }
+
+    @Test func anArrivalAfterTheBaselineCounts() {
+        let watermark = InboxTabWatermark(openedAt: opened)
+        #expect(watermark.newCount(in: [conversationAt(1_001), conversationAt(500)]) == 1)
+    }
+
+    /// A conversation with no activity has no arrival time, so it is a row that
+    /// has always been there rather than a new one.
+    @Test func aConversationWithNoActivityIsNeverNew() {
+        let watermark = InboxTabWatermark(openedAt: opened)
+        #expect(watermark.newCount(in: [conversation("c", hasActivity: false)]) == 0)
+    }
+
+    /// The whole point of the two baselines: visiting clears the COUNT while
+    /// the rows the count was about stay marked for the length of the visit.
+    @Test func visitingClearsTheCountButNotTheRowMarks() {
+        var watermark = InboxTabWatermark(openedAt: opened)
+        let arrival = conversationAt(1_500)
+        #expect(watermark.newCount(in: [arrival]) == 1)
+
+        watermark.visit(at: Date(timeIntervalSince1970: 2_000))
+
+        #expect(watermark.newCount(in: [arrival]) == 0)
+        #expect(watermark.isNewOnRow(arrival))
+    }
+
+    /// The NEXT visit is what retires a row's mark — by then it has been seen.
+    @Test func theFollowingVisitRetiresTheRowMark() {
+        var watermark = InboxTabWatermark(openedAt: opened)
+        let arrival = conversationAt(1_500)
+        watermark.visit(at: Date(timeIntervalSince1970: 2_000))
+        watermark.visit(at: Date(timeIntervalSince1970: 3_000))
+
+        #expect(!watermark.isNewOnRow(arrival))
+        #expect(watermark.newCount(in: [arrival]) == 0)
     }
 }
 

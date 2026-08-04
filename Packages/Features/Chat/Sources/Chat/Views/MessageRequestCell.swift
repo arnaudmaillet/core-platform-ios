@@ -33,7 +33,7 @@ final class MessageRequestCell: UITableViewCell {
     var onAccept: (() -> Void)?
     var onDismiss: (() -> Void)?
 
-    private let avatarView = MonogramAvatarView()
+    private let avatarView = BadgedAvatarView()
     private let nameLabel = UILabel()
     private let previewLabel = UILabel()
     private let timeLabel = UILabel()
@@ -56,6 +56,12 @@ final class MessageRequestCell: UITableViewCell {
 
     func configure(with model: ConversationDisplayModel) {
         avatarView.setMonogram(model.monogram)
+        // `isUnread` means UNVIEWED on a request — one that arrived since the
+        // viewer last looked at this tab. Nothing in `chat.v1` records having
+        // viewed a request, so the mark comes from the same watermark that
+        // counts them; `MessageRequestsViewModel` documents the substitution.
+        avatarView.setBadge(model.isUnread ? .dot : .none)
+        applyUnviewedStyle(model.isUnread)
         nameLabel.text = model.title
         previewLabel.text = Self.previewText(for: model)
         // The separator belongs to the timestamp, so a conversation with no
@@ -84,6 +90,18 @@ final class MessageRequestCell: UITableViewCell {
     /// conversation has no activity to date, so nothing is rendered at all.
     static func timestampText(for model: ConversationDisplayModel) -> String? {
         model.timeText.isEmpty ? nil : "· \(model.timeText)"
+    }
+
+    /// An unviewed request carries its preview in full strength and weight —
+    /// the same treatment an unread conversation gets in the All list, because
+    /// it is the same statement. Only the font and colour change, so a row
+    /// settling from unviewed to viewed cannot move the rows around it.
+    private func applyUnviewedStyle(_ isUnviewed: Bool) {
+        let plain = UIFont.preferredFont(forTextStyle: .subheadline)
+        previewLabel.font = isUnviewed
+            ? UIFont.systemFont(ofSize: plain.pointSize, weight: .semibold)
+            : plain
+        previewLabel.textColor = isUnviewed ? .label : .secondaryLabel
     }
 
     private func configure() {

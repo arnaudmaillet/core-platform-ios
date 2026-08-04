@@ -353,9 +353,7 @@ public final class PagedTabBar: UIControl {
         var height: CGFloat { capsuleHeight + topMargin + bottomMargin }
     }
 
-    /// `fileprivate` so `SegmentView` can shape its own context-menu preview
-    /// from the same inset the lens uses — two numbers for one edge would drift.
-    fileprivate enum Metrics {
+    private enum Metrics {
         /// The lens's clearance inside the capsule, on EVERY side.
         ///
         /// One number, not two. It was 5 horizontally and 4 vertically, which
@@ -735,10 +733,9 @@ public final class PagedTabBar: UIControl {
         // radius still correctly set, which is why this looks like a shape bug
         // and reads in the debugger as a shape that is fine.
         //
-        // It has to be re-asserted because something else turns it off. A
-        // context menu lifts its preview out of the view it belongs to, and a
-        // clipping ancestor would cut that lift off — so UIKit unclips the
-        // ancestors on the way in. It does not always put them back.
+        // Re-asserted rather than set once because it is cheap and the failure
+        // is silent: anything that clears it leaves a bar that looks broken and
+        // debugs as correct.
         capsule.clipsToBounds = true
         // The fallback matters: bounds are zero until the first layout pass, and
         // `0 / 2` is a square. Falling back to the style's own height means the
@@ -746,21 +743,6 @@ public final class PagedTabBar: UIControl {
         let height = capsule.bounds.height > 0 ? capsule.bounds.height : effectiveCapsuleHeight
         capsule.layer.cornerCurve = .continuous
         capsule.layer.cornerRadius = height / 2
-    }
-
-    /// Puts the capsule's shape back after something outside this file has taken
-    /// it apart — today, the context menu's lift.
-    ///
-    /// A layout pass would repair it too (`layoutSubviews` calls the same
-    /// method), but nothing guarantees one happens: the menu's dismissal
-    /// changes no geometry, so the bar can sit there unclipped indefinitely.
-    /// This is called from the dismissal animator's completion, which is the
-    /// first moment UIKit has finished restoring what it borrowed.
-    fileprivate func restoreCapsuleShapeAfterMenu() {
-        enforceCapsuleShape()
-        // Belt and braces: a layout pass re-derives the lens from the segment
-        // frames as well, in case the lift disturbed those too.
-        setNeedsLayout()
     }
 
     /// The segments have re-measured themselves; a hugging bar's own size is
@@ -819,24 +801,6 @@ public final class PagedTabBar: UIControl {
     /// the convenience for hosts that count things.
     public func setBadge(_ count: Int, at index: Int) {
         setBadge(.count(count), at: index)
-    }
-
-    /// The menu a long press on a segment offers, or `nil` for none.
-    ///
-    /// A segment carries its own page's actions, and it carries them whether or
-    /// not that page is the one on screen — long-pressing "Requests" from the
-    /// All tab is a reasonable thing to do, and it works. That is the whole
-    /// reason these live on the BAR rather than in the navigation bar: bar
-    /// items can only ever belong to the active page, so an action published
-    /// there has to appear and disappear as the viewer pages, which is what
-    /// made the trailing slot change width from tab to tab.
-    ///
-    /// Set on the segment's own `UIButton.menu`, which is what anchors the
-    /// presentation to the segment — see the button's configuration for the two
-    /// properties that have to accompany it.
-    public func setMenu(_ menu: UIMenu?, at index: Int) {
-        guard segments.indices.contains(index) else { return }
-        segments[index].menu = menu
     }
 
     /// The badge beside a segment's title, count or dot.
@@ -910,24 +874,6 @@ public final class PagedTabBar: UIControl {
         setNeedsLayout()
         layoutIfNeeded()
         resolveSegmentsThenApplyProgress()
-    }
-
-    /// What a long press on a segment would actually produce: the menu the host
-    /// has given it, and whether the interaction that would show it is
-    /// installed.
-    ///
-    /// Both halves are needed to believe the feature works. A menu with no
-    /// interaction never appears; an interaction with no menu answers a press
-    /// with nothing. Neither is distinguishable from the other — or from a
-    /// working bar — in a screenshot, and a long press cannot be injected into
-    /// the simulator at all.
-    public func debugMenu(at index: Int) -> (titles: [String], hasInteraction: Bool)? {
-        guard segments.indices.contains(index) else { return nil }
-        let segment = segments[index]
-        let titles = (segment.menu?.children ?? []).compactMap { ($0 as? UIAction)?.title }
-        // A menu on a `UIControl` is inert unless this is switched on, and the
-        // two failures are indistinguishable from the outside.
-        return (titles, segment.isContextMenuInteractionEnabled)
     }
 
     /// The size a segment's badge is actually drawing at — the pill whose
@@ -1054,9 +1000,6 @@ public final class PagedTabBar: UIControl {
                 contentOffset: style.contentOffset,
                 lensHeight: style.lensHeight
             )
-            // The lift unclips this bar's capsule on its way in; the segment is
-            // the only thing that knows when it has finished going away.
-            segment.onMenuDismissed = { [weak self] in self?.restoreCapsuleShapeAfterMenu() }
             segment.addAction(
                 UIAction { [weak self] _ in self?.selectSegment(index) },
                 // `.primaryActionTriggered` now that the segment is a real
@@ -1221,10 +1164,9 @@ private final class SegmentView: UIButton {
     /// The pill's laid-out size, for a host asserting its margins.
     var badgeSize: CGSize { badge.bounds.size }
 
-    /// Fired when the long-press menu has finished going away, so the bar can
-    /// put back whatever the lift borrowed. Set by the bar that owns this
-    /// segment; see `PagedTabBar.restoreCapsuleShapeAfterMenu`.
-    var onMenuDismissed: (() -> Void)?
+    /// The lens's height inside this segment, which is also the smallest width
+    /// the segment may take — see `updatePinnedWidth`.
+    private let lensHeight: CGFloat
 
     /// The gap between the title and its badge, handed down by the style.
     private let badgeSpacing: CGFloat
@@ -1232,21 +1174,6 @@ private final class SegmentView: UIButton {
     /// How far the contents sit from the segment's centre, so that unequal
     /// leading and trailing insets both come out at their stated values.
     private let contentOffset: CGFloat
-
-    /// The lens's height inside this segment, which is also the smallest width
-    /// the segment may take — see `updatePinnedWidth`.
-    private let lensHeight: CGFloat
-
-    /// What the long-press menu lifts INSTEAD of the segment: a clear rectangle
-    /// over the lens. See `flatPreview()` for why the lift cannot simply be
-    /// switched off. Never drawn, never touchable, and it costs one view.
-    private lazy var menuAnchor: UIView = {
-        let anchor = UIView()
-        anchor.isUserInteractionEnabled = false
-        anchor.backgroundColor = .clear
-        addSubview(anchor)
-        return anchor
-    }()
 
     init(
         title: String,
@@ -1340,23 +1267,6 @@ private final class SegmentView: UIButton {
         accessibilityLabel = title
         accessibilityTraits = .button
 
-        // Long press → this segment's own menu, through the BUTTON's own menu
-        // rather than an interaction of ours. This is the arrangement the
-        // Profile tab's long-press switcher uses (`MainTabCoordinator`), and
-        // matching it matters for more than consistency: a hand-added
-        // `UIContextMenuInteraction` anchors its menu to the interaction's
-        // view, and the menu opened a long way below the bar. The button's own
-        // menu anchors to the button.
-        //
-        // ⚠️ Two properties, and both are load-bearing — the same pair
-        // `MainTabCoordinator` documents. `UIControl` ships with
-        // `isContextMenuInteractionEnabled == false`, so a `menu` alone is
-        // inert and nothing happens on a long press. And
-        // `showsMenuAsPrimaryAction` must stay FALSE, or the menu opens on TAP
-        // and swallows the tab selection this button exists for.
-        isContextMenuInteractionEnabled = true
-        showsMenuAsPrimaryAction = false
-
         // A real button with a real configuration, so UIKit owns the control
         // state machine: when a touch is a press, when it is cancelled, when a
         // drag outside un-highlights. Pressed feedback lives on the CONTENT,
@@ -1400,84 +1310,6 @@ private final class SegmentView: UIButton {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    // MARK: - Long-press menu
-
-    /// The menu is going away — put the capsule's shape back, DURING the
-    /// dismissal and again after it.
-    ///
-    /// Both, and for different reasons. The completion is the first moment the
-    /// arrangement is ours again, so it is what makes the repair stick. But a
-    /// repair that only happens at the end is a repair the viewer watches
-    /// arrive: the closing animation is itself a frame-by-frame sequence, and a
-    /// capsule that spends it unclipped is a blurry rectangle that snaps round
-    /// at the last instant. Adding the same assertion to the animation block
-    /// puts it in force for every frame of the transition instead.
-    ///
-    /// The `nil` animator is not hypothetical — a dismissal with nothing to
-    /// animate still has to repair, so it repairs immediately.
-    override func contextMenuInteraction(
-        _ interaction: UIContextMenuInteraction,
-        willEndFor configuration: UIContextMenuConfiguration,
-        animator: (any UIContextMenuInteractionAnimating)?
-    ) {
-        super.contextMenuInteraction(interaction, willEndFor: configuration, animator: animator)
-        guard let animator else {
-            onMenuDismissed?()
-            return
-        }
-        animator.addAnimations { [weak self] in self?.onMenuDismissed?() }
-        animator.addCompletion { [weak self] in self?.onMenuDismissed?() }
-    }
-
-    /// **Nothing lifts.** The menu drops out from under the tab and the tab
-    /// itself does not move a pixel.
-    ///
-    /// The lift cannot be turned off — a context menu always raises whatever
-    /// view the preview targets, and returning `nil` opts INTO the default,
-    /// which raises a square crop of the segment. So the preview targets an
-    /// invisible stand-in pinned over the lens instead: UIKit lifts and hides
-    /// that, which is a clear rectangle and looks like nothing at all, while
-    /// the real segment stays exactly where it was drawn. The menu still
-    /// anchors to the lens's frame, so it drops from the right place.
-    ///
-    /// Both the highlight and the dismissal go through it. Answering only the
-    /// first leaves the segment to be lifted on the way OUT — the same jump,
-    /// played backwards.
-    override func contextMenuInteraction(
-        _ interaction: UIContextMenuInteraction,
-        configuration: UIContextMenuConfiguration,
-        highlightPreviewForItemWithIdentifier identifier: any NSCopying
-    ) -> UITargetedPreview? {
-        flatPreview()
-    }
-
-    override func contextMenuInteraction(
-        _ interaction: UIContextMenuInteraction,
-        configuration: UIContextMenuConfiguration,
-        dismissalPreviewForItemWithIdentifier identifier: any NSCopying
-    ) -> UITargetedPreview? {
-        flatPreview()
-    }
-
-    private func flatPreview() -> UITargetedPreview {
-        // Sized to the LENS, not to the whole segment: the menu should hang off
-        // the shape the viewer pressed.
-        menuAnchor.frame = bounds.insetBy(dx: 0, dy: PagedTabBar.Metrics.lensInset)
-        let parameters = UIPreviewParameters()
-        parameters.backgroundColor = .clear
-        // A ROUNDED visible path, stated rather than left to default. Without
-        // one UIKit takes the target's rectangular bounds as the shape it
-        // animates back into place — a square-cornered platter crossing the
-        // capsule on its way out, which is the same rectangle the shape bug
-        // looks like and would be mistaken for it. Radius is half the rect's
-        // height, so the path is the capsule the lens itself draws.
-        let rounded = CGRect(origin: .zero, size: menuAnchor.bounds.size)
-        parameters.visiblePath = UIBezierPath(
-            roundedRect: rounded, cornerRadius: rounded.height / 2
-        )
-        return UITargetedPreview(view: menuAnchor, parameters: parameters)
-    }
 
     private var strength: CGFloat = 0
 

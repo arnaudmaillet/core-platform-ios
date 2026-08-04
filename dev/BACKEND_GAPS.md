@@ -623,6 +623,30 @@ of posts, and the only remedy is to scroll for more.
 
 ---
 
+## 17. No per-conversation unread count — `isUnread` is a Bool
+
+**What the client wants.** The All tab's rows carry a badge on the sender's
+avatar. The design is a COUNT ("3 messages waiting in this thread"); the badge
+component takes one (`BadgedAvatarView.Style.count`).
+
+**What `chat.v1` offers.** `MemberView.last_read` — a read *cursor*, from which
+the client derives a single Bool per conversation (`Conversation.isUnread`).
+There is no `unread_count` field anywhere in the generated messages, and no RPC
+that returns one. Counting client-side is not an option either: it would mean
+fetching every conversation's history past its cursor on every inbox load, and
+`loadConversations()` already costs a `ListMembers` + `GetHistory` round trip
+per conversation.
+
+**What ships instead.** A DOT, not a number — presence is what the contract can
+honestly support. `BadgedAvatarView.Style.count` is implemented and unused, so
+the day the field lands the change is one call site and no layout work.
+
+**What we need.** `unread_count` on the conversation/member view, computed
+server-side from `last_read`. A count that the client derives is a count that
+disagrees with the server the moment a device reads a thread elsewhere.
+
+---
+
 ## Resolved
 
 - **`ProfileService.ListProfilesByAccount` ScyllaDB CQL type bug** (`limit`

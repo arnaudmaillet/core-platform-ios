@@ -40,32 +40,10 @@ final class ConversationListViewController: UIViewController {
 
     var onChromeChange: ((InboxSurfaceChrome) -> Void)?
 
-    /// Recomputes what the container should show for this surface: the unread
-    /// count that rides the tab, and what a long press on that tab offers.
+    /// Recomputes what the container should show for this surface: the count
+    /// on its tab.
     private func publishChrome() {
-        chrome = InboxSurfaceChrome(
-            // The tab carries the unread count, so "All 3" is legible without
-            // opening anything.
-            badgeCount: viewModel.unreadCount,
-            contextMenu: makeMenu()
-        )
-    }
-
-    /// What a long press on the All tab offers.
-    ///
-    /// `nil` when there is nothing to offer — an inbox with everything read has
-    /// no bulk action worth a platter, and a menu with no items is worse than
-    /// no menu. Per-row management (pin, mute, delete) is not here: it lives on
-    /// the row's own long press, which is where the row you mean is the row
-    /// under your finger.
-    private func makeMenu() -> UIMenu? {
-        guard viewModel.unreadCount > 0 else { return nil }
-        return UIMenu(children: [
-            UIAction(
-                title: "Mark All as Read",
-                image: UIImage(systemName: "envelope.open")
-            ) { [weak self] _ in self?.viewModel.markAllRead() }
-        ])
+        chrome = InboxSurfaceChrome(badgeCount: viewModel.newCount)
     }
 
     init(viewModel: ConversationListViewModel) {
@@ -84,7 +62,7 @@ final class ConversationListViewController: UIViewController {
         publishChrome()
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
-        viewModel.onUnreadCountChange = { [weak self] _ in self?.publishChrome() }
+        viewModel.onNewCountChange = { [weak self] _ in self?.publishChrome() }
         render(.loading)
 
         #if DEBUG
@@ -276,6 +254,8 @@ extension ConversationListViewController: InboxSurface {
     /// Paging back here re-checks for new messages. `refresh()` no-ops while a
     /// load is already in flight, so this is free on the appear path.
     func surfaceDidBecomeActive() {
+        // Being looked at is what clears this tab's badge.
+        viewModel.didBecomeVisible()
         viewModel.refresh()
     }
 }

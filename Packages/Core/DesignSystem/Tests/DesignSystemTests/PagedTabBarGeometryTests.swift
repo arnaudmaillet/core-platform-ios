@@ -71,20 +71,6 @@ struct PagedTabBarGeometryTests {
         #expect(bar.debugOverflow == 0)
     }
 
-    /// Long-press menus hang off the SEGMENT, so they must survive the segment
-    /// being re-measured — and a segment with no menu must not answer a press.
-    @Test func onlyASegmentGivenAMenuOffersOne() {
-        let bar = laidOutBar(titles: ["All", "Requests", "Suggestions"])
-        bar.setMenu(UIMenu(children: [UIAction(title: "Clear All Requests") { _ in }]), at: 1)
-
-        #expect(bar.debugMenu(at: 0)?.titles == [])
-        #expect(bar.debugMenu(at: 1)?.titles == ["Clear All Requests"])
-        // The interaction is installed on every segment regardless: it is what
-        // decides, per press, whether there is anything to show.
-        #expect(bar.debugMenu(at: 0)?.hasInteraction == true)
-        #expect(bar.debugMenu(at: 2)?.hasInteraction == true)
-    }
-
     /// A segment's two ends clear the lens by the SAME amount, so its contents
     /// sit dead centre — and the title and its count sit closer to each other
     /// than either sits to an end, so the pair reads as one object.

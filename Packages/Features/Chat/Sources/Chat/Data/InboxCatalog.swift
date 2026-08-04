@@ -312,44 +312,6 @@ final class InboxCatalog {
         emit()
     }
 
-    /// Marks every unread active conversation as read — the inbox-level
-    /// counterpart of opening each thread in turn.
-    ///
-    /// The local projection moves first (the same optimistic path `markRead`
-    /// uses, so the rows and the tab's count clear on the tap), and the writes
-    /// follow per conversation. There is no bulk RPC in `chat.v1`: read state
-    /// is `MemberView.last_read`, a per-conversation cursor, so "all" is
-    /// genuinely N calls and is stated as such rather than hidden behind a
-    /// method that looks atomic.
-    ///
-    /// A write that fails puts its own row back through `markReadDidFail`, so a
-    /// partial success leaves an inbox that tells the truth about which
-    /// conversations actually moved.
-    func markAllRead() {
-        let unread = snapshot.active.filter { snapshot.unreadIDs.contains($0.id) }
-        guard !unread.isEmpty else { return }
-        for conversation in unread { readAheadOfServer.insert(conversation.id) }
-        emit()
-        for conversation in unread {
-            Task { [repository, weak self] in
-                do {
-                    try await repository.markRead(conversation.id, upTo: conversation.lastMessageID)
-                } catch {
-                    self?.markReadDidFail(conversation.id)
-                }
-            }
-        }
-    }
-
-    /// Declines everything currently pending, in one projection.
-    func declineAll() {
-        let pending = snapshot.requests.map(\.id)
-        guard !pending.isEmpty else { return }
-        accepted.subtract(pending)
-        declined.formUnion(pending)
-        emit()
-    }
-
     // MARK: - Projection
 
     /// One projection of the loaded conversations through every piece of

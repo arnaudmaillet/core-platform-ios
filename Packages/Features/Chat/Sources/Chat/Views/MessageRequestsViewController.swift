@@ -30,52 +30,8 @@ final class MessageRequestsViewController: UIViewController {
 
     // MARK: - Chrome
 
-    /// Requests offers no multi-selection editing: every row already carries
-    /// its own accept/refuse pair, so the only bulk operation worth offering is
-    /// "make them all go away".
-    ///
-    /// It lives in the TAB's long-press menu, not the navigation bar. A menu has
-    /// room for the whole sentence — the bar item had to shrink to "Clear" to
-    /// stop it eating the tab capsule beside it ("Clear All" measured 78pt
-    /// against "Clear"'s 40, and cost the capsule 38pt of a slot it could not
-    /// spare) — and a menu costs the header nothing at all.
-    ///
-    /// Destructive and irreversible for the session, so it still asks first.
-    private func makeMenu() -> UIMenu? {
-        guard viewModel.count > 0 else { return nil }
-        return UIMenu(children: [
-            UIAction(
-                title: "Clear All Requests",
-                image: UIImage(systemName: "trash"),
-                attributes: .destructive
-            ) { [weak self] _ in self?.confirmClearAll() }
-        ])
-    }
-
     private func publishChrome() {
-        chrome = InboxSurfaceChrome(
-            badgeCount: viewModel.count,
-            // Rebuilt on every count change, so an emptied Requests tab stops
-            // offering to clear what is no longer there.
-            contextMenu: makeMenu()
-        )
-    }
-
-    private func confirmClearAll() {
-        let count = viewModel.count
-        guard count > 0 else { return }
-        let alert = UIAlertController(
-            title: "Clear All Requests?",
-            message: count == 1
-                ? "This removes the pending request. The sender won't be notified."
-                : "This removes all \(count) pending requests. The senders won't be notified.",
-            preferredStyle: .alert
-        )
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Clear All", style: .destructive) { [weak self] _ in
-            self?.viewModel.clearAll()
-        })
-        present(alert, animated: true)
+        chrome = InboxSurfaceChrome(badgeCount: viewModel.newCount)
     }
 
     init(viewModel: MessageRequestsViewModel) {
@@ -93,9 +49,9 @@ final class MessageRequestsViewController: UIViewController {
         configureStatusViews()
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
-        // The badge rides the same chrome the bar items do, so a count landing
-        // while this surface is off screen can't drop its Edit item.
-        viewModel.onCountChange = { [weak self] _ in self?.publishChrome() }
+        // Published from off screen too — a request landing while the viewer is
+        // on another tab is exactly what the badge is for.
+        viewModel.onNewCountChange = { [weak self] _ in self?.publishChrome() }
         publishChrome()
         render(.loading)
     }
@@ -204,9 +160,11 @@ extension MessageRequestsViewController: InboxSurface {
     var category: MessagesCategory { .requests }
 
     /// The catalog is already loaded by the time this surface is reachable
-    /// (the conversation list loads it on appear), so becoming active only
-    /// asks for a refresh — which no-ops while one is in flight.
+    /// (the conversation list loads it on appear), so becoming active asks for
+    /// a refresh — which no-ops while one is in flight — and tells the view
+    /// model it has been seen, which is what clears the tab's badge.
     func surfaceDidBecomeActive() {
+        viewModel.didBecomeVisible()
         viewModel.refresh()
     }
 }

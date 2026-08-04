@@ -14,15 +14,6 @@ struct InboxSurfaceChrome {
     /// Honoured whether or not the surface is active — that is the point of a
     /// badge.
     var badgeCount: Int = 0
-    /// What a long press on THIS surface's tab offers — "Clear All Requests" on
-    /// Requests, "Mark All as Read" on All, nothing on Suggestions.
-    ///
-    /// This is where a page's actions live. It reaches the viewer without
-    /// touching the navigation bar at all, so it cannot change the header's
-    /// geometry, and it works from any tab: the menu hangs off the segment, not
-    /// off whichever page happens to be showing. `nil` means the page has
-    /// nothing to offer right now, and no menu is better than an empty one.
-    var contextMenu: UIMenu?
 }
 
 /// The contract between the inbox container and one of its paged surfaces.
@@ -39,8 +30,8 @@ protocol InboxSurface: UIViewController {
     /// The current chrome. Read when the surface becomes active, and again on
     /// every `onChromeChange`.
     var chrome: InboxSurfaceChrome { get }
-    /// Fired whenever the chrome changes — a badge count landing, or a menu
-    /// gaining or losing its last action.
+    /// Fired whenever the chrome changes — which today means a badge count
+    /// landing.
     var onChromeChange: ((InboxSurfaceChrome) -> Void)? { get set }
 
     /// The page became the active one (settled swipe, header tap, or the

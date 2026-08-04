@@ -209,23 +209,6 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         }
         runSearchDebugSequence(arguments)
 
-        // `-inbox-menu-probe` prints what a long press on each tab would show,
-        // and whether the interaction that shows it is installed. A long press
-        // cannot be injected in-sim, and every failure mode of this feature —
-        // no interaction, no menu, the menu on the wrong segment — looks
-        // exactly like a working header in a screenshot.
-        if arguments.contains("-inbox-menu-probe") {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                guard let self else { return }
-                for (index, surface) in surfaces.enumerated() {
-                    let probe = categoryBar.debugMenu(at: index)
-                    print("[inbox-menu] \(surface.category.rawValue): "
-                        + "interaction=\(probe?.hasInteraction == true) "
-                        + "items=\(probe?.titles ?? [])")
-                }
-            }
-        }
-
         // `-tabbar-shape-watch` samples the capsule's shape twice a second and
         // prints it. The shape's two halves fail SEPARATELY — clipping switched
         // off leaves the radius reading correct while the bar draws as a
@@ -392,11 +375,10 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
     // MARK: - Chrome
 
-    /// Applies one surface's published chrome: the count on its tab, and the
-    /// menu that tab's long press offers.
+    /// Applies one surface's published chrome: the count on its tab.
     ///
-    /// Both land on the SEGMENT that published them, so both work whether or
-    /// not that page is the one on screen — and neither touches the navigation
+    /// It lands on the SEGMENT that published it, so it works whether or not
+    /// that page is the one on screen — and it does not touch the navigation
     /// bar. The bar is written once, in `viewDidLoad`, and never again: its two
     /// glyphs belong to the inbox rather than to any page, which is what keeps
     /// the capsule between them one width instead of four. A page that wants to
@@ -404,7 +386,6 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     private func apply(_ chrome: InboxSurfaceChrome, from surface: any InboxSurface) {
         guard let index = surfaces.firstIndex(where: { $0.category == surface.category }) else { return }
         setBadge(chrome.badgeCount, at: index)
-        categoryBar.setMenu(chrome.contextMenu, at: index)
     }
 
     /// Stamps a count on a segment and re-settles the navigation bar around it.
