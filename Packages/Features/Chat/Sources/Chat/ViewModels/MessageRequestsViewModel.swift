@@ -131,16 +131,27 @@ public final class MessageRequestsViewModel {
             // treatment (bold preview, a dot on the avatar) is the treatment an
             // unread conversation gets. One flag, so both cells stay honest
             // about meaning the same thing: new to you.
+            // Identical to the All list's projection, and deliberately so: a
+            // request wears the same bold preview and the same numeric badge on
+            // the same corner of the same avatar, and it stops wearing them for
+            // the same reason — the viewer opened it, which moved the read
+            // cursor. `isUnread` used to be the watermark here, which meant a
+            // request stayed marked after being read.
+            let isNew = Dictionary(
+                uniqueKeysWithValues: snapshot.requests.map { ($0.id, watermark.isNewOnRow($0)) }
+            )
             let models = snapshot.requests.map {
                 ConversationDisplayModel(
                     conversation: $0,
                     now: now,
-                    isUnread: watermark.isNewOnRow($0)
+                    isUnread: snapshot.unreadIDs.contains($0.id),
+                    unreadCount: snapshot.unreadIDs.contains($0.id) ? $0.unreadCount : 0
                 )
             }
-            // `isUnread` IS the split here: on a request it means unviewed, and
-            // unviewed is exactly what the badge counts.
-            phase = .content(InboxListSections(rows: models, isNew: \.isUnread))
+            // The SECTION is the watermark's question — what arrived since the
+            // app opened — which is a different question from whether a row has
+            // been read, and the two now have separate answers.
+            phase = .content(InboxListSections(rows: models) { isNew[$0.id] ?? false })
         }
     }
 }

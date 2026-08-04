@@ -75,6 +75,25 @@ final class InboxPagerView: UIView {
         buildPageChain()
     }
 
+    /// Keeps the offset page-aligned through width changes — the first real
+    /// layout and rotation — because offsets are in points and `activeIndex` is
+    /// not.
+    ///
+    /// ⚠️ **This is what makes a launch-time route land on the right page.**
+    /// `-open-messages requests`, and a push payload opening a category, reach
+    /// `setCategory` after the view exists but before it has ever been laid
+    /// out. `setActivePage` records the index and returns without scrolling,
+    /// since a zero-width pager has no offset to scroll to — so without this
+    /// the header's lens sat on Requests while the All list stayed on screen,
+    /// and only a manual swipe put the two back in agreement. Same override,
+    /// for the same reason, as `ForYouPagerView`.
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard bounds.width != lastLayoutWidth, bounds.width > 0 else { return }
+        lastLayoutWidth = bounds.width
+        reassertActivePage()
+    }
+
     /// Re-states where the pager is: snaps the offset onto the active page and
     /// republishes its progress.
     ///

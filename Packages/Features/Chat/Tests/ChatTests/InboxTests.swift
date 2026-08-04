@@ -14,6 +14,7 @@ private func conversation(
     lastMessageIsMine: Bool = false,
     hasActivity: Bool = true,
     isUnread: Bool = false,
+    unreadCount: Int = 0,
     activityAt: Date = Date(timeIntervalSince1970: 0)
 ) -> Conversation {
     Conversation(
@@ -24,7 +25,16 @@ private func conversation(
         otherMemberIDs: (peers ?? [peer].compactMap(\.self)).map { ProfileID($0) },
         lastMessageIsMine: lastMessageIsMine,
         lastMessageID: "\(id)-latest",
-        isUnread: isUnread
+        isUnread: isUnread,
+        unreadCount: unreadCount
+    )
+}
+
+private func displayModel(_ id: String, isUnread: Bool) -> ConversationDisplayModel {
+    ConversationDisplayModel(
+        conversation: conversation(id, isUnread: isUnread, unreadCount: isUnread ? 1 : 0),
+        isUnread: isUnread,
+        unreadCount: isUnread ? 1 : 0
     )
 }
 
@@ -526,7 +536,11 @@ struct InboxCatalogTests {
         _ = token
     }
 
-    @Test func unreadIsTheUnreadSubsetOfTheActiveList() async {
+    /// Unread spans BOTH partitions. It was active-only while unread was a
+    /// question only the All list asked; the Requests rows now wear the same
+    /// bold preview and avatar count, and a request nobody has opened is unread
+    /// by exactly the same test.
+    @Test func unreadCoversRequestsAsWellAsActiveConversations() async {
         let catalog = InboxCatalog(
             repository: StubInboxProvider(conversations: [
                 conversation("read", peer: "friend"),
@@ -541,8 +555,8 @@ struct InboxCatalogTests {
         await settle()
 
         #expect(latest?.active.map(\.id) == [ConversationID("read"), ConversationID("unread")])
-        #expect(latest?.unreadIDs == [ConversationID("unread")])
         #expect(latest?.requests.map(\.id) == [ConversationID("unread-request")])
+        #expect(latest?.unreadIDs == [ConversationID("unread"), ConversationID("unread-request")])
         _ = token
     }
 
@@ -997,9 +1011,14 @@ struct InboxSurfaceViewModelTests {
         #expect(counts == [2])
     }
 
-    /// While the viewer is ON the tab, the badge and the row marks both stay:
-    /// they are what the viewer came to read.
-    @Test func theBadgeAndRowMarksSurviveWhileTheTabIsOpen() async {
+    /// The badge and the SECTION are the watermark's answer — what arrived
+    /// since the app opened — and nothing in the session takes either away.
+    ///
+    /// ⚠️ Deliberately not asserted through `isUnread` any more. That flag is
+    /// the READ CURSOR now, the same as on the All list, so a request the
+    /// fixtures never marked unread is not bold — and the row's section is a
+    /// different question with a different answer.
+    @Test func theBadgeAndItsSectionSurviveWhileTheTabIsOpen() async {
         let catalog = InboxCatalog(
             repository: StubInboxProvider(conversations: [
                 conversation("r1", peer: "a"), conversation("r2", peer: "b")
@@ -1013,14 +1032,71 @@ struct InboxSurfaceViewModelTests {
         requests.refresh()
         await settle()
 
-        // No exit: the viewer is still here.
-        guard case .content(let rowsSections) = phase else {
+        guard case .content(let sections) = phase else {
             Issue.record("expected content, got \(String(describing: phase))")
             return
         }
-        let rows = rowsSections.all
         #expect(requests.newCount == 2)
-        #expect(rows.map(\.isUnread) == [true, true])
+        #expect(sections.new.count == 2)
+        #expect(sections.earlier.isEmpty)
+    }
+
+    /// Opening a request is what un-bolds it: the thread moves the read cursor,
+    /// the catalog drops it from the unread set, and the row comes back plain
+    /// with no count on its avatar — exactly what an All row does.
+    @Test func readingARequestClearsItsBoldPreviewAndCount() async {
+        let catalog = InboxCatalog(
+            repository: StubInboxProvider(conversations: [
+                conversation("r1", peer: "a", isUnread: true, unreadCount: 3),
+                conversation("r2", peer: "b", isUnread: true, unreadCount: 2)
+            ]),
+            relations: StubRelations()
+        )
+        let requests = MessageRequestsViewModel(catalog: catalog)
+        var phase: MessageRequestsViewModel.Phase?
+        requests.onPhaseChange = { phase = $0 }
+        requests.refresh()
+        await settle()
+
+        guard case .content(let before) = phase else {
+            Issue.record("expected content, got \(String(describing: phase))")
+            return
+        }
+        #expect(before.all.map(\.isUnread) == [true, true])
+        #expect(before.all.map(\.unreadCount) == [3, 2])
+
+        // What the thread screen reports when it is opened.
+        catalog.markRead(ConversationID("r1"))
+
+        guard case .content(let after) = phase else {
+            Issue.record("expected content, got \(String(describing: phase))")
+            return
+        }
+        #expect(after.all.map(\.isUnread) == [false, true])
+        #expect(after.all.map(\.unreadCount) == [0, 2])
+        // The row stays put: reading it is not the same as it never arriving.
+        #expect(after.all.map(\.id) == before.all.map(\.id))
+
+        // ⚠️ And because it stays put, the LIST has to be told. The row's id is
+        // unchanged, so the diff between these two states is empty and a
+        // diffable list re-renders nothing unless the changed row is named. A
+        // correct projection that never reaches the cell is the bug this half
+        // of the round trip exists to catch — it is what actually shipped on
+        // Requests while every model-level assertion above passed.
+        let previous = Dictionary(uniqueKeysWithValues: before.all.map { ($0.id, $0) })
+        #expect(
+            InboxRowDiff.changedRows(in: after.all, against: previous) == [ConversationID("r1")]
+        )
+    }
+
+    @Test func anUnchangedRowIsNotReRendered() {
+        let rows = [displayModel("r1", isUnread: true), displayModel("r2", isUnread: false)]
+        let previous = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
+        #expect(InboxRowDiff.changedRows(in: rows, against: previous).isEmpty)
+        // A row the list has never shown is inserted by the diff, not
+        // reconfigured — asking for both is a UIKit exception waiting to happen.
+        let arrival = rows + [displayModel("r3", isUnread: true)]
+        #expect(InboxRowDiff.changedRows(in: arrival, against: previous).isEmpty)
     }
 
     @Test func openingARequestRoutesToItsThread() async {
@@ -1405,6 +1481,44 @@ struct InboxPagerTests {
 
         #expect(settled == [1])
         #expect(pager.activeIndex == 1)
+    }
+
+    /// ⚠️ A page chosen BEFORE the pager has ever been laid out — which is
+    /// every launch-time route, `-open-messages requests` and push payloads
+    /// alike — still has to be the page on screen once there is a screen.
+    ///
+    /// A zero-width pager has no offset to scroll to, so `setActivePage` can
+    /// only record the index and wait. Nothing used to pick it back up: the
+    /// header's lens sat on the routed tab while the first tab's list stayed
+    /// visible, and only a manual swipe reconciled them.
+    @Test func aPageChosenBeforeLayoutIsTheOneShownAfterIt() {
+        let pager = InboxPagerView(pages: (0..<3).map { _ in UIView() })
+        var reported: [CGFloat] = []
+        pager.onProgress = { reported.append($0) }
+
+        pager.setActivePage(1, animated: false)
+        #expect(pager.pagingScrollView.contentOffset.x == 0)
+
+        pager.frame = CGRect(x: 0, y: 0, width: 300, height: 600)
+        pager.layoutIfNeeded()
+
+        #expect(pager.pagingScrollView.contentOffset.x == 300)
+        // The lens is told too — a page the header disagrees with is the same
+        // bug wearing the other half of its face.
+        #expect(reported.last == 1)
+    }
+
+    /// Rotation moves the offset a page index does not: the same index is a
+    /// different number of points at a different width.
+    @Test func aWidthChangeKeepsTheActivePageAligned() {
+        let pager = makePager(width: 300)
+        pager.setActivePage(2, animated: false)
+        #expect(pager.pagingScrollView.contentOffset.x == 600)
+
+        pager.frame = CGRect(x: 0, y: 0, width: 500, height: 600)
+        pager.layoutIfNeeded()
+
+        #expect(pager.pagingScrollView.contentOffset.x == 1000)
     }
 
     /// Progress is continuous, not stepped: it is what the header interpolates

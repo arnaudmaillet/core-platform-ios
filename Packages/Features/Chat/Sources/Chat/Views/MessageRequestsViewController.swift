@@ -119,7 +119,12 @@ final class MessageRequestsViewController: UIViewController {
                 snapshot.appendSections([.earlier])
                 snapshot.appendItems(sections.earlier.map(\.id), toSection: .earlier)
             }
-            modelsByID = Dictionary(uniqueKeysWithValues: sections.all.map { ($0.id, $0) })
+            // Same-identity rows whose content changed re-render in place —
+            // reading a request clears its bold preview and its count without
+            // moving it. See `InboxRowDiff`.
+            let models = sections.all
+            snapshot.reconfigureItems(InboxRowDiff.changedRows(in: models, against: modelsByID))
+            modelsByID = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
             // Animate only while visible — an off-screen change would replay
             // its animation after the next transition.
             dataSource.apply(snapshot, animatingDifferences: hasRenderedContent && view.window != nil)

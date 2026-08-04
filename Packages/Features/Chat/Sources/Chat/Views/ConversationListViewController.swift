@@ -155,10 +155,11 @@ final class ConversationListViewController: UIViewController {
                 snapshot.appendSections([.earlier])
                 snapshot.appendItems(sections.earlier.map(\.id), toSection: .earlier)
             }
-            // Same-identity rows whose content changed (pin/mute flags)
-            // re-render in place; identity moves/removals animate, so swipe
-            // outcomes read as system row animations, not reloads.
-            snapshot.reconfigureItems(models.filter { modelsByID[$0.id] != nil && modelsByID[$0.id] != $0 }.map(\.id))
+            // Same-identity rows whose content changed (pin/mute flags, a read
+            // that cleared the bold preview) re-render in place; identity
+            // moves/removals animate, so swipe outcomes read as system row
+            // animations, not reloads. See `InboxRowDiff`.
+            snapshot.reconfigureItems(InboxRowDiff.changedRows(in: models, against: modelsByID))
             modelsByID = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
             // Animate only while visible. A change that arrives while a thread
             // is pushed over the inbox — reading one, say — would otherwise
