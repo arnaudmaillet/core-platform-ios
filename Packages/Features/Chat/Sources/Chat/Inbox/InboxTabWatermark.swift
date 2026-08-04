@@ -37,9 +37,19 @@ struct InboxTabWatermark: Equatable {
     }
 
     /// The viewer has left the tab — paged away, or left the screen. What was
-    /// new has now been seen, so the next arrival is measured from here.
-    mutating func leave(at now: Date) {
-        baseline = now
+    /// on it has now been seen, so the next arrival is measured from here.
+    ///
+    /// ⚠️ **Not simply `now`.** Leaving means "I have seen what is here", and
+    /// what is here can carry a timestamp AHEAD of this device's clock: server
+    /// and device clocks disagree by seconds routinely, and the mock stages
+    /// arrivals minutes ahead on purpose. A baseline set to the wall clock
+    /// leaves anything stamped past it permanently new — the badge survives the
+    /// exit that was supposed to clear it, which is exactly the bug this
+    /// signature exists to make impossible. Taking the later of the two means
+    /// the exit clears what was on screen no matter whose clock is ahead.
+    mutating func leave(at now: Date, having conversations: [Conversation]) {
+        let newest = conversations.compactMap(\.lastActivityAt).max()
+        baseline = max(now, newest ?? .distantPast)
     }
 
     /// How many of these arrived since the viewer last left.

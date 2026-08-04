@@ -63,11 +63,20 @@ final class BadgedAvatarView: UIView {
         /// 2.5pt: at 2 the ring disappeared into the disc's own edge at the one
         /// place they cross, which is exactly where it has work to do.
         static let ringWidth: CGFloat = 2.5
-        /// How far the badge sits inside the disc's bounding box. The disc is a
-        /// circle inscribed in that box, so its bottom-right "corner" is empty:
-        /// a small inset puts the pill ACROSS the circle's edge rather than
-        /// floating off it or swallowing it.
-        static let cornerInset: CGFloat = 2
+        /// How far the badge hangs OUTSIDE the disc's bounding box.
+        ///
+        /// Positive, so the pill breaks the avatar's bounds rather than sitting
+        /// within them: a badge tucked inside reads as part of the picture,
+        /// where one that overhangs reads as attached to it — which is what it
+        /// is. The disc is a circle inscribed in a square box, so its
+        /// bottom-right corner region is already empty; 3pt past that puts the
+        /// pill's own edge clear of the circle's.
+        ///
+        /// ⚠️ Nothing between here and the cell may clip. `MonogramAccessoryHost`
+        /// exists because a leading ACCESSORY is sized by the table and would
+        /// crop this; these two lists lay their avatar out in a stack inside the
+        /// content view, which does not clip by default.
+        static let overhang: CGFloat = 3
     }
 
     private let avatar = MonogramAvatarView()
@@ -111,10 +120,10 @@ final class BadgedAvatarView: UIView {
         badge.constrain(in: self) { parent in
             badge.heightAnchor.constraint(equalToConstant: Metrics.height)
             badge.trailingAnchor.constraint(
-                equalTo: parent.trailingAnchor, constant: -Metrics.cornerInset
+                equalTo: parent.trailingAnchor, constant: Metrics.overhang
             )
             badge.bottomAnchor.constraint(
-                equalTo: parent.bottomAnchor, constant: -Metrics.cornerInset
+                equalTo: parent.bottomAnchor, constant: Metrics.overhang
             )
         }
         // Held, because a count re-states it: the pill widens for two digits

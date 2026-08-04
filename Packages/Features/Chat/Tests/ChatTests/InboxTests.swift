@@ -1278,16 +1278,31 @@ struct InboxTabWatermarkTests {
         #expect(watermark.newCount(in: [arrival]) == 1)
         #expect(watermark.isNewOnRow(arrival))
 
-        watermark.leave(at: Date(timeIntervalSince1970: 2_000))
+        watermark.leave(at: Date(timeIntervalSince1970: 2_000), having: [arrival])
 
         #expect(watermark.newCount(in: [arrival]) == 0)
         #expect(!watermark.isNewOnRow(arrival))
     }
 
+    /// ⚠️ Leaving clears what was on screen even when its timestamp is AHEAD of
+    /// this device's clock — server skew, or a fixture staging an arrival.
+    /// A baseline pinned to the wall clock left those permanently new, so the
+    /// badge survived the exit that was meant to clear it.
+    @Test func leavingClearsRowsStampedAheadOfTheClock() {
+        var watermark = InboxTabWatermark(openedAt: opened)
+        let fromTheFuture = conversationAt(9_000)
+        #expect(watermark.newCount(in: [fromTheFuture]) == 1)
+
+        // The viewer leaves at 2_000 — long before the row claims to exist.
+        watermark.leave(at: Date(timeIntervalSince1970: 2_000), having: [fromTheFuture])
+
+        #expect(watermark.newCount(in: [fromTheFuture]) == 0)
+    }
+
     /// What arrives AFTER the exit is what brings the badge back.
     @Test func anArrivalAfterLeavingCountsAgain() {
         var watermark = InboxTabWatermark(openedAt: opened)
-        watermark.leave(at: Date(timeIntervalSince1970: 2_000))
+        watermark.leave(at: Date(timeIntervalSince1970: 2_000), having: [conversationAt(1_500)])
 
         #expect(watermark.newCount(in: [conversationAt(1_500)]) == 0)
         #expect(watermark.newCount(in: [conversationAt(2_500)]) == 1)
