@@ -34,7 +34,11 @@ final class ProfileViewController: UIViewController {
     /// defect on this screen came from that container resizing. The pages own
     /// all vertical motion now and this host is MOVED by whichever page is being
     /// read — see `ProfileHeaderScrollCoordinator`.
-    private let headerHost = UIView()
+    /// Passthrough, not a plain view: the header floats OVER the pages, so a
+    /// container that took every touch inside its bounds would stop a drag that
+    /// began on the avatar or the bio from scrolling anything. See
+    /// `ScrollPassthroughView`.
+    private let headerHost = ScrollPassthroughView()
     /// How far the host has been pulled up, driven by the active page's offset.
     private var headerTopConstraint: NSLayoutConstraint?
     /// The bar's see-through dress, worn only while the banner is behind it.
