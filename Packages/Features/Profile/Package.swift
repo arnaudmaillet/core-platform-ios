@@ -15,6 +15,7 @@ let package = Package(
         .package(path: "../../Core/MediaCore"),
         .package(path: "../../Core/CoreNavigation"),
         .package(path: "../../Core/CoreNetworking"),
+        .package(path: "../../Core/CoreStorage"),
         .package(path: "../../Core/DesignSystem"),
         .package(path: "../../Core/PostGrid")
     ],
@@ -28,6 +29,7 @@ let package = Package(
                 "CoreModels",
                 "MediaCore",
                 "CoreNavigation",
+                "CoreStorage",
                 "DesignSystem",
                 "PostGrid"
             ]
@@ -37,6 +39,7 @@ let package = Package(
             dependencies: [
                 "Profile",
                 "CoreNavigation",
+                "CoreStorage",
                 "CoreNetworking",
                 "PostGrid",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking")

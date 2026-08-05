@@ -276,6 +276,11 @@ final class ForYouGridPage: UIView {
         collectionView.addSubview(pagingSpinner)
         collectionView.backgroundColor = .clear
         collectionView.alwaysBounceVertical = true
+        // No indicators: the header floats over these pages, so a vertical bar
+        // runs the whole viewport and crosses the chrome instead of stopping
+        // under it. Same reason as the profile's pages.
+        collectionView.showsVerticalScrollIndicator = false
+        collectionView.showsHorizontalScrollIndicator = false
         collectionView.register(PostGridTileCell.self, forCellWithReuseIdentifier: PostGridTileCell.reuseID)
         collectionView.register(PostGridListRowCell.self, forCellWithReuseIdentifier: PostGridListRowCell.reuseID)
         collectionView.register(

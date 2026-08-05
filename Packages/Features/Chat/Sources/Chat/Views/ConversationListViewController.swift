@@ -93,6 +93,11 @@ final class ConversationListViewController: UIViewController {
 
     private func configureTableView() {
         tableView.register(ConversationCell.self, forCellReuseIdentifier: ConversationCell.reuseIdentifier)
+        // No indicators on the inbox's pages either — the tabs sit above them
+        // and each page keeps its own position, so a bar that flashes on every
+        // switch reads as motion nobody asked for.
+        tableView.showsVerticalScrollIndicator = false
+        tableView.showsHorizontalScrollIndicator = false
         tableView.delegate = self
         tableView.register(
             InboxSectionHeaderView.self,

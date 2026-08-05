@@ -445,10 +445,6 @@ final class ForYouViewController: UIViewController {
         // Dragging the capsule IS dragging the pages: the bar reports a
         // fractional page position and the pager is scrubbed to it, so the same
         // `onProgress` loop that answers a content swipe answers this too.
-        tabBar.onScrub = { [weak self] progress in self?.pager.scrub(to: progress) }
-        tabBar.onScrubEnd = { [weak self] velocity in
-            self?.pager.settleAfterScrub(velocityInPages: velocity)
-        }
         pager.onProgress = { [weak self] progress in self?.tabBar.setProgress(progress) }
         pager.onPageSettled = { [weak self] format in
             self?.viewModel.setFormat(format)

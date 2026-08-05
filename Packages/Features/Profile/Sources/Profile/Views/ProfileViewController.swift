@@ -52,6 +52,9 @@ final class ProfileViewController: UIViewController {
     private let shareTargeting: (any ProfileShareTargeting)?
     private let headerView: ProfileHeaderView
     private let galleryPager: ProfileGalleryPagerView
+    /// Which pages this profile has. The viewer's own carries Saved and Liked;
+    /// everyone else's does not, because neither pile is anybody else's to see.
+    private let tabs: [ProfileTab]
     /// The gallery's format selector — the SAME `PagedTabBar` For You and
     /// Messages wear, so a viewer meets one selector in three places rather
     /// than three selectors doing one job.
@@ -75,12 +78,8 @@ final class ProfileViewController: UIViewController {
     /// funnelled through two places and nowhere else: `mirrorSelection(to:)` for
     /// which segment is chosen, and `setProgress` on both from the pager's own
     /// callback. Nothing else may write to either bar.
-    private let inlineBar = PagedTabBar(
-        titles: ["Activity", "Gallery", "Short"], style: .navigationTitle
-    )
-    private let dockedBar = PagedTabBar(
-        titles: ["Activity", "Gallery", "Short"], style: .navigationTitle
-    )
+    private let inlineBar: PagedTabBar
+    private let dockedBar: PagedTabBar
     /// Both selectors, for the writes that must reach each of them.
     private var selectorBars: [PagedTabBar] { [inlineBar, dockedBar] }
     /// Guards the mirror against its own echo: `select` fires `.valueChanged`
@@ -283,7 +282,11 @@ final class ProfileViewController: UIViewController {
         self.imagePipeline = imagePipeline
         self.shareTargeting = shareTargeting
         headerView = ProfileHeaderView(imagePipeline: imagePipeline)
-        galleryPager = ProfileGalleryPagerView(imagePipeline: imagePipeline)
+        let tabs = viewModel.isOwnProfile ? ProfileTab.ownTabs : ProfileTab.publicTabs
+        self.tabs = tabs
+        galleryPager = ProfileGalleryPagerView(imagePipeline: imagePipeline, tabs: tabs)
+        inlineBar = PagedTabBar(titles: tabs.map(\.title), style: .navigationTitle)
+        dockedBar = PagedTabBar(titles: tabs.map(\.title), style: .navigationTitle)
         super.init(nibName: nil, bundle: nil)
 
         // Only for the toolbar-hosted tray, which owns the bottom of the screen
@@ -385,12 +388,12 @@ final class ProfileViewController: UIViewController {
         galleryPager.onItemTapped = { [weak self] post in
             self?.viewModel.galleryItemTapped(post.id)
         }
-        // Swipe ↔ tabs: a settled swipe adopts the format and mirrors the
-        // tabs; a tab tap records the format and pages.
-        galleryPager.onPageSettled = { [weak self] format in
+        // Swipe ↔ tabs: a settled swipe adopts the tab and mirrors the
+        // selectors; a tab tap records it and pages.
+        galleryPager.onPageSettled = { [weak self] tab in
             guard let self else { return }
-            self.viewModel.setGalleryFormat(format)
-            if let index = ProfileGalleryPagerView.pageOrder.firstIndex(of: format) {
+            self.adoptTab(tab)
+            if let index = self.tabs.firstIndex(of: tab) {
                 self.mirrorSelection(to: index)
             }
         }
@@ -411,6 +414,11 @@ final class ProfileViewController: UIViewController {
         // popping in after it.
         applyNavigationState()
         presentFilterToolbar()
+        // ⚠️ On every appearance, not once. The saved pile is mutable from
+        // outside this screen — the feed's bookmark button writes to the same
+        // store — so a Saved tab bound at load would be stale the first time
+        // the viewer saved something and came back to look at it.
+        viewModel.loadSavedPosts()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -1205,14 +1213,6 @@ final class ProfileViewController: UIViewController {
                 },
                 for: .valueChanged
             )
-            // The capsule is grabbable: dragging it scrubs the pages under the
-            // finger and releasing commits to whichever one it landed nearest.
-            // The same two lines the other two screens that wear this bar have.
-            // Wired on BOTH, because either can be the one on screen.
-            bar.onScrub = { [weak self] progress in self?.galleryPager.scrub(to: progress) }
-            bar.onScrubEnd = { [weak self] velocity in
-                self?.galleryPager.settleAfterScrub(velocityInPages: velocity)
-            }
             // Tapping the tab already showing is a request to go back to the top
             // of it — see the pager for which top that is.
             bar.onReselect = { [weak self] _ in self?.galleryPager.scrollActivePageToTop() }
@@ -1230,12 +1230,13 @@ final class ProfileViewController: UIViewController {
 
         // Land on the user's global preference: tab selection and pager page
         // adopt the (possibly stored) filter before first layout, so the
-        // screen OPENS there — no visible jump.
-        let format = viewModel.galleryFilter.format
-        if let index = ProfileGalleryPagerView.pageOrder.firstIndex(of: format) {
+        // screen OPENS there — no visible jump. The preference names a FORMAT,
+        // so it can only ever land on one of the three every profile has.
+        let tab = ProfileTab.format(viewModel.galleryFilter.format)
+        if let index = tabs.firstIndex(of: tab) {
             mirrorSelection(to: index)
         }
-        galleryPager.setActivePage(format, animated: false)
+        galleryPager.setActivePage(tab, animated: false)
 
         placeSourceTray()
     }
@@ -1246,9 +1247,24 @@ final class ProfileViewController: UIViewController {
         guard !isMirroringSelection else { return }
         let index = bar.selectedIndex
         mirrorSelection(to: index)
-        let format = ProfileGalleryPagerView.pageOrder[index]
-        viewModel.setGalleryFormat(format)
-        galleryPager.setActivePage(format, animated: true)
+        let tab = tabs[index]
+        adoptTab(tab)
+        galleryPager.setActivePage(tab, animated: true)
+    }
+
+    /// Records the choice and re-dresses the screen around it.
+    ///
+    /// ⚠️ Only a FORMAT page is a filter preference. Saved and Liked are
+    /// corpora, not formats, and writing one into the stored filter would mean
+    /// re-opening the profile on a tab the next profile may not even have.
+    /// The source tray goes with it for the same reason: All / Posts / Reposts
+    /// / Tagged are questions about what this profile published, and there is
+    /// no answer to any of them about a post somebody else wrote.
+    private func adoptTab(_ tab: ProfileTab) {
+        if let format = tab.format {
+            viewModel.setGalleryFormat(format)
+        }
+        inlineTrayView.isHidden = tab.format == nil
     }
 
     /// Puts both selectors on the same segment.
@@ -1289,6 +1305,7 @@ final class ProfileViewController: UIViewController {
         dockedBar.translatesAutoresizingMaskIntoConstraints = true
         dockedBar.sizeToFit()
         navigationItem.titleView = dockedBar
+
 
         applyDockedAppearance(animated: false)
     }

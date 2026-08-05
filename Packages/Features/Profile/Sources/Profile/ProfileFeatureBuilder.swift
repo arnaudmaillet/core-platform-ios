@@ -1,6 +1,7 @@
 import MediaCore
 import CoreModels
 import CoreNavigation
+import CoreStorage
 import PostGrid
 import ProfileInterface
 import UIKit
@@ -24,6 +25,10 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// One store for every profile screen: the gallery filter is a GLOBAL
     /// user preference, so all view models read and write the same place.
     private let galleryPreferences = GalleryPreferences()
+    /// The viewer's saved pile. Built here rather than injected because there is
+    /// nothing to inject it from: no service owns this list, so the device is
+    /// the only place it has ever lived. See `PostBookmarkStore`.
+    private let bookmarks = PostBookmarkStore()
     /// Last-known profiles, shared by every profile screen so a switch to one
     /// already seen renders instantly. One per app, like the preferences.
     private let cache = ProfileCache()
@@ -95,6 +100,10 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                 reporting: reporting,
                 gallery: gallery,
                 galleryPreferences: galleryPreferences,
+                // Own profile only — the Saved tab exists nowhere else, and a
+                // store handed to a profile that cannot show one would be a
+                // dependency nothing reads.
+                bookmarks: bookmarks,
                 source: .currentUser,
                 router: router,
                 cache: cache

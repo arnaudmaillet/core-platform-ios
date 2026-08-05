@@ -14,6 +14,14 @@ public protocol ProfileGalleryProviding: Sendable {
     /// Resolved through search.v1 post search, so fleet quality tracks the
     /// search index; the mock indexes captions exactly.
     func taggedPosts(for profileID: ProfileID, handle: String) async throws -> [GalleryPost]
+    /// Tiles for a list of post ids the caller already has.
+    ///
+    /// The Saved pile is the only corpus the client itself owns — no service
+    /// lists it, so it arrives as bare ids from `PostBookmarkStore` and needs
+    /// the same hydration every other tile gets. Order is the caller's, because
+    /// a saved pile is ordered by when you saved it and nothing on the wire
+    /// knows that.
+    func posts(ids: [String]) async throws -> [GalleryPost]
 }
 
 /// Reads the gallery from post.v1 (listing + hydration) and search.v1 (tagged).
@@ -76,6 +84,12 @@ public actor ProfileGalleryRepository: ProfileGalleryProviding {
     /// comments, views — in ONE batched read for the whole page. Best-effort:
     /// a counter outage leaves the counts nil (cells hide them) rather than
     /// failing the grid.
+    public func posts(ids: [String]) async throws -> [GalleryPost] {
+        guard !ids.isEmpty else { return [] }
+        let hydrated = await hydrate(postIDs: ids)
+        return await withCounters(hydrated.map(\.post))
+    }
+
     private func withCounters(_ posts: [GalleryPost]) async -> [GalleryPost] {
         guard !posts.isEmpty else { return posts }
         var request = Counter_V1_BatchGetCountersRequest()

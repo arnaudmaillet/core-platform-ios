@@ -169,10 +169,6 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // fractional page position and the pager is scrubbed to it, so the same
         // `onProgress` loop that answers a content swipe answers this too — the
         // lens and the bar items need no separate path.
-        categoryBar.onScrub = { [weak self] progress in self?.pagerView.scrub(to: progress) }
-        categoryBar.onScrubEnd = { [weak self] velocity in
-            self?.pagerView.settleAfterScrub(velocityInPages: velocity)
-        }
         pagerView.onProgress = { [weak self] progress in self?.categoryBar.setProgress(progress) }
         pagerView.onSettled = { [weak self] index in self?.didSettle(on: index) }
 

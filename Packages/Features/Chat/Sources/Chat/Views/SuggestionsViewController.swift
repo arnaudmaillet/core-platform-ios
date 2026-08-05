@@ -50,6 +50,11 @@ final class SuggestionsViewController: UIViewController {
 
     private func configureTableView() {
         tableView.register(SuggestionCell.self, forCellReuseIdentifier: SuggestionCell.reuseIdentifier)
+        // No indicators on the inbox's pages either — the tabs sit above them
+        // and each page keeps its own position, so a bar that flashes on every
+        // switch reads as motion nobody asked for.
+        tableView.showsVerticalScrollIndicator = false
+        tableView.showsHorizontalScrollIndicator = false
         tableView.delegate = self
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 76
