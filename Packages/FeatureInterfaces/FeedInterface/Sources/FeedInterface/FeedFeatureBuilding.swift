@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import UIKit
 
 /// How the post-detail screen presents.
@@ -61,6 +62,10 @@ public struct ForYouTabPresentation: Equatable, Sendable {
 @MainActor
 public protocol ForYouModeMenuProviding: UIViewController {
     func makeModeMenu() -> UIMenu
+    /// The same lenses as rows the shell can render itself — see
+    /// `ProfileSwitcherPresenting.makeMenuSections` for why the shell cannot
+    /// hand a `UIMenu` to the system any more.
+    func makeModeMenuSections() -> [TabMenuSection]
 }
 
 /// Entry point contract for the Feed feature. Other modules (the app shell,

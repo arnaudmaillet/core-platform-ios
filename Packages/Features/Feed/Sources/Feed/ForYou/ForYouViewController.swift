@@ -1397,4 +1397,25 @@ extension ForYouViewController: ForYouModeMenuProviding {
     func makeModeMenu() -> UIMenu {
         makeContextMenu()
     }
+
+    /// The same lenses as rows the shell renders itself.
+    ///
+    /// ⚠️ The count travels as a BADGE here rather than baked into the glyph.
+    /// In a `UIMenu` a row has one image slot and no other place to put a
+    /// number, which is why `ContextMenuRowIcon` draws the pill and the symbol
+    /// into a single image. A list we own has a trailing accessory, so the
+    /// count goes where a count goes and the glyph stays a glyph.
+    func makeModeMenuSections() -> [TabMenuSection] {
+        let active = viewModel.context
+        let items = ContentContext.allCases.map { context in
+            let count = contextCounts[context] ?? 0
+            return TabMenuItem(
+                title: context.title,
+                image: UIImage(systemName: context.symbol),
+                badge: count > 0 ? String(count) : nil,
+                isSelected: context == active
+            ) { [weak self] in self?.applyContext(context) }
+        }
+        return [TabMenuSection(items: items)]
+    }
 }
