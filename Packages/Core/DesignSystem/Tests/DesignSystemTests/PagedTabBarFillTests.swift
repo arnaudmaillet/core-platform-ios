@@ -2,20 +2,18 @@ import Testing
 import UIKit
 @testable import DesignSystem
 
-/// The two shapes one selector wears.
+/// The two shapes this selector wears.
 ///
 /// A `.navigationTitle` bar hugs its titles, because a navigation bar hands it
-/// only what the side items leave. The SAME instance is hosted inline on the
-/// profile, where it has the page's whole column and hugging leaves a short
-/// capsule stranded in the middle of it — so it is told to fill, and it narrows
-/// back to its hugged size as it approaches the bar it docks into.
+/// only what the side items leave. The same bar is hosted inline on the profile,
+/// where it has the page's whole column and hugging leaves a short capsule
+/// stranded in the middle of it — so that one is told to FILL, while its twin in
+/// the navigation slot goes on hugging.
 ///
 /// Every failure here still renders a plausible-looking bar, which is why these
 /// are measurements rather than screenshots: a fill that only changed the
 /// DISTRIBUTION and left the row centred looks like a correctly-sized capsule
-/// with its segments bunched in the middle, and a floor taken from the wrong
-/// arrangement looks like a bar that truncates a title for the last frame
-/// before it docks.
+/// with its segments bunched in the middle.
 @MainActor
 struct PagedTabBarFillTests {
     private static let titles = ["Activity", "Gallery", "Short"]
@@ -92,39 +90,6 @@ struct PagedTabBarFillTests {
         let widths = segmentFrames(bar(width: 360, fills: false)).map(\.width)
         guard let smallest = widths.min(), let largest = widths.max() else { return }
         #expect(largest - smallest > 0.5, "segments came back equal: \(widths)")
-    }
-
-    // MARK: - The morph's floor
-
-    /// ⚠️ **The floor follows the arrangement the bar is IN, not the one it is
-    /// going to.** A filled bar sizes every segment to the widest, so its
-    /// narrowest honest width is widest × count — wider than the sum of each
-    /// that the docked bar hugs to. A morph aimed at the docked number instead
-    /// spends its last frames squeezing the longest title below what it needs,
-    /// and these segments' minimums are breakable by design, so it truncates
-    /// rather than refuses.
-    @Test func theFloorIsWiderFilledThanHugged() {
-        let filled = bar(width: 360, fills: true)
-        let hugging = bar(width: 360, fills: false)
-        #expect(filled.naturalWidth > hugging.naturalWidth)
-    }
-
-    /// And at that floor every segment is still at least as wide as the widest
-    /// title needs — which is the whole claim the floor makes.
-    @Test func atItsFloorAFilledBarStillFitsTheWidestTitle() {
-        let widest = segmentFrames(bar(width: 360, fills: false)).map(\.width).max() ?? 0
-        let atFloor = bar(width: 360, fills: true)
-        let squeezed = bar(width: atFloor.naturalWidth, fills: true)
-        for frame in segmentFrames(squeezed) {
-            #expect(frame.width + 0.5 >= widest, "\(frame.width) is under \(widest)")
-        }
-    }
-
-    /// The floor is a floor, not a resting size: at rest the bar is as wide as
-    /// the column it was given.
-    @Test func aFilledBarIsWiderThanItsFloorAtRest() {
-        let filled = bar(width: 360, fills: true)
-        #expect(filled.naturalWidth < 360)
     }
 
     // MARK: - Going back

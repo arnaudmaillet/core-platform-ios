@@ -349,8 +349,10 @@ public final class PagedTabBar: UIControl {
             }
         }
 
-        /// Total height including margins.
-        var height: CGFloat { capsuleHeight + topMargin + bottomMargin }
+        /// Total height including margins. Public because a host that places
+        /// this bar by hand has to reserve the room it will take, and reserving
+        /// a number of its own is how the two drift apart.
+        public var height: CGFloat { capsuleHeight + topMargin + bottomMargin }
     }
 
     private enum Metrics {
@@ -423,19 +425,6 @@ public final class PagedTabBar: UIControl {
 
     private var rowHugsConstraints: [NSLayoutConstraint] = []
     private var rowFillsConstraints: [NSLayoutConstraint] = []
-
-    /// The narrowest this bar goes without a title truncating, under whichever
-    /// arrangement it is in.
-    ///
-    /// A host morphing a filled bar down towards its docked size interpolates
-    /// TOWARDS this — not towards the docked width itself. The two differ, and
-    /// by construction: `fillEqually` sizes every segment to the widest, so a
-    /// filled bar's floor is widest × count while the docked bar's is the sum of
-    /// each. Driving the width below this floor does not make the bar smaller,
-    /// it makes the longest title truncate — the segments' minimums are
-    /// breakable in this style precisely so a cramped navigation slot degrades
-    /// that way rather than by clipping a badge.
-    public var naturalWidth: CGFloat { fittedWidth(for: activeDistribution) }
 
     /// The segment the bar is reporting — updated by taps AND by the pages
     /// moving under it, so it is never stale. Reading it is how a

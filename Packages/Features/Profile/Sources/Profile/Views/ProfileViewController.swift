@@ -52,15 +52,37 @@ final class ProfileViewController: UIViewController {
     /// Messages wear, so a viewer meets one selector in three places rather
     /// than three selectors doing one job.
     ///
-    /// It starts inline, under the identity block where it belongs to the
-    /// profile, and docks into the navigation bar's title slot as the identity
-    /// scrolls away — see `updateBarDocking`. That is why it is built in the
-    /// `.navigationTitle` style even though it spends most of its life inline:
-    /// the docked size is the constrained one, and a bar that only fits in the
-    /// place it is not going is no use.
-    private let categoryBar = PagedTabBar(
+    /// It lives inline, under the identity block where it belongs to the
+    /// profile, and hands over to the navigation bar's title slot as the
+    /// identity scrolls away — see `updateBarDocking`. Both are built in the
+    /// `.navigationTitle` style: the docked size is the constrained one, and a
+    /// bar that only fits in the place it is not going is no use. The inline one
+    /// is then told to FILL, which spreads it across the page's column.
+    ///
+    /// ⚠️ **TWO instances, and this replaced one that was re-parented.** A
+    /// single bar moved between the two hosts is the tidier object — it owns its
+    /// selection, its lens and its badge geometry, and a second copy is a second
+    /// answer to each. But one view cannot be in two places, and the hand-over
+    /// is a CROSSFADE: for a quarter of a second both selectors are on screen,
+    /// one shrinking away and one growing in. That is not a state a re-parented
+    /// view can express at any price.
+    ///
+    /// What it costs is exactly the risk the old comment named, so the sync is
+    /// funnelled through two places and nowhere else: `mirrorSelection(to:)` for
+    /// which segment is chosen, and `setProgress` on both from the pager's own
+    /// callback. Nothing else may write to either bar.
+    private let inlineBar = PagedTabBar(
         titles: ["Activity", "Gallery", "Short"], style: .navigationTitle
     )
+    private let dockedBar = PagedTabBar(
+        titles: ["Activity", "Gallery", "Short"], style: .navigationTitle
+    )
+    /// Both selectors, for the writes that must reach each of them.
+    private var selectorBars: [PagedTabBar] { [inlineBar, dockedBar] }
+    /// Guards the mirror against its own echo: `select` fires `.valueChanged`
+    /// exactly as a tap does, so mirroring a choice onto the other bar would
+    /// otherwise re-enter the handler that started it.
+    private var isMirroringSelection = false
     /// The source filter: one drop-down button — the native single-selection
     /// menu carries the options (checkmark on the active one), and the button
     /// shows the pick's glyph. Lazy: the menu actions capture self.
@@ -173,9 +195,19 @@ final class ProfileViewController: UIViewController {
     private var isSwitchingProfile = false
 
     private enum Metrics {
+        /// Between the identity block and the selector.
+        ///
+        /// Deliberately TIGHTER than the gap below it. The selector belongs to
+        /// the profile it sits under — same margins, same column — and what it
+        /// needs separating from is the content it filters. Equal gaps made it
+        /// read as a third thing floating between two others.
+        static let selectorTopGap: CGFloat = 10
+        /// Between the selector and the first row it filters.
+        static let selectorBottomGap: CGFloat = 16
         /// The height the selector's slot holds in the scrolling column,
-        /// whether or not the selector is in it.
-        static let selectorSlotHeight: CGFloat = 52
+        /// whether or not the selector is in it — the bar's own height plus the
+        /// breathing room beneath it, taken from the bar rather than restated.
+        static let selectorSlotHeight = PagedTabBar.Style.navigationTitle.height + selectorBottomGap
         /// How far past the navigation bar the slot has to travel before the
         /// selector docks, and how far back before it returns.
         ///
@@ -184,18 +216,19 @@ final class ProfileViewController: UIViewController {
         /// another scroll callback — and a viewer resting a finger exactly on
         /// the line would watch it flicker between the two homes.
         static let dockingHysteresis: CGFloat = 12
-        /// How much of the header's travel the selector spends narrowing from
-        /// its full inline width down to the size it docks at.
+        /// How long the hand-over between the two selectors takes.
         ///
-        /// Long enough that the narrowing reads as the bar changing shape rather
-        /// than as a step, and short enough to stay clear of the top of the
-        /// scroll, where the bar should simply be its inline self. 96pt is a
-        /// comfortable thumb-flick's worth of scrolling and comfortably less
-        /// than the header's own travel on every profile measured.
-        static let barMorphDistance: CGFloat = 96
-        /// How long the hand-over between the two hosts dissolves for. Short:
-        /// it is covering a seam, not performing.
-        static let dockCrossfade: CFTimeInterval = 0.22
+        /// Short enough to feel like a state change rather than a performance —
+        /// this fires mid-scroll, with the viewer's attention on the content
+        /// coming up, not on the chrome.
+        static let dockTransition: TimeInterval = 0.26
+        /// How small the leaving selector shrinks to, and how small the arriving
+        /// one starts.
+        ///
+        /// Shallow on purpose. A deep zoom reads as an object flying towards the
+        /// viewer; this is one control changing places, and at 0.88 the scale is
+        /// felt as crispness rather than seen as travel.
+        static let dockZoomScale: CGFloat = 0.88
         /// How long the outgoing profile takes to dissolve into the new one.
         static let switchCrossfade: TimeInterval = 0.28
         /// The bottom tray's own height.
@@ -214,10 +247,6 @@ final class ProfileViewController: UIViewController {
     /// scrolling through it, and the scroll would fight the layout for as long
     /// as they stayed near the threshold.
     private let inlineBarSlot = UIView()
-    /// The inline selector's width — full column at rest, narrowing to its
-    /// docked size as the dock line nears. Lives only while the bar is inline;
-    /// see `applyBarMorph`.
-    private var inlineBarWidth: NSLayoutConstraint?
     /// Whether the selector is currently in the navigation bar.
     private var isBarDocked = false
 
@@ -363,7 +392,7 @@ final class ProfileViewController: UIViewController {
             guard let self else { return }
             self.viewModel.setGalleryFormat(format)
             if let index = ProfileGalleryPagerView.pageOrder.firstIndex(of: format) {
-                self.categoryBar.select(index)
+                self.mirrorSelection(to: index)
             }
         }
         configureFilterTray()
@@ -591,11 +620,6 @@ final class ProfileViewController: UIViewController {
         // short one cannot hold the position a long one was left at and the
         // header follows the clamp back up. See `setMinimumScrollTravel`.
         galleryPager.setMinimumScrollTravel(contentTravel)
-        // The inline width is the page's column, so it is only knowable once the
-        // view has one — and it has to be re-taken on rotation. Safe to run
-        // every pass: the slot's height is fixed, so the bar's width cannot feed
-        // back into the header's.
-        applyBarMorph()
     }
 
     /// Opens the followers / following lists on the tapped counter's tab.
@@ -1127,7 +1151,9 @@ final class ProfileViewController: UIViewController {
         // at" changes hands.
         inlineBarSlot.isHidden = !viewModel.hasGallery
         inlineBarSlot.constrain(in: headerHost) { parent in
-            inlineBarSlot.topAnchor.constraint(equalTo: headerView.bottomAnchor, constant: 12)
+            inlineBarSlot.topAnchor.constraint(
+                equalTo: headerView.bottomAnchor, constant: Metrics.selectorTopGap
+            )
             inlineBarSlot.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
             inlineBarSlot.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
             inlineBarSlot.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
@@ -1168,39 +1194,97 @@ final class ProfileViewController: UIViewController {
     private func configureFilterTray() {
         guard viewModel.hasGallery else { return }
 
-        categoryBar.addAction(
-            UIAction { [weak self] _ in
-                guard let self else { return }
-                let format = ProfileGalleryPagerView.pageOrder[categoryBar.selectedIndex]
-                viewModel.setGalleryFormat(format)
-                galleryPager.setActivePage(format, animated: true)
-            },
-            for: .valueChanged
-        )
+        for bar in selectorBars {
+            bar.addAction(
+                UIAction { [weak self, weak bar] _ in
+                    guard let self, let bar else { return }
+                    barSelectionChanged(bar)
+                },
+                for: .valueChanged
+            )
+            // The capsule is grabbable: dragging it scrubs the pages under the
+            // finger and releasing commits to whichever one it landed nearest.
+            // The same two lines the other two screens that wear this bar have.
+            // Wired on BOTH, because either can be the one on screen.
+            bar.onScrub = { [weak self] progress in self?.galleryPager.scrub(to: progress) }
+            bar.onScrubEnd = { [weak self] velocity in
+                self?.galleryPager.settleAfterScrub(velocityInPages: velocity)
+            }
+        }
         // The lens tracks the finger, exactly as it does on the other two
         // screens that wear this bar — the pager reports a fractional position
-        // every frame and the capsule interpolates against it.
-        galleryPager.onProgress = { [weak self] progress in self?.categoryBar.setProgress(progress) }
-        // The capsule is grabbable: dragging it scrubs the pages under the
-        // finger and releasing commits to whichever one it landed nearest. The
-        // same two lines the other two screens that wear this bar already have.
-        categoryBar.onScrub = { [weak self] progress in self?.galleryPager.scrub(to: progress) }
-        categoryBar.onScrubEnd = { [weak self] velocity in
-            self?.galleryPager.settleAfterScrub(velocityInPages: velocity)
+        // every frame and the capsule interpolates against it. Both bars are
+        // told, so the one that is currently invisible is already correct when
+        // it fades in rather than catching up afterwards.
+        galleryPager.onProgress = { [weak self] progress in
+            self?.selectorBars.forEach { $0.setProgress(progress) }
         }
+
+        placeSelectors()
 
         // Land on the user's global preference: tab selection and pager page
         // adopt the (possibly stored) filter before first layout, so the
         // screen OPENS there — no visible jump.
         let format = viewModel.galleryFilter.format
         if let index = ProfileGalleryPagerView.pageOrder.firstIndex(of: format) {
-            categoryBar.select(index)
+            mirrorSelection(to: index)
         }
         galleryPager.setActivePage(format, animated: false)
 
-        undockBar()
-
         placeSourceTray()
+    }
+
+    /// A tap on either selector: record the format, page the gallery, and carry
+    /// the choice to the other bar so the hand-over has nothing to reconcile.
+    private func barSelectionChanged(_ bar: PagedTabBar) {
+        guard !isMirroringSelection else { return }
+        let index = bar.selectedIndex
+        mirrorSelection(to: index)
+        let format = ProfileGalleryPagerView.pageOrder[index]
+        viewModel.setGalleryFormat(format)
+        galleryPager.setActivePage(format, animated: true)
+    }
+
+    /// Puts both selectors on the same segment.
+    ///
+    /// ⚠️ There is deliberately no silent `select` on `PagedTabBar` — choosing
+    /// a segment announces itself, by design, so that a scripted selection
+    /// drives the same path a finger does. That makes mirroring re-entrant, and
+    /// the flag rather than a silent setter is what closes the loop: the echo
+    /// arrives, sees the flag, and stops.
+    private func mirrorSelection(to index: Int) {
+        guard !isMirroringSelection else { return }
+        isMirroringSelection = true
+        defer { isMirroringSelection = false }
+        for bar in selectorBars where bar.selectedIndex != index {
+            bar.select(index)
+        }
+    }
+
+    /// Puts one selector in the page's column and the other in the navigation
+    /// bar's title slot, and leaves them there.
+    ///
+    /// ⚠️ A title view is positioned by FRAME, so the docked bar keeps
+    /// autoresizing on and states its size through `sizeToFit`. The inline one
+    /// is laid out by constraints. Nothing is re-parented after this, which is
+    /// the point: the hand-over is two animations, not a move.
+    private func placeSelectors() {
+        inlineBar.fillsWidth = true
+        inlineBar.constrain(in: inlineBarSlot) { parent in
+            inlineBar.topAnchor.constraint(equalTo: parent.topAnchor)
+            inlineBar.leadingAnchor.constraint(
+                equalTo: parent.leadingAnchor, constant: ProfileHeaderView.pageMargin
+            )
+            inlineBar.trailingAnchor.constraint(
+                equalTo: parent.trailingAnchor, constant: -ProfileHeaderView.pageMargin
+            )
+        }
+
+        dockedBar.translatesAutoresizingMaskIntoConstraints = true
+        dockedBar.sizeToFit()
+        navigationItem.titleView = dockedBar
+
+        applyDockedAppearance(animated: false)
     }
 
     /// Puts the source filter back at the bottom of the screen — in this view
@@ -1270,9 +1354,6 @@ final class ProfileViewController: UIViewController {
     /// arrange between a resizing container and a scroll view that clamped it.
     private func applyHeaderOffset(_ travelled: CGFloat) {
         headerTopConstraint?.constant = -min(max(travelled, 0), headerTravel)
-        // Before the docking check, so the bar has already reached its docked
-        // width by the frame it changes hosts.
-        applyBarMorph()
         updateBarDocking(travelled: travelled)
         updateBarTransparency(travelled: travelled)
     }
@@ -1305,142 +1386,116 @@ final class ProfileViewController: UIViewController {
         return appearance
     }
 
-    /// Puts the selector in the navigation bar's title slot.
+    /// Hands the selection over between the two selectors, and back.
     ///
-    /// ⚠️ **The bar IS the title view — it is not put inside one.** It was
-    /// wrapped in a container at first, so the container could hold a stable
-    /// size for the bar cache. That container was positioned by hand, its frame
-    /// never grew to the bar's, and a `UIView` clips its own hit-testing to its
-    /// bounds — so most of the docked capsule took no touches at all and the
-    /// drag gesture appeared dead. Handing UIKit the bar directly is also what
-    /// the other two screens do; there is no wrapper on either of them.
+    /// **Two coordinated halves, not a move.** The one being left shrinks
+    /// slightly and fades out; the one arriving grows from the same shallow
+    /// scale and fades in. They run together, so for a quarter of a second both
+    /// are on screen and the eye reads one control changing places rather than
+    /// two controls swapping.
     ///
-    /// A title view is positioned by FRAME, so autoresizing has to come back on
-    /// for the trip — the inline slot lays it out with constraints, and a view
-    /// cannot be laid out both ways at once.
+    /// This is why there are two bars at all. The previous arrangement moved a
+    /// single bar between the hosts and could only ever dissolve the hosts'
+    /// rendered contents around the swap — a view cannot fade out of one place
+    /// while fading into another.
     ///
-    /// ⚠️ The width constraint goes FIRST, before autoresizing comes back on.
-    /// It is a constraint on the bar itself rather than on its place in the
-    /// slot, so `removeFromSuperview` does not take it with them — and a view
-    /// that still carries an active constraint when it is handed back to
-    /// autoresizing is a view UIKit will translate into a conflicting one.
-    private func dockBar() {
-        inlineBarWidth?.isActive = false
-        inlineBarWidth = nil
-        categoryBar.fillsWidth = false
-        categoryBar.removeFromSuperview()
-        categoryBar.translatesAutoresizingMaskIntoConstraints = true
-        categoryBar.sizeToFit()
-        navigationItem.titleView = categoryBar
-        forceNavigationBarLayout()
-    }
+    /// ⚠️ **Scale by TRANSFORM, and only the transform.** These capsules take
+    /// their corner radius from their own bounds, so a capsule resized towards
+    /// its target would need its radius re-derived every frame; a transform
+    /// scales what is already drawn, corners included, and leaves the layout
+    /// alone. The shallow 0.88 is also what keeps the glass honest — a deep
+    /// scale magnifies the material's edge and reads as a blur artefact.
+    private func applyDockedAppearance(animated: Bool) {
+        let leaving = isBarDocked ? inlineBar : dockedBar
+        let arriving = isBarDocked ? dockedBar : inlineBar
+        let shrunk = CGAffineTransform(scaleX: Metrics.dockZoomScale, y: Metrics.dockZoomScale)
 
-    /// Returns the selector to its slot in the scrolling column.
-    ///
-    /// One bar, re-parented — not two kept in step. The bar owns its selection,
-    /// its lens position and its badge geometry, and a second copy would be a
-    /// second answer to every one of those, correct only for as long as
-    /// somebody remembered to forward the next change to both.
-    /// Inline it spans the column, on the identity block's own margins, so the
-    /// selector reads as part of the profile rather than as a control parked in
-    /// the middle of it. The width is a CONSTANT rather than a pin to both
-    /// margins because it is the thing the morph animates — one number to
-    /// interpolate, and the bar stays centred while it changes, which is what
-    /// makes the narrowing symmetrical.
-    private func undockBar() {
-        navigationItem.titleView = nil
-        categoryBar.removeFromSuperview()
-        categoryBar.translatesAutoresizingMaskIntoConstraints = false
-        categoryBar.fillsWidth = true
-        inlineBarSlot.addSubview(categoryBar)
-        let width = categoryBar.widthAnchor.constraint(equalToConstant: inlineBarWidthNow)
-        inlineBarWidth = width
-        NSLayoutConstraint.activate([
-            width,
-            categoryBar.centerYAnchor.constraint(equalTo: inlineBarSlot.centerYAnchor),
-            categoryBar.centerXAnchor.constraint(equalTo: inlineBarSlot.centerXAnchor)
-        ])
-        forceNavigationBarLayout()
-    }
+        // Coming back, the host has to be on screen BEFORE the inline bar can be
+        // seen growing into it. Going away it is hidden on completion instead —
+        // see below.
+        if !isBarDocked { headerHost.isHidden = false }
+        leaving.isHidden = false
+        arriving.isHidden = false
+        // The arriving bar starts small — but ONLY when it is arriving from
+        // nothing. A hand-over reversed half way through finds it already part
+        // grown, and snapping it back to the start is what turns a change of
+        // mind into a stutter.
+        if arriving.alpha < 0.01 { arriving.transform = shrunk }
 
-    /// The bar's full inline width: the page's column, on the identity block's
-    /// margins.
-    private var inlineBarFullWidth: CGFloat {
-        max(0, view.bounds.width - ProfileHeaderView.pageMargin * 2)
-    }
-
-    /// The width the inline bar should have for the header's current position —
-    /// full at rest, narrowing to the size it docks at as the dock line nears.
-    ///
-    /// Read at the moment `undockBar` builds the constraint as well as on every
-    /// scroll, because an undock happens PART WAY through the morph: coming back
-    /// down the dock line is crossed with the header still 96pt from rest, and a
-    /// bar rebuilt at its full width there would snap wide the instant it landed
-    /// and then narrow again. Measured on the way down: the bar lands at 74.7pt
-    /// of lens against the 73.3 the same position produced on the way up.
-    private var inlineBarWidthNow: CGFloat {
-        let full = inlineBarFullWidth
-        let floor = min(full, categoryBar.naturalWidth)
-        let start = headerTravel - Metrics.barMorphDistance
-        guard Metrics.barMorphDistance > 0 else { return floor }
-        let progress = min(max((galleryPager.verticalOffset - start) / Metrics.barMorphDistance, 0), 1)
-        return full + (floor - full) * progress
-    }
-
-    /// Narrows the inline selector towards its docked size as the dock line
-    /// approaches, and widens it back on the way down.
-    ///
-    /// **This is the whole morph, and it is a width — not a scale.** A transform
-    /// would squash the titles and the lens along with the capsule, and this bar
-    /// draws a glass capsule whose corner radius is derived from its bounds: a
-    /// scaled capsule is an ellipse with distorted type in it. Driving the WIDTH
-    /// re-lays the row out at every value, so the titles keep their size, the
-    /// lens re-derives from the new segment frames, and the capsule stays a
-    /// capsule the whole way across.
-    private func applyBarMorph() {
-        guard let width = inlineBarWidth else { return }
-        let target = inlineBarWidthNow
-        guard abs(width.constant - target) > 0.5 else { return }
-        width.constant = target
-    }
-
-    /// Dissolves the hand-over between the two hosts.
-    ///
-    /// The seam is COVERED rather than removed, because it cannot be removed:
-    /// the bar's inline home sits below the navigation bar and its docked home
-    /// is inside it, and those two frames are **47pt apart vertically** however
-    /// far the header travels (measured: the slot's centre reaches y = 125pt at
-    /// the dock line, the title slot's is at 78). Letting the header travel that
-    /// extra distance would only slide the bar behind the navigation bar and out
-    /// of sight, which is a disappearance rather than a morph.
-    ///
-    /// HORIZONTALLY there is nothing left to cover, which is the morph's whole
-    /// point: the selected segment arrives at the size it docks at. Measured
-    /// across the dock line — 114.7pt of lens at rest, narrowing evenly to 62.0
-    /// over the last 96pt of travel, against 57.0pt docked, with the remaining
-    /// 5pt closed by the frames between the last sample and the line itself.
-    ///
-    /// ⚠️ `CATransition`, not an alpha animation. This bar carries a
-    /// `UIGlassEffect`, and a material's alpha is never animated in this app —
-    /// half-transparent glass renders as flat grey rather than as a fading
-    /// capsule. A layer transition cross-dissolves the host's RENDERED CONTENTS
-    /// instead, which is the same swap `SectionHeaderPillButton` performs
-    /// between its own inline and pinned presentations.
-    ///
-    /// Added BEFORE the re-parent, on both hosts: the bar leaves one and arrives
-    /// in the other in the same run loop, and `forceNavigationBarLayout` commits
-    /// the arrival synchronously — a transition added afterwards has nothing
-    /// left to cover.
-    private func crossfadeDockingSeam() {
-        let layers = [headerHost.layer, navigationController?.navigationBar.layer].compactMap(\.self)
-        for layer in layers {
-            let fade = CATransition()
-            fade.type = .fade
-            fade.duration = Metrics.dockCrossfade
-            fade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            layer.add(fade, forKey: "profileDockSeam")
+        let settle = {
+            leaving.alpha = 0
+            leaving.transform = shrunk
+            arriving.alpha = 1
+            arriving.transform = .identity
         }
+        // ⚠️ Whichever bar ends up invisible is HIDDEN, not merely transparent.
+        // A navigation bar owns its title view's alpha — it fades the slot's
+        // contents through every push and pop and sets it back to 1 on the way
+        // out — so a docked bar parked at alpha 0 comes back at full strength
+        // the first time this screen is navigated to, and sits in the chrome
+        // over an un-scrolled profile. `isHidden` is not a property UIKit
+        // touches there. (Measured: the resting selector was fully legible in
+        // the navigation bar with the banner and avatar still on screen.)
+        let settleVisibility = { [weak self] in
+            guard let self else { return }
+            leaving.isHidden = true
+            headerHost.isHidden = isBarDocked
+        }
+
+        guard animated else {
+            settle()
+            settleVisibility()
+            return
+        }
+        UIView.animate(
+            withDuration: Metrics.dockTransition,
+            delay: 0,
+            options: [.curveEaseInOut, .beginFromCurrentState],
+            animations: settle,
+            completion: { [weak self] _ in
+                guard let self else { return }
+                // The dock state can have flipped back while this was running,
+                // in which case a later call already owns the two bars and this
+                // completion would hide the one now arriving.
+                guard (isBarDocked ? inlineBar : dockedBar) === leaving else { return }
+                // ⚠️ Docked, the host has nothing left to show: its selector has
+                // faded out and everything above it has scrolled behind the
+                // chrome. Left visible it still DRAWS there — the bar is
+                // transparent so the banner can bleed to y = 0, so the identity
+                // block's last lines went on sitting over the status bar after
+                // the header had gone. Hidden on COMPLETION rather than at the
+                // line, because hiding it at the line takes the fading bar with
+                // it and there is no hand-over left to see.
+                settleVisibility()
+            }
+        )
     }
+
+    #if DEBUG
+    /// Where each selector currently stands, so the hand-over's resting states
+    /// can be asserted rather than screenshotted. Both facts are reported —
+    /// hidden AND alpha — because the distinction between them is the whole
+    /// point: see `applyDockedAppearance`.
+    var debugSelectorState: (
+        inline: (hidden: Bool, alpha: CGFloat), docked: (hidden: Bool, alpha: CGFloat)
+    ) {
+        ((inlineBar.isHidden, inlineBar.alpha), (dockedBar.isHidden, dockedBar.alpha))
+    }
+
+    /// Drives the hand-over without a scroll, for the same reason: the states
+    /// either side of the dock line are what matters, not the gesture that
+    /// crosses it.
+    func debugSetBarDocked(_ docked: Bool) {
+        isBarDocked = docked
+        applyDockedAppearance(animated: false)
+    }
+
+    var debugSelectedIndices: [Int] { selectorBars.map(\.selectedIndex) }
+
+    func debugSelect(_ index: Int, onDocked: Bool) {
+        (onDocked ? dockedBar : inlineBar).select(index)
+    }
+    #endif
 
     /// The nav bar caches its title view's size, so a bar arriving in or leaving
     /// the title slot has to make it re-measure — the same re-layout the other
@@ -1460,16 +1515,7 @@ final class ProfileViewController: UIViewController {
             : travelled >= headerTravel
         guard shouldDock != isBarDocked else { return }
         isBarDocked = shouldDock
-        crossfadeDockingSeam()
-        if shouldDock { dockBar() } else { undockBar() }
-        // ⚠️ Docked, the host has nothing left to show: its selector has moved
-        // into the navigation bar and everything above it has scrolled behind
-        // the chrome. Left visible it still DRAWS there — the bar is transparent
-        // so the banner can bleed to y = 0, so the identity block's last lines
-        // went on sitting over the status bar after the header had gone. Hiding
-        // it is the honest statement of what has happened, and cheaper than
-        // asking the bar to become opaque enough to cover it.
-        headerHost.isHidden = shouldDock
+        applyDockedAppearance(animated: true)
     }
 
 
