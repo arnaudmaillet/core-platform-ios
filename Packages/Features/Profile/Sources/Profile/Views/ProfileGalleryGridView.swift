@@ -82,6 +82,13 @@ final class ProfileGalleryGridView: UIView {
         super.init(frame: .zero)
 
         collectionView.isScrollEnabled = true
+        // No indicators on any page of this screen. The header floats OVER the
+        // pages, so a vertical bar runs the full height of the viewport and
+        // crosses the chrome rather than stopping under it — and with three to
+        // five tabs each holding their own position, an indicator that appears
+        // on every switch reads as motion the viewer did not cause.
+        collectionView.showsVerticalScrollIndicator = false
+        collectionView.showsHorizontalScrollIndicator = false
         // The owner supplies the top inset (the header's height) and drives the
         // header from this view's offset, so UIKit must not also be adjusting
         // for safe areas underneath it.

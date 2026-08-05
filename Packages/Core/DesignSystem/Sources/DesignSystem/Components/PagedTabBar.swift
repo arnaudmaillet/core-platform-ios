@@ -453,7 +453,7 @@ public final class PagedTabBar: UIControl {
     private let capsule = UIVisualEffectView(effect: nil)
     /// Scrolls the segments when they out-measure the capsule. Below that
     /// width it never scrolls and is invisible in every sense.
-    private let scroller = UIScrollView()
+    private let scroller = StripScrollView()
     /// The scroll view's content: the lens and the row, in one coordinate
     /// space. The lens lives HERE rather than in the capsule so it travels with
     /// the segments for free — a lens pinned outside would need the content
@@ -467,6 +467,10 @@ public final class PagedTabBar: UIControl {
     private let row = SegmentRow()
     private var segments: [SegmentView] = []
     private var progress: CGFloat = 0
+    /// The progress the strip was last scrolled to follow. A layout pass that
+    /// changes nothing must not undo a scroll the viewer made by hand — see
+    /// `keepLensVisible`.
+    private var lensFollowedProgress: CGFloat?
 
     public init(titles: [String], style: Style = .floating) {
         self.titles = titles
@@ -947,6 +951,12 @@ public final class PagedTabBar: UIControl {
     /// A hosted bar has no other way to tell the difference between "the tabs
     /// fit" and "the tabs are scrolled and the last badge is off the edge",
     /// which look identical in a screenshot taken at the wrong moment.
+    /// Where the crowded strip is scrolled to, and a way to put it somewhere —
+    /// standing in for the drag a test cannot perform.
+    public var debugStripOffset: CGFloat { scroller.contentOffset.x }
+
+    public func debugSetStripOffset(_ x: CGFloat) { scroller.contentOffset.x = x }
+
     public var debugOverflow: CGFloat {
         max(0, scroller.contentSize.width - scroller.bounds.width)
     }
@@ -1099,12 +1109,21 @@ public final class PagedTabBar: UIControl {
     /// ends. Animating instead would queue a 0.3s animation on every one of the
     /// ~18 frames a page change emits, and they would fight each other.
     ///
-    /// Skipped while the viewer is scrolling the bar by hand — otherwise their
-    /// own drag would be yanked back to the selection under their finger.
+    /// ⚠️ **Only when the SELECTION moved.** This runs from `applyProgress`,
+    /// which every layout pass calls — so following the lens unconditionally
+    /// meant a viewer could drag the strip to see a hidden tab and have it
+    /// snap back to the selection on the next pass, before they could reach
+    /// what they had scrolled to. Chasing the lens is the answer to "the
+    /// selection changed", not to "something laid out".
+    ///
+    /// Skipped mid-drag as well, so a scroll in progress is never yanked from
+    /// under the finger by a page change arriving at the same time.
     private func keepLensVisible() {
+        guard lensFollowedProgress != progress else { return }
         guard scroller.contentSize.width > scroller.bounds.width,
               !scroller.isDragging, !scroller.isDecelerating
         else { return }
+        lensFollowedProgress = progress
         scroller.scrollRectToVisible(
             lens.frame.insetBy(dx: -Metrics.capsulePadding, dy: 0), animated: false
         )
@@ -1140,6 +1159,22 @@ public final class PagedTabBar: UIControl {
 /// The segment strip, which exists as a subclass for ONE reason: to announce
 /// that it has finished positioning its arranged subviews.
 ///
+/// A scroll view that will take a drag which began on a button.
+///
+/// ⚠️ **`UIScrollView` refuses to cancel touches that started in a `UIControl`,
+/// and that default is why the strip could not be scrolled by hand.** It is the
+/// right default for a form — a finger resting on a switch should work the
+/// switch, not the page. It is the wrong one for a strip of tabs, where every
+/// segment IS a control and therefore EVERY drag starts on one: the scroll view
+/// was there, it had somewhere to scroll, and it was never offered the gesture.
+///
+/// Cancelling is what turns a press-then-drag into a scroll. A press that does
+/// not move is untouched by this and still arrives as a tap, which is what
+/// keeps "tap to choose" working alongside "drag to see the rest".
+private final class StripScrollView: UIScrollView {
+    override func touchesShouldCancel(in view: UIView) -> Bool { true }
+}
+
 /// ⚠️ **The selection lens is built entirely out of segment FRAMES, and a stack
 /// view positions its arranged subviews in its OWN `layoutSubviews` — which
 /// runs after its superview's.** So every place the bar derives the lens

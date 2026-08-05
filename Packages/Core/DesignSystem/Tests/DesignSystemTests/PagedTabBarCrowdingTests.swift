@@ -125,3 +125,89 @@ struct PagedTabBarGestureTests {
         #expect(bar.selectedIndex == 2)
     }
 }
+
+/// Who gets to decide where a crowded strip is scrolled to.
+///
+/// Two things want to move it: the selection, which should bring itself into
+/// view when it changes, and the viewer, who drags the strip to reach a tab
+/// they cannot see. The second is the one that breaks if the first is written
+/// carelessly — chasing the lens on every layout pass means a hand-made scroll
+/// is undone before the finger can reach what it scrolled to.
+@MainActor
+struct PagedTabBarStripScrollTests {
+    private func crowdedBar() -> PagedTabBar {
+        let bar = PagedTabBar(
+            titles: ["Activity", "Gallery", "Short", "Saved", "Liked"], style: .navigationTitle
+        )
+        bar.frame = CGRect(x: 0, y: 0, width: 258, height: PagedTabBar.Style.navigationTitle.height)
+        bar.setNeedsLayout()
+        bar.layoutIfNeeded()
+        return bar
+    }
+
+    /// A selection that moves brings itself into view — the half that has to
+    /// keep working.
+    ///
+    /// Driven through `setProgress`, because that is what actually moves the
+    /// lens: the pages report their position every frame and the lens follows
+    /// them, so a bare `select` changes which segment is reported without
+    /// moving anything until the pager catches up.
+    @Test func changingTheSelectionScrollsItIntoView() {
+        let bar = crowdedBar()
+        let before = bar.debugStripOffset
+        bar.setProgress(4)
+        bar.setNeedsLayout()
+        bar.layoutIfNeeded()
+        #expect(bar.debugStripOffset > before)
+    }
+
+    /// ⚠️ **A scroll the viewer made survives a layout pass.** This is the bug
+    /// the follow-on-every-pass version had: drag the strip to see a hidden
+    /// tab, and the next pass — a badge, a re-render, anything — puts it back
+    /// where the selection is, before the tab can be tapped.
+    @Test func aHandMadeScrollSurvivesRelayout() {
+        let bar = crowdedBar()
+        bar.debugSetStripOffset(30)
+        bar.setNeedsLayout()
+        bar.layoutIfNeeded()
+        #expect(abs(bar.debugStripOffset - 30) < 0.5)
+    }
+
+    /// And it survives the many passes a real screen produces, not just one.
+    @Test func aHandMadeScrollSurvivesRepeatedRelayout() {
+        let bar = crowdedBar()
+        bar.debugSetStripOffset(25)
+        for _ in 0..<5 {
+            bar.setNeedsLayout()
+            bar.layoutIfNeeded()
+        }
+        #expect(abs(bar.debugStripOffset - 25) < 0.5)
+    }
+
+    /// ⚠️ But a selection change still wins over it. Scrolling away and then
+    /// choosing a tab must go to that tab — otherwise the strip is stuck where
+    /// it was left and the selected tab can be off screen.
+    @Test func aSelectionChangeOverridesAHandMadeScroll() {
+        let bar = crowdedBar()
+        bar.setProgress(4)
+        bar.setNeedsLayout()
+        bar.layoutIfNeeded()
+        // The viewer drags back to the start, then chooses the first tab.
+        bar.debugSetStripOffset(20)
+        bar.setProgress(0)
+        bar.setNeedsLayout()
+        bar.layoutIfNeeded()
+        #expect(abs(bar.debugStripOffset) < 0.5)
+    }
+
+    /// A bar with room to spare has nothing to scroll and stays put.
+    @Test func aBarThatFitsNeverScrolls() {
+        let bar = PagedTabBar(titles: ["All", "Requests"], style: .navigationTitle)
+        bar.frame = CGRect(x: 0, y: 0, width: 320, height: PagedTabBar.Style.navigationTitle.height)
+        bar.setNeedsLayout()
+        bar.layoutIfNeeded()
+        bar.setProgress(1)
+        bar.layoutIfNeeded()
+        #expect(abs(bar.debugStripOffset) < 0.5)
+    }
+}

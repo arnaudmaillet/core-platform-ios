@@ -65,6 +65,7 @@ final class ProfileGalleryPagerView: UIView {
 
         scrollView.isPagingEnabled = true
         scrollView.showsHorizontalScrollIndicator = false
+        scrollView.showsVerticalScrollIndicator = false
         scrollView.delegate = self
         // This scroll view pages horizontally ONLY; each page scrolls itself
         // vertically, so the two axes never arbitrate for the same drag.
