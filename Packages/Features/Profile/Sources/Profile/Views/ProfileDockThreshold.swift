@@ -56,4 +56,33 @@ enum ProfileDockThreshold {
     static func isAnimated(step: CGFloat) -> Bool {
         abs(step) < animationSpeedLimit
     }
+
+    /// How far before the dock line the identity block finishes fading out.
+    ///
+    /// Long enough to read as a fade rather than a blink; short enough that the
+    /// block is at full strength for almost all of its travel, since it is the
+    /// thing the viewer came to read.
+    static let identityFadeDistance: CGFloat = 90
+
+    /// How visible the identity block — avatar, name, stats, bio — should be for
+    /// a given header position.
+    ///
+    /// ⚠️ **Driven by the SCROLL, not by the docking state.** Docking is a
+    /// discrete event that a flick can cross at 150pt a frame; an alpha animated
+    /// on that event would still be running long after the block had travelled
+    /// somewhere else, and at speed it would simply pop — which is the same
+    /// mistake, in a second place, that made the selector double. Read from the
+    /// offset instead, the block is exactly as faded as its position says it
+    /// should be on every frame, at any speed, in either direction, with no
+    /// state of its own to get out of step.
+    ///
+    /// It reaches zero exactly AT the dock line, which is what lets the host
+    /// stop being hidden there: nothing is drawn, so nothing bleeds through the
+    /// transparent navigation bar, and nothing has to pop to make that true.
+    static func identityAlpha(travelled: CGFloat, dockLine: CGFloat) -> CGFloat {
+        guard dockLine > 0, identityFadeDistance > 0 else { return 1 }
+        let start = dockLine - identityFadeDistance
+        let faded = (travelled - start) / identityFadeDistance
+        return 1 - min(max(faded, 0), 1)
+    }
 }

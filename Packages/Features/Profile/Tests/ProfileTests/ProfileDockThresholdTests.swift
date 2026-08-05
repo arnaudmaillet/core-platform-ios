@@ -116,4 +116,53 @@ struct ProfileDockThresholdTests {
     func aFlickUpwardsAlsoSwapsWithoutAnimating(step: CGFloat) {
         #expect(ProfileDockThreshold.isAnimated(step: step) == false)
     }
+
+    // MARK: - Fading the identity block
+
+    /// Through most of its travel the block is what the viewer came to read, so
+    /// it is at full strength.
+    @Test(arguments: [CGFloat(-200), 0, 100, 300, 310])
+    func theIdentityBlockIsWhollyVisibleWellAboveTheLine(travelled: CGFloat) {
+        #expect(ProfileDockThreshold.identityAlpha(travelled: travelled, dockLine: line) == 1)
+    }
+
+    /// ⚠️ It reaches zero exactly AT the line, and that is load-bearing rather
+    /// than tidy. The host stops being hidden on docking, so the fade is the
+    /// only thing keeping the bio from drawing through a transparent navigation
+    /// bar and over the status bar. A fade that finished late would put it
+    /// there; one that finished early would blink.
+    @Test func theIdentityBlockIsGoneByTheDockLine() {
+        #expect(ProfileDockThreshold.identityAlpha(travelled: line, dockLine: line) == 0)
+    }
+
+    @Test(arguments: [CGFloat(400), 500, 5_000])
+    func theIdentityBlockStaysGonePastTheLine(travelled: CGFloat) {
+        #expect(ProfileDockThreshold.identityAlpha(travelled: travelled, dockLine: line) == 0)
+    }
+
+    /// In between it is neither, and monotonically so — a fade that reversed
+    /// anywhere in its window would read as a flicker.
+    @Test func theFadeOnlyEverDarkens() {
+        let samples = stride(from: CGFloat(300), through: 400, by: 5).map {
+            ProfileDockThreshold.identityAlpha(travelled: $0, dockLine: line)
+        }
+        #expect(zip(samples, samples.dropFirst()).allSatisfy { $0 >= $1 })
+        // And it genuinely passes through the middle rather than stepping.
+        #expect(samples.contains { $0 > 0.2 && $0 < 0.8 })
+    }
+
+    /// Halfway through the window is halfway faded: the ramp is linear, so the
+    /// block's visibility tracks the finger rather than easing away from it.
+    @Test func halfwayThroughTheWindowIsHalfFaded() {
+        let alpha = ProfileDockThreshold.identityAlpha(
+            travelled: line - ProfileDockThreshold.identityFadeDistance / 2, dockLine: line
+        )
+        #expect(abs(alpha - 0.5) < 0.001)
+    }
+
+    /// ⚠️ Before the first layout pass there is no travel to speak of, and a
+    /// window measured against zero would make the block invisible on arrival.
+    @Test func withoutAHeaderToTravelTheBlockIsVisible() {
+        #expect(ProfileDockThreshold.identityAlpha(travelled: 0, dockLine: 0) == 1)
+    }
 }

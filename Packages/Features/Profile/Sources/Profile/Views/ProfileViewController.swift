@@ -1353,8 +1353,38 @@ final class ProfileViewController: UIViewController {
     /// arrange between a resizing container and a scroll view that clamped it.
     private func applyHeaderOffset(_ travelled: CGFloat) {
         headerTopConstraint?.constant = -min(max(travelled, 0), headerTravel)
+        applyIdentityFade(travelled: travelled)
         updateBarDocking(travelled: travelled)
         updateBarTransparency(travelled: travelled)
+    }
+
+    /// Fades the identity block out as it reaches the navigation bar, and back
+    /// in on the way down.
+    ///
+    /// This replaced hiding the host outright at the dock line, which was two
+    /// faults in one line: the block vanished in a single frame, and until that
+    /// frame it went on drawing through the transparent bar — the bio's last
+    /// lines sat over the status bar for the whole approach. Both are the same
+    /// mistake, which is that visibility was a consequence of a STATE when it is
+    /// really a function of a POSITION.
+    ///
+    /// ⚠️ The fade is on the identity block alone, not on its host. The host
+    /// also carries the selector, which is running its own hand-over at exactly
+    /// this moment; fading the pair would apply that transition twice to one of
+    /// them.
+    private func applyIdentityFade(travelled: CGFloat) {
+        let alpha = ProfileDockThreshold.identityAlpha(
+            travelled: travelled, dockLine: headerTravel
+        )
+        guard abs(headerView.alpha - alpha) > 0.001 else { return }
+        headerView.alpha = alpha
+        // ⚠️ Nothing drawn, nothing to touch. The host still spans the band
+        // between the navigation bar and the content once the header has
+        // travelled, and a `UIView` takes touches inside its bounds whether or
+        // not it has anything to show — so left interactive it swallows scrolls
+        // in that band. Hiding it used to do this for free; a faded view has to
+        // say so.
+        headerHost.isUserInteractionEnabled = alpha > 0.01
     }
 
     /// Gives the navigation bar its material back once the banner is no longer
@@ -1409,10 +1439,6 @@ final class ProfileViewController: UIViewController {
         let arriving = isBarDocked ? dockedBar : inlineBar
         let shrunk = CGAffineTransform(scaleX: Metrics.dockZoomScale, y: Metrics.dockZoomScale)
 
-        // Coming back, the host has to be on screen BEFORE the inline bar can be
-        // seen growing into it. Going away it is hidden on completion instead —
-        // see below.
-        if !isBarDocked { headerHost.isHidden = false }
         leaving.isHidden = false
         arriving.isHidden = false
         // The arriving bar starts small — but ONLY when it is arriving from
@@ -1435,10 +1461,8 @@ final class ProfileViewController: UIViewController {
         // over an un-scrolled profile. `isHidden` is not a property UIKit
         // touches there. (Measured: the resting selector was fully legible in
         // the navigation bar with the banner and avatar still on screen.)
-        let settleVisibility = { [weak self] in
-            guard let self else { return }
+        let settleVisibility = {
             leaving.isHidden = true
-            headerHost.isHidden = isBarDocked
         }
 
         guard animated else {
@@ -1464,14 +1488,6 @@ final class ProfileViewController: UIViewController {
                 // in which case a later call already owns the two bars and this
                 // completion would hide the one now arriving.
                 guard (isBarDocked ? inlineBar : dockedBar) === leaving else { return }
-                // ⚠️ Docked, the host has nothing left to show: its selector has
-                // faded out and everything above it has scrolled behind the
-                // chrome. Left visible it still DRAWS there — the bar is
-                // transparent so the banner can bleed to y = 0, so the identity
-                // block's last lines went on sitting over the status bar after
-                // the header had gone. Hidden on COMPLETION rather than at the
-                // line, because hiding it at the line takes the fading bar with
-                // it and there is no hand-over left to see.
                 settleVisibility()
             }
         )
