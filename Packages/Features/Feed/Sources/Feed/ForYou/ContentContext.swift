@@ -40,10 +40,19 @@ public enum ContentContext: String, Equatable, Sendable, CaseIterable {
     /// unfiltered scope later does not mean hunting for `!= .all` comparisons.
     public var isUnfiltered: Bool { self == .all }
 
-    /// What the selector shows and says.
+    /// What the selector shows and says — and, for the active case, what the
+    /// app's own tab item reads.
+    ///
+    /// ⚠️ `.all` is **"For You"**, not "All". The name has to work in two
+    /// places at once: as a row in a menu of lenses, where "All" was the
+    /// clearer word, and as the tab item's title when it is the active one,
+    /// where a tab reading "All" says nothing about what it holds. "For You" is
+    /// what that tab has always been called, so the unfiltered state is now
+    /// named after the screen rather than after the absence of a filter — and
+    /// the menu row and the tab agree instead of being two names for one state.
     public var title: String {
         switch self {
-        case .all: "All"
+        case .all: "For You"
         case .entertainment: "Entertainment"
         case .work: "Work"
         case .focus: "Focus"

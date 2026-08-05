@@ -257,9 +257,86 @@ struct ContentContextMenuTests {
     }
 
     @Test func theMenuOffersEveryContext() {
+        let actions = makeScreen().makeContextActions()
+        #expect(actions.count == ContentContext.allCases.count)
+        // ⚠️ The title is the mode's NAME and nothing else. The count used to be
+        // parenthesised into it — "Work (3)" — which put a number where a name
+        // goes; it is a badge now and lives in the row's image.
+        #expect(actions.map(\.title) == ContentContext.allCases.map(\.title))
+    }
+
+    /// Every row reserves the pill's width whether or not it has a pill, so the
+    /// glyphs line up in a column. A menu whose icons shift depending on which
+    /// modes have activity is harder to read than one with a gap in it.
+    @Test func everyRowReservesTheSameLeadingWidth() {
+        let zero = ContextMenuRowIcon.image(count: 0, symbol: "briefcase.fill", traits: .current)
+        let one = ContextMenuRowIcon.image(count: 7, symbol: "briefcase.fill", traits: .current)
+        #expect(zero?.size.width == one?.size.width)
+    }
+
+    /// A red `0` is a badge claiming there is nothing to report. The space is
+    /// held; nothing is drawn in it.
+    @Test func zeroDrawsNoPill() {
+        let zero = ContextMenuRowIcon.image(count: 0, symbol: "target", traits: .current)
+        let some = ContextMenuRowIcon.image(count: 3, symbol: "target", traits: .current)
+        #expect(zero != nil)
+        // Same footprint, different pixels — the pill is the only difference.
+        #expect(zero?.size == some?.size)
+        #expect(zero?.pngData() != some?.pngData())
+    }
+
+    /// Two digits are wider than one; three wider still. The pill grows with
+    /// its number rather than clipping it.
+    @Test func thePillGrowsWithItsNumber() {
+        let sizes = [7, 42, 128].map {
+            ContextMenuRowIcon.image(count: $0, symbol: "sparkles", traits: .current)?.size.width ?? 0
+        }
+        #expect(sizes == sizes.sorted())
+        #expect(sizes[0] < sizes[2])
+    }
+
+    /// ⚠️ A single digit is a DISK — width exactly equal to height, not a
+    /// capsule a point or two wider that reads as a rendering mistake. The
+    /// image's own width carries the reserved pill plus the glyph, so the pill
+    /// is measured by the difference every count shares.
+    @Test func aSingleDigitPillIsACircle() {
+        for count in 1...9 {
+            #expect(
+                ContextMenuRowIcon.pillSize(for: count).width
+                    == ContextMenuRowIcon.pillSize(for: count).height,
+                "count \(count) is not a disk"
+            )
+        }
+    }
+
+    /// Two digits no longer fit inside the height, so the shape elongates —
+    /// the only case that should.
+    @Test func aTwoDigitPillBecomesACapsule() {
+        let two = ContextMenuRowIcon.pillSize(for: 12)
+        #expect(two.width > two.height)
+    }
+
+    /// Zero reserves a disk's worth of space so the glyph column does not move
+    /// between a row with news and a row without.
+    @Test func zeroReservesTheDisksWidth() {
+        #expect(ContextMenuRowIcon.pillSize(for: 0) == ContextMenuRowIcon.pillSize(for: 5))
+    }
+
+    /// The unfiltered lens is named after the screen, not after the absence of
+    /// a filter — it has to work as a tab item's title too, where "All" says
+    /// nothing about what the tab holds.
+    @Test func theUnfilteredLensIsCalledForYou() {
+        #expect(ContentContext.all.title == "For You")
+    }
+
+    /// The menu's contents are built at PRESENTATION time, not attached once.
+    /// The rows carry live counts now, so a menu whose children were baked in
+    /// at `viewDidLoad` would show whatever the counts were before the first
+    /// page landed — which is zero, forever.
+    @Test func theMenuDefersItsChildren() {
         let children = makeScreen().makeContextMenu().children
-        #expect(children.count == ContentContext.allCases.count)
-        #expect(children.compactMap { ($0 as? UIAction)?.title } == ContentContext.allCases.map(\.title))
+        #expect(children.count == 1)
+        #expect(children.first is UIDeferredMenuElement)
     }
 
     @Test func noItemCarriesACheckmark() {
@@ -267,14 +344,12 @@ struct ContentContextMenuTests {
         // matching row says the same thing again, somewhere you have to open a
         // menu to read. This is the regression guard for that decision — the
         // default `.off` is easy to undo by adding `.singleSelection` back.
-        let children = makeScreen().makeContextMenu().children
-        #expect(children.compactMap { $0 as? UIAction }.allSatisfy { $0.state == .off })
+        #expect(makeScreen().makeContextActions().allSatisfy { $0.state == .off })
     }
 
     @Test func everyItemCarriesItsIcon() {
         // Without checkmarks the icon is the only thing distinguishing the rows
         // at a glance, so a missing one costs more than it used to.
-        let children = makeScreen().makeContextMenu().children
-        #expect(children.compactMap { $0 as? UIAction }.allSatisfy { $0.image != nil })
+        #expect(makeScreen().makeContextActions().allSatisfy { $0.image != nil })
     }
 }

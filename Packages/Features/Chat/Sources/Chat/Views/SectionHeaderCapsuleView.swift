@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// The compose picker's section header: `SectionHeaderPillButton` in the shape
@@ -29,7 +30,10 @@ final class SectionHeaderCapsuleView: UICollectionReusableView {
         onTap = nil
     }
 
-    func setTitle(_ title: String?) {
+    /// `leadsList` decides the header's top margin — see
+    /// `SectionHeaderPillButton.setLeadsList`.
+    func setTitle(_ title: String?, leadsList: Bool = true) {
         pill.setPillTitle(title)
+        pill.setLeadsList(leadsList)
     }
 }

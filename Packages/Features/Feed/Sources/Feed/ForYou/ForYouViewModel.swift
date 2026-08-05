@@ -1,3 +1,4 @@
+import CoreModels
 import Foundation
 import PostGrid
 
@@ -71,6 +72,44 @@ public final class ForYouViewModel {
     /// lens, so the bar has to be told explicitly rather than left to infer it
     /// from content it never sees.
     public var onUnreadChange: (([GalleryFilter.Format: Int]) -> Void)?
+    /// Every context's count, for the menu that offers them.
+    ///
+    /// The menu names five modes, and the whole point of putting a number
+    /// beside each is that a viewer can see where the activity is WITHOUT
+    /// switching to find out. So this answers for all of them at once, against
+    /// the same session baseline the active one is counted against — the
+    /// selected mode's entry and the tab badge are then the same number
+    /// arriving by the same route.
+    public var onContextCountsChange: (([ContentContext: Int]) -> Void)?
+    /// WHICH of the badged tab's posts arrived since the session opened, so the
+    /// page can put exactly those under their own header.
+    ///
+    /// ⚠️ **The identities, not the count.** This published a count first, and
+    /// the page took "the leading N rows" — which is only the same thing when
+    /// the list is in date order. It is not: Trending ranks the corpus, so the
+    /// five newest posts sit wherever their reactions put them, and the "New"
+    /// header ended up over five arbitrary rows while the genuinely new ones
+    /// were somewhere below it. The badge was right and the section under it
+    /// was a lie, which is worse than either being wrong alone.
+    ///
+    /// The count the badge shows is this set's size, so the two still cannot
+    /// disagree — that property is what the whole design is for.
+    public var onNewPostsChange: ((Set<PostID>) -> Void)?
+    /// Fires immediately BEFORE a publish whose corpus was re-derived rather
+    /// than extended — a lens change or a re-ordering.
+    ///
+    /// ⚠️ The pages cannot work this out for themselves, and trying to crashed
+    /// the app. A page treats "same posts plus some new ones" as an append and
+    /// expresses it as an insert, which is what keeps the mosaic from
+    /// reshuffling when Trending re-ranks a landing page. Widening the lens
+    /// produces exactly that shape — every Work post is still there, plus
+    /// thirty more — but it is NOT an append: the newcomers belong all through
+    /// the list, not after it. Inserted at the end they mis-order the timeline,
+    /// and when the sectioning moves in the same pass `performBatchUpdates`
+    /// takes the whole app down with an inconsistency exception.
+    ///
+    /// So the distinction is stated by the only type that knows which it is.
+    public var onCorpusReset: (() -> Void)?
 
     private let repository: any ForYouProviding
     /// Persists the format tab only. The discovery source is session state by
@@ -120,6 +159,9 @@ public final class ForYouViewModel {
     /// `dev/BACKEND_GAPS.md` §14). A source change re-sorts everything, because
     /// there the viewer asked for exactly that.
     private var corpus: [GalleryPost]?
+    /// The instant this session counts from, frozen the first time a corpus
+    /// lands and never moved again. See `ForYouSessionWatermark`.
+    private var sessionWatermark: ForYouSessionWatermark?
     private var failure: String?
     private var nextPageToken: String?
     private var load: Task<Void, Never>?
@@ -199,6 +241,7 @@ public final class ForYouViewModel {
         self.source = source
         // The one place the whole corpus legitimately reorders.
         corpus = corpus.map(source.ordering)
+        onCorpusReset?()
         publish()
     }
 
@@ -213,8 +256,12 @@ public final class ForYouViewModel {
         contextStore?.context = context
         // The unread counts are derived from the VISIBLE corpus, so they have
         // to be republished with it: a tab whose new posts are all filtered out
-        // is a tab with nothing new on it, and a dot left over from the wider
+        // is a tab with nothing new on it, and a count left over from the wider
         // context would be pointing at posts this context does not admit.
+        //
+        // A lens change RE-DERIVES the corpus rather than extending it, and the
+        // pages have to be told before they see it — see `onCorpusReset`.
+        onCorpusReset?()
         publish()
     }
 
@@ -347,8 +394,42 @@ public final class ForYouViewModel {
                 ? .empty(Self.emptyState(format: format, source: source, context: context))
                 : .content(posts)
         }
-        onSnapshotChange?(Snapshot(activity: page(.activity), media: page(.media), short: page(.short)))
+        // ⚠️ Counts FIRST, then content. The Following page splits its rows into
+        // "New" and "Recent" using the count published here, so a page that
+        // received content first would render one flat list and re-section
+        // itself a moment later — a visible restructure on every load. Nothing
+        // in `publishUnread` reads the snapshot, so the order is free.
         publishUnread()
+        onSnapshotChange?(Snapshot(activity: page(.activity), media: page(.media), short: page(.short)))
+    }
+
+    /// What the badged tab counts against this session, frozen on first sight.
+    ///
+    /// Taken from the persisted cursor BEFORE this visit advances it — see
+    /// `ForYouSessionWatermark`. Read against the UNFILTERED corpus on purpose:
+    /// a baseline is an instant, not a subject, and freezing it while a narrow
+    /// context happened to be selected would date the whole session from
+    /// whatever that context's newest post was.
+    private func sessionWatermark(against posts: [GalleryPost]) -> ForYouSessionWatermark? {
+        if let sessionWatermark { return sessionWatermark }
+        guard let baseline = unreadStore.sessionBaseline(for: Self.badgedTab, in: posts) else { return nil }
+        let watermark = ForYouSessionWatermark(baselineMS: baseline)
+        sessionWatermark = watermark
+        return watermark
+    }
+
+    /// The badged tab's arrivals under a given lens, in display order.
+    private func newPosts(in context: ContentContext) -> [GalleryPost] {
+        guard let corpus, let watermark = sessionWatermark(against: Self.badgedTab.filtering(corpus)) else {
+            return []
+        }
+        return watermark.partition(Self.badgedTab.filtering(context.filtering(corpus))).new
+    }
+
+    /// The badged tab's count under a given lens — the size of the set above,
+    /// never derived separately.
+    private func newCount(in context: ContentContext) -> Int {
+        newPosts(in: context).count
     }
 
     /// Recomputes every tab's badge from the corpus in hand.
@@ -362,6 +443,10 @@ public final class ForYouViewModel {
     private func publishUnread() {
         guard corpus != nil else { return }
         applyMockNewActivityIfNeeded()
+        // The session's baseline is frozen here, BEFORE the visit advances the
+        // persisted cursor — that ordering is the whole mechanism.
+        let arrivals = newPosts(in: context)
+        let count = arrivals.count
         unreadStore.markSeen(format, in: posts(for: format))
         // Only the tabs this screen HAS, not every case of the shared enum —
         // `.short` has no tab here, and publishing a count for it would invite
@@ -370,11 +455,19 @@ public final class ForYouViewModel {
         for page in Self.tabs {
             // Discover carries no badge by product decision, not by accident:
             // a ranked feed has no "since you last looked" to count against.
+            // A forced count is `-foryou-badges` only, and overrides the
+            // derivation for the BADGE alone — see `forcedCount`.
             counts[page] = page == Self.badgedTab
-                ? unreadStore.count(for: page, in: posts(for: page))
+                ? (unreadStore.forcedCount(for: page) ?? count)
                 : 0
         }
         onUnreadChange?(counts)
+        onNewPostsChange?(Set(arrivals.map(\.id)))
+        onContextCountsChange?(
+            ContentContext.allCases.reduce(into: [:]) { result, lens in
+                result[lens] = newCount(in: lens)
+            }
+        )
     }
 
     #if DEBUG

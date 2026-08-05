@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// The two shapes a post grid page can take, as bare compositional layouts.
@@ -193,8 +194,24 @@ public enum PostGridMosaic {
 /// The 1-column timeline shape (Activity, Short): rows self-size to
 /// their content, with reading margins instead of the grid's full bleed.
 public enum PostGridListLayout {
-    public static func layout() -> UICollectionViewCompositionalLayout {
-        UICollectionViewCompositionalLayout { _, _ in
+    /// The element kind a sectioned list's header is registered and dequeued
+    /// under. Stated here, beside the layout that asks for it, so a host cannot
+    /// register one string and supply another.
+    public static let headerElementKind = "PostGridListLayout.header"
+
+    /// Headers FLOAT over the rows rather than pushing them down: the header is
+    /// a capsule, not a band, and a pinned capsule reads as an object sitting on
+    /// the list — the same treatment the inbox's plain tables give theirs.
+    ///
+    /// `hasHeader` is asked PER SECTION, not set once for the layout, because
+    /// whether a list is titled at all is content-dependent: a list with
+    /// nothing new in it is one unlabelled run of rows, and a layout that
+    /// reserved header space anyway would leave a gap above the first row that
+    /// no header ever fills. Nil means no section is titled.
+    public static func layout(
+        hasHeader: (@MainActor (Int) -> Bool)? = nil
+    ) -> UICollectionViewCompositionalLayout {
+        UICollectionViewCompositionalLayout { index, _ in
             let item = NSCollectionLayoutItem(layoutSize: .init(
                 widthDimension: .fractionalWidth(1),
                 heightDimension: .estimated(88)
@@ -208,7 +225,55 @@ public enum PostGridListLayout {
             )
             let section = NSCollectionLayoutSection(group: group)
             section.interGroupSpacing = 10
-            section.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16)
+            // The margin that separates two sections is on the TRAILING edge of
+            // the one above, never the leading edge of the one below.
+            //
+            // ⚠️ A top inset does not do this, and looks like it should. It was
+            // tried: `supplementariesFollowContentInsets` defaults to true, so a
+            // top inset reads as if it will carry the header down with the rows —
+            // and measured in-sim it moved the ROWS 15pt and left the header
+            // exactly where it was, opening the gap *under* the pill instead of
+            // above it. The pill went on crowding the card it was supposed to be
+            // separated from. A pinned boundary item resolves its own position
+            // against the section's content, not against the inset.
+            //
+            // A bottom inset has no such ambiguity: it is space after the last
+            // row, which is precisely where the separation belongs. It also
+            // leaves the FIRST header flush under the navigation bar's tab
+            // capsule — there is nothing above it to be separated from, and a
+            // gap there reads as the screen failing to fill.
+            //
+            // Only for sectioned lists. The profile gallery hosts this same
+            // layout as a non-scrolling self-sizing grid, where a trailing
+            // margin is height it did not ask for.
+            //
+            // The SAME constant the pill applies as its own top margin in the
+            // inbox's tables — one number for one rule, expressed through
+            // whichever lever the host actually has. A table has no per-section
+            // content inset, so there the header grows; here a pinned boundary
+            // item resolves its own position and would ignore a top inset, so
+            // the margin goes on the section above.
+            section.contentInsets = NSDirectionalEdgeInsets(
+                top: 0,
+                leading: 16,
+                bottom: hasHeader == nil ? 0 : SectionHeaderPillButton.Metrics.sectionGap,
+                trailing: 16
+            )
+            if hasHeader?(index) == true {
+                let header = NSCollectionLayoutBoundarySupplementaryItem(
+                    layoutSize: .init(
+                        widthDimension: .fractionalWidth(1),
+                        heightDimension: .estimated(44)
+                    ),
+                    elementKind: headerElementKind,
+                    alignment: .top
+                )
+                header.pinToVisibleBounds = true
+                // Above the cells, or the rows scrolling under a glass capsule
+                // would draw on top of it.
+                header.zIndex = 2
+                section.boundarySupplementaryItems = [header]
+            }
             return section
         }
     }

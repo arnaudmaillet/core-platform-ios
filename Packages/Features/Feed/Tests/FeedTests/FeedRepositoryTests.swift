@@ -53,7 +53,9 @@ struct FeedRepositoryTests {
         // Hydration is real: entries carry author and media facts.
         let first = try #require(page.entries.first)
         #expect(!first.author.displayName.isEmpty)
-        #expect(first.post.id == PostID("post-0000"))
+        // The corpus is led by the staged arrivals — the posts For You badges
+        // as new. See `MockSocialDataset.justArrivedRecords`.
+        #expect(first.post.id == PostID("post-new-00"))
     }
 
     @Test func loadPostHydratesSinglePostWithAuthorAndLikes() async throws {
@@ -70,7 +72,11 @@ struct FeedRepositoryTests {
     }
 
     @Test func paginationWalksTheCursorWithoutDuplicatesUntilExhaustion() async throws {
-        let (repository, _) = makeRepository(dataset: MockSocialDataset(postCount: 45))
+        let dataset = MockSocialDataset(postCount: 45)
+        let (repository, _) = makeRepository(dataset: dataset)
+        // `postCount` sizes the seeded corpus; the staged arrivals ride on top
+        // of it, so the total is asked for rather than restated.
+        let total = dataset.posts.count
 
         var seen: [PostID] = []
         var page = try await repository.loadFirstPage()
@@ -81,8 +87,8 @@ struct FeedRepositoryTests {
             #expect(!page.isCold) // only the first request is cold
         }
 
-        #expect(seen.count == 45)
-        #expect(Set(seen).count == 45)
+        #expect(seen.count == total)
+        #expect(Set(seen).count == total)
         #expect(page.nextPageToken == nil)
     }
 

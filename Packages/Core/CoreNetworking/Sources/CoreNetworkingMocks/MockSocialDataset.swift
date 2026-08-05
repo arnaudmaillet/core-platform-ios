@@ -48,6 +48,58 @@ public struct MockSocialDataset: Sendable {
     /// The profile owned by the mock login account (MockAuthService.accountID).
     public static let viewerProfileID = "prof-demo-viewer"
 
+    /// Posts staged as having arrived since the viewer last looked, so For
+    /// You's unread badge has something real to count on a cold launch.
+    ///
+    /// ⚠️ **Dated a few minutes into the FUTURE, and that is the mechanism.**
+    /// The rest of the corpus sits on a fixed epoch so ordering is stable, which
+    /// also means nothing in it is ever newer than a watermark taken from it —
+    /// a badge derived honestly could only ever read zero, and the feature was
+    /// unverifiable without a launch argument. A first sight baselines at the
+    /// newest post the viewer COULD have seen, which is capped at the present
+    /// moment (see `ForYouUnreadStore.sessionBaseline`), so a post stamped
+    /// ahead of the clock is by construction an arrival. `MockChatService`
+    /// stages the inbox's unread counts the same way and for the same reason.
+    ///
+    /// Recomputed per dataset instance rather than pinned to a constant: a
+    /// fixed future date stops being the future, and the badge would quietly
+    /// die some morning with nothing to point at.
+    ///
+    /// The captions are load-bearing. `ContentContext` is a caption keyword
+    /// search, so these decide the per-mode counts the menu shows — three that
+    /// read as Work, one as Focus, one as neither. `MockForYouArrivalTests`
+    /// pins those numbers so a caption edit cannot quietly change them.
+    static func justArrivedRecords(authors: [Author]) -> [PostRecord] {
+        // Ahead of the clock by enough that a slow launch cannot overtake it.
+        let epochMS = Int64(Date().timeIntervalSince1970 * 1000) + 5 * 60_000
+        let captions = [
+            "Standup moved to nine. The deadline holds.",
+            "Refactor landed and the office survived it.",
+            "Shipping the new build tonight.",
+            "Quiet morning, notes and a long walk before anything else.",
+            "Golden hour over the harbour."
+        ]
+        let shapes: [(Int, Int)] = [(1080, 1350), (1600, 900), (1080, 1080)]
+        return captions.enumerated().map { index, caption in
+            // Two of the five are text-only, mirroring the corpus's own mix so
+            // the arrivals do not all land in one cell path.
+            let hasMedia = index % 3 != 2
+            let shape = shapes[index % shapes.count]
+            let host = index % 2 == 0 ? "media" : "video"
+            return PostRecord(
+                postID: String(format: "post-new-%02d", index),
+                authorProfileID: authors[index % authors.count].profileID,
+                caption: caption,
+                media: hasMedia
+                    ? ("mock://\(host)/new-\(index)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
+                    : nil,
+                // Newest first, a minute apart, all of them ahead of the clock.
+                publishedAtMS: epochMS - Int64(index) * 60_000,
+                parentID: ""
+            )
+        }
+    }
+
     public let authors: [Author]
     public let posts: [PostRecord]
 
@@ -232,7 +284,9 @@ public struct MockSocialDataset: Sendable {
                 parentID: isRepost ? String(format: "post-%04d", index - 8) : ""
             ))
         }
-        posts = records
+        // Five posts that arrived AFTER the viewer last looked, at the head of
+        // the timeline. See `justArrivedRecords`.
+        posts = Self.justArrivedRecords(authors: authors) + records
 
         // Twelve follows, not four: the compose picker expands the viewer's
         // first eight follows into friend-of-friend candidates

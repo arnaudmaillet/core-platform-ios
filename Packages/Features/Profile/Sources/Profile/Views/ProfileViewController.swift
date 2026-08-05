@@ -27,7 +27,20 @@ final class ProfileViewController: UIViewController {
         (ProfileRelationshipsViewModel.Subject, RelationshipDirection) -> UIViewController
     )?
 
-    private let scrollView = UIScrollView()
+    /// The identity block and the selector, floating above the pages.
+    ///
+    /// ⚠️ **Not in a scroll view.** The profile used to be one outer scroll view
+    /// containing the header and a pager sized to its active page; every layout
+    /// defect on this screen came from that container resizing. The pages own
+    /// all vertical motion now and this host is MOVED by whichever page is being
+    /// read — see `ProfileHeaderScrollCoordinator`.
+    private let headerHost = UIView()
+    /// How far the host has been pulled up, driven by the active page's offset.
+    private var headerTopConstraint: NSLayoutConstraint?
+    /// The bar's see-through dress, worn only while the banner is behind it.
+    private var transparentBarAppearance: UINavigationBarAppearance?
+    /// Whether the bar is currently see-through.
+    private var isBarTransparent = true
     /// Retained for the share sheet, which builds its own QR card (and a
     /// throwaway one to rasterize) and needs the same avatar cache.
     private let imagePipeline: ImagePipeline
@@ -35,16 +48,19 @@ final class ProfileViewController: UIViewController {
     private let shareTargeting: (any ProfileShareTargeting)?
     private let headerView: ProfileHeaderView
     private let galleryPager: ProfileGalleryPagerView
-    /// The filter tray's two selectors, hosted as custom bar items in the
-    /// navigation controller's native toolbar. They carry no material of
-    /// their own: the iOS 26 bar wraps each item in the system's Liquid
-    /// Glass capsule (same rule as the nav-bar items — see
-    /// `updateActionBarItem`). Ownership of the shared toolbar is handed
-    /// over between screens by the successor rule — see
-    /// `concealFilterToolbar` and `SnapFeedViewController.concealToolbar`.
-    private let formatRow = GlassSegmentRow(segments: [
-        .title("Activity"), .title("Gallery"), .title("Short")
-    ])
+    /// The gallery's format selector — the SAME `PagedTabBar` For You and
+    /// Messages wear, so a viewer meets one selector in three places rather
+    /// than three selectors doing one job.
+    ///
+    /// It starts inline, under the identity block where it belongs to the
+    /// profile, and docks into the navigation bar's title slot as the identity
+    /// scrolls away — see `updateBarDocking`. That is why it is built in the
+    /// `.navigationTitle` style even though it spends most of its life inline:
+    /// the docked size is the constrained one, and a bar that only fits in the
+    /// place it is not going is no use.
+    private let categoryBar = PagedTabBar(
+        titles: ["Activity", "Gallery", "Short"], style: .navigationTitle
+    )
     /// The source filter: one drop-down button — the native single-selection
     /// menu carries the options (checkmark on the active one), and the button
     /// shows the pick's glyph. Lazy: the menu actions capture self.
@@ -157,21 +173,47 @@ final class ProfileViewController: UIViewController {
     private var isSwitchingProfile = false
 
     private enum Metrics {
-        /// `GlassSegmentRow`'s resting height — the inline tray's own height.
-        static let inlineTrayHeight = InlineFilterTrayView.height
+        /// The height the selector's slot holds in the scrolling column,
+        /// whether or not the selector is in it.
+        static let selectorSlotHeight: CGFloat = 52
+        /// How far past the navigation bar the slot has to travel before the
+        /// selector docks, and how far back before it returns.
+        ///
+        /// ⚠️ Hysteresis, not a threshold. One line would flap: docking removes
+        /// the bar from the slot, which is a layout change, which arrives as
+        /// another scroll callback — and a viewer resting a finger exactly on
+        /// the line would watch it flicker between the two homes.
+        static let dockingHysteresis: CGFloat = 12
         /// How long the outgoing profile takes to dissolve into the new one.
         static let switchCrossfade: TimeInterval = 0.28
+        /// The bottom tray's own height.
+        static let inlineTrayHeight = InlineFilterTrayView.height
         /// Between the tray and the bar beneath it, so the two glass rows read
         /// as separate objects rather than one stack.
         static let inlineTraySpacing = InlineFilterTrayView.spacingBelow
     }
 
-    /// Hosts the tray under `.aboveBottomSafeArea`. `InlineFilterTrayView`
-    /// supplies the one `UIGlassEffect` per control that the bare
-    /// `GlassSegmentRow`/`GlassMenuButton` need outside a toolbar — see its
-    /// doc for why that material must never be doubled.
-    private lazy var inlineTrayView: UIView =
-        InlineFilterTrayView(leading: formatRow, trailing: sourceMenuButton)
+    /// Holds the selector's place in the scrolling column whether or not the
+    /// selector is currently in it.
+    ///
+    /// ⚠️ **The slot keeps its height when the bar leaves.** Docking moves one
+    /// view between two parents; if the vacated slot collapsed, the content
+    /// below would jump up by its height at the exact moment the viewer is
+    /// scrolling through it, and the scroll would fight the layout for as long
+    /// as they stayed near the threshold.
+    private let inlineBarSlot = UIView()
+    /// Whether the selector is currently in the navigation bar.
+    private var isBarDocked = false
+
+    /// The bottom tray, holding the source filter and nothing else now that the
+    /// format tabs have moved to the top of the screen.
+    ///
+    /// The two filters answer different questions and are asked at different
+    /// rates: the format tabs are navigation — tapped and swiped constantly —
+    /// while the source is a setting, chosen once and then left alone. Splitting
+    /// them puts each where its traffic is, and leaves the source where this
+    /// screen's viewers have always reached for it.
+    private lazy var inlineTrayView: UIView = InlineFilterTrayView(trailing: sourceMenuButton)
 
     init(
         viewModel: ProfileViewModel,
@@ -305,7 +347,7 @@ final class ProfileViewController: UIViewController {
             guard let self else { return }
             self.viewModel.setGalleryFormat(format)
             if let index = ProfileGalleryPagerView.pageOrder.firstIndex(of: format) {
-                self.formatRow.select(index, notify: false)
+                self.categoryBar.select(index)
             }
         }
         configureFilterTray()
@@ -350,7 +392,7 @@ final class ProfileViewController: UIViewController {
         // stretch-over-overscroll behavior can be screenshotted.
         if ProcessInfo.processInfo.arguments.contains("-profile-overscroll") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                self?.scrollView.setContentOffset(CGPoint(x: 0, y: -140), animated: true)
+                self?.galleryPager.debugOverscroll(by: 140)
             }
         }
         // Dev convenience: `-profile-layout-audit` prints the resolved header
@@ -524,10 +566,15 @@ final class ProfileViewController: UIViewController {
             ? Metrics.inlineTrayHeight + Metrics.inlineTraySpacing
             : 0
         let bottom = view.safeAreaInsets.bottom + (viewModel.hasGallery ? 8 : 0) + trayClearance
-        if scrollView.contentInset.bottom != bottom {
-            scrollView.contentInset.bottom = bottom
-            scrollView.verticalScrollIndicatorInsets.bottom = bottom
-        }
+        galleryPager.setContentBottomInset(bottom)
+        // The pages are inset by the header floating over them, so their content
+        // starts below it rather than behind it. Applied here because the
+        // header's height is only known once it has laid out.
+        galleryPager.setContentTopInset(headerHeight)
+        // Every tab must be able to absorb the header's whole travel, or a
+        // short one cannot hold the position a long one was left at and the
+        // header follows the clamp back up. See `setMinimumScrollTravel`.
+        galleryPager.setMinimumScrollTravel(contentTravel)
     }
 
     /// Opens the followers / following lists on the tapped counter's tab.
@@ -779,6 +826,7 @@ final class ProfileViewController: UIViewController {
         let transparent = UINavigationBarAppearance()
         transparent.configureWithTransparentBackground()
         transparent.titleTextAttributes = [.foregroundColor: UIColor.white]
+        transparentBarAppearance = transparent
         navigationItem.scrollEdgeAppearance = transparent
         navigationItem.standardAppearance = UINavigationBarAppearance()
 
@@ -897,13 +945,13 @@ final class ProfileViewController: UIViewController {
     /// composition), viewWillAppear (synchronous pre-transition bind), and the
     /// async data callbacks (via `alongsideTransition`).
     private func applyNavigationState() {
-        // Guarded, like the bar items below: re-assigning an identical title
-        // still asks the bar to re-lay-out its centre, which during a pop is a
-        // change it has to animate from nothing.
-        let resolvedTitle = currentHandle ?? "Profile"
-        if title != resolvedTitle {
-            title = resolvedTitle
-        }
+        // ⚠️ **No title.** The bar used to carry the @handle, which said again
+        // what the identity block says in full a finger's width below it — and
+        // once the format selector docks into the title slot, a name there
+        // would be competing with the one control this screen's chrome exists
+        // to hold. The handle is not lost: it is on the profile, where the
+        // viewer is already looking.
+        if title != nil { title = nil }
         updateActionBarItem(followButtonState)
     }
 
@@ -1033,50 +1081,52 @@ final class ProfileViewController: UIViewController {
 
 
     private func configureViews() {
-        scrollView.alwaysBounceVertical = true
-        // The header's banner must start at y = 0 of the screen, so the scroll
-        // view must not push content below the (transparent) navigation bar;
-        // the header re-adds the chrome height for its overlay content via
-        // `chromeTopInset` (see viewSafeAreaInsetsDidChange).
-        scrollView.contentInsetAdjustmentBehavior = .never
-        scrollView.pin(to: view)
+        // The pages fill the screen and scroll themselves; the header floats
+        // over them. Order matters — the header is added second so it draws
+        // above the content sliding under it.
+        galleryPager.pin(to: view)
 
-        refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
-        // The pull-down region is no longer bare background — the banner
-        // stretches over it (see anchorBanner below) — so the spinner must
-        // render above the media, in a color that survives it (the banner's
-        // top scrim backs it up).
-        refreshControl.tintColor = .white
-        refreshControl.layer.zPosition = 1
-        scrollView.refreshControl = refreshControl
+        headerHost.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(headerHost)
+        let top = headerHost.topAnchor.constraint(equalTo: view.topAnchor)
+        headerTopConstraint = top
+        NSLayoutConstraint.activate([
+            top,
+            headerHost.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            headerHost.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
 
-        let content = scrollView.contentLayoutGuide
-        let frame = scrollView.frameLayoutGuide
-        headerView.constrain(in: scrollView) { _ in
-            headerView.topAnchor.constraint(equalTo: content.topAnchor)
-            headerView.leadingAnchor.constraint(equalTo: content.leadingAnchor)
-            headerView.trailingAnchor.constraint(equalTo: content.trailingAnchor)
-            headerView.widthAnchor.constraint(equalTo: frame.widthAnchor)
+        headerView.constrain(in: headerHost) { parent in
+            headerView.topAnchor.constraint(equalTo: parent.topAnchor)
+            headerView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+            headerView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
         }
-        // The gallery pager continues the header's column; its height tracks
-        // the active page, so together they define the content height.
-        galleryPager.isHidden = !viewModel.hasGallery
-        galleryPager.constrain(in: scrollView) { _ in
-            galleryPager.topAnchor.constraint(equalTo: headerView.bottomAnchor, constant: 12)
-            galleryPager.leadingAnchor.constraint(equalTo: content.leadingAnchor)
-            galleryPager.trailingAnchor.constraint(equalTo: content.trailingAnchor)
-            galleryPager.widthAnchor.constraint(equalTo: frame.widthAnchor)
-            galleryPager.bottomAnchor.constraint(equalTo: content.bottomAnchor)
+        // The selector's slot sits between the identity block and the gallery
+        // it filters — the one place on this screen where "what you are looking
+        // at" changes hands.
+        inlineBarSlot.isHidden = !viewModel.hasGallery
+        inlineBarSlot.constrain(in: headerHost) { parent in
+            inlineBarSlot.topAnchor.constraint(equalTo: headerView.bottomAnchor, constant: 12)
+            inlineBarSlot.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+            inlineBarSlot.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
+            inlineBarSlot.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
+            inlineBarSlot.heightAnchor.constraint(
+                equalToConstant: viewModel.hasGallery ? Metrics.selectorSlotHeight : 0
+            )
         }
 
-        // Stretchy banner: on downward overscroll the banner must keep
-        // covering the screen from the very top instead of riding down with
-        // the header and exposing the background.
-        headerView.anchorBanner(toViewportTop: frame.topAnchor)
+        // ⚠️ Stretchy banner, unchanged in mechanism and load-bearing in this
+        // arrangement. The host is moved by its TOP CONSTRAINT rather than by a
+        // transform precisely so this still works: constraints cannot see a
+        // transform, and `lessThanOrEqualTo` the view's top is what pins the
+        // banner while the host travels down under a pull, stretching it instead
+        // of dragging it away and exposing the background behind.
+        headerView.anchorBanner(toViewportTop: view.topAnchor)
 
-        let viewportFill = content.heightAnchor.constraint(greaterThanOrEqualTo: frame.heightAnchor)
-        viewportFill.priority = UILayoutPriority(800)
-        skeletonViewportFill = viewportFill
+        galleryPager.onVerticalScroll = { [weak self] offset in
+            self?.applyHeaderOffset(offset)
+        }
+        galleryPager.onPullToRefresh = { [weak self] in self?.viewModel.refresh() }
 
         statusLabel.font = .preferredFont(forTextStyle: .body)
         statusLabel.adjustsFontForContentSizeCategory = true
@@ -1091,33 +1141,51 @@ final class ProfileViewController: UIViewController {
         }
     }
 
-    /// Wires the bottom filter tray and installs it as this screen's toolbar
-    /// items: a format tab records the selection and pages the gallery; a
-    /// source pick re-filters every page in place. The items must exist by
-    /// the time a push starts — the feed's handover rule reads the incoming
-    /// screen's `toolbarItems` in its own viewWillDisappear.
+    /// Wires the selector and the source filter, and puts the selector in its
+    /// inline slot: a format tab records the selection and pages the gallery; a
+    /// source pick re-filters every page in place.
     private func configureFilterTray() {
         guard viewModel.hasGallery else { return }
 
-        formatRow.onSelect = { [weak self] index in
-            guard let self else { return }
-            let format = ProfileGalleryPagerView.pageOrder[index]
-            self.viewModel.setGalleryFormat(format)
-            self.galleryPager.setActivePage(format, animated: true)
+        categoryBar.addAction(
+            UIAction { [weak self] _ in
+                guard let self else { return }
+                let format = ProfileGalleryPagerView.pageOrder[categoryBar.selectedIndex]
+                viewModel.setGalleryFormat(format)
+                galleryPager.setActivePage(format, animated: true)
+            },
+            for: .valueChanged
+        )
+        // The lens tracks the finger, exactly as it does on the other two
+        // screens that wear this bar — the pager reports a fractional position
+        // every frame and the capsule interpolates against it.
+        galleryPager.onProgress = { [weak self] progress in self?.categoryBar.setProgress(progress) }
+        // The capsule is grabbable: dragging it scrubs the pages under the
+        // finger and releasing commits to whichever one it landed nearest. The
+        // same two lines the other two screens that wear this bar already have.
+        categoryBar.onScrub = { [weak self] progress in self?.galleryPager.scrub(to: progress) }
+        categoryBar.onScrubEnd = { [weak self] velocity in
+            self?.galleryPager.settleAfterScrub(velocityInPages: velocity)
         }
+
         // Land on the user's global preference: tab selection and pager page
         // adopt the (possibly stored) filter before first layout, so the
         // screen OPENS there — no visible jump.
         let format = viewModel.galleryFilter.format
         if let index = ProfileGalleryPagerView.pageOrder.firstIndex(of: format) {
-            formatRow.select(index, notify: false)
+            categoryBar.select(index)
         }
         galleryPager.setActivePage(format, animated: false)
 
-        // Inline: the tray is ours to place, above the bottom safe area — which
-        // inside a tab bar controller is the top of the tab bar, so the two sit
-        // flush without either knowing the other's height. Same idiom as the
-        // map's filter bars.
+        undockBar()
+
+        placeSourceTray()
+    }
+
+    /// Puts the source filter back at the bottom of the screen — in this view
+    /// above the safe area when this is the Profile tab, or in the navigation
+    /// controller's shared toolbar when the screen was pushed.
+    private func placeSourceTray() {
         guard trayPlacement == .navigationToolbar else {
             view.addSubview(inlineTrayView)
             NSLayoutConstraint.activate([
@@ -1131,13 +1199,159 @@ final class ProfileViewController: UIViewController {
             ])
             return
         }
-
-        toolbarItems = [
-            UIBarButtonItem(customView: formatRow),
-            .flexibleSpace(),
-            UIBarButtonItem(customView: sourceMenuButton)
-        ]
+        // The items must exist by the time a push starts — the feed's handover
+        // rule reads the incoming screen's `toolbarItems` in its own
+        // viewWillDisappear.
+        toolbarItems = [.flexibleSpace(), UIBarButtonItem(customView: sourceMenuButton)]
     }
+
+    /// The height the header takes when nothing is scrolled — what the pages
+    /// are inset by so their content starts below it rather than behind it.
+    private var headerHeight: CGFloat {
+        headerHost.systemLayoutSizeFitting(
+            CGSize(width: view.bounds.width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        ).height
+    }
+
+    /// How far the header travels before its selector reaches the navigation
+    /// bar — the moment it docks.
+    private var headerTravel: CGFloat {
+        max(0, headerHeight - Metrics.selectorSlotHeight - view.safeAreaInsets.top)
+    }
+
+    /// How far a tab must be able to scroll for its first row to sit directly
+    /// beneath the navigation bar.
+    ///
+    /// ⚠️ **A slot's height further than the header travels, and the difference
+    /// is the whole bug.** The pages are inset by the header's full height,
+    /// selector slot included. Once the selector DOCKS, that slot is empty — its
+    /// occupant is in the navigation bar — but the inset still reserves it, so a
+    /// tab resting at the docked position sat a slot's height below the bar with
+    /// nothing in the gap. One number was being asked two questions: when does
+    /// the selector dock, and how far must the content come up. They differ by
+    /// exactly the slot that changed hands.
+    ///
+    /// Only the FLOOR uses this. Docking still happens where it did, and the
+    /// header still stops where it did — it is hidden past that point anyway.
+    private var contentTravel: CGFloat {
+        max(0, headerHeight - view.safeAreaInsets.top)
+    }
+
+    /// **The coordinator.** Moves the header from the active page's offset, and
+    /// decides docking from the same number.
+    ///
+    /// ⚠️ Everything on this screen that used to be a separate mechanism is this
+    /// arithmetic now. The header's position, the docking state and the
+    /// tab-switch continuity all read the SAME offset, so they cannot disagree —
+    /// which is what the previous architecture spent five fixes trying to
+    /// arrange between a resizing container and a scroll view that clamped it.
+    private func applyHeaderOffset(_ travelled: CGFloat) {
+        headerTopConstraint?.constant = -min(max(travelled, 0), headerTravel)
+        updateBarDocking(travelled: travelled)
+        updateBarTransparency(travelled: travelled)
+    }
+
+    /// Gives the navigation bar its material back once the banner is no longer
+    /// behind it.
+    ///
+    /// ⚠️ **UIKit normally does this for us and cannot here.** The scroll-edge
+    /// appearance is chosen by watching a scroll view in the hierarchy, and this
+    /// screen no longer has one at the top level — the pages own their own
+    /// scrolling, one level down. Left alone the bar stays at its scroll-edge
+    /// dress forever, which on this screen is fully transparent: the header's
+    /// bio and link went on showing through it after the header had docked,
+    /// sitting over the status bar.
+    private func updateBarTransparency(travelled: CGFloat) {
+        let shouldBeTransparent = travelled <= 0
+        guard shouldBeTransparent != isBarTransparent else { return }
+        isBarTransparent = shouldBeTransparent
+        let appearance = shouldBeTransparent ? transparentBarAppearance : opaqueBarAppearance
+        navigationItem.scrollEdgeAppearance = appearance
+        navigationItem.standardAppearance = appearance
+        navigationItem.compactAppearance = appearance
+        forceNavigationBarLayout()
+    }
+
+    /// The bar's material dress, worn once the header has scrolled behind it.
+    private var opaqueBarAppearance: UINavigationBarAppearance {
+        let appearance = UINavigationBarAppearance()
+        appearance.configureWithDefaultBackground()
+        return appearance
+    }
+
+    /// Puts the selector in the navigation bar's title slot.
+    ///
+    /// ⚠️ **The bar IS the title view — it is not put inside one.** It was
+    /// wrapped in a container at first, so the container could hold a stable
+    /// size for the bar cache. That container was positioned by hand, its frame
+    /// never grew to the bar's, and a `UIView` clips its own hit-testing to its
+    /// bounds — so most of the docked capsule took no touches at all and the
+    /// drag gesture appeared dead. Handing UIKit the bar directly is also what
+    /// the other two screens do; there is no wrapper on either of them.
+    ///
+    /// A title view is positioned by FRAME, so autoresizing has to come back on
+    /// for the trip — the inline slot lays it out with constraints, and a view
+    /// cannot be laid out both ways at once.
+    private func dockBar() {
+        categoryBar.removeFromSuperview()
+        categoryBar.translatesAutoresizingMaskIntoConstraints = true
+        categoryBar.sizeToFit()
+        navigationItem.titleView = categoryBar
+        forceNavigationBarLayout()
+    }
+
+    /// Returns the selector to its slot in the scrolling column.
+    ///
+    /// One bar, re-parented — not two kept in step. The bar owns its selection,
+    /// its lens position and its badge geometry, and a second copy would be a
+    /// second answer to every one of those, correct only for as long as
+    /// somebody remembered to forward the next change to both.
+    private func undockBar() {
+        navigationItem.titleView = nil
+        categoryBar.removeFromSuperview()
+        categoryBar.translatesAutoresizingMaskIntoConstraints = false
+        inlineBarSlot.addSubview(categoryBar)
+        NSLayoutConstraint.activate([
+            categoryBar.leadingAnchor.constraint(
+                greaterThanOrEqualTo: inlineBarSlot.layoutMarginsGuide.leadingAnchor
+            ),
+            categoryBar.centerYAnchor.constraint(equalTo: inlineBarSlot.centerYAnchor),
+            categoryBar.centerXAnchor.constraint(equalTo: inlineBarSlot.centerXAnchor)
+        ])
+        forceNavigationBarLayout()
+    }
+
+    /// The nav bar caches its title view's size, so a bar arriving in or leaving
+    /// the title slot has to make it re-measure — the same re-layout the other
+    /// two screens force whenever a badge changes their bar's width.
+    private func forceNavigationBarLayout() {
+        guard let bar = navigationController?.navigationBar else { return }
+        bar.setNeedsLayout()
+        bar.layoutIfNeeded()
+    }
+
+    /// Docks the selector into the navigation bar once the header has travelled
+    /// as far as it can, and gives it back on the way down.
+    private func updateBarDocking(travelled: CGFloat) {
+        guard viewModel.hasGallery, isViewLoaded else { return }
+        let shouldDock = isBarDocked
+            ? travelled > headerTravel - Metrics.dockingHysteresis
+            : travelled >= headerTravel
+        guard shouldDock != isBarDocked else { return }
+        isBarDocked = shouldDock
+        if shouldDock { dockBar() } else { undockBar() }
+        // ⚠️ Docked, the host has nothing left to show: its selector has moved
+        // into the navigation bar and everything above it has scrolled behind
+        // the chrome. Left visible it still DRAWS there — the bar is transparent
+        // so the banner can bleed to y = 0, so the identity block's last lines
+        // went on sitting over the status bar after the header had gone. Hiding
+        // it is the honest statement of what has happened, and cheaper than
+        // asking the bar to become opaque enough to cover it.
+        headerHost.isHidden = shouldDock
+    }
+
 
     /// Shows the shared toolbar for this screen, riding the transition. The
     /// mechanics mirror the feed's `presentToolbar`: shown non-animated so the
@@ -1215,7 +1429,7 @@ final class ProfileViewController: UIViewController {
             // snapshot arrives. Hydration is a pure cross-fade over the very
             // frames the content will occupy — nothing can shift.
             statusLabel.isHidden = true
-            scrollView.isHidden = false
+            galleryPager.isHidden = false
             // The HEADER is held on a switch rather than redacted: its bones'
             // shimmer sweeps left to right, and over a fast load that sweep
             // became the transition — a diagonal wipe across the identity.
@@ -1232,7 +1446,7 @@ final class ProfileViewController: UIViewController {
         case .content(let model):
             refreshControl.endRefreshing()
             statusLabel.isHidden = true
-            scrollView.isHidden = false
+            galleryPager.isHidden = false
             // Content owns its height again; the release rides the same
             // layout pass as the (dissolve-masked) gallery height snap.
             skeletonViewportFill?.isActive = false
@@ -1253,7 +1467,7 @@ final class ProfileViewController: UIViewController {
         case .failed(let message):
             refreshControl.endRefreshing()
             // Never leave the previous profile held over an error.
-            scrollView.isHidden = true
+            galleryPager.isHidden = true
             skeletonViewportFill?.isActive = false
             headerView.setRedacted(false)
             statusLabel.text = message

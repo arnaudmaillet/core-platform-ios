@@ -124,6 +124,18 @@ final class ForYouPagerView: UIView {
         }
     }
 
+    /// The next snapshot is a re-derived corpus, not an extended one — told to
+    /// BOTH pages, because a lens applies across the surface.
+    func invalidateIncrementalUpdates() {
+        pages.forEach { $0.invalidateIncrementalUpdates() }
+    }
+
+    /// Which of a page's posts arrived since the session baseline — the rows it
+    /// puts a "New" header above.
+    func setNewPosts(_ ids: Set<PostID>, for format: GalleryFilter.Format) {
+        page(for: format)?.setNewPosts(ids)
+    }
+
     func endRefreshing() {
         pages.forEach { $0.endRefreshing() }
     }

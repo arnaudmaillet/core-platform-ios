@@ -194,7 +194,7 @@ extension MessageRequestsViewController: UITableViewDelegate {
         let header = tableView.dequeueReusableHeaderFooterView(
             withIdentifier: InboxSectionHeaderView.reuseIdentifier
         ) as? InboxSectionHeaderView
-        header?.setTitle(section.title)
+        header?.setTitle(section.title, leadsList: index == 0)
         // The section's own first row, so tapping "Recent" puts Recent under
         // the header rather than wherever the list happened to be.
         header?.onTap = { [weak self] in

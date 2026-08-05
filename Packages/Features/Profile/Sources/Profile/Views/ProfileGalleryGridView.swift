@@ -27,6 +27,20 @@ final class ProfileGalleryGridView: UIView {
     }
 
     var onItemTapped: ((GalleryPost) -> Void)?
+    /// This page's vertical offset, every tick — the header rides the active
+    /// page's.
+    var onVerticalScroll: ((CGFloat) -> Void)?
+    var onPullToRefresh: (() -> Void)?
+
+    private let refreshControl = UIRefreshControl()
+    /// Clearance the owner asked for — the tab bar, the tray.
+    private var baseBottomInset: CGFloat = 0
+    /// The header's travel, which this page must always be able to absorb.
+    private var minimumTravel: CGFloat = 0
+    /// Positions the empty state as though it were the first row.
+    private var statusTopConstraint: NSLayoutConstraint?
+    /// Clearance between the content's top and the empty state.
+    private static let statusClearance: CGFloat = 48
 
     private let imagePipeline: ImagePipeline
     private let style: Style
@@ -41,19 +55,38 @@ final class ProfileGalleryGridView: UIView {
     /// full 8-brick pattern.
     private var skeletonCount: Int { style == .grid ? PostGridMosaic.patternLength : 5 }
 
-    private let collectionView: SelfSizingCollectionView
+    /// The page's own scroll view.
+    ///
+    /// ⚠️ **This used to be non-scrolling and self-sizing**, reporting its whole
+    /// content as intrinsic size so the profile's outer scroll view could lay it
+    /// out like any other view. That made every cell permanently "visible", so
+    /// none were ever recycled — measured at 26 built up front and 26 after
+    /// scrolling to the end, against 34 → 54 for the equivalent For You surface.
+    /// It also made the page's HEIGHT the thing that changed when tabs changed,
+    /// which is where every clipping, jumping and straddling bug on this screen
+    /// came from.
+    ///
+    /// It is an ordinary scrolling collection view now, exactly one viewport
+    /// tall. The owner insets it below the header rather than sizing it around
+    /// the content.
+    let collectionView: UICollectionView
     private let statusLabel = UILabel()
 
     init(imagePipeline: ImagePipeline, style: Style) {
         self.imagePipeline = imagePipeline
         self.style = style
-        collectionView = SelfSizingCollectionView(
+        collectionView = UICollectionView(
             frame: .zero,
             collectionViewLayout: style == .grid ? PostGridMosaic.layout() : PostGridListLayout.layout()
         )
         super.init(frame: .zero)
 
-        collectionView.isScrollEnabled = false
+        collectionView.isScrollEnabled = true
+        // The owner supplies the top inset (the header's height) and drives the
+        // header from this view's offset, so UIKit must not also be adjusting
+        // for safe areas underneath it.
+        collectionView.contentInsetAdjustmentBehavior = .never
+        collectionView.alwaysBounceVertical = true
         collectionView.backgroundColor = .clear
         collectionView.register(PostGridTileCell.self, forCellWithReuseIdentifier: PostGridTileCell.reuseID)
         collectionView.register(PostGridListRowCell.self, forCellWithReuseIdentifier: PostGridListRowCell.reuseID)
@@ -67,16 +100,35 @@ final class ProfileGalleryGridView: UIView {
         collectionView.delegate = self
         collectionView.pin(to: self)
 
+        // The pull-down region is the banner's, so the spinner renders above the
+        // media in a colour that survives it.
+        refreshControl.addAction(
+            UIAction { [weak self] _ in self?.onPullToRefresh?() }, for: .valueChanged
+        )
+        refreshControl.tintColor = .white
+        refreshControl.layer.zPosition = 1
+        collectionView.refreshControl = refreshControl
+
         statusLabel.font = .preferredFont(forTextStyle: .subheadline)
         statusLabel.adjustsFontForContentSizeCategory = true
         statusLabel.textColor = .secondaryLabel
         statusLabel.textAlignment = .center
         statusLabel.numberOfLines = 0
-        statusLabel.constrain(in: self) { parent in
-            statusLabel.topAnchor.constraint(equalTo: parent.topAnchor, constant: 48)
-            statusLabel.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor)
-            statusLabel.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor)
-        }
+        // ⚠️ The empty state is NOT in the collection view, so it does not
+        // scroll on its own — and this page is inset below a header now, so a
+        // constant from the page's top puts it behind the chrome. Its position
+        // is driven from the same two numbers the content uses, which makes it
+        // behave as though it were content: below the header at rest, scrolling
+        // away with everything else.
+        statusLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(statusLabel)
+        let statusTop = statusLabel.topAnchor.constraint(equalTo: topAnchor, constant: 48)
+        statusTopConstraint = statusTop
+        NSLayoutConstraint.activate([
+            statusTop,
+            statusLabel.leadingAnchor.constraint(equalTo: layoutMarginsGuide.leadingAnchor),
+            statusLabel.trailingAnchor.constraint(equalTo: layoutMarginsGuide.trailingAnchor)
+        ])
 
         // Statuses (empty / failed) need visible height even though the
         // collection view is empty then; the grid provides a floor and
@@ -88,6 +140,15 @@ final class ProfileGalleryGridView: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // The room a page needs below its last row depends on how much content
+        // it has and how tall it is, and both settle after layout — a page
+        // measured before its rows exist would reserve the wrong amount and
+        // stop being able to hold the header.
+        applyBottomInset()
+    }
 
     func render(_ state: ProfileViewModel.GalleryPageState) {
         switch state {
@@ -176,19 +237,110 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     }
 }
 
-// MARK: - Self-sizing host
 
-/// Reports the layout's full content size as intrinsic size, so the outer
-/// scroll view can Auto-Layout the (non-scrolling) grid like any other view.
-private final class SelfSizingCollectionView: UICollectionView {
-    override var intrinsicContentSize: CGSize {
-        collectionViewLayout.collectionViewContentSize
+// MARK: - The vertical axis this page now owns
+
+extension ProfileGalleryGridView {
+    /// Where this page is scrolled to, measured from the top of its content
+    /// rather than from its own origin.
+    ///
+    /// The pages sit under a header, so their resting offset is `-inset` rather
+    /// than zero. Reporting the distance travelled instead keeps every caller
+    /// out of that arithmetic: zero is the top for all three pages, whatever
+    /// their insets happen to be mid-transition.
+    var verticalOffset: CGFloat {
+        collectionView.contentOffset.y + collectionView.contentInset.top
     }
 
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        if bounds.size.height != intrinsicContentSize.height {
-            invalidateIntrinsicContentSize()
-        }
+    func setVerticalOffset(_ offset: CGFloat) {
+        // ⚠️ **Make room BEFORE asking the page to travel.** The room a page
+        // needs is computed from its content size, and on a tab switch the page
+        // being handed the offset may not have laid out since its content
+        // arrived — so it clamps against a range that has not been extended yet,
+        // and the header follows the clamp. Laying out first is what makes the
+        // floor arrive before the question rather than after the answer.
+        collectionView.layoutIfNeeded()
+        applyBottomInset()
+        let inset = collectionView.contentInset.top
+        // ⚠️ **The bottom inset is part of how far a page can travel**, and
+        // leaving it out is why the header still moved on a tab switch. The room
+        // reserved by `setMinimumScrollTravel` IS bottom inset — so a clamp that
+        // ignored it measured the page as unable to hold the offset, took the
+        // shorter number, and the header followed it back up. The floor was
+        // being reserved and then not counted.
+        let travel = collectionView.contentSize.height
+            + inset
+            + collectionView.contentInset.bottom
+            - collectionView.bounds.height
+        // Negative is the pulled-down region, which only the QA hook asks for;
+        // a real drag never routes through here.
+        let target = offset < 0 ? offset : min(offset, max(0, travel))
+        guard abs(verticalOffset - target) > 0.5 else { return }
+        collectionView.contentOffset = CGPoint(x: 0, y: target - inset)
+    }
+
+    /// The height of the header floating above this page.
+    func setContentTopInset(_ inset: CGFloat) {
+        guard collectionView.contentInset.top != inset else { return }
+        let travelled = verticalOffset
+        collectionView.contentInset.top = inset
+        collectionView.verticalScrollIndicatorInsets.top = inset
+        // Changing the inset moves the content under a stationary offset, so the
+        // offset is restated to keep the page where it was.
+        collectionView.contentOffset = CGPoint(x: 0, y: travelled - inset)
+        positionStatusLabel()
+    }
+
+    /// Puts the empty state where the first row would be.
+    private func positionStatusLabel() {
+        statusTopConstraint?.constant =
+            collectionView.contentInset.top + Self.statusClearance - verticalOffset
+    }
+
+    func setContentBottomInset(_ inset: CGFloat) {
+        guard baseBottomInset != inset else { return }
+        baseBottomInset = inset
+        applyBottomInset()
+    }
+
+    /// How far this page must be ABLE to scroll, whatever it holds.
+    ///
+    /// ⚠️ **This is what freezes the header across a tab switch.** The header
+    /// rides the active page's offset, and a page with three rows cannot reach
+    /// the offset a page with thirty was sitting at — so switching to it
+    /// clamped, and the header followed the clamp back up. Nothing was
+    /// auto-scrolling; the short tab simply had nowhere to put the viewer.
+    ///
+    /// Given room to travel the header's full distance, every tab can hold any
+    /// position the header can be in, and a switch moves it by nothing at all.
+    /// The room is empty space below the last row — which is exactly what the
+    /// other apps show under a sparse tab, and only ever as much as the header
+    /// actually needs.
+    func setMinimumScrollTravel(_ travel: CGFloat) {
+        guard minimumTravel != travel else { return }
+        minimumTravel = travel
+        applyBottomInset()
+    }
+
+    private func applyBottomInset() {
+        let needed = minimumTravel
+            + collectionView.bounds.height
+            - collectionView.contentSize.height
+            - collectionView.contentInset.top
+        let bottom = max(baseBottomInset, needed)
+        guard abs(collectionView.contentInset.bottom - bottom) > 0.5 else { return }
+        collectionView.contentInset.bottom = bottom
+        collectionView.verticalScrollIndicatorInsets.bottom = baseBottomInset
+    }
+
+    func endRefreshing() {
+        refreshControl.endRefreshing()
+    }
+}
+
+extension ProfileGalleryGridView: UIScrollViewDelegate {
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        positionStatusLabel()
+        onVerticalScroll?(verticalOffset)
     }
 }

@@ -282,7 +282,10 @@ final class NewMessageViewController: UIViewController, TransientDestinationPick
         let headerRegistration = UICollectionView.SupplementaryRegistration<SectionHeaderCapsuleView>(
             elementKind: UICollectionView.elementKindSectionHeader
         ) { [weak self] header, _, indexPath in
-            header.setTitle(self?.title(forSectionAt: indexPath.section))
+            header.setTitle(
+                self?.title(forSectionAt: indexPath.section),
+                leadsList: indexPath.section == 0
+            )
             // Captured by SECTION, not by index path: the header is reused and
             // its index path is only valid for this configure pass, whereas the
             // section it names survives the snapshots that reshuffle rows

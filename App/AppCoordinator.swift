@@ -216,6 +216,17 @@ final class AppCoordinator: Coordinator {
             if let index = arguments.firstIndex(of: "-open-post"), index + 1 < arguments.count {
                 container.router.route(to: .post(PostID(arguments[index + 1])))
             }
+            // `-open-foryou` selects the For You root tab on launch.
+            //
+            // Direct tab selection rather than a route, because there is no
+            // `AppRoute` case for this tab — nothing in the app navigates TO
+            // For You, it is where the viewer starts from. That leaves it the
+            // one root tab a script could not reach, which is why its chrome
+            // (the mode badges, the tab item the active mode renames) had no
+            // way to be verified without a human tapping.
+            if arguments.contains("-open-foryou") {
+                tabCoordinator.selectTab(.forYou)
+            }
             if let index = arguments.firstIndex(of: "-open-comments"), index + 1 < arguments.count {
                 container.router.route(to: .comments(PostID(arguments[index + 1])))
             }

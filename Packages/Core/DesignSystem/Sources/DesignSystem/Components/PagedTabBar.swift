@@ -1318,7 +1318,6 @@ private final class SegmentView: UIButton {
         self.strength = strength
         boldLabel.alpha = strength
         plainLabel.alpha = 1 - strength
-        badge.setSelectionStrength(strength)
         let selected = strength > 0.5
         if selected != accessibilityTraits.contains(.selected) {
             accessibilityTraits = selected ? [.button, .selected] : [.button]
@@ -1372,8 +1371,12 @@ private final class SegmentView: UIButton {
 
 // MARK: - Badge
 
-/// The pending count beside a segment title: a filled capsule that follows the
-/// segment's own selection strength, so it brightens with its label.
+/// The pending count beside a segment title: a filled capsule in notification
+/// red, the same colour the bottom tab bar badges the app with.
+///
+/// It does NOT follow its segment's selection — see `applyFill` for why the
+/// count stopped being chrome that dims with its title, and for why it matches
+/// the bar below rather than the rows it summarises.
 ///
 /// **Its height is given to it, not derived from its text.** The host states one
 /// number (`Style.badgeHeight`) and the pill is exactly that tall in both
@@ -1392,16 +1395,22 @@ private final class BadgeView: UIView {
         super.init(frame: .zero)
         label.font = .preferredFont(forTextStyle: .caption2, weight: .semibold, maximumPointSize: maximumPointSize)
         label.adjustsFontForContentSizeCategory = true
-        // `.systemBackground` does NOT survive inside a `UIGlassEffect` content
-        // view — it resolved to white in dark mode, on a badge whose fill had
-        // correctly resolved to white, erasing the count. An explicit dynamic
-        // colour carries the same intent (the inverse of `.label`) in values
-        // the effect can't reinterpret.
-        label.textColor = UIColor { traits in
-            traits.userInterfaceStyle == .dark
-                ? UIColor(white: 0.06, alpha: 1)
-                : UIColor(white: 1, alpha: 1)
-        }
+        // ⚠️ **White in both appearances, and stated outright.**
+        //
+        // This was a dynamic colour — the inverse of `.label`, dark-on-light and
+        // light-on-dark — which is the right rule for a fill that FLIPS with the
+        // appearance, as `.label` does. The fill is notification red now, and it
+        // does not flip: it is red in both, so an inverting text colour put
+        // near-black on saturated red every dark-mode night and called it
+        // contrast. White is also what the system's own badges use, which is the
+        // pairing this is matching.
+        //
+        // Static rather than semantic on purpose. `.systemBackground` does not
+        // survive inside a `UIGlassEffect` content view — it resolved to white
+        // in dark mode on a badge whose fill had also resolved to white, erasing
+        // the count — and the lesson generalises: a colour the effect can
+        // reinterpret is a colour that can disappear.
+        label.textColor = .white
         label.textAlignment = .center
         // CENTRED, not pinned by insets. The pill's height is stated below and
         // its width is stated by `countWidth`, so the label's job is only to sit
@@ -1497,37 +1506,42 @@ private final class BadgeView: UIView {
         invalidateIntrinsicContentSize()
     }
 
-    func setSelectionStrength(_ strength: CGFloat) {
-        self.strength = strength
-        applyFill()
-    }
-
-    private var strength: CGFloat = 0
-
-    /// The badge's fill, which differs by style because the two say different
-    /// things.
+    /// The badge's fill: notification red, whichever mark it is.
     ///
-    /// A COUNT is chrome: it follows its segment's selection, brightening from
-    /// `secondaryLabel` to `label` alongside the title it belongs to, so a row
-    /// of counts reads as one control.
+    /// **Red is what this app already calls "a number of things waiting".** The
+    /// bottom tab bar's badges are the system's own red, and the count pills in
+    /// For You's mode menu are drawn to match them. A tab capsule sitting a
+    /// finger's width above that bar, saying the same kind of thing in a
+    /// different colour, made the viewer resolve two palettes to learn one
+    /// fact.
     ///
-    /// A DOT is an alert. It is the only mark on this bar that means "look
-    /// here", so it takes the tint rather than the text colour and holds it
-    /// whether or not its segment is selected — a dot that dimmed with its
-    /// segment would be quietest exactly when it is the only thing worth
-    /// noticing.
+    /// ⚠️ **This was the accent for one revision, on the argument that the same
+    /// number appears on the avatar of every row it counts and those badges are
+    /// the accent.** That argument is real and it lost: matching DOWN to the
+    /// bar the tabs live on beats matching ACROSS to the rows they summarise,
+    /// because the bar is the thing a viewer sees in the same glance. The cost
+    /// is stated rather than hidden — a count is red on the tab and blue on the
+    /// row it counts, and `BadgedAvatarView` is where that would be reconciled
+    /// if it ever should be.
     ///
-    /// ⚠️ `.systemBlue` is a semantic colour inside a `UIGlassEffect` content
-    /// view, which is the arrangement that once resolved `.systemBackground` to
-    /// the wrong end of the spectrum in dark mode (see the type comment). It was
-    /// therefore checked in both appearances rather than reasoned about, and it
-    /// resolves correctly in each.
+    /// ⚠️ **A count used to be chrome** — it followed its segment's selection,
+    /// brightening from `secondaryLabel` to `label` alongside the title it
+    /// belonged to, so a row of counts read as one control. It is not chrome any
+    /// more, and what goes with it is deliberate: an unselected tab no longer
+    /// dims its count, because a count on the tab you are NOT looking at is
+    /// exactly the one worth noticing. That is the argument the dot has always
+    /// made for itself, and both marks now make it together.
+    ///
+    /// ⚠️ A semantic colour inside a `UIGlassEffect` content view — the
+    /// arrangement that once resolved `.systemBackground` to the wrong end of
+    /// the spectrum in dark mode (see the type comment) — so it was checked in
+    /// both appearances rather than reasoned about.
     private func applyFill() {
         switch style {
         case .count:
-            backgroundColor = strength > 0.5 ? .label : .secondaryLabel
+            backgroundColor = .systemRed
         case .dot:
-            backgroundColor = .systemBlue
+            backgroundColor = .systemRed
         }
     }
 }

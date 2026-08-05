@@ -33,6 +33,35 @@ final class ForYouTabCoordinator: TabCoordinator {
     }
 
     func start() {
-        navigationController.viewControllers = [container.feedFeature.makeForYouViewController()]
+        let forYou = container.feedFeature.makeForYouViewController { [weak self] presentation in
+            self?.apply(presentation)
+        }
+        navigationController.viewControllers = [forYou]
+    }
+
+    /// The lens menu this tab's root offers, for the shell to hang off a
+    /// long press on the bar item.
+    ///
+    /// Read through the stack ROOT rather than held, because the root is the
+    /// only thing that owns a lens — a thread or a post pushed on top of it
+    /// does not, and asking `topViewController` would hand back nothing the
+    /// moment the viewer navigated anywhere.
+    var modeMenu: UIMenu? {
+        (navigationController.viewControllers.first as? any ForYouModeMenuProviding)?.makeModeMenu()
+    }
+
+    /// The tab item follows the screen's content lens: its name, its glyph and
+    /// how much is waiting under it.
+    ///
+    /// ⚠️ **The `UITab` is built lazily and its title/image are `var`s on the
+    /// live object**, so this must not re-create it — `tabs` is assigned once
+    /// in `MainTabCoordinator` and a replacement item would never reach the bar.
+    /// Touching `tab` here is also what forces the lazy build if the shell has
+    /// not asked for it yet, which is harmless: the provider closure only runs
+    /// when the tab is selected.
+    private func apply(_ presentation: ForYouTabPresentation) {
+        tab.title = presentation.title
+        tab.image = UIImage(systemName: presentation.symbol)
+        tab.badgeValue = presentation.badgeCount > 0 ? String(presentation.badgeCount) : nil
     }
 }
