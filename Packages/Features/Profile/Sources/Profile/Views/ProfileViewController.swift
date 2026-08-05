@@ -208,14 +208,6 @@ final class ProfileViewController: UIViewController {
         /// whether or not the selector is in it — the bar's own height plus the
         /// breathing room beneath it, taken from the bar rather than restated.
         static let selectorSlotHeight = PagedTabBar.Style.navigationTitle.height + selectorBottomGap
-        /// How far past the navigation bar the slot has to travel before the
-        /// selector docks, and how far back before it returns.
-        ///
-        /// ⚠️ Hysteresis, not a threshold. One line would flap: docking removes
-        /// the bar from the slot, which is a layout change, which arrives as
-        /// another scroll callback — and a viewer resting a finger exactly on
-        /// the line would watch it flicker between the two homes.
-        static let dockingHysteresis: CGFloat = 12
         /// How long the hand-over between the two selectors takes.
         ///
         /// Short enough to feel like a state change rather than a performance —
@@ -249,6 +241,9 @@ final class ProfileViewController: UIViewController {
     private let inlineBarSlot = UIView()
     /// Whether the selector is currently in the navigation bar.
     private var isBarDocked = false
+    /// The header's position at the previous docking check, so the next one can
+    /// tell a scroll from a flick.
+    private var lastDockingTravel: CGFloat = 0
 
     /// The bottom tray, holding the source filter and nothing else now that the
     /// format tabs have moved to the top of the screen.
@@ -1447,6 +1442,13 @@ final class ProfileViewController: UIViewController {
         }
 
         guard animated else {
+            // ⚠️ Stop whatever is in flight FIRST. This path is taken because
+            // the scroll is too fast to animate through, and a hand-over already
+            // running would otherwise go on interpolating over the values just
+            // written — which is the flash, arriving a frame late. Setting the
+            // model values does not cancel a running animation; removing it
+            // does.
+            for bar in selectorBars { bar.layer.removeAllAnimations() }
             settle()
             settleVisibility()
             return
@@ -1512,14 +1514,35 @@ final class ProfileViewController: UIViewController {
 
     /// Docks the selector into the navigation bar once the header has travelled
     /// as far as it can, and gives it back on the way down.
+    ///
+    /// Both decisions — whether to change, and whether to animate the change —
+    /// come from `ProfileDockThreshold`, and both depend on how fast the header
+    /// is moving. See there for why speed is the input that matters.
     private func updateBarDocking(travelled: CGFloat) {
         guard viewModel.hasGallery, isViewLoaded else { return }
-        let shouldDock = isBarDocked
-            ? travelled > headerTravel - Metrics.dockingHysteresis
-            : travelled >= headerTravel
+        // How far the header moved since the last callback. Callbacks arrive per
+        // displayed frame, so this is a velocity in the only unit that matters
+        // here: distance the viewer sees between one frame and the next.
+        let step = travelled - lastDockingTravel
+        lastDockingTravel = travelled
+        let shouldDock = ProfileDockThreshold.isDocked(
+            travelled: travelled, dockLine: headerTravel, step: step, wasDocked: isBarDocked
+        )
         guard shouldDock != isBarDocked else { return }
         isBarDocked = shouldDock
-        applyDockedAppearance(animated: true)
+        let animated = ProfileDockThreshold.isAnimated(step: step)
+        #if DEBUG
+        // Dev convenience: `-profile-dock-trace` prints every hand-over with the
+        // speed that produced it. The flicker this rule exists to stop is a
+        // sequence of these, not any one of them, so the log is the measurement
+        // — a screenshot of a settled screen cannot show a rate.
+        if ProcessInfo.processInfo.arguments.contains("-profile-dock-trace") {
+            print(String(format: "[dock] %@ travelled=%.0f step=%.0f animated=%@",
+                         shouldDock ? "DOCK  " : "UNDOCK", travelled, step,
+                         animated ? "yes" : "no"))
+        }
+        #endif
+        applyDockedAppearance(animated: animated)
     }
 
 
