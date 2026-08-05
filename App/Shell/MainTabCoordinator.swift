@@ -1,6 +1,4 @@
 import CoreNavigation
-import DesignSystem
-import FeedInterface
 import NotificationsInterface
 import ProfileInterface
 import UIKit
@@ -68,50 +66,64 @@ final class MainTabCoordinator: NSObject, Coordinator {
     /// Backs the Profile tab's long-press switcher menu.
     private lazy var profileSwitcher = container.profileFeature.makeProfileSwitcher()
 
-    /// The For You root. Held so its lens menu can be answered when the bar
-    /// reports a long press over that tab.
+    /// An invisible button laid over the Profile tab, carrying the switcher as
+    /// its `menu`.
+    ///
+    /// **Why a control and not a `UIContextMenuInteraction`.** A context menu
+    /// always LIFTS its source: it hides the original, floats a scaled copy and
+    /// dims everything behind. On a tab that produced a second avatar hovering
+    /// over the bar, clipped to whatever `visiblePath` allowed — an artifact
+    /// with no place on fixed chrome, and one the interaction offers no way to
+    /// switch off. Narrowing the path only makes the floating copy smaller.
+    ///
+    /// A `UIControl` presents the same `UIMenu` anchored to itself without any
+    /// of that, which is exactly how the map avatar's `UIBarButtonItem.menu`
+    /// behaved before Profile became a tab. Because this button is invisible and
+    /// is a *different view* from the tab, UIKit never touches the real icon:
+    /// not hidden, not snapshotted, not moved.
+    ///
+    /// Two properties, neither of them the default, are what make it long-press:
+    /// `UIControl` ships with `isContextMenuInteractionEnabled == false`, so a
+    /// `menu` alone is inert; and `showsMenuAsPrimaryAction` must stay FALSE, or
+    /// the menu opens on tap and swallows tab selection.
+    private lazy var profileMenuOverlay: UIButton = {
+        let button = UIButton(type: .custom)
+        button.backgroundColor = .clear
+        button.isContextMenuInteractionEnabled = true
+        button.showsMenuAsPrimaryAction = false
+        button.accessibilityLabel = "Profile"
+        button.accessibilityHint = "Double tap and hold to switch profile"
+        // The overlay covers the real tab button, so a plain tap has to be
+        // forwarded or it would be swallowed.
+        button.addAction(UIAction { [weak self] _ in self?.selectTab(.profile) }, for: .primaryActionTriggered)
+        return button
+    }()
+    /// The For You root. Held so its lens menu can be hung off a long press on
+    /// the bar item, the way the Profile tab's switcher is.
     private var forYouTab: ForYouTabCoordinator?
 
-    /// The bar's long-press menu.
+    /// An invisible button laid over the For You tab, carrying the lens menu.
     ///
-    /// **A recognizer we own, not `UIContextMenuInteraction`.** The interaction
-    /// works in a simulator and never fires on hardware: the real
-    /// `UITabBarButton` absorbs the Haptic Touch press first, and the device
-    /// log says so outright — "System gesture gate timed out". A recognizer
-    /// declaring simultaneous recognition does not have to win that arbitration,
-    /// it opts out of it. Confirmed on a device before this was built on.
+    /// Everything `profileMenuOverlay` documents applies here unchanged — a
+    /// control rather than a `UIContextMenuInteraction` because the interaction
+    /// LIFTS its source and would float a scaled copy of the tab icon over
+    /// fixed chrome, `isContextMenuInteractionEnabled` on and
+    /// `showsMenuAsPrimaryAction` off so the gesture is a long press and a
+    /// plain tap still selects the tab.
     ///
-    /// ⚠️ `cancelsTouchesInView` is TRUE, and it matters. A long press only
-    /// cancels once it RECOGNISES, so an ordinary tap is untouched and still
-    /// selects the tab — but without it the touch runs on to the button and the
-    /// tab ALSO switches when the finger lifts, opening the menu over a screen
-    /// that has already navigated somewhere else.
-    private lazy var tabMenuPress: UILongPressGestureRecognizer = {
-        let press = UILongPressGestureRecognizer(target: self, action: #selector(handleTabMenuPress))
-        press.minimumPressDuration = 0.35
-        press.cancelsTouchesInView = true
-        press.delegate = self
-        return press
+    /// ⚠️ Its accessibility label is NOT fixed: this tab is renamed by whichever
+    /// lens is active ("For You", "Work", "Focus"), and the button that finds it
+    /// in the bar matches on that title — so the label is re-stated on every
+    /// alignment pass rather than set once here.
+    private lazy var forYouMenuOverlay: UIButton = {
+        let button = UIButton(type: .custom)
+        button.backgroundColor = .clear
+        button.isContextMenuInteractionEnabled = true
+        button.showsMenuAsPrimaryAction = false
+        button.accessibilityHint = "Double tap and hold to choose what to see"
+        button.addAction(UIAction { [weak self] _ in self?.selectTab(.forYou) }, for: .primaryActionTriggered)
+        return button
     }()
-
-    /// The tap that opened the menu, so the popover can point back at it.
-    private var pressedTabFrame: CGRect = .zero
-
-    /// One recognizer per menu-bearing tab button, by recognizer identity.
-    ///
-    /// **A press on the button knows which tab it is.** That is the whole
-    /// reason for these: the bar-level recognizer has to answer "which button
-    /// was under 308,23" from a private view hierarchy, and on hardware it
-    /// answered wrong — the device log read `-> no menu tab`. A recognizer
-    /// attached to the button cannot be wrong about that, because the mapping
-    /// is made once, at attach time, and never re-derived from a coordinate.
-    ///
-    /// ⚠️ The bar-level one is KEPT behind these rather than replaced. Finding
-    /// the buttons is still a search through views UIKit does not promise, and
-    /// on a build where that search comes up empty the bar still catches the
-    /// press. Two mechanisms, one of which needs no private lookup at press
-    /// time and one of which needs no private lookup at all.
-    private var buttonPresses: [ObjectIdentifier: AppTab] = [:]
 
     /// Tabs paired with their `AppTab`, in bar order — the lookup `selectTab`
     /// resolves against. Every bar button is in here now that the Feed action
@@ -138,7 +150,10 @@ final class MainTabCoordinator: NSObject, Coordinator {
         // reads the last `reload` — so without this the first long-press builds
         // its menu from an empty snapshot and offers only "Add Profile", with
         // the viewer's own profiles missing.
-        Task { [weak self] in await self?.profileSwitcher?.reload() }
+        Task { [weak self] in
+            await self?.profileSwitcher?.reload()
+            self?.rebuildSwitcherMenu()
+        }
 
         let feedFlow = FeedFlowCoordinator(container: container)
         feedFlow.start()
@@ -169,19 +184,19 @@ final class MainTabCoordinator: NSObject, Coordinator {
         popGestureEnablers = orderedTabs.map { NativePopGestureEnabler(taking: $0.1.navigationController) }
         tabBarController.tabs = orderedTabs.map { $0.1.tab }
         tabBarController.delegate = self
-        // The long-press menus. `UITab` carries no menu of its own — every tab
-        // header in the iOS 26.5 SDK was checked and none mentions one — so the
-        // bar carries a single interaction and answers from the press location.
-        //
-        // Installed once here rather than per layout pass: an interaction
-        // belongs to the view, and the view does not change. Nothing needs
-        // keeping aligned any more, which is the whole point of the change.
-        tabBarController.tabBar.addGestureRecognizer(tabMenuPress)
-        // The bar builds and rebuilds its buttons on layout — a selection
-        // changes their sizes, a lens rename changes their labels — so the
-        // per-button recognizers are re-checked whenever it lays out. Attaching
-        // is idempotent; see `attachTabButtonPresses`.
-        tabBarController.onLayout = { [weak self] in self?.attachTabButtonPresses() }
+        // The Profile tab's long-press switcher. `UITab` carries no menu of its
+        // own — `UITab`, `UITabBar`, `UITabBarItem` and the controller delegate
+        // were all checked against the iOS 26 SDK and expose nothing — so the
+        // menu rides an invisible button kept aligned over the tab.
+        tabBarController.onLayout = { [weak self] in
+            self?.alignProfileMenuOverlay()
+            // The CONTROLLER lays out before the bar has placed its own buttons,
+            // and then does not lay out again — measured: one call, reading a
+            // zero frame. One hop to the next runloop turn catches the settled
+            // geometry, and alignment ignores a zero frame rather than caching
+            // it, so the early pass costs nothing.
+            DispatchQueue.main.async { self?.alignProfileMenuOverlay() }
+        }
 
         loadAvatar()
         refreshUnreadBadge()
@@ -286,7 +301,10 @@ final class MainTabCoordinator: NSObject, Coordinator {
         loadAvatar()
         // The menu is built on demand from the last `reload`, so refresh the
         // snapshot rather than the menu — there is no menu object to replace.
-        Task { [weak self] in await self?.profileSwitcher?.reload() }
+        Task { [weak self] in
+            await self?.profileSwitcher?.reload()
+            self?.rebuildSwitcherMenu()
+        }
     }
 
     private func presentAddProfilePlaceholder() {
@@ -345,6 +363,9 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     func tabBarController(_ tabBarController: UITabBarController, didSelect viewController: UIViewController) {
         refreshUnreadBadge()
         syncTabBarVisibility()
+        // Selection resizes the tab buttons (the selected one carries the
+        // lens), so the overlay has to follow.
+        alignProfileMenuOverlay()
     }
 
     /// The bar is managed by hand around full-bleed snap surfaces (the pushed
@@ -374,201 +395,60 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     }
 }
 
-// MARK: - Long-press menus on the tab bar
-
-extension MainTabCoordinator: UIGestureRecognizerDelegate {
-    /// Declares away the exclusivity rather than trying to beat it.
-    ///
-    /// A `UITabBarButton` tracks its own touches and, on hardware, the system
-    /// arbitrates that against everything else in the window — the device log
-    /// for the old interaction read "System gesture gate timed out", which is
-    /// that arbitration timing out rather than resolving. Saying "recognise
-    /// alongside" stops it being a contest at all.
-    func gestureRecognizer(
-        _ gestureRecognizer: UIGestureRecognizer,
-        shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
-    ) -> Bool {
-        gestureRecognizer === tabMenuPress
-            || buttonPresses[ObjectIdentifier(gestureRecognizer)] != nil
-    }
-
-    /// Puts a recognizer on each menu-bearing tab button, and forgets the ones
-    /// whose buttons have gone.
-    ///
-    /// Idempotent, because it runs on every layout pass: a button that already
-    /// carries one of ours keeps it, and only its TAB is refreshed — the For
-    /// You item is renamed by whichever lens is active, so the button that was
-    /// "For You" a moment ago may be "Work" now while being the same view.
-    ///
-    /// ⚠️ Cleanup is by identity, not by removal. A recognizer belongs to its
-    /// view and dies with it, so a rebuilt bar disposes of the old ones itself;
-    /// what would leak is this map's entries, which is what the filter drops.
-    private func attachTabButtonPresses() {
-        let bar = tabBarController.tabBar
-        var live: Set<ObjectIdentifier> = []
-        for tab in [AppTab.profile, .forYou] {
-            guard let title = title(for: tab),
-                  let button = tabButton(labelled: title, at: barIndex(of: tab), in: bar)
-            else { continue }
-            let existing = button.gestureRecognizers?
-                .compactMap { $0 as? UILongPressGestureRecognizer }
-                .first { buttonPresses[ObjectIdentifier($0)] != nil }
-            let press = existing ?? {
-                let press = UILongPressGestureRecognizer(
-                    target: self, action: #selector(handleTabMenuPress)
-                )
-                press.minimumPressDuration = 0.35
-                press.cancelsTouchesInView = true
-                press.delegate = self
-                button.addGestureRecognizer(press)
-                trace("attached to \(tab) button")
-                return press
-            }()
-            buttonPresses[ObjectIdentifier(press)] = tab
-            live.insert(ObjectIdentifier(press))
-        }
-        buttonPresses = buttonPresses.filter { live.contains($0.key) }
-    }
-
-    @objc private func handleTabMenuPress(_ press: UILongPressGestureRecognizer) {
-        guard press.state == .began else { return }
-        // Two recognizers can see one press — the button's and the bar's — and
-        // only the first of them should open anything.
-        guard tabBarController.presentedViewController == nil else { return }
-        let bar = tabBarController.tabBar
-        let location = press.location(in: bar)
-        // A recognizer that belongs to a button already knows its tab; only the
-        // bar's has to work it out from where the finger landed.
-        let resolved: (AppTab, UIView)? = buttonPresses[ObjectIdentifier(press)]
-            .flatMap { tab in press.view.map { (tab, $0) } }
-            ?? tabAndButton(at: location)
-        guard let (tab, button) = resolved else {
-            trace("press at \(Int(location.x)),\(Int(location.y)) resolved to no menu tab")
-            return
-        }
-        let sections = menuSections(for: tab)
-        guard sections.contains(where: { !$0.items.isEmpty }) else {
-            trace("\(tab) has no rows to show")
-            return
-        }
-        trace("\(tab) menu at \(Int(location.x)),\(Int(location.y))")
-        // The press has been recognised and the tab will not be selected, so
-        // the feedback is the only thing telling the finger it worked.
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        pressedTabFrame = button.convert(button.bounds, to: bar)
-        presentTabMenu(sections)
-    }
-
-    /// Presents the rows as a popover pointing down at the tab that was held.
-    private func presentTabMenu(_ sections: [TabMenuSection]) {
-        let menu = TabMenuViewController(sections: sections)
-        menu.modalPresentationStyle = .popover
-        menu.popoverPresentationController?.sourceView = tabBarController.tabBar
-        menu.popoverPresentationController?.sourceRect = pressedTabFrame
-        // Down, because the bar is at the bottom: the arrow points at the tab
-        // and the list opens above it, where there is room.
-        menu.popoverPresentationController?.permittedArrowDirections = .down
-        menu.popoverPresentationController?.delegate = self
-        menu.popoverPresentationController?.backgroundColor = .clear
-        tabBarController.present(menu, animated: true)
-    }
-
-    private func menuSections(for tab: AppTab) -> [TabMenuSection] {
-        switch tab {
-        case .forYou:
-            (forYouTab?.navigationController.viewControllers.first as? any ForYouModeMenuProviding)?
-                .makeModeMenuSections() ?? []
-        case .profile:
-            profileSwitcher?.makeMenuSections(
-                onSwitch: {},
-                onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
-            ) ?? []
-        default: []
-        }
-    }
-}
-
-extension MainTabCoordinator: UIPopoverPresentationControllerDelegate {
-    /// ⚠️ **`.none`, or iPhone turns this into a sheet.** A popover adapts to a
-    /// full-screen presentation by default on compact widths, which is exactly
-    /// the bottom-of-the-screen modal card the whole approach is avoiding —
-    /// refusing the adaptation is what keeps the arrow pointing at the tab.
-    func adaptivePresentationStyle(
-        for controller: UIPresentationController, traitCollection: UITraitCollection
-    ) -> UIModalPresentationStyle {
-        .none
-    }
-}
+// MARK: - Profile tab long-press
 
 extension MainTabCoordinator {
-    /// Which tab a point in the bar belongs to, and the button it landed on.
+    /// Keeps the switcher overlay exactly over the Profile tab's button.
     ///
-    /// Only the two tabs that HAVE menus are considered; a press anywhere else
-    /// returns nil, which is what lets the bar go on behaving like a tab bar.
-    /// ⚠️ **Starts from the view under the finger and walks UP.** The previous
-    /// version searched the whole bar for a button and then asked whether its
-    /// frame contained the point — two private-hierarchy guesses instead of
-    /// one, and on hardware it guessed wrong: the device log read
-    /// `PROBE long press began at 308,23 -> no menu tab`. Hit-testing asks
-    /// UIKit which view is there, which is the same question with an answer
-    /// that cannot drift, and the walk up finds the button from whichever
-    /// label or image inside it actually took the point.
+    /// Runs on every layout pass, so it is cheap and idempotent: it re-adds
+    /// nothing already added and writes the frame only when it moved.
+    fileprivate func alignProfileMenuOverlay() {
+        align(profileMenuOverlay, over: profileTab?.tab.title)
+        alignForYouMenuOverlay()
+    }
+
+    /// Keeps the lens-menu overlay over the For You tab, and installs the menu
+    /// the first time the root exists to supply one.
     ///
-    /// Only reached by the BAR's recognizer now. A recognizer attached to a
-    /// button knows its tab without any of this.
-    private func tabAndButton(at location: CGPoint) -> (AppTab, UIView)? {
+    /// ⚠️ The menu is attached HERE rather than at `start()`, because the tab's
+    /// root view controller is built when its stack is populated and the shell
+    /// assembles the bar before that has happened. Attaching once and only once
+    /// matters: the menu resolves its own rows at presentation, so re-fetching
+    /// it on every layout pass would buy nothing and cost a build per frame.
+    private func alignForYouMenuOverlay() {
+        // The tab is renamed by the active lens, so both the lookup and the
+        // label follow it rather than a constant.
+        let title = forYouTab?.tab.title
+        forYouMenuOverlay.accessibilityLabel = title
+        if forYouMenuOverlay.menu == nil { forYouMenuOverlay.menu = forYouTab?.modeMenu }
+        align(forYouMenuOverlay, over: title)
+    }
+
+    /// Puts an overlay exactly over the bar button titled `title`.
+    ///
+    /// Runs on every layout pass, so it is cheap and idempotent: it re-adds
+    /// nothing already added and writes the frame only when it moved.
+    private func align(_ overlay: UIButton, over title: String?) {
         let bar = tabBarController.tabBar
-        var node = bar.hitTest(location, with: nil)
-        while let view = node, view !== bar {
-            if let tab = menuTab(titled: view.accessibilityLabel) { return (tab, view) }
-            node = view.superview
-        }
-        // Nothing on the way up named itself. Fall back to the old search,
-        // which is wrong less often than it is right but is better than
-        // refusing a press the viewer definitely made.
-        for tab in [AppTab.profile, .forYou] {
-            guard let title = title(for: tab),
-                  let button = tabButton(labelled: title, at: barIndex(of: tab), in: bar)
-            else { continue }
-            if button.convert(button.bounds, to: bar).contains(location) { return (tab, button) }
-        }
-        return nil
+        guard let title, let button = tabButton(labelled: title, in: bar) else { return }
+        let frame = button.convert(button.bounds, to: bar)
+        // A zero frame means the bar has not placed its buttons yet; leaving the
+        // overlay unplaced is right, and a later pass will catch it.
+        guard !frame.isEmpty else { return }
+        if overlay.superview !== bar { bar.addSubview(overlay) }
+        if overlay.frame != frame { overlay.frame = frame }
+        // Keep it topmost: UIKit re-adds its own subviews during a layout pass
+        // and would otherwise bury the overlay, which silently costs the
+        // long-press with nothing on screen to explain why.
+        bar.bringSubviewToFront(overlay)
     }
 
-    /// Which menu-bearing tab wears this label, if any.
-    private func menuTab(titled label: String?) -> AppTab? {
-        guard let label else { return nil }
-        return [AppTab.profile, .forYou].first { title(for: $0) == label }
-    }
-
-    private func title(for tab: AppTab) -> String? {
-        switch tab {
-        // Renamed by whichever lens is active ("For You", "Work", "Focus"), so
-        // the lookup follows the tab rather than a constant.
-        case .forYou: forYouTab?.tab.title
-        case .profile: profileTab?.tab.title
-        default: nil
-        }
-    }
-
-    /// Where a tab sits in the bar, left to right — the fallback the label
-    /// lookup falls back TO. See `tabButton(labelled:at:in:)`.
-    private func barIndex(of tab: AppTab) -> Int? {
-        orderedTabs.firstIndex { $0.0 == tab }
-    }
-
-    /// Dev convenience: `-tabmenu-trace` reports which tab a press resolved to.
-    ///
-    /// ⚠️ This exists because the failure it describes is INVISIBLE. A press
-    /// that resolved to no tab looks exactly like one that resolved to a tab
-    /// with no menu, and both look like nothing happening — and the mechanism
-    /// reads a private view hierarchy, which is precisely the kind of thing
-    /// that differs between one iOS build and the next.
-    private func trace(_ message: @autoclosure () -> String) {
-        #if DEBUG
-        guard ProcessInfo.processInfo.arguments.contains("-tabmenu-trace") else { return }
-        print("[tabmenu] \(message())")
-        #endif
+    /// Installs the switcher menu from the factory's current snapshot.
+    fileprivate func rebuildSwitcherMenu() {
+        profileMenuOverlay.menu = profileSwitcher?.makeMenu(
+            onSwitch: {},
+            onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
+        )
     }
 
     /// The tab bar's button for the tab titled `title`.
@@ -576,28 +456,19 @@ extension MainTabCoordinator {
     /// Breadth-first, and matched on `accessibilityLabel` rather than on the
     /// private button classes it walks past: a tab button is labelled with its
     /// own title, and breadth-first reaches the button before the label nested
-    /// inside it — so this never has to name `_UITabButton`.
-    ///
-    /// ⚠️ With a positional fallback, because the label is UIKit's and not
-    /// ours: a build that suffixes, localises or relocates it costs the match,
-    /// and the symptom is a long press that does nothing. "The nth button, left
-    /// to right" is a weaker claim than the label but it is a claim about the
-    /// bar's ARRANGEMENT, which is the part that stays true. Fallback rather
-    /// than primary, because position is not identity.
-    private func tabButton(labelled title: String, at index: Int?, in bar: UIView) -> UIView? {
-        var candidates: [UIView] = []
+    /// inside it — so this never has to name `_UITabButton`. A future iOS
+    /// re-shuffling that hierarchy costs the menu, not a crash.
+    private func tabButton(labelled title: String, in bar: UIView) -> UIView? {
         var queue = bar.subviews
         while !queue.isEmpty {
             let view = queue.removeFirst()
+            // The overlays carry the same labels by design; skip them or one
+            // would match itself and pin its own frame.
+            if view === profileMenuOverlay || view === forYouMenuOverlay { continue }
             if view.accessibilityLabel == title { return view }
-            if view is UIControl, view.accessibilityLabel?.isEmpty == false {
-                candidates.append(view)
-            }
             queue.append(contentsOf: view.subviews)
         }
-        guard let index, candidates.indices.contains(index) else { return nil }
-        return candidates.sorted { $0.convert($0.bounds, to: bar).minX
-            < $1.convert($1.bounds, to: bar).minX }[index]
+        return nil
     }
 }
 

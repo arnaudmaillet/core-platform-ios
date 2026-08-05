@@ -1,5 +1,4 @@
 import CoreModels
-import DesignSystem
 import MediaCore
 import ProfileInterface
 import UIKit
@@ -54,29 +53,6 @@ final class ProfileSwitcherMenuFactory: ProfileSwitcherPresenting {
     /// the active profile and "Add Profile". Just avatar + display name, all in
     /// standard `.label` — the section split marks the active one, no checkmark
     /// or accent color.
-    /// The same two sections as `makeMenu`, as rows the shell renders itself.
-    ///
-    /// Kept beside the `UIMenu` rather than replacing it: the menu is still the
-    /// right thing wherever the SYSTEM opens it, and only the tab bar — where
-    /// the buttons absorb the press on hardware — needs the shell to draw its
-    /// own. One source of rows, two shapes.
-    func makeMenuSections(
-        onSwitch: @escaping () -> Void, onAddProfile: @escaping () -> Void
-    ) -> [TabMenuSection] {
-        func item(for row: Row) -> TabMenuItem {
-            TabMenuItem(title: row.title, image: row.image, isSelected: row.isActive) {
-                [weak self] in self?.commitSwitch(to: row.id, then: onSwitch)
-            }
-        }
-        let inactive = rows.filter { !$0.isActive }.map(item(for:))
-        var active = rows.filter(\.isActive).map(item(for:))
-        active.append(TabMenuItem(
-            title: "Add Profile",
-            image: UIImage(systemName: "person.badge.plus")
-        ) { onAddProfile() })
-        return [TabMenuSection(items: inactive), TabMenuSection(items: active)]
-    }
-
     func makeMenu(onSwitch: @escaping () -> Void, onAddProfile: @escaping () -> Void) -> UIMenu {
         func action(for row: Row) -> UIAction {
             UIAction(title: row.title, image: row.image) { [weak self] _ in

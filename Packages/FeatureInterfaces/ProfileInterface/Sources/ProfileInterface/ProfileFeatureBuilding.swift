@@ -1,5 +1,4 @@
 import CoreModels
-import DesignSystem
 import UIKit
 
 /// Where the profile's gallery filter tray is hosted.
@@ -111,16 +110,8 @@ public extension ProfileFeatureBuilding {
 public protocol ProfileSwitcherPresenting: AnyObject {
     /// Pre-fetch + pre-format the account's profiles.
     func reload() async
-    /// The switcher's rows, built synchronously from the last `reload`.
-    ///
-    /// ⚠️ Data rather than a `UIMenu`, because the shell can no longer let the
-    /// system present one: a tab bar's buttons absorb the long press on
-    /// hardware, so the shell owns the gesture — and there is no public way to
-    /// present a `UIMenu` at a point, nor to read a `UIAction`'s handler back
-    /// out of one. Owning the gesture means owning the contents.
-    func makeMenuSections(
-        onSwitch: @escaping () -> Void, onAddProfile: @escaping () -> Void
-    ) -> [TabMenuSection]
+    /// A synchronous switcher menu built from the last `reload`.
+    func makeMenu(onSwitch: @escaping () -> Void, onAddProfile: @escaping () -> Void) -> UIMenu
 }
 
 public extension Notification.Name {

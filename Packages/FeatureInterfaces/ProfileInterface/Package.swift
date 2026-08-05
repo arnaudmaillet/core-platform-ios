@@ -8,13 +8,12 @@ let package = Package(
         .library(name: "ProfileInterface", targets: ["ProfileInterface"])
     ],
     dependencies: [
-        .package(path: "../../Core/DesignSystem"),
         .package(path: "../../Kit/CoreModels")
     ],
     targets: [
         .target(
             name: "ProfileInterface",
-            dependencies: ["CoreModels", "DesignSystem"]
+            dependencies: ["CoreModels"]
         )
     ]
 )
