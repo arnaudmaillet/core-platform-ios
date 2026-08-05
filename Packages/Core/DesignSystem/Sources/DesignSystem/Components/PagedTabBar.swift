@@ -381,6 +381,62 @@ public final class PagedTabBar: UIControl {
 
     public let style: Style
 
+    /// Whether the bar spreads across the width it is given instead of hugging
+    /// its own titles.
+    ///
+    /// A `.navigationTitle` bar hugs, because a navigation bar hands it the slot
+    /// left over between the side items and a bar that claimed all of it would
+    /// sit over them. The SAME bar hosted inline on a screen has the screen's
+    /// width, and hugging there leaves a short capsule stranded in the middle of
+    /// a wide column. Turning this on gives it the `.floating` bar's own
+    /// arrangement — equal slots, pinned to both ends — without giving it the
+    /// floating bar's type ramp or its material, which still belong to where it
+    /// docks.
+    ///
+    /// ⚠️ Three things move together, and leaving any one behind is visible.
+    /// The DISTRIBUTION becomes `fillEqually`, or the slack lands on whichever
+    /// segment the stack happens to favour. The ROW stops centring and pins to
+    /// both ends, or the slack lands as margin either side and the segments
+    /// never see it. And the bar stops STATING a width, or its intrinsic size
+    /// argues with the host's constraint over a number the host owns.
+    public var fillsWidth: Bool = false {
+        didSet {
+            guard fillsWidth != oldValue, style.hugsContent else { return }
+            row.distribution = activeDistribution
+            NSLayoutConstraint.deactivate(fillsWidth ? rowHugsConstraints : rowFillsConstraints)
+            NSLayoutConstraint.activate(fillsWidth ? rowFillsConstraints : rowHugsConstraints)
+            invalidateIntrinsicContentSize()
+            setNeedsLayout()
+        }
+    }
+
+    /// Whether the bar is currently taking its width from its host rather than
+    /// stating one — true for a floating bar always, and for a hugging bar that
+    /// has been told to fill.
+    private var spansItsHost: Bool { !style.hugsContent || fillsWidth }
+
+    /// How the row divides itself RIGHT NOW, which is the style's answer only
+    /// while the bar is hugging.
+    private var activeDistribution: UIStackView.Distribution {
+        spansItsHost ? .fillEqually : style.segmentDistribution
+    }
+
+    private var rowHugsConstraints: [NSLayoutConstraint] = []
+    private var rowFillsConstraints: [NSLayoutConstraint] = []
+
+    /// The narrowest this bar goes without a title truncating, under whichever
+    /// arrangement it is in.
+    ///
+    /// A host morphing a filled bar down towards its docked size interpolates
+    /// TOWARDS this — not towards the docked width itself. The two differ, and
+    /// by construction: `fillEqually` sizes every segment to the widest, so a
+    /// filled bar's floor is widest × count while the docked bar's is the sum of
+    /// each. Driving the width below this floor does not make the bar smaller,
+    /// it makes the longest title truncate — the segments' minimums are
+    /// breakable in this style precisely so a cramped navigation slot degrades
+    /// that way rather than by clipping a badge.
+    public var naturalWidth: CGFloat { fittedWidth(for: activeDistribution) }
+
     /// The segment the bar is reporting — updated by taps AND by the pages
     /// moving under it, so it is never stale. Reading it is how a
     /// `.valueChanged` handler learns WHICH segment — the same shape
@@ -484,7 +540,7 @@ public final class PagedTabBar: UIControl {
         // floating row distribute its slack, and what still lets it out-measure
         // the capsule and scroll when the titles genuinely need more room than
         // the screen has.
-        row.distribution = style.segmentDistribution
+        row.distribution = activeDistribution
         // ⚠️ THE authoritative moment to size the lens. Everything else that
         // calls `applyProgress` is a hint that may be one pass early; this is
         // the one call that cannot be, because it fires after the row has
@@ -510,26 +566,29 @@ public final class PagedTabBar: UIControl {
         // was up to the stack. Centred, the slack lands where slack belongs: as
         // equal margin at both ends. Segments keep exactly the widths they asked
         // for, so the disk floor in `updatePinnedWidth` reaches the screen.
-        NSLayoutConstraint.activate(
-            style.hugsContent
-                ? [
-                    row.leadingAnchor.constraint(
-                        greaterThanOrEqualTo: content.leadingAnchor, constant: Metrics.capsulePadding
-                    ),
-                    row.trailingAnchor.constraint(
-                        lessThanOrEqualTo: content.trailingAnchor, constant: -Metrics.capsulePadding
-                    ),
-                    row.centerXAnchor.constraint(equalTo: content.centerXAnchor)
-                ]
-                : [
-                    row.leadingAnchor.constraint(
-                        equalTo: content.leadingAnchor, constant: Metrics.capsulePadding
-                    ),
-                    row.trailingAnchor.constraint(
-                        equalTo: content.trailingAnchor, constant: -Metrics.capsulePadding
-                    )
-                ]
-        )
+        //
+        // Both sets are BUILT, and which one is live is `fillsWidth`'s to
+        // decide — a hugging bar that is asked to fill has to stop centring, or
+        // the extra width lands as margin at its two ends and the segments never
+        // see it. See `fillsWidth`.
+        rowHugsConstraints = [
+            row.leadingAnchor.constraint(
+                greaterThanOrEqualTo: content.leadingAnchor, constant: Metrics.capsulePadding
+            ),
+            row.trailingAnchor.constraint(
+                lessThanOrEqualTo: content.trailingAnchor, constant: -Metrics.capsulePadding
+            ),
+            row.centerXAnchor.constraint(equalTo: content.centerXAnchor)
+        ]
+        rowFillsConstraints = [
+            row.leadingAnchor.constraint(
+                equalTo: content.leadingAnchor, constant: Metrics.capsulePadding
+            ),
+            row.trailingAnchor.constraint(
+                equalTo: content.trailingAnchor, constant: -Metrics.capsulePadding
+            )
+        ]
+        NSLayoutConstraint.activate(spansItsHost ? rowFillsConstraints : rowHugsConstraints)
 
         // How the content relates to the capsule's width — and this is what
         // decides whether "too much content" becomes SCROLLING or TRUNCATION.
@@ -602,35 +661,43 @@ public final class PagedTabBar: UIControl {
     /// their spacing — so the capsule is exactly as wide as its titles. It has
     /// to be re-derived whenever a badge appears or a text size changes, which
     /// is what the `invalidateIntrinsicContentSize` calls below are for.
+    ///
+    /// A bar that has been told to `fillsWidth` states no width for the same
+    /// reason a floating one does not: the host owns that number now.
     public override var intrinsicContentSize: CGSize {
-        guard style.hugsContent else {
+        guard !spansItsHost else {
             return CGSize(width: UIView.noIntrinsicMetric, height: style.height)
         }
-        // Derived from the segments' own pinned widths rather than measured off
-        // the row: `systemLayoutSizeFitting` answers from the row's CURRENTLY
-        // resolved constraints, which lag a badge by one layout pass, while a
-        // segment knows its target width the instant it is set.
-        //
-        // ⚠️ The measurement follows the DISTRIBUTION, and getting it wrong in
-        // either direction is visible. Under `fillEqually` every segment is
-        // sized to the WIDEST, so the width is widest × count — summing the
-        // individual minimums there under-measures by (widest − each) and the
-        // capsule asks for less room than its own contents need, which is a
-        // scrolling strip that clips a title mid-word ("Activity" → "tivity")
-        // with space going spare beside it (measured: summed 208pt vs 227pt
-        // actual on three titles). Under `.fill` each segment keeps its own
-        // width, so the sum IS the answer and widest × count would claim room
-        // the side bar items need.
+        return CGSize(
+            width: fittedWidth(for: activeDistribution),
+            height: effectiveCapsuleHeight + style.topMargin + style.bottomMargin
+        )
+    }
+
+    /// The width the segments add up to under a given arrangement.
+    ///
+    /// Derived from the segments' own pinned widths rather than measured off
+    /// the row: `systemLayoutSizeFitting` answers from the row's CURRENTLY
+    /// resolved constraints, which lag a badge by one layout pass, while a
+    /// segment knows its target width the instant it is set.
+    ///
+    /// ⚠️ The measurement follows the DISTRIBUTION, and getting it wrong in
+    /// either direction is visible. Under `fillEqually` every segment is sized
+    /// to the WIDEST, so the width is widest × count — summing the individual
+    /// minimums there under-measures by (widest − each) and the capsule asks
+    /// for less room than its own contents need, which is a scrolling strip
+    /// that clips a title mid-word ("Activity" → "tivity") with space going
+    /// spare beside it (measured: summed 208pt vs 227pt actual on three
+    /// titles). Under `.fill` each segment keeps its own width, so the sum IS
+    /// the answer and widest × count would claim room the side items need.
+    private func fittedWidth(for distribution: UIStackView.Distribution) -> CGFloat {
         let widths = segments.map(\.pinnedWidth)
-        let total = switch style.segmentDistribution {
+        let total = switch distribution {
         case .fillEqually: (widths.max() ?? 0) * CGFloat(segments.count)
         default: widths.reduce(0, +)
         }
         let spacing = Metrics.interSegmentSpacing * CGFloat(max(0, segments.count - 1))
-        return CGSize(
-            width: ceil(total + spacing) + Metrics.capsulePadding * 2,
-            height: effectiveCapsuleHeight + style.topMargin + style.bottomMargin
-        )
+        return ceil(total + spacing) + Metrics.capsulePadding * 2
     }
 
     /// Materialized in-window, never in init: creating a real effect off

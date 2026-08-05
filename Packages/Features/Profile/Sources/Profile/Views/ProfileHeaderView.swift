@@ -48,6 +48,11 @@ final class ProfileHeaderView: UIView {
         static let horizontalInset: CGFloat = 20
     }
 
+    /// The identity block's page margin, published so the selector directly
+    /// beneath it can line its own ends up with the name and the bio rather
+    /// than with a second opinion about where this page's column starts.
+    static let pageMargin = Metrics.horizontalInset
+
     private let bannerView: ProfileBannerView
     private let avatarView = CircleAvatarView()
     private let monogramLabel = UILabel()

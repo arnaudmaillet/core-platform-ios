@@ -184,6 +184,18 @@ final class ProfileViewController: UIViewController {
         /// another scroll callback — and a viewer resting a finger exactly on
         /// the line would watch it flicker between the two homes.
         static let dockingHysteresis: CGFloat = 12
+        /// How much of the header's travel the selector spends narrowing from
+        /// its full inline width down to the size it docks at.
+        ///
+        /// Long enough that the narrowing reads as the bar changing shape rather
+        /// than as a step, and short enough to stay clear of the top of the
+        /// scroll, where the bar should simply be its inline self. 96pt is a
+        /// comfortable thumb-flick's worth of scrolling and comfortably less
+        /// than the header's own travel on every profile measured.
+        static let barMorphDistance: CGFloat = 96
+        /// How long the hand-over between the two hosts dissolves for. Short:
+        /// it is covering a seam, not performing.
+        static let dockCrossfade: CFTimeInterval = 0.22
         /// How long the outgoing profile takes to dissolve into the new one.
         static let switchCrossfade: TimeInterval = 0.28
         /// The bottom tray's own height.
@@ -202,6 +214,10 @@ final class ProfileViewController: UIViewController {
     /// scrolling through it, and the scroll would fight the layout for as long
     /// as they stayed near the threshold.
     private let inlineBarSlot = UIView()
+    /// The inline selector's width — full column at rest, narrowing to its
+    /// docked size as the dock line nears. Lives only while the bar is inline;
+    /// see `applyBarMorph`.
+    private var inlineBarWidth: NSLayoutConstraint?
     /// Whether the selector is currently in the navigation bar.
     private var isBarDocked = false
 
@@ -575,6 +591,11 @@ final class ProfileViewController: UIViewController {
         // short one cannot hold the position a long one was left at and the
         // header follows the clamp back up. See `setMinimumScrollTravel`.
         galleryPager.setMinimumScrollTravel(contentTravel)
+        // The inline width is the page's column, so it is only knowable once the
+        // view has one — and it has to be re-taken on rotation. Safe to run
+        // every pass: the slot's height is fixed, so the bar's width cannot feed
+        // back into the header's.
+        applyBarMorph()
     }
 
     /// Opens the followers / following lists on the tapped counter's tab.
@@ -1249,6 +1270,9 @@ final class ProfileViewController: UIViewController {
     /// arrange between a resizing container and a scroll view that clamped it.
     private func applyHeaderOffset(_ travelled: CGFloat) {
         headerTopConstraint?.constant = -min(max(travelled, 0), headerTravel)
+        // Before the docking check, so the bar has already reached its docked
+        // width by the frame it changes hosts.
+        applyBarMorph()
         updateBarDocking(travelled: travelled)
         updateBarTransparency(travelled: travelled)
     }
@@ -1294,7 +1318,16 @@ final class ProfileViewController: UIViewController {
     /// A title view is positioned by FRAME, so autoresizing has to come back on
     /// for the trip — the inline slot lays it out with constraints, and a view
     /// cannot be laid out both ways at once.
+    ///
+    /// ⚠️ The width constraint goes FIRST, before autoresizing comes back on.
+    /// It is a constraint on the bar itself rather than on its place in the
+    /// slot, so `removeFromSuperview` does not take it with them — and a view
+    /// that still carries an active constraint when it is handed back to
+    /// autoresizing is a view UIKit will translate into a conflicting one.
     private func dockBar() {
+        inlineBarWidth?.isActive = false
+        inlineBarWidth = nil
+        categoryBar.fillsWidth = false
         categoryBar.removeFromSuperview()
         categoryBar.translatesAutoresizingMaskIntoConstraints = true
         categoryBar.sizeToFit()
@@ -1308,19 +1341,105 @@ final class ProfileViewController: UIViewController {
     /// its lens position and its badge geometry, and a second copy would be a
     /// second answer to every one of those, correct only for as long as
     /// somebody remembered to forward the next change to both.
+    /// Inline it spans the column, on the identity block's own margins, so the
+    /// selector reads as part of the profile rather than as a control parked in
+    /// the middle of it. The width is a CONSTANT rather than a pin to both
+    /// margins because it is the thing the morph animates — one number to
+    /// interpolate, and the bar stays centred while it changes, which is what
+    /// makes the narrowing symmetrical.
     private func undockBar() {
         navigationItem.titleView = nil
         categoryBar.removeFromSuperview()
         categoryBar.translatesAutoresizingMaskIntoConstraints = false
+        categoryBar.fillsWidth = true
         inlineBarSlot.addSubview(categoryBar)
+        let width = categoryBar.widthAnchor.constraint(equalToConstant: inlineBarWidthNow)
+        inlineBarWidth = width
         NSLayoutConstraint.activate([
-            categoryBar.leadingAnchor.constraint(
-                greaterThanOrEqualTo: inlineBarSlot.layoutMarginsGuide.leadingAnchor
-            ),
+            width,
             categoryBar.centerYAnchor.constraint(equalTo: inlineBarSlot.centerYAnchor),
             categoryBar.centerXAnchor.constraint(equalTo: inlineBarSlot.centerXAnchor)
         ])
         forceNavigationBarLayout()
+    }
+
+    /// The bar's full inline width: the page's column, on the identity block's
+    /// margins.
+    private var inlineBarFullWidth: CGFloat {
+        max(0, view.bounds.width - ProfileHeaderView.pageMargin * 2)
+    }
+
+    /// The width the inline bar should have for the header's current position —
+    /// full at rest, narrowing to the size it docks at as the dock line nears.
+    ///
+    /// Read at the moment `undockBar` builds the constraint as well as on every
+    /// scroll, because an undock happens PART WAY through the morph: coming back
+    /// down the dock line is crossed with the header still 96pt from rest, and a
+    /// bar rebuilt at its full width there would snap wide the instant it landed
+    /// and then narrow again. Measured on the way down: the bar lands at 74.7pt
+    /// of lens against the 73.3 the same position produced on the way up.
+    private var inlineBarWidthNow: CGFloat {
+        let full = inlineBarFullWidth
+        let floor = min(full, categoryBar.naturalWidth)
+        let start = headerTravel - Metrics.barMorphDistance
+        guard Metrics.barMorphDistance > 0 else { return floor }
+        let progress = min(max((galleryPager.verticalOffset - start) / Metrics.barMorphDistance, 0), 1)
+        return full + (floor - full) * progress
+    }
+
+    /// Narrows the inline selector towards its docked size as the dock line
+    /// approaches, and widens it back on the way down.
+    ///
+    /// **This is the whole morph, and it is a width — not a scale.** A transform
+    /// would squash the titles and the lens along with the capsule, and this bar
+    /// draws a glass capsule whose corner radius is derived from its bounds: a
+    /// scaled capsule is an ellipse with distorted type in it. Driving the WIDTH
+    /// re-lays the row out at every value, so the titles keep their size, the
+    /// lens re-derives from the new segment frames, and the capsule stays a
+    /// capsule the whole way across.
+    private func applyBarMorph() {
+        guard let width = inlineBarWidth else { return }
+        let target = inlineBarWidthNow
+        guard abs(width.constant - target) > 0.5 else { return }
+        width.constant = target
+    }
+
+    /// Dissolves the hand-over between the two hosts.
+    ///
+    /// The seam is COVERED rather than removed, because it cannot be removed:
+    /// the bar's inline home sits below the navigation bar and its docked home
+    /// is inside it, and those two frames are **47pt apart vertically** however
+    /// far the header travels (measured: the slot's centre reaches y = 125pt at
+    /// the dock line, the title slot's is at 78). Letting the header travel that
+    /// extra distance would only slide the bar behind the navigation bar and out
+    /// of sight, which is a disappearance rather than a morph.
+    ///
+    /// HORIZONTALLY there is nothing left to cover, which is the morph's whole
+    /// point: the selected segment arrives at the size it docks at. Measured
+    /// across the dock line — 114.7pt of lens at rest, narrowing evenly to 62.0
+    /// over the last 96pt of travel, against 57.0pt docked, with the remaining
+    /// 5pt closed by the frames between the last sample and the line itself.
+    ///
+    /// ⚠️ `CATransition`, not an alpha animation. This bar carries a
+    /// `UIGlassEffect`, and a material's alpha is never animated in this app —
+    /// half-transparent glass renders as flat grey rather than as a fading
+    /// capsule. A layer transition cross-dissolves the host's RENDERED CONTENTS
+    /// instead, which is the same swap `SectionHeaderPillButton` performs
+    /// between its own inline and pinned presentations.
+    ///
+    /// Added BEFORE the re-parent, on both hosts: the bar leaves one and arrives
+    /// in the other in the same run loop, and `forceNavigationBarLayout` commits
+    /// the arrival synchronously — a transition added afterwards has nothing
+    /// left to cover.
+    private func crossfadeDockingSeam() {
+        let layers = [headerHost.layer, navigationController?.navigationBar.layer].compactMap(\.self)
+        for layer in layers {
+            let fade = CATransition()
+            fade.type = .fade
+            fade.duration = Metrics.dockCrossfade
+            fade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            layer.add(fade, forKey: "profileDockSeam")
+        }
     }
 
     /// The nav bar caches its title view's size, so a bar arriving in or leaving
@@ -1341,6 +1460,7 @@ final class ProfileViewController: UIViewController {
             : travelled >= headerTravel
         guard shouldDock != isBarDocked else { return }
         isBarDocked = shouldDock
+        crossfadeDockingSeam()
         if shouldDock { dockBar() } else { undockBar() }
         // ⚠️ Docked, the host has nothing left to show: its selector has moved
         // into the navigation bar and everything above it has scrolled behind
