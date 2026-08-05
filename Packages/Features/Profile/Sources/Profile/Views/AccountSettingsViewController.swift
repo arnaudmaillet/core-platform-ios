@@ -49,6 +49,10 @@ final class AccountSettingsViewController: UIViewController {
         self.account = account
         self.onLogout = onLogout
         super.init(nibName: nil, bundle: nil)
+        // Settings is somewhere you go and come back from, not a fifth tab.
+        // Declared here rather than at the push site so it holds wherever this
+        // screen is pushed from.
+        hidesBottomBarWhenPushed = true
     }
 
     @available(*, unavailable)
