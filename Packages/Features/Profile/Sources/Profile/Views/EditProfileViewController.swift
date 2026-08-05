@@ -59,6 +59,12 @@ final class EditProfileViewController: UIViewController {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
         super.init(nibName: nil, bundle: nil)
+        // Editing is a task, not a place: the tab bar offers four ways to
+        // abandon it half-finished, and none of them belong on a form. Declared
+        // HERE rather than at the push site so it holds wherever this screen is
+        // pushed from — the same reason the chat thread and the relationship
+        // lists state it in their own inits.
+        hidesBottomBarWhenPushed = true
     }
 
     @available(*, unavailable)
