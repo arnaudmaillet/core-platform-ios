@@ -1,3 +1,4 @@
+import DesignSystem
 import MediaCore
 import PostGrid
 import UIKit
@@ -39,8 +40,6 @@ final class ProfileGalleryGridView: UIView {
     private var minimumTravel: CGFloat = 0
     /// Positions the empty state as though it were the first row.
     private var statusTopConstraint: NSLayoutConstraint?
-    /// Clearance between the content's top and the empty state.
-    private static let statusClearance: CGFloat = 48
 
     private let imagePipeline: ImagePipeline
     private let style: Style
@@ -70,11 +69,17 @@ final class ProfileGalleryGridView: UIView {
     /// tall. The owner insets it below the header rather than sizing it around
     /// the content.
     let collectionView: UICollectionView
-    private let statusLabel = UILabel()
+    /// The shared empty state, the same object Messages shows when a tab has
+    /// nothing in it. It used to be a bare centred label here — a sentence with
+    /// no glyph and no headline, which reads as a screen that failed rather than
+    /// as an answer, and which said nothing about WHICH tab was empty.
+    private let emptyStateView = EmptyStateView()
+    private let tab: ProfileTab
 
-    init(imagePipeline: ImagePipeline, style: Style) {
+    init(imagePipeline: ImagePipeline, style: Style, tab: ProfileTab) {
         self.imagePipeline = imagePipeline
         self.style = style
+        self.tab = tab
         collectionView = UICollectionView(
             frame: .zero,
             collectionViewLayout: style == .grid ? PostGridMosaic.layout() : PostGridListLayout.layout()
@@ -116,25 +121,28 @@ final class ProfileGalleryGridView: UIView {
         refreshControl.layer.zPosition = 1
         collectionView.refreshControl = refreshControl
 
-        statusLabel.font = .preferredFont(forTextStyle: .subheadline)
-        statusLabel.adjustsFontForContentSizeCategory = true
-        statusLabel.textColor = .secondaryLabel
-        statusLabel.textAlignment = .center
-        statusLabel.numberOfLines = 0
+
         // ⚠️ The empty state is NOT in the collection view, so it does not
         // scroll on its own — and this page is inset below a header now, so a
         // constant from the page's top puts it behind the chrome. Its position
         // is driven from the same two numbers the content uses, which makes it
         // behave as though it were content: below the header at rest, scrolling
         // away with everything else.
-        statusLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(statusLabel)
-        let statusTop = statusLabel.topAnchor.constraint(equalTo: topAnchor, constant: 48)
+        emptyStateView.translatesAutoresizingMaskIntoConstraints = false
+        emptyStateView.isHidden = true
+        addSubview(emptyStateView)
+        // ⚠️ Positioned by its CENTRE, and the centre is computed rather than
+        // pinned. `EmptyStateView` centres itself in its parent, and this
+        // parent is the whole page — under the floating header, so a plain
+        // centre lands the block behind the identity block. The constant puts
+        // it in the middle of what is actually visible, and rides the offset so
+        // it scrolls away like content rather than hanging in the chrome.
+        let statusTop = emptyStateView.centerYAnchor.constraint(equalTo: topAnchor)
         statusTopConstraint = statusTop
         NSLayoutConstraint.activate([
             statusTop,
-            statusLabel.leadingAnchor.constraint(equalTo: layoutMarginsGuide.leadingAnchor),
-            statusLabel.trailingAnchor.constraint(equalTo: layoutMarginsGuide.trailingAnchor)
+            emptyStateView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            emptyStateView.trailingAnchor.constraint(equalTo: trailingAnchor)
         ])
 
         // Statuses (empty / failed) need visible height even though the
@@ -155,19 +163,47 @@ final class ProfileGalleryGridView: UIView {
         // measured before its rows exist would reserve the wrong amount and
         // stop being able to hold the header.
         applyBottomInset()
+        // ⚠️ The empty state is centred between the header and the chrome, and
+        // BOTH of those are measured from this view's height — which is zero
+        // until a layout pass gives it one. Positioned only from the inset, the
+        // block centred on the header's own bottom edge and its glyph came out
+        // clipped behind the selector. Re-running it here is what lets it
+        // settle once the page knows how tall it is.
+        positionStatusLabel()
     }
 
     func render(_ state: ProfileViewModel.GalleryPageState) {
         switch state {
         case .loading:
-            statusLabel.isHidden = true
+            emptyStateView.isHidden = true
             apply([], skeleton: true)
         case .content(let posts):
-            statusLabel.isHidden = true
+            emptyStateView.isHidden = true
             apply(posts, skeleton: false)
-        case .empty(let message), .failed(let message):
-            statusLabel.text = message
-            statusLabel.isHidden = false
+        case .empty(let message):
+            let copy = tab.emptyState
+            // The model's message wins when it has something the tab cannot
+            // know — "no media in reposts" says why this page is narrower than
+            // the profile, which is the thing worth reading. A tab that is
+            // simply empty has nothing to add, and falls back to its own line.
+            emptyStateView.configure(
+                symbolName: copy.symbol,
+                title: copy.title,
+                subtitle: message.isEmpty ? copy.subtitle : message
+            )
+            emptyStateView.isHidden = false
+            apply([], skeleton: false)
+        case .failed(let message):
+            // A failure is NOT an empty state, and saying so is the point of
+            // having both: the glyph and the headline have to read as "this did
+            // not work" rather than as "there is nothing here", or a viewer
+            // retries nothing and concludes the profile is bare.
+            emptyStateView.configure(
+                symbolName: "exclamationmark.triangle",
+                title: "Couldn't Load",
+                subtitle: message
+            )
+            emptyStateView.isHidden = false
             apply([], skeleton: false)
         }
     }
@@ -316,8 +352,11 @@ extension ProfileGalleryGridView {
 
     /// Puts the empty state where the first row would be.
     private func positionStatusLabel() {
-        statusTopConstraint?.constant =
-            collectionView.contentInset.top + Self.statusClearance - verticalOffset
+        // Centre of the region between the header's bottom and the chrome at
+        // the foot of the screen — not of the page, which is taller than either.
+        let visibleTop = collectionView.contentInset.top
+        let visibleBottom = max(visibleTop, bounds.height - baseBottomInset)
+        statusTopConstraint?.constant = (visibleTop + visibleBottom) / 2 - verticalOffset
     }
 
     func setContentBottomInset(_ inset: CGFloat) {

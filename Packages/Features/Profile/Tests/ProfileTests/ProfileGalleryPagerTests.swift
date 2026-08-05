@@ -198,7 +198,7 @@ struct ProfileGalleryTravelFloorTests {
 
     private func makePage() -> ProfileGalleryGridView {
         let page = ProfileGalleryGridView(
-            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list, tab: .format(.activity)
         )
         page.frame = CGRect(x: 0, y: 0, width: 400, height: 600)
         page.layoutIfNeeded()

@@ -48,3 +48,34 @@ public enum ProfileTab: Equatable, Sendable {
     /// The five the viewer sees on their own.
     public static let ownTabs: [ProfileTab] = publicTabs + [.saved, .reactions]
 }
+
+// MARK: - What a tab says when it is empty
+
+extension ProfileTab {
+    /// The glyph, headline and explanation a page shows when it has nothing.
+    ///
+    /// Per TAB rather than per page, because the answer is about what the tab
+    /// IS: an empty Gallery and an empty Saved pile are both blank grids and
+    /// mean entirely different things, and the difference is the only thing
+    /// worth saying at that moment.
+    ///
+    /// ⚠️ The subtitle here is a DEFAULT, not the last word. A format page can
+    /// be empty because of the source filter rather than because the profile
+    /// has nothing — "no media in reposts" — and that is more useful than a
+    /// generic sentence. The page prefers the model's message when it has one
+    /// and falls back to this; see `ProfileGalleryGridView.render`.
+    var emptyState: (symbol: String, title: String, subtitle: String) {
+        switch self {
+        case .format(.activity):
+            ("rectangle.stack", "No Activity Yet", "Activity and updates will appear here.")
+        case .format(.media):
+            ("photo.on.rectangle", "No Posts Yet", "Photos and posts will be listed here.")
+        case .format(.short):
+            ("play.rectangle", "No Shorts Yet", "Short video clips will be displayed here.")
+        case .saved:
+            ("bookmark", "No Saved Posts", "Posts you bookmark will appear here.")
+        case .reactions:
+            ("heart", "No Reactions Yet", "Posts you react to or like will show up here.")
+        }
+    }
+}

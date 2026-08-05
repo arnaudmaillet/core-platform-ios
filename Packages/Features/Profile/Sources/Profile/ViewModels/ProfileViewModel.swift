@@ -47,16 +47,14 @@ public final class ProfileViewModel {
         public var short: GalleryPageState
         /// The viewer's saved pile. Absent on anyone else's profile — a saved
         /// list is private by construction.
-        public var saved: GalleryPageState = .empty(message: "Nothing saved yet.")
+        public var saved: GalleryPageState = .empty(message: "")
         /// ⚠️ Always the same answer, and honestly so. `engagement.v1` can
         /// record a reaction and count reactions on a post; nothing anywhere
         /// answers "which posts did this profile react to", and the client
         /// cannot even read back whether IT reacted to one. The tab exists so
         /// the shape is right when a seam arrives; what it shows until then is
         /// the truth about what can be known.
-        public var reactions: GalleryPageState = .empty(
-            message: "Your reactions will appear here once we can list them."
-        )
+        public var reactions: GalleryPageState = .empty(message: "")
 
         public func state(for tab: ProfileTab) -> GalleryPageState {
             switch tab {
@@ -536,7 +534,7 @@ public final class ProfileViewModel {
         guard let bookmarks, let gallery else { return }
         let ids = bookmarks.savedPostIDs
         guard !ids.isEmpty else {
-            savedPage = .empty(message: "Nothing saved yet.")
+            savedPage = .empty(message: "")
             renderGallery()
             return
         }
@@ -553,7 +551,15 @@ public final class ProfileViewModel {
     }
 
     /// Names the empty combination so the blank page reads as an answer.
+    ///
+    /// ⚠️ Empty means "nothing to add", not "nothing to say". Unfiltered, this
+    /// page is empty because the profile has nothing of that kind — which the
+    /// TAB already says better than a generated sentence can, with a glyph and
+    /// a headline. It is the FILTER that this knows and the tab cannot: "no
+    /// media in reposts" explains why the page is narrower than the profile,
+    /// and that is worth overriding the tab's own line for.
     nonisolated static func emptyMessage(for filter: GalleryFilter) -> String {
+        guard filter.source != .all else { return "" }
         let format = switch filter.format {
         case .activity: "activity"
         case .media: "media"

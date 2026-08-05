@@ -176,3 +176,53 @@ struct PostBookmarkStoreTests {
         #expect(changes == 2)
     }
 }
+
+/// What each tab says when it has nothing.
+///
+/// A blank grid reads as a screen that failed. The difference between that and
+/// "there is genuinely nothing here" is the entire reason the shared empty
+/// state exists — and on a five-tab profile it also has to say WHICH nothing,
+/// because an empty Gallery and an empty Saved pile look identical and mean
+/// completely different things.
+@MainActor
+struct ProfileEmptyStateTests {
+    @Test func everyTabSaysWhichNothingItIs() {
+        let states = ProfileTab.ownTabs.map(\.emptyState)
+        #expect(Set(states.map(\.title)).count == states.count)
+        #expect(Set(states.map(\.subtitle)).count == states.count)
+        #expect(Set(states.map(\.symbol)).count == states.count)
+    }
+
+    @Test func everyTabCarriesAllThreeParts() {
+        for state in ProfileTab.ownTabs.map(\.emptyState) {
+            #expect(!state.symbol.isEmpty)
+            #expect(!state.title.isEmpty)
+            #expect(!state.subtitle.isEmpty)
+        }
+    }
+
+    /// ⚠️ Every glyph resolves. A symbol name with a typo in it renders as
+    /// nothing at all — the block loses its anchor and no test that only checks
+    /// the string would notice.
+    @Test func everyGlyphIsARealSymbol() {
+        for state in ProfileTab.ownTabs.map(\.emptyState) {
+            #expect(UIImage(systemName: state.symbol) != nil, "\(state.symbol) does not resolve")
+        }
+    }
+
+    /// The copy itself, pinned — it was specified, so a change to it should be
+    /// a decision rather than a drift.
+    @Test func theCopyIsWhatWasAskedFor() {
+        #expect(ProfileTab.format(.activity).emptyState.title == "No Activity Yet")
+        #expect(ProfileTab.format(.media).emptyState.title == "No Posts Yet")
+        #expect(ProfileTab.format(.short).emptyState.title == "No Shorts Yet")
+        #expect(ProfileTab.saved.emptyState.title == "No Saved Posts")
+        #expect(ProfileTab.reactions.emptyState.title == "No Reactions Yet")
+
+        #expect(ProfileTab.saved.emptyState.subtitle == "Posts you bookmark will appear here.")
+        #expect(
+            ProfileTab.reactions.emptyState.subtitle
+                == "Posts you react to or like will show up here."
+        )
+    }
+}

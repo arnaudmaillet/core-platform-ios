@@ -142,13 +142,26 @@ struct GalleryFilterTests {
         #expect(filter.tiles(authored: authored, tagged: tagged).isEmpty)
     }
 
+    /// A FILTERED page says why it is narrower than the profile — that is the
+    /// thing the tab itself cannot know.
     @Test func emptyMessagesNameTheCombination() {
         #expect(ProfileViewModel.emptyMessage(
             for: GalleryFilter(format: .media, source: .reposts)
         ) == "No media in reposts yet.")
         #expect(ProfileViewModel.emptyMessage(
-            for: GalleryFilter(format: .short, source: .all)
-        ) == "No short posts yet.")
+            for: GalleryFilter(format: .short, source: .tagged)
+        ) == "No short posts in tagged posts yet.")
+    }
+
+    /// ⚠️ And an UNFILTERED one says nothing, deliberately. The page is empty
+    /// because the profile has nothing of that kind, which the tab's own empty
+    /// state already says with a glyph and a headline — a generated sentence
+    /// underneath it would be the same fact twice, in worse words.
+    @Test(arguments: [GalleryFilter.Format.activity, .media, .short])
+    func anUnfilteredPageLeavesTheTabToSpeak(format: GalleryFilter.Format) {
+        #expect(ProfileViewModel.emptyMessage(
+            for: GalleryFilter(format: format, source: .all)
+        ).isEmpty)
     }
 }
 

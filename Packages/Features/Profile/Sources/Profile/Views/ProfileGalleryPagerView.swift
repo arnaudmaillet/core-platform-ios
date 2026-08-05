@@ -58,7 +58,8 @@ final class ProfileGalleryPagerView: UIView {
                 imagePipeline: imagePipeline,
                 // The mosaic is for pages that are mostly pictures. Saved and
                 // Liked are whatever the viewer kept, which is mostly not.
-                style: tab == .format(.media) ? .grid : .list
+                style: tab == .format(.media) ? .grid : .list,
+                tab: tab
             )
         }
         super.init(frame: .zero)
