@@ -164,38 +164,6 @@ final class ForYouPagerView: UIView {
         }
     }
 
-    /// Drives the pager from something other than its own pan — the tab
-    /// capsule, which can be grabbed and dragged like the pages themselves.
-    /// Unanimated by design: this is called per frame of a finger.
-    ///
-    /// Lives here rather than in the caller so the index↔offset conversion (and
-    /// with it the RTL mirroring) stays in one place; a caller writing
-    /// `contentOffset` itself would be right in English and wrong in Arabic.
-    func scrub(to progress: CGFloat) {
-        guard bounds.width > 0, pages.count > 1 else { return }
-        let clamped = min(max(progress, 0), CGFloat(pages.count - 1))
-        let slot = isRTL ? CGFloat(pages.count - 1) - clamped : clamped
-        scrollView.setContentOffset(CGPoint(x: slot * bounds.width, y: 0), animated: false)
-    }
-
-    /// Ends a scrub on a whole page, carrying the fling through: a flick that
-    /// barely moved still lands on the next page, the same way the pager's own
-    /// pan behaves.
-    func settleAfterScrub(velocityInPages: CGFloat) {
-        guard bounds.width > 0, pages.count > 1 else { return }
-        // Half a page of "throw" per unit velocity — enough that a flick
-        // commits, small enough that a slow drag released mid-way falls back to
-        // whichever page it is actually nearest.
-        let projected = progress + velocityInPages * 0.5
-        let landing = min(max(Int(projected.rounded()), 0), pages.count - 1)
-        activeIndex = landing
-        syncAutoplay()
-        // Always animate, even when the landing is the page we started on:
-        // that case is a scrub that didn't commit, and it still has to travel
-        // back from wherever the finger left it.
-        scrollView.setContentOffset(CGPoint(x: offsetX(for: landing), y: 0), animated: true)
-    }
-
     // MARK: - Autoplay
 
     /// Whether this surface may autoplay at all — tab frontmost, nothing

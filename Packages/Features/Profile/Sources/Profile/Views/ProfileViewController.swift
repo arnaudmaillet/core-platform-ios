@@ -1213,14 +1213,6 @@ final class ProfileViewController: UIViewController {
                 },
                 for: .valueChanged
             )
-            // The capsule is grabbable: dragging it scrubs the pages under the
-            // finger and releasing commits to whichever one it landed nearest.
-            // The same two lines the other two screens that wear this bar have.
-            // Wired on BOTH, because either can be the one on screen.
-            bar.onScrub = { [weak self] progress in self?.galleryPager.scrub(to: progress) }
-            bar.onScrubEnd = { [weak self] velocity in
-                self?.galleryPager.settleAfterScrub(velocityInPages: velocity)
-            }
             // Tapping the tab already showing is a request to go back to the top
             // of it — see the pager for which top that is.
             bar.onReselect = { [weak self] _ in self?.galleryPager.scrollActivePageToTop() }
@@ -1300,12 +1292,6 @@ final class ProfileViewController: UIViewController {
     /// the point: the hand-over is two animations, not a move.
     private func placeSelectors() {
         inlineBar.fillsWidth = true
-        // ⚠️ Only the DOCKED bar may scroll, and only when there are more tabs
-        // than a title slot can hold. The inline one has the page's whole
-        // column and fills it, so it never needs to; the docked one is capped
-        // at 258pt by the navigation bar, which five titles overrun by 59.
-        // Reaching a tab by swiping the capsule beats not reaching it at all.
-        dockedBar.scrollsWhenCrowded = tabs.count > ProfileTab.publicTabs.count
         inlineBar.constrain(in: inlineBarSlot) { parent in
             inlineBar.topAnchor.constraint(equalTo: parent.topAnchor)
             inlineBar.leadingAnchor.constraint(

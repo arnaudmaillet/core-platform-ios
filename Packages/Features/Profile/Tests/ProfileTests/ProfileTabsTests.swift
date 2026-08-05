@@ -98,12 +98,15 @@ struct ProfileTabsTests {
 
     /// A swipe onto the last tab reports THAT tab — an off-by-one here lands
     /// the selector on Saved while the pager shows Liked.
+    ///
+    /// Driven through the scroll view's own settle, which is the only way a
+    /// swipe commits now that the capsule carries no gesture of its own.
     @Test func settlingOnTheLastTabReportsIt() {
         let pager = pager(ProfileTab.ownTabs)
         var settled: [ProfileTab] = []
         pager.onPageSettled = { settled.append($0) }
-        pager.scrub(to: 4)
-        pager.settleAfterScrub(velocityInPages: 0)
+        pager.debugScrollView.contentOffset = CGPoint(x: 4 * pager.bounds.width, y: 0)
+        pager.scrollViewDidEndDecelerating(pager.debugScrollView)
         #expect(settled == [.reactions])
     }
 }

@@ -221,12 +221,17 @@ public final class PagedTabBar: UIControl {
         /// scroll to that would not hide a tab, so its minimums are breakable
         /// and the titles truncate where they stand. The badges never take part
         /// in either: they refuse to compress at all.
-        var segmentWidthPriority: UILayoutPriority {
-            switch self {
-            case .floating: .required
-            case .navigationTitle: .defaultHigh
-            }
-        }
+        ///
+        /// ⚠️ **Required on BOTH now, and this changed.** A title view used to
+        /// break its minimums and truncate in place, on the reasoning that it
+        /// could not scroll out from between two bar buttons without hiding a
+        /// tab. That reasoning traded one invisible tab for one unreadable
+        /// title — and truncation takes the SELECTED title first, which is the
+        /// one the viewer most needs. A strip that scrolls hides a tab
+        /// reachably, and `keepLensVisible` brings the selected one back
+        /// whenever the selection moves, so nothing the viewer is actually
+        /// looking at is ever the thing that got hidden.
+        var segmentWidthPriority: UILayoutPriority { .required }
 
         /// The segment titles' type ramp, which differs because the two hosts
         /// give the bar wildly different amounts of room.
@@ -412,39 +417,6 @@ public final class PagedTabBar: UIControl {
         }
     }
 
-    /// Whether a hugging bar that cannot fit may scroll instead of truncating.
-    ///
-    /// A title view normally may NOT: it gets only what the side buttons leave,
-    /// and a strip that scrolled there could hide a tab behind the edge with
-    /// nothing to say so. That reasoning holds while the titles nearly fit —
-    /// the shortfall lands on one word and a truncated title is still a visible
-    /// title.
-    ///
-    /// It stops holding once there are more tabs than the slot can hold at any
-    /// size. Measured on the profile's five: 317pt of titles into a slot the
-    /// navigation bar caps at 258, and the shortest naming that keeps them
-    /// distinguishable still wants 269. At that shortfall something is hidden
-    /// whatever the bar does, and a strip that scrolls hides tabs REACHABLY
-    /// where truncation hides them permanently — and takes the selected title
-    /// first, which is the one the viewer most needs to read.
-    ///
-    /// Off by default, so the two screens whose bars already fit keep the
-    /// arrangement that was measured for them.
-    public var scrollsWhenCrowded: Bool = false {
-        didSet {
-            guard scrollsWhenCrowded != oldValue, style.hugsContent else { return }
-            crowdedWidthConstraint?.isActive = scrollsWhenCrowded
-            snugWidthConstraint?.isActive = !scrollsWhenCrowded
-            for segment in segments {
-                segment.setWidthPriority(scrollsWhenCrowded ? .required : style.segmentWidthPriority)
-            }
-            invalidateIntrinsicContentSize()
-            setNeedsLayout()
-        }
-    }
-
-    private var snugWidthConstraint: NSLayoutConstraint?
-    private var crowdedWidthConstraint: NSLayoutConstraint?
 
     /// Whether the bar is currently taking its width from its host rather than
     /// stating one — true for a floating bar always, and for a hugging bar that
@@ -477,13 +449,6 @@ public final class PagedTabBar: UIControl {
     /// for it simply leave this nil.
     public var onReselect: ((Int) -> Void)?
 
-    /// A drag on the capsule itself, as a fractional page position. Fires every
-    /// frame of the finger; the owner scrubs the pager to it.
-    public var onScrub: ((CGFloat) -> Void)?
-    /// That drag ended, with its velocity in pages per second, so the owner can
-    /// let a flick carry to the next page instead of snapping back.
-    public var onScrubEnd: ((CGFloat) -> Void)?
-
     private let titles: [String]
     private let capsule = UIVisualEffectView(effect: nil)
     /// Scrolls the segments when they out-measure the capsule. Below that
@@ -502,9 +467,6 @@ public final class PagedTabBar: UIControl {
     private let row = SegmentRow()
     private var segments: [SegmentView] = []
     private var progress: CGFloat = 0
-    private var scrubPan: UIPanGestureRecognizer!
-    /// Where `progress` stood when the current capsule drag began.
-    private var scrubOrigin: CGFloat = 0
 
     public init(titles: [String], style: Style = .floating) {
         self.titles = titles
@@ -651,28 +613,10 @@ public final class PagedTabBar: UIControl {
         // are built; `scrollsWhenCrowded` picks. When the titles DO fit the two
         // are indistinguishable — Auto Layout satisfies `>=` at the smallest
         // width that works, which is the frame's.
-        let snug = content.widthAnchor.constraint(
-            equalTo: scroller.frameLayoutGuide.widthAnchor,
-            multiplier: 1
-        )
-        let crowded = content.widthAnchor.constraint(
+        content.widthAnchor.constraint(
             greaterThanOrEqualTo: scroller.frameLayoutGuide.widthAnchor
-        )
-        if style.hugsContent {
-            snugWidthConstraint = snug
-            crowdedWidthConstraint = crowded
-            snug.isActive = true
-        } else {
-            crowded.isActive = true
-        }
+        ).isActive = true
 
-
-        // Grab anywhere. The capsule is one physical object, so dragging it
-        // should move the pages whether the finger happens to land on a title,
-        // on a badge, or on the glass between them.
-        scrubPan = UIPanGestureRecognizer(target: self, action: #selector(handleScrub))
-        scrubPan.delegate = self
-        capsule.contentView.addGestureRecognizer(scrubPan)
 
         // The whole capsule reads as one tab bar to VoiceOver; each segment is
         // a button reporting its own selected state.
@@ -1061,53 +1005,22 @@ public final class PagedTabBar: UIControl {
         sendActions(for: .valueChanged)
     }
 
-    // MARK: - Grab
-
-    public override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        guard gestureRecognizer === scrubPan else {
-            return super.gestureRecognizerShouldBegin(gestureRecognizer)
-        }
-        // When the strip itself has somewhere to scroll, the finger belongs to
-        // it — moving the tabs and moving the pages at once would be two
-        // answers to one gesture.
-        guard scroller.contentSize.width <= scroller.bounds.width + 0.5 else { return false }
-        // Horizontal intent only. A vertical drag that starts on the bar is
-        // someone reaching for the content underneath it.
-        let velocity = scrubPan.velocity(in: capsule)
-        return abs(velocity.x) > abs(velocity.y)
-    }
-
-    /// Translates a drag on the capsule into pages.
-    ///
-    /// One segment's width dragged = one page, so the lens keeps pace with the
-    /// finger rather than sliding at some other rate.
-    ///
-    /// **The sign follows the LENS, not the pages.** Dragging left moves the
-    /// selection left: the capsule behaves like a strip of tabs being slid
-    /// under the finger, which is what grabbing a physical object implies.
-    /// That is deliberately the OPPOSITE of dragging the page content, where
-    /// pulling left brings the next page in from the right — the two gestures
-    /// act on different objects, and each follows the one being touched.
-    @objc private func handleScrub(_ pan: UIPanGestureRecognizer) {
-        guard segments.count > 1 else { return }
-        // The AVERAGE segment, not the first one. Under `fillEqually` they are
-        // the same number; under `.fill` the first segment can be less than half
-        // the width of its neighbours ("All" 41pt beside "Suggestions" 98pt), and
-        // measuring the drag against it would run the pages at more than twice
-        // the speed of the finger.
-        let slot = max(1, row.bounds.width / CGFloat(segments.count))
-        switch pan.state {
-        case .began:
-            scrubOrigin = progress
-        case .changed:
-            let delta = pan.translation(in: capsule).x / slot
-            onScrub?(scrubOrigin + delta)
-        case .ended, .cancelled, .failed:
-            onScrubEnd?(pan.velocity(in: capsule).x / slot)
-        default:
-            break
-        }
-    }
+    // MARK: - Moving between tabs
+    //
+    // ⚠️ **There is no gesture on this bar, and that is the design.** The
+    // capsule used to be draggable — a grab that slid the lens and ran the
+    // pages under the finger. It read well on a bar with room to spare and
+    // fought everything else the moment there was not: a strip that overflows
+    // has to yield the same drag to its own scroll view, so the same gesture on
+    // the same control did one thing on three tabs and another on five, and a
+    // vertical component in it belonged to the page underneath. Three
+    // recognizers arbitrating one finger produced behaviour no rule could
+    // state simply.
+    //
+    // Tapping a segment and swiping the pages are the two ways to change tabs
+    // now. Both are unambiguous, both are what every other tab bar on the
+    // platform does, and neither has anything to arbitrate with the horizontal
+    // scrolling this strip does when it is crowded.
 
     private func buildSegments() {
         segments = titles.enumerated().map { index, title in
@@ -1220,7 +1133,7 @@ public final class PagedTabBar: UIControl {
 /// Conformance only — the policy is an `override` in the class body, because
 /// `UIView` already declares `gestureRecognizerShouldBegin(_:)` and Swift will
 /// not let an extension override it.
-extension PagedTabBar: UIGestureRecognizerDelegate {}
+
 
 // MARK: - Segment row
 
@@ -1286,22 +1199,6 @@ private final class SegmentView: UIButton {
 
     /// The pill's laid-out size, for a host asserting its margins.
     var badgeSize: CGSize { badge.bounds.size }
-
-    /// Re-decides what gives when the host is too narrow for this segment.
-    ///
-    /// Breakable means the title truncates where it stands; required means it
-    /// keeps its width and pushes the strip past the capsule, where a scroll
-    /// view can reach it. Which is right depends on how far past the host the
-    /// row goes — see `PagedTabBar.scrollsWhenCrowded`.
-    func setWidthPriority(_ priority: UILayoutPriority) {
-        guard pinnedWidthConstraint.priority != priority else { return }
-        pinnedWidthConstraint.priority = priority
-        // Compression resistance has to follow, or the label inside gives way
-        // where the segment around it did not — a full-width segment with an
-        // ellipsis in the middle of it.
-        plainLabel.setContentCompressionResistancePriority(priority, for: .horizontal)
-        boldLabel.setContentCompressionResistancePriority(priority, for: .horizontal)
-    }
 
     /// The lens's height inside this segment, which is also the smallest width
     /// the segment may take — see `updatePinnedWidth`.
