@@ -403,7 +403,7 @@ extension MainTabCoordinator {
     /// Runs on every layout pass, so it is cheap and idempotent: it re-adds
     /// nothing already added and writes the frame only when it moved.
     fileprivate func alignProfileMenuOverlay() {
-        align(profileMenuOverlay, over: profileTab?.tab.title)
+        align(profileMenuOverlay, over: profileTab?.tab.title, at: barIndex(of: .profile))
         alignForYouMenuOverlay()
     }
 
@@ -421,16 +421,25 @@ extension MainTabCoordinator {
         let title = forYouTab?.tab.title
         forYouMenuOverlay.accessibilityLabel = title
         if forYouMenuOverlay.menu == nil { forYouMenuOverlay.menu = forYouTab?.modeMenu }
-        align(forYouMenuOverlay, over: title)
+        align(forYouMenuOverlay, over: title, at: barIndex(of: .forYou))
+    }
+
+    /// Where a tab sits in the bar, left to right — the fallback the label
+    /// lookup falls back TO. See `tabButton(labelled:at:in:)`.
+    private func barIndex(of tab: AppTab) -> Int? {
+        orderedTabs.firstIndex { $0.0 == tab }
     }
 
     /// Puts an overlay exactly over the bar button titled `title`.
     ///
     /// Runs on every layout pass, so it is cheap and idempotent: it re-adds
     /// nothing already added and writes the frame only when it moved.
-    private func align(_ overlay: UIButton, over title: String?) {
+    private func align(_ overlay: UIButton, over title: String?, at index: Int?) {
         let bar = tabBarController.tabBar
-        guard let title, let button = tabButton(labelled: title, in: bar) else { return }
+        guard let title, let button = tabButton(labelled: title, at: index, in: bar) else {
+            trace("no button for \(title ?? "nil") — overlay left unplaced")
+            return
+        }
         let frame = button.convert(button.bounds, to: bar)
         // A zero frame means the bar has not placed its buttons yet; leaving the
         // overlay unplaced is right, and a later pass will catch it.
@@ -441,10 +450,36 @@ extension MainTabCoordinator {
         // and would otherwise bury the overlay, which silently costs the
         // long-press with nothing on screen to explain why.
         bar.bringSubviewToFront(overlay)
+        trace(String(
+            format: "%@ placed at %.0f,%.0f %.0fx%.0f menu=%@ contextEnabled=%@",
+            title, frame.minX, frame.minY, frame.width, frame.height,
+            overlay.menu == nil ? "MISSING" : "ok",
+            overlay.isContextMenuInteractionEnabled ? "yes" : "no"
+        ))
+    }
+
+    /// Dev convenience: `-tabmenu-trace` reports what the overlays found and
+    /// where they landed.
+    ///
+    /// ⚠️ This exists because the failure it describes is INVISIBLE. An overlay
+    /// that never found its button, or found it at a zero frame, looks exactly
+    /// like one that is working until somebody holds the tab — and the whole
+    /// mechanism is a hand-placed view over a private hierarchy, which is
+    /// precisely the kind of thing that differs between one iOS build and the
+    /// next. On a device this is the difference between "the menu doesn't work"
+    /// and a line saying which of the two it was.
+    private func trace(_ message: @autoclosure () -> String) {
+        #if DEBUG
+        guard ProcessInfo.processInfo.arguments.contains("-tabmenu-trace") else { return }
+        print("[tabmenu] \(message())")
+        #endif
     }
 
     /// Installs the switcher menu from the factory's current snapshot.
     fileprivate func rebuildSwitcherMenu() {
+        defer {
+            trace("switcher menu rebuilt: \(profileMenuOverlay.menu == nil ? "STILL NIL" : "installed")")
+        }
         profileMenuOverlay.menu = profileSwitcher?.makeMenu(
             onSwitch: {},
             onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
@@ -458,7 +493,21 @@ extension MainTabCoordinator {
     /// own title, and breadth-first reaches the button before the label nested
     /// inside it — so this never has to name `_UITabButton`. A future iOS
     /// re-shuffling that hierarchy costs the menu, not a crash.
-    private func tabButton(labelled title: String, in bar: UIView) -> UIView? {
+    ///
+    /// ⚠️ **With a positional fallback, because the label match is the part
+    /// most likely to differ between one iOS build and another.** The label is
+    /// UIKit's, not ours: a build that suffixes it, localises it, or moves it
+    /// onto a different view in the hierarchy costs the match, and the symptom
+    /// is a long press that does nothing at all — no menu, no error, nothing on
+    /// screen to say the overlay was never placed. Falling back to "the nth
+    /// button, left to right" is a weaker claim than the label but it is a
+    /// claim about the bar's ARRANGEMENT, which is the part that stays true.
+    ///
+    /// It is a fallback rather than the primary rule because position is not
+    /// identity: the sidebar layouts and any future reordering would make the
+    /// index wrong where the label is still right.
+    private func tabButton(labelled title: String, at index: Int?, in bar: UIView) -> UIView? {
+        var candidates: [UIView] = []
         var queue = bar.subviews
         while !queue.isEmpty {
             let view = queue.removeFirst()
@@ -466,9 +515,18 @@ extension MainTabCoordinator {
             // would match itself and pin its own frame.
             if view === profileMenuOverlay || view === forYouMenuOverlay { continue }
             if view.accessibilityLabel == title { return view }
+            // A tab button is a control that says something. Gathered on the way
+            // past so the fallback costs nothing when the label matches.
+            if view is UIControl, view.accessibilityLabel?.isEmpty == false {
+                candidates.append(view)
+            }
             queue.append(contentsOf: view.subviews)
         }
-        return nil
+        guard let index, candidates.indices.contains(index) else { return nil }
+        let button = candidates.sorted { $0.convert($0.bounds, to: bar).minX
+            < $1.convert($1.bounds, to: bar).minX }[index]
+        trace("label \"\(title)\" missed; fell back to button \(index) of \(candidates.count)")
+        return button
     }
 }
 
