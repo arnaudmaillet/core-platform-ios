@@ -432,6 +432,17 @@ public final class PagedTabBar: UIControl {
     /// `UISegmentedControl` has, so the owner registers a `UIAction` rather
     /// than being handed a closure to store.
     public private(set) var selectedIndex: Int = 0
+    /// A tap on the segment that is ALREADY selected.
+    ///
+    /// ⚠️ Its own channel, deliberately, rather than a `.valueChanged` that
+    /// fires on a value that did not change. Re-selection is a different request
+    /// from selection — "take me back to the top of what I am already looking
+    /// at" rather than "show me this instead" — and answering it through the
+    /// change event would make every handler on every screen wearing this bar
+    /// defensive about being told nothing happened. Screens that have no answer
+    /// for it simply leave this nil.
+    public var onReselect: ((Int) -> Void)?
+
     /// A drag on the capsule itself, as a fractional page position. Fires every
     /// frame of the finger; the owner scrubs the pager to it.
     public var onScrub: ((CGFloat) -> Void)?
@@ -982,14 +993,23 @@ public final class PagedTabBar: UIControl {
     /// cannot be in.
     public func select(_ index: Int) {
         guard segments.indices.contains(index) else { return }
-        selectSegment(index)
+        selectSegment(index, fromTap: false)
     }
 
     /// A segment was chosen. Publishes through `.valueChanged` rather than a
     /// stored closure, so the owner wires this the way it would wire any
     /// system control.
-    private func selectSegment(_ index: Int) {
-        guard index != selectedIndex else { return }
+    /// ⚠️ `fromTap` is what keeps re-selection honest. Setting a value to what
+    /// it already is is a NO-OP; tapping the thing that is already chosen is an
+    /// EVENT, and only the second one is a request. The profile mirrors every
+    /// choice onto a second bar, so a `select` to the current segment happens on
+    /// ordinary tab changes — announcing those as re-selections would scroll the
+    /// list to the top every time the viewer merely changed tabs.
+    private func selectSegment(_ index: Int, fromTap: Bool) {
+        guard index != selectedIndex else {
+            if fromTap { onReselect?(index) }
+            return
+        }
         selectedIndex = index
         sendActions(for: .valueChanged)
     }
@@ -1057,7 +1077,7 @@ public final class PagedTabBar: UIControl {
                 lensHeight: style.lensHeight
             )
             segment.addAction(
-                UIAction { [weak self] _ in self?.selectSegment(index) },
+                UIAction { [weak self] _ in self?.selectSegment(index, fromTap: true) },
                 // `.primaryActionTriggered` now that the segment is a real
                 // `UIButton` — UIButton synthesizes it, where the bare
                 // `UIControl` this used to be never fired it at all.

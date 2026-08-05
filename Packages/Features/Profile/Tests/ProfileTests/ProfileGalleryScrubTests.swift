@@ -282,6 +282,51 @@ struct ProfileGalleryOffsetSyncTests {
         pager.debugSetOffset(400, forPage: 0)
         #expect(pager.debugAlignedOffset(forPage: 1) == 400)
     }
+
+    // MARK: - Back to the top of the tab you are on
+
+    /// ⚠️ **The top of the TAB, not of the profile.** A tab starts at its first
+    /// row under the docked bar now that each keeps its own place; carrying on
+    /// up to the identity block would answer a different question, and it would
+    /// drag the other two tabs with it, because below the dock line the offset
+    /// belongs to the screen rather than to the tab.
+    @Test func reselectingReturnsToTheTabsOwnTop() {
+        let pager = splitPager()
+        pager.debugSetOffset(1_500, forPage: 0)
+        pager.scrollActivePageToTop()
+        #expect(abs(pager.debugVerticalOffsets[0] - 360) < 1)
+    }
+
+    /// And it leaves the others exactly where they were — a tab's own top is
+    /// its own business.
+    @Test func reselectingLeavesTheOtherTabsAlone() {
+        let pager = splitPager()
+        pager.debugSetOffset(900, forPage: 1)
+        pager.debugSetOffset(700, forPage: 2)
+        pager.debugSetOffset(1_500, forPage: 0)
+        pager.scrollActivePageToTop()
+        #expect(abs(pager.debugVerticalOffsets[1] - 900) < 1)
+        #expect(abs(pager.debugVerticalOffsets[2] - 700) < 1)
+    }
+
+    /// ⚠️ Never downwards. From above the dock line the list is already showing
+    /// its first row, and a "back to the top" that scrolled DOWN to reach the
+    /// docked position would be a surprise rather than a service.
+    @Test func reselectingFromAboveTheLineDoesNothing() {
+        let pager = splitPager()
+        pager.debugSetOffset(120, forPage: 0)
+        pager.scrollActivePageToTop()
+        #expect(abs(pager.debugVerticalOffsets[0] - 120) < 1)
+    }
+
+    /// Asking again once it is already there is a no-op rather than a nudge.
+    @Test func reselectingAtTheTopIsIdempotent() {
+        let pager = splitPager()
+        pager.debugSetOffset(1_500, forPage: 0)
+        pager.scrollActivePageToTop()
+        pager.scrollActivePageToTop()
+        #expect(abs(pager.debugVerticalOffsets[0] - 360) < 1)
+    }
 }
 
 /// The room a tab reserves so it can hold the header's position.

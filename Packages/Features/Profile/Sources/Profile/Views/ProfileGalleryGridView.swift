@@ -253,6 +253,17 @@ extension ProfileGalleryGridView {
     }
 
     func setVerticalOffset(_ offset: CGFloat) {
+        setVerticalOffset(offset, animated: false)
+    }
+
+    /// The same, with the option of travelling there in view of the viewer.
+    ///
+    /// Animated is for the ONE case a viewer asked for the journey: re-tapping
+    /// the tab already showing, which is a request to be taken back rather than
+    /// to be put back. Every other caller writes the offset directly, because
+    /// they are keeping a page in step with something else and an animation
+    /// there is a page arriving late.
+    func setVerticalOffset(_ offset: CGFloat, animated: Bool) {
         // ⚠️ **Make room BEFORE asking the page to travel.** The room a page
         // needs is computed from its content size, and on a tab switch the page
         // being handed the offset may not have laid out since its content
@@ -276,7 +287,12 @@ extension ProfileGalleryGridView {
         // a real drag never routes through here.
         let target = offset < 0 ? offset : min(offset, max(0, travel))
         guard abs(verticalOffset - target) > 0.5 else { return }
-        collectionView.contentOffset = CGPoint(x: 0, y: target - inset)
+        let point = CGPoint(x: 0, y: target - inset)
+        if animated {
+            collectionView.setContentOffset(point, animated: true)
+        } else {
+            collectionView.contentOffset = point
+        }
     }
 
     /// The height of the header floating above this page.

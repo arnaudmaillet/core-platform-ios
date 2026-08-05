@@ -1213,6 +1213,9 @@ final class ProfileViewController: UIViewController {
             bar.onScrubEnd = { [weak self] velocity in
                 self?.galleryPager.settleAfterScrub(velocityInPages: velocity)
             }
+            // Tapping the tab already showing is a request to go back to the top
+            // of it — see the pager for which top that is.
+            bar.onReselect = { [weak self] _ in self?.galleryPager.scrollActivePageToTop() }
         }
         // The lens tracks the finger, exactly as it does on the other two
         // screens that wear this bar — the pager reports a fractional position

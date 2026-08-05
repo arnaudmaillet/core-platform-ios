@@ -132,3 +132,64 @@ struct PagedTabBarFillTests {
         #expect(bar.intrinsicContentSize == before)
     }
 }
+
+/// Choosing a segment, and choosing the one already chosen.
+///
+/// These are two different requests and the bar keeps them apart: `.valueChanged`
+/// is a CHANGE, and firing it for a value that did not change would make every
+/// handler on every screen wearing this bar defensive about being told nothing
+/// happened. Re-selection gets its own channel, which screens without an answer
+/// for it simply never set.
+@MainActor
+struct PagedTabBarReselectionTests {
+    private func laidOutBar() -> PagedTabBar {
+        let bar = PagedTabBar(titles: ["Activity", "Gallery", "Short"], style: .navigationTitle)
+        bar.frame = CGRect(origin: .zero, size: bar.intrinsicContentSize)
+        bar.setNeedsLayout()
+        bar.layoutIfNeeded()
+        return bar
+    }
+
+    /// ⚠️ **A programmatic selection to the SAME segment is not a
+    /// re-selection**, and this caught the first cut of it. Setting a value to
+    /// what it already is is a no-op; TAPPING the thing already chosen is an
+    /// event, and only the second is a request. The profile mirrors every choice
+    /// onto a second bar, so `select` to the current segment happens on ordinary
+    /// tab changes — announcing those would scroll the list to the top every
+    /// time the viewer merely changed tabs.
+    @Test func settingTheSegmentAlreadySetAnnouncesNothing() {
+        let bar = laidOutBar()
+        var reselected: [Int] = []
+        var changed = 0
+        bar.onReselect = { reselected.append($0) }
+        bar.addAction(UIAction { _ in changed += 1 }, for: .valueChanged)
+
+        bar.select(0)
+        #expect(reselected.isEmpty)
+        #expect(changed == 0)
+    }
+
+    /// A real change still comes through the change channel, and only there.
+    @Test func changingTheSegmentAnnouncesAChange() {
+        let bar = laidOutBar()
+        var reselected: [Int] = []
+        var changed: [Int] = []
+        bar.onReselect = { reselected.append($0) }
+        bar.addAction(UIAction { [weak bar] _ in changed.append(bar?.selectedIndex ?? -1) },
+                      for: .valueChanged)
+
+        bar.select(2)
+        #expect(changed == [2])
+        #expect(reselected.isEmpty)
+        #expect(bar.selectedIndex == 2)
+    }
+
+    /// And a bar with no answer for re-selection is unaffected by any of it —
+    /// the other two screens wearing this bar never set the closure.
+    @Test func aBarWithoutAReselectionHandlerIsUnbothered() {
+        let bar = laidOutBar()
+        bar.select(1)
+        bar.select(1)
+        #expect(bar.selectedIndex == 1)
+    }
+}

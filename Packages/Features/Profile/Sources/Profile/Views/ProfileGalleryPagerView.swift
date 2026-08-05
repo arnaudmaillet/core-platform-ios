@@ -189,6 +189,24 @@ final class ProfileGalleryPagerView: UIView {
         return max(page.verticalOffset, contentFloor)
     }
 
+    /// A tap on the tab already showing: take the viewer back to the top of it.
+    ///
+    /// **The top of THAT TAB, not of the profile.** A tab's top is its first row
+    /// under the docked bar — `contentFloor` — because that is where a tab
+    /// starts now that each keeps its own place. Carrying on past it to the
+    /// identity block would answer a different question, and it would drag the
+    /// other two tabs up on the way, since below the dock line the offset stops
+    /// belonging to the tab and starts belonging to the screen.
+    ///
+    /// Never downwards. From above the line the list is already showing its
+    /// first row, and a "back to the top" that scrolled DOWN to get there is a
+    /// surprise rather than a service.
+    func scrollActivePageToTop() {
+        let page = pages[activeIndex]
+        guard page.verticalOffset > contentFloor + 0.5 else { return }
+        page.setVerticalOffset(contentFloor, animated: true)
+    }
+
     /// Selector tap → smooth page.
     func setActivePage(_ format: GalleryFilter.Format, animated: Bool) {
         guard let index = Self.pageOrder.firstIndex(of: format), index != activeIndex else { return }
