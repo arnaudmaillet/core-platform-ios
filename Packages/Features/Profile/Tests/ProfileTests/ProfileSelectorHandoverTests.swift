@@ -55,6 +55,8 @@ struct ProfileSelectorHandoverTests {
         func taggedPosts(for profileID: ProfileID, handle: String) async throws -> [GalleryPost] {
             []
         }
+
+        func posts(ids: [String]) async throws -> [GalleryPost] { [] }
     }
 
     /// A loaded screen with its view up — the selectors are only placed once

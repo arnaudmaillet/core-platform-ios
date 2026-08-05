@@ -1,3 +1,4 @@
+import CoreStorage
 import MediaCore
 import CoreModels
 import CoreNavigation
@@ -47,10 +48,14 @@ final class SnapFeedViewController: UIViewController {
     /// trailing platters morph.
     private var defaultToolbarItems: [UIBarButtonItem] = []
     private var engagedToolbarItems: [UIBarButtonItem] = []
-    /// Session-local optimistic bookmark state: the BFF exposes no save/
-    /// bookmark API yet (dev/BACKEND_GAPS.md), so the toggle lives here until
-    /// a real seam exists on `FeedViewModel` — swap this set for it.
-    private var bookmarkedPostIDs: Set<PostID> = []
+    /// The viewer's saved pile.
+    ///
+    /// It used to be a `Set` on this screen, which meant a save survived
+    /// exactly as long as the feed did and was visible to nothing else. The BFF
+    /// still exposes no save API — but the profile now has a Saved tab, and two
+    /// surfaces reading one list is precisely what a store is for. See
+    /// `PostBookmarkStore` for what a client-owned list can and cannot claim.
+    private let bookmarks = PostBookmarkStore()
 
     /// id → display model; lookups only, never measurement.
     private var modelsByID: [PostID: FeedItemDisplayModel] = [:]
@@ -569,16 +574,14 @@ final class SnapFeedViewController: UIViewController {
     /// Optimistic local toggle (no backend seam yet — see the set's comment);
     /// the glyph flips immediately, scoped to the acted-on post.
     private func toggleBookmark(for id: PostID) {
-        if !bookmarkedPostIDs.insert(id).inserted {
-            bookmarkedPostIDs.remove(id)
-        }
+        bookmarks.toggle(id.rawValue)
         refreshBookmarkGlyph(for: id)
     }
 
     /// Points the bookmark glyph at `id`'s state — called on toggle and when
     /// the active page changes.
     private func refreshBookmarkGlyph(for id: PostID) {
-        let saved = bookmarkedPostIDs.contains(id)
+        let saved = bookmarks.isSaved(id.rawValue)
         var config = bookmarkButton.configuration
         config?.image = UIImage(systemName: saved ? "bookmark.fill" : "bookmark")?
             .withConfiguration(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))

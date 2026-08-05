@@ -82,18 +82,18 @@ struct ProfileGalleryScrubTests {
     /// bar and the view model exactly as a swipe does.
     @Test func committingToANewPageReportsIt() {
         let pager = makePager()
-        var settled: [GalleryFilter.Format] = []
+        var settled: [ProfileTab] = []
         pager.onPageSettled = { settled.append($0) }
         pager.scrub(to: 1.7)
         pager.settleAfterScrub(velocityInPages: 0)
-        #expect(settled == [ProfileGalleryPagerView.pageOrder[2]])
+        #expect(settled == [pager.pageOrder[2]])
     }
 
     /// A scrub that returns to the page it started on is not a page change, so
     /// it announces nothing — the bar and the view model already agree.
     @Test func fallingBackToTheSamePageReportsNothing() {
         let pager = makePager()
-        var settled: [GalleryFilter.Format] = []
+        var settled: [ProfileTab] = []
         pager.onPageSettled = { settled.append($0) }
         pager.scrub(to: 0.3)
         pager.settleAfterScrub(velocityInPages: 0)
@@ -202,8 +202,8 @@ struct ProfileGalleryOffsetSyncTests {
     /// the page sliding in is already where the viewer is.
     @Test func aTapCarriesTheOffsetToItsDestination() {
         let pager = makePager()
-        pager.setActivePage(ProfileGalleryPagerView.pageOrder[1], animated: false)
-        #expect(pager.debugActiveFormat == ProfileGalleryPagerView.pageOrder[1])
+        pager.setActivePage(pager.pageOrder[1], animated: false)
+        #expect(pager.debugActiveFormat == pager.pageOrder[1])
         #expect(pager.debugVerticalOffsets.allSatisfy { $0 == 0 })
     }
 

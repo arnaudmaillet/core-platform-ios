@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreStorage
 import Foundation
 import PostGrid
 
@@ -44,12 +45,26 @@ public final class ProfileViewModel {
         public var activity: GalleryPageState
         public var media: GalleryPageState
         public var short: GalleryPageState
+        /// The viewer's saved pile. Absent on anyone else's profile — a saved
+        /// list is private by construction.
+        public var saved: GalleryPageState = .empty(message: "Nothing saved yet.")
+        /// ⚠️ Always the same answer, and honestly so. `engagement.v1` can
+        /// record a reaction and count reactions on a post; nothing anywhere
+        /// answers "which posts did this profile react to", and the client
+        /// cannot even read back whether IT reacted to one. The tab exists so
+        /// the shape is right when a seam arrives; what it shows until then is
+        /// the truth about what can be known.
+        public var reactions: GalleryPageState = .empty(
+            message: "Your reactions will appear here once we can list them."
+        )
 
-        public func state(for format: GalleryFilter.Format) -> GalleryPageState {
-            switch format {
-            case .activity: activity
-            case .media: media
-            case .short: short
+        public func state(for tab: ProfileTab) -> GalleryPageState {
+            switch tab {
+            case .format(.activity): activity
+            case .format(.media): media
+            case .format(.short): short
+            case .saved: saved
+            case .reactions: reactions
             }
         }
     }
@@ -92,6 +107,14 @@ public final class ProfileViewModel {
     /// means "session-local": the filter starts at the default and isn't
     /// persisted.
     private let galleryPreferences: GalleryPreferences?
+    /// The viewer's saved pile — client-owned, because nothing on the wire
+    /// carries one. Absent on anyone else's profile, and absent in the many
+    /// setups that never show a Saved tab at all.
+    private let bookmarks: PostBookmarkStore?
+    /// The saved pile's tiles, once hydrated. Held because the pile can change
+    /// while the screen is up (a post unsaved from the feed underneath) and the
+    /// snapshot is rebuilt from parts.
+    private var savedPage: GalleryPageState = .empty(message: "Nothing saved yet.")
     private let source: Source
     private let router: (any Router)?
     /// Last-known profiles, shared app-wide. Nil in compositions without one
@@ -137,6 +160,7 @@ public final class ProfileViewModel {
         reporting: (any ProfileReporting)? = nil,
         gallery: (any ProfileGalleryProviding)? = nil,
         galleryPreferences: GalleryPreferences? = nil,
+        bookmarks: PostBookmarkStore? = nil,
         source: Source = .currentUser,
         router: (any Router)? = nil,
         cache: ProfileCache? = nil
@@ -145,6 +169,7 @@ public final class ProfileViewModel {
         self.reporting = reporting
         self.gallery = gallery
         self.galleryPreferences = galleryPreferences
+        self.bookmarks = bookmarks
         self.source = source
         self.router = router
         self.cache = cache
@@ -200,6 +225,19 @@ public final class ProfileViewModel {
     /// Whether this screen shows a gallery at all — drives the filter tray's
     /// existence, not just its state.
     public var hasGallery: Bool { gallery != nil }
+
+    /// Whether this screen is the viewer looking at themselves.
+    ///
+    /// Read from the SOURCE, so it is settled before the first byte arrives —
+    /// the pager's page count depends on it and the pages are built once, in
+    /// `init`, long before any relationship read resolves.
+    ///
+    /// ⚠️ Deliberately narrower than the `isSelf` the relationships screen is
+    /// handed. That one also accepts a routed-to profile that turns out to be
+    /// yours; this one does not, because a profile reached by tapping a handle
+    /// is being read as somebody's page rather than as your own, and growing
+    /// two extra tabs when the read lands would be a jump.
+    public var isOwnProfile: Bool { source == .currentUser }
 
     /// Everything the followers / following screen needs to open, or `nil`
     /// until the profile has loaded (the counters read "—" until then, so
@@ -478,8 +516,40 @@ public final class ProfileViewModel {
         onGalleryChange?(GallerySnapshot(
             activity: page(.activity),
             media: page(.media),
-            short: page(.short)
+            short: page(.short),
+            saved: savedPage
         ))
+    }
+
+    /// Rebuilds the Saved page from the pile the viewer has curated.
+    ///
+    /// ⚠️ Reads the ids EVERY time rather than caching them. The pile is
+    /// mutable from outside this screen — the feed's bookmark button writes to
+    /// the same store — so the ids are the store's answer at the moment of
+    /// asking, not a copy taken when the profile opened.
+    ///
+    /// A post that no longer resolves simply drops out, the same way a tile
+    /// that fails to hydrate does everywhere else. That is the honest behaviour
+    /// for a client-owned list pointing at server-owned posts: the pile can
+    /// outlive what it points at.
+    func loadSavedPosts() {
+        guard let bookmarks, let gallery else { return }
+        let ids = bookmarks.savedPostIDs
+        guard !ids.isEmpty else {
+            savedPage = .empty(message: "Nothing saved yet.")
+            renderGallery()
+            return
+        }
+        savedPage = .loading
+        renderGallery()
+        Task { [weak self] in
+            let tiles = (try? await gallery.posts(ids: ids)) ?? []
+            guard let self else { return }
+            savedPage = tiles.isEmpty
+                ? .empty(message: "Nothing saved yet.")
+                : .content(tiles)
+            renderGallery()
+        }
     }
 
     /// Names the empty combination so the blank page reads as an answer.

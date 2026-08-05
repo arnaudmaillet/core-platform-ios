@@ -22,13 +22,15 @@ import UIKit
 /// `ProfileHeaderScrollCoordinator` from whichever page is being read, which is
 /// what keeps a tab switch from jumping — see that type for the whole rule.
 final class ProfileGalleryPagerView: UIView {
-    /// Pager order == selector order.
-    static let pageOrder: [GalleryFilter.Format] = [.activity, .media, .short]
+    /// Pager order == selector order. Set at init, because how many pages
+    /// there are depends on whose profile this is: the viewer's own carries
+    /// Saved and Liked, everyone else's does not.
+    let pageOrder: [ProfileTab]
 
     var onItemTapped: ((GalleryPost) -> Void)?
     /// Fired when a swipe settles on a page (not for programmatic paging) —
     /// the selector mirrors it.
-    var onPageSettled: ((GalleryFilter.Format) -> Void)?
+    var onPageSettled: ((ProfileTab) -> Void)?
     /// Fractional page position, emitted on every scroll tick.
     ///
     /// This is what lets the selector's lens track the finger instead of
@@ -49,11 +51,14 @@ final class ProfileGalleryPagerView: UIView {
     private let pages: [ProfileGalleryGridView]
     private var activeIndex = 0
 
-    init(imagePipeline: ImagePipeline) {
-        pages = Self.pageOrder.map { format in
+    init(imagePipeline: ImagePipeline, tabs: [ProfileTab] = ProfileTab.publicTabs) {
+        pageOrder = tabs
+        pages = tabs.map { tab in
             ProfileGalleryGridView(
                 imagePipeline: imagePipeline,
-                style: format == .media ? .grid : .list
+                // The mosaic is for pages that are mostly pictures. Saved and
+                // Liked are whatever the viewer kept, which is mostly not.
+                style: tab == .format(.media) ? .grid : .list
             )
         }
         super.init(frame: .zero)
@@ -99,8 +104,8 @@ final class ProfileGalleryPagerView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func render(_ snapshot: ProfileViewModel.GallerySnapshot) {
-        for (index, format) in Self.pageOrder.enumerated() {
-            pages[index].render(snapshot.state(for: format))
+        for (index, tab) in pageOrder.enumerated() {
+            pages[index].render(snapshot.state(for: tab))
         }
     }
 
@@ -208,8 +213,8 @@ final class ProfileGalleryPagerView: UIView {
     }
 
     /// Selector tap → smooth page.
-    func setActivePage(_ format: GalleryFilter.Format, animated: Bool) {
-        guard let index = Self.pageOrder.firstIndex(of: format), index != activeIndex else { return }
+    func setActivePage(_ tab: ProfileTab, animated: Bool) {
+        guard let index = pageOrder.firstIndex(of: tab), index != activeIndex else { return }
         // The destination takes its position BEFORE it travels, so the page
         // sliding in is already where it belongs rather than arriving somewhere
         // else and correcting.
@@ -254,7 +259,7 @@ final class ProfileGalleryPagerView: UIView {
 
 #if DEBUG
 extension ProfileGalleryPagerView {
-    var debugActiveFormat: GalleryFilter.Format { Self.pageOrder[activeIndex] }
+    var debugActiveFormat: ProfileTab { pageOrder[activeIndex] }
     var debugActiveIndex: Int { activeIndex }
     var debugContentOffsetX: CGFloat { scrollView.contentOffset.x }
     var debugScrollView: UIScrollView { scrollView }
@@ -325,7 +330,7 @@ extension ProfileGalleryPagerView {
         }
         reportVerticalOffset()
         guard changedPage else { return }
-        onPageSettled?(Self.pageOrder[index])
+        onPageSettled?(pageOrder[index])
     }
 }
 
@@ -374,7 +379,7 @@ extension ProfileGalleryPagerView: UIScrollViewDelegate {
         guard landed != activeIndex else { return }
         activeIndex = landed
         reportVerticalOffset()
-        onPageSettled?(Self.pageOrder[landed])
+        onPageSettled?(pageOrder[landed])
     }
 }
 

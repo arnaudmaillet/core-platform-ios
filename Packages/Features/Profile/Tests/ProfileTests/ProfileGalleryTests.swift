@@ -86,6 +86,9 @@ private actor StubGalleryProvider: ProfileGalleryProviding {
         lastTaggedHandle = handle
         return tagged
     }
+
+
+    func posts(ids: [String]) async throws -> [GalleryPost] { [] }
 }
 
 // MARK: - Filter semantics (pure)

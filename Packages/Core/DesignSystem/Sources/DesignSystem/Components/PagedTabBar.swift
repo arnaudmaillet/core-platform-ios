@@ -412,6 +412,40 @@ public final class PagedTabBar: UIControl {
         }
     }
 
+    /// Whether a hugging bar that cannot fit may scroll instead of truncating.
+    ///
+    /// A title view normally may NOT: it gets only what the side buttons leave,
+    /// and a strip that scrolled there could hide a tab behind the edge with
+    /// nothing to say so. That reasoning holds while the titles nearly fit —
+    /// the shortfall lands on one word and a truncated title is still a visible
+    /// title.
+    ///
+    /// It stops holding once there are more tabs than the slot can hold at any
+    /// size. Measured on the profile's five: 317pt of titles into a slot the
+    /// navigation bar caps at 258, and the shortest naming that keeps them
+    /// distinguishable still wants 269. At that shortfall something is hidden
+    /// whatever the bar does, and a strip that scrolls hides tabs REACHABLY
+    /// where truncation hides them permanently — and takes the selected title
+    /// first, which is the one the viewer most needs to read.
+    ///
+    /// Off by default, so the two screens whose bars already fit keep the
+    /// arrangement that was measured for them.
+    public var scrollsWhenCrowded: Bool = false {
+        didSet {
+            guard scrollsWhenCrowded != oldValue, style.hugsContent else { return }
+            crowdedWidthConstraint?.isActive = scrollsWhenCrowded
+            snugWidthConstraint?.isActive = !scrollsWhenCrowded
+            for segment in segments {
+                segment.setWidthPriority(scrollsWhenCrowded ? .required : style.segmentWidthPriority)
+            }
+            invalidateIntrinsicContentSize()
+            setNeedsLayout()
+        }
+    }
+
+    private var snugWidthConstraint: NSLayoutConstraint?
+    private var crowdedWidthConstraint: NSLayoutConstraint?
+
     /// Whether the bar is currently taking its width from its host rather than
     /// stating one — true for a floating bar always, and for a hugging bar that
     /// has been told to fill.
@@ -611,13 +645,26 @@ public final class PagedTabBar: UIControl {
         // request grew 245 → 258 (the cap) with 25pt of content still
         // outstanding, and "Short 99" lost half its badge off the trailing edge
         // while "Activity" sat there untruncated with room to give.
-        content.widthAnchor.constraint(
+        //
+        // A crowded bar swaps `==` for `>=`, which is what lets the content
+        // out-measure the capsule and the scroll view take it from there. Both
+        // are built; `scrollsWhenCrowded` picks. When the titles DO fit the two
+        // are indistinguishable — Auto Layout satisfies `>=` at the smallest
+        // width that works, which is the frame's.
+        let snug = content.widthAnchor.constraint(
             equalTo: scroller.frameLayoutGuide.widthAnchor,
             multiplier: 1
-        ).isActive = style.hugsContent
-        content.widthAnchor.constraint(
+        )
+        let crowded = content.widthAnchor.constraint(
             greaterThanOrEqualTo: scroller.frameLayoutGuide.widthAnchor
-        ).isActive = !style.hugsContent
+        )
+        if style.hugsContent {
+            snugWidthConstraint = snug
+            crowdedWidthConstraint = crowded
+            snug.isActive = true
+        } else {
+            crowded.isActive = true
+        }
 
 
         // Grab anywhere. The capsule is one physical object, so dragging it
@@ -1239,6 +1286,22 @@ private final class SegmentView: UIButton {
 
     /// The pill's laid-out size, for a host asserting its margins.
     var badgeSize: CGSize { badge.bounds.size }
+
+    /// Re-decides what gives when the host is too narrow for this segment.
+    ///
+    /// Breakable means the title truncates where it stands; required means it
+    /// keeps its width and pushes the strip past the capsule, where a scroll
+    /// view can reach it. Which is right depends on how far past the host the
+    /// row goes — see `PagedTabBar.scrollsWhenCrowded`.
+    func setWidthPriority(_ priority: UILayoutPriority) {
+        guard pinnedWidthConstraint.priority != priority else { return }
+        pinnedWidthConstraint.priority = priority
+        // Compression resistance has to follow, or the label inside gives way
+        // where the segment around it did not — a full-width segment with an
+        // ellipsis in the middle of it.
+        plainLabel.setContentCompressionResistancePriority(priority, for: .horizontal)
+        boldLabel.setContentCompressionResistancePriority(priority, for: .horizontal)
+    }
 
     /// The lens's height inside this segment, which is also the smallest width
     /// the segment may take — see `updatePinnedWidth`.
