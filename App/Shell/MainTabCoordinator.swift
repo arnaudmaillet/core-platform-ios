@@ -97,6 +97,22 @@ final class MainTabCoordinator: NSObject, Coordinator {
     /// The tap that opened the menu, so the popover can point back at it.
     private var pressedTabFrame: CGRect = .zero
 
+    /// One recognizer per menu-bearing tab button, by recognizer identity.
+    ///
+    /// **A press on the button knows which tab it is.** That is the whole
+    /// reason for these: the bar-level recognizer has to answer "which button
+    /// was under 308,23" from a private view hierarchy, and on hardware it
+    /// answered wrong — the device log read `-> no menu tab`. A recognizer
+    /// attached to the button cannot be wrong about that, because the mapping
+    /// is made once, at attach time, and never re-derived from a coordinate.
+    ///
+    /// ⚠️ The bar-level one is KEPT behind these rather than replaced. Finding
+    /// the buttons is still a search through views UIKit does not promise, and
+    /// on a build where that search comes up empty the bar still catches the
+    /// press. Two mechanisms, one of which needs no private lookup at press
+    /// time and one of which needs no private lookup at all.
+    private var buttonPresses: [ObjectIdentifier: AppTab] = [:]
+
     /// Tabs paired with their `AppTab`, in bar order — the lookup `selectTab`
     /// resolves against. Every bar button is in here now that the Feed action
     /// slot has become the For You root.
@@ -161,6 +177,11 @@ final class MainTabCoordinator: NSObject, Coordinator {
         // belongs to the view, and the view does not change. Nothing needs
         // keeping aligned any more, which is the whole point of the change.
         tabBarController.tabBar.addGestureRecognizer(tabMenuPress)
+        // The bar builds and rebuilds its buttons on layout — a selection
+        // changes their sizes, a lens rename changes their labels — so the
+        // per-button recognizers are re-checked whenever it lays out. Attaching
+        // is idempotent; see `attachTabButtonPresses`.
+        tabBarController.onLayout = { [weak self] in self?.attachTabButtonPresses() }
 
         loadAvatar()
         refreshUnreadBadge()
@@ -368,13 +389,60 @@ extension MainTabCoordinator: UIGestureRecognizerDelegate {
         shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
     ) -> Bool {
         gestureRecognizer === tabMenuPress
+            || buttonPresses[ObjectIdentifier(gestureRecognizer)] != nil
+    }
+
+    /// Puts a recognizer on each menu-bearing tab button, and forgets the ones
+    /// whose buttons have gone.
+    ///
+    /// Idempotent, because it runs on every layout pass: a button that already
+    /// carries one of ours keeps it, and only its TAB is refreshed — the For
+    /// You item is renamed by whichever lens is active, so the button that was
+    /// "For You" a moment ago may be "Work" now while being the same view.
+    ///
+    /// ⚠️ Cleanup is by identity, not by removal. A recognizer belongs to its
+    /// view and dies with it, so a rebuilt bar disposes of the old ones itself;
+    /// what would leak is this map's entries, which is what the filter drops.
+    private func attachTabButtonPresses() {
+        let bar = tabBarController.tabBar
+        var live: Set<ObjectIdentifier> = []
+        for tab in [AppTab.profile, .forYou] {
+            guard let title = title(for: tab),
+                  let button = tabButton(labelled: title, at: barIndex(of: tab), in: bar)
+            else { continue }
+            let existing = button.gestureRecognizers?
+                .compactMap { $0 as? UILongPressGestureRecognizer }
+                .first { buttonPresses[ObjectIdentifier($0)] != nil }
+            let press = existing ?? {
+                let press = UILongPressGestureRecognizer(
+                    target: self, action: #selector(handleTabMenuPress)
+                )
+                press.minimumPressDuration = 0.35
+                press.cancelsTouchesInView = true
+                press.delegate = self
+                button.addGestureRecognizer(press)
+                trace("attached to \(tab) button")
+                return press
+            }()
+            buttonPresses[ObjectIdentifier(press)] = tab
+            live.insert(ObjectIdentifier(press))
+        }
+        buttonPresses = buttonPresses.filter { live.contains($0.key) }
     }
 
     @objc private func handleTabMenuPress(_ press: UILongPressGestureRecognizer) {
         guard press.state == .began else { return }
+        // Two recognizers can see one press — the button's and the bar's — and
+        // only the first of them should open anything.
+        guard tabBarController.presentedViewController == nil else { return }
         let bar = tabBarController.tabBar
         let location = press.location(in: bar)
-        guard let (tab, button) = tabAndButton(at: location) else {
+        // A recognizer that belongs to a button already knows its tab; only the
+        // bar's has to work it out from where the finger landed.
+        let resolved: (AppTab, UIView)? = buttonPresses[ObjectIdentifier(press)]
+            .flatMap { tab in press.view.map { (tab, $0) } }
+            ?? tabAndButton(at: location)
+        guard let (tab, button) = resolved else {
             trace("press at \(Int(location.x)),\(Int(location.y)) resolved to no menu tab")
             return
         }
@@ -437,8 +505,27 @@ extension MainTabCoordinator {
     ///
     /// Only the two tabs that HAVE menus are considered; a press anywhere else
     /// returns nil, which is what lets the bar go on behaving like a tab bar.
+    /// ⚠️ **Starts from the view under the finger and walks UP.** The previous
+    /// version searched the whole bar for a button and then asked whether its
+    /// frame contained the point — two private-hierarchy guesses instead of
+    /// one, and on hardware it guessed wrong: the device log read
+    /// `PROBE long press began at 308,23 -> no menu tab`. Hit-testing asks
+    /// UIKit which view is there, which is the same question with an answer
+    /// that cannot drift, and the walk up finds the button from whichever
+    /// label or image inside it actually took the point.
+    ///
+    /// Only reached by the BAR's recognizer now. A recognizer attached to a
+    /// button knows its tab without any of this.
     private func tabAndButton(at location: CGPoint) -> (AppTab, UIView)? {
         let bar = tabBarController.tabBar
+        var node = bar.hitTest(location, with: nil)
+        while let view = node, view !== bar {
+            if let tab = menuTab(titled: view.accessibilityLabel) { return (tab, view) }
+            node = view.superview
+        }
+        // Nothing on the way up named itself. Fall back to the old search,
+        // which is wrong less often than it is right but is better than
+        // refusing a press the viewer definitely made.
         for tab in [AppTab.profile, .forYou] {
             guard let title = title(for: tab),
                   let button = tabButton(labelled: title, at: barIndex(of: tab), in: bar)
@@ -446,6 +533,12 @@ extension MainTabCoordinator {
             if button.convert(button.bounds, to: bar).contains(location) { return (tab, button) }
         }
         return nil
+    }
+
+    /// Which menu-bearing tab wears this label, if any.
+    private func menuTab(titled label: String?) -> AppTab? {
+        guard let label else { return nil }
+        return [AppTab.profile, .forYou].first { title(for: $0) == label }
     }
 
     private func title(for tab: AppTab) -> String? {
