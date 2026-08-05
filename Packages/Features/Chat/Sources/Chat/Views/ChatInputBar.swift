@@ -10,6 +10,9 @@ final class ChatInputBar: UIView {
     var onSend: ((String) -> Void)?
     /// Fired by the media (+) button; media composition is the host's affair.
     var onAttachMedia: (() -> Void)?
+    /// Fired by the trailing mic button when the field is empty; voice capture
+    /// is the host's affair, the same way media composition is.
+    var onRecordVoice: (() -> Void)?
     /// Fired by the reply preview's close control — the host cancels the reply.
     var onCancelReply: (() -> Void)?
 
@@ -35,14 +38,14 @@ final class ChatInputBar: UIView {
     private var replyCollapsed: NSLayoutConstraint!
 
     /// What the trailing round button does right now. With text present it
-    /// sends; with the field empty *while focused* it collapses the keyboard
-    /// (nothing to send, so the send glyph would be a dead control) — the
-    /// button morphs between the two as text and focus change.
-    private enum ActionMode { case send, dismissKeyboard }
-    private var actionMode: ActionMode = .send
-    /// Mirrors the text view's first-responder state (`keyboard open`),
-    /// tracked via the begin/end-editing delegate callbacks.
-    private var isEditingText = false
+    /// sends; with the field empty it offers voice capture (nothing to send, so
+    /// a send glyph would be a dead control) — the button morphs between the
+    /// two as the text changes. Focus is deliberately NOT part of this: an
+    /// empty composer offers the mic whether or not the keyboard is up, so the
+    /// glyph never flickers as the keyboard comes and goes. The keyboard is
+    /// dismissed by tapping or dragging the transcript instead.
+    private enum ActionMode { case send, voice }
+    private var actionMode: ActionMode = .voice
 
     // Effect set on window attach: materializing one in init contacts the
     // render server and stalls headless CI simulators (see ci memory).
@@ -91,8 +94,8 @@ final class ChatInputBar: UIView {
         mediaButton.configuration?.cornerStyle = .capsule
         mediaButton.addAction(UIAction { [weak self] _ in self?.onAttachMedia?() }, for: .primaryActionTriggered)
 
-        sendButton.accessibilityLabel = "Send"
-        applyButtonStyle(for: .send)
+        // Starts in the resting (empty-field) mode, matching `actionMode`.
+        applyButtonStyle(for: .voice)
         sendButton.addAction(UIAction { [weak self] _ in self?.actionTapped() }, for: .primaryActionTriggered)
 
         configureReplyPreview()
@@ -214,6 +217,7 @@ final class ChatInputBar: UIView {
     /// with the preview (Messages behavior).
     func focus() { textView.becomeFirstResponder() }
 
+
     /// Seeds the composer with text the user has not typed — today, a profile
     /// link carried in from the share sheet. Deliberately NOT sent
     /// automatically: the message is theirs to review, edit, or abandon, and a
@@ -296,8 +300,30 @@ final class ChatInputBar: UIView {
     private func actionTapped() {
         switch actionMode {
         case .send: sendTapped()
-        case .dismissKeyboard: textView.resignFirstResponder()
+        case .voice: onRecordVoice?()
         }
+    }
+
+    /// Drops text — today a favorite sticker's emoji — into the composer rather
+    /// than sending it outright: the message is the user's to review, extend,
+    /// or abandon, the same rule `setDraftText` follows for shared links. The
+    /// Send button lighting up blue is the receipt that the tap landed.
+    ///
+    /// Inserts at the caret while the composer is focused and appends
+    /// otherwise: an unfocused text view reports a stale zero-length selection
+    /// at the start, which would file the sticker in front of text already
+    /// typed. Ends by running the same sync a keystroke would, so the field
+    /// grows and the button morphs exactly as if it had been typed.
+    func insertIntoComposer(_ text: String) {
+        let current = textView.text ?? ""
+        if textView.isFirstResponder, let caret = Range(textView.selectedRange, in: current) {
+            textView.text = current.replacingCharacters(in: caret, with: text)
+            let location = textView.selectedRange.location + (text as NSString).length
+            textView.selectedRange = NSRange(location: location, length: 0)
+        } else {
+            textView.text = current + text
+        }
+        textViewDidChange(textView)
     }
 
     private func sendTapped() {
@@ -309,7 +335,7 @@ final class ChatInputBar: UIView {
     }
 
     private static func actionImage(for mode: ActionMode) -> UIImage? {
-        let symbol = mode == .send ? "arrow.up" : "keyboard.chevron.compact.down"
+        let symbol = mode == .send ? "arrow.up" : "mic.fill"
         return UIImage(
             systemName: symbol,
             withConfiguration: UIImage.SymbolConfiguration(weight: .semibold)
@@ -318,11 +344,13 @@ final class ChatInputBar: UIView {
 
     /// Rebuilds the trailing button's Liquid-Glass configuration for a mode:
     /// a prominent blue fill + white glyph to send; the plain clear-glass
-    /// material (no color fill) + secondary-label glyph to dismiss the
-    /// keyboard — nothing to send, so the control recedes into the bar the
-    /// same way the leading `+` does. `UIView.transition` wrapping this call
-    /// cross-dissolves the glyph AND the material together.
+    /// material (no color fill) for the mic — with nothing to send the control
+    /// recedes into the bar and reads as a peer of the leading `+`, so the blue
+    /// fill stays reserved for "there is a message waiting to go".
+    /// `UIView.transition` wrapping this call cross-dissolves the glyph AND the
+    /// material together.
     private func applyButtonStyle(for mode: ActionMode) {
+        sendButton.accessibilityLabel = mode == .send ? "Send" : "Record Voice Message"
         switch mode {
         case .send:
             var config = UIButton.Configuration.prominentGlass()
@@ -331,28 +359,25 @@ final class ChatInputBar: UIView {
             config.baseBackgroundColor = .systemBlue
             config.baseForegroundColor = .white
             sendButton.configuration = config
-        case .dismissKeyboard:
+        case .voice:
             var config = UIButton.Configuration.glass()
             config.cornerStyle = .capsule
             config.image = Self.actionImage(for: mode)
-            config.baseForegroundColor = .secondaryLabel
             sendButton.configuration = config
         }
     }
 
-    /// Resolves the button's mode from text + focus, cross-dissolving the
+    /// Resolves the button's mode from the text alone, cross-dissolving the
     /// glyph and background when the mode flips, and setting the spinner +
     /// enablement per mode:
     ///  - text present → Send (enabled while not in flight)
-    ///  - empty + keyboard open → Dismiss keyboard (always live)
-    ///  - empty + keyboard closed → Send, disabled (the resting affordance)
+    ///  - empty → Voice record (live, keyboard up or down)
     private func updateActionButton() {
         let hasText = !textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let newMode: ActionMode = hasText ? .send : (isEditingText ? .dismissKeyboard : .send)
+        let newMode: ActionMode = hasText ? .send : .voice
 
         if newMode != actionMode {
             actionMode = newMode
-            sendButton.accessibilityLabel = newMode == .send ? "Send" : "Dismiss Keyboard"
             UIView.transition(
                 with: sendButton, duration: 0.2,
                 options: [.transitionCrossDissolve, .allowUserInteraction]
@@ -366,7 +391,7 @@ final class ChatInputBar: UIView {
         sendButton.configuration?.showsActivityIndicator = isSending && newMode == .send
         switch newMode {
         case .send: sendButton.isEnabled = hasText && !isSending
-        case .dismissKeyboard: sendButton.isEnabled = !isSending
+        case .voice: sendButton.isEnabled = !isSending
         }
     }
 
@@ -395,13 +420,4 @@ extension ChatInputBar: UITextViewDelegate {
         updateFieldHeight()
     }
 
-    func textViewDidBeginEditing(_ textView: UITextView) {
-        isEditingText = true
-        updateActionButton()
-    }
-
-    func textViewDidEndEditing(_ textView: UITextView) {
-        isEditingText = false
-        updateActionButton()
-    }
 }
