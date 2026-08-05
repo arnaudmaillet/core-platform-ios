@@ -132,12 +132,11 @@ final class ProfileGalleryPagerView: UIView {
 
     /// Puts every page at the same vertical offset.
     ///
-    /// ⚠️ **This is what makes a tab switch seamless, and it has to reach the
-    /// pages that are NOT being looked at.** A page keeps its own offset; left
-    /// alone, swiping to a neighbour would arrive at wherever that neighbour was
-    /// last left — usually its top — and the header would snap back with it. So
-    /// the offset is a property of the SCREEN, pushed to all three, and the one
-    /// the viewer swipes to is already where they were.
+    /// ⚠️ **This is what keeps the HEADER still, and it has to reach the pages
+    /// that are NOT being looked at.** A page keeps its own offset; left alone,
+    /// swiping to a neighbour would arrive at wherever that neighbour was last
+    /// left, and the header — which rides whichever page is active — would snap
+    /// with it.
     ///
     /// A page whose content is too short to reach the offset takes as much of it
     /// as it can, which is the same clamp UIKit would apply, done deliberately
@@ -148,13 +147,55 @@ final class ProfileGalleryPagerView: UIView {
         }
     }
 
+    /// How far the screen scrolls before the header has finished travelling —
+    /// the line either side of which the offset means a different thing.
+    private var dockLine: CGFloat = 0
+    /// The least a tab may sit at once the header is docked: the offset that
+    /// puts its FIRST ROW directly under the navigation bar.
+    ///
+    /// ⚠️ **Not the same number as `dockLine`, and the difference is a visible
+    /// gap.** The header docks once its selector reaches the bar, but the pages
+    /// are inset by the header's whole height — selector slot included — so at
+    /// the dock line a tab's first row still sits a slot's height lower. A tab
+    /// arriving at `dockLine` therefore opens with an empty band under the
+    /// chrome. (Measured: 60pt of white above the first tile.)
+    private var contentFloor: CGFloat = 0
+
+    func setSharedTravel(dockLine: CGFloat, contentFloor: CGFloat) {
+        self.dockLine = max(0, dockLine)
+        self.contentFloor = max(0, contentFloor)
+    }
+
+    /// Where a page should sit, given where the screen currently is.
+    ///
+    /// **The offset is two things stacked, and only one of them belongs to the
+    /// tab.** BELOW `dockLine` the header is still travelling, and a header
+    /// is one object that cannot be in two places: every page has to agree, or
+    /// changing tabs teleports the identity block. ABOVE it the header is docked
+    /// and stays docked whatever the number is — so each tab is free to keep its
+    /// own place in its own content, which is the whole point of there being
+    /// three of them.
+    ///
+    /// This is the one rule that reconciles two things that sound contradictory:
+    /// every tab remembers where it was, AND switching tabs moves the chrome by
+    /// nothing. What it costs is that scrolling back up past the dock line
+    /// carries every tab up with it — unavoidable, because up there the tabs and
+    /// the header are the same number. A tab therefore remembers its place for
+    /// exactly as long as the viewer stays below the line, which is the whole
+    /// time the memory is worth anything.
+    private func alignedOffset(for page: ProfileGalleryGridView) -> CGFloat {
+        let current = verticalOffset
+        guard dockLine > 0, current >= dockLine else { return current }
+        return max(page.verticalOffset, contentFloor)
+    }
+
     /// Selector tap → smooth page.
     func setActivePage(_ format: GalleryFilter.Format, animated: Bool) {
         guard let index = Self.pageOrder.firstIndex(of: format), index != activeIndex else { return }
-        // The destination adopts the offset BEFORE it travels, so the page
-        // sliding in is already where the viewer is rather than arriving at its
-        // own top and correcting.
-        pages[index].setVerticalOffset(verticalOffset)
+        // The destination takes its position BEFORE it travels, so the page
+        // sliding in is already where it belongs rather than arriving somewhere
+        // else and correcting.
+        pages[index].setVerticalOffset(alignedOffset(for: pages[index]))
         activeIndex = index
         scrollView.setContentOffset(CGPoint(x: CGFloat(index) * bounds.width, y: 0), animated: animated)
         reportVerticalOffset()
@@ -201,6 +242,18 @@ extension ProfileGalleryPagerView {
     var debugScrollView: UIScrollView { scrollView }
     var debugIsScrubbing: Bool { isScrubbing }
     var debugVerticalOffsets: [CGFloat] { pages.map(\.verticalOffset) }
+    /// Where a given page would be put for the screen's current position —
+    /// the split between the screen's share of the offset and the tab's, which
+    /// is otherwise only observable by switching tabs and looking.
+    func debugAlignedOffset(forPage index: Int) -> CGFloat {
+        alignedOffset(for: pages[index])
+    }
+
+    /// Leaves one page somewhere without moving the others, which is what a
+    /// viewer does by scrolling a tab and then switching away from it.
+    func debugSetOffset(_ offset: CGFloat, forPage index: Int) {
+        pages[index].setVerticalOffset(offset)
+    }
     /// Parks the active page in its pulled-down region, so the banner's
     /// stretch-over-overscroll can be screenshotted without touch injection.
     func debugOverscroll(by distance: CGFloat) {
@@ -244,7 +297,7 @@ extension ProfileGalleryPagerView {
         let changedPage = index != activeIndex
         // The index is true before the travel starts, so nothing can re-align to
         // the page being left.
-        pages[index].setVerticalOffset(verticalOffset)
+        pages[index].setVerticalOffset(alignedOffset(for: pages[index]))
         activeIndex = index
         let target = landing * bounds.width
         if scrollView.contentOffset.x == target {
@@ -265,11 +318,16 @@ extension ProfileGalleryPagerView: UIScrollViewDelegate {
         guard scrollView === self.scrollView, bounds.width > 0 else { return }
         onProgress?(scrollView.contentOffset.x / bounds.width)
         // ⚠️ Mid-swipe both pages are on screen, so the one arriving has to be
-        // where the one leaving is — every frame, not on settle. Carried here
-        // rather than at the end because a viewer watching a neighbour slide in
-        // at a different scroll position has already seen the jump the settle
-        // would have been correcting.
-        setVerticalOffset(verticalOffset, excluding: pages[activeIndex])
+        // settled every frame rather than on release — a viewer watching a
+        // neighbour slide in and then correct itself has already seen the jump.
+        //
+        // Where it settles TO is `alignedOffset`'s to decide: level with this
+        // page while the header is still travelling, its own remembered place
+        // once the header is docked.
+        let active = pages[activeIndex]
+        for page in pages where page !== active {
+            page.setVerticalOffset(alignedOffset(for: page))
+        }
     }
 
     /// A release that does not throw the pages far enough to decelerate never

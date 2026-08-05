@@ -620,6 +620,10 @@ final class ProfileViewController: UIViewController {
         // short one cannot hold the position a long one was left at and the
         // header follows the clamp back up. See `setMinimumScrollTravel`.
         galleryPager.setMinimumScrollTravel(contentTravel)
+        // Where the header stops, and so where the offset stops being the
+        // screen's business and starts being each tab's own. See the pager's
+        // `alignedOffset`.
+        galleryPager.setSharedTravel(dockLine: headerTravel, contentFloor: contentTravel)
     }
 
     /// Opens the followers / following lists on the tapped counter's tab.

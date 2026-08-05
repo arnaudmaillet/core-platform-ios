@@ -150,13 +150,17 @@ struct ProfileGalleryScrubTests {
 }
 
 
-/// The vertical offset is a property of the SCREEN, not of a page.
+/// The vertical offset is TWO things stacked, and only one of them belongs to
+/// the tab.
 ///
-/// Each tab scrolls itself now, so left alone each would keep its own place and
-/// switching tabs would jump to wherever that tab was last left. The offset is
-/// pushed to all three instead, which is what makes a switch seamless — and it
-/// has to reach the pages nobody is looking at, because those are the ones a
-/// swipe is about to reveal.
+/// Below the header's travel it is the SCREEN's: the header is one object, it
+/// rides whichever page is active, and pages that disagreed down there would
+/// teleport the identity block every time the tab changed. Above it the header
+/// is docked and stays docked whatever the number is, so each tab keeps its own
+/// place in its own content.
+///
+/// Either way the writes have to reach the pages nobody is looking at, because
+/// those are the ones a swipe is about to reveal.
 @MainActor
 struct ProfileGalleryOffsetSyncTests {
     private struct SilentFetcher: ImageFetching {
@@ -210,6 +214,73 @@ struct ProfileGalleryOffsetSyncTests {
         let pager = makePager()
         pager.setVerticalOffset(5_000)
         #expect(pager.debugVerticalOffsets.allSatisfy { $0 >= 0 })
+    }
+
+    // MARK: - Whose offset is it
+
+    /// The header docks at 300; a tab's first row is only flush under the bar
+    /// at 360, and the pages can travel 2,000 so a remembered position has
+    /// somewhere to be remembered.
+    private func splitPager() -> ProfileGalleryPagerView {
+        let pager = makePager()
+        pager.setMinimumScrollTravel(2_000)
+        pager.setSharedTravel(dockLine: 300, contentFloor: 360)
+        return pager
+    }
+
+    /// Below the header's travel every page agrees, because the header is down
+    /// there with them and it cannot be in two places.
+    @Test func belowTheHeadersTravelEveryTabMovesTogether() {
+        let pager = splitPager()
+        pager.setVerticalOffset(120)
+        #expect(pager.debugAlignedOffset(forPage: 1) == 120)
+        #expect(pager.debugAlignedOffset(forPage: 2) == 120)
+    }
+
+    /// ⚠️ **Above it, a tab keeps its own place — this is the whole feature.**
+    /// The header is docked at any offset past its travel, so the number is the
+    /// tab's to choose, and returning to one that was left further down puts it
+    /// back there rather than at the top of its list.
+    @Test func aboveTheHeadersTravelEachTabKeepsItsOwnPlace() {
+        let pager = splitPager()
+        pager.debugSetOffset(900, forPage: 1)
+        pager.debugSetOffset(400, forPage: 0)
+        #expect(pager.debugAlignedOffset(forPage: 1) == 900)
+    }
+
+    /// ⚠️ A tab with nothing to remember arrives with its first row under the
+    /// bar — at the CONTENT floor, not at the dock line.
+    ///
+    /// The two differ by the selector's slot, which the pages are still inset
+    /// by after the selector has left it, so a tab dropped at the dock line
+    /// opens with an empty band under the chrome. Measured at 60pt of white
+    /// above the first tile before this was split in two.
+    @Test func aFreshTabArrivesFlushUnderTheBarRatherThanAtTheDockLine() {
+        let pager = splitPager()
+        pager.debugSetOffset(0, forPage: 2)
+        pager.debugSetOffset(700, forPage: 0)
+        #expect(pager.debugAlignedOffset(forPage: 2) == 360)
+    }
+
+    /// And never back above the dock line — a tab left at its own top must not
+    /// drag the header down with it and hand back an identity block the viewer
+    /// did not ask for.
+    @Test func aTabAtItsTopStillArrivesDocked() {
+        let pager = splitPager()
+        pager.debugSetOffset(0, forPage: 2)
+        pager.debugSetOffset(700, forPage: 0)
+        #expect(pager.debugAlignedOffset(forPage: 2) >= 300)
+    }
+
+    /// With no header to share, there is nothing to split: every page tracks
+    /// the screen. This is also the state before the first layout pass, which
+    /// is when a bad default would show.
+    @Test func withoutASharedTravelEveryTabTracksTheScreen() {
+        let pager = makePager()
+        pager.setMinimumScrollTravel(2_000)
+        pager.debugSetOffset(900, forPage: 1)
+        pager.debugSetOffset(400, forPage: 0)
+        #expect(pager.debugAlignedOffset(forPage: 1) == 400)
     }
 }
 
