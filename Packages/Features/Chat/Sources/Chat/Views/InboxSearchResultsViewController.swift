@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import UIKit
 
 /// The inbox's search results: one sectioned list covering every category at
@@ -94,7 +95,7 @@ final class InboxSearchResultsViewController: UIViewController {
             PersonListCell, ProfileID
         > { [weak self] cell, _, id in
             guard let model = self?.viewModel.peopleModels[id] else { return }
-            cell.configure(with: model)
+            cell.configure(with: model.rowContent)
         }
 
         // A plain list pins its headers, so rows pass DIRECTLY under this one.

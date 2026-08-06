@@ -263,7 +263,7 @@ final class NewMessageViewController: UIViewController, TransientDestinationPick
         let cellRegistration = UICollectionView.CellRegistration<PersonListCell, Item> {
             [weak self] cell, _, item in
             guard let self, let model = self.modelsByItem[item] else { return }
-            cell.configure(with: model)
+            cell.configure(with: model.rowContent)
         }
 
         let skeletonRegistration = UICollectionView.CellRegistration<PersonSkeletonCell, Int> {

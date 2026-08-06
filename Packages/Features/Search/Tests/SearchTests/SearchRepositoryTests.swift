@@ -90,6 +90,96 @@ struct SearchRepositoryTests {
         #expect(results.isEmpty)
         #expect(called.query == nil) // never hit the wire
     }
+
+    // MARK: - Suggest
+
+    private func makeSuggestRepository(
+        handler: @escaping @Sendable (Search_V1_SuggestRequest) -> Search_V1_SuggestResponse
+    ) -> SearchRepository {
+        let bff = MockBFF()
+        bff.register(path: "/search.v1.SearchService/Suggest") { (request: Search_V1_SuggestRequest) in
+            .success(handler(request))
+        }
+        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        return SearchRepository(searchClient: Search_V1_SearchServiceClient(client: client))
+    }
+
+    private func completion(
+        _ text: String, id: String = "", type: Search_V1_SearchEntityType = .profile
+    ) -> Search_V1_Suggestion {
+        var suggestion = Search_V1_Suggestion()
+        suggestion.entityType = type
+        suggestion.text = text
+        suggestion.id = id
+        return suggestion
+    }
+
+    @Test func mapsCompletionsAndTheirEntityKinds() async throws {
+        let repository = makeSuggestRepository { _ in
+            var response = Search_V1_SuggestResponse()
+            response.suggestions = [
+                completion("sofia", id: "prof-1"),
+                completion("swift", type: .hashtag)
+            ]
+            return response
+        }
+
+        let suggestions = try await repository.suggestions(forPrefix: "s", limit: 8)
+
+        #expect(suggestions.map(\.text) == ["sofia", "swift"])
+        #expect(suggestions.map(\.kind) == [.profile, .hashtag])
+        #expect(suggestions.first?.id == "prof-1")
+    }
+
+    /// `search.v1` stores handles bare, so "@sof" is a prefix that matches
+    /// nothing. The sigil is stripped at the adapter, because it is a fact
+    /// about the index rather than about any one screen.
+    @Test func stripsTheSigilBeforeItReachesTheIndex() async throws {
+        let received = PrefixBox()
+        let repository = makeSuggestRepository { request in
+            received.set(prefix: request.prefix, limit: request.limit)
+            return Search_V1_SuggestResponse()
+        }
+
+        _ = try await repository.suggestions(forPrefix: "  @sof  ", limit: 8)
+
+        #expect(received.prefix == "sof")
+        #expect(received.limit == 8)
+    }
+
+    /// A completion with no text is nothing to render and nothing to search
+    /// for, whatever its entity type says.
+    @Test func dropsTextlessCompletions() async throws {
+        let repository = makeSuggestRepository { _ in
+            var response = Search_V1_SuggestResponse()
+            response.suggestions = [completion("   "), completion("sofia")]
+            return response
+        }
+
+        #expect(try await repository.suggestions(forPrefix: "s", limit: 8).map(\.text) == ["sofia"])
+    }
+
+    @Test func anEmptyPrefixShortCircuitsWithoutCallingTheService() async throws {
+        let received = PrefixBox()
+        let repository = makeSuggestRepository { request in
+            received.set(prefix: request.prefix, limit: request.limit)
+            return Search_V1_SuggestResponse()
+        }
+
+        #expect(try await repository.suggestions(forPrefix: " ", limit: 8).isEmpty)
+        #expect(received.prefix == nil) // never hit the wire
+    }
+}
+
+private final class PrefixBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _prefix: String?
+    private var _limit: Int32 = 0
+    var prefix: String? { lock.withLock { _prefix } }
+    var limit: Int32 { lock.withLock { _limit } }
+    func set(prefix: String, limit: Int32) {
+        lock.withLock { _prefix = prefix; _limit = limit }
+    }
 }
 
 private final class QueryBox: @unchecked Sendable {

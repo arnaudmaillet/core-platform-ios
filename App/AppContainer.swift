@@ -320,8 +320,31 @@ final class AppContainer {
         searchClient: Search_V1_SearchServiceClient(client: authenticatedRPCClient)
     )
 
+    /// The viewer's search history. Device-local — no contract carries one.
+    private lazy var recentSearchStore = RecentSearchStore()
+
+    /// The search screen's trending section, served off the SAME feed
+    /// repository the timeline and For You read — so one hydration path, one
+    /// cache, and a post opened from a trending tile is already warm in the
+    /// snap feed it opens into. See `ForYouExploreAdapter`.
+    private lazy var exploreRepository = ForYouExploreAdapter(
+        forYou: ForYouRepository(feed: feedRepository)
+    )
+
+    /// Pictures for the search screen's person rows. `search.v1` answers with
+    /// storage keys and `Suggest` with no image at all, so the only read that
+    /// returns an avatar is `profile.v1` — see `ProfileAvatarRepository` for
+    /// the fan-out this bounds.
+    private lazy var profileAvatarRepository = ProfileAvatarRepository(
+        profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient)
+    )
+
     private(set) lazy var searchFeature: any SearchFeatureBuilding = SearchFeatureBuilder(
         repository: searchRepository,
+        recentSearches: recentSearchStore,
+        explore: exploreRepository,
+        avatars: profileAvatarRepository,
+        imagePipeline: imagePipeline,
         router: routeResolver
     )
 

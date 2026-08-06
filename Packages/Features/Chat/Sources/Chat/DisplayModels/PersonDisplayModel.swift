@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import Foundation
 
 /// One person row in the compose picker, pre-formatted so the cell does no
@@ -40,6 +41,25 @@ public struct PersonDisplayModel: Equatable, Sendable, Identifiable {
 }
 
 extension PersonDisplayModel {
+    /// This model as the shared row cell renders it.
+    ///
+    /// The projection drops the two fields that are this feature's business
+    /// and not the row's — the profile id the section keys by, and the
+    /// conversation id that decides whether tapping skips a round trip.
+    ///
+    /// The handle goes across bare, no "@": every row on this screen is a
+    /// person and the second line is always their handle, so the sigil is
+    /// decoration repeated down the whole list. `PersonRowContent` renders
+    /// what it is given, so that stays a decision made here.
+    var rowContent: PersonRowContent {
+        PersonRowContent(
+            displayName: displayName,
+            handle: handle,
+            monogram: monogram,
+            isVerified: isVerified
+        )
+    }
+
     /// A directory search hit.
     public init(person: DirectoryPerson, existingConversationID: ConversationID? = nil) {
         let name = person.displayName.trimmingCharacters(in: .whitespaces).isEmpty
