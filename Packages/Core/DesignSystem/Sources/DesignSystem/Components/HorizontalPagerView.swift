@@ -1,7 +1,12 @@
 import UIKit
 
-/// The inbox's horizontal pager: full-height pages in one paging scroll view,
-/// one page per surface. Swiping between them IS the tab change.
+/// A horizontal pager: full-height pages in one paging scroll view, one page
+/// per surface. Swiping between them IS the tab change.
+///
+/// Built for the Messages inbox (All / Requests / Suggestions) and reused by
+/// the profile's relationship lists (Followers / Following / Friends). It knows
+/// nothing about either — it takes views and reports a fractional position — so
+/// it pairs with `PagedTabBar`, which consumes exactly that signal.
 ///
 /// Nesting works because the axes never compete: this scroll view pages
 /// horizontally only (its content height equals its frame height, and it never
@@ -14,21 +19,21 @@ import UIKit
 /// position: `onProgress` fires every frame of the drag with a fractional page
 /// index, which is what lets the header's selection pill track the finger
 /// rather than snap at the end.
-final class InboxPagerView: UIView {
+public final class HorizontalPagerView: UIView {
     /// Fractional page position (e.g. `1.42` — 42% of the way from Requests to
     /// Suggestions), emitted on every scroll tick, drag or animation.
-    var onProgress: ((CGFloat) -> Void)?
+    public var onProgress: ((CGFloat) -> Void)?
     /// A page became active: a settled finger swipe or a finished programmatic
     /// page. Not fired when the index is unchanged.
-    var onSettled: ((Int) -> Void)?
+    public var onSettled: ((Int) -> Void)?
 
     /// The pan that pages; exposed so the owner can subordinate it to the
     /// navigation stack's interactive pop.
-    var horizontalPan: UIPanGestureRecognizer { scrollView.panGestureRecognizer }
+    public var horizontalPan: UIPanGestureRecognizer { scrollView.panGestureRecognizer }
 
     /// Paging is suspended while the active surface is in multi-selection
     /// editing — swiping a half-made selection off screen has no good outcome.
-    var isPagingEnabled: Bool {
+    public var isPagingEnabled: Bool {
         get { scrollView.isScrollEnabled }
         set { scrollView.isScrollEnabled = newValue }
     }
@@ -36,21 +41,21 @@ final class InboxPagerView: UIView {
     /// The paging scroll view as a plain `UIScrollView`. Tests drive
     /// fractional offsets through it, which is the only way to exercise the
     /// continuous progress signal without a real gesture.
-    var pagingScrollView: UIScrollView { scrollView }
+    public var pagingScrollView: UIScrollView { scrollView }
 
     /// The page the pager is on (or animating to). Offset math reads this.
-    private(set) var activeIndex: Int
+    public private(set) var activeIndex: Int
     /// The last index handed to `onSettled`. Tracked separately from
     /// `activeIndex` because a tap sets the TARGET immediately and only
     /// arrives a beat later — comparing the landing against `activeIndex`
     /// alone would make every tap-driven page change look like a no-op, and
     /// the destination surface would never be woken or publish its chrome.
     private var reportedIndex: Int
-    private let scrollView = InboxPagerScrollView()
+    private let scrollView = HorizontalPagerScrollView()
     private let pages: [UIView]
     private var lastLayoutWidth: CGFloat = 0
 
-    init(pages: [UIView], initialIndex: Int = 0) {
+    public init(pages: [UIView], initialIndex: Int = 0) {
         self.pages = pages
         let start = pages.indices.contains(initialIndex) ? initialIndex : 0
         activeIndex = start
@@ -88,7 +93,7 @@ final class InboxPagerView: UIView {
     /// the header's lens sat on Requests while the All list stayed on screen,
     /// and only a manual swipe put the two back in agreement. Same override,
     /// for the same reason, as `ForYouPagerView`.
-    override func layoutSubviews() {
+    override public func layoutSubviews() {
         super.layoutSubviews()
         guard bounds.width != lastLayoutWidth, bounds.width > 0 else { return }
         lastLayoutWidth = bounds.width
@@ -104,7 +109,7 @@ final class InboxPagerView: UIView {
     /// progress anyone heard is from part-way through, so the header's lens is
     /// left pointing at a different tab than the one on screen. Called when
     /// the inbox returns, which is BEFORE the pop draws its first frame.
-    func reassertActivePage() {
+    public func reassertActivePage() {
         guard bounds.width > 0, pages.indices.contains(activeIndex) else { return }
         scrollView.setContentOffset(CGPoint(x: offsetX(for: activeIndex), y: 0), animated: false)
         reportedIndex = activeIndex
@@ -136,7 +141,7 @@ final class InboxPagerView: UIView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// Header tap → smooth page. The scroll animation reports progress every
     /// frame, so a tap drives the header through exactly the same path a finger
@@ -152,7 +157,7 @@ final class InboxPagerView: UIView {
     /// you are in is worse than either curve on its own. The claim it was built
     /// on — that UIKit's scroll animation does not report intermediate offsets
     /// to `scrollViewDidScroll` — was simply wrong.
-    func setActivePage(_ index: Int, animated: Bool) {
+    public func setActivePage(_ index: Int, animated: Bool) {
         guard pages.indices.contains(index), index != activeIndex else { return }
         activeIndex = index
         guard bounds.width > 0 else { return }
@@ -187,23 +192,23 @@ final class InboxPagerView: UIView {
 
 // MARK: - UIScrollViewDelegate
 
-extension InboxPagerView: UIScrollViewDelegate {
-    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+extension HorizontalPagerView: UIScrollViewDelegate {
+    public func scrollViewDidScroll(_ scrollView: UIScrollView) {
         guard bounds.width > 0 else { return }
         onProgress?(progress)
     }
 
-    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+    public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         settle()
     }
 
     /// A drag released without enough velocity to decelerate still lands on a
     /// page; without this the header would keep the old selection.
-    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+    public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         if !decelerate { settle() }
     }
 
-    func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+    public func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
         settle()
     }
 
@@ -224,7 +229,7 @@ extension InboxPagerView: UIScrollViewDelegate {
 /// today (nothing to pop), but the rule costs nothing and means the container
 /// stays correct the day it is pushed — the same guarantee
 /// `ProfileGalleryPagerView` makes.
-private final class InboxPagerScrollView: UIScrollView {
+private final class HorizontalPagerScrollView: UIScrollView {
     /// Matches the system's edge-gesture strip.
     private static let popEdgeZone: CGFloat = 20
 

@@ -3,18 +3,19 @@ import Testing
 import UIKit
 @testable import Profile
 
-/// Whether the three segment titles fit the navigation bar.
+/// The segment titles keep their counts at every width.
 ///
-/// Counts came back to the segments ("1.2K Followers"), and three counted
-/// titles are much wider than the two this control was built for. When they do
-/// not fit, a `UISegmentedControl` truncates — and the strings it eats into are
-/// "Followers" and "Following", producing "12.4K Follow…" and "200+ Follow…",
-/// which are indistinguishable. So the screen drops the counts instead, and
-/// these tests pin both halves of that rule.
+/// **This suite used to assert the opposite.** With the selector in the
+/// navigation bar's title slot, three counted titles did not fit — the slot
+/// caps at 258pt — so the screen dropped the counts on narrow devices to avoid
+/// truncating "Followers" and "Following" into two identical stubs. Replacing
+/// `UISegmentedControl` with `PagedTabBar` removed the constraint that forced
+/// that trade: the bar spans the screen and its segments live in a scroll view,
+/// so titles that out-measure the capsule scroll instead of being clipped.
 ///
-/// Driven through the real view controller at real device widths rather than a
-/// rebuilt control, so the font, the padding and the width budget under test
-/// are the ones that actually ship.
+/// So the rule these now pin is the simple one: the counts are always there, on
+/// every device, whatever they say. Driven through the real view controller so
+/// the component and the titles under test are the ones that ship.
 @MainActor
 @Suite("Relationship segment fit")
 struct ProfileRelationshipsSegmentFitTests {
@@ -52,8 +53,7 @@ struct ProfileRelationshipsSegmentFitTests {
     }
 
     private func titles(_ controller: ProfileRelationshipsViewController) -> [String] {
-        (0..<controller.segmentedControl.numberOfSegments)
-            .compactMap { controller.segmentedControl.titleForSegment(at: $0) }
+        controller.tabBar.currentTitles
     }
 
     @Test("Small counts fit on the narrowest supported device")
@@ -72,14 +72,14 @@ struct ProfileRelationshipsSegmentFitTests {
         #expect(titles(controller) == ["142 Followers", "89 Following", "Friends"])
     }
 
-    /// The case the fallback exists for: abbreviated counts on both of the
-    /// long nouns, on the narrowest device.
-    @Test("Large counts on a narrow device fall back to bare nouns")
-    func largeCountsDegradeOnNarrowWidth() {
+    /// The case that forced the old fallback: abbreviated counts on both of
+    /// the long nouns, on the narrowest device. The scrolling strip keeps them.
+    @Test("Large counts survive on a narrow device")
+    func largeCountsSurviveOnNarrowWidth() {
         let controller = makeController(
             followers: .exact(12_400), following: .atLeast(200), width: DeviceWidth.narrow
         )
-        #expect(titles(controller) == ["Followers", "Following", "Friends"])
+        #expect(titles(controller) == ["12.4K Followers", "200+ Following", "Friends"])
     }
 
     /// Whatever the titles end up being, no segment may be blank and there
@@ -96,27 +96,108 @@ struct ProfileRelationshipsSegmentFitTests {
         let rendered = titles(controller)
         #expect(rendered.count == 3)
         #expect(rendered.allSatisfy { !$0.isEmpty })
+        // No ellipsis anywhere: the whole point of the scrolling strip.
+        #expect(rendered.allSatisfy { !$0.contains("…") })
         #expect(rendered.last?.hasSuffix("Friends") == true)
     }
 
-    /// A wider device should not throw information away — the fallback is for
-    /// when the counts do not fit, not a blanket retreat.
-    @Test("A wide device keeps the counts that a narrow one drops")
-    func wideDeviceKeepsCountsNarrowDrops() {
-        let narrow = makeController(
-            followers: .exact(12_400), following: .atLeast(200), width: DeviceWidth.narrow
-        )
-        let wide = makeController(
-            followers: .exact(12_400), following: .atLeast(200), width: DeviceWidth.wide
-        )
-        #expect(titles(narrow).first == "Followers")
-        #expect(titles(wide).first == "12.4K Followers")
+    /// Width no longer changes what the segments say — the property the
+    /// rewrite bought, stated as an invariant so a future host that re-parents
+    /// the bar into a bounded slot fails here rather than in a screenshot.
+    @Test("The titles do not depend on the device width")
+    func titlesAreWidthIndependent() {
+        let rendered = [DeviceWidth.narrow, DeviceWidth.regular, DeviceWidth.wide].map { width in
+            titles(makeController(
+                followers: .exact(12_400), following: .atLeast(200), width: width
+            ))
+        }
+        #expect(Set(rendered.map { $0.joined(separator: "|") }).count == 1)
+        #expect(rendered[0] == ["12.4K Followers", "200+ Following", "Friends"])
     }
 }
 
 /// Answers every page with nothing: these tests are about the navigation bar,
 /// and rows would only add scheduling to them.
 private actor FitStubProvider: ProfileRelationshipsProviding {
+    let supportsFollowerRemoval = false
+
+    func relationships(
+        for profileID: ProfileID,
+        direction: RelationshipDirection,
+        pageToken: String,
+        limit: Int32
+    ) async throws -> RelationshipPage {
+        RelationshipPage(relations: [], nextPageToken: "")
+    }
+
+    func setFollowing(_ following: Bool, for profileID: ProfileID) async throws {}
+    func removeFollower(_ profileID: ProfileID) async throws {}
+    func invalidateViewerCache() async {}
+}
+
+/// Tab bar ↔ pager, in both directions.
+///
+/// ⚠️ **The tap half cannot be verified in the simulator.** The bar sits in the
+/// top band of the screen, which does not receive injected `CGEvent` touches —
+/// a harness limitation, not an app one. A real swipe *was* verified there
+/// (the lens tracks the finger frame by frame); the tap is pinned here instead,
+/// through the same `.valueChanged` a finger raises.
+@MainActor
+@Suite("Relationship tab sync")
+struct ProfileRelationshipsTabSyncTests {
+    private func makeController() -> ProfileRelationshipsViewController {
+        let viewModel = ProfileRelationshipsViewModel(
+            subject: ProfileRelationshipsViewModel.Subject(
+                id: ProfileID("subject"),
+                handle: "subject",
+                visibility: .public,
+                viewerFollowsSubject: true,
+                isSelf: false,
+                followerCount: .exact(35),
+                followingCount: .exact(12)
+            ),
+            repository: SyncStubProvider()
+        )
+        let controller = ProfileRelationshipsViewController(viewModel: viewModel, imagePipeline: nil)
+        controller.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        controller.view.layoutIfNeeded()
+        return controller
+    }
+
+    @Test("Tapping a tab pages to it")
+    func tapPagesToTab() {
+        let controller = makeController()
+
+        controller.tabBar.debugSimulateTap(at: 2)
+
+        #expect(controller.pager.activeIndex == 2)
+    }
+
+    @Test("A settled page selects its tab")
+    func settledPageSelectsTab() {
+        let controller = makeController()
+
+        controller.pager.setActivePage(1, animated: false)
+
+        #expect(controller.tabBar.selectedIndex == 1)
+    }
+
+    /// The lens is driven by fractional progress, not by the settle — this is
+    /// what makes it follow a finger instead of snapping when it lifts.
+    @Test("A part-way drag moves the lens without changing the page")
+    func partialDragMovesLensOnly() {
+        let controller = makeController()
+        let pager = controller.pager.pagingScrollView
+
+        pager.contentOffset.x = pager.bounds.width * 0.4
+        pager.delegate?.scrollViewDidScroll?(pager)
+
+        #expect(controller.pager.activeIndex == 0)
+        #expect(controller.tabBar.selectedIndex == 0)
+    }
+}
+
+private actor SyncStubProvider: ProfileRelationshipsProviding {
     let supportsFollowerRemoval = false
 
     func relationships(

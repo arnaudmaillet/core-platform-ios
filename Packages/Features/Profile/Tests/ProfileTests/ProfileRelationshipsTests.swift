@@ -165,7 +165,13 @@ struct RelationshipListAccessTests {
 struct ProfileRelationshipsViewModelTests {
     private func phaseRecorder(_ viewModel: ProfileRelationshipsViewModel) -> () -> [ProfileRelationshipsViewModel.Phase] {
         let box = Box<ProfileRelationshipsViewModel.Phase>()
-        viewModel.onPhaseChange = { box.append($0) }
+        // Every direction publishes now that all three lists are mounted at
+        // once; these tests are written against the SELECTED one, which is the
+        // stream the screen's active page sees.
+        viewModel.onPhaseChange = { [weak viewModel] direction, phase in
+            guard direction == viewModel?.direction else { return }
+            box.append(phase)
+        }
         return { box.items }
     }
 
@@ -365,14 +371,14 @@ struct ProfileRelationshipsViewModelTests {
         viewModel.viewDidLoad()
         await settle(until: { rows(phases).count == 2 })
 
-        viewModel.loadNextPageIfNeeded()
+        viewModel.loadNextPageIfNeeded(for: viewModel.direction)
         await settle(until: { rows(phases).count == 4 })
-        viewModel.loadNextPageIfNeeded()
+        viewModel.loadNextPageIfNeeded(for: viewModel.direction)
         await settle(until: { rows(phases).count == 5 })
 
         #expect(rows(phases).map(\.id.rawValue) == ["p0", "p1", "p2", "p3", "p4"])
         // Exhausted: the empty cursor stops further requests.
-        viewModel.loadNextPageIfNeeded()
+        viewModel.loadNextPageIfNeeded(for: viewModel.direction)
         await settle()
         #expect(await provider.pageRequests.count == 3)
     }
@@ -389,7 +395,7 @@ struct ProfileRelationshipsViewModelTests {
 
         // What scrolling actually produces: the runway check fires on every
         // cell that comes into view.
-        for _ in 0..<5 { viewModel.loadNextPageIfNeeded() }
+        for _ in 0..<5 { viewModel.loadNextPageIfNeeded(for: viewModel.direction) }
         await settle(until: { rows(phases).count == 4 })
 
         #expect(await provider.pageRequests.count == 2)
@@ -404,7 +410,7 @@ struct ProfileRelationshipsViewModelTests {
 
         viewModel.viewDidLoad()
         await settle(until: { rows(phases).count == 2 })
-        viewModel.loadNextPageIfNeeded()
+        viewModel.loadNextPageIfNeeded(for: viewModel.direction)
         await settle(until: { rows(phases).count == 4 })
 
         viewModel.refresh()
@@ -794,7 +800,7 @@ struct ProfileRelationshipsViewModelTests {
         viewModel.viewDidLoad()
         await settle(until: { rows(phases).count == 2 })
         viewModel.searchQueryChanged("p")
-        viewModel.loadNextPageIfNeeded()
+        viewModel.loadNextPageIfNeeded(for: viewModel.direction)
         await settle()
 
         #expect(await provider.pageRequests.count == 1)

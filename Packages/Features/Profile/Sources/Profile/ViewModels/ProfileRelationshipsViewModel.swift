@@ -111,7 +111,11 @@ public final class ProfileRelationshipsViewModel {
         case failed(message: String)
     }
 
-    public var onPhaseChange: ((Phase) -> Void)?
+    /// A direction's phase changed. **Carries its direction**, because all
+    /// three lists are on screen at once now — they sit side by side in a
+    /// pager, and a background tab finishing its load has to repaint its own
+    /// page rather than the visible one.
+    public var onPhaseChange: ((RelationshipDirection, Phase) -> Void)?
     /// Fires when the segmented control's selection is changed programmatically
     /// (a debug launch argument today), so the control follows the model.
     public var onDirectionChange: ((RelationshipDirection) -> Void)?
@@ -272,7 +276,9 @@ public final class ProfileRelationshipsViewModel {
     /// hand, so paging on behalf of a query would fetch pages the user can't
     /// see and, worse, make the visible result set grow on its own while they
     /// are reading it.
-    public func loadNextPageIfNeeded() {
+    /// Takes the direction explicitly: every list is mounted at once now, and
+    /// the one that reached its end is not necessarily the one selected.
+    public func loadNextPageIfNeeded(for direction: RelationshipDirection) {
         guard access == .visible, query.isEmpty, let state = states[direction] else { return }
         guard state.hasLoaded, !state.isLoading, !state.nextPageToken.isEmpty else { return }
         load(direction, reset: false)
@@ -458,16 +464,26 @@ public final class ProfileRelationshipsViewModel {
 
     // MARK: - Output
 
+    /// Publishes one direction's phase, or every direction's when unqualified.
+    ///
+    /// No longer filtered to the active tab. All three lists are mounted in a
+    /// pager, so each one owns a page that must show its own state — the tab
+    /// you are about to swipe to has to be right *before* it arrives, not once
+    /// it settles.
     private func emit(for direction: RelationshipDirection? = nil) {
-        // A background tab's landing page must not repaint the visible one.
-        guard direction == nil || direction == self.direction else { return }
-        onPhaseChange?(phase)
+        for target in direction.map({ [$0] }) ?? RelationshipDirection.allCases {
+            onPhaseChange?(target, phase(for: target))
+        }
     }
 
-    private var phase: Phase {
+    /// The rendering state of one list.
+    public func phase(for direction: RelationshipDirection) -> Phase {
         guard let state = states[direction] else { return .loading }
         if access == .private || state.isForbidden {
-            return .restricted(title: restrictedTitle, message: restrictedMessage)
+            return .restricted(
+                title: Self.restrictedTitle(for: direction),
+                message: restrictedMessage(for: direction)
+            )
         }
         if let failure = state.failure, state.relations.isEmpty {
             return .failed(message: failure)
@@ -476,7 +492,10 @@ public final class ProfileRelationshipsViewModel {
             return .loading
         }
         guard !state.relations.isEmpty else {
-            return .empty(title: emptyTitle, message: emptyMessage)
+            return .empty(
+                title: Self.emptyTitle(for: direction),
+                message: emptyMessage(for: direction)
+            )
         }
         let visible = state.relations.filter(matches)
         guard !visible.isEmpty else {
@@ -533,7 +552,7 @@ public final class ProfileRelationshipsViewModel {
 
     // MARK: - Copy
 
-    private var restrictedTitle: String {
+    private static func restrictedTitle(for direction: RelationshipDirection) -> String {
         switch direction {
         case .followers: "Followers Are Private"
         case .following: "Following Is Private"
@@ -541,7 +560,7 @@ public final class ProfileRelationshipsViewModel {
         }
     }
 
-    private var restrictedMessage: String {
+    private func restrictedMessage(for direction: RelationshipDirection) -> String {
         let list = switch direction {
         case .followers: "follower list"
         case .following: "following list"
@@ -553,7 +572,7 @@ public final class ProfileRelationshipsViewModel {
         return "@\(subject.handle)'s \(list) is private. Follow them to see it."
     }
 
-    private var emptyTitle: String {
+    private static func emptyTitle(for direction: RelationshipDirection) -> String {
         switch direction {
         case .followers: "No Followers Yet"
         case .following: "Not Following Anyone"
@@ -561,7 +580,7 @@ public final class ProfileRelationshipsViewModel {
         }
     }
 
-    private var emptyMessage: String {
+    private func emptyMessage(for direction: RelationshipDirection) -> String {
         switch (direction, subject.isSelf) {
         case (.followers, true): "When someone follows you, they'll show up here."
         case (.followers, false): "@\(subject.handle) doesn't have any followers yet."

@@ -41,7 +41,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
     /// Built in `viewDidLoad`, once the surfaces are children — reading a
     /// child's `view` before containment would load it outside its parent.
-    private var pagerView: InboxPagerView!
+    private var pagerView: HorizontalPagerView!
     private var didSubordinatePagerToPop = false
     private var hasActivatedInitialSurface = false
     #if DEBUG
@@ -139,7 +139,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         let startIndex = pendingCategory
             .flatMap { category in surfaces.firstIndex { $0.category == category } } ?? initialIndex
         pendingCategory = nil
-        pagerView = InboxPagerView(pages: surfaces.map(\.view), initialIndex: startIndex)
+        pagerView = HorizontalPagerView(pages: surfaces.map(\.view), initialIndex: startIndex)
         pagerView.pin(to: view)
         for surface in surfaces { surface.didMove(toParent: self) }
 
