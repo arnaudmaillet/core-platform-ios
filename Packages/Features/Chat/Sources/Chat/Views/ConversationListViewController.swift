@@ -32,7 +32,7 @@ final class ConversationListViewController: UIViewController {
     private let skeletonView = ConversationListSkeletonView()
     private let statusView = InboxStatusView()
 
-    private var dataSource: SectionedConversationDataSource!
+    private var adapter: ConversationListTableAdapter!
     private var modelsByID: [ConversationID: ConversationDisplayModel] = [:]
     /// The row `pin(_:)` has just painted by hand, excluded from the next
     /// snapshot's `reconfigureItems` — see there for why that matters.
@@ -101,7 +101,7 @@ final class ConversationListViewController: UIViewController {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                 guard let self,
                       let indexPath = self.tableView.indexPathsForVisibleRows?.last,
-                      let id = self.dataSource.itemIdentifier(for: indexPath)
+                      let id = self.adapter.itemIdentifier(for: indexPath)
                 else { return }
                 self.pin(id)
             }
@@ -116,7 +116,7 @@ final class ConversationListViewController: UIViewController {
         // way on the Requests tab, which wears the same seam.
         if ProcessInfo.processInfo.arguments.contains("-chat-preview-demo") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                guard let self, let id = self.dataSource.snapshot().itemIdentifiers.first,
+                guard let self, let id = self.adapter.allIdentifiers.first,
                       let make = self.threadPreviewProvider else { return }
                 self.present(make(id), animated: true)
             }
@@ -148,7 +148,7 @@ final class ConversationListViewController: UIViewController {
     /// this frame and the row slides back down without it.
     private func pin(_ id: ConversationID) {
         let willPin = !viewModel.isPinned(id)
-        if let indexPath = dataSource.indexPath(for: id),
+        if let indexPath = adapter.indexPath(for: id),
            let cell = tableView.cellForRow(at: indexPath) as? ConversationCell {
             cell.setPinnedStyle(willPin, animated: false)
             CATransaction.flush()
@@ -191,7 +191,7 @@ final class ConversationListViewController: UIViewController {
         refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
         tableView.refreshControl = refreshControl
 
-        dataSource = SectionedConversationDataSource(tableView: tableView) {
+        adapter = ConversationListTableAdapter(tableView: tableView) {
             [weak self] tableView, indexPath, id in
             let cell = tableView.dequeueReusableCell(
                 withIdentifier: ConversationCell.reuseIdentifier, for: indexPath
@@ -200,6 +200,18 @@ final class ConversationListViewController: UIViewController {
                 cell.configure(with: model, imagePipeline: self.imagePipeline, avatars: self.avatars)
             }
             return cell
+        }
+    }
+
+    /// Re-renders rows whose content changed but whose position did not,
+    /// straight onto the live cells.
+    private func reconfigureVisible(_ ids: [ConversationID]) {
+        for id in ids {
+            guard let indexPath = adapter.indexPath(for: id),
+                  let cell = tableView.cellForRow(at: indexPath) as? ConversationCell,
+                  let model = modelsByID[id]
+            else { continue }
+            cell.configure(with: model, imagePipeline: imagePipeline, avatars: avatars)
         }
     }
 
@@ -225,44 +237,25 @@ final class ConversationListViewController: UIViewController {
             refreshControl.endRefreshing()
             statusView.isHidden = true
             let models = sections.all
-            var snapshot = NSDiffableDataSourceSnapshot<InboxListSection, ConversationID>()
-            // Empty sections are never appended, so a list with no arrivals is
-            // one plain list rather than a header over nothing.
-            if !sections.new.isEmpty {
-                snapshot.appendSections([.new])
-                snapshot.appendItems(sections.new.map(\.id), toSection: .new)
-            }
-            if !sections.earlier.isEmpty {
-                snapshot.appendSections([.earlier])
-                snapshot.appendItems(sections.earlier.map(\.id), toSection: .earlier)
-            }
-            // Same-identity rows whose content changed (pin/mute flags, a read
-            // that cleared the bold preview) re-render in place; identity
-            // moves/removals animate, so swipe outcomes read as system row
-            // animations, not reloads. See `InboxRowDiff`.
-            // ⚠️ **A row that is reconfigured AND moved in one snapshot does
-            // not animate as a move — the data source falls back to a reload,
-            // which renders as a fade: the row vanishes and reappears at the
-            // top instead of travelling there. That is what made "grey during
-            // the slide" unobservable; there was no slide.
+            // Rows whose content changed without moving. Applied straight to
+            // the visible cells below — there is no snapshot to reconcile, so
+            // this cannot collide with the move animation the way a diffable
+            // `reconfigureItems` did. See `InboxRowDiff`, and
+            // `ConversationListTableAdapter` for why this list is hand-driven.
             //
-            // The pinned row's content is already correct because `pin(_:)`
-            // painted the cell by hand, so it is dropped from the reconfigure
-            // set and left to animate as a pure move. Every other changed row
-            // still reconfigures normally — a row that moves because a message
-            // arrived genuinely needs its new preview text.
+            // The row `pin(_:)` just painted is excluded: its cell is already
+            // correct, and re-configuring it mid-move would fight the paint.
             let changed = InboxRowDiff.changedRows(in: models, against: modelsByID)
                 .filter { $0 != pinPaintedID }
             pinPaintedID = nil
-            snapshot.reconfigureItems(changed)
-            // BEFORE any apply: `cellForRowAt` reads this, so a reconfigure
-            // scheduled below has to find the new model already in place.
+            // BEFORE the apply: `cellForRowAt` reads this.
             modelsByID = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
             // Animate only while visible. A change that arrives while a thread
             // is pushed over the inbox — reading one, say — would otherwise
             // play its row animation on the way back, turning a settled screen
             // into a moving one right after the pop.
-            dataSource.apply(snapshot, animatingDifferences: hasRenderedContent && view.window != nil)
+            adapter.apply(sections, animated: hasRenderedContent && view.window != nil)
+            reconfigureVisible(changed)
             hasRenderedContent = true
             revealContent()
         case .empty:
@@ -314,8 +307,8 @@ final class ConversationListViewController: UIViewController {
         else { return }
         let section: InboxListSection = name == "new" ? .new : .earlier
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            guard let self, let target = dataSource.index(of: section) else { return }
-            dataSource.scroll(tableView, toSectionAt: target)
+            guard let self, let target = adapter.index(of: section) else { return }
+            adapter.scroll(tableView, toSectionAt: target)
         }
     }
     #endif
@@ -326,7 +319,7 @@ extension ConversationListViewController: UITableViewDelegate {
 
     /// The glass pill, and the tap that scrolls to the section it names.
     func tableView(_ tableView: UITableView, viewForHeaderInSection index: Int) -> UIView? {
-        guard let section = dataSource.headedSection(at: index) else { return nil }
+        guard let section = adapter.headedSection(at: index) else { return nil }
         let header = tableView.dequeueReusableHeaderFooterView(
             withIdentifier: InboxSectionHeaderView.reuseIdentifier
         ) as? InboxSectionHeaderView
@@ -335,7 +328,7 @@ extension ConversationListViewController: UITableViewDelegate {
         // the header rather than wherever the list happened to be.
         header?.onTap = { [weak self] in
             guard let self else { return }
-            dataSource.scroll(tableView, toSectionAt: index)
+            adapter.scroll(tableView, toSectionAt: index)
         }
         return header
     }
@@ -344,12 +337,12 @@ extension ConversationListViewController: UITableViewDelegate {
     /// section a default height even when its header view is nil, which would
     /// leave a blank band above a list that has no header at all.
     func tableView(_ tableView: UITableView, heightForHeaderInSection index: Int) -> CGFloat {
-        dataSource.headedSection(at: index) == nil ? .leastNormalMagnitude : UITableView.automaticDimension
+        adapter.headedSection(at: index) == nil ? .leastNormalMagnitude : UITableView.automaticDimension
     }
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        guard let id = dataSource.itemIdentifier(for: indexPath) else { return }
+        guard let id = adapter.itemIdentifier(for: indexPath) else { return }
         viewModel.didSelect(id)
     }
 
@@ -363,7 +356,7 @@ extension ConversationListViewController: UITableViewDelegate {
         contextMenuConfigurationForRowAt indexPath: IndexPath,
         point: CGPoint
     ) -> UIContextMenuConfiguration? {
-        guard let id = dataSource.itemIdentifier(for: indexPath) else { return nil }
+        guard let id = adapter.itemIdentifier(for: indexPath) else { return nil }
         let makePreview = threadPreviewProvider
         return UIContextMenuConfiguration(
             identifier: id.rawValue as NSString,
