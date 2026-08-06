@@ -320,8 +320,49 @@ final class AppContainer {
         searchClient: Search_V1_SearchServiceClient(client: authenticatedRPCClient)
     )
 
+    /// The viewer's search history. Device-local — no contract carries one.
+    private lazy var recentSearchStore = RecentSearchStore()
+
+    /// The search screen's trending section, served off the SAME feed
+    /// repository the timeline and For You read — so one hydration path, one
+    /// cache, and a post opened from a trending tile is already warm in the
+    /// snap feed it opens into. See `ForYouExploreAdapter`.
+    private lazy var exploreRepository = ForYouExploreAdapter(
+        forYou: ForYouRepository(feed: feedRepository)
+    )
+
+    /// Pictures and social context for the search screen's person rows.
+    /// `search.v1` answers with storage keys and no relationship at all, and
+    /// `Suggest` with neither — so `profile.v1` and `social_graph.v1` are the
+    /// only reads that carry them. See `ProfileMetadataRepository` for the
+    /// fan-out this bounds.
+    ///
+    /// Not a `lazy var`: the viewer closure captures an actor, and a stored
+    /// property's initializer cannot be both main-actor and actor isolated
+    /// under Swift 6.2's default-isolation rule. A computed body can — the same
+    /// shape `realtimeClient` above uses, for the same diagnostic.
+    private var cachedProfileMetadataRepository: ProfileMetadataRepository?
+    private var profileMetadataRepository: ProfileMetadataRepository {
+        if let cachedProfileMetadataRepository { return cachedProfileMetadataRepository }
+        let profiles = profileRepository
+        let repository = ProfileMetadataRepository(
+            profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
+            socialGraphClient: SocialGraph_V1_SocialGraphServiceClient(client: authenticatedRPCClient),
+            // The relation is asked from the VIEWER's side, so it needs whose
+            // side that is; nil before sign-in simply means no context on the
+            // rows rather than a wrong one.
+            viewerID: { await profiles.viewerProfileID() }
+        )
+        cachedProfileMetadataRepository = repository
+        return repository
+    }
+
     private(set) lazy var searchFeature: any SearchFeatureBuilding = SearchFeatureBuilder(
         repository: searchRepository,
+        recentSearches: recentSearchStore,
+        explore: exploreRepository,
+        metadata: profileMetadataRepository,
+        imagePipeline: imagePipeline,
         router: routeResolver
     )
 

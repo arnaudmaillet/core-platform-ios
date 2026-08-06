@@ -729,6 +729,16 @@ final class SnapCommentTickerView: UIView {
     /// deterministic observable for tests; actual rendering needs a window.
     var currentKineticFraction: CGFloat { blurAnimator?.fractionComplete ?? 0 }
 
+    /// When the coast began, in `CACurrentMediaTime()`'s clock.
+    ///
+    /// Exposed so a test can express "one millisecond after release" as
+    /// `coastStartTime + 0.001`. Reading the clock a second time instead —
+    /// `CACurrentMediaTime() + 0.001`, after `endScrub` has already stamped
+    /// this — silently measures however long the machine took between the two
+    /// lines, which is ~0 on a developer's Mac and hundreds of milliseconds on
+    /// a loaded CI runner. That is a decayed fraction, and it failed the build.
+    var coastStartTime: CFTimeInterval { coastStart }
+
     /// Drives the paused animator's `fractionComplete`. Zero is the hard
     /// teardown (page deactivation); the graceful end of an interaction is
     /// `dismissKineticBackdrop`.

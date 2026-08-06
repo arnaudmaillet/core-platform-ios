@@ -12,6 +12,15 @@ public enum RelationshipDirection: Equatable, Sendable, CaseIterable {
     case followers
     /// Profiles the subject follows (`ListFollowing(follower_id:)`).
     case following
+    /// Mutuals — people the subject follows who follow them back.
+    ///
+    /// ⚠️ **There is no RPC for this.** `social_graph.v1` offers
+    /// `ListFollowers` and `ListFollowing` and nothing that intersects them,
+    /// so the client does it: page the FOLLOWING side and keep whoever also
+    /// appears in the subject's follower set. See
+    /// `ProfileRelationshipsRepository.friendEdges` for what that costs and
+    /// where it stops being exact.
+    case friends
 }
 
 /// One person in a follower / following list, hydrated for display.
@@ -173,6 +182,12 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding {
     /// The viewer's follow set, resolved once per screen. `nil` = not yet read.
     private var viewerFollowing: Set<String>?
 
+    /// Follower sets by subject, for the mutual intersection. Kept for the
+    /// screen's lifetime: the Friends tab tests every following page against
+    /// the same set, and re-paging `ListFollowers` for each would turn one
+    /// sweep into one per page.
+    private var followerSets: [ProfileID: Set<String>] = [:]
+
     /// `supportsFollowerRemoval` is injected by the composition root rather
     /// than probed: whether the RPC exists is a property of the *deployment*
     /// (the mock implements it, the fleet does not yet), and discovering that
@@ -234,19 +249,90 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding {
             }
 
         case .following:
-            var request = SocialGraph_V1_ListFollowingRequest()
-            request.followerID = profileID.rawValue
-            request.limit = limit
-            request.pageToken = pageToken
-            let response = await socialGraphClient.listFollowing(request: request, headers: [:])
-            switch response.result {
-            case .success(let body):
-                return (body.following.map(\.profileID), body.nextPageToken)
-            case .failure(let error):
-                throw Self.mapped(error)
-            }
+            return try await followingEdges(for: profileID, pageToken: pageToken, limit: limit)
+
+        case .friends:
+            return try await friendEdges(for: profileID, pageToken: pageToken, limit: limit)
         }
     }
+
+    private func followingEdges(
+        for profileID: ProfileID, pageToken: String, limit: Int32
+    ) async throws -> (ids: [String], nextPageToken: String) {
+        var request = SocialGraph_V1_ListFollowingRequest()
+        request.followerID = profileID.rawValue
+        request.limit = limit
+        request.pageToken = pageToken
+        let response = await socialGraphClient.listFollowing(request: request, headers: [:])
+        switch response.result {
+        case .success(let body):
+            return (body.following.map(\.profileID), body.nextPageToken)
+        case .failure(let error):
+            throw Self.mapped(error)
+        }
+    }
+
+    /// Mutuals: the subject's following list, filtered to whoever follows back.
+    ///
+    /// **Paged from the FOLLOWING side, filtered against a followers set.**
+    /// The alternative — asking `GetRelationStatus` per row — is a request per
+    /// person, which is exactly the shape this repository already refuses for
+    /// `viewerFollows`.
+    ///
+    /// It keeps pulling following pages until it has a full page of mutuals,
+    /// because a page of following can contain few or none and a caller that
+    /// received an empty page with a token would have to loop itself. The
+    /// bound is `maxFollowingSweeps`, so a subject who follows thousands of
+    /// people without reciprocation cannot spin here forever.
+    ///
+    /// ⚠️ **Exact only while the follower set fits in `followerSetLimit`.**
+    /// The set is what membership is tested against, and it is assembled by
+    /// paging `ListFollowers` — so beyond that ceiling a real mutual whose
+    /// follower edge was never fetched reads as a non-mutual and is missed.
+    /// The fix is a server-side intersection; see `dev/BACKEND_GAPS.md` §13d.
+    private func friendEdges(
+        for profileID: ProfileID, pageToken: String, limit: Int32
+    ) async throws -> (ids: [String], nextPageToken: String) {
+        let followers = try await followerSet(for: profileID)
+        var collected: [String] = []
+        var token = pageToken
+        var sweeps = 0
+
+        while collected.count < Int(limit), sweeps < Self.maxFollowingSweeps {
+            sweeps += 1
+            let page = try await followingEdges(for: profileID, pageToken: token, limit: limit)
+            collected += page.ids.filter(followers.contains)
+            token = page.nextPageToken
+            if token.isEmpty { break }
+        }
+        return (Array(collected.prefix(Int(limit))), token)
+    }
+
+    /// Everyone following `profileID`, assembled once and cached for the
+    /// screen's lifetime — the membership test `friendEdges` runs against.
+    private func followerSet(for profileID: ProfileID) async throws -> Set<String> {
+        if let cached = followerSets[profileID] { return cached }
+        var ids: Set<String> = []
+        var token = ""
+        repeat {
+            let page = try await edges(
+                for: profileID, direction: .followers, pageToken: token, limit: Self.edgePageSize
+            )
+            ids.formUnion(page.ids)
+            token = page.nextPageToken
+        } while !token.isEmpty && ids.count < Self.followerSetLimit
+        followerSets[profileID] = ids
+        return ids
+    }
+
+    /// How many following pages one request for friends may walk before giving
+    /// up on filling itself. Ten pages of fruitless following is already a
+    /// strong signal that this subject has few mutuals.
+    private static let maxFollowingSweeps = 10
+    /// The ceiling on the follower set — see `friendEdges` for what exceeding
+    /// it costs.
+    private static let followerSetLimit = 2_000
+    private static let edgePageSize: Int32 = 100
 
     /// A refusal is an answer, not an outage: the day the fleet enforces
     /// relationship-list privacy it will land here as `permissionDenied`, and

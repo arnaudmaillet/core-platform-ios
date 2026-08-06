@@ -111,12 +111,19 @@ public final class ProfileRelationshipsViewModel {
         case failed(message: String)
     }
 
-    public var onPhaseChange: ((Phase) -> Void)?
+    /// A direction's phase changed. **Carries its direction**, because all
+    /// three lists are on screen at once now — they sit side by side in a
+    /// pager, and a background tab finishing its load has to repaint its own
+    /// page rather than the visible one.
+    public var onPhaseChange: ((RelationshipDirection, Phase) -> Void)?
     /// Fires when the segmented control's selection is changed programmatically
     /// (a debug launch argument today), so the control follows the model.
     public var onDirectionChange: ((RelationshipDirection) -> Void)?
     /// Fires when a segment's title changes — today only when removing a
     /// follower decrements the viewer's own count.
+    /// Fires when a segment title changes — the Friends count only becomes
+    /// known once that tab has loaded, and removing a follower moves the
+    /// Followers count.
     public var onSegmentTitlesChange: (([String]) -> Void)?
     public var onActionResult: ((ActionResult) -> Void)?
 
@@ -139,9 +146,14 @@ public final class ProfileRelationshipsViewModel {
         var isForbidden = false
     }
 
-    private var states: [RelationshipDirection: TabState] = [
-        .followers: TabState(), .following: TabState()
-    ]
+    /// Built from `allCases`, not listed by hand: a direction with no entry
+    /// here guards out of `loadIfNeeded` and reports `.loading` from `phase`
+    /// forever, so a missing key is a tab that shows skeletons and never
+    /// resolves — which is exactly what adding Friends to a hand-written pair
+    /// produced.
+    private var states: [RelationshipDirection: TabState] = Dictionary(
+        uniqueKeysWithValues: RelationshipDirection.allCases.map { ($0, TabState()) }
+    )
     public private(set) var direction: RelationshipDirection = .followers
     private var loads: [RelationshipDirection: Task<Void, Never>] = [:]
     /// Follow toggles in flight, so a double tap can't issue two commands.
@@ -150,10 +162,11 @@ public final class ProfileRelationshipsViewModel {
     /// loaded — the graph exposes no search-within-followers RPC, and a
     /// server round trip per keystroke would be the wrong shape for it anyway.
     private var query = ""
-    /// Counts behind the segment titles. Seeded from the subject and nudged
-    /// locally when the viewer removes one of their own followers.
+    /// Counts behind the segment titles. Followers and Following are seeded
+    /// from the subject; Friends has no backend count at all (there is no
+    /// mutuals RPC — `dev/BACKEND_GAPS.md` §13d) and is filled in from what
+    /// the tab actually loads.
     private var counts: [RelationshipDirection: CountEstimate] = [:]
-
     public init(
         subject: Subject,
         repository: any ProfileRelationshipsProviding,
@@ -169,17 +182,45 @@ public final class ProfileRelationshipsViewModel {
         counts = [.followers: subject.followerCount, .following: subject.followingCount]
     }
 
-    /// Segment titles in `RelationshipDirection.allCases` order, counts
-    /// included ("142 Followers"). A count the backend never answered degrades
-    /// to the bare noun rather than showing "—  Followers".
+    /// Segment titles in `RelationshipDirection.allCases` order, each led by
+    /// its count when one is known ("1.2K Followers").
     public var segmentTitles: [String] {
         RelationshipDirection.allCases.map(segmentTitle)
     }
 
+    /// The same segments without their counts, for when the counted titles do
+    /// not fit the navigation bar.
+    ///
+    /// Offered as an alternative rather than decided here: whether "12.4K
+    /// Followers" fits is a question about a control's width on a particular
+    /// device, which is the view's to answer, not the view model's.
+    public var bareSegmentTitles: [String] {
+        RelationshipDirection.allCases.map(Self.noun)
+    }
+
+    /// "1.2K Followers", or the bare noun when the count is unknown.
+    ///
+    /// A count the backend never answered degrades to "Followers" rather than
+    /// showing "—  Followers", which reads as a broken string. Friends starts
+    /// out unknown on every profile and gains its count when the tab loads.
+    ///
+    /// ⚠️ Three counted titles are wider than two, and this control is the
+    /// navigation item's `titleView`. The width that makes them fit is set in
+    /// `ProfileRelationshipsViewController` — changing the wording here can
+    /// push a segment into truncation, and "35 Follow…" is indistinguishable
+    /// from "12 Follow…".
     private func segmentTitle(for direction: RelationshipDirection) -> String {
-        let noun = direction == .followers ? "Followers" : "Following"
+        let noun = Self.noun(for: direction)
         guard let count = counts[direction], count != .unavailable else { return noun }
         return "\(ProfileDisplayModel.format(count)) \(noun)"
+    }
+
+    private static func noun(for direction: RelationshipDirection) -> String {
+        switch direction {
+        case .followers: return "Followers"
+        case .following: return "Following"
+        case .friends: return "Friends"
+        }
     }
 
     /// The screen's title — the subject's `@handle`, matching the profile
@@ -235,7 +276,9 @@ public final class ProfileRelationshipsViewModel {
     /// hand, so paging on behalf of a query would fetch pages the user can't
     /// see and, worse, make the visible result set grow on its own while they
     /// are reading it.
-    public func loadNextPageIfNeeded() {
+    /// Takes the direction explicitly: every list is mounted at once now, and
+    /// the one that reached its end is not necessarily the one selected.
+    public func loadNextPageIfNeeded(for direction: RelationshipDirection) {
         guard access == .visible, query.isEmpty, let state = states[direction] else { return }
         guard state.hasLoaded, !state.isLoading, !state.nextPageToken.isEmpty else { return }
         load(direction, reset: false)
@@ -316,9 +359,8 @@ public final class ProfileRelationshipsViewModel {
             do {
                 try await self.repository.removeFollower(profileID)
                 self.states[.followers]?.relations.removeAll { $0.id == profileID }
-                // The segment header is a count of this list, so it has to
-                // follow the list down — otherwise "142 Followers" sits above
-                // 141 of them.
+                // The segment title counts this list, so it has to follow the
+                // list down — otherwise "142 Followers" sits above 141 of them.
                 self.counts[.followers] = self.counts[.followers]?.adjusted(by: -1)
                 self.onSegmentTitlesChange?(self.segmentTitles)
                 self.emit()
@@ -385,6 +427,19 @@ public final class ProfileRelationshipsViewModel {
         state.isAppending = false
         state.failure = nil
         states[direction] = state
+        // Friends is the one tab whose count has no other source, so it is
+        // taken from the rows in hand: exact once the cursor is spent, "n+"
+        // while pages remain. Followers and Following keep the subject's own
+        // numbers — those are the whole list's size, not the part loaded.
+        if direction == .friends {
+            let updated = CountEstimate.fromSample(
+                count: state.relations.count, hasMore: !state.nextPageToken.isEmpty
+            )
+            if counts[.friends] != updated {
+                counts[.friends] = updated
+                onSegmentTitlesChange?(segmentTitles)
+            }
+        }
         emit(for: direction)
     }
 
@@ -409,16 +464,26 @@ public final class ProfileRelationshipsViewModel {
 
     // MARK: - Output
 
+    /// Publishes one direction's phase, or every direction's when unqualified.
+    ///
+    /// No longer filtered to the active tab. All three lists are mounted in a
+    /// pager, so each one owns a page that must show its own state — the tab
+    /// you are about to swipe to has to be right *before* it arrives, not once
+    /// it settles.
     private func emit(for direction: RelationshipDirection? = nil) {
-        // A background tab's landing page must not repaint the visible one.
-        guard direction == nil || direction == self.direction else { return }
-        onPhaseChange?(phase)
+        for target in direction.map({ [$0] }) ?? RelationshipDirection.allCases {
+            onPhaseChange?(target, phase(for: target))
+        }
     }
 
-    private var phase: Phase {
+    /// The rendering state of one list.
+    public func phase(for direction: RelationshipDirection) -> Phase {
         guard let state = states[direction] else { return .loading }
         if access == .private || state.isForbidden {
-            return .restricted(title: restrictedTitle, message: restrictedMessage)
+            return .restricted(
+                title: Self.restrictedTitle(for: direction),
+                message: restrictedMessage(for: direction)
+            )
         }
         if let failure = state.failure, state.relations.isEmpty {
             return .failed(message: failure)
@@ -427,7 +492,10 @@ public final class ProfileRelationshipsViewModel {
             return .loading
         }
         guard !state.relations.isEmpty else {
-            return .empty(title: emptyTitle, message: emptyMessage)
+            return .empty(
+                title: Self.emptyTitle(for: direction),
+                message: emptyMessage(for: direction)
+            )
         }
         let visible = state.relations.filter(matches)
         guard !visible.isEmpty else {
@@ -484,25 +552,44 @@ public final class ProfileRelationshipsViewModel {
 
     // MARK: - Copy
 
-    private var restrictedTitle: String {
-        direction == .followers ? "Followers Are Private" : "Following Is Private"
+    private static func restrictedTitle(for direction: RelationshipDirection) -> String {
+        switch direction {
+        case .followers: "Followers Are Private"
+        case .following: "Following Is Private"
+        case .friends: "Friends Are Private"
+        }
     }
 
-    private var restrictedMessage: String {
-        let list = direction == .followers ? "follower list" : "following list"
+    private func restrictedMessage(for direction: RelationshipDirection) -> String {
+        let list = switch direction {
+        case .followers: "follower list"
+        case .following: "following list"
+        // The friends list is derived from the other two, so a refusal on
+        // either surfaces here — naming it after the tab keeps the sentence
+        // true whichever side was withheld.
+        case .friends: "friends list"
+        }
         return "@\(subject.handle)'s \(list) is private. Follow them to see it."
     }
 
-    private var emptyTitle: String {
-        direction == .followers ? "No Followers Yet" : "Not Following Anyone"
+    private static func emptyTitle(for direction: RelationshipDirection) -> String {
+        switch direction {
+        case .followers: "No Followers Yet"
+        case .following: "Not Following Anyone"
+        case .friends: "No Friends Yet"
+        }
     }
 
-    private var emptyMessage: String {
+    private func emptyMessage(for direction: RelationshipDirection) -> String {
         switch (direction, subject.isSelf) {
         case (.followers, true): "When someone follows you, they'll show up here."
         case (.followers, false): "@\(subject.handle) doesn't have any followers yet."
         case (.following, true): "Profiles you follow will show up here."
         case (.following, false): "@\(subject.handle) isn't following anyone yet."
+        // "Friend" is mutual by definition, so the empty state has to say what
+        // makes one rather than leaving it to be inferred from the tab.
+        case (.friends, true): "People you follow who follow you back will show up here."
+        case (.friends, false): "@\(subject.handle) doesn't follow anyone back yet."
         }
     }
 

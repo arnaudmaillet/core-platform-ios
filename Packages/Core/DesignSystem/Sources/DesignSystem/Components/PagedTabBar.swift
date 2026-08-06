@@ -449,7 +449,7 @@ public final class PagedTabBar: UIControl {
     /// for it simply leave this nil.
     public var onReselect: ((Int) -> Void)?
 
-    private let titles: [String]
+    private var titles: [String]
     private let capsule = UIVisualEffectView(effect: nil)
     /// Scrolls the segments when they out-measure the capsule. Below that
     /// width it never scrolls and is invisible in every sense.
@@ -817,6 +817,35 @@ public final class PagedTabBar: UIControl {
 
     /// The pager's fractional page position. Called every frame of a drag and
     /// every frame of a tap-driven scroll animation.
+    /// Replaces the segment titles, keeping the current selection.
+    ///
+    /// Segments are rebuilt rather than relabelled: a `SegmentView` pins its
+    /// width to its SEMIBOLD title at construction — the reflow trap this file
+    /// documents — so a title it did not measure would leave the lens sized for
+    /// the old word.
+    ///
+    /// ⚠️ **Badges do not survive**, since they belong to the segments being
+    /// replaced. A host that uses both has to re-apply them after this call.
+    /// Nothing does today: the two badge hosts have fixed titles, and the host
+    /// with changing titles (the profile's relationship lists) has no badges.
+    /// What the segments currently read, in order.
+    public var currentTitles: [String] { titles }
+
+    public func setTitles(_ newTitles: [String]) {
+        guard newTitles != titles else { return }
+        titles = newTitles
+        for segment in segments {
+            row.removeArrangedSubview(segment)
+            segment.removeFromSuperview()
+        }
+        buildSegments()
+        // The selection is an index into a list that just changed length.
+        selectedIndex = min(max(0, selectedIndex), max(0, titles.count - 1))
+        // The strip's width follows its content, and the lens follows the
+        // strip; both are settled by the layout pass `row.onLayout` completes.
+        setNeedsLayout()
+    }
+
     public func setProgress(_ progress: CGFloat) {
         guard progress != self.progress else { return }
         self.progress = progress
@@ -992,6 +1021,18 @@ public final class PagedTabBar: UIControl {
     /// `setProgress` off the pager's position, so a caller that wants to move
     /// the bar without moving the pages is describing a state this control
     /// cannot be in.
+    /// Fires a segment exactly as a finger on it would, `.valueChanged` and
+    /// all — where `select(_:)` moves the lens without announcing anything.
+    ///
+    /// Exists because the tap path is otherwise unverifiable: the bar sits in
+    /// the top band of the screen, which the simulator does not deliver
+    /// injected touches to, so a host's tap-to-page wiring can only be
+    /// exercised from a test.
+    public func debugSimulateTap(at index: Int) {
+        guard segments.indices.contains(index) else { return }
+        selectSegment(index, fromTap: true)
+    }
+
     public func select(_ index: Int) {
         guard segments.indices.contains(index) else { return }
         selectSegment(index, fromTap: false)

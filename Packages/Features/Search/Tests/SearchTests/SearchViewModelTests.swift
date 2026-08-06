@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreStorage
 import Foundation
 import Testing
 @testable import Search
@@ -16,6 +17,8 @@ private actor StubSearchProvider: SearchProviding {
         lastQuery = query
         return results
     }
+
+    func suggestions(forPrefix prefix: String, limit: Int32) async throws -> [SearchSuggestion] { [] }
 }
 
 @MainActor
@@ -38,12 +41,15 @@ struct SearchViewModelTests {
 
     private func makeViewModel(
         _ results: [ProfileSearchResult],
-        router: SpyRouter? = nil
+        router: SpyRouter? = nil,
+        store: RecentSearchStore? = nil
     ) -> (SearchViewModel, () -> [SearchViewModel.Phase]) {
         let viewModel = SearchViewModel(
             repository: StubSearchProvider(results: results),
             router: router,
-            debounce: .zero
+            recentSearches: store ?? RecentSearchStore(
+                defaults: UserDefaults(suiteName: UUID().uuidString)!, now: { 1 }
+            )
         )
         let box = PhaseBox()
         viewModel.onPhaseChange = { box.append($0) }
@@ -63,10 +69,12 @@ struct SearchViewModelTests {
         return phases().last
     }
 
-    @Test func nonEmptyQueryProducesResults() async {
+    // MARK: - Submitting
+
+    @Test func submittingProducesResults() async {
         let (viewModel, phases) = makeViewModel([result("prof-1", "alice")])
 
-        viewModel.queryChanged("alice")
+        viewModel.submitQuery("alice")
 
         guard case .results(let models) = await settledPhase(phases) else {
             Issue.record("expected results, got \(String(describing: phases().last))")
@@ -75,23 +83,70 @@ struct SearchViewModelTests {
         #expect(models.map(\.id) == [ProfileID("prof-1")])
     }
 
-    @Test func matchlessQueryProducesEmpty() async {
+    @Test func aSubmittedQueryThatMatchesNothingProducesEmpty() async {
         let (viewModel, phases) = makeViewModel([])
 
-        viewModel.queryChanged("zzz")
+        viewModel.submitQuery("zzz")
 
         #expect(await settledPhase(phases) == .empty(query: "zzz"))
     }
 
-    @Test func clearingQueryReturnsToIdle() async {
+    @Test func submittingBlankTextDoesNothing() async {
         let (viewModel, phases) = makeViewModel([result("prof-1", "alice")])
 
-        viewModel.queryChanged("alice")
-        _ = await settledPhase(phases) // let the first query land first
+        viewModel.submitQuery("   ")
+
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(phases().isEmpty)
+    }
+
+    // MARK: - Typing does not search
+
+    /// The core of the submit-driven flow: keystrokes narrow the history and
+    /// never reach the network.
+    @Test func typingNarrowsInsteadOfSearching() async {
+        let (viewModel, phases) = makeViewModel([result("prof-1", "alice")])
+
+        viewModel.queryChanged("ali")
+
+        try? await Task.sleep(for: .milliseconds(50))
+        guard case .suggesting(let query, _) = phases().last else {
+            Issue.record("expected suggesting, got \(String(describing: phases().last))")
+            return
+        }
+        #expect(query == "ali")
+        #expect(!phases().contains { if case .results = $0 { return true } else { return false } })
+    }
+
+    @Test func typingSurfacesMatchingRecentsOnly() {
+        let store = RecentSearchStore(defaults: UserDefaults(suiteName: UUID().uuidString)!, now: { 1 })
+        store.recordQuery("alice")
+        store.recordQuery("bob")
+        let (viewModel, phases) = makeViewModel([], store: store)
+
+        viewModel.queryChanged("ali")
+
+        guard case .suggesting(_, let matches) = phases().last else {
+            Issue.record("expected suggesting, got \(String(describing: phases().last))")
+            return
+        }
+        #expect(matches.map(\.text) == ["alice"])
+    }
+
+    @Test func clearingTheFieldReturnsToExplore() async {
+        let (viewModel, phases) = makeViewModel([result("prof-1", "alice")])
+
+        viewModel.submitQuery("alice")
+        _ = await settledPhase(phases)
         viewModel.queryChanged("")
 
-        #expect(phases().last == .idle)
+        guard case .explore = phases().last else {
+            Issue.record("expected explore, got \(String(describing: phases().last))")
+            return
+        }
     }
+
+    // MARK: - Routing
 
     @Test func selectingResultRoutesToProfile() {
         let router = SpyRouter()
@@ -101,5 +156,19 @@ struct SearchViewModelTests {
         viewModel.didSelectResult(ProfileID("prof-7"))
 
         #expect(router.routes == [.profile(ProfileID("prof-7"), stub: nil)])
+    }
+
+    @Test func selectingAResultCarriesTheIdentityStub() async {
+        let router = SpyRouter()
+        let (viewModel, phases) = makeViewModel([result("prof-1", "alice")], router: router)
+
+        viewModel.submitQuery("alice")
+        _ = await settledPhase(phases)
+        viewModel.didSelectResult(ProfileID("prof-1"))
+
+        // The sigil belongs to the row, never to the stub.
+        #expect(router.routes == [
+            .profile(ProfileID("prof-1"), stub: ProfileIdentityStub(handle: "alice", displayName: "Alice"))
+        ])
     }
 }

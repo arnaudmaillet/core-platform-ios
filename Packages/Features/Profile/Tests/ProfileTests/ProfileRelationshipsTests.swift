@@ -34,12 +34,13 @@ private actor StubRelationshipsProvider: ProfileRelationshipsProviding {
     init(
         followers: [ProfileRelation] = [],
         following: [ProfileRelation] = [],
+        friends: [ProfileRelation] = [],
         failure: Error? = nil,
         followError: Error? = nil,
         removeError: Error? = nil,
         supportsFollowerRemoval: Bool = false
     ) {
-        people = [.followers: followers, .following: following]
+        people = [.followers: followers, .following: following, .friends: friends]
         self.failure = failure
         self.followError = followError
         self.removeError = removeError
@@ -164,7 +165,13 @@ struct RelationshipListAccessTests {
 struct ProfileRelationshipsViewModelTests {
     private func phaseRecorder(_ viewModel: ProfileRelationshipsViewModel) -> () -> [ProfileRelationshipsViewModel.Phase] {
         let box = Box<ProfileRelationshipsViewModel.Phase>()
-        viewModel.onPhaseChange = { box.append($0) }
+        // Every direction publishes now that all three lists are mounted at
+        // once; these tests are written against the SELECTED one, which is the
+        // stream the screen's active page sees.
+        viewModel.onPhaseChange = { [weak viewModel] direction, phase in
+            guard direction == viewModel?.direction else { return }
+            box.append(phase)
+        }
         return { box.items }
     }
 
@@ -364,14 +371,14 @@ struct ProfileRelationshipsViewModelTests {
         viewModel.viewDidLoad()
         await settle(until: { rows(phases).count == 2 })
 
-        viewModel.loadNextPageIfNeeded()
+        viewModel.loadNextPageIfNeeded(for: viewModel.direction)
         await settle(until: { rows(phases).count == 4 })
-        viewModel.loadNextPageIfNeeded()
+        viewModel.loadNextPageIfNeeded(for: viewModel.direction)
         await settle(until: { rows(phases).count == 5 })
 
         #expect(rows(phases).map(\.id.rawValue) == ["p0", "p1", "p2", "p3", "p4"])
         // Exhausted: the empty cursor stops further requests.
-        viewModel.loadNextPageIfNeeded()
+        viewModel.loadNextPageIfNeeded(for: viewModel.direction)
         await settle()
         #expect(await provider.pageRequests.count == 3)
     }
@@ -388,7 +395,7 @@ struct ProfileRelationshipsViewModelTests {
 
         // What scrolling actually produces: the runway check fires on every
         // cell that comes into view.
-        for _ in 0..<5 { viewModel.loadNextPageIfNeeded() }
+        for _ in 0..<5 { viewModel.loadNextPageIfNeeded(for: viewModel.direction) }
         await settle(until: { rows(phases).count == 4 })
 
         #expect(await provider.pageRequests.count == 2)
@@ -403,7 +410,7 @@ struct ProfileRelationshipsViewModelTests {
 
         viewModel.viewDidLoad()
         await settle(until: { rows(phases).count == 2 })
-        viewModel.loadNextPageIfNeeded()
+        viewModel.loadNextPageIfNeeded(for: viewModel.direction)
         await settle(until: { rows(phases).count == 4 })
 
         viewModel.refresh()
@@ -654,15 +661,17 @@ struct ProfileRelationshipsViewModelTests {
             subject: subject(followerCount: .exact(142), followingCount: .exact(89)),
             repository: StubRelationshipsProvider()
         )
-        #expect(viewModel.segmentTitles == ["142 Followers", "89 Following"])
+        // Friends has no backend count, so it stays a bare noun until its tab
+        // loads — see `friendsSegmentTakesItsCountFromWhatLoaded`.
+        #expect(viewModel.segmentTitles == ["142 Followers", "89 Following", "Friends"])
     }
 
-    @Test func segmentTitlesAbbreviateLikeTheHeaderMetrics() {
+    @Test func segmentTitlesAbbreviateThroughTheSharedFormatter() {
         let viewModel = ProfileRelationshipsViewModel(
             subject: subject(followerCount: .exact(12_400), followingCount: .atLeast(200)),
             repository: StubRelationshipsProvider()
         )
-        #expect(viewModel.segmentTitles == ["12.4K Followers", "200+ Following"])
+        #expect(viewModel.segmentTitles == ["12.4K Followers", "200+ Following", "Friends"])
     }
 
     @Test func anUnavailableCountDegradesToTheBareNoun() {
@@ -671,26 +680,60 @@ struct ProfileRelationshipsViewModelTests {
         let viewModel = ProfileRelationshipsViewModel(
             subject: subject(), repository: StubRelationshipsProvider()
         )
-        #expect(viewModel.segmentTitles == ["Followers", "Following"])
+        #expect(viewModel.segmentTitles == ["Followers", "Following", "Friends"])
     }
 
-    @Test func removingAFollowerDecrementsTheSegmentCount() async {
+    /// Friends is the one tab with no count on the wire, so the title is
+    /// filled in from the rows the tab actually loaded — exact once the cursor
+    /// is spent.
+    @Test func friendsSegmentTakesItsCountFromWhatLoaded() async {
+        let provider = StubRelationshipsProvider(friends: [person("ava"), person("kenji")])
+        let viewModel = ProfileRelationshipsViewModel(
+            subject: subject(), repository: provider, direction: .friends
+        )
+        let titles = Box<[String]>()
+        viewModel.onSegmentTitlesChange = { titles.append($0) }
+        let phases = phaseRecorder(viewModel)
+
+        viewModel.viewDidLoad()
+        await settle(until: { !rows(phases).isEmpty })
+
+        #expect(viewModel.segmentTitles.last == "2 Friends")
+        #expect(titles.items.last?.last == "2 Friends")
+    }
+
+    /// A tab still holding a cursor knows only a lower bound, and says so
+    /// rather than passing off a page size as the total.
+    @Test func aPartiallyLoadedFriendsListSaysAtLeast() async {
         let provider = StubRelationshipsProvider(
-            followers: [person("ava")], supportsFollowerRemoval: true
+            friends: (1...5).map { person("friend-\($0)") }
+        )
+        let viewModel = ProfileRelationshipsViewModel(
+            subject: subject(), repository: provider, direction: .friends, pageSize: 2
+        )
+        let phases = phaseRecorder(viewModel)
+
+        viewModel.viewDidLoad()
+        await settle(until: { !rows(phases).isEmpty })
+
+        #expect(viewModel.segmentTitles.last == "2+ Friends")
+    }
+
+    @Test func removingAFollowerDropsTheRow() async {
+        let provider = StubRelationshipsProvider(
+            followers: [person("ava"), person("kenji")], supportsFollowerRemoval: true
         )
         let viewModel = ProfileRelationshipsViewModel(
             subject: subject(isSelf: true, followerCount: .exact(142)), repository: provider
         )
         let phases = phaseRecorder(viewModel)
-        let titles = Box<[String]>()
-        viewModel.onSegmentTitlesChange = { titles.append($0) }
 
         viewModel.viewDidLoad()
-        await settle(until: { !rows(phases).isEmpty })
+        await settle(until: { rows(phases).count == 2 })
         viewModel.removeFollower(ProfileID("ava"))
-        await settle(until: { !titles.items.isEmpty })
+        await settle(until: { rows(phases).count == 1 })
 
-        #expect(viewModel.segmentTitles.first == "141 Followers")
+        #expect(rows(phases).map(\.id.rawValue) == ["kenji"])
     }
 
     // MARK: Search
@@ -757,7 +800,7 @@ struct ProfileRelationshipsViewModelTests {
         viewModel.viewDidLoad()
         await settle(until: { rows(phases).count == 2 })
         viewModel.searchQueryChanged("p")
-        viewModel.loadNextPageIfNeeded()
+        viewModel.loadNextPageIfNeeded(for: viewModel.direction)
         await settle()
 
         #expect(await provider.pageRequests.count == 1)

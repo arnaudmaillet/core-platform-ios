@@ -1,18 +1,18 @@
-import DesignSystem
 import UIKit
 
-/// One loading row in the compose picker: an identity disc, a name bone and a
-/// shorter handle bone — `PersonListCell`'s silhouette with the text taken out.
+/// One loading row: an identity disc, a name bone and a shorter handle bone —
+/// `PersonListCell`'s silhouette with the text taken out.
 ///
-/// A *cell*, not an overlay view. The picker's loading state is not
-/// all-or-nothing: recents are free and land immediately while the social-graph
-/// fan-out is still running, so the shimmer has to begin exactly where the
-/// loaded rows stop. Hanging a skeleton view over the list meant computing that
-/// boundary by hand — and getting it wrong, because a diffable apply's content
+/// A *cell*, not an overlay view. A person list's loading state is rarely
+/// all-or-nothing — in the compose picker recents are free and land
+/// immediately while the social-graph fan-out is still running — so the
+/// shimmer has to begin exactly where the loaded rows stop. Hanging a skeleton
+/// view over the list meant computing that boundary by hand — and getting it
+/// wrong, because a diffable apply's content
 /// size isn't final when the apply returns, so the bones landed *on top of* the
 /// rows they were supposed to follow. As collection view items they are placed
 /// by the layout, which already knows where the last row ended.
-final class PersonSkeletonCell: UICollectionViewListCell {
+public final class PersonSkeletonCell: UICollectionViewListCell {
     private enum Metrics {
         /// `MonogramAvatarView.rowDiameter` (copied, not referenced: this
         /// nonisolated constant can't read a main-actor one).
@@ -30,7 +30,7 @@ final class PersonSkeletonCell: UICollectionViewListCell {
 
     /// How many rows of this height it takes to fill `height`, rounded up so
     /// the last one runs past the bottom edge instead of leaving a gap.
-    static func rowsToFill(_ height: CGFloat) -> Int {
+    public static func rowsToFill(_ height: CGFloat) -> Int {
         guard height > 0 else { return 0 }
         return max(1, Int((height / Metrics.rowHeight).rounded(.up)))
     }
@@ -41,7 +41,7 @@ final class PersonSkeletonCell: UICollectionViewListCell {
     private var nameWidth: NSLayoutConstraint!
     private var handleWidth: NSLayoutConstraint!
 
-    override init(frame: CGRect) {
+    public override init(frame: CGRect) {
         super.init(frame: frame)
         isUserInteractionEnabled = false
 
@@ -74,11 +74,11 @@ final class PersonSkeletonCell: UICollectionViewListCell {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// `index` continues the width cycle across the whole run of rows, so the
     /// pattern doesn't restart when the skeleton shrinks as content lands.
-    func configure(at index: Int) {
+    public func configure(at index: Int) {
         // Multipliers are immutable, so varying a width means replacing its
         // constraint rather than assigning to it.
         NSLayoutConstraint.deactivate([nameWidth, handleWidth])

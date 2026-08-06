@@ -20,6 +20,7 @@ final class SuggestionCell: UITableViewCell {
     private let nameLabel = UILabel()
     private let handleLabel = UILabel()
     private let reasonLabel = UILabel()
+    private let separatorLabel = UILabel()
     private let followButton = UIButton(type: .system)
     private let dismissButton = UIButton(type: .system)
 
@@ -51,6 +52,11 @@ final class SuggestionCell: UITableViewCell {
         nameLabel.text = model.displayName
         handleLabel.text = model.handleText
         reasonLabel.text = model.reasonText
+        // Hidden, not empty: a stack skips a hidden arranged subview, so a
+        // suggestion with no reason collapses to a bare handle rather than
+        // trailing a stray bullet.
+        reasonLabel.isHidden = model.reasonText.isEmpty
+        separatorLabel.isHidden = reasonLabel.isHidden || model.handleText.isEmpty
         applyFollowState(model.isFollowing, name: model.displayName)
         dismissButton.accessibilityLabel = "Remove suggestion \(model.displayName)"
         loadAvatar(model.avatarURL)
@@ -98,10 +104,15 @@ final class SuggestionCell: UITableViewCell {
         handleLabel.font = .preferredFont(forTextStyle: .subheadline)
         handleLabel.textColor = .secondaryLabel
 
-        reasonLabel.font = .preferredFont(forTextStyle: .footnote)
+        // Same size as the handle, one colour step quieter — the reason is a
+        // peer of the handle on the line they share, not a third tier of type.
+        reasonLabel.font = .preferredFont(forTextStyle: .subheadline)
         reasonLabel.textColor = .tertiaryLabel
+        separatorLabel.font = .preferredFont(forTextStyle: .subheadline)
+        separatorLabel.textColor = .tertiaryLabel
+        separatorLabel.text = "•"
 
-        for label in [nameLabel, handleLabel, reasonLabel] {
+        for label in [nameLabel, handleLabel, separatorLabel, reasonLabel] {
             label.adjustsFontForContentSizeCategory = true
             label.numberOfLines = 1
         }
@@ -122,9 +133,25 @@ final class SuggestionCell: UITableViewCell {
         dismissButton.addAction(UIAction { [weak self] _ in self?.onDismiss?() }, for: .primaryActionTriggered)
         dismissButton.setContentHuggingPriority(.required, for: .horizontal)
 
-        let textColumn = UIStackView(arrangedSubviews: [nameLabel, handleLabel, reasonLabel])
+        // ⚠️ The reason sits INLINE after the handle, not on a third line —
+        // the same shape `PersonListCell` gives the search screen's rows, so
+        // the two suggestion lists read as one design and this row comes down
+        // to the app's standard pitch. The handle is the only part that may
+        // lose characters.
+        handleLabel.lineBreakMode = .byTruncatingTail
+        handleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        for label in [separatorLabel, reasonLabel] {
+            label.setContentCompressionResistancePriority(.required, for: .horizontal)
+            label.setContentHuggingPriority(.required, for: .horizontal)
+        }
+        let subtitleRow = UIStackView(arrangedSubviews: [handleLabel, separatorLabel, reasonLabel])
+        subtitleRow.axis = .horizontal
+        subtitleRow.alignment = .firstBaseline
+        subtitleRow.spacing = Spacing.xs
+
+        let textColumn = UIStackView(arrangedSubviews: [nameLabel, subtitleRow])
         textColumn.axis = .vertical
-        textColumn.spacing = 1
+        textColumn.spacing = 2
         textColumn.alignment = .leading
 
         let actions = UIStackView(arrangedSubviews: [followButton, dismissButton])
@@ -137,8 +164,15 @@ final class SuggestionCell: UITableViewCell {
         row.axis = .horizontal
         row.alignment = .center
         row.spacing = Spacing.md
+        // Two lines now that the reason shares the handle's, so the disc is
+        // what the row is padded around — the same arithmetic as every other
+        // people list in the app.
+        let inset = PersonRowMetrics.verticalInset(forContentHeight: max(
+            MonogramAvatarView.rowDiameter,
+            PersonRowMetrics.textHeight([.headline, .subheadline])
+        ))
         row.pin(to: contentView, insets: NSDirectionalEdgeInsets(
-            top: Spacing.md, leading: Spacing.lg, bottom: Spacing.md, trailing: Spacing.lg
+            top: inset, leading: Spacing.lg, bottom: inset, trailing: Spacing.lg
         ))
     }
 }

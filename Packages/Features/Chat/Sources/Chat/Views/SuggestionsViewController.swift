@@ -56,6 +56,9 @@ final class SuggestionsViewController: UIViewController {
         tableView.showsVerticalScrollIndicator = false
         tableView.showsHorizontalScrollIndicator = false
         tableView.delegate = self
+        // No hairlines, matching every other people list in the app: a 48pt
+        // disc and two lines of type already make each row its own object.
+        tableView.separatorStyle = .none
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 76
         tableView.pin(to: view)

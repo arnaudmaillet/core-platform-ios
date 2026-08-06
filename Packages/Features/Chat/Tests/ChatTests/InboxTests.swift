@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import DesignSystem
 import Foundation
 import Testing
 import UIKit
@@ -1462,8 +1463,8 @@ struct InboxTabWatermarkTests {
 
 @MainActor
 struct InboxPagerTests {
-    private func makePager(pages: Int = 3, width: CGFloat = 300) -> InboxPagerView {
-        let pager = InboxPagerView(pages: (0..<pages).map { _ in UIView() })
+    private func makePager(pages: Int = 3, width: CGFloat = 300) -> HorizontalPagerView {
+        let pager = HorizontalPagerView(pages: (0..<pages).map { _ in UIView() })
         pager.frame = CGRect(x: 0, y: 0, width: width, height: 600)
         pager.layoutIfNeeded()
         return pager
@@ -1492,7 +1493,7 @@ struct InboxPagerTests {
     /// header's lens sat on the routed tab while the first tab's list stayed
     /// visible, and only a manual swipe reconciled them.
     @Test func aPageChosenBeforeLayoutIsTheOneShownAfterIt() {
-        let pager = InboxPagerView(pages: (0..<3).map { _ in UIView() })
+        let pager = HorizontalPagerView(pages: (0..<3).map { _ in UIView() })
         var reported: [CGFloat] = []
         pager.onProgress = { reported.append($0) }
 

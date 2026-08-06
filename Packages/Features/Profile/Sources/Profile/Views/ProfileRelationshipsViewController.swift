@@ -3,54 +3,68 @@ import DesignSystem
 import MediaCore
 import UIKit
 
-/// The followers / following screen, pushed from the profile header's counter
-/// row.
+/// The followers / following / friends screen, pushed from the profile
+/// header's counter row.
 ///
-/// One screen, two lists, a `UISegmentedControl` between them — rather than two
-/// pushed screens or a swipeable pager. Followers and Following are the same
-/// question asked in two directions, and the segmented control is the platform's
-/// own answer for that: it keeps one navigation entry, one scroll context per
-/// tab, and one back button, and it costs no custom chrome. It sits in the
-/// navigation bar's `titleView`, where the system styles and centers it; the
-/// back button carries the @handle forward from the profile underneath, so
-/// whose lists these are stays legible without a second title line.
+/// **One screen, three lists, a swipeable pager between them.** This began as a
+/// `UISegmentedControl` in the navigation bar's title slot, which was right
+/// while there were two lists: the platform's own answer, one navigation entry,
+/// no custom chrome. A third tab broke it. The bar caps a title view at 258pt,
+/// and three counted titles ("12.4K Followers") do not fit that on any device —
+/// the control truncated them to "12.4K Follow…" and "200+ Follow…", the two
+/// labels a viewer most needs to tell apart. A fallback that dropped the counts
+/// on narrow screens bought correctness by giving up the numbers.
+///
+/// So the selector left the title slot. `PagedTabBar` floats under the
+/// navigation bar on the screen's full width, and its segments live in a scroll
+/// view — past the capsule's width they scroll rather than truncate, so a title
+/// is never clipped whatever it says or however large the text is set. The same
+/// component the Messages inbox and the For You grid wear, in the same
+/// `.floating` style it was originally built for.
+///
+/// **The pager is what the tab bar was always for.** `PagedTabBar.setProgress`
+/// takes a *fractional* page position, so the lens tracks a finger mid-swipe
+/// instead of snapping at the end — and a tap animates the pager, which reports
+/// progress the same way, so taps and swipes drive the header through one path.
+/// The two directions of that sync are `pager.onProgress` and the control's
+/// `.valueChanged`; the view model is told only once a page settles.
 final class ProfileRelationshipsViewController: UIViewController {
-    private enum Section: Hashable {
-        case people
-        case skeleton
-        case paging
-    }
-
-    private enum Item: Hashable {
-        case person(ProfileID)
-        case placeholder(Int)
-        case paging
-    }
-
     private let viewModel: ProfileRelationshipsViewModel
     private let imagePipeline: ImagePipeline?
 
-    /// The direction selector, hosted as the navigation item's `titleView`.
-    private let segmentedControl = UISegmentedControl()
+    /// The direction selector. Internal so tests can read what the segments
+    /// actually say — the point of the rewrite is that they say it in full.
+    let tabBar: PagedTabBar
+    /// Internal alongside `tabBar` so tests can assert the two stay in step —
+    /// which is the whole contract of this screen's chrome.
+    let pager: HorizontalPagerView
+    /// One list per direction, in `Self.directions` order.
+    private let pages: [ProfileRelationshipListViewController]
+
     /// Search, collapsed to a magnifier in the bar's trailing slot until
     /// tapped — `.integratedButton`, which is UIKit's own name for exactly
     /// that behaviour.
     private let searchController = UISearchController(searchResultsController: nil)
-    private var collectionView: UICollectionView!
-    private let refreshControl = UIRefreshControl()
 
-    private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
-    private var rowsByID: [ProfileID: ProfileRelationshipsViewModel.Row] = [:]
-    private var phase: ProfileRelationshipsViewModel.Phase = .loading
-    private var hasRenderedContent = false
-
-    /// Segment order, so index ↔ direction never drifts from the control's
-    /// titles.
-    private static let directions: [RelationshipDirection] = [.followers, .following]
+    /// Segment order, so index ↔ direction never drifts.
+    ///
+    /// ⚠️ Must stay in the same order as
+    /// `ProfileRelationshipsViewModel.segmentTitles`, which maps
+    /// `RelationshipDirection.allCases` — segment *i* pairs with direction *i*
+    /// and nothing checks the two agree.
+    private static let directions: [RelationshipDirection] = RelationshipDirection.allCases
 
     init(viewModel: ProfileRelationshipsViewModel, imagePipeline: ImagePipeline?) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
+        self.tabBar = PagedTabBar(titles: viewModel.segmentTitles, style: .floating)
+        self.pages = Self.directions.map {
+            ProfileRelationshipListViewController(
+                direction: $0, viewModel: viewModel, imagePipeline: imagePipeline
+            )
+        }
+        let start = Self.directions.firstIndex(of: viewModel.direction) ?? 0
+        self.pager = HorizontalPagerView(pages: pages.map(\.view), initialIndex: start)
         super.init(nibName: nil, bundle: nil)
         // The profile underneath hides the tab bar on push; this screen is one
         // level deeper and must not bring it back.
@@ -65,21 +79,96 @@ final class ProfileRelationshipsViewController: UIViewController {
         view.backgroundColor = .systemBackground
         configureSearch()
         configureNavigationBar()
-        configureCollectionView()
+        configurePager()
 
-        viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
+        viewModel.onPhaseChange = { [weak self] direction, phase in
+            self?.page(for: direction)?.render(phase)
+            // Privacy is per tab — a backend refusal can lock one list while
+            // the others read fine — so the search affordance is re-evaluated
+            // whenever the ACTIVE tab's phase moves.
+            if direction == self?.viewModel.direction { self?.applySearchAvailability() }
+        }
         viewModel.onDirectionChange = { [weak self] direction in
-            guard let index = Self.directions.firstIndex(of: direction) else { return }
-            self?.segmentedControl.selectedSegmentIndex = index
+            guard let self, let index = Self.directions.firstIndex(of: direction) else { return }
+            self.tabBar.select(index)
+            self.pager.setActivePage(index, animated: true)
         }
         viewModel.onSegmentTitlesChange = { [weak self] titles in
-            self?.applySegmentTitles(titles)
+            self?.tabBar.setTitles(titles)
         }
         viewModel.onActionResult = { [weak self] result in self?.render(result) }
 
-        render(.loading)
         viewModel.viewDidLoad()
         applySearchAvailability()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // The lists scroll UNDER the floating capsule, so each one is inset by
+        // exactly the room the bar occupies. Read from the bar rather than
+        // stated: its height moves with Dynamic Type.
+        let inset = tabBar.bounds.height
+        for page in pages { page.topContentInset = inset }
+    }
+
+    // MARK: - Pager
+
+    private func configurePager() {
+        for page in pages {
+            addChild(page)
+            page.didMove(toParent: self)
+        }
+
+        pager.pin(to: view)
+        // Above the pager, and NOT inside it: the bar belongs to the screen,
+        // not to any one page, so it must not travel with the pages it labels.
+        tabBar.constrain(in: view) { parent in
+            tabBar.topAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.topAnchor)
+            tabBar.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+            tabBar.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
+        }
+
+        // Tap → page. Animated, so the lens rides the same progress stream a
+        // finger produces rather than jumping.
+        tabBar.addAction(
+            UIAction { [weak self] _ in
+                guard let self else { return }
+                self.pager.setActivePage(self.tabBar.selectedIndex, animated: true)
+            },
+            for: .valueChanged
+        )
+        // Swipe → lens, every frame of the drag.
+        pager.onProgress = { [weak self] progress in
+            #if DEBUG
+            // Dev convenience: `-relationships-trace-progress` prints the
+            // fractional page position every frame. Whether the lens TRACKS a
+            // swipe or snaps at the end of it is invisible to a screenshot and
+            // easy to misread from a video — a frame-by-frame measurement that
+            // includes the selected segment's bold text reads as a jump even
+            // when the lens is moving perfectly.
+            if ProcessInfo.processInfo.arguments.contains("-relationships-trace-progress") {
+                print("REL-PROGRESS \(progress)")
+            }
+            #endif
+            self?.tabBar.setProgress(progress)
+        }
+        // Only a SETTLED page changes the model's direction. Telling it
+        // mid-swipe would make the search field and the QA hooks flicker
+        // between tabs while a finger is still deciding.
+        pager.onSettled = { [weak self] index in
+            guard let self, let direction = Self.directions[safe: index] else { return }
+            self.viewModel.selectDirection(direction)
+        }
+        tabBar.select(Self.directions.firstIndex(of: viewModel.direction) ?? 0)
+    }
+
+    private func page(for direction: RelationshipDirection) -> ProfileRelationshipListViewController? {
+        pages.first { $0.direction == direction }
+    }
+
+    /// The active tab's phase, which is what the search affordance keys off.
+    private var phase: ProfileRelationshipsViewModel.Phase {
+        viewModel.phase(for: viewModel.direction)
     }
 
     /// Whether the search affordance should be withheld.
@@ -155,13 +244,16 @@ final class ProfileRelationshipsViewController: UIViewController {
         super.viewDidAppear(animated)
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        // Dev convenience: `-profile-relationships-tab following` opens on the
-        // second tab, and `-profile-relationships-action` fires the first row's
+        // Dev convenience: `-profile-relationships-tab following|friends` opens
+        // on that tab, and `-profile-relationships-action` fires the first row's
         // trailing button — neither is reachable in the simulator, which can
         // deliver no taps.
-        if let index = arguments.firstIndex(of: "-profile-relationships-tab"),
-           arguments.dropFirst(index + 1).first == "following" {
-            viewModel.qaSelectDirection(.following)
+        if let index = arguments.firstIndex(of: "-profile-relationships-tab") {
+            switch arguments.dropFirst(index + 1).first {
+            case "following": viewModel.qaSelectDirection(.following)
+            case "friends": viewModel.qaSelectDirection(.friends)
+            default: break
+            }
         }
         if arguments.contains("-profile-relationships-action") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
@@ -206,34 +298,12 @@ final class ProfileRelationshipsViewController: UIViewController {
     // MARK: - Setup
 
     private func configureNavigationBar() {
-        applySegmentTitles(viewModel.segmentTitles)
-        segmentedControl.selectedSegmentIndex =
-            Self.directions.firstIndex(of: viewModel.direction) ?? 0
-        segmentedControl.addAction(
-            UIAction { [weak self] _ in
-                guard let self,
-                      let direction = Self.directions[safe: self.segmentedControl.selectedSegmentIndex]
-                else { return }
-                self.viewModel.selectDirection(direction)
-            },
-            for: .valueChanged
-        )
-        navigationItem.titleView = segmentedControl
+        // The title slot is free now that the selector floats below the bar,
+        // so it carries whose lists these are instead of a control.
+        navigationItem.title = viewModel.title
+        navigationItem.largeTitleDisplayMode = .never
         navigationItem.backButtonTitle = "Back"
         navigationItem.accessibilityLabel = viewModel.title
-    }
-
-    /// Retitles the segments in place; replacing them would drop the selection
-    /// and replay the control's entrance, and this fires while the screen is up.
-    private func applySegmentTitles(_ titles: [String]) {
-        for (index, title) in titles.enumerated() {
-            if index < segmentedControl.numberOfSegments {
-                guard segmentedControl.titleForSegment(at: index) != title else { continue }
-                segmentedControl.setTitle(title, forSegmentAt: index)
-            } else {
-                segmentedControl.insertSegment(withTitle: title, at: index, animated: false)
-            }
-        }
     }
 
     /// The search controller itself; where its bar goes is `applySearchAvailability`'s job.
@@ -259,137 +329,6 @@ final class ProfileRelationshipsViewController: UIViewController {
         definesPresentationContext = true
     }
 
-    private func configureCollectionView() {
-        var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
-        configuration.showsSeparators = true
-        // Separators start past the identity disc, the way every stock
-        // people-list in iOS insets them past the leading accessory.
-        configuration.separatorConfiguration.topSeparatorVisibility = .hidden
-        let layout = UICollectionViewCompositionalLayout.list(using: configuration)
-
-        collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
-        collectionView.delegate = self
-        collectionView.alwaysBounceVertical = true
-        collectionView.pin(to: view)
-
-        refreshControl.addAction(
-            UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged
-        )
-        collectionView.refreshControl = refreshControl
-
-        let rowRegistration = UICollectionView.CellRegistration<RelationshipListCell, ProfileID> {
-            [weak self] cell, _, id in
-            guard let self, let row = self.rowsByID[id] else { return }
-            cell.configure(with: row, imagePipeline: self.imagePipeline)
-            cell.loadAvatar(row.avatarURL)
-            cell.onAction = { [weak self] in
-                guard let self else { return }
-                switch row.action {
-                case .remove: self.confirmRemoveFollower(row)
-                case .follow, .following: self.viewModel.toggleFollow(id)
-                case .inert: break
-                }
-            }
-        }
-
-        let skeletonRegistration = UICollectionView.CellRegistration<RelationshipSkeletonCell, Int> {
-            cell, _, index in
-            cell.configure(at: index)
-        }
-
-        let pagingRegistration = UICollectionView.CellRegistration<RelationshipPagingCell, Int> {
-            cell, _, _ in
-            cell.startAnimating()
-        }
-
-        dataSource = UICollectionViewDiffableDataSource<Section, Item>(
-            collectionView: collectionView
-        ) { collectionView, indexPath, item in
-            switch item {
-            case .person(let id):
-                collectionView.dequeueConfiguredReusableCell(
-                    using: rowRegistration, for: indexPath, item: id
-                )
-            case .placeholder(let index):
-                collectionView.dequeueConfiguredReusableCell(
-                    using: skeletonRegistration, for: indexPath, item: index
-                )
-            case .paging:
-                collectionView.dequeueConfiguredReusableCell(
-                    using: pagingRegistration, for: indexPath, item: 0
-                )
-            }
-        }
-    }
-
-    // MARK: - Render
-
-    private func render(_ phase: ProfileRelationshipsViewModel.Phase) {
-        self.phase = phase
-        switch phase {
-        case .loading:
-            apply(rows: [], placeholders: placeholderCount(after: 0), isAppending: false)
-
-        case .content(let rows, let isAppending):
-            refreshControl.endRefreshing()
-            apply(rows: rows, placeholders: 0, isAppending: isAppending)
-
-        case .empty, .restricted, .failed:
-            refreshControl.endRefreshing()
-            apply(rows: [], placeholders: 0, isAppending: false)
-        }
-        // The empty / private / failure states are the platform's own, not a
-        // hand-built column: `UIContentUnavailableConfiguration` supplies the
-        // symbol, the type ladder, the centring, and the cross-fade between
-        // states, and it stays correct across Dynamic Type and future OS
-        // revisions in a way a bespoke stack would not.
-        setNeedsUpdateContentUnavailableConfiguration()
-        // The toolbar follows the phase: a tab that turns out to be restricted
-        // (the backend refused, or the viewer switched to a locked direction)
-        // gives its search bar up, and one that turns out not to be gets it
-        // back. Skipped before first appearance — `viewWillAppear` owns the
-        // opening state, and running here first would fight the transition.
-        applySearchAvailability()
-    }
-
-    override func updateContentUnavailableConfiguration(
-        using state: UIContentUnavailableConfigurationState
-    ) {
-        var configuration: UIContentUnavailableConfiguration?
-        switch phase {
-        case .loading, .content:
-            configuration = nil
-
-        case .empty(let title, let message):
-            var empty = UIContentUnavailableConfiguration.empty()
-            empty.image = UIImage(systemName: "person.2")
-            empty.text = title
-            empty.secondaryText = message
-            configuration = empty
-
-        case .restricted(let title, let message):
-            var restricted = UIContentUnavailableConfiguration.empty()
-            restricted.image = UIImage(systemName: "lock")
-            restricted.text = title
-            restricted.secondaryText = message
-            configuration = restricted
-
-        case .failed(let message):
-            var failed = UIContentUnavailableConfiguration.empty()
-            failed.image = UIImage(systemName: "exclamationmark.triangle")
-            failed.text = "Couldn't Load"
-            failed.secondaryText = message
-            var button = UIButton.Configuration.borderless()
-            button.title = "Try Again"
-            failed.button = button
-            failed.buttonProperties.primaryAction = UIAction { [weak self] _ in
-                self?.viewModel.refresh()
-            }
-            configuration = failed
-        }
-        contentUnavailableConfiguration = configuration
-    }
-
     /// A failed row mutation. A toast, not an alert: the row has already
     /// rolled back to its previous state, so there is nothing for the user to
     /// dismiss or decide.
@@ -400,115 +339,6 @@ final class ProfileRelationshipsViewController: UIViewController {
         }
     }
 
-    private func apply(
-        rows: [ProfileRelationshipsViewModel.Row],
-        placeholders: Int,
-        isAppending: Bool
-    ) {
-        rowsByID = rows.reduce(into: [:]) { models, row in models[row.id] = row }
-
-        var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        if !rows.isEmpty {
-            snapshot.appendSections([.people])
-            snapshot.appendItems(rows.map { Item.person($0.id) }, toSection: .people)
-        }
-        if placeholders > 0 {
-            snapshot.appendSections([.skeleton])
-            snapshot.appendItems((0..<placeholders).map(Item.placeholder), toSection: .skeleton)
-        }
-        if isAppending {
-            snapshot.appendSections([.paging])
-            snapshot.appendItems([.paging], toSection: .paging)
-        }
-
-        // Animate only once there is something to animate *from*, and only
-        // while on screen — an off-screen apply replays its animation the next
-        // time the screen is pushed.
-        dataSource.apply(snapshot, animatingDifferences: hasRenderedContent && view.window != nil)
-        hasRenderedContent = true
-
-        // Rows already on screen keep their old closure and display model after
-        // an in-place change (a follow toggle mutates the row, not the item id),
-        // so the visible ones are re-configured explicitly.
-        reconfigureVisibleRows(in: snapshot)
-    }
-
-    /// Re-applies the current display model to rows whose *identity* didn't
-    /// change. A diffable snapshot compares item identifiers, and a row's
-    /// identifier is its profile id — so a Follow→Following flip is invisible
-    /// to the diff and would otherwise leave the old button on screen.
-    private func reconfigureVisibleRows(in snapshot: NSDiffableDataSourceSnapshot<Section, Item>) {
-        let visible = collectionView.indexPathsForVisibleItems.compactMap {
-            dataSource.itemIdentifier(for: $0)
-        }
-        let refreshable = visible.filter { item in
-            guard case .person = item else { return false }
-            return snapshot.indexOfItem(item) != nil
-        }
-        guard !refreshable.isEmpty else { return }
-        var updated = dataSource.snapshot()
-        updated.reconfigureItems(refreshable)
-        dataSource.apply(updated, animatingDifferences: false)
-    }
-
-    /// Removing a follower is destructive and silent on the other side, so it
-    /// asks first and names the person — the same standard the profile's block
-    /// action holds itself to.
-    private func confirmRemoveFollower(_ row: ProfileRelationshipsViewModel.Row) {
-        let sheet = UIAlertController(
-            title: "Remove \(row.handle)?",
-            message: "They'll stop following you. They aren't notified, and they can follow you again.",
-            preferredStyle: .actionSheet
-        )
-        sheet.addAction(UIAlertAction(title: "Remove", style: .destructive) { [weak self] _ in
-            self?.viewModel.removeFollower(row.id)
-        })
-        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        // iPad: anchor to the row that spawned it.
-        if let index = dataSource.indexPath(for: .person(row.id)),
-           let cell = collectionView.cellForItem(at: index) {
-            sheet.popoverPresentationController?.sourceView = cell
-            sheet.popoverPresentationController?.sourceRect = cell.bounds
-        }
-        present(sheet, animated: true)
-    }
-
-    /// How many loading rows it takes to reach the bottom of the screen from
-    /// where the loaded ones stop — derived from the viewport rather than a
-    /// fixed tally, so the shimmer runs to the bottom edge on every device.
-    private func placeholderCount(after loadedRows: Int) -> Int {
-        let viewport = collectionView.bounds.height - collectionView.adjustedContentInset.top
-        return max(0, RelationshipSkeletonCell.rowsToFill(viewport) - loadedRows)
-    }
-}
-
-extension ProfileRelationshipsViewController: UICollectionViewDelegate {
-    /// Asks for the next page as the end of the list comes into view. Three
-    /// rows of runway, so the page is usually in hand by the time the viewer
-    /// arrives and the list simply continues; the view model absorbs the repeat
-    /// calls this fires on every bounce.
-    func collectionView(
-        _ collectionView: UICollectionView,
-        willDisplay cell: UICollectionViewCell,
-        forItemAt indexPath: IndexPath
-    ) {
-        guard case .person = dataSource.itemIdentifier(for: indexPath) else { return }
-        let rowsInSection = collectionView.numberOfItems(inSection: indexPath.section)
-        guard indexPath.item >= rowsInSection - 3 else { return }
-        // Deferred by a runloop turn on purpose: asking here would land the
-        // paging spinner's snapshot apply *inside* `willDisplay`, which UIKit
-        // does not support — the collection view is mid-layout for the very
-        // cell being handed to us.
-        DispatchQueue.main.async { [weak self] in
-            self?.viewModel.loadNextPageIfNeeded()
-        }
-    }
-
-    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        collectionView.deselectItem(at: indexPath, animated: true)
-        guard case .person(let id) = dataSource.itemIdentifier(for: indexPath) else { return }
-        viewModel.rowTapped(id)
-    }
 }
 
 private extension Array {
