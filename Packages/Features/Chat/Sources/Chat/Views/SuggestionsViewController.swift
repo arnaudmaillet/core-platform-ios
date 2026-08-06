@@ -14,7 +14,16 @@ final class SuggestionsViewController: UIViewController {
     private let viewModel: SuggestionsViewModel
     private let imagePipeline: ImagePipeline?
 
-    private let tableView = UITableView(frame: .zero, style: .plain)
+    /// ⚠️ Built with its horizontal indicator off explicitly. The app-wide
+    /// appearance default (`ScrollIndicatorStyle`) covers the vertical one and
+    /// covers collection views entirely, but `UITableView` sets
+    /// `showsHorizontalScrollIndicator` on itself at init, and an instance
+    /// value outranks an appearance default.
+    private let tableView: UITableView = {
+        let table = UITableView(frame: .zero, style: .plain)
+        table.showsHorizontalScrollIndicator = false
+        return table
+    }()
     private let refreshControl = UIRefreshControl()
     private let skeletonView = ConversationListSkeletonView()
     private let statusView = InboxStatusView()
