@@ -683,28 +683,29 @@ struct ProfileRelationshipsViewModelTests {
         #expect(viewModel.segmentTitles == ["Followers", "Following", "Friends"])
     }
 
-    /// Friends is the one tab with no count on the wire, so the title is
-    /// filled in from the rows the tab actually loaded — exact once the cursor
-    /// is spent.
-    @Test func friendsSegmentTakesItsCountFromWhatLoaded() async {
+    /// Friends stays a bare noun even once its rows are in hand.
+    ///
+    /// The only number available would be "how many have loaded", which is a
+    /// page size sitting next to two real totals — it would read as a total and
+    /// then change as the list pages. Asserted AFTER a load precisely because
+    /// that is when a count would be tempting to show.
+    @Test func friendsSegmentNeverShowsACount() async {
         let provider = StubRelationshipsProvider(friends: [person("ava"), person("kenji")])
         let viewModel = ProfileRelationshipsViewModel(
-            subject: subject(), repository: provider, direction: .friends
+            subject: subject(followerCount: .exact(35), followingCount: .exact(12)),
+            repository: provider,
+            direction: .friends
         )
-        let titles = Box<[String]>()
-        viewModel.onSegmentTitlesChange = { titles.append($0) }
         let phases = phaseRecorder(viewModel)
 
         viewModel.viewDidLoad()
         await settle(until: { !rows(phases).isEmpty })
 
-        #expect(viewModel.segmentTitles.last == "2 Friends")
-        #expect(titles.items.last?.last == "2 Friends")
+        #expect(viewModel.segmentTitles == ["35 Followers", "12 Following", "Friends"])
     }
 
-    /// A tab still holding a cursor knows only a lower bound, and says so
-    /// rather than passing off a page size as the total.
-    @Test func aPartiallyLoadedFriendsListSaysAtLeast() async {
+    /// A partly-loaded Friends tab must not sprout "2+" either.
+    @Test func aPartiallyLoadedFriendsListStaysBare() async {
         let provider = StubRelationshipsProvider(
             friends: (1...5).map { person("friend-\($0)") }
         )
@@ -716,7 +717,7 @@ struct ProfileRelationshipsViewModelTests {
         viewModel.viewDidLoad()
         await settle(until: { !rows(phases).isEmpty })
 
-        #expect(viewModel.segmentTitles.last == "2+ Friends")
+        #expect(viewModel.segmentTitles.last == "Friends")
     }
 
     @Test func removingAFollowerDropsTheRow() async {
