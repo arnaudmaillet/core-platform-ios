@@ -43,6 +43,29 @@ final class ConversationResultCell: UICollectionViewListCell {
         content.secondaryTextProperties.font = .preferredFont(forTextStyle: .subheadline)
         content.secondaryTextProperties.color = model.isUnread ? .label : .secondaryLabel
         content.secondaryTextProperties.numberOfLines = 1
+
+        // Sized to land on the same row height as `PersonListCell`, which the
+        // People section of this very list is built from.
+        //
+        // **Derived from that cell's constant, not from a number read off a
+        // screenshot.** Copying its 12pt margin was tried and left this row
+        // 60.3pt against the person rows' 62.7 — the two cells reach their
+        // text height by different routes (a hand-built column with an
+        // explicit 2pt gap there, a content configuration with its own
+        // internal gap here), so matching the INPUT does not match the OUTPUT.
+        // Working back from the shared target does, and keeps tracking it
+        // through Dynamic Type.
+        //
+        // ⚠️ Set, not `max`'d against the default: this row is being made
+        // shorter, and taking the larger of the two would keep the system's
+        // margin and change nothing.
+        let textHeight = UIFont.preferredFont(forTextStyle: .headline).lineHeight
+            + UIFont.preferredFont(forTextStyle: .subheadline).lineHeight
+        var margins = content.directionalLayoutMargins
+        let margin = max(0, (PersonListCell.comfortableRowHeight - textHeight) / 2)
+        margins.top = margin
+        margins.bottom = margin
+        content.directionalLayoutMargins = margins
         contentConfiguration = content
 
         timeLabel.text = model.timeText
