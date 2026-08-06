@@ -117,6 +117,10 @@ public final class ProfileRelationshipsViewModel {
     public var onDirectionChange: ((RelationshipDirection) -> Void)?
     /// Fires when a segment's title changes — today only when removing a
     /// follower decrements the viewer's own count.
+    /// Fires when a segment title changes — the Friends count only becomes
+    /// known once that tab has loaded, and removing a follower moves the
+    /// Followers count.
+    public var onSegmentTitlesChange: (([String]) -> Void)?
     public var onActionResult: ((ActionResult) -> Void)?
 
     private let subject: Subject
@@ -154,6 +158,11 @@ public final class ProfileRelationshipsViewModel {
     /// loaded — the graph exposes no search-within-followers RPC, and a
     /// server round trip per keystroke would be the wrong shape for it anyway.
     private var query = ""
+    /// Counts behind the segment titles. Followers and Following are seeded
+    /// from the subject; Friends has no backend count at all (there is no
+    /// mutuals RPC — `dev/BACKEND_GAPS.md` §13d) and is filled in from what
+    /// the tab actually loads.
+    private var counts: [RelationshipDirection: CountEstimate] = [:]
     public init(
         subject: Subject,
         repository: any ProfileRelationshipsProviding,
@@ -166,26 +175,40 @@ public final class ProfileRelationshipsViewModel {
         self.router = router
         self.direction = direction
         self.pageSize = pageSize
+        counts = [.followers: subject.followerCount, .following: subject.followingCount]
     }
 
-    /// Segment titles in `RelationshipDirection.allCases` order.
-    ///
-    /// Constant for the screen's life — see `segmentTitle` for why the counts
-    /// came out. Read once at setup; there is no change notification because
-    /// there is nothing left to change.
+    /// Segment titles in `RelationshipDirection.allCases` order, each led by
+    /// its count when one is known ("1.2K Followers").
     public var segmentTitles: [String] {
         RelationshipDirection.allCases.map(segmentTitle)
     }
 
-    /// ⚠️ **The bare noun, since Friends made this a three-tab control.**
+    /// The same segments without their counts, for when the counted titles do
+    /// not fit the navigation bar.
     ///
-    /// The titles used to lead with the count ("142 Followers"). Three of those
-    /// do not fit the control's width, and what the segments truncate to is
-    /// "35 Follow…" and "12 Follow…" — two labels a viewer cannot tell apart,
-    /// which is worse than not showing the count at all. The counts are still
-    /// on the profile header a tap behind this screen.
+    /// Offered as an alternative rather than decided here: whether "12.4K
+    /// Followers" fits is a question about a control's width on a particular
+    /// device, which is the view's to answer, not the view model's.
+    public var bareSegmentTitles: [String] {
+        RelationshipDirection.allCases.map(Self.noun)
+    }
+
+    /// "1.2K Followers", or the bare noun when the count is unknown.
+    ///
+    /// A count the backend never answered degrades to "Followers" rather than
+    /// showing "—  Followers", which reads as a broken string. Friends starts
+    /// out unknown on every profile and gains its count when the tab loads.
+    ///
+    /// ⚠️ Three counted titles are wider than two, and this control is the
+    /// navigation item's `titleView`. The width that makes them fit is set in
+    /// `ProfileRelationshipsViewController` — changing the wording here can
+    /// push a segment into truncation, and "35 Follow…" is indistinguishable
+    /// from "12 Follow…".
     private func segmentTitle(for direction: RelationshipDirection) -> String {
-        Self.noun(for: direction)
+        let noun = Self.noun(for: direction)
+        guard let count = counts[direction], count != .unavailable else { return noun }
+        return "\(ProfileDisplayModel.format(count)) \(noun)"
     }
 
     private static func noun(for direction: RelationshipDirection) -> String {
@@ -330,6 +353,10 @@ public final class ProfileRelationshipsViewModel {
             do {
                 try await self.repository.removeFollower(profileID)
                 self.states[.followers]?.relations.removeAll { $0.id == profileID }
+                // The segment title counts this list, so it has to follow the
+                // list down — otherwise "142 Followers" sits above 141 of them.
+                self.counts[.followers] = self.counts[.followers]?.adjusted(by: -1)
+                self.onSegmentTitlesChange?(self.segmentTitles)
                 self.emit()
             } catch {
                 self.onActionResult?(.failed(message: "Couldn't remove this follower."))
@@ -394,6 +421,19 @@ public final class ProfileRelationshipsViewModel {
         state.isAppending = false
         state.failure = nil
         states[direction] = state
+        // Friends is the one tab whose count has no other source, so it is
+        // taken from the rows in hand: exact once the cursor is spent, "n+"
+        // while pages remain. Followers and Following keep the subject's own
+        // numbers — those are the whole list's size, not the part loaded.
+        if direction == .friends {
+            let updated = CountEstimate.fromSample(
+                count: state.relations.count, hasMore: !state.nextPageToken.isEmpty
+            )
+            if counts[.friends] != updated {
+                counts[.friends] = updated
+                onSegmentTitlesChange?(segmentTitles)
+            }
+        }
         emit(for: direction)
     }
 

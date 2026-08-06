@@ -34,12 +34,13 @@ private actor StubRelationshipsProvider: ProfileRelationshipsProviding {
     init(
         followers: [ProfileRelation] = [],
         following: [ProfileRelation] = [],
+        friends: [ProfileRelation] = [],
         failure: Error? = nil,
         followError: Error? = nil,
         removeError: Error? = nil,
         supportsFollowerRemoval: Bool = false
     ) {
-        people = [.followers: followers, .following: following]
+        people = [.followers: followers, .following: following, .friends: friends]
         self.failure = failure
         self.followError = followError
         self.removeError = removeError
@@ -649,26 +650,67 @@ struct ProfileRelationshipsViewModelTests {
 
     // MARK: Segment titles
 
-    /// The titles are the three nouns, whatever the subject's counts are.
-    ///
-    /// They used to lead with the count ("142 Followers"), which stopped
-    /// fitting when Friends made this a three-segment control — three counted
-    /// titles truncate to "35 Follow…" / "12 Follow…", which cannot be told
-    /// apart. Asserted against a subject that HAS counts, so a change that
-    /// puts them back has to come through here.
-    @Test func segmentTitlesAreTheBareNouns() {
+    @Test func segmentTitlesCarryTheSubjectsCounts() {
         let viewModel = ProfileRelationshipsViewModel(
             subject: subject(followerCount: .exact(142), followingCount: .exact(89)),
             repository: StubRelationshipsProvider()
         )
-        #expect(viewModel.segmentTitles == ["Followers", "Following", "Friends"])
+        // Friends has no backend count, so it stays a bare noun until its tab
+        // loads — see `friendsSegmentTakesItsCountFromWhatLoaded`.
+        #expect(viewModel.segmentTitles == ["142 Followers", "89 Following", "Friends"])
     }
 
-    @Test func segmentTitlesAreTheSameWithNoCountsAtAll() {
+    @Test func segmentTitlesAbbreviateThroughTheSharedFormatter() {
+        let viewModel = ProfileRelationshipsViewModel(
+            subject: subject(followerCount: .exact(12_400), followingCount: .atLeast(200)),
+            repository: StubRelationshipsProvider()
+        )
+        #expect(viewModel.segmentTitles == ["12.4K Followers", "200+ Following", "Friends"])
+    }
+
+    @Test func anUnavailableCountDegradesToTheBareNoun() {
+        // "—  Followers" would read as a broken string; the noun alone is
+        // honest about knowing nothing.
         let viewModel = ProfileRelationshipsViewModel(
             subject: subject(), repository: StubRelationshipsProvider()
         )
         #expect(viewModel.segmentTitles == ["Followers", "Following", "Friends"])
+    }
+
+    /// Friends is the one tab with no count on the wire, so the title is
+    /// filled in from the rows the tab actually loaded — exact once the cursor
+    /// is spent.
+    @Test func friendsSegmentTakesItsCountFromWhatLoaded() async {
+        let provider = StubRelationshipsProvider(friends: [person("ava"), person("kenji")])
+        let viewModel = ProfileRelationshipsViewModel(
+            subject: subject(), repository: provider, direction: .friends
+        )
+        let titles = Box<[String]>()
+        viewModel.onSegmentTitlesChange = { titles.append($0) }
+        let phases = phaseRecorder(viewModel)
+
+        viewModel.viewDidLoad()
+        await settle(until: { !rows(phases).isEmpty })
+
+        #expect(viewModel.segmentTitles.last == "2 Friends")
+        #expect(titles.items.last?.last == "2 Friends")
+    }
+
+    /// A tab still holding a cursor knows only a lower bound, and says so
+    /// rather than passing off a page size as the total.
+    @Test func aPartiallyLoadedFriendsListSaysAtLeast() async {
+        let provider = StubRelationshipsProvider(
+            friends: (1...5).map { person("friend-\($0)") }
+        )
+        let viewModel = ProfileRelationshipsViewModel(
+            subject: subject(), repository: provider, direction: .friends, pageSize: 2
+        )
+        let phases = phaseRecorder(viewModel)
+
+        viewModel.viewDidLoad()
+        await settle(until: { !rows(phases).isEmpty })
+
+        #expect(viewModel.segmentTitles.last == "2+ Friends")
     }
 
     @Test func removingAFollowerDropsTheRow() async {

@@ -1,3 +1,4 @@
+import DesignSystem
 import Foundation
 
 /// Pure formatting for the grid cells' metadata line: abbreviated counts
@@ -37,24 +38,13 @@ public enum PostMetadata {
 /// delegates to it.
 public enum PostGridCount {
     /// 1234 → "1.2K", 1_500_000 → "1.5M".
+    ///
+    /// Delegates to `CountFormatter` so a grid cell's counters and the profile
+    /// header directly above them cannot disagree about how a number is
+    /// spelled. ⚠️ That formatter TRUNCATES — 1,999 is "1.9K" — where this
+    /// used to round it to "2K"; a counter must never overstate itself.
     public static func abbreviate(_ value: Int64) -> String {
-        let absValue = abs(value)
-        switch absValue {
-        case 1_000_000...:
-            return trimmed(Double(value) / 1_000_000) + "M"
-        case 1_000...:
-            return trimmed(Double(value) / 1_000) + "K"
-        default:
-            return String(value)
-        }
-    }
-
-    private static func trimmed(_ value: Double) -> String {
-        // One decimal place, but drop a trailing ".0" (1.0K → "1K").
-        let rounded = (value * 10).rounded() / 10
-        if rounded == rounded.rounded() {
-            return String(Int(rounded))
-        }
-        return String(format: "%.1f", rounded)
+        CountFormatter.compactString(for: value)
     }
 }
+

@@ -31,7 +31,14 @@ final class ProfileRelationshipsViewController: UIViewController {
     private let imagePipeline: ImagePipeline?
 
     /// The direction selector, hosted as the navigation item's `titleView`.
-    private let segmentedControl = UISegmentedControl()
+    ///
+    /// Internal rather than private so the layout tests can assert what the
+    /// segments actually say at a given width — whether the counts fit is the
+    /// behaviour, and a test that rebuilt its own control would be measuring a
+    /// copy.
+    let segmentedControl = UISegmentedControl()
+    /// The control's width cap, re-made whenever the bar's usable width does.
+    private var segmentedControlWidth: NSLayoutConstraint?
     /// Search, collapsed to a magnifier in the bar's trailing slot until
     /// tapped — `.integratedButton`, which is UIKit's own name for exactly
     /// that behaviour.
@@ -75,11 +82,21 @@ final class ProfileRelationshipsViewController: UIViewController {
             guard let index = Self.directions.firstIndex(of: direction) else { return }
             self?.segmentedControl.selectedSegmentIndex = index
         }
+        viewModel.onSegmentTitlesChange = { [weak self] _ in
+            self?.applyBestFittingSegmentTitles()
+        }
         viewModel.onActionResult = { [weak self] result in self?.render(result) }
 
         render(.loading)
         viewModel.viewDidLoad()
         applySearchAvailability()
+    }
+
+    /// Rotation, split view, and Dynamic Type all change what the bar can
+    /// spare for the title; the cap is re-derived rather than set once.
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        updateSegmentedControlWidth()
     }
 
     /// Whether the search affordance should be withheld.
@@ -221,14 +238,98 @@ final class ProfileRelationshipsViewController: UIViewController {
             },
             for: .valueChanged
         )
+        configureSegmentedControlMetrics()
         navigationItem.titleView = segmentedControl
         navigationItem.backButtonTitle = "Back"
         navigationItem.accessibilityLabel = viewModel.title
     }
 
+    /// Makes three counted titles ("1.2K Followers") fit the navigation bar.
+    ///
+    /// Two levers, both needed. **A smaller title font**, because the control's
+    /// default body-size type puts three counted titles past the width the bar
+    /// leaves between the back button and the search glyph; the segments then
+    /// truncate to "35 Follow…" and "12 Follow…", which a viewer cannot tell
+    /// apart — worse than showing no count at all. **Content-proportional
+    /// widths**, because the three titles are not the same length and equal
+    /// thirds would truncate the longest while the shortest sat in white space.
+    ///
+    /// ⚠️ Sized against the bar, not the screen: `titleView` is offered what is
+    /// left after the bar's items, so this is capped at the readable width
+    /// minus that pair rather than the whole bar, and re-measured from
+    /// `viewDidLayoutSubviews` so rotation and Dynamic Type both land.
+    private func configureSegmentedControlMetrics() {
+        segmentedControl.apportionsSegmentWidthsByContent = true
+        for state in [UIControl.State.normal, .selected] {
+            segmentedControl.setTitleTextAttributes([.font: Self.segmentFont], for: state)
+        }
+        updateSegmentedControlWidth()
+    }
+
+    /// The widest the control may be. The bar has to keep room for the back
+    /// button and the search glyph either side, so this is the readable width
+    /// minus that pair rather than the whole bar.
+    private func updateSegmentedControlWidth() {
+        let available = availableTitleWidth
+        guard available > 0 else { return }
+        segmentedControlWidth?.isActive = false
+        let constraint = segmentedControl.widthAnchor.constraint(lessThanOrEqualToConstant: available)
+        constraint.isActive = true
+        segmentedControlWidth = constraint
+        applyBestFittingSegmentTitles()
+    }
+
+    /// Counted titles when they fit, bare nouns when they don't.
+    ///
+    /// "12.4K Followers · 200+ Following · 1.2K Friends" is wider than a 375pt
+    /// device's navigation bar can offer, and a segmented control given more
+    /// text than room truncates it — to "12.4K Follow…" and "200+ Follow…",
+    /// which are the two labels a viewer most needs to tell apart. Dropping
+    /// the counts loses information; truncating loses the *distinction*, which
+    /// is worse. So the counts are shown only when all three fit, and the
+    /// decision is re-made whenever the width or the titles change.
+    private func applyBestFittingSegmentTitles() {
+        let counted = viewModel.segmentTitles
+        let available = availableTitleWidth
+        applySegmentTitles(fits(counted, in: available) ? counted : viewModel.bareSegmentTitles)
+    }
+
+    /// Whether `titles` can be laid out as segments within `width`.
+    ///
+    /// Measured with the control's own title font plus its per-segment
+    /// padding, rather than trusting `sizeToFit` — the control reports a
+    /// content-sized width even when it will go on to truncate.
+    private func fits(_ titles: [String], in width: CGFloat) -> Bool {
+        let font = Self.segmentFont
+        let text = titles.reduce(CGFloat.zero) { total, title in
+            total + (title as NSString)
+                .size(withAttributes: [.font: font])
+                .width
+        }
+        return text + CGFloat(titles.count) * Self.segmentHorizontalPadding <= width
+    }
+
+    /// What the bar can offer the title view: the readable width less the
+    /// leading back button and the trailing search glyph.
+    private var availableTitleWidth: CGFloat {
+        max(0, view.bounds.width
+            - view.safeAreaInsets.left - view.safeAreaInsets.right
+            - Self.navigationBarItemAllowance)
+    }
+
+    private static var segmentFont: UIFont { .preferredFont(forTextStyle: .footnote) }
+    /// The control's own inset either side of a segment's title, doubled — a
+    /// measured constant, since UIKit exposes no metric for it.
+    private static let segmentHorizontalPadding: CGFloat = 20
+
+    /// Room reserved for the leading back button and the trailing search
+    /// glyph, both of which are circular glass bubbles with their own margins.
+    private static let navigationBarItemAllowance: CGFloat = 128
+
     /// Retitles the segments in place; replacing them would drop the selection
     /// and replay the control's entrance, and this fires while the screen is up.
     private func applySegmentTitles(_ titles: [String]) {
+        var changed = false
         for (index, title) in titles.enumerated() {
             if index < segmentedControl.numberOfSegments {
                 guard segmentedControl.titleForSegment(at: index) != title else { continue }
@@ -236,7 +337,12 @@ final class ProfileRelationshipsViewController: UIViewController {
             } else {
                 segmentedControl.insertSegment(withTitle: title, at: index, animated: false)
             }
+            changed = true
         }
+        // A retitle changes how wide the content wants to be, and with
+        // content-proportional segments the control does not re-measure itself.
+        guard changed else { return }
+        segmentedControl.sizeToFit()
     }
 
     /// The search controller itself; where its bar goes is `applySearchAvailability`'s job.

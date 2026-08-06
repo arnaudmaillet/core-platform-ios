@@ -40,23 +40,9 @@ public enum ProfileRowContext: Equatable, Sendable {
     /// is already competing for the width: "1.2K" costs four characters where
     /// "1,240" costs five and reads no better at a glance.
     ///
-    /// Truncating rather than rounding — 1,999 is "1.9K", not "2K" — so the
-    /// number never claims more than the count it came from.
+    /// Delegates to `CountFormatter`, which owns the truncating rule (1,999 is
+    /// "1.9K", never "2K") for every counter in the app.
     static func abbreviate(_ count: Int) -> String {
-        switch count {
-        case ..<1_000:
-            "\(count)"
-        case ..<1_000_000:
-            "\(trimmed(Double(count) / 1_000))K"
-        default:
-            "\(trimmed(Double(count) / 1_000_000))M"
-        }
-    }
-
-    private static func trimmed(_ value: Double) -> String {
-        let floored = (value * 10).rounded(.down) / 10
-        return floored == floored.rounded()
-            ? String(Int(floored))
-            : String(format: "%.1f", floored)
+        CountFormatter.compactString(for: count)
     }
 }
