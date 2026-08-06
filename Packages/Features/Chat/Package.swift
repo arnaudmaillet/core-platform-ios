@@ -15,7 +15,11 @@ let package = Package(
         .package(path: "../../Core/CoreNavigation"),
         .package(path: "../../Core/CoreNetworking"),
         .package(path: "../../Core/DesignSystem"),
-        .package(path: "../../Core/MediaCore")
+        .package(path: "../../Core/MediaCore"),
+        // Renders the composer's favorite-sticker strip. dotLottie (.lottie)
+        // is a zipped bundle of Bodymovin JSON, so a real player is required —
+        // there is no UIImage path for it.
+        .package(url: "https://github.com/airbnb/lottie-ios.git", from: "4.5.0")
     ],
     targets: [
         .target(
@@ -27,8 +31,13 @@ let package = Package(
                 "CoreModels",
                 "CoreNavigation",
                 "DesignSystem",
-                "MediaCore"
-            ]
+                "MediaCore",
+                .product(name: "Lottie", package: "lottie-ios")
+            ],
+            // .copy, not .process: the sticker folder keeps its structure in
+            // the bundle so the catalog can address it by subdirectory, and
+            // .lottie is an opaque archive no build rule should touch.
+            resources: [.copy("Resources/Stickers")]
         ),
         .testTarget(
             name: "ChatTests",
