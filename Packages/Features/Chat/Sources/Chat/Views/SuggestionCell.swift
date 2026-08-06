@@ -137,8 +137,16 @@ final class SuggestionCell: UITableViewCell {
         row.axis = .horizontal
         row.alignment = .center
         row.spacing = Spacing.md
+        // ⚠️ THREE lines here — name, handle, and the reason the person is
+        // being suggested — which is taller than the disc and leaves the least
+        // room to pad. The shared minimum is what keeps this row from being
+        // squeezed below what its own content needs.
+        let inset = PersonRowMetrics.verticalInset(forContentHeight: max(
+            MonogramAvatarView.rowDiameter,
+            PersonRowMetrics.textHeight([.headline, .subheadline, .footnote])
+        ))
         row.pin(to: contentView, insets: NSDirectionalEdgeInsets(
-            top: Spacing.md, leading: Spacing.lg, bottom: Spacing.md, trailing: Spacing.lg
+            top: inset, leading: Spacing.lg, bottom: inset, trailing: Spacing.lg
         ))
     }
 }

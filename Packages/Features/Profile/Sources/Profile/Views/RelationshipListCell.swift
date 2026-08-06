@@ -123,6 +123,16 @@ final class RelationshipListCell: UICollectionViewListCell {
         content.secondaryText = row.handle
         content.secondaryTextProperties.color = .secondaryLabel
         content.secondaryTextProperties.font = .preferredFont(forTextStyle: .subheadline)
+        // The same row height every other people list in the app uses, worked
+        // back from the shared target rather than copied from another cell's
+        // margin — see `PersonRowMetrics`.
+        var margins = content.directionalLayoutMargins
+        let margin = PersonRowMetrics.verticalInset(
+            forContentHeight: PersonRowMetrics.textHeight([.headline, .subheadline]), minimum: 0
+        )
+        margins.top = margin
+        margins.bottom = margin
+        content.directionalLayoutMargins = margins
         contentConfiguration = content
 
         var accessories: [UICellAccessory] = [

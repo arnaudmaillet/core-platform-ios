@@ -117,8 +117,13 @@ final class ConversationCell: UITableViewCell {
         row.axis = .horizontal
         row.alignment = .center
         row.spacing = Spacing.md
+        // The disc is the tallest thing here — a title over a preview does
+        // not clear 48pt — so it is what the row is padded around.
+        let inset = PersonRowMetrics.verticalInset(
+            forContentHeight: MonogramAvatarView.rowDiameter
+        )
         row.pin(to: contentView, insets: NSDirectionalEdgeInsets(
-            top: Spacing.sm, leading: Spacing.lg, bottom: Spacing.sm, trailing: Spacing.lg
+            top: inset, leading: Spacing.lg, bottom: inset, trailing: Spacing.lg
         ))
     }
 }

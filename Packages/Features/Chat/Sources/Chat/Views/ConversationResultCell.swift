@@ -59,10 +59,10 @@ final class ConversationResultCell: UICollectionViewListCell {
         // ⚠️ Set, not `max`'d against the default: this row is being made
         // shorter, and taking the larger of the two would keep the system's
         // margin and change nothing.
-        let textHeight = UIFont.preferredFont(forTextStyle: .headline).lineHeight
-            + UIFont.preferredFont(forTextStyle: .subheadline).lineHeight
         var margins = content.directionalLayoutMargins
-        let margin = max(0, (PersonListCell.comfortableRowHeight - textHeight) / 2)
+        let margin = PersonRowMetrics.verticalInset(
+            forContentHeight: PersonRowMetrics.textHeight([.headline, .subheadline]), minimum: 0
+        )
         margins.top = margin
         margins.bottom = margin
         content.directionalLayoutMargins = margins

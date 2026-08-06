@@ -110,6 +110,9 @@ final class ConversationListViewController: UIViewController {
         // (`SectionHeaderPillButton.Metrics.float`), so this is padding on top
         // of padding.
         tableView.sectionHeaderTopPadding = 0
+        // No hairlines, matching every other people list in the app: a 48pt
+        // disc and two lines of type already make each row its own object.
+        tableView.separatorStyle = .none
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 72
         tableView.pin(to: view)

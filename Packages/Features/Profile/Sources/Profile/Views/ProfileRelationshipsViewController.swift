@@ -261,10 +261,12 @@ final class ProfileRelationshipsViewController: UIViewController {
 
     private func configureCollectionView() {
         var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
-        configuration.showsSeparators = true
-        // Separators start past the identity disc, the way every stock
-        // people-list in iOS insets them past the leading accessory.
-        configuration.separatorConfiguration.topSeparatorVisibility = .hidden
+        // No hairlines, matching every other people list in the app. The rows
+        // already read as separate objects — a 48pt disc, a name, a handle —
+        // and the rules were drawing a grid around content that did not need
+        // one. `RelationshipListCell` keeps its own separator inset logic for
+        // whenever a list here does want them back.
+        configuration.showsSeparators = false
         let layout = UICollectionViewCompositionalLayout.list(using: configuration)
 
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)

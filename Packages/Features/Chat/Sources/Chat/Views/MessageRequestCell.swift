@@ -177,8 +177,15 @@ final class MessageRequestCell: UITableViewCell {
         // across the whole two-line height.
         row.alignment = .center
         row.spacing = Spacing.md
+        // Tallest of the three things in the row: the disc, the two lines of
+        // type, and the dismiss button.
+        let inset = PersonRowMetrics.verticalInset(forContentHeight: max(
+            MonogramAvatarView.rowDiameter,
+            PersonRowMetrics.textHeight([.headline, .subheadline]),
+            Metrics.dismissDiameter
+        ))
         row.pin(to: contentView, insets: NSDirectionalEdgeInsets(
-            top: Spacing.md, leading: Spacing.lg, bottom: Spacing.md, trailing: Spacing.lg
+            top: inset, leading: Spacing.lg, bottom: inset, trailing: Spacing.lg
         ))
     }
 
