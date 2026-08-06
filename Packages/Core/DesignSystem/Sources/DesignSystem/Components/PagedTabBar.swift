@@ -8,11 +8,16 @@ import UIKit
 /// either — it takes titles and reports an index, so a third host is a `titles`
 /// array and two closures.
 ///
-/// Both hosts now wear it as `navigationItem.titleView` (`.navigationTitle`),
-/// which is why that style carries the measured constants: it is the one under
-/// daily use. `.floating` is the original arrangement and still complete —
-/// including the overflow scrolling a title view cannot do — but it currently
-/// has no host, so treat its numbers as unverified against real content.
+/// All three hosts wear it as `navigationItem.titleView` (`.navigationTitle`)
+/// — Messages, For You, and the profile's relationship lists — which is why
+/// that style carries the measured constants. `.floating` is the original
+/// arrangement and still complete, but has no host today, so treat its numbers
+/// as unverified against real content.
+///
+/// ⚠️ **A title view scrolls its overflow.** An earlier revision of this file
+/// said it could not, and pinned the content width with `==` to force
+/// truncation instead; that variant is gone. See the `content.widthAnchor`
+/// constraint and `PagedTabBarTitleOverflowTests`.
 ///
 /// **Anatomy.** A full-width capsule of `UIGlassEffect` inset by the standard
 /// margin, with a tinted overlay marking the active segment. **No shadow and no
@@ -612,11 +617,18 @@ public final class PagedTabBar: UIControl {
         // outstanding, and "Short 99" lost half its badge off the trailing edge
         // while "Activity" sat there untruncated with room to give.
         //
-        // A crowded bar swaps `==` for `>=`, which is what lets the content
-        // out-measure the capsule and the scroll view take it from there. Both
-        // are built; `scrollsWhenCrowded` picks. When the titles DO fit the two
-        // are indistinguishable — Auto Layout satisfies `>=` at the smallest
-        // width that works, which is the frame's.
+        // ⚠️ **`>=` IS WHAT SHIPS, for both styles** — the `==` variant and the
+        // `scrollsWhenCrowded` picker that chose between them are gone, so the
+        // paragraphs above describe history, not behaviour. A crowded title
+        // view SCROLLS today; it does not truncate. When the titles DO fit the
+        // two are indistinguishable — Auto Layout satisfies `>=` at the
+        // smallest width that works, which is the frame's.
+        //
+        // The profile's relationship lists depend on this: three counted titles
+        // ("12.4K Followers") in the title slot must stay whole, and truncation
+        // would collapse two of them into indistinguishable stubs. Pinned by
+        // `PagedTabBarTitleOverflowTests` — flipping this back to `==` fails
+        // there rather than in a screenshot nobody takes.
         content.widthAnchor.constraint(
             greaterThanOrEqualTo: scroller.frameLayoutGuide.widthAnchor
         ).isActive = true
@@ -844,6 +856,12 @@ public final class PagedTabBar: UIControl {
         // The strip's width follows its content, and the lens follows the
         // strip; both are settled by the layout pass `row.onLayout` completes.
         setNeedsLayout()
+        // ⚠️ Load-bearing for a title view. `.navigationTitle` STATES an
+        // intrinsic width — the navigation bar sizes the slot from it and
+        // nothing else — so a retitle that doesn't invalidate leaves the bar
+        // measured for the old words. "Friends" becoming "2 Friends" would be
+        // laid out into a slot sized before the count existed.
+        invalidateIntrinsicContentSize()
     }
 
     public func setProgress(_ progress: CGFloat) {

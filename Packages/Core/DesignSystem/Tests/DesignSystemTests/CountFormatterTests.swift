@@ -1,4 +1,5 @@
 import Testing
+import UIKit
 @testable import DesignSystem
 
 /// The app's single count spelling. Every counter on every surface routes
@@ -79,5 +80,57 @@ struct CountFormatterTests {
     func rowContextDelegates() {
         #expect(ProfileRowContext.followerCount(1_999).label == "1.9K followers")
         #expect(ProfileRowContext.followerCount(450).label == "450 followers")
+    }
+}
+
+/// What a `.navigationTitle` bar does when its titles out-measure the slot.
+///
+/// ⚠️ **This is the question the profile's relationship lists turn on.** They
+/// wear three counted titles ("12.4K Followers") in the navigation bar's title
+/// view, which the bar caps — historically at 258pt. If overflow TRUNCATES
+/// there, "12.4K Followers" and "200+ Following" collapse into two
+/// indistinguishable stubs, which is the failure that drove the whole redesign.
+///
+/// The content width is pinned with `>=` against the scroller's frame, so the
+/// strip is free to out-measure the capsule and scroll. Pinned here because the
+/// alternative (`==`) is one character away and would silently restore
+/// truncation — the type comment still describes a `scrollsWhenCrowded` picker
+/// that no longer exists.
+@MainActor
+@Suite("Title-slot overflow")
+struct PagedTabBarTitleOverflowTests {
+    private func makeBar(_ titles: [String], width: CGFloat) -> PagedTabBar {
+        let bar = PagedTabBar(titles: titles, style: .navigationTitle)
+        // A navigation bar hands the title view a width; it does not promise
+        // the one the view asked for. Squeezing it is the whole point.
+        bar.frame = CGRect(x: 0, y: 0, width: width, height: 44)
+        bar.layoutIfNeeded()
+        return bar
+    }
+
+    @Test("Titles that fit produce no overflow")
+    func fittingTitlesDoNotScroll() {
+        let bar = makeBar(["35 Followers", "12 Following", "2 Friends"], width: 258)
+        #expect(bar.debugOverflow == 0)
+    }
+
+    /// The counts stay whole and the strip scrolls instead.
+    @Test("Titles that do not fit overflow rather than truncate")
+    func crowdedTitlesScroll() {
+        let bar = makeBar(["12.4K Followers", "200+ Following", "1.2K Friends"], width: 258)
+        #expect(bar.debugOverflow > 0)
+        #expect(bar.currentTitles == ["12.4K Followers", "200+ Following", "1.2K Friends"])
+    }
+
+    /// Scrolled content is reachable — an overflow that cannot be scrolled to
+    /// is just a clip with extra steps.
+    @Test("The overflowed end can be scrolled into view")
+    func overflowIsReachable() {
+        let bar = makeBar(["12.4K Followers", "200+ Following", "1.2K Friends"], width: 258)
+        let overflow = bar.debugOverflow
+
+        bar.debugSetStripOffset(overflow)
+
+        #expect(abs(bar.debugStripOffset - overflow) < 0.5)
     }
 }

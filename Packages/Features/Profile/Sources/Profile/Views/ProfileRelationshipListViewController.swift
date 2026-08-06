@@ -44,16 +44,6 @@ final class ProfileRelationshipListViewController: UIViewController {
     private var phase: ProfileRelationshipsViewModel.Phase = .loading
     private var hasRenderedContent = false
 
-    /// Clearance for the tab bar floating above this page, which the container
-    /// sets — the list scrolls *under* the glass capsule rather than starting
-    /// below it.
-    var topContentInset: CGFloat = 0 {
-        didSet {
-            guard isViewLoaded, topContentInset != oldValue else { return }
-            applyTopInset()
-        }
-    }
-
     init(
         direction: RelationshipDirection,
         viewModel: ProfileRelationshipsViewModel,
@@ -71,7 +61,6 @@ final class ProfileRelationshipListViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         configureCollectionView()
-        applyTopInset()
         render(viewModel.phase(for: direction))
     }
 
@@ -80,11 +69,6 @@ final class ProfileRelationshipListViewController: UIViewController {
         // The skeleton runs to the bottom edge, and how many rows that takes
         // is a function of the viewport — which is not known until now.
         if case .loading = phase { render(phase) }
-    }
-
-    private func applyTopInset() {
-        collectionView.contentInset.top = topContentInset
-        collectionView.verticalScrollIndicatorInsets.top = topContentInset
     }
 
     // MARK: - Setup
