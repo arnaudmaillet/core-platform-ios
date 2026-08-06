@@ -20,8 +20,17 @@ final class EditProfileViewController: UIViewController {
     private var avatarURL: URL?
     private var avatarImage: UIImage?
 
+    #if DEBUG
+    func qaOpenPrivacy() { onOpenPrivacy?() }
+    #endif
+
+    /// Pushes the privacy screen. A hook rather than a push done here: this
+    /// controller doesn't own the navigation stack it sits in, and the
+    /// composition root is what knows how the privacy store is built.
+    var onOpenPrivacy: (() -> Void)?
+
     private enum Section: Int, CaseIterable {
-        case hero, identity, links
+        case hero, identity, links, privacy
     }
 
     /// The editable fields, one row each. `Item` wraps this plus the hero so the
@@ -43,6 +52,9 @@ final class EditProfileViewController: UIViewController {
     private enum Item: Hashable {
         case hero
         case field(Field)
+        /// Pushes the privacy screen. Not a `field`: it edits nothing on the
+        /// profile being saved here, it navigates.
+        case privacy
         // Shimmer placeholders shown while the profile loads. They ride the same
         // sections + list layout as the real items, so the skeleton mirrors the
         // grouped geometry exactly; `rowSkeleton`'s index only varies the value
@@ -114,6 +126,14 @@ final class EditProfileViewController: UIViewController {
             cell.accessories = [.disclosureIndicator()]
         }
 
+        let privacyRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, _, _ in
+            var content = UIListContentConfiguration.valueCell()
+            content.text = "Privacy"
+            content.image = UIImage(systemName: "lock")
+            cell.contentConfiguration = content
+            cell.accessories = [.disclosureIndicator()]
+        }
+
         let heroSkeletonRegistration = UICollectionView.CellRegistration<EditProfileHeroSkeletonCell, Item> { _, _, _ in }
 
         let rowSkeletonRegistration = UICollectionView.CellRegistration<EditProfileSkeletonRowCell, Int> { cell, _, index in
@@ -126,6 +146,8 @@ final class EditProfileViewController: UIViewController {
                 return collectionView.dequeueConfiguredReusableCell(using: heroRegistration, for: indexPath, item: item)
             case .field(let field):
                 return collectionView.dequeueConfiguredReusableCell(using: fieldRegistration, for: indexPath, item: field)
+            case .privacy:
+                return collectionView.dequeueConfiguredReusableCell(using: privacyRegistration, for: indexPath, item: item)
             case .heroSkeleton:
                 return collectionView.dequeueConfiguredReusableCell(using: heroSkeletonRegistration, for: indexPath, item: item)
             case .rowSkeleton(let index):
@@ -174,10 +196,11 @@ final class EditProfileViewController: UIViewController {
 
     private func applyRealSnapshot() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections([.hero, .identity, .links])
+        snapshot.appendSections([.hero, .identity, .links, .privacy])
         snapshot.appendItems([.hero], toSection: .hero)
         snapshot.appendItems([.field(.name), .field(.username), .field(.bio), .field(.website)], toSection: .identity)
         snapshot.appendItems([.field(.links)], toSection: .links)
+        snapshot.appendItems([.privacy], toSection: .privacy)
 
         guard isShowingSkeleton else {
             dataSource.apply(snapshot, animatingDifferences: false)
@@ -382,8 +405,11 @@ final class EditProfileViewController: UIViewController {
 extension EditProfileViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
-        guard case .field(let field) = dataSource.itemIdentifier(for: indexPath) else { return }
-        edit(field)
+        switch dataSource.itemIdentifier(for: indexPath) {
+        case .field(let field): edit(field)
+        case .privacy: onOpenPrivacy?()
+        default: break
+        }
     }
 }
 

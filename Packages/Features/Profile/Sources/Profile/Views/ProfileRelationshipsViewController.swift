@@ -46,7 +46,10 @@ final class ProfileRelationshipsViewController: UIViewController {
 
     /// Segment order, so index ↔ direction never drifts from the control's
     /// titles.
-    private static let directions: [RelationshipDirection] = [.followers, .following]
+    /// ⚠️ Must stay in the same order as `ProfileRelationshipsViewModel.segmentTitles`,
+    /// which maps `RelationshipDirection.allCases` — the segmented control pairs
+    /// title *i* with direction *i* and nothing checks the two agree.
+    private static let directions: [RelationshipDirection] = RelationshipDirection.allCases
 
     init(viewModel: ProfileRelationshipsViewModel, imagePipeline: ImagePipeline?) {
         self.viewModel = viewModel
@@ -71,9 +74,6 @@ final class ProfileRelationshipsViewController: UIViewController {
         viewModel.onDirectionChange = { [weak self] direction in
             guard let index = Self.directions.firstIndex(of: direction) else { return }
             self?.segmentedControl.selectedSegmentIndex = index
-        }
-        viewModel.onSegmentTitlesChange = { [weak self] titles in
-            self?.applySegmentTitles(titles)
         }
         viewModel.onActionResult = { [weak self] result in self?.render(result) }
 
@@ -155,13 +155,16 @@ final class ProfileRelationshipsViewController: UIViewController {
         super.viewDidAppear(animated)
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        // Dev convenience: `-profile-relationships-tab following` opens on the
-        // second tab, and `-profile-relationships-action` fires the first row's
+        // Dev convenience: `-profile-relationships-tab following|friends` opens
+        // on that tab, and `-profile-relationships-action` fires the first row's
         // trailing button — neither is reachable in the simulator, which can
         // deliver no taps.
-        if let index = arguments.firstIndex(of: "-profile-relationships-tab"),
-           arguments.dropFirst(index + 1).first == "following" {
-            viewModel.qaSelectDirection(.following)
+        if let index = arguments.firstIndex(of: "-profile-relationships-tab") {
+            switch arguments.dropFirst(index + 1).first {
+            case "following": viewModel.qaSelectDirection(.following)
+            case "friends": viewModel.qaSelectDirection(.friends)
+            default: break
+            }
         }
         if arguments.contains("-profile-relationships-action") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in

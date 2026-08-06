@@ -112,10 +112,16 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             shareTargeting: shareTargeting,
             onLogout: onLogout,
             makeEditViewController: { [imagePipeline] onSaved in
-                EditProfileViewController(
+                let editor = EditProfileViewController(
                     viewModel: EditProfileViewModel(repository: repository, onSaved: onSaved),
                     imagePipeline: imagePipeline
                 )
+                editor.onOpenPrivacy = { [weak editor] in
+                    editor?.navigationController?.pushViewController(
+                        PrivacySettingsViewController(store: RelationshipPrivacyStore()), animated: true
+                    )
+                }
+                return editor
             },
             // Both are account management, so both ride on `onLogout`: a
             // routed arrival gets the profile without the global actions. Edit

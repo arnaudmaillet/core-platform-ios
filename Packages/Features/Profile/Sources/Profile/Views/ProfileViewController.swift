@@ -481,6 +481,17 @@ final class ProfileViewController: UIViewController {
         // Following item through its own primary action ~2s in, and prints the
         // state either side. A bar item takes no simulated touch, so this is
         // how the item's wiring is verified at all.
+        // Dev convenience: `-profile-edit-privacy` pushes the editor and then
+        // its Privacy row, which sits behind two taps the simulator can't
+        // deliver.
+        if arguments.contains("-profile-edit-privacy") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.pushEditProfile()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                    self?.qaOpenPrivacy()
+                }
+            }
+        }
         if arguments.contains("-profile-follow-tap") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                 self?.qaTapFollowItem()
@@ -648,6 +659,16 @@ final class ProfileViewController: UIViewController {
             makeRelationshipsViewController(subject, direction), animated: true
         )
     }
+
+    #if DEBUG
+    /// Opens the editor's Privacy row from QA. Reaches through the pushed
+    /// editor rather than building the screen here, so what is verified is the
+    /// real wiring and not a second path to the same class.
+    private func qaOpenPrivacy() {
+        let editor = navigationController?.topViewController
+        (editor as? EditProfileViewController)?.qaOpenPrivacy()
+    }
+    #endif
 
     private func pushEditProfile() {
         guard let makeEditViewController else { return }

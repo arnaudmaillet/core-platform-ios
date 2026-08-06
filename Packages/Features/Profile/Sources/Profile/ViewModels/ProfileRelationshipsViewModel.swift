@@ -117,7 +117,6 @@ public final class ProfileRelationshipsViewModel {
     public var onDirectionChange: ((RelationshipDirection) -> Void)?
     /// Fires when a segment's title changes — today only when removing a
     /// follower decrements the viewer's own count.
-    public var onSegmentTitlesChange: (([String]) -> Void)?
     public var onActionResult: ((ActionResult) -> Void)?
 
     private let subject: Subject
@@ -139,9 +138,14 @@ public final class ProfileRelationshipsViewModel {
         var isForbidden = false
     }
 
-    private var states: [RelationshipDirection: TabState] = [
-        .followers: TabState(), .following: TabState()
-    ]
+    /// Built from `allCases`, not listed by hand: a direction with no entry
+    /// here guards out of `loadIfNeeded` and reports `.loading` from `phase`
+    /// forever, so a missing key is a tab that shows skeletons and never
+    /// resolves — which is exactly what adding Friends to a hand-written pair
+    /// produced.
+    private var states: [RelationshipDirection: TabState] = Dictionary(
+        uniqueKeysWithValues: RelationshipDirection.allCases.map { ($0, TabState()) }
+    )
     public private(set) var direction: RelationshipDirection = .followers
     private var loads: [RelationshipDirection: Task<Void, Never>] = [:]
     /// Follow toggles in flight, so a double tap can't issue two commands.
@@ -150,10 +154,6 @@ public final class ProfileRelationshipsViewModel {
     /// loaded — the graph exposes no search-within-followers RPC, and a
     /// server round trip per keystroke would be the wrong shape for it anyway.
     private var query = ""
-    /// Counts behind the segment titles. Seeded from the subject and nudged
-    /// locally when the viewer removes one of their own followers.
-    private var counts: [RelationshipDirection: CountEstimate] = [:]
-
     public init(
         subject: Subject,
         repository: any ProfileRelationshipsProviding,
@@ -166,20 +166,34 @@ public final class ProfileRelationshipsViewModel {
         self.router = router
         self.direction = direction
         self.pageSize = pageSize
-        counts = [.followers: subject.followerCount, .following: subject.followingCount]
     }
 
-    /// Segment titles in `RelationshipDirection.allCases` order, counts
-    /// included ("142 Followers"). A count the backend never answered degrades
-    /// to the bare noun rather than showing "—  Followers".
+    /// Segment titles in `RelationshipDirection.allCases` order.
+    ///
+    /// Constant for the screen's life — see `segmentTitle` for why the counts
+    /// came out. Read once at setup; there is no change notification because
+    /// there is nothing left to change.
     public var segmentTitles: [String] {
         RelationshipDirection.allCases.map(segmentTitle)
     }
 
+    /// ⚠️ **The bare noun, since Friends made this a three-tab control.**
+    ///
+    /// The titles used to lead with the count ("142 Followers"). Three of those
+    /// do not fit the control's width, and what the segments truncate to is
+    /// "35 Follow…" and "12 Follow…" — two labels a viewer cannot tell apart,
+    /// which is worse than not showing the count at all. The counts are still
+    /// on the profile header a tap behind this screen.
     private func segmentTitle(for direction: RelationshipDirection) -> String {
-        let noun = direction == .followers ? "Followers" : "Following"
-        guard let count = counts[direction], count != .unavailable else { return noun }
-        return "\(ProfileDisplayModel.format(count)) \(noun)"
+        Self.noun(for: direction)
+    }
+
+    private static func noun(for direction: RelationshipDirection) -> String {
+        switch direction {
+        case .followers: return "Followers"
+        case .following: return "Following"
+        case .friends: return "Friends"
+        }
     }
 
     /// The screen's title — the subject's `@handle`, matching the profile
@@ -316,11 +330,6 @@ public final class ProfileRelationshipsViewModel {
             do {
                 try await self.repository.removeFollower(profileID)
                 self.states[.followers]?.relations.removeAll { $0.id == profileID }
-                // The segment header is a count of this list, so it has to
-                // follow the list down — otherwise "142 Followers" sits above
-                // 141 of them.
-                self.counts[.followers] = self.counts[.followers]?.adjusted(by: -1)
-                self.onSegmentTitlesChange?(self.segmentTitles)
                 self.emit()
             } catch {
                 self.onActionResult?(.failed(message: "Couldn't remove this follower."))
@@ -485,16 +494,31 @@ public final class ProfileRelationshipsViewModel {
     // MARK: - Copy
 
     private var restrictedTitle: String {
-        direction == .followers ? "Followers Are Private" : "Following Is Private"
+        switch direction {
+        case .followers: "Followers Are Private"
+        case .following: "Following Is Private"
+        case .friends: "Friends Are Private"
+        }
     }
 
     private var restrictedMessage: String {
-        let list = direction == .followers ? "follower list" : "following list"
+        let list = switch direction {
+        case .followers: "follower list"
+        case .following: "following list"
+        // The friends list is derived from the other two, so a refusal on
+        // either surfaces here — naming it after the tab keeps the sentence
+        // true whichever side was withheld.
+        case .friends: "friends list"
+        }
         return "@\(subject.handle)'s \(list) is private. Follow them to see it."
     }
 
     private var emptyTitle: String {
-        direction == .followers ? "No Followers Yet" : "Not Following Anyone"
+        switch direction {
+        case .followers: "No Followers Yet"
+        case .following: "Not Following Anyone"
+        case .friends: "No Friends Yet"
+        }
     }
 
     private var emptyMessage: String {
@@ -503,6 +527,10 @@ public final class ProfileRelationshipsViewModel {
         case (.followers, false): "@\(subject.handle) doesn't have any followers yet."
         case (.following, true): "Profiles you follow will show up here."
         case (.following, false): "@\(subject.handle) isn't following anyone yet."
+        // "Friend" is mutual by definition, so the empty state has to say what
+        // makes one rather than leaving it to be inferred from the tab.
+        case (.friends, true): "People you follow who follow you back will show up here."
+        case (.friends, false): "@\(subject.handle) doesn't follow anyone back yet."
         }
     }
 

@@ -421,6 +421,15 @@ rpc UpdatePrivacySettings(UpdatePrivacySettingsRequest) returns (CommandResponse
 Until then the client keeps inferring, and the inference is documented in
 `RelationshipListAccess` so it is not mistaken for a contract.
 
+**A settings screen now exists, and it is local-only.** Edit Profile → Privacy
+(`PrivacySettingsViewController`) offers one switch per list, persisted through
+`RelationshipPrivacyStore` in `UserDefaults`. It is shaped for the
+`follower_list_visibility` / `following_list_visibility` fields proposed above,
+so the day they land it gains a sync path instead of a rewrite. Until then the
+flags govern nothing: the screen's own footer tells the viewer in plain words
+that hiding a list here does not remove it from anyone else's app, because a
+privacy control that overstates its reach is worse than none.
+
 ### 13b. No `RemoveFollower` RPC
 
 **Symptom.** A user cannot drop someone from their own follower list.
@@ -476,6 +485,43 @@ would also serve the inbox, the compose picker, and the share sheet, all three
 of which run the same fan-out today.
 
 ---
+
+### 13d. No way to ask for mutual follows
+
+**Symptom.** The relationships screen has a **Friends** tab — people the
+subject follows who follow them back. `social_graph.v1` can list followers and
+list following, and offers nothing that intersects them: no `ListMutuals`, no
+filter on either list RPC, and no `mutual` field on `EdgeSummary`.
+
+**What the client does today.** `ProfileRelationshipsRepository.friendEdges`
+pages the *following* side and keeps whoever also appears in the subject's
+follower set, which it assembles once by paging `ListFollowers` to a
+`followerSetLimit` ceiling. Because a page of following may contain few mutuals
+or none, it keeps pulling pages until it has filled one (bounded by
+`maxFollowingSweeps`) rather than handing back an empty page with a token.
+
+**Cost, and where it stops being exact.** One extra full sweep of the follower
+list per screen, and the intersection is only as complete as that set: beyond
+`followerSetLimit`, a real mutual whose follower edge was never fetched reads
+as a non-mutual and is silently missed. Exact for mock's 48 authors; an
+approximation for anyone with a large follower list.
+
+**Required.** Intersect server-side, where both sides are already indexed:
+
+```proto
+// social_graph.v1
+rpc ListMutuals(ListMutualsRequest) returns (ListMutualsResponse);
+
+message ListMutualsRequest {
+  string profile_id = 1;
+  int32 limit = 2;
+  string page_token = 3;
+}
+```
+
+A `mutual` bool on `EdgeSummary` would also let the existing list RPCs answer
+it without a third endpoint, at the cost of making Friends a client-side filter
+over a full page rather than a page of its own.
 
 ## 14. No discovery / recommendation feed for the "For You" tab
 

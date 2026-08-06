@@ -649,48 +649,43 @@ struct ProfileRelationshipsViewModelTests {
 
     // MARK: Segment titles
 
-    @Test func segmentTitlesCarryTheSubjectsCounts() {
+    /// The titles are the three nouns, whatever the subject's counts are.
+    ///
+    /// They used to lead with the count ("142 Followers"), which stopped
+    /// fitting when Friends made this a three-segment control — three counted
+    /// titles truncate to "35 Follow…" / "12 Follow…", which cannot be told
+    /// apart. Asserted against a subject that HAS counts, so a change that
+    /// puts them back has to come through here.
+    @Test func segmentTitlesAreTheBareNouns() {
         let viewModel = ProfileRelationshipsViewModel(
             subject: subject(followerCount: .exact(142), followingCount: .exact(89)),
             repository: StubRelationshipsProvider()
         )
-        #expect(viewModel.segmentTitles == ["142 Followers", "89 Following"])
+        #expect(viewModel.segmentTitles == ["Followers", "Following", "Friends"])
     }
 
-    @Test func segmentTitlesAbbreviateLikeTheHeaderMetrics() {
-        let viewModel = ProfileRelationshipsViewModel(
-            subject: subject(followerCount: .exact(12_400), followingCount: .atLeast(200)),
-            repository: StubRelationshipsProvider()
-        )
-        #expect(viewModel.segmentTitles == ["12.4K Followers", "200+ Following"])
-    }
-
-    @Test func anUnavailableCountDegradesToTheBareNoun() {
-        // "—  Followers" would read as a broken string; the noun alone is
-        // honest about knowing nothing.
+    @Test func segmentTitlesAreTheSameWithNoCountsAtAll() {
         let viewModel = ProfileRelationshipsViewModel(
             subject: subject(), repository: StubRelationshipsProvider()
         )
-        #expect(viewModel.segmentTitles == ["Followers", "Following"])
+        #expect(viewModel.segmentTitles == ["Followers", "Following", "Friends"])
     }
 
-    @Test func removingAFollowerDecrementsTheSegmentCount() async {
+    @Test func removingAFollowerDropsTheRow() async {
         let provider = StubRelationshipsProvider(
-            followers: [person("ava")], supportsFollowerRemoval: true
+            followers: [person("ava"), person("kenji")], supportsFollowerRemoval: true
         )
         let viewModel = ProfileRelationshipsViewModel(
             subject: subject(isSelf: true, followerCount: .exact(142)), repository: provider
         )
         let phases = phaseRecorder(viewModel)
-        let titles = Box<[String]>()
-        viewModel.onSegmentTitlesChange = { titles.append($0) }
 
         viewModel.viewDidLoad()
-        await settle(until: { !rows(phases).isEmpty })
+        await settle(until: { rows(phases).count == 2 })
         viewModel.removeFollower(ProfileID("ava"))
-        await settle(until: { !titles.items.isEmpty })
+        await settle(until: { rows(phases).count == 1 })
 
-        #expect(viewModel.segmentTitles.first == "141 Followers")
+        #expect(rows(phases).map(\.id.rawValue) == ["kenji"])
     }
 
     // MARK: Search
