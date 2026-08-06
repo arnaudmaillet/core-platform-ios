@@ -110,8 +110,21 @@ struct PagedTabBarTitleOverflowTests {
 
     @Test("Titles that fit produce no overflow")
     func fittingTitlesDoNotScroll() {
-        let bar = makeBar(["35 Followers", "12 Following", "2 Friends"], width: 258)
+        // Short titles — the Messages inbox's shape. At 15pt three *counted*
+        // titles no longer fit a 258pt slot, which is the whole reason the
+        // strip has to scroll; see `crowdedTitlesScroll`.
+        let bar = makeBar(["All", "Requests", "Suggestions"], width: 258)
         #expect(bar.debugOverflow == 0)
+    }
+
+    /// The relationship screen's own titles at the raised type size. They
+    /// overflow a nominal slot, and that is the accepted trade: the counts stay
+    /// whole and readable, and the strip slides.
+    @Test("Counted relationship titles overflow at 15pt and stay whole")
+    func countedRelationshipTitlesScroll() {
+        let bar = makeBar(["35 Followers", "12 Following", "Friends"], width: 258)
+        #expect(bar.debugOverflow > 0)
+        #expect(bar.currentTitles == ["35 Followers", "12 Following", "Friends"])
     }
 
     /// The counts stay whole and the strip scrolls instead.

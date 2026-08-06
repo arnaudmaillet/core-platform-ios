@@ -165,29 +165,18 @@ public final class PagedTabBar: UIControl {
         /// `trailingInset`, the same number at the other end, so a segment's
         /// contents sit dead centre in it.
         ///
-        /// **7pt is what symmetry costs here, and it is free.** The two ends
-        /// were 6 and 8 for a while, on the argument that a filled badge ends
-        /// exactly where it is drawn where a letter carries its own side
-        /// bearing. True as far as it goes, but it left the contents 1pt off
-        /// centre, and a tab bar's segments are read as a row — an even margin
-        /// on both sides is the stronger signal. Meeting in the middle is
-        /// exactly cost-neutral: each segment gains a point at one end and
-        /// gives one back at the other.
+        /// **8pt, on every host.** The two ends were 6 and 8 for a while, on
+        /// the argument that a filled badge ends exactly where it is drawn
+        /// where a letter carries its own side bearing — true, but it left the
+        /// contents 1pt off centre, and a tab bar's segments are read as a row.
         ///
-        /// ⚠️ 8pt on BOTH ends is not available. The navigation bar caps this
-        /// title view at **258pt** (measured by asking for more — the bar
-        /// requested 269 and was given 258), and 8/8 needs 263; buying it would
-        /// mean squeezing `badgeSpacing` to 2pt or zeroing the gap between
-        /// segments, which spends two constants to move one edge.
-        var leadingInset: CGFloat {
-            switch self {
-            // Unchanged for a floating bar, which has the screen's width and
-            // no reason to economise: 8 at both ends reproduces the
-            // `Spacing.lg` padding it has always had.
-            case .floating: Spacing.sm
-            case .navigationTitle: 7
-            }
-        }
+        /// ⚠️ **A title view used to take 7/7, and that was a budget, not a
+        /// design.** 8/8 needs 263pt against a slot the navigation bar caps at
+        /// 258, so the odd point was shaved to buy the fit. Now that a crowded
+        /// strip scrolls rather than truncates, there is no fit to buy: the bar
+        /// asks for the padding it wants and slides if the slot is smaller.
+        /// Both styles read 8.
+        var leadingInset: CGFloat { Spacing.sm }
 
         /// Clearance from the last thing in the segment — the badge, when there
         /// is one — to the lens's TRAILING edge. Equal to the leading inset;
@@ -238,51 +227,44 @@ public final class PagedTabBar: UIControl {
         /// looking at is ever the thing that got hidden.
         var segmentWidthPriority: UILayoutPriority { .required }
 
-        /// The segment titles' type ramp, which differs because the two hosts
-        /// give the bar wildly different amounts of room.
+        /// The segment titles' type ramp — **one size for every host**.
         ///
-        /// A FLOATING bar owns the screen's width and can afford `.subheadline`.
-        /// A TITLE VIEW gets only what the side bar items leave it, and at 15pt
-        /// this bar's own content simply does not fit there: measured on the
-        /// Messages inbox, three titles plus two badges needed 261pt of a slot
-        /// that tops out at ~252 with NOTHING beside it and hands over 229 when
-        /// the page publishes a trailing item. Every title truncated, and the
-        /// SELECTED one truncated first.
+        /// `.subheadline` (15pt), the size UIKit gives a sub-navigation
+        /// selector and the size the rest of this app's secondary chrome uses.
         ///
-        /// `.footnote` is 13pt, which is not a nudge downward to make the sums
-        /// work — it is what UIKit itself sets on a `UISegmentedControl`, the
-        /// stock control for this exact placement. It buys ~23pt across three
-        /// titles, which is the difference between padded titles and clipped
-        /// ones.
-        var titleTextStyle: UIFont.TextStyle {
-            switch self {
-            case .floating: .subheadline
-            case .navigationTitle: .footnote
-            }
-        }
+        /// ⚠️ **A title view used to take `.footnote` (13pt), and that history
+        /// matters.** It was never a type decision: at 15pt the bar's content
+        /// did not FIT the title slot — measured on the Messages inbox at 261pt
+        /// of a slot topping out near 252 — and back then overflow TRUNCATED,
+        /// taking the selected title first. 13pt bought the ~23pt that made
+        /// three titles fit. Once the strip started scrolling its overflow (see
+        /// the `content.widthAnchor` constraint) that pressure disappeared: a
+        /// bar too wide for its slot now slides instead of clipping, so the
+        /// only thing 13pt still bought was smaller text. Every host reads at
+        /// 15pt now, and a crowded one scrolls.
+        var titleTextStyle: UIFont.TextStyle { .subheadline }
 
         /// Where Dynamic Type stops growing the titles.
         ///
         /// A FLOATING bar has room to give and grows to 19pt before it stops.
         ///
-        /// A TITLE VIEW does not grow AT ALL — 13 is `.footnote`'s own base
-        /// size, so the cap is reached before the first step. That matches the
-        /// bar it lives in: a navigation bar's title and its button items are
-        /// both fixed-size chrome, so a capsule that grew between them would be
-        /// the only thing on the row that moved, and it would move into space
-        /// that does not exist. Measured at `accessibility-medium` with a 17pt
-        /// cap: the slot is unchanged, every segment overruns it, and the
-        /// shortfall lands on one — "All 11" lost its title completely and
-        /// rendered as a bare badge in a lens.
+        /// A TITLE VIEW does not grow at all — 15 is `.subheadline`'s own base
+        /// size, so the cap is reached before the first step. **The reason
+        /// changed with the move to 15pt** and is worth restating: it is no
+        /// longer width (the strip scrolls) but the row it sits in. A
+        /// navigation bar's title and its button items are fixed-size chrome,
+        /// so a capsule that grew between them would be the only thing on the
+        /// row that moved — and it would grow inside a fixed 44pt capsule,
+        /// where the lens runs out of VERTICAL room long before the strip runs
+        /// out of horizontal.
         ///
-        /// ⚠️ This is a real trade: viewers on large text sizes get tab titles
-        /// at 13pt. It is the same bargain UIKit strikes for every navigation
-        /// bar, and the CONTENT beneath still scales — but it is a bargain, not
-        /// a free win.
+        /// ⚠️ Still a real trade: viewers on large text sizes get tab titles
+        /// at 15pt. It is the same bargain UIKit strikes for every navigation
+        /// bar, and the CONTENT beneath still scales — but it is a bargain.
         var maximumTitlePointSize: CGFloat {
             switch self {
             case .floating: 19
-            case .navigationTitle: 13
+            case .navigationTitle: 15
             }
         }
 
