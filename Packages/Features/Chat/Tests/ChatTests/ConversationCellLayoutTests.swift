@@ -108,12 +108,12 @@ struct ConversationCellLayoutTests {
     /// the cell owns: configure with `isPinned` and the band is there.
     @Test("Pinning tints the row as soon as it is configured")
     func pinnedRowIsTintedOnConfigure() {
-        #expect(makeCell(muted: false, pinned: true).backgroundColor == .quaternarySystemFill)
+        #expect(makeCell(muted: false, pinned: true).contentView.backgroundColor == .quaternarySystemFill)
     }
 
     @Test("An unpinned row carries no band")
     func unpinnedRowHasNoTint() {
-        #expect(makeCell(muted: false, pinned: false).backgroundColor == nil)
+        #expect(makeCell(muted: false, pinned: false).contentView.backgroundColor == nil)
     }
 
     /// Reconfiguring the same cell from pinned to unpinned clears the band —
@@ -133,6 +133,6 @@ struct ConversationCellLayoutTests {
         )
         cell.configure(with: unpinned)
 
-        #expect(cell.backgroundColor == nil)
+        #expect(cell.contentView.backgroundColor == nil)
     }
 }

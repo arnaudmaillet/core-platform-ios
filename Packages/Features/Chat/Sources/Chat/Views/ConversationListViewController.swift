@@ -34,9 +34,6 @@ final class ConversationListViewController: UIViewController {
 
     private var adapter: ConversationListTableAdapter!
     private var modelsByID: [ConversationID: ConversationDisplayModel] = [:]
-    /// The row `pin(_:)` has just painted by hand, excluded from the next
-    /// snapshot's `reconfigureItems` — see there for why that matters.
-    private var pinPaintedID: ConversationID?
     private var hasRenderedContent = false
 
     /// Builds the thread screen a context-menu long-press previews — injected
@@ -124,37 +121,30 @@ final class ConversationListViewController: UIViewController {
         #endif
     }
 
-    /// Toggles the pin: paints the live row, commits the frame, then moves it.
+    /// Toggles the pin, painting the row's band before the move begins.
     ///
-    /// ⚠️ **The deferral is the fix, and it took three wrong attempts.** The
-    /// band and the row's new position come from one state change, and every
-    /// arrangement that let them share a runloop turn lost:
+    /// The paint is a plain, unanimated property set on the live cell; the
+    /// movement belongs entirely to `performBatchUpdates` in
+    /// `ConversationListTableAdapter`. Nothing is flushed and nothing is
+    /// deferred.
     ///
-    /// - both in one snapshot → UIKit settles the reconfigure at the END of
-    ///   the move, so the row slides wearing its old background;
-    /// - two `apply` calls in one turn → coalesced into exactly that;
-    /// - painting the cell synchronously and toggling immediately after → the
-    ///   background change is swept into the table update's own animation
-    ///   block and rides the move rather than preceding it.
+    /// ⚠️ **Both of those were here and both were wrong.** A
+    /// `CATransaction.flush()` committed a frame in the middle of the update
+    /// UIKit was assembling, and a `DispatchQueue.main.async` hop split the
+    /// state change away from it — between them the moving cell was dropped
+    /// for the length of the animation, which is the blank hole the row left
+    /// behind. They were compensating for a diffable data source that faded
+    /// rather than moved; with a real `moveRow` there is nothing to
+    /// compensate for.
     ///
-    /// A context-menu `UIAction` already runs after the menu has dismissed, so
-    /// menu suppression is not what is in the way — sharing a transaction with
-    /// the table update is. `CATransaction.flush()` commits the painted cell to
-    /// the render server as its own frame, and the model change is handed to
-    /// the next turn so the reorder animation starts from a row that is
-    /// already grey.
-    ///
-    /// Unpinning is the same call with the flag inverted: the band clears on
-    /// this frame and the row slides back down without it.
+    /// Unpinning is the same call with the flag inverted.
     private func pin(_ id: ConversationID) {
         let willPin = !viewModel.isPinned(id)
         if let indexPath = adapter.indexPath(for: id),
            let cell = tableView.cellForRow(at: indexPath) as? ConversationCell {
             cell.setPinnedStyle(willPin, animated: false)
-            CATransaction.flush()
-            pinPaintedID = id
         }
-        DispatchQueue.main.async { [weak self] in self?.viewModel.togglePin(id) }
+        viewModel.togglePin(id)
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -246,16 +236,23 @@ final class ConversationListViewController: UIViewController {
             // The row `pin(_:)` just painted is excluded: its cell is already
             // correct, and re-configuring it mid-move would fight the paint.
             let changed = InboxRowDiff.changedRows(in: models, against: modelsByID)
-                .filter { $0 != pinPaintedID }
-            pinPaintedID = nil
             // BEFORE the apply: `cellForRowAt` reads this.
             modelsByID = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
             // Animate only while visible. A change that arrives while a thread
             // is pushed over the inbox — reading one, say — would otherwise
             // play its row animation on the way back, turning a settled screen
             // into a moving one right after the pop.
-            adapter.apply(sections, animated: hasRenderedContent && view.window != nil)
+            // ⚠️ **BEFORE the move, at the rows' OLD positions.** `moveRow`
+            // reuses a cell as-is — it never re-asks for one — so a row that
+            // travels wearing stale content keeps it for the whole flight and
+            // only corrects when something re-configures it afterwards. That
+            // is the pinned row arriving grey a beat late.
+            //
+            // Reconfiguring here, while the old index paths are still the live
+            // ones, means the cell already looks right when the batch picks it
+            // up and the band travels with it.
             reconfigureVisible(changed)
+            adapter.apply(sections, animated: hasRenderedContent && view.window != nil)
             hasRenderedContent = true
             revealContent()
         case .empty:

@@ -73,7 +73,13 @@ final class ConversationCell: UITableViewCell {
         // colors are translucent and adapt to dark mode), and a pin glyph
         // under the timestamp that names the state up close.
         pinnedIcon.isHidden = !model.isPinned
-        applyPinnedTint(model.isPinned)
+        // ⚠️ Unanimated. This used to cross-fade, which meant a cell dequeued
+        // at the pinned row's DESTINATION spent the first quarter-second
+        // fading its band in — the row arrived wearing its glyph and no tint,
+        // which is the tail end of the lag this whole thread chased. The move
+        // animation is what carries the change now; the colour is simply true
+        // on every frame the row is drawn.
+        applyPinnedTint(model.isPinned, animated: false)
         let states: [String?] = [
             model.title,
             model.isUnread ? "Unread" : nil,
@@ -135,14 +141,14 @@ final class ConversationCell: UITableViewCell {
     /// animation would be a flash on a row the viewer never saw unpinned.
     private func applyPinnedTint(_ isPinned: Bool, animated: Bool = true) {
         let tint: UIColor? = isPinned ? .quaternarySystemFill : nil
-        guard animated, window != nil, backgroundColor != tint else {
-            backgroundColor = tint
+        guard animated, window != nil, contentView.backgroundColor != tint else {
+            contentView.backgroundColor = tint
             return
         }
         UIView.transition(
-            with: self, duration: 0.25,
+            with: contentView, duration: 0.25,
             options: [.transitionCrossDissolve, .allowUserInteraction]
-        ) { self.backgroundColor = tint }
+        ) { self.contentView.backgroundColor = tint }
     }
 
     private func applyUnreadStyle(_ isUnread: Bool) {
