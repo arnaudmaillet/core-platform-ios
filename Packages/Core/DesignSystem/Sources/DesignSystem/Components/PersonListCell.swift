@@ -28,6 +28,7 @@ public final class PersonListCell: UICollectionViewListCell {
     // compiles cleanly and traps the first time the list dequeues a cell.
     public override init(frame: CGRect) {
         super.init(frame: frame)
+        buildTextColumn()
     }
 
     @available(*, unavailable)
@@ -61,7 +62,10 @@ public final class PersonListCell: UICollectionViewListCell {
     /// Computed from the fonts rather than fixed, so it tracks Dynamic Type —
     /// a constant would clip the text at the larger sizes.
     public static var comfortableRowHeight: CGFloat {
-        ceil(twoLineTextHeight + Spacing.lg * 2)
+        // ⚠️ The gap BETWEEN the two lines counts. It used to be hidden inside
+        // `UIListContentConfiguration`; now the column owns it, and leaving it
+        // out quietly shortened every row by the size of that gap.
+        ceil(twoLineTextHeight + Spacing.xs + Spacing.lg * 2)
     }
 
     private static var twoLineTextHeight: CGFloat {
@@ -110,34 +114,108 @@ public final class PersonListCell: UICollectionViewListCell {
         required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     }
 
-    /// The trailing context label.
+    /// The row's text, laid out by hand rather than by
+    /// `UIListContentConfiguration`.
     ///
-    /// A bare `UILabel` can be a custom accessory directly: UIKit asserts that
-    /// accessory views keep `translatesAutoresizingMaskIntoConstraints`
-    /// enabled, and a label sizes itself intrinsically without constraints on
-    /// itself. (`MonogramAvatarView` cannot, which is what
-    /// `MonogramAccessoryHost` exists to work around.) The inbox's
-    /// `ConversationResultCell` carries its timestamp the same way.
+    /// ⚠️ **The second line needs two labels that truncate independently**, and
+    /// a content configuration has exactly one `secondaryText`. Put the context
+    /// in that string and it shares the handle's truncation: a long handle on a
+    /// narrow screen swallows it. Put it in a trailing ACCESSORY instead — the
+    /// first thing tried — and it is correct but detached, sitting at the row's
+    /// outer edge like a timestamp rather than reading as part of the handle
+    /// line. Owning the column is what buys "handle gives way, context stays,
+    /// both on the same line".
     ///
-    /// ⚠️ **An accessory, not a second line of text.** As part of the content
-    /// configuration it would share one truncation with the handle, and a long
-    /// handle on a narrow screen would eat the context entirely. An accessory
-    /// reserves its width first and the NAME and HANDLE truncate into what is
-    /// left — which is the behaviour the row wants: the context is short,
-    /// bounded, and the thing you can least afford to lose half of.
-    private lazy var contextLabel: UILabel = {
-        let label = UILabel()
-        // Tertiary and a size below the handle: this is the quietest thing in
-        // the row and must not compete with the name or read as a second
-        // handle.
-        label.font = .preferredFont(forTextStyle: .caption1)
-        label.textColor = .tertiaryLabel
-        label.adjustsFontForContentSizeCategory = true
-        // The label never shrinks; the name and handle give way instead.
-        label.setContentCompressionResistancePriority(.required, for: .horizontal)
-        label.setContentHuggingPriority(.required, for: .horizontal)
-        return label
-    }()
+    /// What that costs, and is paid for below: the system's type ramp, its
+    /// margins, and its self-sizing all become this cell's job.
+    private let nameLabel = UILabel()
+    private let handleLabel = UILabel()
+    private let separatorLabel = UILabel()
+    private let contextLabel = UILabel()
+    private lazy var subtitleRow = UIStackView(
+        arrangedSubviews: [handleLabel, separatorLabel, contextLabel]
+    )
+    private lazy var textColumn = UIStackView(arrangedSubviews: [nameLabel, subtitleRow])
+    /// The text column's top and bottom pins, held so the row's height can be
+    /// set by widening them.
+    ///
+    /// ⚠️ **A `>=` height constraint does not work here**, on the content view
+    /// OR on the column: the content view is frame-driven, so anything below
+    /// required gets broken to fit it and anything at required fights UIKit's
+    /// own encapsulated height. Growing the MARGINS is unambiguous — every
+    /// constraint stays required, and the row is exactly as tall as the
+    /// arithmetic says.
+    private var topPin: NSLayoutConstraint?
+    private var bottomPin: NSLayoutConstraint?
+
+    private func buildTextColumn() {
+        nameLabel.font = .preferredFont(forTextStyle: .headline)
+        nameLabel.textColor = .label
+        handleLabel.font = .preferredFont(forTextStyle: .subheadline)
+        handleLabel.textColor = .secondaryLabel
+        // Same size and weight as the handle, one step quieter in colour: the
+        // context is a peer of the handle, not a second subtitle competing
+        // with it, and not something the eye should land on first.
+        contextLabel.font = .preferredFont(forTextStyle: .subheadline)
+        contextLabel.textColor = .tertiaryLabel
+        separatorLabel.font = .preferredFont(forTextStyle: .subheadline)
+        separatorLabel.textColor = .tertiaryLabel
+        separatorLabel.text = "•"
+
+        for label in [nameLabel, handleLabel, separatorLabel, contextLabel] {
+            label.adjustsFontForContentSizeCategory = true
+        }
+        // The handle is the only thing on the line that may lose characters.
+        handleLabel.lineBreakMode = .byTruncatingTail
+        handleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        for label in [separatorLabel, contextLabel] {
+            label.setContentCompressionResistancePriority(.required, for: .horizontal)
+            label.setContentHuggingPriority(.required, for: .horizontal)
+        }
+
+        subtitleRow.axis = .horizontal
+        subtitleRow.alignment = .firstBaseline
+        subtitleRow.spacing = Spacing.xs
+        textColumn.axis = .vertical
+        textColumn.alignment = .leading
+        // Enough to separate the two lines without opening a gap the disc has
+        // to span; the row's height budget is set by `minimumRowHeight`.
+        textColumn.spacing = Spacing.xs
+        // ⚠️ The leading inset is the gap to the DISC. UIKit already insets
+        // `contentView` past a leading accessory, but it leaves no air between
+        // them — without this the name starts hard against the avatar.
+        let top = textColumn.topAnchor.constraint(
+            equalTo: contentView.topAnchor, constant: Metrics.verticalMargin
+        )
+        let bottom = contentView.bottomAnchor.constraint(
+            equalTo: textColumn.bottomAnchor, constant: Metrics.verticalMargin
+        )
+        topPin = top
+        bottomPin = bottom
+        textColumn.constrain(in: contentView) { parent in
+            top
+            bottom
+            textColumn.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Spacing.lg)
+            textColumn.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
+        }
+        // ⚠️ And the separator follows the TEXT, not the cell. A list cell
+        // aligns its separator to whatever the content configuration drew;
+        // with a hand-built column it has nothing to follow and runs the full
+        // width, under the avatar, which reads as a different list. This is
+        // the documented hook for saying where the text starts.
+        separatorLayoutGuide.leadingAnchor.constraint(
+            equalTo: textColumn.leadingAnchor
+        ).isActive = true
+    }
+
+    private enum Metrics {
+        /// Above and below the text column. Chosen so a two-line row lands
+        /// where `UIListContentConfiguration` used to put it — this cell drew
+        /// itself with the system's margins until the second line needed two
+        /// independently truncating labels, and the compose picker and inbox
+        /// search should not shift because of a change they did not ask for.
+        static let verticalMargin = Spacing.md
+    }
 
     private lazy var deleteHost: DeleteAccessoryView = {
         let host = DeleteAccessoryView()
@@ -170,62 +248,41 @@ public final class PersonListCell: UICollectionViewListCell {
         case .symbol(let systemName): avatarHost.setSymbol(systemName)
         }
 
-        var content = UIListContentConfiguration.subtitleCell()
-        content.attributedText = Self.nameText(for: model)
-        // One two-line shape everywhere — name over handle, disc centred across
-        // both. `nil` (not "") on the rare handle-less row so it collapses to
-        // one line rather than leaving a gap under the name.
-        content.secondaryText = model.handle.isEmpty ? nil : model.handle
-        content.secondaryTextProperties.color = .secondaryLabel
-        content.secondaryTextProperties.font = .preferredFont(forTextStyle: .subheadline)
+        nameLabel.attributedText = Self.nameText(for: model)
+        handleLabel.text = model.handle
+        // Hidden, not empty: a stack view skips a hidden arranged subview
+        // entirely, so a handle-less row collapses to one line and a
+        // context-less row shows no stray bullet.
+        handleLabel.isHidden = model.handle.isEmpty
+        contextLabel.text = model.context.label
+        contextLabel.isHidden = model.context.label == nil
+        // The bullet only earns its place between two things.
+        separatorLabel.isHidden = handleLabel.isHidden || contextLabel.isHidden
+        subtitleRow.isHidden = handleLabel.isHidden && contextLabel.isHidden
 
-        if minimumRowHeight > 0 {
-            var margins = content.directionalLayoutMargins
-            // ⚠️ The target is never below what a two-line row is ALREADY.
-            // Taking the requested minimum alone left the two-line rows on
-            // their own (larger) default margins while the one-line rows were
-            // lifted to the smaller target — so they still did not match, just
-            // by less. The natural two-line height is the floor.
-            let naturalHeight = Self.twoLineTextHeight + margins.top + margins.bottom
-            let target = max(minimumRowHeight, naturalHeight)
-            // Whatever it takes to reach the target from THIS row's text —
-            // more for a one-line row than a two-line one, which is exactly
-            // what makes the two land on the same height.
-            let textHeight = content.secondaryText == nil
-                ? UIFont.preferredFont(forTextStyle: .headline).lineHeight
-                : Self.twoLineTextHeight
-            let margin = max(margins.top, (target - textHeight) / 2)
-            margins.top = margin
-            margins.bottom = margin
-            content.directionalLayoutMargins = margins
-        }
-        contentConfiguration = content
+        // Whatever margin it takes to reach the target from THIS row's text —
+        // more for a one-line row than a two-line one, which is exactly what
+        // makes the two land on the same height.
+        let columnHeight = subtitleRow.isHidden
+            ? UIFont.preferredFont(forTextStyle: .headline).lineHeight
+            : Self.twoLineTextHeight + textColumn.spacing
+        let margin = max(Metrics.verticalMargin, (minimumRowHeight - columnHeight) / 2)
+        topPin?.constant = margin
+        bottomPin?.constant = margin
 
         // The disc, and a ✕ only where the host asked for one. A row that
         // needs a whole action COLUMN is not this row — see
         // `RelationshipListCell`, which is this anatomy with a follow button
         // and stays its own type because of it.
         deleteHost.button.accessibilityLabel = "Remove \(model.displayName)"
-        contextLabel.text = model.context.label
-
-        // Order matters: the context sits inside the ✕, so the remove button
-        // stays on the row's outer edge where a trailing action belongs.
-        var trailing: [UICellAccessory] = []
-        if model.context.label != nil {
-            trailing.append(.customView(configuration: .init(
-                customView: contextLabel,
-                placement: .trailing(displayed: .always),
-                reservedLayoutWidth: .actual
-            )))
-        }
-        if onDelete != nil {
-            trailing.append(.customView(configuration: .init(
+        accessories = onDelete == nil ? [avatarHost.leadingAccessory] : [
+            avatarHost.leadingAccessory,
+            .customView(configuration: .init(
                 customView: deleteHost,
                 placement: .trailing(displayed: .always),
                 reservedLayoutWidth: .actual
-            )))
-        }
-        accessories = [avatarHost.leadingAccessory] + trailing
+            ))
+        ]
 
         accessibilityLabel = [model.displayName, model.handle, model.context.label]
             .compactMap { $0 }
