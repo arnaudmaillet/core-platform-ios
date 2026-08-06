@@ -94,10 +94,14 @@ final class ConversationListViewController: UIViewController {
                 self.viewModel.togglePin(id)
             }
         }
-        // `-chat-preview-demo` presents the context-menu preview
-        // construction (`.preview` mode) as a sheet ~2s in — long-presses
-        // can't be injected in-sim; verifies the stripped compose bar and
-        // the live transcript.
+        // `-chat-preview-demo` presents the context-menu preview construction
+        // (`.preview` mode) as a sheet ~2s in, which isolates the preview
+        // screen itself — the stripped compose bar and the live transcript.
+        //
+        // ⚠️ It is NOT needed to reach the menu: a long-press CAN be injected,
+        // via a held CGEvent drag (mouse down, jitter for ~1.4s, up). The
+        // comment here used to say otherwise. Both halves were verified that
+        // way on the Requests tab, which wears the same seam.
         if ProcessInfo.processInfo.arguments.contains("-chat-preview-demo") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                 guard let self, let id = self.dataSource.snapshot().itemIdentifiers.first,
