@@ -19,6 +19,9 @@ public struct SearchResultDisplayModel: Equatable, Sendable, Identifiable {
     /// `avatar_key`, a storage key nothing in the app resolves — so this is
     /// filled in by `ProfileAvatarProviding` or not at all.
     public var avatarURL: URL?
+    /// Social context, resolved after the hit arrives — `search.v1` says
+    /// nothing about the viewer's relationship to a hit.
+    public var context: ProfileRowContext = .none
 
     public init(result: ProfileSearchResult) {
         id = result.id
@@ -53,7 +56,8 @@ extension SearchResultDisplayModel {
             displayName: displayName,
             handle: handle.hasPrefix("@") ? String(handle.dropFirst()) : handle,
             monogram: monogram,
-            isVerified: isVerified
+            isVerified: isVerified,
+            context: context
         )
     }
 }

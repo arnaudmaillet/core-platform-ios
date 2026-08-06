@@ -29,13 +29,14 @@ enum SearchSection: Hashable {
     /// those are the only thing on screen, and a title over them would be
     /// naming the obvious.
     ///
-    /// ⚠️ **"Suggestions" is the product's word, not the data's.** The corpus
-    /// behind that section is the viewer's FOLLOWING timeline, so everyone in
-    /// it is already followed — see `ExploreRanking.creators`. It was titled
-    /// "Creators" for exactly that reason; Arnaud set it to "Suggestions" for
+    /// ⚠️ **"Suggestions" is the product's word, not the data's.** That section
+    /// is ranked out of the viewer's timeline rather than any discovery
+    /// endpoint — there is none, see `dev/BACKEND_GAPS.md` §14 — so it leans
+    /// towards people they already follow and is not a recommendation. It was
+    /// titled "Creators" for that reason; Arnaud set it to "Suggestions" for
     /// the MVP (2026-08-06), which is a naming call, not a claim the ranking
-    /// can back. Nothing downstream should start treating these as people the
-    /// viewer does NOT follow.
+    /// can back. Each row now states its own relationship, which is what keeps
+    /// the section honest whatever it is called.
     var title: String? {
         switch self {
         case .recent: "Recent"

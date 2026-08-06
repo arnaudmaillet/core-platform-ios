@@ -50,18 +50,23 @@ public struct PersonRowContent: Equatable, Sendable {
     /// fallback), and re-deriving would quietly overrule them.
     public let monogram: String
     public let isVerified: Bool
+    /// What the row says about this person beside their name — see
+    /// `ProfileRowContext`. `.none` renders nothing.
+    public let context: ProfileRowContext
 
     public init(
         displayName: String,
         handle: String,
         monogram: String,
         isVerified: Bool = false,
-        subject: Subject = .person
+        subject: Subject = .person,
+        context: ProfileRowContext = .none
     ) {
         self.displayName = displayName
         self.handle = handle
         self.monogram = monogram
         self.isVerified = isVerified
         self.subject = subject
+        self.context = context
     }
 }

@@ -330,7 +330,8 @@ final class SearchViewController: UIViewController {
             cell.configure(with: PersonRowContent(
                 displayName: creator.displayName,
                 handle: creator.handle,
-                monogram: creator.monogram
+                monogram: creator.monogram,
+                context: creator.context
             ))
             self.loadAvatar(creator.avatarURL, into: cell, stillShowing: .suggested(id))
         }

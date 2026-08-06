@@ -47,6 +47,9 @@ public struct SearchRowDisplayModel: Equatable, Sendable, Identifiable {
     /// Nil is not "no avatar" — it is "none known yet", and the disc falls
     /// back to initials until one arrives.
     public var avatarURL: URL?
+    /// Social context, filled in by `ProfileMetadataProviding`. Never
+    /// persisted — see `RecentSearchStore`.
+    public var context: ProfileRowContext = .none
     /// One or two letters behind the picture.
     public let monogram: String
     public let source: Source
@@ -152,7 +155,8 @@ public struct SearchRowDisplayModel: Equatable, Sendable, Identifiable {
             displayName: text,
             handle: subtitle ?? "",
             monogram: monogram,
-            subject: subject
+            subject: subject,
+            context: context
         )
     }
 }

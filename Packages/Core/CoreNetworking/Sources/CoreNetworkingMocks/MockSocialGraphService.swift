@@ -52,6 +52,13 @@ public final class MockSocialGraphService: @unchecked Sendable {
             view.actorID = request.actorID
             view.targetID = request.targetID
             view.status = relationStatus(from: request.actorID, to: request.targetID)
+            // The counts the view carries, which used to be left at zero.
+            // `counter.v1` does not project follower counts at all
+            // (`dev/BACKEND_GAPS.md` §7), so this view is the only place they
+            // are answered — and a search row that reads "0 followers" for
+            // everybody is worse than one that says nothing.
+            view.targetFollowersCount = Int64(followers(of: request.targetID).count)
+            view.targetFollowingCount = Int64(following(of: request.targetID).count)
             return .success(view)
         }
         bff.register(path: "/social_graph.v1.SocialGraphService/Follow") { [self] (request: SocialGraph_V1_FollowRequest) in

@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNavigation
 import CoreStorage
+import DesignSystem
 import Foundation
 
 @MainActor
@@ -39,7 +40,7 @@ public final class SearchViewModel {
     private let router: (any Router)?
     private let recentSearches: RecentSearchStore?
     private let explore: (any ExploreProviding)?
-    private let avatars: (any ProfileAvatarProviding)?
+    private let metadata: (any ProfileMetadataProviding)?
     private let pageSize: Int32
     private let trendingLimit: Int
     private let creatorLimit: Int
@@ -77,15 +78,15 @@ public final class SearchViewModel {
     /// Pictures resolved this session, overlaid onto every list that shows the
     /// person — so someone seen once in Suggestions is already complete when
     /// they turn up in the history or in a result.
-    private var resolvedAvatars: [ProfileID: URL] = [:]
-    private var avatarTask: Task<Void, Never>?
+    private var resolvedMetadata: [ProfileID: ProfileRowMetadata] = [:]
+    private var metadataTask: Task<Void, Never>?
 
     public init(
         repository: any SearchProviding,
         router: (any Router)? = nil,
         recentSearches: RecentSearchStore? = nil,
         explore: (any ExploreProviding)? = nil,
-        avatars: (any ProfileAvatarProviding)? = nil,
+        metadata: (any ProfileMetadataProviding)? = nil,
         pageSize: Int32 = 25,
         trendingLimit: Int = 30,
         creatorLimit: Int = 12,
@@ -96,7 +97,7 @@ public final class SearchViewModel {
         self.router = router
         self.recentSearches = recentSearches
         self.explore = explore
-        self.avatars = avatars
+        self.metadata = metadata
         self.pageSize = pageSize
         self.trendingLimit = trendingLimit
         self.creatorLimit = creatorLimit
@@ -114,7 +115,10 @@ public final class SearchViewModel {
         let model = exploreModel()
         phase = .explore(model)
         loadTrendingIfNeeded()
-        resolveAvatars(for: peopleNeedingAvatars(in: model.recents))
+        // Both lists on this screen, in one pass — the cache makes a person
+        // seen in Suggestions free when they turn up in the history too.
+        resolveAvatars(for: peopleNeedingAvatars(in: model.recents)
+            + model.trending.creators.filter { resolvedMetadata[$0.id] == nil }.map(\.id))
     }
 
     /// Called on every keystroke.
@@ -200,7 +204,7 @@ public final class SearchViewModel {
                 // Whatever the row was drawn with, plus anything resolved
                 // since — so the history keeps the picture rather than
                 // re-recording the person with less than is known.
-                avatarURL: avatarURL ?? resolvedAvatars[profileID]
+                avatarURL: avatarURL ?? resolvedMetadata[profileID]?.avatarURL
             )
         }
     }
@@ -264,7 +268,7 @@ public final class SearchViewModel {
             id: id,
             handle: String(hit.handle.dropFirst(hit.handle.hasPrefix("@") ? 1 : 0)),
             displayName: hit.displayName,
-            avatarURL: hit.avatarURL ?? resolvedAvatars[id]
+            avatarURL: hit.avatarURL ?? resolvedMetadata[id]?.avatarURL
         )
     }
 
@@ -281,7 +285,7 @@ public final class SearchViewModel {
         return ExploreDisplayModel(
             recents: withResolvedAvatars(model.recents),
             hiddenRecentCount: model.hiddenRecentCount,
-            trending: model.trending
+            trending: withResolvedContext(model.trending)
         )
     }
 
@@ -294,18 +298,43 @@ public final class SearchViewModel {
     /// that have gone stale, not for overruling.
     private func withResolvedAvatars(_ rows: [SearchRowDisplayModel]) -> [SearchRowDisplayModel] {
         rows.map { row in
-            guard case .openProfile(let id, _, _, _) = row.action, row.avatarURL == nil else { return row }
+            guard case .openProfile(let id, _, _, _) = row.action else { return row }
+            guard let known = resolvedMetadata[id] else { return row }
             var filled = row
-            filled.avatarURL = resolvedAvatars[id]
+            if filled.avatarURL == nil { filled.avatarURL = known.avatarURL }
+            filled.context = Self.context(for: known)
             return filled
         }
+    }
+
+    /// Fills the Suggestions rows in from what came back about those people.
+    private func withResolvedContext(_ state: TrendingState) -> TrendingState {
+        guard case .loaded(let creators) = state else { return state }
+        return .loaded(creators: creators.map { creator in
+            guard let known = resolvedMetadata[creator.id] else { return creator }
+            var filled = creator
+            filled.context = Self.context(for: known)
+            return filled
+        })
+    }
+
+    /// What a row says about a person, from what came back about them.
+    ///
+    /// **Following wins over the count.** "You already follow them" is the
+    /// more actionable of the two — it is the difference between a stranger
+    /// and someone the viewer knows — and showing both would put two competing
+    /// labels at the end of one row.
+    private static func context(for metadata: ProfileRowMetadata) -> ProfileRowContext {
+        if metadata.isFollowed { return .following }
+        if let followers = metadata.followerCount { return .followerCount(followers) }
+        return .none
     }
 
     /// The people on screen who still have no picture.
     private func peopleNeedingAvatars(in rows: [SearchRowDisplayModel]) -> [ProfileID] {
         rows.compactMap { row in
-            guard case .openProfile(let id, _, _, _) = row.action, row.avatarURL == nil else { return nil }
-            return resolvedAvatars[id] == nil ? id : nil
+            guard case .openProfile(let id, _, _, _) = row.action else { return nil }
+            return resolvedMetadata[id] == nil ? id : nil
         }
     }
 
@@ -316,14 +345,23 @@ public final class SearchViewModel {
     /// speculative prefetch. `ProfileAvatarRepository` then makes the second
     /// sighting of the same person free.
     private func resolveAvatars(for ids: [ProfileID]) {
-        guard let avatars, !ids.isEmpty else { return }
-        avatarTask?.cancel()
-        avatarTask = Task { [weak self] in
-            let found = await avatars.avatarURLs(for: ids)
+        guard let metadata, !ids.isEmpty else { return }
+        metadataTask?.cancel()
+        metadataTask = Task { [weak self] in
+            let found = await metadata.metadata(for: ids)
             guard let self, !Task.isCancelled, !found.isEmpty else { return }
-            self.resolvedAvatars.merge(found) { current, _ in current }
+            self.resolvedMetadata.merge(found) { current, _ in current }
             self.rerenderWithAvatars()
         }
+    }
+
+    /// Fills a result row in from whatever came back about that person.
+    private func withResolvedMetadata(_ model: SearchResultDisplayModel) -> SearchResultDisplayModel {
+        guard let known = resolvedMetadata[model.id] else { return model }
+        var filled = model
+        if filled.avatarURL == nil { filled.avatarURL = known.avatarURL }
+        filled.context = Self.context(for: known)
+        return filled
     }
 
     /// Re-emits the current phase with the pictures that just landed. Only the
@@ -336,12 +374,7 @@ public final class SearchViewModel {
         case .suggesting(let query, let rows):
             phase = .suggesting(query: query, rows: withResolvedAvatars(rows))
         case .results(let models):
-            phase = .results(models.map { model in
-                guard model.avatarURL == nil else { return model }
-                var filled = model
-                filled.avatarURL = resolvedAvatars[model.id]
-                return filled
-            })
+            phase = .results(models.map(withResolvedMetadata))
         case .loading, .empty, .failed:
             break
         }
@@ -386,7 +419,14 @@ public final class SearchViewModel {
             // Only if the resting screen is still what is showing. A fetch
             // that lands while the viewer is reading results must not throw
             // them back to explore.
-            if case .explore = self.phase { self.phase = .explore(self.exploreModel()) }
+            if case .explore = self.phase {
+                let model = self.exploreModel()
+                self.phase = .explore(model)
+                // The corpus just named people nothing is known about yet.
+                self.resolveAvatars(
+                    for: model.trending.creators.filter { self.resolvedMetadata[$0.id] == nil }.map(\.id)
+                )
+            }
         }
     }
 
@@ -481,16 +521,12 @@ public final class SearchViewModel {
             if results.isEmpty {
                 phase = .empty(query: trimmed)
             } else {
-                let models = results.map { result in
-                    var model = SearchResultDisplayModel(result: result)
-                    // `search.v1` gives a storage key, never a URL — so a
-                    // result starts with initials and is completed by
-                    // `ProfileAvatarProviding`.
-                    model.avatarURL = resolvedAvatars[model.id]
-                    return model
-                }
+                // `search.v1` gives a storage key, never a URL, and says
+                // nothing about the viewer's relationship — so a result starts
+                // bare and is completed by `ProfileMetadataProviding`.
+                let models = results.map { withResolvedMetadata(SearchResultDisplayModel(result: $0)) }
                 phase = .results(models)
-                resolveAvatars(for: models.filter { $0.avatarURL == nil }.map(\.id))
+                resolveAvatars(for: models.filter { resolvedMetadata[$0.id] == nil }.map(\.id))
             }
         } catch {
             guard !Task.isCancelled else { return }

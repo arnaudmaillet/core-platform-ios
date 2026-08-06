@@ -331,19 +331,37 @@ final class AppContainer {
         forYou: ForYouRepository(feed: feedRepository)
     )
 
-    /// Pictures for the search screen's person rows. `search.v1` answers with
-    /// storage keys and `Suggest` with no image at all, so the only read that
-    /// returns an avatar is `profile.v1` — see `ProfileAvatarRepository` for
-    /// the fan-out this bounds.
-    private lazy var profileAvatarRepository = ProfileAvatarRepository(
-        profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient)
-    )
+    /// Pictures and social context for the search screen's person rows.
+    /// `search.v1` answers with storage keys and no relationship at all, and
+    /// `Suggest` with neither — so `profile.v1` and `social_graph.v1` are the
+    /// only reads that carry them. See `ProfileMetadataRepository` for the
+    /// fan-out this bounds.
+    ///
+    /// Not a `lazy var`: the viewer closure captures an actor, and a stored
+    /// property's initializer cannot be both main-actor and actor isolated
+    /// under Swift 6.2's default-isolation rule. A computed body can — the same
+    /// shape `realtimeClient` above uses, for the same diagnostic.
+    private var cachedProfileMetadataRepository: ProfileMetadataRepository?
+    private var profileMetadataRepository: ProfileMetadataRepository {
+        if let cachedProfileMetadataRepository { return cachedProfileMetadataRepository }
+        let profiles = profileRepository
+        let repository = ProfileMetadataRepository(
+            profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
+            socialGraphClient: SocialGraph_V1_SocialGraphServiceClient(client: authenticatedRPCClient),
+            // The relation is asked from the VIEWER's side, so it needs whose
+            // side that is; nil before sign-in simply means no context on the
+            // rows rather than a wrong one.
+            viewerID: { await profiles.viewerProfileID() }
+        )
+        cachedProfileMetadataRepository = repository
+        return repository
+    }
 
     private(set) lazy var searchFeature: any SearchFeatureBuilding = SearchFeatureBuilder(
         repository: searchRepository,
         recentSearches: recentSearchStore,
         explore: exploreRepository,
-        avatars: profileAvatarRepository,
+        metadata: profileMetadataRepository,
         imagePipeline: imagePipeline,
         router: routeResolver
     )

@@ -11,7 +11,7 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
     private let repository: any SearchProviding
     private let recentSearches: RecentSearchStore?
     private let explore: (any ExploreProviding)?
-    private let avatars: (any ProfileAvatarProviding)?
+    private let metadata: (any ProfileMetadataProviding)?
     private let imagePipeline: ImagePipeline
     private let router: (any Router)?
 
@@ -19,14 +19,14 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
         repository: any SearchProviding,
         recentSearches: RecentSearchStore? = nil,
         explore: (any ExploreProviding)? = nil,
-        avatars: (any ProfileAvatarProviding)? = nil,
+        metadata: (any ProfileMetadataProviding)? = nil,
         imagePipeline: ImagePipeline,
         router: (any Router)? = nil
     ) {
         self.repository = repository
         self.recentSearches = recentSearches
         self.explore = explore
-        self.avatars = avatars
+        self.metadata = metadata
         self.imagePipeline = imagePipeline
         self.router = router
     }
@@ -38,7 +38,7 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
                 router: router,
                 recentSearches: recentSearches,
                 explore: explore,
-                avatars: avatars
+                metadata: metadata
             ),
             imagePipeline: imagePipeline
         )

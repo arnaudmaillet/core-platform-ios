@@ -110,6 +110,35 @@ public final class PersonListCell: UICollectionViewListCell {
         required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     }
 
+    /// The trailing context label.
+    ///
+    /// A bare `UILabel` can be a custom accessory directly: UIKit asserts that
+    /// accessory views keep `translatesAutoresizingMaskIntoConstraints`
+    /// enabled, and a label sizes itself intrinsically without constraints on
+    /// itself. (`MonogramAvatarView` cannot, which is what
+    /// `MonogramAccessoryHost` exists to work around.) The inbox's
+    /// `ConversationResultCell` carries its timestamp the same way.
+    ///
+    /// ⚠️ **An accessory, not a second line of text.** As part of the content
+    /// configuration it would share one truncation with the handle, and a long
+    /// handle on a narrow screen would eat the context entirely. An accessory
+    /// reserves its width first and the NAME and HANDLE truncate into what is
+    /// left — which is the behaviour the row wants: the context is short,
+    /// bounded, and the thing you can least afford to lose half of.
+    private lazy var contextLabel: UILabel = {
+        let label = UILabel()
+        // Tertiary and a size below the handle: this is the quietest thing in
+        // the row and must not compete with the name or read as a second
+        // handle.
+        label.font = .preferredFont(forTextStyle: .caption1)
+        label.textColor = .tertiaryLabel
+        label.adjustsFontForContentSizeCategory = true
+        // The label never shrinks; the name and handle give way instead.
+        label.setContentCompressionResistancePriority(.required, for: .horizontal)
+        label.setContentHuggingPriority(.required, for: .horizontal)
+        return label
+    }()
+
     private lazy var deleteHost: DeleteAccessoryView = {
         let host = DeleteAccessoryView()
         host.button.addAction(
@@ -177,16 +206,29 @@ public final class PersonListCell: UICollectionViewListCell {
         // `RelationshipListCell`, which is this anatomy with a follow button
         // and stays its own type because of it.
         deleteHost.button.accessibilityLabel = "Remove \(model.displayName)"
-        accessories = onDelete == nil ? [avatarHost.leadingAccessory] : [
-            avatarHost.leadingAccessory,
-            .customView(configuration: .init(
+        contextLabel.text = model.context.label
+
+        // Order matters: the context sits inside the ✕, so the remove button
+        // stays on the row's outer edge where a trailing action belongs.
+        var trailing: [UICellAccessory] = []
+        if model.context.label != nil {
+            trailing.append(.customView(configuration: .init(
+                customView: contextLabel,
+                placement: .trailing(displayed: .always),
+                reservedLayoutWidth: .actual
+            )))
+        }
+        if onDelete != nil {
+            trailing.append(.customView(configuration: .init(
                 customView: deleteHost,
                 placement: .trailing(displayed: .always),
                 reservedLayoutWidth: .actual
-            ))
-        ]
+            )))
+        }
+        accessories = [avatarHost.leadingAccessory] + trailing
 
-        accessibilityLabel = [model.displayName, model.handle]
+        accessibilityLabel = [model.displayName, model.handle, model.context.label]
+            .compactMap { $0 }
             .filter { !$0.isEmpty }
             .joined(separator: ", ")
     }

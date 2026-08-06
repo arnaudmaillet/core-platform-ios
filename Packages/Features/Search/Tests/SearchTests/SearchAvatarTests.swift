@@ -1,10 +1,11 @@
 import CoreModels
 import CoreStorage
+import DesignSystem
 import Foundation
 import Testing
 @testable import Search
 
-private actor StubProvider: SearchProviding {
+fileprivate actor StubProvider: SearchProviding {
     private let results: [ProfileSearchResult]
     private let completions: [SearchSuggestion]
 
@@ -17,17 +18,25 @@ private actor StubProvider: SearchProviding {
     func suggestions(forPrefix prefix: String, limit: Int32) async throws -> [SearchSuggestion] { completions }
 }
 
-private actor StubAvatars: ProfileAvatarProviding {
-    private let urls: [ProfileID: URL]
+fileprivate actor StubAvatars: ProfileMetadataProviding {
+    private let entries: [ProfileID: ProfileRowMetadata]
     private(set) var asked: [[ProfileID]] = []
 
-    init(_ urls: [String: String]) {
-        self.urls = Dictionary(uniqueKeysWithValues: urls.map { (ProfileID($0.key), URL(string: $0.value)!) })
+    init(_ urls: [String: String], followed: Set<String> = [], followers: [String: Int] = [:]) {
+        var built: [ProfileID: ProfileRowMetadata] = [:]
+        for key in Set(urls.keys).union(followed).union(followers.keys) {
+            built[ProfileID(key)] = ProfileRowMetadata(
+                avatarURL: urls[key].flatMap(URL.init(string:)),
+                isFollowed: followed.contains(key),
+                followerCount: followers[key]
+            )
+        }
+        entries = built
     }
 
-    func avatarURLs(for ids: [ProfileID]) async -> [ProfileID: URL] {
+    func metadata(for ids: [ProfileID]) async -> [ProfileID: ProfileRowMetadata] {
         asked.append(ids)
-        return urls.filter { ids.contains($0.key) }
+        return entries.filter { ids.contains($0.key) }
     }
 
     func requests() -> [[ProfileID]] { asked }
@@ -44,7 +53,7 @@ private actor StubAvatars: ProfileAvatarProviding {
 /// and was a data one.
 @MainActor
 struct SearchAvatarTests {
-    private func make(
+    fileprivate func make(
         results: [ProfileSearchResult] = [],
         completions: [SearchSuggestion] = [],
         avatars: StubAvatars,
@@ -55,7 +64,7 @@ struct SearchAvatarTests {
         let viewModel = SearchViewModel(
             repository: StubProvider(results: results, completions: completions),
             recentSearches: store,
-            avatars: avatars,
+            metadata: avatars,
             suggestDebounce: .zero
         )
         var phases: [SearchViewModel.Phase] = []
@@ -77,7 +86,7 @@ struct SearchAvatarTests {
         return []
     }
 
-    private func results(_ phases: () -> [SearchViewModel.Phase]) -> [SearchResultDisplayModel] {
+    fileprivate func results(_ phases: () -> [SearchViewModel.Phase]) -> [SearchResultDisplayModel] {
         for phase in phases().reversed() {
             if case .results(let models) = phase { return models }
         }
@@ -178,5 +187,110 @@ struct SearchAvatarTests {
         // nothing — the request list never grew a second non-empty entry.
         let nonEmpty = await avatars.requests().filter { !$0.isEmpty }
         #expect(nonEmpty.count == 1)
+    }
+}
+
+/// The trailing context label — what a row says about a person beside their
+/// name, and where each surface gets it from.
+@MainActor
+struct SearchRowContextTests {
+    private func settle(until condition: () -> Bool) async {
+        for _ in 0..<500 {
+            if condition() { return }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    // MARK: - The label itself
+
+    @Test func followingReadsAsFollowing() {
+        #expect(ProfileRowContext.following.label == "Following")
+    }
+
+    @Test func nothingKnownRendersNoLabelAtAll() {
+        // Not an empty string: a row with no context must be exactly as tall
+        // as it always was.
+        #expect(ProfileRowContext.none.label == nil)
+    }
+
+    @Test func followerCountsAreAbbreviated() {
+        #expect(ProfileRowContext.followerCount(0).label == "0 followers")
+        #expect(ProfileRowContext.followerCount(999).label == "999 followers")
+        #expect(ProfileRowContext.followerCount(1_000).label == "1K followers")
+        #expect(ProfileRowContext.followerCount(1_240).label == "1.2K followers")
+        #expect(ProfileRowContext.followerCount(2_500_000).label == "2.5M followers")
+    }
+
+    /// Truncated, not rounded: 1,999 followers is "1.9K", never "2K". The
+    /// number must never claim more than the count it came from.
+    @Test func abbreviationNeverRoundsUp() {
+        #expect(ProfileRowContext.followerCount(1_999).label == "1.9K followers")
+        #expect(ProfileRowContext.followerCount(1_099).label == "1K followers")
+    }
+
+    // MARK: - Which context a row gets
+
+    @Test func aFollowedPersonSaysFollowingRatherThanTheirCount() async {
+        let (viewModel, _, phases) = SearchAvatarTests().make(
+            results: [ProfileSearchResult(
+                id: ProfileID("prof-1"), handle: "ada", displayName: "Ada", isVerified: false
+            )],
+            avatars: StubAvatars([:], followed: ["prof-1"], followers: ["prof-1": 4_200])
+        )
+
+        viewModel.submitQuery("ada")
+        await settle(until: {
+            SearchAvatarTests().results(phases).first.map { $0.context != .none } == true
+        })
+
+        #expect(SearchAvatarTests().results(phases).map(\.context) == [.following])
+    }
+
+    @Test func aStrangerWithAKnownCountSaysTheCount() async {
+        let (viewModel, _, phases) = SearchAvatarTests().make(
+            results: [ProfileSearchResult(
+                id: ProfileID("prof-1"), handle: "ada", displayName: "Ada", isVerified: false
+            )],
+            avatars: StubAvatars([:], followers: ["prof-1": 4_200])
+        )
+
+        viewModel.submitQuery("ada")
+        await settle(until: {
+            SearchAvatarTests().results(phases).first.map { $0.context != .none } == true
+        })
+
+        #expect(SearchAvatarTests().results(phases).map(\.context) == [.followerCount(4_200)])
+    }
+
+    /// A person nothing is known about says nothing, rather than "0 followers".
+    @Test func aStrangerWithNoKnownCountSaysNothing() async {
+        let (viewModel, _, phases) = SearchAvatarTests().make(
+            results: [ProfileSearchResult(
+                id: ProfileID("prof-1"), handle: "ada", displayName: "Ada", isVerified: false
+            )],
+            avatars: StubAvatars(["prof-1": "https://example.com/a.jpg"])
+        )
+
+        viewModel.submitQuery("ada")
+        await settle(until: { SearchAvatarTests().results(phases).first?.avatarURL != nil })
+
+        #expect(SearchAvatarTests().results(phases).map(\.context) == [ProfileRowContext.none])
+    }
+
+    /// ⚠️ A suggested creator starts with NO context and is told about like
+    /// anyone else.
+    ///
+    /// This briefly shipped as "everyone in Suggestions is followed, because
+    /// the corpus is the following timeline" — and that is false: the mock's
+    /// timeline serves every author regardless of the graph, so a person whose
+    /// Suggestions row said "Following" came back "3 followers" when searched
+    /// for. The relationship is per person, never inherited from the corpus.
+    @Test func aSuggestedCreatorClaimsNothingUntilItIsTold() {
+        let creator = ExploreCreator(
+            id: ProfileID("prof-1"), displayName: "Ada", handle: "ada",
+            monogram: "A", avatarURL: nil
+        )
+
+        #expect(creator.context == .none)
     }
 }

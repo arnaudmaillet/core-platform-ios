@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import Foundation
 
 /// One item of the corpus the trending list is ranked from: a post, reduced to
@@ -68,6 +69,16 @@ public struct ExploreCreator: Equatable, Sendable, Identifiable {
     public let handle: String
     public let monogram: String
     public let avatarURL: URL?
+    /// Social context, resolved per person like every other list's.
+    ///
+    /// ⚠️ **It was briefly assumed instead — "the corpus is the following
+    /// timeline, so everyone in it is followed" — and that is NOT true.** The
+    /// mock's timeline returns posts from every author regardless of the
+    /// follow graph, and nothing in `timeline.v1` promises otherwise; a search
+    /// for one of these people came back "3 followers" while their Suggestions
+    /// row claimed "Following". Cheap and wrong beat expensive and right for
+    /// exactly one build. It is asked for now.
+    public var context: ProfileRowContext = .none
 
     public init(id: ProfileID, displayName: String, handle: String, monogram: String, avatarURL: URL?) {
         self.id = id
@@ -101,12 +112,12 @@ enum ExploreRanking {
 
     /// The distinct authors of `ranked`, in the order their best post appears.
     ///
-    /// ⚠️ **These are not "suggested" or "new" people, and the list must not
-    /// claim they are.** The corpus is the viewer's FOLLOWING timeline, so
-    /// every author here is someone they already follow — a "discover
-    /// creators" list built from it would be recommending people back to
-    /// themselves. What it honestly is: who has been most active in what the
-    /// viewer already reads.
+    /// ⚠️ **The corpus is nominally the viewer's following timeline**, so this
+    /// list leans towards people they already follow — but do not treat that
+    /// as a guarantee. `timeline.v1` does not promise it and the mock does not
+    /// honour it, which is why each row asks about its own relationship rather
+    /// than inheriting one from where the data came from. What the list
+    /// honestly is: who has been most active in what the viewer reads.
     static func creators(from ranked: [ExplorePost], limit: Int) -> [ExploreCreator] {
         var seen: Set<ProfileID> = []
         var creators: [ExploreCreator] = []
