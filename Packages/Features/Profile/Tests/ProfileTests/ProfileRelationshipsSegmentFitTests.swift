@@ -5,13 +5,14 @@ import UIKit
 
 /// The segment titles keep their counts at every width.
 ///
-/// **This suite used to assert the opposite.** With the selector in the
-/// navigation bar's title slot, three counted titles did not fit — the slot
+/// **This suite used to assert the opposite.** With a `UISegmentedControl` in
+/// the navigation bar's title slot, three counted titles did not fit — the slot
 /// caps at 258pt — so the screen dropped the counts on narrow devices to avoid
 /// truncating "Followers" and "Following" into two identical stubs. Replacing
-/// `UISegmentedControl` with `PagedTabBar` removed the constraint that forced
-/// that trade: the bar spans the screen and its segments live in a scroll view,
-/// so titles that out-measure the capsule scroll instead of being clipped.
+/// it with `PagedTabBar` removed the constraint that forced that trade: the
+/// selector still lives in the title slot, but its segments sit in a scroll
+/// view, so titles that out-measure the capsule scroll instead of clipping.
+/// The overflow itself is pinned by `PagedTabBarTitleOverflowTests`.
 ///
 /// So the rule these now pin is the simple one: the counts are always there, on
 /// every device, whatever they say. Driven through the real view controller so
