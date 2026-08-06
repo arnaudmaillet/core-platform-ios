@@ -180,7 +180,10 @@ struct SnapCommentTickerViewTests {
         let blur = try #require(
             ticker.subviews.first { $0.accessibilityIdentifier == "ticker-kinetic-backdrop" }
         )
-        let start = CACurrentMediaTime()
+        // The ticker's own release stamp, not a fresh reading — see
+        // `accumulatorSumsAbsoluteDeltasNotNetTranslation` for what a second
+        // clock read costs on a loaded runner.
+        let start = ticker.coastStartTime
         ticker.coastStep(now: start + 0.016) // one fast frame into the decay
         #expect(!blur.isHidden)
         #expect(ticker.currentKineticFraction > 0)
@@ -217,7 +220,12 @@ struct SnapCommentTickerViewTests {
         ticker.applyScrubTranslation(200) // net translation: zero
         ticker.endScrub(releaseVelocity: 1200)
 
-        ticker.coastStep(now: CACurrentMediaTime() + 0.001)
+        // Anchored to the release the ticker recorded, NOT to a fresh clock
+        // reading: the gap between `endScrub` and this line is real elapsed
+        // time, and on a loaded runner it is long enough for the fraction to
+        // decay out of the assertion. This test is about the accumulator
+        // summing |Δx|, not about how fast the machine got here.
+        ticker.coastStep(now: ticker.coastStartTime + 0.001)
         // 400pt of absolute travel ≥ blurDistanceScale → released at the cap.
         #expect(ticker.currentKineticFraction > SnapCommentTickerView.maxBlurFraction - 0.05)
     }

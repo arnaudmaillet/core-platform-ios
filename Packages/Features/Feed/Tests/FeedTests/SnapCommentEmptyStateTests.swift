@@ -111,7 +111,14 @@ struct SnapCommentEmptyStateTests {
         #expect(caption.frame == captionFrameBefore)
         // md — the harmonized inter-container seam (it stands in the
         // band's seat, so it keeps the band's gap against the caption).
-        #expect(prompt.frame.maxY == captionFrameBefore.minY - Spacing.md)
+        //
+        // ⚠️ Compared with a tolerance, not `==`. Both sides are laid out on a
+        // fractional scale (754.666… at 3x), and the two arrive by different
+        // arithmetic — exact equality held on CI's device and was off by one
+        // ulp on an iPhone 17 Pro, which is a rounding artefact rather than a
+        // layout error. Half a point is far below anything visible and far
+        // above the error being tolerated.
+        #expect(abs(prompt.frame.maxY - (captionFrameBefore.minY - Spacing.md)) < 0.5)
         #expect(prompt.frame.minX == caption.frame.minX)
         #expect(prompt.frame.height > 0)
     }
