@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import MediaCore
 import UIKit
 
 /// The inbox's "All" surface: every active direct message, with unread ones
@@ -53,8 +54,20 @@ final class ConversationListViewController: UIViewController {
         chrome = InboxSurfaceChrome(badgeCount: viewModel.newCount)
     }
 
-    init(viewModel: ConversationListViewModel) {
+    /// `imagePipeline` and `avatars` are optional: the list is complete
+    /// without them (see `ConversationCell.configure`), and mock builds that
+    /// wire neither still render initials.
+    private let imagePipeline: ImagePipeline?
+    private let avatars: (any PeerAvatarProviding)?
+
+    init(
+        viewModel: ConversationListViewModel,
+        imagePipeline: ImagePipeline? = nil,
+        avatars: (any PeerAvatarProviding)? = nil
+    ) {
         self.viewModel = viewModel
+        self.imagePipeline = imagePipeline
+        self.avatars = avatars
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -134,7 +147,9 @@ final class ConversationListViewController: UIViewController {
             let cell = tableView.dequeueReusableCell(
                 withIdentifier: ConversationCell.reuseIdentifier, for: indexPath
             ) as! ConversationCell
-            if let model = self?.modelsByID[id] { cell.configure(with: model) }
+            if let self, let model = self.modelsByID[id] {
+                cell.configure(with: model, imagePipeline: self.imagePipeline, avatars: self.avatars)
+            }
             return cell
         }
     }

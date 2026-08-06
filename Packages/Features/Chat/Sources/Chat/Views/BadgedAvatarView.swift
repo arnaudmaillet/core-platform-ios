@@ -80,6 +80,13 @@ final class BadgedAvatarView: UIView {
     }
 
     private let avatar = MonogramAvatarView()
+    /// The picture, drawn OVER the monogram rather than instead of it.
+    ///
+    /// The monogram stays underneath for the whole lifetime of the row, so
+    /// there is no empty disc at any point: before the fetch, during it, and
+    /// after one that failed, the initials are what shows. A swap would need a
+    /// third state for "loading" and would flash on cell reuse.
+    private let picture = AvatarImageView()
     private let badge = UIView()
     private let label = UILabel()
     private var badgeWidth: NSLayoutConstraint!
@@ -87,6 +94,7 @@ final class BadgedAvatarView: UIView {
     init() {
         super.init(frame: .zero)
         avatar.pin(to: self)
+        picture.pin(to: avatar)
 
         badge.backgroundColor = .tintColor
         badge.layer.borderWidth = Metrics.ringWidth
@@ -156,6 +164,22 @@ final class BadgedAvatarView: UIView {
 
     func setMonogram(_ monogram: String) {
         avatar.setMonogram(monogram)
+    }
+
+    /// Reveals a fetched picture over the initials, or clears back to them.
+    ///
+    /// Cross-dissolved when it arrives late (the common case — the row was on
+    /// screen before the profile service answered) and set outright when it is
+    /// already in hand, so a scroll through cached rows doesn't shimmer.
+    func setPicture(_ image: UIImage?, animated: Bool) {
+        guard animated, image != nil else {
+            picture.image = image
+            return
+        }
+        UIView.transition(
+            with: picture, duration: 0.25,
+            options: [.transitionCrossDissolve, .allowUserInteraction]
+        ) { self.picture.image = image }
     }
 
     func setBadge(_ style: Style) {

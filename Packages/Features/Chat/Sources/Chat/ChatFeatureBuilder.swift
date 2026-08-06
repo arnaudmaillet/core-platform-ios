@@ -56,7 +56,12 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         onUnreadCountChange: ((Int) -> Void)? = nil
     ) -> UIViewController {
         let conversations = ConversationListViewController(
-            viewModel: ConversationListViewModel(catalog: catalog, router: router)
+            viewModel: ConversationListViewModel(catalog: catalog, router: router),
+            imagePipeline: imagePipeline,
+            // The suggestions repository doubles as the avatar source: it
+            // already caches the profiles these rows need, and the two
+            // surfaces are one tab apart.
+            avatars: connections as? any PeerAvatarProviding
         )
         // Context-menu previews show the real thread screen in `.preview`
         // mode: same transcript construction as the router's `.conversation`
@@ -74,7 +79,9 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         }
 
         let requests = MessageRequestsViewController(
-            viewModel: MessageRequestsViewModel(catalog: catalog, router: router)
+            viewModel: MessageRequestsViewModel(catalog: catalog, router: router),
+            imagePipeline: imagePipeline,
+            avatars: connections as? any PeerAvatarProviding
         )
         let suggestions = SuggestionsViewController(
             viewModel: SuggestionsViewModel(

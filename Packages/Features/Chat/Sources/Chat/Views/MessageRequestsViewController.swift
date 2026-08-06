@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import MediaCore
 import UIKit
 
 /// The inbox's "Requests" surface: conversations from accounts the viewer
@@ -41,8 +42,17 @@ final class MessageRequestsViewController: UIViewController {
         chrome = InboxSurfaceChrome(badgeCount: viewModel.newCount)
     }
 
-    init(viewModel: MessageRequestsViewModel) {
+    private let imagePipeline: ImagePipeline?
+    private let avatars: (any PeerAvatarProviding)?
+
+    init(
+        viewModel: MessageRequestsViewModel,
+        imagePipeline: ImagePipeline? = nil,
+        avatars: (any PeerAvatarProviding)? = nil
+    ) {
         self.viewModel = viewModel
+        self.imagePipeline = imagePipeline
+        self.avatars = avatars
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -97,7 +107,9 @@ final class MessageRequestsViewController: UIViewController {
             let cell = tableView.dequeueReusableCell(
                 withIdentifier: MessageRequestCell.reuseIdentifier, for: indexPath
             ) as! MessageRequestCell
-            if let model = self?.modelsByID[id] { cell.configure(with: model) }
+            if let self, let model = self.modelsByID[id] {
+                cell.configure(with: model, imagePipeline: self.imagePipeline, avatars: self.avatars)
+            }
             // Decisions are captured per row: the diffable snapshot animates
             // the row out, so neither handler needs an index path.
             cell.onAccept = { [weak self] in self?.viewModel.accept(id) }

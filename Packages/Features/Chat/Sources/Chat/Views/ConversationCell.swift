@@ -1,4 +1,6 @@
+import CoreModels
 import DesignSystem
+import MediaCore
 import UIKit
 
 /// A conversation-list row: monogram avatar, title, last-message preview, and
@@ -14,6 +16,11 @@ final class ConversationCell: UITableViewCell {
     }
 
     private let avatarView = BadgedAvatarView()
+    private var avatarTask: Task<Void, Never>?
+    /// The peer this cell is currently showing. A reused cell can outlive its
+    /// own fetch, so the late result is checked against this before it draws —
+    /// otherwise a slow avatar lands on whoever the row became.
+    private var avatarPeerID: ProfileID?
     private let titleLabel = UILabel()
     private let previewLabel = UILabel()
     private let timeLabel = UILabel()
@@ -28,8 +35,30 @@ final class ConversationCell: UITableViewCell {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func configure(with model: ConversationDisplayModel) {
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        avatarTask?.cancel()
+        avatarTask = nil
+        avatarPeerID = nil
+        avatarView.setPicture(nil, animated: false)
+    }
+
+    /// The row draws immediately from `model`; the picture, if there is one,
+    /// arrives later through `avatars` and `imagePipeline`.
+    ///
+    /// ⚠️ **Both are optional and the row is complete without them.** The inbox
+    /// is built from `chat.v1`, which carries no pictures at all — the avatar
+    /// lives in `profile.v1` — so a list that waited for faces would hold every
+    /// row behind a second service. The monogram is not a placeholder here; it
+    /// is the rendered state, and the picture is an enhancement that may never
+    /// come.
+    func configure(
+        with model: ConversationDisplayModel,
+        imagePipeline: ImagePipeline? = nil,
+        avatars: (any PeerAvatarProviding)? = nil
+    ) {
         avatarView.setMonogram(model.monogram)
+        loadAvatar(for: model, imagePipeline: imagePipeline, avatars: avatars)
         titleLabel.text = model.title
         previewLabel.text = model.preview.isEmpty ? "No messages yet" : model.preview
         timeLabel.text = model.timeText
@@ -59,6 +88,28 @@ final class ConversationCell: UITableViewCell {
     /// Unread rows carry weight and full-strength colour; read rows recede.
     /// Only the fonts and colours change — nothing moves — so a row switching
     /// state can't shift the rows around it.
+    /// Resolves the peer's avatar URL, then its image, then draws it — each
+    /// step abandoned if the cell has moved on.
+    private func loadAvatar(
+        for model: ConversationDisplayModel,
+        imagePipeline: ImagePipeline?,
+        avatars: (any PeerAvatarProviding)?
+    ) {
+        avatarTask?.cancel()
+        avatarTask = nil
+        avatarPeerID = model.peerID
+        avatarView.setPicture(nil, animated: false)
+
+        guard let peerID = model.peerID, let avatars, let imagePipeline else { return }
+        avatarTask = Task { [weak self] in
+            let urls = await avatars.avatarURLs(for: [peerID])
+            guard !Task.isCancelled, let url = urls[peerID] else { return }
+            guard let image = try? await imagePipeline.image(for: url) else { return }
+            guard let self, !Task.isCancelled, self.avatarPeerID == peerID else { return }
+            self.avatarView.setPicture(image, animated: true)
+        }
+    }
+
     private func applyUnreadStyle(_ isUnread: Bool) {
         titleLabel.font = isUnread
             ? .preferredFont(forTextStyle: .headline, weight: .bold)
