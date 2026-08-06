@@ -110,15 +110,32 @@ final class ConversationCell: UITableViewCell {
         }
     }
 
+    /// Paints the pinned state on THIS cell, right now.
+    ///
+    /// ⚠️ **Called at the action site, before the snapshot that moves the row.**
+    /// Pinning changes content and position together, and every attempt to let
+    /// the data source carry the content half lost the race: a reconfigure in
+    /// the same snapshot as the move settles at the END of the move, and a
+    /// separate `apply` in the same runloop turn gets coalesced with it —
+    /// especially under the context menu's own dismissal animation, which is
+    /// where pinning is actually triggered from. Mutating the visible cell is
+    /// the only path that puts the band on frame 0.
+    ///
+    /// The later reconfigure then sets the same values and does nothing, so
+    /// this does not fight the data source; it front-runs it.
+    func setPinnedStyle(_ isPinned: Bool, animated: Bool) {
+        pinnedIcon.isHidden = !isPinned
+        applyPinnedTint(isPinned, animated: animated)
+        layoutIfNeeded()
+    }
+
     /// The pinned band. Cross-faded rather than swapped when the row is
-    /// already on screen, so the tint arrives with the reordering animation
-    /// instead of snapping a frame before it — the two together read as one
-    /// gesture. Set outright otherwise (first render, reuse during a scroll),
-    /// where an animation would be a flash on a row the viewer never saw
-    /// unpinned.
-    private func applyPinnedTint(_ isPinned: Bool) {
+    /// already on screen, so the tint reads as part of the same gesture. Set
+    /// outright otherwise (first render, reuse during a scroll), where an
+    /// animation would be a flash on a row the viewer never saw unpinned.
+    private func applyPinnedTint(_ isPinned: Bool, animated: Bool = true) {
         let tint: UIColor? = isPinned ? .quaternarySystemFill : nil
-        guard window != nil, backgroundColor != tint else {
+        guard animated, window != nil, backgroundColor != tint else {
             backgroundColor = tint
             return
         }

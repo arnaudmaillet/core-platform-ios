@@ -86,12 +86,21 @@ final class ConversationListViewController: UIViewController {
         render(.loading)
 
         #if DEBUG
-        // `-chat-pin-demo` pins the LAST row ~2s in — swipes can't be
-        // injected in-sim; shows the pinned tint and the reorder-to-top.
+        // `-chat-pin-demo` pins the last VISIBLE row ~2s in and shows the tint
+        // plus the reorder-to-top.
+        //
+        // ⚠️ Visible, not `itemIdentifiers.last` — which is usually off-screen,
+        // where there is no cell to paint and the whole point of the fix
+        // (front-running the data source on the live cell) goes unexercised.
+        // Watch it with Slow Animations on: the band must be there on frame 0
+        // of the slide, not when it lands.
         if ProcessInfo.processInfo.arguments.contains("-chat-pin-demo") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                guard let self, let id = self.dataSource.snapshot().itemIdentifiers.last else { return }
-                self.viewModel.togglePin(id)
+                guard let self,
+                      let indexPath = self.tableView.indexPathsForVisibleRows?.last,
+                      let id = self.dataSource.itemIdentifier(for: indexPath)
+                else { return }
+                self.pin(id)
             }
         }
         // `-chat-preview-demo` presents the context-menu preview construction
@@ -112,27 +121,27 @@ final class ConversationListViewController: UIViewController {
         #endif
     }
 
-    /// Re-renders changed rows at their CURRENT positions, ahead of the
-    /// snapshot that moves them.
+    /// Toggles the pin, painting the visible row FIRST.
     ///
-    /// ⚠️ **Why a second apply.** Pinning changes a row's content (its tinted
-    /// band) *and* its position, and both arrived in one snapshot. UIKit runs
-    /// the move animation and settles the reconfigure at the END of it, so the
-    /// row slid to the top still wearing its old background and only greyed
-    /// once it landed — a visible lag on the one action whose whole feedback
-    /// IS that tint. Painting first, against the order still on screen, means
-    /// the row is already grey when it starts moving.
+    /// ⚠️ **Order is the whole fix.** The band and the row's new position both
+    /// come from the same state change, and the data source insists on
+    /// delivering them together — a reconfigure bundled with the move settles
+    /// after the move, and a separate `apply` in the same turn is coalesced
+    /// into it. Pinning is triggered from a context menu, so all of this
+    /// happens under UIKit's menu-dismissal animation, which makes the
+    /// coalescing reliable rather than occasional.
     ///
-    /// Cheap and safe: no-op when nothing changed, when the list has never
-    /// rendered, or off-screen — and `reconfigureItems` on an item the current
-    /// snapshot doesn't hold would trap, so membership is checked.
-    private func repaintInPlace(_ ids: [ConversationID]) {
-        guard hasRenderedContent, view.window != nil, !ids.isEmpty else { return }
-        var current = dataSource.snapshot()
-        let present = ids.filter { current.indexOfItem($0) != nil }
-        guard !present.isEmpty else { return }
-        current.reconfigureItems(present)
-        dataSource.apply(current, animatingDifferences: false)
+    /// So the cell is painted synchronously, before the model changes at all.
+    /// By the time the reordering snapshot animates, the row it is moving is
+    /// already grey — and the reconfigure that follows sets the same values
+    /// and changes nothing.
+    private func pin(_ id: ConversationID) {
+        let willPin = !viewModel.isPinned(id)
+        if let indexPath = dataSource.indexPath(for: id),
+           let cell = tableView.cellForRow(at: indexPath) as? ConversationCell {
+            cell.setPinnedStyle(willPin, animated: true)
+        }
+        viewModel.togglePin(id)
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -223,7 +232,6 @@ final class ConversationListViewController: UIViewController {
             // BEFORE any apply: `cellForRowAt` reads this, so a reconfigure
             // scheduled below has to find the new model already in place.
             modelsByID = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
-            repaintInPlace(changed)
             // Animate only while visible. A change that arrives while a thread
             // is pushed over the inbox — reading one, say — would otherwise
             // play its row animation on the way back, turning a settled screen
@@ -357,7 +365,7 @@ extension ConversationListViewController: UITableViewDelegate {
         let pin = UIAction(
             title: isPinned ? "Unpin" : "Pin",
             image: UIImage(systemName: isPinned ? "pin.slash" : "pin")
-        ) { [weak self] _ in self?.viewModel.togglePin(id) }
+        ) { [weak self] _ in self?.pin(id) }
         let mute = UIAction(
             title: isMuted ? "Unmute" : "Mute",
             image: UIImage(systemName: isMuted ? "bell" : "bell.slash")
