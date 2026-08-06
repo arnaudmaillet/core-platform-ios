@@ -61,11 +61,13 @@ public final class PersonListCell: UICollectionViewListCell {
     ///
     /// Computed from the fonts rather than fixed, so it tracks Dynamic Type —
     /// a constant would clip the text at the larger sizes.
+    /// ⚠️ Expressed in the SAME metrics the layout uses, so the two cannot
+    /// drift. It is the natural height of a two-line row; a one-line row is
+    /// then padded up to meet it. The gap between the lines counts — it used
+    /// to be hidden inside `UIListContentConfiguration`, and leaving it out of
+    /// this sum quietly shortened every row by exactly that gap.
     public static var comfortableRowHeight: CGFloat {
-        // ⚠️ The gap BETWEEN the two lines counts. It used to be hidden inside
-        // `UIListContentConfiguration`; now the column owns it, and leaving it
-        // out quietly shortened every row by the size of that gap.
-        ceil(twoLineTextHeight + Spacing.xs + Spacing.lg * 2)
+        ceil(twoLineTextHeight + Metrics.lineSpacing + Metrics.verticalMargin * 2)
     }
 
     private static var twoLineTextHeight: CGFloat {
@@ -178,9 +180,7 @@ public final class PersonListCell: UICollectionViewListCell {
         subtitleRow.spacing = Spacing.xs
         textColumn.axis = .vertical
         textColumn.alignment = .leading
-        // Enough to separate the two lines without opening a gap the disc has
-        // to span; the row's height budget is set by `minimumRowHeight`.
-        textColumn.spacing = Spacing.xs
+        textColumn.spacing = Metrics.lineSpacing
         // ⚠️ The leading inset is the gap to the DISC. UIKit already insets
         // `contentView` past a leading accessory, but it leaves no air between
         // them — without this the name starts hard against the avatar.
@@ -209,12 +209,15 @@ public final class PersonListCell: UICollectionViewListCell {
     }
 
     private enum Metrics {
-        /// Above and below the text column. Chosen so a two-line row lands
-        /// where `UIListContentConfiguration` used to put it — this cell drew
-        /// itself with the system's margins until the second line needed two
-        /// independently truncating labels, and the compose picker and inbox
-        /// search should not shift because of a change they did not ask for.
+        /// Above and below the text column.
         static let verticalMargin = Spacing.md
+        /// Between the name and the handle line.
+        ///
+        /// Tighter than the `Spacing` scale's smallest step on purpose: these
+        /// two lines are one statement about one person, and the gap only has
+        /// to keep the descenders of the name off the handle. Anything larger
+        /// reads as two separate things stacked.
+        static let lineSpacing: CGFloat = 2
     }
 
     private lazy var deleteHost: DeleteAccessoryView = {

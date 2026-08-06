@@ -97,6 +97,17 @@ enum ExploreLayout {
         UICollectionViewCompositionalLayout { index, environment in
             var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
             configuration.headerMode = hasHeader(index) ? .supplementary : .none
+            // No hairlines. Every row on this screen already reads as its own
+            // object — a 48pt disc, a name, a handle — and at this density the
+            // rules were drawing a grid around content that did not need one.
+            //
+            // A property of the LIST, not of the cell: `PersonListCell` still
+            // ties its `separatorLayoutGuide` to the text column, because the
+            // compose picker and the inbox's search show separators and need
+            // them inset past the avatar. Turning them off here leaves that
+            // alone rather than reaching into a shared component to disable
+            // something two other screens still want.
+            configuration.showsSeparators = false
             // Only the FIRST section loses its top padding. That padding is
             // what separates a header from the rows above it; at the top of
             // the list there is nothing above to separate from, and the gap
