@@ -73,7 +73,7 @@ final class ConversationCell: UITableViewCell {
         // colors are translucent and adapt to dark mode), and a pin glyph
         // under the timestamp that names the state up close.
         pinnedIcon.isHidden = !model.isPinned
-        backgroundColor = model.isPinned ? .quaternarySystemFill : nil
+        applyPinnedTint(model.isPinned)
         let states: [String?] = [
             model.title,
             model.isUnread ? "Unread" : nil,
@@ -108,6 +108,24 @@ final class ConversationCell: UITableViewCell {
             guard let self, !Task.isCancelled, self.avatarPeerID == peerID else { return }
             self.avatarView.setPicture(image, animated: true)
         }
+    }
+
+    /// The pinned band. Cross-faded rather than swapped when the row is
+    /// already on screen, so the tint arrives with the reordering animation
+    /// instead of snapping a frame before it — the two together read as one
+    /// gesture. Set outright otherwise (first render, reuse during a scroll),
+    /// where an animation would be a flash on a row the viewer never saw
+    /// unpinned.
+    private func applyPinnedTint(_ isPinned: Bool) {
+        let tint: UIColor? = isPinned ? .quaternarySystemFill : nil
+        guard window != nil, backgroundColor != tint else {
+            backgroundColor = tint
+            return
+        }
+        UIView.transition(
+            with: self, duration: 0.25,
+            options: [.transitionCrossDissolve, .allowUserInteraction]
+        ) { self.backgroundColor = tint }
     }
 
     private func applyUnreadStyle(_ isUnread: Bool) {

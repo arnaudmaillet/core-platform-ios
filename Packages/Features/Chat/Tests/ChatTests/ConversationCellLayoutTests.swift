@@ -98,4 +98,41 @@ struct ConversationCellLayoutTests {
     func mutedOnlyShowsOne() {
         #expect(glyphs(in: makeCell(muted: true, pinned: false)).count == 1)
     }
+
+    /// The pinned band is applied by `configure`, not deferred.
+    ///
+    /// It used to arrive only when the row was re-rendered after its move
+    /// animation settled, so pinning greyed the row a beat late — on the one
+    /// action whose entire feedback IS that tint. The list now repaints the
+    /// row in place before the snapshot that moves it, and this pins the half
+    /// the cell owns: configure with `isPinned` and the band is there.
+    @Test("Pinning tints the row as soon as it is configured")
+    func pinnedRowIsTintedOnConfigure() {
+        #expect(makeCell(muted: false, pinned: true).backgroundColor == .quaternarySystemFill)
+    }
+
+    @Test("An unpinned row carries no band")
+    func unpinnedRowHasNoTint() {
+        #expect(makeCell(muted: false, pinned: false).backgroundColor == nil)
+    }
+
+    /// Reconfiguring the same cell from pinned to unpinned clears the band —
+    /// the cross-fade path must not leave the colour behind.
+    @Test("Unpinning clears the band")
+    func unpinningClearsTheTint() {
+        let cell = makeCell(muted: false, pinned: true)
+        let unpinned = ConversationDisplayModel(
+            conversation: Conversation(
+                id: ConversationID("c1"), title: "Ava Moreau", lastMessage: "hi",
+                lastActivityAt: Date(timeIntervalSince1970: 0),
+                otherMemberIDs: [ProfileID("peer-1")], lastMessageIsMine: false,
+                lastMessageID: "c1-latest", isUnread: false, unreadCount: 0
+            ),
+            now: Date(timeIntervalSince1970: 60),
+            isPinned: false, isMuted: false, isUnread: false, unreadCount: 0
+        )
+        cell.configure(with: unpinned)
+
+        #expect(cell.backgroundColor == nil)
+    }
 }

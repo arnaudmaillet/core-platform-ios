@@ -112,6 +112,29 @@ final class ConversationListViewController: UIViewController {
         #endif
     }
 
+    /// Re-renders changed rows at their CURRENT positions, ahead of the
+    /// snapshot that moves them.
+    ///
+    /// ⚠️ **Why a second apply.** Pinning changes a row's content (its tinted
+    /// band) *and* its position, and both arrived in one snapshot. UIKit runs
+    /// the move animation and settles the reconfigure at the END of it, so the
+    /// row slid to the top still wearing its old background and only greyed
+    /// once it landed — a visible lag on the one action whose whole feedback
+    /// IS that tint. Painting first, against the order still on screen, means
+    /// the row is already grey when it starts moving.
+    ///
+    /// Cheap and safe: no-op when nothing changed, when the list has never
+    /// rendered, or off-screen — and `reconfigureItems` on an item the current
+    /// snapshot doesn't hold would trap, so membership is checked.
+    private func repaintInPlace(_ ids: [ConversationID]) {
+        guard hasRenderedContent, view.window != nil, !ids.isEmpty else { return }
+        var current = dataSource.snapshot()
+        let present = ids.filter { current.indexOfItem($0) != nil }
+        guard !present.isEmpty else { return }
+        current.reconfigureItems(present)
+        dataSource.apply(current, animatingDifferences: false)
+    }
+
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         viewModel.viewWillAppear()
@@ -195,8 +218,12 @@ final class ConversationListViewController: UIViewController {
             // that cleared the bold preview) re-render in place; identity
             // moves/removals animate, so swipe outcomes read as system row
             // animations, not reloads. See `InboxRowDiff`.
-            snapshot.reconfigureItems(InboxRowDiff.changedRows(in: models, against: modelsByID))
+            let changed = InboxRowDiff.changedRows(in: models, against: modelsByID)
+            snapshot.reconfigureItems(changed)
+            // BEFORE any apply: `cellForRowAt` reads this, so a reconfigure
+            // scheduled below has to find the new model already in place.
             modelsByID = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
+            repaintInPlace(changed)
             // Animate only while visible. A change that arrives while a thread
             // is pushed over the inbox — reading one, say — would otherwise
             // play its row animation on the way back, turning a settled screen
