@@ -121,27 +121,36 @@ final class ConversationListViewController: UIViewController {
         #endif
     }
 
-    /// Toggles the pin, painting the visible row FIRST.
+    /// Toggles the pin: paints the live row, commits the frame, then moves it.
     ///
-    /// ⚠️ **Order is the whole fix.** The band and the row's new position both
-    /// come from the same state change, and the data source insists on
-    /// delivering them together — a reconfigure bundled with the move settles
-    /// after the move, and a separate `apply` in the same turn is coalesced
-    /// into it. Pinning is triggered from a context menu, so all of this
-    /// happens under UIKit's menu-dismissal animation, which makes the
-    /// coalescing reliable rather than occasional.
+    /// ⚠️ **The deferral is the fix, and it took three wrong attempts.** The
+    /// band and the row's new position come from one state change, and every
+    /// arrangement that let them share a runloop turn lost:
     ///
-    /// So the cell is painted synchronously, before the model changes at all.
-    /// By the time the reordering snapshot animates, the row it is moving is
-    /// already grey — and the reconfigure that follows sets the same values
-    /// and changes nothing.
+    /// - both in one snapshot → UIKit settles the reconfigure at the END of
+    ///   the move, so the row slides wearing its old background;
+    /// - two `apply` calls in one turn → coalesced into exactly that;
+    /// - painting the cell synchronously and toggling immediately after → the
+    ///   background change is swept into the table update's own animation
+    ///   block and rides the move rather than preceding it.
+    ///
+    /// A context-menu `UIAction` already runs after the menu has dismissed, so
+    /// menu suppression is not what is in the way — sharing a transaction with
+    /// the table update is. `CATransaction.flush()` commits the painted cell to
+    /// the render server as its own frame, and the model change is handed to
+    /// the next turn so the reorder animation starts from a row that is
+    /// already grey.
+    ///
+    /// Unpinning is the same call with the flag inverted: the band clears on
+    /// this frame and the row slides back down without it.
     private func pin(_ id: ConversationID) {
         let willPin = !viewModel.isPinned(id)
         if let indexPath = dataSource.indexPath(for: id),
            let cell = tableView.cellForRow(at: indexPath) as? ConversationCell {
-            cell.setPinnedStyle(willPin, animated: true)
+            cell.setPinnedStyle(willPin, animated: false)
+            CATransaction.flush()
         }
-        viewModel.togglePin(id)
+        DispatchQueue.main.async { [weak self] in self?.viewModel.togglePin(id) }
     }
 
     override func viewWillAppear(_ animated: Bool) {
