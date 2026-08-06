@@ -42,6 +42,10 @@ final class MessageRequestsViewController: UIViewController {
         chrome = InboxSurfaceChrome(badgeCount: viewModel.newCount)
     }
 
+    /// Builds the thread screen shown in a long-press preview. Supplied by the
+    /// composition root, exactly as the All tab's is — the peek is the real
+    /// screen in `.preview` mode, not a facsimile.
+    var threadPreviewProvider: ((ConversationID) -> UIViewController)?
     private let imagePipeline: ImagePipeline?
     private let avatars: (any PeerAvatarProviding)?
 
@@ -244,6 +248,55 @@ extension MessageRequestsViewController: UITableViewDelegate {
         tableView.deselectRow(at: indexPath, animated: true)
         guard let id = dataSource.itemIdentifier(for: indexPath) else { return }
         viewModel.didSelect(id)
+    }
+
+    // MARK: - Context menu (haptic long-press)
+
+    /// The same seam the All tab uses: long-press lifts the row and previews
+    /// the actual thread screen through `threadPreviewProvider`.
+    ///
+    /// ⚠️ The MENU differs, and has to. A request is not yet a conversation —
+    /// it cannot be pinned or muted, and the view model exposes no such calls.
+    /// What a request offers is the decision it is waiting on, which is also
+    /// what its row's two buttons offer.
+    func tableView(
+        _ tableView: UITableView,
+        contextMenuConfigurationForRowAt indexPath: IndexPath,
+        point: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard let id = dataSource.itemIdentifier(for: indexPath) else { return nil }
+        let makePreview = threadPreviewProvider
+        return UIContextMenuConfiguration(
+            identifier: id.rawValue as NSString,
+            previewProvider: makePreview.map { make in { make(id) } },
+            actionProvider: { [weak self] _ in self?.contextMenu(for: id) }
+        )
+    }
+
+    /// Tapping the lifted preview commits to the real thing, through the same
+    /// route seam as a row tap.
+    func tableView(
+        _ tableView: UITableView,
+        willPerformPreviewActionForMenuWith configuration: UIContextMenuConfiguration,
+        animator: UIContextMenuInteractionCommitAnimating
+    ) {
+        guard let raw = configuration.identifier as? String else { return }
+        animator.addCompletion { [weak self] in
+            self?.viewModel.didSelect(ConversationID(raw))
+        }
+    }
+
+    private func contextMenu(for id: ConversationID) -> UIMenu {
+        let accept = UIAction(
+            title: "Accept",
+            image: UIImage(systemName: "checkmark")
+        ) { [weak self] _ in self?.viewModel.accept(id) }
+        let decline = UIAction(
+            title: "Delete",
+            image: UIImage(systemName: "trash"),
+            attributes: .destructive
+        ) { [weak self] _ in self?.viewModel.decline(id) }
+        return UIMenu(children: [accept, decline])
     }
 }
 

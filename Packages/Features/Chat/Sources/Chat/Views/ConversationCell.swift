@@ -133,8 +133,10 @@ final class ConversationCell: UITableViewCell {
         timeLabel.font = .preferredFont(forTextStyle: .footnote)
         applyUnreadStyle(false)
 
-        // Status glyphs (all hidden by default): muted sits inline after the
-        // title, the pin under the time.
+        // Status glyphs (all hidden by default). BOTH live in the trailing
+        // column now, under the time — muted used to sit inline after the
+        // title, which put the row's two management marks at opposite ends of
+        // it and made neither scannable. Together they read as one group.
         for icon in [mutedIcon, pinnedIcon] {
             icon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .caption1)
             icon.tintColor = .secondaryLabel
@@ -144,20 +146,24 @@ final class ConversationCell: UITableViewCell {
             icon.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
 
-        let titleRow = UIStackView(arrangedSubviews: [titleLabel, mutedIcon])
-        titleRow.axis = .horizontal
-        // Center, not firstBaseline: the glyph image views have no baseline.
-        titleRow.alignment = .center
-        titleRow.spacing = Spacing.sm
-
-        let textColumn = UIStackView(arrangedSubviews: [titleRow, previewLabel])
+        let textColumn = UIStackView(arrangedSubviews: [titleLabel, previewLabel])
         textColumn.axis = .vertical
         textColumn.spacing = 2
 
-        // Time over the pin, pushed to the row's trailing edge. The stack keeps
-        // its width when the glyph hides, so toggling pin can never reflow the
-        // title/preview column beside it.
-        let statusColumn = UIStackView(arrangedSubviews: [timeLabel, pinnedIcon])
+        // `[mute][pin]`, in that order, reading toward the row's edge — mute is
+        // the quieter statement and sits inboard of the pin, which is the one
+        // that also tints the whole row.
+        //
+        // Center, not firstBaseline: the glyph image views have no baseline.
+        let glyphRow = UIStackView(arrangedSubviews: [mutedIcon, pinnedIcon])
+        glyphRow.axis = .horizontal
+        glyphRow.alignment = .center
+        glyphRow.spacing = Spacing.xs
+
+        // Time over the glyphs, pushed to the row's trailing edge. The stack
+        // keeps its width when a glyph hides, so toggling either can never
+        // reflow the title/preview column beside it.
+        let statusColumn = UIStackView(arrangedSubviews: [timeLabel, glyphRow])
         statusColumn.axis = .vertical
         statusColumn.alignment = .trailing
         statusColumn.spacing = Spacing.xs

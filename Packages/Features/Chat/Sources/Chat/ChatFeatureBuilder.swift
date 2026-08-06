@@ -66,7 +66,10 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         // Context-menu previews show the real thread screen in `.preview`
         // mode: same transcript construction as the router's `.conversation`
         // push, minus the compose bar (typing is impossible in a peek).
-        conversations.threadPreviewProvider = { [repository, directory, router] id in
+        // One provider, both surfaces: the peek is the real thread screen in
+        // `.preview` mode, and Requests earns the same long-press as All.
+        let makeThreadPreview: (ConversationID) -> UIViewController = {
+            [repository, directory, router] id in
             ConversationViewController(
                 viewModel: ConversationViewModel(
                     conversationID: id,
@@ -77,12 +80,14 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
                 mode: .preview
             )
         }
+        conversations.threadPreviewProvider = makeThreadPreview
 
         let requests = MessageRequestsViewController(
             viewModel: MessageRequestsViewModel(catalog: catalog, router: router),
             imagePipeline: imagePipeline,
             avatars: connections as? any PeerAvatarProviding
         )
+        requests.threadPreviewProvider = makeThreadPreview
         let suggestions = SuggestionsViewController(
             viewModel: SuggestionsViewModel(
                 repository: connections ?? EmptySuggestionsRepository(),
