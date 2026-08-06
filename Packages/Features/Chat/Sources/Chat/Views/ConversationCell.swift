@@ -15,6 +15,18 @@ final class ConversationCell: UITableViewCell {
     private enum Metrics {
     }
 
+    /// The pinned band, as the cell's `backgroundView`.
+    ///
+    /// ⚠️ **Not `contentView.backgroundColor`, and not the cell's own.** The
+    /// disclosure chevron is an `accessoryType`, which UIKit lays out OUTSIDE
+    /// `contentView` — so tinting the content view left an untinted strip down
+    /// the row's trailing edge, exactly the width of the accessory. And the
+    /// cell's own `backgroundColor` is re-applied by UIKit during batch layout,
+    /// which is what made the band vanish mid-move.
+    ///
+    /// `backgroundView` is neither: it spans the cell's full bounds, sits
+    /// behind both the content and the accessory, and survives the move.
+    private let pinnedBackground = UIView()
     private let avatarView = BadgedAvatarView()
     private var avatarTask: Task<Void, Never>?
     /// The peer this cell is currently showing. A reused cell can outlive its
@@ -141,14 +153,14 @@ final class ConversationCell: UITableViewCell {
     /// animation would be a flash on a row the viewer never saw unpinned.
     private func applyPinnedTint(_ isPinned: Bool, animated: Bool = true) {
         let tint: UIColor? = isPinned ? .quaternarySystemFill : nil
-        guard animated, window != nil, contentView.backgroundColor != tint else {
-            contentView.backgroundColor = tint
+        guard animated, window != nil, pinnedBackground.backgroundColor != tint else {
+            pinnedBackground.backgroundColor = tint
             return
         }
         UIView.transition(
-            with: contentView, duration: 0.25,
+            with: pinnedBackground, duration: 0.25,
             options: [.transitionCrossDissolve, .allowUserInteraction]
-        ) { self.contentView.backgroundColor = tint }
+        ) { self.pinnedBackground.backgroundColor = tint }
     }
 
     private func applyUnreadStyle(_ isUnread: Bool) {
@@ -164,6 +176,10 @@ final class ConversationCell: UITableViewCell {
 
     private func configure() {
         accessoryType = .disclosureIndicator
+        // Installed once and recoloured thereafter — swapping the view per
+        // configure would hand the move animation a different layer halfway
+        // through.
+        backgroundView = pinnedBackground
 
         titleLabel.textColor = .label
         previewLabel.numberOfLines = 1
