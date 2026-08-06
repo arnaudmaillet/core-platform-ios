@@ -84,6 +84,103 @@ final class SearchViewController: UIViewController {
     // viewer had done anything. The field is a tap away; the content is worth
     // seeing first.
 
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        // Only when something was PUSHED over this screen. A tab switch also
+        // sends `viewWillDisappear`, and fading the bar for that would take it
+        // away from whichever tab the viewer just moved to.
+        guard navigationController?.topViewController !== self else { return }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-search-layout-audit") { dumpBottomChrome() }
+        #endif
+        fadeTabBar(to: 0)
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        fadeTabBar(to: 1)
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // Belt and braces: whatever the transition did or did not finish, a
+        // screen that is on top must never leave invisible chrome behind it.
+        tabBarChrome?.alpha = 1
+    }
+
+    /// The view holding the bottom chrome — the bar, its platters, and the
+    /// search capsule.
+    ///
+    /// ⚠️ **Not `tabBarController.tabBar`.** On iOS 26 the tab-hosted search
+    /// field is a SIBLING of the bar, not a child of it: the hierarchy is
+    /// `_UITabBarContainerView` → { `UITabBar`, `_UITabHostedSearchContainer`,
+    /// a loose platter }. Fading the bar was tried first and moved nothing on
+    /// screen, because the capsule was never inside it. The container is the
+    /// nearest view that holds all three.
+    ///
+    /// Reached by relationship rather than by class name, and guarded: if a
+    /// future layout ever makes the bar a direct child of the controller's own
+    /// view, fading that would fade the whole screen, so the bar itself is the
+    /// fallback.
+    private var tabBarChrome: UIView? {
+        guard let tabBar = tabBarController?.tabBar else { return nil }
+        guard let container = tabBar.superview, container !== tabBarController?.view else {
+            return tabBar
+        }
+        return container
+    }
+
+    /// Fades the bottom chrome in step with the push or pop moving this screen.
+    ///
+    /// ⚠️ **The glitch this exists to fix.** `hidesBottomBarWhenPushed` takes
+    /// the bar away at the END of the push, while its *contents* leave at the
+    /// start — so for the whole transition two emptied glass containers sat
+    /// frozen over the incoming profile and then popped out of existence.
+    /// Riding the transition coordinator makes the glass leave with everything
+    /// else, and come back the same way on the pop.
+    ///
+    /// Alpha rather than the house's usual render-level dissolve because the
+    /// chrome is *leaving*, not restyling: the rule against fading a glass lens
+    /// is about a material sampling the wrong backdrop while it stays on
+    /// screen, and nothing here stays.
+    private func fadeTabBar(to alpha: CGFloat) {
+        guard let chrome = tabBarChrome else { return }
+        guard let coordinator = transitionCoordinator else {
+            chrome.alpha = alpha
+            return
+        }
+        coordinator.animate(alongsideTransition: { _ in
+            chrome.alpha = alpha
+        }, completion: { context in
+            // An interactive pop the viewer abandoned leaves the profile up, so
+            // the chrome has to go back to where the push left it.
+            if context.isCancelled { chrome.alpha = 1 - alpha }
+        })
+    }
+
+    #if DEBUG
+    /// `-search-layout-audit`: names every view sitting in the bottom band at
+    /// push time. The search capsule is drawn by iOS somewhere in the tab bar's
+    /// hierarchy and is not `tabBarController.tabBar`, so finding out what to
+    /// animate means asking rather than assuming.
+    private func dumpBottomChrome() {
+        guard let window = view.window, let root = tabBarController?.view else { return }
+        let band = window.bounds.height - 140
+        func walk(_ view: UIView, depth: Int) {
+            let frame = view.convert(view.bounds, to: window)
+            if frame.maxY > band, frame.height > 8, frame.width > 40 {
+                print(String(
+                    format: "[chrome] %@%@ frame=%@ alpha=%.2f hidden=%@",
+                    String(repeating: "  ", count: depth), String(describing: type(of: view)),
+                    NSCoder.string(for: frame), view.alpha, view.isHidden ? "y" : "n"
+                ))
+            }
+            view.subviews.forEach { walk($0, depth: depth + 1) }
+        }
+        walk(root, depth: 0)
+    }
+    #endif
+
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         updateBottomInsetForSearchField()
