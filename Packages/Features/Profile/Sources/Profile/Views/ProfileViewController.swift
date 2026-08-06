@@ -1397,7 +1397,23 @@ final class ProfileViewController: UIViewController {
     /// which is what the previous architecture spent five fixes trying to
     /// arrange between a resizing container and a scroll view that clamped it.
     private func applyHeaderOffset(_ travelled: CGFloat) {
-        headerTopConstraint?.constant = -min(max(travelled, 0), headerTravel)
+        // ⚠️ **Negative travel is not clamped, and that is the point.** The
+        // floor used to be `max(travelled, 0)`, which pinned the header at rest
+        // while the list bounced beneath it — pull down at the top of a profile
+        // and the identity block sat still while the grid peeled away from it,
+        // as though the two were unrelated screens. Letting the constant go
+        // POSITIVE carries the header down by exactly the overscroll, so the
+        // banner, the identity block and the selector travel with the content
+        // they belong to and the whole top of the screen stretches as one.
+        //
+        // Only the downward end is free. The upward end still stops at
+        // `headerTravel`, which is where the header has finished docking under
+        // the navigation bar and must not keep climbing.
+        //
+        // Everything downstream of here already tolerates it: `identityAlpha`
+        // clamps its ramp, and `isDocked` compares against a dock line no
+        // negative offset can reach.
+        headerTopConstraint?.constant = -min(travelled, headerTravel)
         applyIdentityFade(travelled: travelled)
         updateBarDocking(travelled: travelled)
         updateBarTransparency(travelled: travelled)
