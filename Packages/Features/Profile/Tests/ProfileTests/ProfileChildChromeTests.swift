@@ -62,6 +62,25 @@ struct ProfileChildChromeTests {
         #expect(settings.hidesBottomBarWhenPushed)
     }
 
+    /// A profile that was PUSHED owns the bottom of the screen, and the bar
+    /// goes with the transition that brought it.
+    ///
+    /// This is the invariant the search screen leans on and does not itself
+    /// implement: the search field is drawn by iOS in the TAB BAR (a
+    /// `UISearchTab` mirrors it there), so hiding the bar on a push is what
+    /// takes the search capsule away with it — animated, in sync, and restored
+    /// on pop, all by UIKit. Nothing in Search hides anything by hand, which
+    /// is why this assertion lives here and not there.
+    @Test func aPushedProfileHidesTheTabBar() {
+        let screen = ProfileViewController(
+            viewModel: ProfileViewModel(repository: StubProfiles()),
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            onLogout: nil,
+            trayPlacement: .navigationToolbar
+        )
+        #expect(screen.hidesBottomBarWhenPushed)
+    }
+
     /// ⚠️ The profile itself must NOT — it is a tab root when it is the tab, and
     /// a root that hid the bar would take the app's own navigation away with it.
     /// The flag is only for the pushed context, which is what `trayPlacement`
