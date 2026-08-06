@@ -34,38 +34,37 @@ public final class PersonListCell: UICollectionViewListCell {
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// A floor under the row's height, so a list that mixes one-line and
-    /// two-line rows keeps one rhythm.
-    ///
-    /// **The row is TEXT-bound, which is the whole subtlety.** A person's row
-    /// is two lines and a query's is one, so the same margins leave them 16pt
-    /// apart and the shorter rows read as a denser list. The disc does not
-    /// save it either — 48pt fits inside both — so the height is settled by
-    /// type, and the only lever that reaches a one-line row is its own margin.
-    /// `configure` therefore computes the margin PER ROW: whatever it takes to
-    /// land on the same total.
-    ///
-    /// ⚠️ Two things that look like the fix and are not, both tried: a
-    /// `>=` height constraint on `contentView` (the cell owns that frame and
-    /// ignores it) and a taller leading accessory (accessories are laid out
-    /// inside the row's height, they do not set it).
-    ///
-    /// Opt-in (`0` = whatever the content configuration says) because it is a
-    /// decision about a LIST, not about a row: the compose picker is all
-    /// people, every row there is already the same height, and it would be
-    /// paying for a problem it does not have.
-    public var minimumRowHeight: CGFloat = 0
-
     /// The row height the app's people lists breathe at: two lines of type
     /// with a generous margin above and below.
     ///
     /// Computed from the fonts rather than fixed, so it tracks Dynamic Type —
     /// a constant would clip the text at the larger sizes.
+    /// The height EVERY row of this cell takes, everywhere.
+    ///
+    /// **The row is TEXT-bound, which is the whole subtlety.** A person's row
+    /// is two lines and a remembered query's is one, so identical margins
+    /// leave them ~16pt apart and the shorter rows read as a denser list. The
+    /// disc does not save it either — 48pt fits inside both — so the height is
+    /// settled by type, and the only lever that reaches a one-line row is its
+    /// own margin. `configure` computes that margin PER ROW: whatever it takes
+    /// to land here.
+    ///
+    /// ⚠️ Three things that look like the fix and are not, all tried: a `>=`
+    /// height constraint on `contentView` (the cell owns that frame and
+    /// ignores it), the same on the text column (broken to fit below required,
+    /// fighting UIKit's encapsulated height at required), and a taller leading
+    /// accessory (accessories lay out INSIDE the row's height, they do not set
+    /// it).
+    ///
+    /// It was briefly a per-host opt-in, on the theory that a list of only
+    /// people is already uniform and should not pay for a problem it does not
+    /// have. Every host wanted it in the end, so the knob is gone and one
+    /// density is simply what this row is.
+    ///
     /// ⚠️ Expressed in the SAME metrics the layout uses, so the two cannot
-    /// drift. It is the natural height of a two-line row; a one-line row is
-    /// then padded up to meet it. The gap between the lines counts — it used
-    /// to be hidden inside `UIListContentConfiguration`, and leaving it out of
-    /// this sum quietly shortened every row by exactly that gap.
+    /// drift. The gap between the lines counts — it used to be hidden inside
+    /// `UIListContentConfiguration`, and leaving it out of this sum quietly
+    /// shortened every row by exactly that gap.
     public static var comfortableRowHeight: CGFloat {
         ceil(twoLineTextHeight + Metrics.lineSpacing + Metrics.verticalMargin * 2)
     }
@@ -269,7 +268,7 @@ public final class PersonListCell: UICollectionViewListCell {
         let columnHeight = subtitleRow.isHidden
             ? UIFont.preferredFont(forTextStyle: .headline).lineHeight
             : Self.twoLineTextHeight + textColumn.spacing
-        let margin = max(Metrics.verticalMargin, (minimumRowHeight - columnHeight) / 2)
+        let margin = max(Metrics.verticalMargin, (Self.comfortableRowHeight - columnHeight) / 2)
         topPin?.constant = margin
         bottomPin?.constant = margin
 

@@ -294,10 +294,6 @@ final class SearchViewController: UIViewController {
         let rowRegistration = UICollectionView.CellRegistration<PersonListCell, String> {
             [weak self] cell, _, id in
             guard let self, let model = self.recentsByID[id] else { return }
-            // One rhythm across the screen: a one-line query row reserves the
-            // same band as a two-line person row, so Recent does not read as a
-            // denser list than Suggestions.
-            cell.minimumRowHeight = PersonListCell.comfortableRowHeight
             cell.configure(
                 with: model.rowContent,
                 // Only the history is the viewer's to forget; a completion is
@@ -315,7 +311,6 @@ final class SearchViewController: UIViewController {
         let resultRegistration = UICollectionView.CellRegistration<PersonListCell, ProfileID> {
             [weak self] cell, _, id in
             guard let self, let model = self.resultsByID[id] else { return }
-            cell.minimumRowHeight = PersonListCell.comfortableRowHeight
             cell.configure(with: model.rowContent)
             self.loadAvatar(model.avatarURL, into: cell, stillShowing: .result(id))
         }
@@ -326,7 +321,6 @@ final class SearchViewController: UIViewController {
         let suggestedRegistration = UICollectionView.CellRegistration<PersonListCell, ProfileID> {
             [weak self] cell, _, id in
             guard let self, let creator = self.creatorsByID[id] else { return }
-            cell.minimumRowHeight = PersonListCell.comfortableRowHeight
             cell.configure(with: PersonRowContent(
                 displayName: creator.displayName,
                 handle: creator.handle,

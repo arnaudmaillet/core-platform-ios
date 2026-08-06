@@ -245,6 +245,10 @@ final class NewMessageViewController: UIViewController, TransientDestinationPick
         // globally would reserve an empty header band above them.
         let layout = UICollectionViewCompositionalLayout { [weak self] index, environment in
             var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
+            // No hairlines, matching the search screen: a 48pt disc and two
+            // lines of type already make each row its own object, and the
+            // rules were drawing a grid around content that did not need one.
+            configuration.showsSeparators = false
             configuration.headerMode = self?.title(forSectionAt: index) == nil ? .none : .supplementary
             // Only the FIRST header loses its top padding. That padding is what
             // separates one section from the rows of the one above it, so

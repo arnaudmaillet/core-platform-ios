@@ -72,6 +72,8 @@ final class InboxSearchResultsViewController: UIViewController {
         // at the top of the list there is nothing above to separate from.
         let layout = UICollectionViewCompositionalLayout { index, environment in
             var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
+            // No hairlines — see the compose picker and the search screen.
+            configuration.showsSeparators = false
             configuration.headerMode = .supplementary
             if index == 0 { configuration.headerTopPadding = 0 }
             return NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: environment)
