@@ -34,6 +34,9 @@ final class ConversationListViewController: UIViewController {
 
     private var dataSource: SectionedConversationDataSource!
     private var modelsByID: [ConversationID: ConversationDisplayModel] = [:]
+    /// The row `pin(_:)` has just painted by hand, excluded from the next
+    /// snapshot's `reconfigureItems` — see there for why that matters.
+    private var pinPaintedID: ConversationID?
     private var hasRenderedContent = false
 
     /// Builds the thread screen a context-menu long-press previews — injected
@@ -149,6 +152,7 @@ final class ConversationListViewController: UIViewController {
            let cell = tableView.cellForRow(at: indexPath) as? ConversationCell {
             cell.setPinnedStyle(willPin, animated: false)
             CATransaction.flush()
+            pinPaintedID = id
         }
         DispatchQueue.main.async { [weak self] in self?.viewModel.togglePin(id) }
     }
@@ -236,7 +240,20 @@ final class ConversationListViewController: UIViewController {
             // that cleared the bold preview) re-render in place; identity
             // moves/removals animate, so swipe outcomes read as system row
             // animations, not reloads. See `InboxRowDiff`.
+            // ⚠️ **A row that is reconfigured AND moved in one snapshot does
+            // not animate as a move — the data source falls back to a reload,
+            // which renders as a fade: the row vanishes and reappears at the
+            // top instead of travelling there. That is what made "grey during
+            // the slide" unobservable; there was no slide.
+            //
+            // The pinned row's content is already correct because `pin(_:)`
+            // painted the cell by hand, so it is dropped from the reconfigure
+            // set and left to animate as a pure move. Every other changed row
+            // still reconfigures normally — a row that moves because a message
+            // arrived genuinely needs its new preview text.
             let changed = InboxRowDiff.changedRows(in: models, against: modelsByID)
+                .filter { $0 != pinPaintedID }
+            pinPaintedID = nil
             snapshot.reconfigureItems(changed)
             // BEFORE any apply: `cellForRowAt` reads this, so a reconfigure
             // scheduled below has to find the new model already in place.
