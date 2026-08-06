@@ -199,7 +199,11 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             people: people,
             suggestionPageSize: Self.suggestionPageSize
         )
-        let picker = NewMessageViewController(viewModel: viewModel)
+        let picker = NewMessageViewController(
+            viewModel: viewModel,
+            imagePipeline: imagePipeline,
+            avatars: connections as? any PeerAvatarProviding
+        )
         // A target, not a conversation: the pick is resolved and the push
         // begins in the same runloop turn, and whether the thread has to be
         // created is the thread's own problem once it is on screen.
