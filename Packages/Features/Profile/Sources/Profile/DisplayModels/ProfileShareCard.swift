@@ -29,6 +29,10 @@ enum ProfileShareCard {
         // with an empty centre.
         card.layoutIfNeeded()
         card.layoutIfNeeded()
+        // The on-screen path renders the code off the main thread; a snapshot
+        // cannot wait for that, so export forces it here. No-op when the code
+        // is already in place.
+        card.renderCodeNow()
 
         let format = UIGraphicsImageRendererFormat()
         format.scale = scale

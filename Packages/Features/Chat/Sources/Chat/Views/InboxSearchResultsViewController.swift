@@ -1,5 +1,6 @@
 import CoreModels
 import DesignSystem
+import MediaCore
 import UIKit
 
 /// The inbox's search results: one sectioned list covering every category at
@@ -43,8 +44,17 @@ final class InboxSearchResultsViewController: UIViewController {
     /// why this is a hook rather than something done here.
     var onWillOpenResult: (() -> Void)?
 
-    init(viewModel: InboxSearchViewModel) {
+    private let imagePipeline: ImagePipeline?
+    private let avatars: (any PeerAvatarProviding)?
+
+    init(
+        viewModel: InboxSearchViewModel,
+        imagePipeline: ImagePipeline? = nil,
+        avatars: (any PeerAvatarProviding)? = nil
+    ) {
         self.viewModel = viewModel
+        self.imagePipeline = imagePipeline
+        self.avatars = avatars
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -89,8 +99,8 @@ final class InboxSearchResultsViewController: UIViewController {
         let conversationRegistration = UICollectionView.CellRegistration<
             ConversationResultCell, ConversationID
         > { [weak self] cell, _, id in
-            guard let model = self?.viewModel.conversationModels[id] else { return }
-            cell.configure(with: model)
+            guard let self, let model = self.viewModel.conversationModels[id] else { return }
+            cell.configure(with: model, imagePipeline: self.imagePipeline, avatars: self.avatars)
         }
 
         let personRegistration = UICollectionView.CellRegistration<

@@ -1,4 +1,6 @@
+import CoreModels
 import DesignSystem
+import MediaCore
 import UIKit
 
 /// A conversation row in the inbox's search results.
@@ -19,6 +21,9 @@ final class ConversationResultCell: UICollectionViewListCell {
     /// `translatesAutoresizingMaskIntoConstraints` enabled, and a bare label
     /// sizes itself intrinsically, so it can be the accessory directly.
     private let timeLabel = UILabel()
+    private var avatarTask: Task<Void, Never>?
+    /// Guards a late fetch against reuse — see `ConversationCell`.
+    private var avatarPeerID: ProfileID?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -29,8 +34,22 @@ final class ConversationResultCell: UICollectionViewListCell {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func configure(with model: ConversationDisplayModel) {
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        avatarTask?.cancel()
+        avatarTask = nil
+        avatarPeerID = nil
+        avatarHost.setImage(nil)
+    }
+
+    /// Same contract as the inbox rows: initials now, picture when it lands.
+    func configure(
+        with model: ConversationDisplayModel,
+        imagePipeline: ImagePipeline? = nil,
+        avatars: (any PeerAvatarProviding)? = nil
+    ) {
         avatarHost.setMonogram(model.monogram)
+        loadAvatar(for: model, imagePipeline: imagePipeline, avatars: avatars)
 
         var content = UIListContentConfiguration.subtitleCell()
         // Weight is the unread signal here, as it is in the inbox: nothing moves
@@ -81,6 +100,26 @@ final class ConversationResultCell: UICollectionViewListCell {
             model.preview
         ]
         accessibilityLabel = states.compactMap(\.self).filter { !$0.isEmpty }.joined(separator: ", ")
+    }
+
+    private func loadAvatar(
+        for model: ConversationDisplayModel,
+        imagePipeline: ImagePipeline?,
+        avatars: (any PeerAvatarProviding)?
+    ) {
+        avatarTask?.cancel()
+        avatarTask = nil
+        avatarPeerID = model.peerID
+        avatarHost.setImage(nil)
+
+        guard let peerID = model.peerID, let avatars, let imagePipeline else { return }
+        avatarTask = Task { [weak self] in
+            let urls = await avatars.avatarURLs(for: [peerID])
+            guard !Task.isCancelled, let url = urls[peerID] else { return }
+            guard let image = try? await imagePipeline.image(for: url) else { return }
+            guard let self, !Task.isCancelled, self.avatarPeerID == peerID else { return }
+            self.avatarHost.setImage(image)
+        }
     }
 
     /// The timestamp, trailing. Omitted entirely rather than shown empty when a

@@ -32,8 +32,9 @@ final class ProfileGalleryGridView: UIView {
     /// page's.
     var onVerticalScroll: ((CGFloat) -> Void)?
     var onPullToRefresh: (() -> Void)?
+    /// Fired when a drag ends, with how far the page was pulled past its top.
+    var onPullReleased: ((CGFloat) -> Void)?
 
-    private let refreshControl = UIRefreshControl()
     /// Clearance the owner asked for — the tab bar, the tray.
     private var baseBottomInset: CGFloat = 0
     /// The header's travel, which this page must always be able to absorb.
@@ -114,12 +115,12 @@ final class ProfileGalleryGridView: UIView {
 
         // The pull-down region is the banner's, so the spinner renders above the
         // media in a colour that survives it.
-        refreshControl.addAction(
-            UIAction { [weak self] _ in self?.onPullToRefresh?() }, for: .valueChanged
-        )
-        refreshControl.tintColor = .white
-        refreshControl.layer.zPosition = 1
-        collectionView.refreshControl = refreshControl
+        // ⚠️ **No `UIRefreshControl` here, deliberately.** It positions itself
+        // against its scroll view's content top, and this page is inset below
+        // the profile header — so the spinner appeared mid-screen, under the
+        // identity block, rather than at the top of the page it was refreshing.
+        // The indicator is hosted by `ProfileViewController` above the header
+        // instead, and driven by the pull this page reports.
 
 
         // ⚠️ The empty state is NOT in the collection view, so it does not
@@ -395,14 +396,21 @@ extension ProfileGalleryGridView {
         collectionView.verticalScrollIndicatorInsets.bottom = baseBottomInset
     }
 
-    func endRefreshing() {
-        refreshControl.endRefreshing()
-    }
+    /// Kept for the owner's call sites; the visible spinner is the profile's,
+    /// so there is nothing to stop here.
+    func endRefreshing() {}
 }
 
 extension ProfileGalleryGridView: UIScrollViewDelegate {
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         positionStatusLabel()
         onVerticalScroll?(verticalOffset)
+    }
+
+    /// The finger left the glass. Reports how far past the top the page was
+    /// when it did, which is what decides whether a refresh was asked for —
+    /// the threshold belongs to the indicator, not to this page.
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        onPullReleased?(max(0, -verticalOffset))
     }
 }

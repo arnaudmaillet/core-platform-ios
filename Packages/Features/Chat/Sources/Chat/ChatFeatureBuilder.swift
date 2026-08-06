@@ -99,7 +99,11 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             viewer: repository,
             people: people
         )
-        let searchResults = InboxSearchResultsViewController(viewModel: searchViewModel)
+        let searchResults = InboxSearchResultsViewController(
+            viewModel: searchViewModel,
+            imagePipeline: imagePipeline,
+            avatars: connections as? any PeerAvatarProviding
+        )
         // A target, not a conversation — the same seam the compose picker rides,
         // so a result opens by exactly the path a picked contact does and neither
         // waits on a round trip.
@@ -150,7 +154,12 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         // the viewer would otherwise swipe back from a thread they started to
         // a list without it.
         viewModel.onDidResolveConversation = { [catalog] _ in catalog.refresh() }
-        return ConversationViewController(viewModel: viewModel, prefill: prefill)
+        return ConversationViewController(
+            viewModel: viewModel,
+            prefill: prefill,
+            imagePipeline: imagePipeline,
+            avatars: connections as? any PeerAvatarProviding
+        )
     }
 
     /// A thread with `profileID`, opened before anyone knows whether one

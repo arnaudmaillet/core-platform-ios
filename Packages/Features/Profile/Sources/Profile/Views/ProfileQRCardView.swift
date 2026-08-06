@@ -57,6 +57,8 @@ final class ProfileQRCardView: UIView {
 
     private let imagePipeline: ImagePipeline?
     private var avatarTask: Task<Void, Never>?
+    /// The in-flight QR render, so a re-layout cannot queue a second one.
+    private var renderTask: Task<Void, Never>?
     private var renderedURL: URL?
     private var renderedSide: CGFloat = 0
 
@@ -80,7 +82,10 @@ final class ProfileQRCardView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    deinit { avatarTask?.cancel() }
+    deinit {
+        avatarTask?.cancel()
+        renderTask?.cancel()
+    }
 
     private func configureSubviews() {
         qrImageView.contentMode = .scaleAspectFit
@@ -217,13 +222,50 @@ final class ProfileQRCardView: UIView {
     /// far the rubber-band stretches it). A QR is a bitmap of hard-edged
     /// squares; there is nothing to gain by re-rendering it at every
     /// intermediate size.
-    private func renderCodeIfNeeded() {
+    /// Renders the code OFF the main thread and applies it when it lands.
+    ///
+    /// ⚠️ **This used to be synchronous, and it was what made the share sheet
+    /// slow to open.** `makeImage` runs a CoreImage filter and a bitmap pass,
+    /// and it stood up a fresh `CIContext` each time; called from
+    /// `viewDidLoad`, all of that sat on the main thread between the tap and
+    /// the first frame. Nothing about a QR needs to be on the main thread —
+    /// only the assignment does.
+    ///
+    /// The guard still runs on the main actor, so the "already rendered" and
+    /// "no size yet" cases cost nothing and no duplicate render is scheduled.
+    /// Renders the code on THIS thread, now, if it has not landed yet.
+    ///
+    /// ⚠️ **The export path needs this and cannot wait.** `ProfileShareCard`
+    /// snapshots the card into a bitmap synchronously; with only the async
+    /// path, sharing produced a card with a blank centre — the code arrived
+    /// after the snapshot had already been taken. On-screen display stays
+    /// async (that is what keeps the sheet quick to open); export opts back in.
+    func renderCodeNow() {
+        renderTask?.cancel()
+        renderTask = nil
         let side = qrImageView.bounds.width.rounded()
         guard side > 0, let url = renderedURL, qrImageView.image == nil else { return }
         renderedSide = side
         qrImageView.image = ProfileQRCode.makeImage(
             for: url, side: side, scale: traitCollection.displayScale
         )
+    }
+
+    private func renderCodeIfNeeded() {
+        let side = qrImageView.bounds.width.rounded()
+        guard side > 0, let url = renderedURL, qrImageView.image == nil,
+              renderTask == nil
+        else { return }
+        renderedSide = side
+        let scale = traitCollection.displayScale
+        renderTask = Task { [weak self] in
+            let image = await Task.detached(priority: .userInitiated) {
+                ProfileQRCode.makeImage(for: url, side: side, scale: scale)
+            }.value
+            guard let self, !Task.isCancelled, self.renderedURL == url else { return }
+            self.qrImageView.image = image
+            self.renderTask = nil
+        }
     }
 
     private func loadAvatar(_ url: URL?) {

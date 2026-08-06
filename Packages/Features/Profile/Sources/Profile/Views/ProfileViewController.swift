@@ -117,7 +117,11 @@ final class ProfileViewController: UIViewController {
             self.sourceMenuButton.button.accessibilityValue = action.title
         }
     }
-    private let refreshControl = UIRefreshControl()
+    /// The pull indicator, above the header rather than inside a list — see
+    /// `ProfilePullToRefreshView` for why the stock control could not be used.
+    private let pullIndicator = ProfilePullToRefreshView()
+    /// The band the spinner centres in, under the navigation bar.
+    private static let pullIndicatorHeight: CGFloat = 44
     private let statusLabel = UILabel()
     /// First-load guarantee: while the skeleton screen is up, the scroll
     /// content must fill the viewport, so the gallery's shimmer rows reach
@@ -1203,9 +1207,28 @@ final class ProfileViewController: UIViewController {
         headerView.anchorBanner(toViewportTop: view.topAnchor)
 
         galleryPager.onVerticalScroll = { [weak self] offset in
-            self?.applyHeaderOffset(offset)
+            guard let self else { return }
+            self.applyHeaderOffset(offset)
+            // Negative travel is the overscroll the indicator draws from.
+            self.pullIndicator.setPull(max(0, -offset))
+        }
+        galleryPager.onPullReleased = { [weak self] distance in
+            guard let self, self.pullIndicator.shouldRefresh(releasedAt: distance) else { return }
+            self.pullIndicator.beginRefreshing()
+            self.viewModel.refresh()
         }
         galleryPager.onPullToRefresh = { [weak self] in self?.viewModel.refresh() }
+
+        // Above everything, including the header it is pulled out from under:
+        // the band between the safe-area top and the first content is exactly
+        // where a refresh belongs, and the header slides down past it.
+        pullIndicator.constrain(in: view) { parent in
+            pullIndicator.topAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.topAnchor)
+            pullIndicator.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+            pullIndicator.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
+            pullIndicator.heightAnchor.constraint(equalToConstant: Self.pullIndicatorHeight)
+        }
+        view.bringSubviewToFront(pullIndicator)
 
         statusLabel.font = .preferredFont(forTextStyle: .body)
         statusLabel.adjustsFontForContentSizeCategory = true
@@ -1714,7 +1737,7 @@ final class ProfileViewController: UIViewController {
             }
 
         case .content(let model):
-            refreshControl.endRefreshing()
+            pullIndicator.endRefreshing()
             statusLabel.isHidden = true
             galleryPager.isHidden = false
             // Content owns its height again; the release rides the same
@@ -1735,7 +1758,7 @@ final class ProfileViewController: UIViewController {
             headerView.setRedacted(false, animated: view.window != nil)
 
         case .failed(let message):
-            refreshControl.endRefreshing()
+            pullIndicator.endRefreshing()
             // Never leave the previous profile held over an error.
             galleryPager.isHidden = true
             skeletonViewportFill?.isActive = false

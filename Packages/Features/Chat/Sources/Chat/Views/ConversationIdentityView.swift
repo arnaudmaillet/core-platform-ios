@@ -23,6 +23,10 @@ final class ConversationIdentityView: UIView {
 
     private let avatarView = UIView()
     private let monogramLabel = UILabel()
+    /// The peer's picture, over the initials — same contract as the inbox
+    /// rows: the monogram is the rendered state and this is an enhancement
+    /// that may never arrive.
+    private let pictureView = AvatarImageView()
     private let nameLabel = UILabel()
 
     init() {
@@ -45,6 +49,7 @@ final class ConversationIdentityView: UIView {
         monogramLabel.textColor = .secondaryLabel
         monogramLabel.textAlignment = .center
         monogramLabel.pin(to: avatarView)
+        pictureView.pin(to: avatarView)
 
         nameLabel.font = .preferredFont(forTextStyle: .headline)
         nameLabel.adjustsFontForContentSizeCategory = true
@@ -83,6 +88,19 @@ final class ConversationIdentityView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// Reveals the peer's picture over the initials.
+    func setPicture(_ image: UIImage?) {
+        guard image !== pictureView.image else { return }
+        guard window != nil, image != nil else {
+            pictureView.image = image
+            return
+        }
+        UIView.transition(
+            with: pictureView, duration: 0.25,
+            options: [.transitionCrossDissolve, .allowUserInteraction]
+        ) { self.pictureView.image = image }
+    }
+
     @objc private func identityTapped() {
         onTapped?()
     }
@@ -107,6 +125,9 @@ final class ConversationIdentityView: UIView {
             self.nameLabel.text = name
             self.monogramLabel.text = monogram
         }
+        // A new identity invalidates whatever face was showing; the caller
+        // re-supplies one through `setPicture` when it resolves.
+        pictureView.image = nil
         setNeedsLayout()
         var bar: UIView? = superview
         while let view = bar, !(view is UINavigationBar) { bar = view.superview }
