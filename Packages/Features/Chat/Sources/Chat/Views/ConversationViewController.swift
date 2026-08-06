@@ -3,8 +3,9 @@ import UIKit
 
 /// The conversation thread, Telegram-grade on stock UIKit: a compositional-
 /// layout collection view with diffable snapshots and self-sizing bubble
-/// cells, day chips pinned per section, and a floating glass compose bar
-/// docked to the keyboard through `keyboardLayoutGuide`.
+/// cells, day chips pinned per section, a floating glass compose bar docked to
+/// the keyboard through `keyboardLayoutGuide`, and the favorites sticker strip
+/// riding the navigation controller's own static bottom toolbar beneath it.
 ///
 /// Section identity = `TranscriptDay`, item identity = message id; row models
 /// live in `rowsByID` and rows whose *content* changed (a bubble's run
@@ -21,6 +22,9 @@ final class ConversationViewController: UIViewController {
 
     private lazy var collectionView = UICollectionView(frame: .zero, collectionViewLayout: makeLayout())
     private let inputBar = ChatInputBar()
+    /// Rides the navigation controller's own bottom toolbar as a bar item,
+    /// static at the bottom of the screen — it does not track the keyboard.
+    private let stickerStrip = FavoriteStickerStripView()
     private let identityView = ConversationIdentityView()
     private let refreshControl = UIRefreshControl()
     private let skeletonView = TranscriptSkeletonView()
@@ -60,6 +64,12 @@ final class ConversationViewController: UIViewController {
     /// Establishing that first inset is not keyboard travel, so it must not
     /// drag the transcript with it.
     private var hasEstablishedClearance = false
+    /// Distance from the transcript's tail at the moment the finger went down —
+    /// the reading position an interactive dismissal has to give back.
+    private var dragStartTailDistance: CGFloat?
+    /// Set only when a clearance change actually landed mid-drag; the pin owed
+    /// back to the list once the finger lifts.
+    private var deferredTailDistance: CGFloat?
 
     /// Text to seed the composer with — a profile link sent from the share
     /// sheet. Applied once, on first load; never sent automatically.
@@ -147,10 +157,20 @@ final class ConversationViewController: UIViewController {
         // push transition is being set up, so the pill animates in at its
         // final dimensions instead of settling after the transition.
         navigationController?.navigationBar.layoutIfNeeded()
+        // The sticker toolbar belongs to this screen only — the inbox behind it
+        // has none. Shown during the push so it slides in with the transition
+        // rather than popping in after it.
+        if mode == .full {
+            navigationController?.setToolbarHidden(false, animated: animated)
+        }
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        // Taken away on the way out, or the inbox inherits an empty bar.
+        if mode == .full {
+            navigationController?.setToolbarHidden(true, animated: animated)
+        }
         // Don't strand a text selection when navigating away.
         endTextSelection()
         // Nor a suspended scroll: a swipe interrupted by the pop gesture never
@@ -173,6 +193,12 @@ final class ConversationViewController: UIViewController {
             }
             return
         }
+        // The strip's own width is the one thing it cannot work out: it is a
+        // bar-item custom view whose content has no intrinsic width, and it is
+        // not in the toolbar's hierarchy until layout. The bar's margins are
+        // already accounted for by the item wrapper, so the view's width is the
+        // right budget.
+        stickerStrip.setPreferredWidth(view.bounds.width - Spacing.md * 2)
         // The transcript scrolls under the floating bar: keep a clearance
         // inset matching the bar's overlap beyond the bottom safe area, and
         // carry the content the same distance. Runs on every keyboard-guide-
@@ -232,6 +258,15 @@ final class ConversationViewController: UIViewController {
         if mode == .full {
             refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
             collectionView.refreshControl = refreshControl
+            // Tap the transcript to put the keyboard away — the partner to the
+            // `.interactive` drag above, and the reason the trailing button no
+            // longer has to double as a dismiss control. `cancelsTouchesInView`
+            // stays false so the tap still reaches the cells underneath (bubble
+            // taps, link taps); this recognizer only ever ends editing, and
+            // `endEditing` is a no-op when nothing is first responder.
+            let dismissTap = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboardFromTranscript))
+            dismissTap.cancelsTouchesInView = false
+            collectionView.addGestureRecognizer(dismissTap)
         } else {
             // No compose bar to clear in a peek, but the last bubble should
             // not sit flush on the platter's bottom edge. Static — the
@@ -269,11 +304,10 @@ final class ConversationViewController: UIViewController {
     private func configureInputBar() {
         view.addSubview(inputBar)
         inputBar.translatesAutoresizingMaskIntoConstraints = false
-        // The bottom mirror of the nav bar's soft scroll edge: the system
-        // draws the same progressive fade-blur behind this container's
-        // region, shaped around its glass elements — and because the effect
-        // is bound to the VIEW, it tracks every keyboard-guide move (dock,
-        // undock, interactive dismissal scrubs) with no geometry code here.
+        // The bottom mirror of the nav bar's soft scroll edge: the system draws
+        // the same progressive fade-blur behind this container's region, shaped
+        // around its glass elements — and because the effect is bound to the
+        // VIEW, it tracks every keyboard-guide move with no geometry here.
         let edgeEffect = UIScrollEdgeElementContainerInteraction()
         edgeEffect.scrollView = collectionView
         edgeEffect.edge = .bottom
@@ -282,9 +316,21 @@ final class ConversationViewController: UIViewController {
             inputBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Spacing.md),
             inputBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Spacing.md),
             // The dock: the guide tracks the keyboard, including interactive
-            // dismissal scrubs, so the bar rides it with no keyboard math.
+            // dismissal scrubs, so the bar rides it with no keyboard math. With
+            // the keyboard down the guide rests on the safe area — which the
+            // navigation controller's toolbar has already inflated — so the bar
+            // floats just above the static sticker toolbar.
             inputBar.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor, constant: -Spacing.sm)
         ])
+
+        // The strip is ONE custom item on the navigation controller's own
+        // toolbar (the feed's arrangement), so it stays put at the bottom of
+        // the screen while the composer rides the keyboard above it.
+        stickerStrip.onSelect = { [weak self] sticker in
+            self?.inputBar.insertIntoComposer(sticker.emoji)
+        }
+        toolbarItems = [UIBarButtonItem(customView: stickerStrip)]
+
         inputBar.onSend = { [weak self] text in self?.viewModel.send(text) }
         inputBar.onCancelReply = { [weak self] in self?.viewModel.cancelReply() }
         // Honest seam: chat.v1 SendMessage is text-only today. The affordance
@@ -295,6 +341,18 @@ final class ConversationViewController: UIViewController {
                 message: "Sending photos and videos isn't available yet."
             )
         }
+        // Same honest seam as media: chat.v1 carries no voice payload, so the
+        // mic affordance ships and says so rather than miming a recorder.
+        inputBar.onRecordVoice = { [weak self] in
+            self?.presentNotice(
+                title: "Voice Messages",
+                message: "Recording voice messages isn't available yet."
+            )
+        }
+    }
+
+    @objc private func dismissKeyboardFromTranscript() {
+        view.endEditing(true)
     }
 
     private func presentNotice(title: String, message: String) {
@@ -314,8 +372,13 @@ final class ConversationViewController: UIViewController {
             skeletonView.topAnchor.constraint(equalTo: parent.topAnchor)
             skeletonView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
             skeletonView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
+            // The safe area carries the accessory's height in `.full`, so one
+            // anchor now serves both modes — the bar itself lives in another
+            // view hierarchy and can no longer be constrained to.
             mode == .full
-                ? skeletonView.bottomAnchor.constraint(equalTo: inputBar.topAnchor, constant: -Spacing.md)
+                ? skeletonView.bottomAnchor.constraint(
+                    equalTo: parent.safeAreaLayoutGuide.bottomAnchor, constant: -Spacing.md
+                )
                 : skeletonView.bottomAnchor.constraint(
                     equalTo: parent.safeAreaLayoutGuide.bottomAnchor, constant: -Spacing.md
                 )
@@ -441,16 +504,13 @@ final class ConversationViewController: UIViewController {
     /// Backstop for the keyboard transition, using the notification's own
     /// duration and curve.
     ///
-    /// The compose bar is docked to `keyboardLayoutGuide`, and UIKit normally
-    /// resolves that guide — bar move, clearance inset and content shift, all
-    /// inside its own keyboard animation — BEFORE this notification is even
-    /// delivered (verified by instrumenting the layout pass against the
-    /// handler). When that happens `layoutIfNeeded` here is a no-op and
-    /// `syncTranscriptClearance` finds a zero delta, so this costs nothing.
-    ///
-    /// It earns its keep in the opposite ordering, where the guide has not yet
-    /// been resolved: the layout then lands inside THIS block and travels on
-    /// the keyboard's exact timing rather than jumping a frame ahead of it.
+    /// UIKit moves the accessory itself, so nothing here touches the composer.
+    /// What this still owns is the TRANSCRIPT: with the bar gone from this
+    /// view's hierarchy, a keyboard change no longer invalidates this view's
+    /// layout, so `viewDidLayoutSubviews` cannot be relied on to fire — this
+    /// notification became the clearance's primary trigger rather than its
+    /// backstop, and running the work inside the keyboard's own duration and
+    /// curve keeps the transcript travelling with the bar instead of snapping.
     @objc private func keyboardWillChangeFrame(_ notification: Notification) {
         guard mode == .full, isViewLoaded, view.window != nil,
               let userInfo = notification.userInfo else { return }
@@ -492,11 +552,30 @@ final class ConversationViewController: UIViewController {
     /// of text, the reply banner): the transcript stays pinned to the bar
     /// instead of hiding behind it.
     private func syncTranscriptClearance() {
-        let overlap = max(0, view.bounds.height - inputBar.frame.minY - view.safeAreaInsets.bottom)
-        let clearance = overlap + Spacing.md
+        // The bar is back in this view's hierarchy, so its frame is readable
+        // again and is the honest source. What the scroll view needs in TOTAL
+        // is everything below the bar's top edge plus the breathing gap; the
+        // static sticker toolbar is already inside that, since it sits under
+        // the bar and inside the bottom safe area.
+        let desired = view.bounds.height - inputBar.frame.minY + Spacing.md
+        // What UIKit already contributes, MEASURED rather than assumed — the
+        // toolbar inflates the bottom safe area, and hard-coding a figure for
+        // it would leave the tail short by exactly the difference.
+        let systemBottom = collectionView.adjustedContentInset.bottom - collectionView.contentInset.bottom
+        let clearance = max(0, desired - systemBottom)
         let delta = clearance - collectionView.contentInset.bottom
         // Sub-point deltas are layout noise, not keyboard travel.
         guard abs(delta) > 0.5 else { return }
+
+        // Both readings must be taken BEFORE the inset moves. Assigning
+        // `contentInset.bottom` makes UIKit immediately clamp `contentOffset`
+        // into the new range, so the offset read afterwards is already part-way
+        // through the travel — adding `delta` to THAT double-counts it and
+        // overshoots by a whole keyboard.
+        let offsetBefore = collectionView.contentOffset.y
+        // How far from the tail the reader was, which is the thing to preserve.
+        let distanceFromTail = max(0, maxContentOffsetY - offsetBefore)
+
         collectionView.contentInset.bottom = clearance
         collectionView.verticalScrollIndicatorInsets.bottom = clearance
 
@@ -505,19 +584,69 @@ final class ConversationViewController: UIViewController {
             hasEstablishedClearance = true
             return
         }
-        // Nothing to carry before the first transcript exists, and never out
-        // from under a finger already dragging the list — which is what makes
-        // an interactive keyboard dismissal scrub with the finger instead of
-        // fighting it.
-        guard hasRenderedContent, !collectionView.isTracking else { return }
+        // Nothing to carry before the first transcript exists.
+        guard hasRenderedContent else { return }
+        // A finger on the list owns the offset — an interactive dismissal must
+        // scrub with it, not fight it. The pin is not abandoned though: the
+        // distance measured here is carried to `settleDeferredClearancePin`
+        // and applied the moment the gesture lets go, or the transcript would
+        // be left wherever the scrub happened to end, with its newest bubble
+        // stranded behind the bar.
+        guard !collectionView.isTracking else {
+            // The distance measured NOW is already contaminated by the scrub in
+            // progress, and it grows with every layout pass the drag triggers.
+            // What is owed back is where the reader was when they touched down.
+            deferredTailDistance = dragStartTailDistance ?? distanceFromTail
+            return
+        }
+        let translated = min(
+            max(offsetBefore + delta, -collectionView.adjustedContentInset.top),
+            maxContentOffsetY
+        )
+        // The translation alone is not enough when the travel gets clamped: a
+        // conversation shorter than the viewport is top-aligned and has only a
+        // few points of scroll range, so translating it by a whole keyboard
+        // height slams it against the TOP of that range and files the last
+        // bubble behind the compose bar — which is what the bar growing a
+        // sticker strip made visible. Holding the reader's distance from the
+        // tail as a floor keeps a tail-pinned transcript tail-pinned no matter
+        // how little room it has, while someone parked deep in history still
+        // rides the bar 1:1.
+        collectionView.contentOffset.y = max(
+            translated,
+            max(-collectionView.adjustedContentInset.top, maxContentOffsetY - distanceFromTail)
+        )
+    }
+
+    /// Applies the pin an in-flight drag postponed. Called when the list comes
+    /// to rest; no-op unless a clearance change actually happened under a
+    /// finger, so ordinary scrolling never gets corrected.
+    private func settleDeferredClearancePin() {
+        guard let distance = deferredTailDistance, !collectionView.isTracking else { return }
+        deferredTailDistance = nil
+        dragStartTailDistance = nil
+
+        // Only transcripts with no room to spare. When the list has real travel
+        // a downward drag IS a scroll into history that the dismissal merely
+        // rode along with, and snapping back would steal the gesture. Below one
+        // bar's worth of travel there is no reading position to steal — just a
+        // newest bubble that would otherwise sit behind the composer.
+        let minOffset = -collectionView.adjustedContentInset.top
+        guard maxContentOffsetY - minOffset < inputBar.bounds.height else { return }
+
+        let target = max(minOffset, maxContentOffsetY - distance)
+        guard target > collectionView.contentOffset.y + 0.5 else { return }
+        collectionView.setContentOffset(CGPoint(x: 0, y: target), animated: true)
+    }
+
+    /// The largest `contentOffset.y` the transcript can hold with its current
+    /// insets — the tail. `adjustedContentInset.bottom` already carries the
+    /// compose-bar clearance, so this grows with the keyboard, and it never
+    /// reports less than the minimum for content shorter than the viewport.
+    private var maxContentOffsetY: CGFloat {
         let insets = collectionView.adjustedContentInset
-        let minOffset = -insets.top
-        // `insets.bottom` already carries the new clearance, so the reachable
-        // maximum grows with the keyboard — a tail-pinned transcript stays
-        // exactly tail-pinned instead of clamping short.
         let reachable = collectionView.contentSize.height + insets.bottom - collectionView.bounds.height
-        let maxOffset = max(minOffset, reachable)
-        collectionView.contentOffset.y = min(max(collectionView.contentOffset.y + delta, minOffset), maxOffset)
+        return max(-insets.top, reachable)
     }
 
     // MARK: - Reply-swipe scroll lock
@@ -678,6 +807,18 @@ extension ConversationViewController: UICollectionViewDelegate {
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         // Scrolling dismisses a text selection (Messages behavior).
         endTextSelection()
+        // Only a reading position, not a promise to restore it: it is handed
+        // back exclusively when the keyboard moved under this same finger.
+        dragStartTailDistance = max(0, maxContentOffsetY - collectionView.contentOffset.y)
+    }
+
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        guard !decelerate else { return }
+        settleDeferredClearancePin()
+    }
+
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        settleDeferredClearancePin()
     }
 }
 
