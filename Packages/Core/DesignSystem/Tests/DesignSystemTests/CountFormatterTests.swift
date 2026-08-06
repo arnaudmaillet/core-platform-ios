@@ -147,3 +147,85 @@ struct PagedTabBarTitleOverflowTests {
         #expect(abs(bar.debugStripOffset - overflow) < 0.5)
     }
 }
+
+/// The app-wide scroll-indicator default.
+///
+/// ⚠️ **This suite exists because the mechanism is undocumented.** Neither
+/// indicator property is marked `UI_APPEARANCE_SELECTOR`; `UIAppearance`
+/// happens to replay them when a view enters a window. If a future iOS stops
+/// doing that, every list in the app quietly grows scroll bars again — a
+/// regression nobody would catch by reading code. These tests fail instead.
+///
+/// They attach to a real window on purpose: an appearance default is applied at
+/// that moment, so a detached scroll view still reports `true` and asserting on
+/// one would pass whether or not the mechanism works.
+@MainActor
+@Suite("Scroll indicator style")
+struct ScrollIndicatorStyleTests {
+    private func inWindow<V: UIView>(_ view: V) -> V {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
+        window.addSubview(view)
+        window.isHidden = false
+        window.layoutIfNeeded()
+        return view
+    }
+
+    @Test("A plain scroll view hides both indicators")
+    func scrollViewHidesBoth() {
+        ScrollIndicatorStyle.hideAppWide()
+        let scroll = inWindow(UIScrollView())
+        #expect(!scroll.showsVerticalScrollIndicator)
+        #expect(!scroll.showsHorizontalScrollIndicator)
+    }
+
+    /// The subclass every list in the app is built from — it inherits the
+    /// proxy, and that inheritance is the whole reason one default suffices.
+    @Test("A collection view inherits the default")
+    func collectionViewHidesBoth() {
+        ScrollIndicatorStyle.hideAppWide()
+        let collectionView = inWindow(
+            UICollectionView(frame: .zero, collectionViewLayout: UICollectionViewFlowLayout())
+        )
+        #expect(!collectionView.showsVerticalScrollIndicator)
+        #expect(!collectionView.showsHorizontalScrollIndicator)
+    }
+
+    /// ⚠️ **A table view inherits the VERTICAL default only.** It assigns
+    /// `showsHorizontalScrollIndicator` to itself during init, and an instance
+    /// value outranks an appearance default — so the global cannot reach it.
+    /// Documented here as behaviour rather than worked around, because it is
+    /// the reason the app's four table views set that one flag by hand. (No
+    /// bar was ever visible: a table view does not scroll horizontally. The
+    /// flag is set so the stated invariant is true, not to fix a symptom.)
+    @Test("A table view inherits the vertical default but not the horizontal")
+    func tableViewInheritsVerticalOnly() {
+        ScrollIndicatorStyle.hideAppWide()
+        let table = inWindow(UITableView(frame: .zero, style: .plain))
+        #expect(!table.showsVerticalScrollIndicator)
+        #expect(table.showsHorizontalScrollIndicator) // UIKit's own value wins
+    }
+
+    /// A screen that wants its bars back can still say so — an explicit value
+    /// set on the instance outranks the appearance default.
+    @Test("An explicit local value still wins")
+    func explicitValueOverridesTheDefault() {
+        ScrollIndicatorStyle.hideAppWide()
+        let scroll = UIScrollView()
+        scroll.showsVerticalScrollIndicator = true
+        _ = inWindow(scroll)
+        #expect(scroll.showsVerticalScrollIndicator)
+    }
+
+    /// The tab strip is a scroll view too, and it must never show a bar under
+    /// its glass — it was hiding its own before this default existed.
+    @Test("The tab bar's strip hides its indicator")
+    func pagedTabBarStripHidesIndicator() {
+        ScrollIndicatorStyle.hideAppWide()
+        let bar = PagedTabBar(titles: ["One", "Two", "Three"], style: .navigationTitle)
+        bar.frame = CGRect(x: 0, y: 0, width: 200, height: 44)
+        _ = inWindow(bar)
+        let scrollers = bar.subviews.flatMap { $0.subviews }.compactMap { $0 as? UIScrollView }
+            + bar.subviews.compactMap { $0 as? UIScrollView }
+        #expect(scrollers.allSatisfy { !$0.showsHorizontalScrollIndicator })
+    }
+}
