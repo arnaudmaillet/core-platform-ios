@@ -8,6 +8,9 @@ import UIKit
 private enum StreamSection: Hashable { case main }
 private enum StreamItem: Hashable {
     case postSection
+    /// The post's caption, as the list's first row — a message bubble in
+    /// the thread rather than a fixed header above it.
+    case caption
     case emptyState
     case skeletonPlaceholder(Int)
     case comment(String)
@@ -84,27 +87,27 @@ final class PostDetailViewController: UIViewController {
     private var composeBottomEngaged: [NSLayoutConstraint] = []
     private var scrollBottomDefault: NSLayoutConstraint?
     private var scrollBottomEngaged: NSLayoutConstraint?
-    /// The engaged footer's wall-to-wall frost (replaced the gradient
-    /// scrim): rows gliding under the input band stay visible but
-    /// dissolve into the blur — the bottom half of the frame the header
-    /// frost opens at the top, same material family. PROGRESSIVE: clear
-    /// at the band's top edge, solid from `footerFrostSolidFraction`
-    /// down to the window's bottom, so rows blend into the blur with no
-    /// geometric seam (the mask re-frames itself when the keyboard grows
-    /// the band). HIT-INERT (the frost type disables interaction): the
-    /// band must never eat the bar's taps, the ✕, or the swipe pan.
-    /// Effect nil until the engaged entrance IN A WINDOW (headless-CI
-    /// doctrine); it rides the master spring via
-    /// `setComposerEntranceState`, the one seam that already runs inside
-    /// that animation block in both directions.
+    /// The engaged footer's frost: rows gliding behind the composer stay
+    /// visible but dissolve into a LIGHT blur, so the bar reads over them
+    /// without the band reading as an overlay on the post. The system's `.regular`
+    /// material, which adapts to light and dark on its own. Clear at the band's top edge, attenuated
+    /// from `footerFrostSolidFraction` down to the screen's bottom; the
+    /// mask re-frames itself when the keyboard grows the band. HIT-INERT:
+    /// it must never eat the bar's taps or the swipe pan. Effect nil until
+    /// the engaged entrance IN A WINDOW; it rides the master spring via
+    /// `setComposerEntranceState`, the one seam already inside that block.
     private let composerBackdrop = ProgressiveFrostView(
-        maskColors: [.clear, .black, .black],
-        maskLocations: [0, NSNumber(value: Double(SnapCommentsLayout.footerFrostSolidFraction)), 1]
+        maskColors: SnapCommentsLayout.footerFrostMaskColors,
+        maskLocations: [0, 0.5, 1],
+        topRampLength: SnapCommentsLayout.footerFrostLead
     )
     private var imageTasks: [Task<Void, Never>] = []
     /// The threaded stream as last loaded — kept so expansion re-renders
     /// without a refetch.
     private var latestComments: [CommentDisplayModel] = []
+    /// The post as last rendered — the caption row's model, kept so a
+    /// snapshot re-apply can rebuild item #0 without a refetch.
+    private var latestPost: PostDetailDisplayModel?
     /// Parents whose full reply pool is shown (the "view more" seam's
     /// state). Per-screen, like scroll position.
     private var expandedReplyParents: Set<String> = []
@@ -148,7 +151,21 @@ final class PostDetailViewController: UIViewController {
     // MARK: - Setup
 
     private func configureViews() {
+        // The comment list BOUNCES, and the bounce is the transition's
+        // driver: past the top, `contentOffset` IS the pull, rubber-banded
+        // by UIKit's own curve, so the fade and the overscroll cannot drift
+        // out of step — they are the same number. (Locking the offset and
+        // reading the pan instead was the previous shape; it worked, but the
+        // content sat frozen while the layer moved, which read as two
+        // surfaces rather than one.)
+        //
+        // It keeps NO refresh control, though: that competed for the same
+        // gesture outright. The PUSHED POST screen (`.full`, the `.post`
+        // deep link) is a different surface with no layout to collapse to —
+        // it keeps its refresh.
+        let isCommentList = mode == .commentsOnly
         collectionView.alwaysBounceVertical = true
+        collectionView.bounces = true
         collectionView.keyboardDismissMode = .interactive
         // A bare tap on the stream retires the keyboard (the drag path
         // above already does; taps should match). Non-cancelling, so row
@@ -157,8 +174,14 @@ final class PostDetailViewController: UIViewController {
         let keyboardDismissTap = UITapGestureRecognizer(target: self, action: #selector(handleStreamTap))
         keyboardDismissTap.cancelsTouchesInView = false
         collectionView.addGestureRecognizer(keyboardDismissTap)
-        refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
-        collectionView.refreshControl = refreshControl
+        if !isCommentList {
+            refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
+            collectionView.refreshControl = refreshControl
+        }
+        // With bouncing back on, the overshoot itself is the signal — the
+        // scroll delegate reports it continuously, during the drag AND
+        // through the spring-back, which is what makes the cancel free.
+        collectionView.delegate = self
         configureStreamDataSource()
         configureComposeBar()
         // Scroll view fills above the compose bar, which tracks the keyboard.
@@ -297,7 +320,7 @@ final class PostDetailViewController: UIViewController {
         // The reply state's natural exit: keyboard retired over an empty
         // field — later compositions start top-level again.
         composeBar.onIdleDismiss = { [weak self] in self?.clearReplyState() }
-        // The engaged footer frost (hidden outside the engagement): below
+        // The engaged footer band (hidden outside the engagement): below
         // the bar, above the stream.
         composerBackdrop.isHidden = true
         composerBackdrop.translatesAutoresizingMaskIntoConstraints = false
@@ -319,6 +342,10 @@ final class PostDetailViewController: UIViewController {
             composerBackdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             composerBackdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             composerBackdrop.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            // The band starts ABOVE the composer by the lead, so its ramp
+            // is finished — full material — by the time it reaches the
+            // capsule's top edge. Anchored to the composer, so it rides the
+            // keyboard with it.
             composerBackdrop.topAnchor.constraint(
                 equalTo: composeBar.topAnchor, constant: -SnapCommentsLayout.footerFrostLead
             ),
@@ -332,13 +359,31 @@ final class PostDetailViewController: UIViewController {
     /// action rail's exclusive column (zero overlap). The composer
     /// deliberately stays full-width: the rail's territory ends well above
     /// the footer.
-    /// Wires the composer's close affordance (the engaged context's exit in
-    /// the send slot while the field is empty). Also the switch that turns
-    /// the close/send toggle ON — unwired (the pushed comments screen),
-    /// the bar keeps a permanent send button.
-    func setEngagedCloseHandler(_ handler: @escaping () -> Void) {
-        composeBar.onClose = handler
+
+    /// Wires the INTERACTIVE pull-down dismissal: dragging the list down
+    /// from its top drives the collapse under the finger. The list forwards
+    /// each phase with the raw downward translation and release velocity;
+    /// the host renders the progress and decides, on release, whether to
+    /// finish or spring back. Left unwired by text posts (whose engagement
+    /// is permanent) and by the pushed comments screen — nil makes the
+    /// gesture a plain scroll.
+    func setPullDismissDriveHandler(
+        _ handler: @escaping (CommentsInputBar.PageSwipePhase, _ translation: CGFloat, _ velocity: CGFloat) -> Void
+    ) {
+        onPullDismissDrive = handler
     }
+    private var onPullDismissDrive: ((CommentsInputBar.PageSwipePhase, CGFloat, CGFloat) -> Void)?
+    /// Set once a released pull has committed, so the spring-back that
+    /// follows cannot drive the transition backwards over the dismissal
+    /// already in flight.
+    private var isCommittingPullDismiss = false
+    /// Whether the gesture in flight is allowed to drive the dismissal —
+    /// armed only when the drag PHYSICALLY BEGAN at the top.
+    ///
+    /// It outlives the drag on purpose: a released pull that fell short
+    /// springs home, and the transition has to ride that bounce back to
+    /// rest before disarming, or it would freeze mid-fade.
+    private var isPullDismissArmed = false
 
     /// Wires the composer's INTERACTIVE page-swipe — the bar forwards each
     /// pan phase (began/changed/ended) with the raw vertical translation and
@@ -348,6 +393,19 @@ final class PostDetailViewController: UIViewController {
         _ handler: @escaping (CommentsInputBar.PageSwipePhase, CGFloat, CGFloat) -> Void
     ) {
         composeBar.onPageSwipe = handler
+    }
+
+    /// The STREAM's shrink for the engagement, 0 (engaged) → 1 (dismissed).
+    ///
+    /// It scales the list and nothing else. The composer and the footer's
+    /// blur band are siblings of the list, not children, so they hold their
+    /// size and position at the screen's edge while the content pulls away —
+    /// which is the whole point: a band that scales stops being chrome and
+    /// starts being part of the moving layer.
+    func setStreamTransitionProgress(_ progress: CGFloat) {
+        let t = min(max(0, progress), 1)
+        let scale = 1 + (SnapCommentsLayout.streamEntranceScale - 1) * t
+        collectionView.transform = CGAffineTransform(scaleX: scale, y: scale)
     }
 
     /// The composer's entrance state for the engaged footer handoff:
@@ -361,17 +419,22 @@ final class PostDetailViewController: UIViewController {
         composeBar.transform = offstage
             ? CGAffineTransform(translationX: 0, y: SnapCommentsLayout.composerEntranceOffset)
             : .identity
+        // The footer band rides the same seam — this already runs inside the
+        // master spring both ways, and `effect` is the one animatable path
+        // for a material. Window-guarded (headless CI never pays for a real
+        // blur) and gated on the engaged context (the pushed screen has no
+        // band).
+        if offstage {
+            composerBackdrop.effect = nil
+        } else if view.window != nil, !composerBackdrop.isHidden, composerBackdrop.effect == nil {
+            composerBackdrop.effect = UIBlurEffect(style: SnapCommentsLayout.frostStyle)
+        }
         // The footer frost rides the same seam — this method already runs
         // inside the master spring in both directions, and the `effect`
         // property is the one supported animatable path for blur. Window-
         // guarded (real blurs contact the render server; headless CI test
         // hosts must never pay), and gated on the engaged context (the
         // backdrop stays hidden — and frost-free — on the pushed screen).
-        if offstage {
-            composerBackdrop.effect = nil
-        } else if view.window != nil, !composerBackdrop.isHidden, composerBackdrop.effect == nil {
-            composerBackdrop.effect = UIBlurEffect(style: .systemThinMaterialDark)
-        }
     }
 
     func setEngagedInsets(top: CGFloat, trailing: CGFloat, bottomInset: CGFloat) {
@@ -463,6 +526,13 @@ final class PostDetailViewController: UIViewController {
     }
 
     private func configure(_ model: PostDetailDisplayModel) {
+        // Retained for the caption row: the stream's first item renders from
+        // this, and a re-render must not have to go back to the view model.
+        let hadCaption = latestPost?.hasCaption == true
+        latestPost = model
+        if mode == .commentsOnly, model.hasCaption != hadCaption || hasAppliedStream {
+            applyStream(animated: hasAppliedStream)
+        }
         monogramLabel.text = model.avatarMonogram
         nameLabel.text = model.authorName
         handleLabel.text = model.handle
@@ -525,21 +595,14 @@ final class PostDetailViewController: UIViewController {
                 self.postSectionHost.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor),
             ])
         }
-        let commentCell = UICollectionView.CellRegistration<UICollectionViewCell, String> {
+        // The cell owns its row for its whole life; this only re-points it.
+        // No subview teardown, no view construction, no recognizer or
+        // interaction allocation per dequeue — the scroll path does layout
+        // and text, and nothing else.
+        let commentCell = UICollectionView.CellRegistration<CommentCell, String> {
             [weak self] cell, _, commentID in
-            guard let self else { return }
-            cell.contentView.subviews.forEach { $0.removeFromSuperview() }
-            guard let model = self.streamModels[commentID] else { return }
-            let row = self.makeCommentRow(model)
-            row.translatesAutoresizingMaskIntoConstraints = false
-            cell.contentView.addSubview(row)
-            NSLayoutConstraint.activate([
-                row.topAnchor.constraint(equalTo: cell.contentView.topAnchor),
-                row.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor),
-                row.trailingAnchor.constraint(equalTo: cell.contentView.trailingAnchor),
-                // The old stack's inter-row breathing, as cell padding.
-                row.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -Spacing.lg),
-            ])
+            guard let self, let model = self.streamModels[commentID] else { return }
+            self.configureCommentRow(cell.row, with: model)
         }
         let seamCell = UICollectionView.CellRegistration<UICollectionViewCell, StreamItem> {
             [weak self] cell, _, item in
@@ -583,12 +646,20 @@ final class PostDetailViewController: UIViewController {
                 empty.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor),
             ])
         }
+        let captionCell = UICollectionView.CellRegistration<CaptionBubbleCell, StreamItem> {
+            [weak self] cell, _, _ in
+            guard let self, let post = self.latestPost else { return }
+            cell.configure(with: post, imagePipeline: self.imagePipeline)
+            cell.onAvatarTap = { [weak self] in self?.viewModel.didTapAuthor() }
+        }
         streamDataSource = UICollectionViewDiffableDataSource<StreamSection, StreamItem>(
             collectionView: collectionView
         ) { collectionView, indexPath, item in
             switch item {
             case .postSection:
                 return collectionView.dequeueConfiguredReusableCell(using: postCell, for: indexPath, item: item)
+            case .caption:
+                return collectionView.dequeueConfiguredReusableCell(using: captionCell, for: indexPath, item: item)
             case .emptyState:
                 return collectionView.dequeueConfiguredReusableCell(using: emptyCell, for: indexPath, item: item)
             case .skeletonPlaceholder(let index):
@@ -604,6 +675,11 @@ final class PostDetailViewController: UIViewController {
     private func streamItems() -> [StreamItem] {
         var items: [StreamItem] = []
         if mode == .full { items.append(.postSection) }
+        // The caption leads the COMMENTS-ONLY stream — item #0, above the
+        // skeletons as well as above the comments, so it is on screen from
+        // the first frame and never pops in behind a shimmer. The full mode
+        // already carries the caption inside its post section.
+        if mode == .commentsOnly, latestPost?.hasCaption == true { items.append(.caption) }
         guard commentsLoaded else {
             // The initial fetch renders as a skeleton stream (the
             // messages screens' doctrine — shimmering placeholder rows,
@@ -679,8 +755,12 @@ final class PostDetailViewController: UIViewController {
         }
     }
 
-    private func makeCommentRow(_ model: CommentDisplayModel) -> CommentRowView {
-        let row = CommentRowView(model: model)
+    /// Points an EXISTING row at a model and re-wires its seams — the whole
+    /// per-dequeue cost of a comment. The image pipeline rides along so the
+    /// row can hydrate its own avatar behind its monogram, guarded by the
+    /// comment id against a recycled row catching someone else's face.
+    private func configureCommentRow(_ row: CommentRowView, with model: CommentDisplayModel) {
+        row.configure(with: model, imagePipeline: imagePipeline)
         row.onAvatarTap = { [weak self] in
             self?.viewModel.didTapCommentAuthor(commentID: model.id)
         }
@@ -701,7 +781,6 @@ final class PostDetailViewController: UIViewController {
             let nowLiked = self.viewModel.toggleCommentLike(commentID: model.id)
             row?.setLiked(nowLiked, count: nowLiked ? 1 : 0)
         }
-        return row
     }
 
     private func makeSeamRow(kind: CommentThreadToggleRow.Kind, parentID: String) -> CommentThreadToggleRow {
@@ -765,3 +844,72 @@ final class PostDetailViewController: UIViewController {
     }
 }
 
+// MARK: - Interactive pull-down dismissal
+
+extension PostDetailViewController: UICollectionViewDelegate {
+    /// The list's OVERSHOOT past its top drives the collapse back to the
+    /// media layout, continuously and in both directions.
+    ///
+    /// Reading `contentOffset` rather than the pan is what keeps the two
+    /// surfaces welded: the rubber band and the fade are the same number, so
+    /// the content cannot slide while the layer sits still. It also makes
+    /// the cancel free — when a released pull springs back, UIKit animates
+    /// the offset home and these callbacks walk the transition back to rest
+    /// with it, no separate animation to write or to keep in sync.
+    ///
+    /// Arming is unconditional by construction: overshoot exists only at the
+    /// top, so a drag anywhere else reports zero and drives nothing.
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        // INTENT, decided once per drag: only a gesture that starts at the
+        // top is a dismissal. A drag that begins mid-list and scrolls up
+        // into the top is someone reading — it still bounces, because that
+        // is UIKit's own behaviour and the content genuinely ran out, but it
+        // drives nothing. Arming continuously (which the overshoot alone
+        // would do) made every read that reached the top start dissolving
+        // the screen.
+        isPullDismissArmed = overshoot(of: scrollView) >= 0
+            && scrollView.contentOffset.y <= -scrollView.contentInset.top + 0.5
+    }
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        guard let onPullDismissDrive, isPullDismissArmed, !isCommittingPullDismiss else { return }
+        onPullDismissDrive(.changed, overshoot(of: scrollView), 0)
+    }
+
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate: Bool) {
+        guard let onPullDismissDrive, isPullDismissArmed, !isCommittingPullDismiss else { return }
+        let pull = overshoot(of: scrollView)
+        let velocity = scrollView.panGestureRecognizer.velocity(in: scrollView).y / 1000
+        guard pull > 0, SnapCommentsLayout.shouldCompletePullDismiss(
+            progress: SnapCommentsLayout.pullDismissProgress(translation: pull),
+            velocity: velocity
+        ) else {
+            // Below the bar: the bounce springs home and the transition
+            // rides it back through `scrollViewDidScroll`. Stay armed until
+            // it settles, or the fade would stop wherever it was.
+            if !willDecelerate { disarmPullDismiss(scrollView) }
+            return
+        }
+        isCommittingPullDismiss = true
+        onPullDismissDrive(.ended, pull, velocity)
+    }
+
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        disarmPullDismiss(scrollView)
+    }
+
+    /// Ends the armed window, settling the transition at rest first so a
+    /// disarm can never strand it part-way faded.
+    private func disarmPullDismiss(_ scrollView: UIScrollView) {
+        guard isPullDismissArmed, !isCommittingPullDismiss else { return }
+        isPullDismissArmed = false
+        onPullDismissDrive?(.changed, 0, 0)
+    }
+
+    /// How far past its resting top the list has been pulled, in points.
+    /// Zero anywhere else — the resting offset is NEGATIVE here, since the
+    /// engaged stream carries a top content inset.
+    private func overshoot(of scrollView: UIScrollView) -> CGFloat {
+        max(0, -(scrollView.contentOffset.y + scrollView.contentInset.top))
+    }
+}

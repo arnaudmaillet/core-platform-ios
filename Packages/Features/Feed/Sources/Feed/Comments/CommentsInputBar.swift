@@ -14,12 +14,15 @@ final class CommentsInputBar: UIView {
     /// Fired by the media (+) button; media composition is the host's affair
     /// (the chat bar's contract, verbatim).
     var onAttachMedia: (() -> Void)?
-    /// Fired by the close button (shown in the send slot while the field is
-    /// empty). Wiring this ENABLES the close/send toggle — hosts that leave
-    /// it nil (the pushed comments screen) keep a permanent send button.
-    var onClose: (() -> Void)? {
-        didSet { updateTrailingButtons(animated: false) }
-    }
+    /// Fired by the MICROPHONE face (the idle trailing slot): the voice-note
+    /// seam. Unwired for now — an honest affordance whose capture flow does
+    /// not exist yet, the same posture as `onAttachMedia`.
+    ///
+    /// The slot used to hold a ✕ that collapsed the engagement. The exit
+    /// moved to the toolbar, which is where the layout's other mode controls
+    /// live, and the bar got the affordance a message composer actually
+    /// wants in that position.
+    var onVoiceNote: (() -> Void)?
     /// One phase of an interactive vertical page-swipe born on the bar.
     enum PageSwipePhase { case began, changed, ended }
     /// A vertical drag anywhere on the bar (field, buttons, gaps) drives the
@@ -60,12 +63,12 @@ final class CommentsInputBar: UIView {
     private let mediaButton = UIButton(configuration: .glass())
     private let sendButton = UIButton(configuration: .prominentGlass())
     /// The trailing slot's UTILITY face (send's overlay partner): a
-    /// keyboard-state morphing control. Keyboard closed → the close ✕
-    /// (collapses the engagement); keyboard open with an empty field →
-    /// the dismiss-keyboard chevron (retires the keyboard, engagement
+    /// keyboard-state morphing control. Keyboard closed → the MICROPHONE
+    /// (voice note); keyboard open with an empty field → the
+    /// dismiss-keyboard chevron (retires the keyboard, engagement
     /// untouched). Send takes the slot only while there is text to send
     /// (or a submission in flight).
-    private let closeButton = UIButton(configuration: .glass())
+    private let utilityButton = UIButton(configuration: .glass())
     /// Whether the keyboard is up — the third axis of the trailing
     /// toggle, driven by the keyboardWillShow/Hide notifications (the
     /// engaged bar is the screen's only text input, so the global signal
@@ -126,16 +129,16 @@ final class CommentsInputBar: UIView {
         sendButton.accessibilityLabel = "Send comment"
         sendButton.addAction(UIAction { [weak self] _ in self?.sendTapped() }, for: .primaryActionTriggered)
 
-        closeButton.configuration?.image = UIImage(
-            systemName: "xmark",
+        utilityButton.configuration?.image = UIImage(
+            systemName: "mic",
             withConfiguration: UIImage.SymbolConfiguration(weight: .semibold)
         )
-        closeButton.configuration?.cornerStyle = .capsule
-        closeButton.accessibilityLabel = "Close comments"
-        closeButton.addAction(UIAction { [weak self] _ in self?.utilityTapped() }, for: .primaryActionTriggered)
+        utilityButton.configuration?.cornerStyle = .capsule
+        utilityButton.accessibilityLabel = "Record voice comment"
+        utilityButton.addAction(UIAction { [weak self] _ in self?.utilityTapped() }, for: .primaryActionTriggered)
 
         // The keyboard axis of the trailing toggle: the utility face
-        // morphs ✕ ↔ dismiss-keyboard as the keyboard comes and goes.
+        // morphs mic ↔ dismiss-keyboard as the keyboard comes and goes.
         keyboardObservers.tokens = [
             NotificationCenter.default.addObserver(
                 forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main
@@ -152,11 +155,11 @@ final class CommentsInputBar: UIView {
         addSubview(mediaButton)
         addSubview(field)
         addSubview(sendButton)
-        addSubview(closeButton)
+        addSubview(utilityButton)
         mediaButton.translatesAutoresizingMaskIntoConstraints = false
         field.translatesAutoresizingMaskIntoConstraints = false
         sendButton.translatesAutoresizingMaskIntoConstraints = false
-        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        utilityButton.translatesAutoresizingMaskIntoConstraints = false
         fieldHeight = field.heightAnchor.constraint(equalToConstant: Metrics.controlSize)
         // Bottom-baseline anchoring: the field grows upward, the round
         // controls hold their stations; the field owns all flexible width.
@@ -175,10 +178,10 @@ final class CommentsInputBar: UIView {
             sendButton.bottomAnchor.constraint(equalTo: bottomAnchor),
             sendButton.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
             sendButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
-            closeButton.centerXAnchor.constraint(equalTo: sendButton.centerXAnchor),
-            closeButton.centerYAnchor.constraint(equalTo: sendButton.centerYAnchor),
-            closeButton.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
-            closeButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
+            utilityButton.centerXAnchor.constraint(equalTo: sendButton.centerXAnchor),
+            utilityButton.centerYAnchor.constraint(equalTo: sendButton.centerYAnchor),
+            utilityButton.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
+            utilityButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
         ])
 
         updateTrailingButtons(animated: false)
@@ -284,14 +287,14 @@ final class CommentsInputBar: UIView {
         }
     }
 
-    /// The utility face's tap: with the keyboard up it ONLY retires the
-    /// keyboard (the engagement stays); with it down, it collapses the
-    /// engagement. One slot, one thumb position, state-appropriate intent.
+    /// The utility face's tap: with the keyboard up it retires the keyboard
+    /// (the engagement stays); with it down it opens the voice-note seam.
+    /// One slot, one thumb position, state-appropriate intent.
     private func utilityTapped() {
         if isKeyboardOpen {
             textView.resignFirstResponder()
         } else {
-            onClose?()
+            onVoiceNote?()
         }
     }
 
@@ -327,52 +330,47 @@ final class CommentsInputBar: UIView {
     }
 
     /// The trailing slot's three-state toggle:
-    ///   keyboard OPEN, field empty → dismiss-keyboard chevron (ANY post)
+    ///   keyboard OPEN, field empty → dismiss-keyboard chevron
     ///   keyboard OPEN, has text    → send (also while a send is in flight)
-    ///   keyboard CLOSED, empty     → ✕ (collapse) if closable, else send
-    /// The keyboard-dismiss face is DECOUPLED from the close handler: a
-    /// text-only post has no ✕ (permanent resting), but it still shows the
-    /// dismiss chevron over an empty field with the keyboard up — and swaps
-    /// back to send the moment text is entered. Swapped as short crossfades
-    /// — the slot swap animates alpha, the utility glyph its own
-    /// cross-dissolve — never a pop.
+    ///   keyboard CLOSED, empty     → 🎙 microphone (voice note)
+    /// Both idle faces belong to a FEED ENGAGEMENT; the pushed comments
+    /// screen wires no page-swipe and keeps a permanent send. Swapped as
+    /// short crossfades — the slot swap animates alpha, the utility glyph
+    /// its own cross-dissolve — never a pop.
     private func updateTrailingButtons(animated: Bool) {
         let hasText = !textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         sendButton.isEnabled = hasText && !isSending
-        // A feed engagement (media OR text) wires either the ✕ (media) or
-        // the page-swipe drive (both) — the pushed comments SCREEN wires
-        // neither and keeps a permanent send. The dismiss chevron belongs
-        // to feed engagements: it wins whenever the keyboard is up over an
-        // empty field, INCLUDING text posts (which have no ✕). Otherwise
-        // the ✕ shows only for closable (media) engagements with the
-        // keyboard down and empty; anything else is send.
-        let isFeedEngagement = onClose != nil || onPageSwipe != nil
+        // The page-swipe drive is the engagement's marker — BOTH media and
+        // text posts wire it (the ✕ that used to distinguish them is gone
+        // from this bar entirely). The pushed comments SCREEN wires nothing
+        // and keeps its permanent send.
+        let isFeedEngagement = onPageSwipe != nil
         let showsKeyboardDismiss = isFeedEngagement && isKeyboardOpen && !hasText
-        // The ✕ owns the slot whenever a closable (media) engagement has the
-        // keyboard DOWN — draft parked or not (send needs the keyboard up).
-        let showsClose = onClose != nil && !isKeyboardOpen
-        let showsSend = isSending || !(showsKeyboardDismiss || showsClose)
+        // The mic owns the slot whenever an engaged bar is idle — keyboard
+        // down, draft parked or not (send needs the keyboard up).
+        let showsMic = isFeedEngagement && !isKeyboardOpen
+        let showsSend = isSending || !(showsKeyboardDismiss || showsMic)
         let apply = {
             self.sendButton.alpha = showsSend ? 1 : 0
-            self.closeButton.alpha = showsSend ? 0 : 1
+            self.utilityButton.alpha = showsSend ? 0 : 1
         }
         sendButton.isUserInteractionEnabled = showsSend
-        closeButton.isUserInteractionEnabled = !showsSend
+        utilityButton.isUserInteractionEnabled = !showsSend
 
         let wantsKeyboardDismiss = showsKeyboardDismiss
         if wantsKeyboardDismiss != utilityShowsKeyboardDismiss {
             utilityShowsKeyboardDismiss = wantsKeyboardDismiss
             let swapGlyph = {
-                self.closeButton.configuration?.image = UIImage(
-                    systemName: wantsKeyboardDismiss ? "keyboard.chevron.compact.down" : "xmark",
+                self.utilityButton.configuration?.image = UIImage(
+                    systemName: wantsKeyboardDismiss ? "keyboard.chevron.compact.down" : "mic",
                     withConfiguration: UIImage.SymbolConfiguration(weight: .semibold)
                 )
-                self.closeButton.accessibilityLabel =
-                    wantsKeyboardDismiss ? "Dismiss keyboard" : "Close comments"
+                self.utilityButton.accessibilityLabel =
+                    wantsKeyboardDismiss ? "Dismiss keyboard" : "Record voice comment"
             }
             if animated {
                 UIView.transition(
-                    with: closeButton, duration: 0.15,
+                    with: utilityButton, duration: 0.15,
                     options: [.transitionCrossDissolve, .allowUserInteraction],
                     animations: swapGlyph
                 )

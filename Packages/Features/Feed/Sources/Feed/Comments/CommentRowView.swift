@@ -1,9 +1,23 @@
+import CoreModels
+import MediaCore
 import DesignSystem
 import UIKit
 
-/// A single comment: monogram avatar, "Name · time" header (display name
+/// A single comment: identity disc, "Name · time" header (display name
 /// only — the @handle identifier was removed for reading comfort), and body.
-/// Plain `UIView` (not a cell) — appended into the post-detail content stack.
+///
+/// REUSABLE by design. It is configured, not constructed, per appearance:
+/// `CommentCell` owns one instance for its lifetime and re-points it at a
+/// model on every dequeue. Building a fresh row per dequeue — a view tree,
+/// two gesture recognizers, and a context-menu interaction, all on the main
+/// thread mid-scroll — is exactly the kind of per-frame allocation that
+/// costs a stream its 60fps.
+///
+/// AVATARS follow the app-wide contract: the two-letter monogram is the
+/// RENDERED state, drawn synchronously at configure time; the picture is an
+/// enhancement layered OVER it that may never arrive. No row waits on a
+/// face, and nothing here has a third "loading" state — a missing URL, a
+/// slow network, and a failed fetch all leave the same disc standing.
 ///
 /// Interactions, all host-wired seams:
 /// - avatar tap → the author's profile (the outbound push lifecycle).
@@ -12,6 +26,7 @@ import UIKit
 final class CommentRowView: UIView {
     private enum Metrics {
         static let avatarSize: CGFloat = 32
+        static let avatarGap: CGFloat = Spacing.sm
         /// The level-2 indentation: replies step in by one avatar column
         /// (avatar + its gap), the standard thread offset — a reply's
         /// avatar starts where its parent's text does.
@@ -20,9 +35,30 @@ final class CommentRowView: UIView {
 
     /// Exposed for layout tests: the leading inset a reply row applies.
     static var replyIndent: CGFloat { Metrics.replyIndent }
+    /// The avatar column, shared with the caption bubble row so the two
+    /// align to the point — that alignment is what makes the caption read
+    /// as the thread's first message.
+    static var avatarSize: CGFloat { Metrics.avatarSize }
+    static var avatarGap: CGFloat { Metrics.avatarGap }
 
-    private let avatarView = UIView()
-    private let monogramLabel = UILabel()
+    /// The shared identity disc — the SAME component the chat inbox, the
+    /// compose picker, and the profile relationship lists draw, at this
+    /// surface's diameter. Two features rolling their own discs drift, and
+    /// the lists read as different products the moment they do.
+    private let avatarView = MonogramAvatarView(diameter: Metrics.avatarSize)
+    /// The picture, pinned OVER the monogram (never swapped for it — the
+    /// monogram stays behind as the permanent fallback).
+    private let avatarImageView = AvatarImageView()
+    /// The in-flight avatar fetch, cancelled on reuse.
+    private var avatarTask: Task<Void, Never>?
+    /// REUSE GUARD, and it must be an identity check rather than
+    /// cancellation alone: a recycled row can outlive its own fetch, and
+    /// without this a slow avatar lands on whichever comment the row has
+    /// since become.
+    private var representedID: String?
+    /// The reply indent, restated per configure — a reused row can switch
+    /// depth between a top-level comment and a reply.
+    private var rowLeading: NSLayoutConstraint?
     private let headerLabel = UILabel()
     private let bodyLabel = UILabel()
     /// The header line's trailing control: ♥ + counter, pushed to the far
@@ -48,12 +84,9 @@ final class CommentRowView: UIView {
     var onBlock: (() -> Void)?
     var onReport: (() -> Void)?
 
-    init(model: CommentDisplayModel) {
+    init() {
         super.init(frame: .zero)
-        configure(indented: model.isReply)
-        headerLabel.text = "\(model.authorName) · \(model.metaText)"
-        bodyLabel.text = model.body
-        monogramLabel.text = model.monogram
+        buildLayout()
 
         // The avatar's tap outranks the row's (recognizers resolve to the
         // deepest view); everything else on the row is the reply trigger.
@@ -69,6 +102,55 @@ final class CommentRowView: UIView {
         rowTap.delegate = self
         addGestureRecognizer(rowTap)
         addInteraction(UIContextMenuInteraction(delegate: self))
+    }
+
+    /// Test/preview convenience: build and configure in one step.
+    convenience init(model: CommentDisplayModel) {
+        self.init()
+        configure(with: model)
+    }
+
+    /// Points the row at a comment. Everything textual lands SYNCHRONOUSLY,
+    /// including the monogram — the row is fully readable on the frame it
+    /// appears, and only the picture arrives later.
+    func configure(with model: CommentDisplayModel, imagePipeline: ImagePipeline? = nil) {
+        representedID = model.id
+        headerLabel.text = "\(model.authorName) · \(model.metaText)"
+        bodyLabel.text = model.body
+        avatarView.setMonogram(model.monogram)
+        rowLeading?.constant = model.isReply ? Metrics.replyIndent : 0
+        loadAvatar(model.avatarURL, for: model.id, using: imagePipeline)
+    }
+
+    /// Cell recycling: drop the in-flight fetch, the picture, and the
+    /// identity it belonged to. Called from `CommentCell.prepareForReuse`.
+    func prepareForReuse() {
+        avatarTask?.cancel()
+        avatarTask = nil
+        representedID = nil
+        avatarImageView.image = nil
+        onAvatarTap = nil
+        onLikeTap = nil
+        onReplyTap = nil
+        onShare = nil
+        onBlock = nil
+        onReport = nil
+    }
+
+    /// Fetches the picture and draws it over the monogram — off the main
+    /// thread, and only if the row is still showing the comment it started
+    /// for. Every failure path (no URL, cancelled, decode error, recycled
+    /// row) simply leaves the monogram, which is already on screen.
+    private func loadAvatar(_ url: URL?, for id: String, using pipeline: ImagePipeline?) {
+        avatarTask?.cancel()
+        avatarTask = nil
+        avatarImageView.image = nil
+        guard let url, let pipeline else { return }
+        avatarTask = Task { [weak self] in
+            let image = try? await pipeline.image(for: url)
+            guard let self, let image, !Task.isCancelled, self.representedID == id else { return }
+            self.avatarImageView.image = image
+        }
     }
 
     @objc private func avatarTapped() { onAvatarTap?() }
@@ -97,14 +179,11 @@ final class CommentRowView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    private func configure(indented: Bool) {
-        avatarView.backgroundColor = .tertiarySystemFill
-        avatarView.layer.cornerRadius = Metrics.avatarSize / 2
-        avatarView.clipsToBounds = true
-        monogramLabel.font = .systemFont(ofSize: 13, weight: .semibold)
-        monogramLabel.textColor = .secondaryLabel
-        monogramLabel.textAlignment = .center
-        monogramLabel.pin(to: avatarView)
+    private func buildLayout() {
+        // The picture overlays the disc and inherits its circle — the
+        // monogram behind it is the permanent fallback, so an absent or
+        // failed image is simply the disc, never a hole.
+        avatarImageView.pin(to: avatarView)
 
         headerLabel.font = .preferredFont(forTextStyle: .footnote)
         headerLabel.adjustsFontForContentSizeCategory = true
@@ -147,23 +226,166 @@ final class CommentRowView: UIView {
         let row = UIStackView(arrangedSubviews: [avatarView, textStack])
         row.axis = .horizontal
         row.alignment = .top
-        row.spacing = Spacing.sm
+        row.spacing = Metrics.avatarGap
         // Level-2 rows step in by the reply indent; level-1 rows fill the
         // width. The indent is the row's ONLY depth cue — same avatar,
-        // same type — which is exactly the standard thread grammar.
+        // same type — which is exactly the standard thread grammar. The
+        // constraint is STORED, not baked: a reused row can switch depth.
         addSubview(row)
         row.translatesAutoresizingMaskIntoConstraints = false
 
+        let leading = row.leadingAnchor.constraint(equalTo: leadingAnchor)
+        rowLeading = leading
         NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(
-                equalTo: leadingAnchor, constant: indented ? Metrics.replyIndent : 0
-            ),
+            leading,
             row.trailingAnchor.constraint(equalTo: trailingAnchor),
             row.topAnchor.constraint(equalTo: topAnchor),
             row.bottomAnchor.constraint(equalTo: bottomAnchor),
-            avatarView.widthAnchor.constraint(equalToConstant: Metrics.avatarSize),
-            avatarView.heightAnchor.constraint(equalToConstant: Metrics.avatarSize)
+            // The disc sizes itself (MonogramAvatarView pins its own
+            // diameter), so no width/height constraints belong here.
         ])
+    }
+}
+
+/// The comment list's FIRST ROW: the post's own caption, as a message
+/// bubble with the author's avatar beside it.
+///
+///   ( ) ┌──────────────────────────┐
+///       │ Weekend build log: …     │
+///       │                10 weeks  │
+///       └──────────────────────────┘
+///   ( ) Kenji Tanaka · 20m
+///       Love this shot 🔥
+///
+/// The avatar column is `CommentRowView`'s, to the point: same diameter,
+/// same gap, same monogram-under-picture contract, same id-guarded fetch.
+/// That alignment is the whole reason the caption reads as the first
+/// message in the thread rather than as a header pasted above it — the
+/// bubble's glass is the only thing that sets it apart.
+///
+/// It scrolls like any other row (it IS any other row), which is what the
+/// move out of the feed cell bought: no reserved region, no measured
+/// caption height, and no floating card to keep in sync with the list.
+final class CaptionBubbleCell: UICollectionViewCell {
+    private let avatarView = MonogramAvatarView(diameter: CommentRowView.avatarSize)
+    private let avatarImageView = AvatarImageView()
+    private let bubble = SnapPostInfoCardView()
+    private var avatarTask: Task<Void, Never>?
+    /// The reuse guard, the comment rows' rule applied to the post: a
+    /// recycled cell can outlive its own fetch.
+    private var representedID: PostID?
+
+    /// The avatar was tapped — the host pushes the author's profile.
+    var onAvatarTap: (() -> Void)?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        avatarImageView.pin(to: avatarView)
+        avatarView.isUserInteractionEnabled = true
+        avatarView.addGestureRecognizer(
+            UITapGestureRecognizer(target: self, action: #selector(avatarTapped))
+        )
+        // The bubble is NON-INTERACTIVE: a standard row in the list, like
+        // every comment beside it. It carried a tap that closed the layout
+        // for one round; the toolbar's ✕ is the single exit now, and a row
+        // that silently dismisses the screen under a stray tap is not what
+        // a message in a thread should do.
+
+        let row = UIStackView(arrangedSubviews: [avatarView, bubble])
+        row.axis = .horizontal
+        row.alignment = .top
+        row.spacing = CommentRowView.avatarGap
+        row.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(row)
+        NSLayoutConstraint.activate([
+            row.topAnchor.constraint(equalTo: contentView.topAnchor),
+            row.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            // The inter-row breathing every other stream row uses.
+            row.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Spacing.lg),
+        ])
+        // The bubble is onstage by default: it is list content, and the
+        // engagement's fade belongs to the container it rides in.
+        bubble.setContentEntrance(offstage: false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        avatarTask?.cancel()
+        avatarTask = nil
+        representedID = nil
+        avatarImageView.image = nil
+        bubble.reset()
+        onAvatarTap = nil
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        // The glass materializes only in a window (the render-server rule
+        // every glass surface here follows) — and this row can be dequeued
+        // long before it is attached, so the seed lives here rather than in
+        // `configure`.
+        bubble.setGlassActive(window != nil)
+    }
+
+    func configure(with model: PostDetailDisplayModel, imagePipeline: ImagePipeline?) {
+        representedID = model.postID
+        bubble.configure(caption: model.caption, timestamp: model.timestampText)
+        avatarView.setMonogram(model.avatarMonogram)
+        bubble.setGlassActive(window != nil)
+        loadAvatar(model.avatarURL, for: model.postID, using: imagePipeline)
+    }
+
+    private func loadAvatar(_ url: URL?, for id: PostID, using pipeline: ImagePipeline?) {
+        avatarTask?.cancel()
+        avatarTask = nil
+        avatarImageView.image = nil
+        guard let url, let pipeline else { return }
+        avatarTask = Task { [weak self] in
+            let image = try? await pipeline.image(for: url)
+            guard let self, let image, !Task.isCancelled, self.representedID == id else { return }
+            self.avatarImageView.image = image
+        }
+    }
+
+    @objc private func avatarTapped() { onAvatarTap?() }
+}
+
+
+/// The stream's comment cell: ONE `CommentRowView`, built once and
+/// reconfigured per dequeue.
+///
+/// It exists to give the row a real recycling lifecycle. The stream used to
+/// tear every subview out of the cell and construct a fresh row on each
+/// appearance, which meant a full view tree, two gesture recognizers, and a
+/// context-menu interaction allocated on the main thread for every row that
+/// scrolled past — and, with no `prepareForReuse` anywhere, no place to
+/// cancel an avatar fetch that outlived its row.
+final class CommentCell: UICollectionViewCell {
+    let row = CommentRowView()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        row.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(row)
+        NSLayoutConstraint.activate([
+            row.topAnchor.constraint(equalTo: contentView.topAnchor),
+            row.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            // The inter-row breathing the old stack spacing provided.
+            row.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Spacing.lg),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        row.prepareForReuse()
     }
 }
 

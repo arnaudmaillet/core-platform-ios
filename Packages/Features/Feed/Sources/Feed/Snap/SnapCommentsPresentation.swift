@@ -5,11 +5,23 @@ import UIKit
 /// in-cell layout mutation between the page's two states:
 ///
 ///   NORMAL:  full-bleed media under the overlay chrome.
-///   ENGAGED: [nav identity pill]                  — screen chrome, untouched
-///            [media │ caption          ]          ┐ the CARD — the post
-///            [      │ ♫ music line     ]          │ reformatted: media
-///            [      │ ♥ 💬 ⇄ save      ]          ┘ left, one column right
-///            [comments container → cell bottom]   — cell-owned, child view
+///   ENGAGED: [‹]  …  [⇅ sort] [author pill]       — screen chrome
+///            ( ) [ caption bubble  10 weeks ]     ┐ the comment LIST:
+///            ( ) Kenji Tanaka · 20m               │ the caption is row #0
+///            ( ) Lena Klein · 5m                  ┘ and scrolls with it
+///            [ compose bar          🎙 ]          — clear, no frost band
+///            [ a black wash, ~50%    ]            — the readability layer
+///            [ the post's media, full-bleed ]     — never moves, never stops
+///
+/// THE MEDIA DOES NOT DOCK. It stays exactly where it was — full-bleed,
+/// identity transform, still playing — and becomes the BACKGROUND of the
+/// engaged screen — at identity, square-cornered, untouched. A plain black
+/// wash pushes it back in depth so the stream reading over it stays legible
+/// WITHOUT blurring the photo away. (The 88pt tile that
+/// preceded this is gone, and with it the crop masks, the media's own glass
+/// card, and the whole bug class that came from the engagement owning the
+/// media's transform — every path that reset it had to branch on the
+/// engagement, and three separate defects came from one that didn't.)
 ///
 /// (Author identity deliberately does NOT appear in the card: the nav
 /// pill — screen chrome — already carries it, and fading the pill means
@@ -19,99 +31,68 @@ import UIKit
 /// the cell's own hierarchy and animates in a single spring block (the
 /// sheet, the custom presentation controller, and the reveal animators that
 /// preceded this design are gone — each split the screen into two motion
-/// systems, and each read as exactly that). The media view's constraints/
-/// transform animate in place, so playback is untouchable by construction.
+/// systems, and each read as exactly that).
 ///
-/// Every number the mutation depends on lives HERE, as pure functions of
-/// the cell bounds and the frozen top inset (the feed's pushed-threshold
-/// doctrine), so the strip and the comments region partition the page
-/// exactly.
+/// The background is the wash, plus two blur bands — a dense adaptive
+/// material, gradient-masked so each dissolves into the stream instead of
+/// ending on an edge. They do one narrow job: keeping the nav chrome and the
+/// composer legible where rows glide past them.
+///
+/// What is left here is small on purpose: with the caption scrolling as a
+/// list row, the only geometry the cell still needs is where the stream
+/// starts, and that is a pure function of the frozen top inset (the feed's
+/// pushed-threshold doctrine).
 enum SnapCommentsLayout {
-    /// The docked media's side: the slot is a perfect 1:1 SQUARE, compact
-    /// (thumbnail-sized — the strip is an index card, not a viewer; the
-    /// engaged screen belongs to the comments). 88, not the original 128:
-    /// the tile sets the whole card's height, and the column beside it
-    /// (caption / music / actions) reads balanced at this size where 128
-    /// left a dead gap under short captions. The media still shrinks as
-    /// a uniform scale (no distortion) — squareness comes from an animated
-    /// center-crop mask (`mediaCropFrame`), so the docked tile re-crops the
-    /// full-bleed content rather than squashing it.
-    static let mediaSlotHeight: CGFloat = 88
-    /// The docked media's visual corner radius (compensated for the
-    /// transform's scale when applied to the full-size layer) —
-    /// proportioned to the 88pt tile.
-    static let mediaCornerRadius: CGFloat = 12
     static let stripTopPadding: CGFloat = Spacing.sm
     static let stripBottomPadding: CGFloat = Spacing.md
 
-    // MARK: The card's interior
+    // MARK: The caption bubble's interior
     //
-    // The engaged card is the POST, reformatted — not a caption summary,
-    // and not a stack of bands: ONE horizontal split. The media square
-    // owns the left edge; a single vertical column beside it hosts the
-    // caption, the music/attribution line, and the metrics/actions row,
-    // bottom-anchored in that order. The card is exactly one media row
-    // tall, so its height — and with it `stripBottom`, the comments
-    // partition — stays a pure function of the constants.
+    // The caption is no longer a floating card the cell reserves space for —
+    // it is the comment list's FIRST ROW, a message bubble that scrolls with
+    // everything else (see `CaptionBubbleCell`). What survives here is the
+    // bubble's own styling, shared with the list cell so its interior and
+    // the stream's other geometry agree.
+    //
+    // Everything that existed to RESERVE a fixed region for a floating card
+    // is gone with the card: the caption line cap, the measured caption
+    // height, the band slack, and `cardHeight`. A self-sizing list cell
+    // measures its own text — that is the entire job those did, done by
+    // Auto Layout instead of by hand.
 
-    /// The metrics/actions row at the column's bottom: likes, comments,
-    /// repost, save. Sized with the 88pt column: every point spent here
-    /// comes out of the caption's line budget. (No music line: the native
-    /// toolbar stays onstage through the engagement — keep-and-stack —
-    /// and its attribution item owns the audio credit.)
-    static let cardActionsHeight: CGFloat = 24
-
-    /// The card's FULL height: the 88pt media square with uniform padding
-    /// (a two-line caption's home).
-    static var cardHeight: CGFloat {
-        stripCardPadding + mediaSlotHeight + stripCardPadding
-    }
-
-    /// The info card's inner content margins — shared with
-    /// `SnapPostInfoCardView` so the compact height and the card's own
-    /// interior agree exactly.
-    static let cardContentInset: CGFloat = Spacing.md
-    /// The single interior separation between the caption and the counters
-    /// row — the SAME comfortable value whether the caption is one line
-    /// (compact card) or two (full card). At `sm` it gives the single-line
-    /// state a premium breath instead of the cramped `xs` hairline; the
-    /// compact card height absorbs the change (it's a pure function of this).
+    /// The bubble's inner content margins.
+    ///
+    /// `lg`, the message-bubble measure: a chat bubble's text sits well clear
+    /// of its rounded edge, and at the old `md` the caption crowded a corner
+    /// radius that has since grown.
+    static let cardContentInset: CGFloat = Spacing.lg
+    /// The interior separation between the caption and the timestamp beneath
+    /// it — a comfortable breath, not a cramped hairline.
     static let captionActionsGap: CGFloat = Spacing.sm
-    /// The caption's line height, the compact-height unit (one caption line).
-    static var captionLineHeight: CGFloat {
-        UIFont.preferredFont(forTextStyle: .subheadline).lineHeight
-    }
-
-    /// The COMPACT card height — a single-line caption with no slack: the
-    /// two content insets, one caption line, the caption→counters gap, and
-    /// the counters row. The media square shrinks in step (see
-    /// `mediaSlotHeight(compact:)`), so the two cards stay a matched pair.
-    static var compactCardHeight: CGFloat {
-        2 * cardContentInset + ceil(captionLineHeight) + captionActionsGap + cardActionsHeight
-    }
-
-    /// The card height for the caption's line count: compact (one line) or
-    /// full (two). Every strip dimension derives from this.
-    static func cardHeight(compact: Bool) -> CGFloat {
-        compact ? compactCardHeight : cardHeight
-    }
-
-    /// The docked media square's side for the state: the card height minus
-    /// its two paddings, so the tile matches the (compact or full) card.
-    static func mediaSlotHeight(compact: Bool) -> CGFloat {
-        cardHeight(compact: compact) - 2 * stripCardPadding
-    }
 
     /// The engaged-state spring, shared by every leg of the one animation —
-    /// and symmetric: the return runs the same envelope, with the footer
-    /// crossfade riding inside it in both directions. ONE rhythm: media
-    /// morph, caption flight, blur, chrome fades, and both footer alphas
-    /// all breathe in this single block.
+    /// and symmetric: the return runs the same envelope. ONE rhythm: the
+    /// media's recede, the backdrop's wash, the chrome fades, the stream's
+    /// fade-and-expand, and the composer's slide all breathe in this single
+    /// block.
     static let engageDuration: TimeInterval = 0.45
     static let disengageDuration: TimeInterval = 0.45
     /// The composer's entrance micro-translation: it slides up into place
     /// as it fades, arriving into its stacked seat above the native bar.
     static let composerEntranceOffset: CGFloat = 15
+    /// The stream's entrance scale: the whole comments layer EXPANDS into
+    /// place as it fades in, rather than simply appearing there. This
+    /// carries the engagement's motion now that neither the media nor a
+    /// floating card morphs — without a replacement the change reads as a
+    /// panel sliding over the post (the exact failure this feature
+    /// diagnosed once already, by frame capture, when a coordinator block
+    /// ran its legs un-animated).
+    ///
+    /// It moved from the caption card to the CONTAINER when the caption
+    /// became a scrolling row: the motion belongs to the surface that
+    /// appears, and that is now the list itself. Deliberately small —
+    /// the one piece of motion the engagement still owns.
+    static let streamEntranceScale: CGFloat = 0.94
 
     /// The skeleton density estimate: a DELIBERATE low-ball of the real
     /// skeleton row's height (~48pt with list insets), because the count
@@ -128,163 +109,247 @@ enum SnapCommentsLayout {
         return Int(ceil(viewportHeight / skeletonRowEstimate))
     }
 
-    /// Where the media docks, in cell coordinates: a 1:1 square tile on the
-    /// card's left edge, uniformly padded.
-    static func mediaSlotFrame(in bounds: CGRect, topInset: CGFloat, compact: Bool = false) -> CGRect {
-        guard bounds.height > 0 else { return .zero }
-        let card = stripCardFrame(in: bounds, topInset: topInset, compact: compact)
-        let side = mediaSlotHeight(compact: compact)
-        return CGRect(
-            x: Spacing.lg,
-            y: card.minY + stripCardPadding,
-            width: side,
-            height: side
-        )
+    /// Where the engaged stream's content begins — the comments region's
+    /// upper boundary, and the scroll view's top inset.
+    ///
+    /// It is now just the NAV ZONE plus a breath. There is no card to
+    /// reserve a region for: the caption scrolls as the list's first row,
+    /// so everything below the screen chrome belongs to the stream. (This
+    /// used to be `topInset + padding + cardHeight + padding`, and the card
+    /// height was a measured function of the caption — a whole apparatus
+    /// whose only purpose was holding a fixed rectangle open.)
+    static func commentsTopInset(topInset: CGFloat) -> CGFloat {
+        topInset + stripTopPadding + stripBottomPadding
     }
 
-    /// The center-crop that squares the full-bleed media, in the media
-    /// view's own (untransformed) coordinate space: the largest centered
-    /// square. Applied as an animated mask, it starts at the full bounds
-    /// (no visible crop) and closes to this square as the transform docks
-    /// the view — the tile is cropped, never squashed.
-    static func mediaCropFrame(in bounds: CGRect) -> CGRect {
-        let side = min(bounds.width, bounds.height)
-        return CGRect(
-            x: (bounds.width - side) / 2,
-            y: (bounds.height - side) / 2,
-            width: side,
-            height: side
-        )
+    /// The caption bubble's corner radius: the app's MESSAGE-BUBBLE radius,
+    /// taken from `MessageCell` rather than picked — the caption is a bubble
+    /// in a list of messages, so it is the same bubble the chat transcript
+    /// draws. Applied via `cornerConfiguration` (see `SnapGlassCardView`),
+    /// which is what gives it the continuous curve — a layer radius would
+    /// clip the material instead of shaping it.
+    static let stripCardCornerRadius: CGFloat = 18
+
+    /// The comments region's height: everything below the screen chrome,
+    /// down to the cell's bottom edge.
+    static func commentsRegionHeight(containerHeight: CGFloat, topInset: CGFloat) -> CGFloat {
+        max(0, containerHeight - commentsTopInset(topInset: topInset))
     }
 
-    /// The strip's lower boundary — the comments region's upper one. Rises
-    /// on a compact (single-line) card, so the comments sit snug beneath the
-    /// shorter strip rather than under a fixed-height gap.
-    static func stripBottom(topInset: CGFloat, compact: Bool = false) -> CGFloat {
-        topInset + stripTopPadding + cardHeight(compact: compact) + stripBottomPadding
+    // MARK: The background treatment
+    //
+    // The media stays full-bleed behind the whole engaged screen, so the
+    // stream reads over live content. ONE constant makes that legible: a
+    // plain black wash. No blur, by decision — see `backdropDimOpacity`.
+
+    /// How far the media is dimmed behind the engaged stream, and the whole
+    /// readability treatment: a solid black overlay at this opacity, over
+    /// undisturbed pixels. Nothing else — no blur, no material, no gradient.
+    ///
+    /// TWO ROUNDS OF MATERIAL WERE TRIED AND BOTH LOST THE PHOTO, which is
+    /// why the treatment is now this plain. `systemThinMaterialDark` + 0.45
+    /// sampled a FLAT (36,44,64) at two heights 700pt apart on a page whose
+    /// media runs a yellow-green gradient from (164,164,91) to (101,100,56)
+    /// — a blue-dominant constant, which that content cannot produce: it had
+    /// rebuilt the black curtain this layout exists to remove.
+    /// `systemUltraThinMaterialDark` + 0.28 restored the hue but still
+    /// smeared the image past recognition. A dark material does not merely
+    /// blur; it desaturates and tints toward its own grey, and over a
+    /// full-screen photo that reads as fog.
+    ///
+    /// A wash has none of that: it scales luminance and leaves hue, detail,
+    /// and motion intact, so the post stays the post. It is also the
+    /// cheapest thing that can work — a single opaque-blend pass over a
+    /// surface that may be a playing `AVPlayerLayer`, where a full-screen
+    /// blur is a per-frame render-server cost. (Per-row glass was considered
+    /// and declined for the same reason, plus the reply indent / thread
+    /// seams / rail exclusion all fight a per-row capsule.)
+    ///
+    /// At 0.5 a mid-tone photo lands near luminance 78 — comfortably past
+    /// 4.5:1 against white body text — while a near-white region lands near
+    /// 128, about 3.9:1, which is the honest floor of this approach. Raising
+    /// it buys contrast on bright media and costs visibility of the post,
+    /// which is the trade this constant exists to express.
+    static let backdropDimOpacity: CGFloat = 0.5
+
+    // MARK: The chrome's frost bands
+    //
+    // Two dissolving bands frame the stream: one under the nav chrome, one
+    // behind the composer. They exist for a narrow job — keeping the BARS
+    // legible where rows glide past them — and they very nearly earned
+    // themselves deleted by overreaching at full strength, where they read
+    // as heavy overlays on a background whose whole point is the photo.
+
+    /// The bands' material.
+    ///
+    /// `.regular` — the system's standard separator blur, semi-translucent
+    /// and adaptive.
+    ///
+    /// A denser material (`.systemThickMaterial`) was tried for more
+    /// presence, since a `UIBlurEffect` has no intensity property and the
+    /// only way to add weight is to climb the material scale. It reads as
+    /// too solid over the post. The PROTECTION does not depend on it
+    /// anyway: what keeps the composer legible is `footerFrostLead` — the
+    /// band reaching full material ABOVE the capsule rather than at it — so
+    /// the material can stay light.
+    static let frostStyle: UIBlurEffect.Style = .regular
+
+    // MARK: The interactive pull-down dismissal
+    //
+    // Dragging down at the top of the comment list collapses back to media,
+    // and does it UNDER THE FINGER: the layer fades, shrinks, and un-dims in
+    // step with the drag, then commits or springs back on release. The
+    // earlier version fired a fixed animation once a threshold was crossed,
+    // which meant the gesture had no relationship to what was on screen
+    // until it was already over.
+    //
+    // The list's OVERSHOOT past its top is the progress — the same number
+    // UIKit is already rubber-banding, so the content and the fade cannot
+    // drift apart. Arming is unconditional by construction: overshoot exists
+    // only at the top, so a drag anywhere else drives nothing, and no rule
+    // about where the drag began is needed to say so.
+    //
+    // The CANCEL is free for the same reason. A pull that falls short
+    // springs home under UIKit's own animation, and the scroll callbacks
+    // walk the transition back to rest with it — there is no separate
+    // spring to write, and none to keep in sync with the bounce.
+
+    /// The OVERSHOOT that maps to a complete dismissal — how far past its
+    /// top the list is pulled, not how far the finger moved. UIKit's rubber
+    /// band damps the finger to roughly half, so this reads as about twice
+    /// its number in the hand; 90 of overshoot is a deliberate,
+    /// comfortable pull.
+    static let pullDismissDistance: CGFloat = 90
+    /// The progress at which releasing COMMITS rather than springs back —
+    /// about a third of the way, so a decisive pull finishes and a hesitant
+    /// one returns.
+    static let pullDismissCommitProgress: CGFloat = 0.35
+    /// A flick commits from any progress: past this downward velocity
+    /// (points/ms) the gesture reads as a throw.
+    static let pullDismissCommitVelocity: CGFloat = 1.2
+
+    /// The transition's progress for a finger displacement: 0 fully engaged,
+    /// 1 fully dismissed. Clamped, so an upward drag reads as 0 rather than
+    /// running the transition backwards past its own resting state.
+    static func pullDismissProgress(translation: CGFloat) -> CGFloat {
+        min(1, max(0, translation / pullDismissDistance))
     }
 
-    /// The floating Liquid Glass CARD that carries the strip: the full
-    /// post reformatted (header / media+caption / actions), wrapped with
-    /// `stripCardPadding` and inset from the screen edges — a distinct
-    /// floating surface over the full-height stream, not a wall-to-wall
-    /// band. The PRIMARY rect of the engaged geometry: the media slot and
-    /// the strip's lower boundary both derive from it.
-    static let stripCardCornerRadius: CGFloat = 16
-    static let stripCardPadding: CGFloat = Spacing.sm
-
-    static func stripCardFrame(in bounds: CGRect, topInset: CGFloat, compact: Bool = false) -> CGRect {
-        let inset = Spacing.lg - stripCardPadding
-        return CGRect(
-            x: inset,
-            y: topInset + stripTopPadding,
-            width: bounds.width - inset * 2,
-            height: cardHeight(compact: compact)
-        )
+    /// Whether a released drag should finish the dismissal or spring back.
+    /// `velocity` is the release velocity in points/ms, positive downward.
+    static func shouldCompletePullDismiss(progress: CGFloat, velocity: CGFloat) -> Bool {
+        progress >= pullDismissCommitProgress || velocity >= pullDismissCommitVelocity
     }
 
-    /// The physical gap between the two floating glass cards (media | info)
-    /// on a media post — the clear space that reads them as two distinct
-    /// objects rather than one panel.
-    static let cardGap: CGFloat = Spacing.sm
 
-    /// The MEDIA glass card: a square wrapping the docked slot with the
-    /// card's inner padding — the LEFT card on media posts (the media tile
-    /// floats inside it). A pure square at the strip's left edge.
-    static func mediaCardFrame(in bounds: CGRect, topInset: CGFloat, compact: Bool = false) -> CGRect {
-        mediaSlotFrame(in: bounds, topInset: topInset, compact: compact)
-            .insetBy(dx: -stripCardPadding, dy: -stripCardPadding)
-    }
+    /// The HEADER band's ramp: opaque at the screen's top edge, fully clear
+    /// at the container's bottom — one gradient across the whole container,
+    /// two stops so there is no knee partway down.
+    static var headerFrostMaskColors: [UIColor] { [.black, .clear] }
+    static let headerFrostMaskLocations: [NSNumber] = [0, 1]
 
-    /// The POST-INFO glass card: the RIGHT card on media posts — from just
-    /// past the media card (plus the gap) to the strip's right edge — or
-    /// the standalone FULL-WIDTH card on text posts (which omit the media
-    /// card). Its own independent floating surface either way.
-    static func infoCardFrame(in bounds: CGRect, topInset: CGFloat, hasMedia: Bool, compact: Bool = false) -> CGRect {
-        let full = stripCardFrame(in: bounds, topInset: topInset, compact: compact)
-        guard hasMedia else { return full }
-        let media = mediaCardFrame(in: bounds, topInset: topInset, compact: compact)
-        let x = media.maxX + cardGap
-        return CGRect(x: x, y: full.minY, width: full.maxX - x, height: full.height)
-    }
-
-    /// The caption column's hard floor, in cell coordinates: the actions
-    /// row is the only reservation at the column's bottom; the caption
-    /// stops above it.
-    static func captionColumnMaxY(slotMaxY: CGFloat) -> CGFloat {
-        slotMaxY - cardActionsHeight - Spacing.xs
-    }
-
-    /// How many whole caption lines the column can hold. A LINE cap, not a
-    /// height clamp: a height-compressed `UILabel` vertically centers and
-    /// clips both edges — only `numberOfLines` yields whole lines with an
-    /// honest trailing ellipsis. Never below one (a caption always shows
-    /// its first line, whatever Dynamic Type does to the ratio).
-    static func captionLineCapacity(columnHeight: CGFloat, lineHeight: CGFloat) -> Int {
-        guard lineHeight > 0 else { return 1 }
-        return max(1, Int((columnHeight / lineHeight).rounded(.down)))
-    }
-
-    /// The comments region's height: everything below the strip, down to
-    /// the cell's bottom edge.
-    static func commentsRegionHeight(containerHeight: CGFloat, topInset: CGFloat, compact: Bool = false) -> CGFloat {
-        max(0, containerHeight - stripBottom(topInset: topInset, compact: compact))
-    }
-
-    /// The transform that carries the full-bleed media view into `slot`.
-    /// A UNIFORM scale about the view's center plus a recentering translate
-    /// — width-based, sized so the center-crop square (`mediaCropFrame`,
-    /// whose side is the view's width on portrait pages) lands exactly on
-    /// the square slot; the crop is centered, so mapping the view's center
-    /// onto the slot's center aligns the two. GPU-composited, no constraint
-    /// surgery, exactly reversible to `.identity`.
-    static func mediaTransform(bounds: CGRect, slot: CGRect) -> CGAffineTransform {
-        guard bounds.width > 0 else { return .identity }
-        let scale = slot.width / min(bounds.width, bounds.height)
-        return CGAffineTransform(
-            translationX: slot.midX - bounds.midX,
-            y: slot.midY - bounds.midY
-        ).scaledBy(x: scale, y: scale)
-    }
-
-    /// Where the header frost's dissolve BEGINS, as a fraction of the
-    /// band's height: solid through the nav zone (the screen chrome needs
-    /// full frost behind it), fading across the card zone, zero exactly at
-    /// the partition line — so a row scrolling up crosses from crisp into
-    /// a progressively deepening blur with no geometric seam. Clamped
-    /// under 1 so degenerate insets can't invert the ramp.
-    static func headerFrostSolidFraction(topInset: CGFloat) -> CGFloat {
-        let band = stripBottom(topInset: topInset)
-        guard band > 0 else { return 0 }
-        return min(0.9, max(0, topInset / band))
-    }
-
-    /// The footer frost's ramp: clear at the band's top edge, solid from
-    /// this fraction down to the window's bottom — the mirror of the
-    /// header's dissolve.
-    static let footerFrostSolidFraction: CGFloat = 0.45
-    /// How far above the composer's top the footer band begins — the
-    /// dissolve's runway. Taller than the old scrim's 16pt lead: a ramp
-    /// needs distance to read as a dissolve rather than an edge.
-    static let footerFrostLead: CGFloat = 64
+    /// The FOOTER band's ramp: clear at the band's top edge, reaching FULL
+    /// material by `footerFrostLead` — which is exactly where the composer
+    /// begins — and holding it to the screen's bottom.
+    ///
+    /// The band starts above the composer on purpose. Ramping across the
+    /// whole footer container put the ramp's 0% end exactly where the
+    /// composer sits, so the capsule floated over the least-blurred part of
+    /// its own band and rows read straight through it (measured: local
+    /// contrast under the composer rose 14 → 70). The lead moves the fade
+    /// entirely ABOVE the composer, so content is already fully separated
+    /// by the time it reaches the capsule's top edge.
+    static var footerFrostMaskColors: [UIColor] { [.clear, .black, .black] }
+    /// How far above the composer's top the band begins — and therefore the
+    /// ramp's whole length, since it must be finished by the time it gets
+    /// there.
+    static let footerFrostLead: CGFloat = 96
 }
 
-/// A frosted band whose blur DISSOLVES along its length instead of ending
-/// on a hard geometric edge: a `UIVisualEffectView` alpha-masked by a
-/// vertical `CAGradientLayer`. The mask must be a VIEW assigned to `mask`
-/// (UIKit propagates it through the effect's internal backdrop layers;
-/// masking `layer` directly breaks effect rendering), and its frame is
-/// re-bound to the bounds every layout pass — the footer band resizes
-/// when the keyboard lifts the composer, and a stale mask would shear the
-/// ramp. Hit-inert like the hard-edged bands it replaces: the frost
-/// frames the stream, it never owns a touch.
+/// The engaged screen's READABILITY LAYER: the one surface between the
+/// post's full-bleed media and the comment stream reading over it.
+///
+/// It is a black view whose alpha animates, and deliberately nothing more.
+/// No blur, no material, no gradient — two rounds of dark material were
+/// tried and both cost the photo (the archaeology is on
+/// `SnapCommentsLayout.backdropDimOpacity`). A wash scales luminance and
+/// leaves hue, detail, and motion untouched, so the post stays legible AS
+/// the post; a dark material desaturates and tints toward its own grey,
+/// which over a full-screen image reads as fog.
+///
+/// Being plain also makes it the cheapest possible answer. It covers the
+/// whole cell over a surface that may be a playing `AVPlayerLayer`, where a
+/// full-screen blur is a per-frame render-server cost; an opaque-blend pass
+/// is nearly free. It needs no window guard for the same reason — there is
+/// no `UIBlurEffect` here to contact the render server, so unlike every
+/// other effect surface in this feature it behaves identically on a
+/// headless CI host and on a device.
+///
+/// Alpha is the animatable channel (and the only one it has), so the whole
+/// treatment rides the engagement's single spring block for free.
+///
+/// HIT-INERT: the media behind it keeps whatever hit-testing it had, and
+/// the stream in front keeps every touch. This layer owns none.
+final class SnapMediaBackdropView: UIView {
+    init() {
+        super.init(frame: .zero)
+        isUserInteractionEnabled = false
+        backgroundColor = .black
+        alpha = 0
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Raises (or clears) the wash. Call inside the engagement's animation
+    /// block — alpha interpolates.
+    func setActive(_ active: Bool) {
+        setDim(active ? SnapCommentsLayout.backdropDimOpacity : 0)
+    }
+
+    /// The wash at an arbitrary opacity — the interactive dismissal ramps it
+    /// down under the finger rather than switching it.
+    func setDim(_ opacity: CGFloat) {
+        alpha = min(max(0, opacity), SnapCommentsLayout.backdropDimOpacity)
+    }
+
+    /// The wash's current opacity — the choreography's test seam.
+    var dimOpacity: CGFloat { alpha }
+}
+
+/// A blur band that DISSOLVES along its length instead of ending on a hard
+/// geometric edge: a `UIVisualEffectView` alpha-masked by a vertical
+/// `CAGradientLayer`.
+///
+/// This masked-effect-view pair IS the native way to build a blur gradient —
+/// UIKit has no gradient-blur type, blur strength is not a settable
+/// property, and alpha on an effect view is unsupported. So the material is
+/// the system's own (`.regular`, set by the callers, which adapts to light
+/// and dark) and the gradient decides only WHERE it lands.
+///
+/// Two mechanics, both load-bearing: the mask must be a VIEW assigned to
+/// `mask` (UIKit propagates it through the effect's internal backdrop
+/// layers; masking `layer` directly breaks effect rendering), and its frame
+/// is re-bound to the bounds every layout pass — the footer band resizes
+/// when the keyboard lifts the composer, and a stale mask shears the ramp.
+///
+/// Hit-inert by construction: the band frames the stream, it never owns a
+/// touch.
 final class ProgressiveFrostView: UIVisualEffectView {
     private let fadeMask: GradientView
+    /// When set, the ramp occupies exactly this many points from the band's
+    /// TOP edge and the rest holds full material — resolved against the
+    /// live height every layout pass, so a band that grows (the footer's
+    /// does, when the keyboard lifts the composer) keeps the fade the same
+    /// physical length instead of stretching it. A fixed fraction cannot do
+    /// that, and a stale one shears the ramp.
+    private let topRampLength: CGFloat?
 
     /// `maskColors`/`maskLocations` describe the mask's OPACITY ramp
-    /// top→bottom: black = full frost, clear = no frost.
-    init(maskColors: [UIColor], maskLocations: [NSNumber]) {
+    /// top→bottom: opaque = full material, clear = none.
+    init(maskColors: [UIColor], maskLocations: [NSNumber], topRampLength: CGFloat? = nil) {
         fadeMask = GradientView(colors: maskColors, locations: maskLocations)
+        self.topRampLength = topRampLength
         super.init(effect: nil)
         isUserInteractionEnabled = false
         mask = fadeMask
@@ -293,14 +358,14 @@ final class ProgressiveFrostView: UIVisualEffectView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// Re-tunes the ramp's stops (the header band computes its solid
-    /// fraction from the frozen insets at install time).
-    func setFadeLocations(_ locations: [NSNumber]) {
-        fadeMask.setLocations(locations)
-    }
 
     override func layoutSubviews() {
         super.layoutSubviews()
         fadeMask.frame = bounds
+        guard let topRampLength, bounds.height > 0 else { return }
+        // Clamped under 1 so a band shorter than its own ramp still fades
+        // rather than inverting into a hard edge.
+        let stop = min(0.95, max(0, topRampLength / bounds.height))
+        fadeMask.setLocations([0, NSNumber(value: Double(stop)), 1])
     }
 }

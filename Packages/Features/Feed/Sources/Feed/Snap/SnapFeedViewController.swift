@@ -47,7 +47,17 @@ final class SnapFeedViewController: UIViewController {
     /// seams — the leading attribution shared between both, so only the
     /// trailing platters morph.
     private var defaultToolbarItems: [UIBarButtonItem] = []
-    private var engagedToolbarItems: [UIBarButtonItem] = []
+    /// The engaged band for a MEDIA post — trailing ✕, because there is a
+    /// media layout to close back to.
+    private var engagedMediaToolbarItems: [UIBarButtonItem] = []
+    /// The engaged band for a TEXT post — trailing ⋯, identical to resting.
+    /// A text engagement is the page's permanent state, so it has nothing to
+    /// close to and must not offer an exit that lands on an empty shell.
+    private var engagedTextToolbarItems: [UIBarButtonItem] = []
+    /// The nav bar's two trailing items, held so comment mode can add the
+    /// sort selector beside the author pill and take it away again.
+    private var authorItem = UIBarButtonItem()
+    private var sortItem = UIBarButtonItem()
     /// The viewer's saved pile.
     ///
     /// It used to be a `Set` on this screen, which meant a save survived
@@ -475,6 +485,47 @@ final class SnapFeedViewController: UIViewController {
         }
     }
 
+    /// Puts the screen chrome into (or out of) comment mode, both bars at
+    /// once — they are one state, and splitting them across call sites is
+    /// how a half-engaged bar happens.
+    ///
+    ///   NAV      [‹ back]  …  [⇅ sort] [author pill]
+    ///   TOOLBAR  [♫ attribution] … [🔖 ⬆︎] [✕ or ⋯]
+    ///
+    /// `hasMedia` picks the toolbar's trailing slot: a media post can close
+    /// back to its layout, a text post has none to close to.
+    private func setEngagedChrome(_ engaged: Bool, hasMedia: Bool, animated: Bool) {
+        // `rightBarButtonItems` reads RIGHT TO LEFT: index 0 is the
+        // rightmost, so the sort lands just LEFT of the author pill.
+        //
+        // The FIXED SPACE between them is not cosmetic — it is what makes
+        // them two pills. iOS 26 groups ADJACENT bar items into one shared
+        // glass platter, so `[author, sort]` rendered as a single capsule
+        // with the sort swallowed into the author's pill; a spacer item
+        // breaks the run and each custom view gets its own floating
+        // background, its own padding, and its own tap target.
+        //
+        // SET, don't ASSIGN. `navigationItem.rightBarButtonItems = …` is a
+        // plain property write: the bar has no transition to run, so the
+        // pill popped in on a hard crossfade. The `setRightBarButtonItems(
+        // _:animated:)` form is the one that hands the change to the
+        // navigation bar's own item animator — the same slide-and-fade the
+        // system uses for a push — so the sort pill morphs in beside the
+        // author instead of appearing on top of it.
+        let navItems: [UIBarButtonItem] = engaged
+            ? [authorItem, .fixedSpace(Spacing.sm), sortItem]
+            : [authorItem]
+        if navigationItem.rightBarButtonItems ?? [] != navItems {
+            navigationItem.setRightBarButtonItems(navItems, animated: animated)
+        }
+
+        let barItems = engaged
+            ? (hasMedia ? engagedMediaToolbarItems : engagedTextToolbarItems)
+            : defaultToolbarItems
+        guard toolbarItems ?? [] != barItems else { return }
+        setToolbarItems(barItems, animated: animated)
+    }
+
     private func configureNavigationItem() {
         // Fully transparent bar over the full-bleed media, identical for every
         // bar state so no scroll-edge transition ever fires. Set per-item (not
@@ -493,7 +544,9 @@ final class SnapFeedViewController: UIViewController {
         // bar's ONLY trailing item — the feed's chrome is identical on every
         // entry path (menu push and pin flight), so nothing may install
         // extra items, here or from outside.
-        navigationItem.rightBarButtonItems = [UIBarButtonItem(customView: authorIdentityView)]
+        authorItem = UIBarButtonItem(customView: authorIdentityView)
+        sortItem = UIBarButtonItem(customView: commentSortButton)
+        navigationItem.rightBarButtonItems = [authorItem]
         authorIdentityView.onAuthorTapped = { [weak self] id in self?.viewModel.didTapAuthor(id) }
         // The feed layer has no follow API (follow state/toggling lives in the
         // Profile feature), so the follow affordance routes to the author's
@@ -544,31 +597,93 @@ final class SnapFeedViewController: UIViewController {
             }
         ])
 
-        // TWO item sets over one living bar (keep-and-stack): the audio
-        // attribution ANCHORS the leading slot and the more (…) bubble
-        // ANCHORS the far right in BOTH — the same item instances in both
-        // arrays, so their platters never move — while the territory
-        // between swaps via `setToolbarItems(_:animated:)` (the system's
-        // own platter morph, the same choreography a push uses): the
-        // bookmark/share cluster for the feed, the comments sort selector
-        // while engaged (bookmark and the post metrics already live in
-        // the engaged card — the band carries no duplicates).
+        // The comments exit: a ✕ in the toolbar's trailing slot, where the
+        // layout's other mode controls live. It replaced the ✕ that used to
+        // sit in the composer bar (which now carries a microphone).
+        let close = SnapNavControls.makeToolbarActionButton(systemName: "xmark")
+        // RED, alone among the bar's controls: every other item acts ON the
+        // post (bookmark, share, more) while this one LEAVES the layout.
+        // The colour is the signal that it is the exit, not another action.
+        close.configuration?.baseForegroundColor = .systemRed
+        close.accessibilityLabel = "Close comments"
+        close.addAction(UIAction { [weak self] _ in self?.dismissComments() }, for: .primaryActionTriggered)
+
+        // THREE item sets over one living bar (keep-and-stack). All three
+        // open with the audio attribution and carry the bookmark/share
+        // cluster — the SAME item instances, so those platters never move —
+        // and only the TRAILING slot swaps via `setToolbarItems(_:animated:)`
+        // (the system's own platter morph, the same choreography a push uses):
+        //
+        //   media resting     [♫ attribution] … [🔖 ⬆︎] [⋯]
+        //   comments (media)  [♫ attribution] … [🔖 ⬆︎] [✕]
+        //   comments (text)   [♫ attribution] … [🔖 ⬆︎] [⋯]
+        //
+        // TEXT POSTS KEEP THE ⋯ because they have nowhere to close TO: their
+        // engagement is the page's permanent resting state, so a ✕ there
+        // would promise a media layout that does not exist. That asymmetry
+        // is the whole reason there are three sets and not two.
+        //
+        // The sort selector is NOT here any more — it moved to the nav bar,
+        // beside the author pill (`setEngagedNavigation`).
         let leading: [UIBarButtonItem] = [
             UIBarButtonItem(customView: mediaAttributionView),
             .flexibleSpace(),
         ]
+        let shareItem = UIBarButtonItem(customView: shareCluster)
+        let trailingGap: UIBarButtonItem = .fixedSpace(Spacing.sm)
         let moreItem = UIBarButtonItem(customView: more)
-        defaultToolbarItems = leading + [
-            UIBarButtonItem(customView: shareCluster),
-            .fixedSpace(Spacing.sm),
-            moreItem,
+        defaultToolbarItems = leading + [shareItem, trailingGap, moreItem]
+        engagedMediaToolbarItems = leading + [
+            shareItem,
+            trailingGap,
+            UIBarButtonItem(customView: close),
         ]
-        engagedToolbarItems = leading + [
-            UIBarButtonItem(customView: commentSortButton),
-            .fixedSpace(Spacing.sm),
-            moreItem,
-        ]
+        engagedTextToolbarItems = defaultToolbarItems
         toolbarItems = defaultToolbarItems
+    }
+
+    /// The INTERACTIVE pull-down dismissal: the comment list's drag drives
+    /// the collapse under the finger, and release either finishes it or
+    /// springs it back.
+    ///
+    /// The progress is rendered by the CELL (`setCommentsEngagementProgress`)
+    /// — the same interpolatable state the animated engage/disengage moves
+    /// between, so a released-and-committed drag simply hands off to
+    /// `dismissComments`, whose spring interpolates from wherever the finger
+    /// left things. Nothing has to reconcile two descriptions of the state.
+    /// The last progress rendered, so a stream scrolling inside its content
+    /// (which reports zero on every frame) does no work.
+    private var lastPullDismissProgress: CGFloat = 0
+
+    private func drivePullDismiss(
+        _ phase: CommentsInputBar.PageSwipePhase, translation: CGFloat, velocity: CGFloat
+    ) {
+        guard let cell = engagedCell() else { return }
+        switch phase {
+        case .began:
+            break
+        case .changed:
+            // `translation` is the list's OVERSHOOT past its top, so the
+            // rubber band and the fade are one number. No animation block:
+            // the layer tracks the content exactly rather than chasing it.
+            let progress = SnapCommentsLayout.pullDismissProgress(translation: translation)
+            // Scrolling inside the list reports zero every frame; only
+            // write when something actually moves.
+            guard progress != lastPullDismissProgress else { return }
+            lastPullDismissProgress = progress
+            cell.setCommentsEngagementProgress(progress)
+            // The shrink is the STREAM's own — the composer and the footer
+            // band stay put at the screen's edge.
+            (commentsContentVC as? PostDetailViewController)?
+                .setStreamTransitionProgress(progress)
+        case .ended:
+            // Only a COMMITTED release arrives here — a pull that falls
+            // short simply springs back, and the offset's own animation
+            // walks the transition home through `.changed`. There is no
+            // cancel branch to write, and none to keep in sync.
+            lastPullDismissProgress = 0
+            dismissComments()
+        }
     }
 
     /// Optimistic local toggle (no backend seam yet — see the set's comment);
@@ -871,13 +986,14 @@ final class SnapFeedViewController: UIViewController {
             // stable; same frozen-threshold doctrine as the chrome's top).
             bottomInset: view.safeAreaInsets.bottom
         )
+        // Dragging the list down from its top collapses back to media — the
+        // sheet gesture. MEDIA pages only: a text engagement is the page's
+        // permanent resting state, so there is nothing to collapse to and
+        // the handler stays nil (which makes the gesture a plain scroll).
         if modelsByID[id]?.mediaURL != nil {
-            // Media pages wire the ✕ (and with it the composer's
-            // close/send toggle). TEXT-ONLY pages don't: their engagement
-            // is the permanent resting state — nothing to dismiss to —
-            // so the trailing slot stays a permanent send and the only
-            // way off the post is paging.
-            detail?.setEngagedCloseHandler { [weak self] in self?.dismissComments() }
+            detail?.setPullDismissDriveHandler { [weak self] phase, translation, velocity in
+                self?.drivePullDismiss(phase, translation: translation, velocity: velocity)
+            }
         }
         detail?.setEngagedPageSwipeHandler { [weak self] phase, translation, velocity in
             self?.drivePageSwipe(phase, translation: translation, velocity: velocity)
@@ -888,6 +1004,9 @@ final class SnapFeedViewController: UIViewController {
         // where it is (keep-and-stack: the bar is never faded, never
         // touched; transitions remain the system's alone).
         detail?.setComposerEntranceState(offstage: true)
+        // The stream starts shrunk and expands into place inside the spring
+        // — the entrance's one piece of motion.
+        detail?.setStreamTransitionProgress(1)
         // The living bar changes CONTEXT, not presence: the trailing
         // action cluster yields its territory to the comments sort
         // selector through the system's own item morph, on the spring's
@@ -899,13 +1018,14 @@ final class SnapFeedViewController: UIViewController {
         commentSortButton.onOrderChange = { [weak detail] order in
             detail?.setCommentSortOrder(order)
         }
-        setToolbarItems(engagedToolbarItems, animated: true)
+        setEngagedChrome(true, hasMedia: true, animated: true)
         UIView.animate(
             withDuration: SnapCommentsLayout.engageDuration, delay: 0,
             usingSpringWithDamping: 1, initialSpringVelocity: 0
         ) {
             cell.setCommentsEngaged(true)
             cell.contentView.layoutIfNeeded()
+            detail?.setStreamTransitionProgress(0)
             detail?.setComposerEntranceState(offstage: false)
         }
     }
@@ -969,7 +1089,7 @@ final class SnapFeedViewController: UIViewController {
         commentSortButton.onOrderChange = { [weak detail] order in
             detail?.setCommentSortOrder(order)
         }
-        setToolbarItems(engagedToolbarItems, animated: true)
+        setEngagedChrome(true, hasMedia: false, animated: true)
     }
 
     /// Reverse mutation (strip tap, entry-surface re-tap): the comments
@@ -988,12 +1108,18 @@ final class SnapFeedViewController: UIViewController {
         // The keyboard rides down with the collapse, not after it.
         commentsContentVC?.view.endEditing(true)
         let detail = commentsContentVC as? PostDetailViewController
-        // The mirror morph: the action cluster takes its territory back.
-        setToolbarItems(defaultToolbarItems, animated: true)
+        // The mirror morph: the overflow menu takes its slot back and the
+        // sort selector leaves the nav bar.
+        setEngagedChrome(false, hasMedia: true, animated: true)
         UIView.animate(withDuration: SnapCommentsLayout.disengageDuration, delay: 0,
                        usingSpringWithDamping: 1, initialSpringVelocity: 0) { [weak self] in
             self?.engagedCell()?.setCommentsEngaged(false)
+            (self?.commentsContentVC as? PostDetailViewController)?
+                .setStreamTransitionProgress(1)
             detail?.setComposerEntranceState(offstage: true)
+        // The stream starts shrunk and expands into place inside the spring
+        // — the entrance's one piece of motion.
+        detail?.setStreamTransitionProgress(1)
         } completion: { [weak self] _ in
             self?.finishCommentsDisengagement()
         }
@@ -1059,7 +1185,7 @@ final class SnapFeedViewController: UIViewController {
         let targetReEngages = orderedIDs.indices.contains(target)
             && modelsByID[orderedIDs[target]]?.mediaURL == nil
         if changesPage && !targetReEngages {
-            setToolbarItems(defaultToolbarItems, animated: true)
+            setEngagedChrome(false, hasMedia: true, animated: true)
         }
         let distance = abs(collectionView.contentOffset.y - targetOffset)
         let springVelocity = distance > 0 ? min(3, abs(vy) / distance) : 0
@@ -1132,8 +1258,8 @@ final class SnapFeedViewController: UIViewController {
         // cleanup). Identity-compare first: after a normal dismiss the
         // swap already landed, and re-setting identical items would only
         // churn the bar's layout.
-        if toolbarItems ?? [] != defaultToolbarItems, !defaultToolbarItems.isEmpty {
-            setToolbarItems(defaultToolbarItems, animated: false)
+        if !defaultToolbarItems.isEmpty {
+            setEngagedChrome(false, hasMedia: true, animated: false)
         }
     }
 

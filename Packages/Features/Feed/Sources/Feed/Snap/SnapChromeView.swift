@@ -652,7 +652,15 @@ final class SnapChromeView: UIView {
     /// the faded surfaces from hit-testing, so the entry pill can't
     /// re-fire mid-engagement.
     func setCommentsEngaged(_ engaged: Bool) {
-        let alpha: CGFloat = engaged ? 0 : 1
+        setCommentsEngagedProgress(engaged ? 0 : 1)
+    }
+
+    /// The same fade, INTERPOLATED: 0 = fully engaged (comment surfaces
+    /// hidden), 1 = fully resting (all of them back). The interactive
+    /// pull-down dismissal drives this continuously, so the ticker and the
+    /// caption return under the finger instead of appearing at the end.
+    func setCommentsEngagedProgress(_ progress: CGFloat) {
+        let alpha = min(max(0, progress), 1)
         captionLabel.alpha = alpha
         scrimView.alpha = alpha
         commentTicker.alpha = alpha

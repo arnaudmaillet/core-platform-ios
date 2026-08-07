@@ -21,12 +21,19 @@ import UIKit
 final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     static let reuseIdentifier = "SnapFeedCell"
 
-    /// The media component: the video/photo render surfaces, their crop
-    /// masks, and the top-left docking transform — one standalone card. The
-    /// cell drives playback into `mediaCard.renderView` and gates the drift;
-    /// the card owns the surfaces' geometry. Text posts leave it empty
-    /// (surfaces hidden) — nothing docks.
+    /// The media component: the video/photo render surfaces, full-bleed in
+    /// BOTH states. The cell drives playback into `mediaCard.renderView`
+    /// and gates the drift; the card owns the surfaces' motion. Engaging
+    /// the comments does not move it — it becomes the page's background,
+    /// with the stream reading over it. Text posts leave it empty
+    /// (surfaces hidden), so the black contentView shows through.
     private let mediaCard = SnapMediaCardView()
+    /// The engaged screen's readability layer, directly over the media and
+    /// directly under the stream: a plain black wash — no blur — so
+    /// comments stay legible over live content while the post stays
+    /// visibly the post. Inert and invisible at rest; it is the layer that
+    /// replaced the opaque black container the comments used to sit on.
+    private let mediaBackdrop = SnapMediaBackdropView()
     private let chrome = SnapChromeView()
 
     /// A large centred play glyph shown while the active video is user-paused.
@@ -34,12 +41,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     private var representedID: PostID?
     private var mediaURL: URL?
-    /// Whether THIS post's caption fits on a single line (so the strip runs
-    /// the COMPACT height — a shorter info card, a matching smaller media
-    /// square, and the comments snug beneath). Resolved at `installComments`
-    /// from the caption's single-line width vs the region, then the sole
-    /// input to every strip-geometry call for the engagement's lifetime.
-    private var isCompactCaption = false
     private var mediaKind: MediaKind = .image
     private var videoPlayback: VideoPlaybackController?
     private var imageTasks: [Task<Void, Never>] = []
@@ -76,34 +77,18 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// below the chrome (the action rail floats over it).
     private let commentsContainer = SnapCommentsContainerView()
     private var commentsContainerConstraints: [NSLayoutConstraint] = []
-    /// The header zone's wall-to-wall frost: screen top → the strip's
-    /// lower boundary, layered BETWEEN the stream (behind) and the glass
-    /// card (in front) — rows scrolled under the header dissolve into the
-    /// blur while the open viewport below stays crisp; the floating card
-    /// keeps its own stronger glass on top. HIT-INERT by construction
-    /// (`isUserInteractionEnabled = false`): the engaged touch surface —
-    /// card taps close, header-zone drags scroll the stream — must be
-    /// exactly what it was before this layer existed. Effect nil until
-    /// engagement IN A WINDOW (the headless-CI doctrine), animated via
-    /// the `effect` property inside the master spring, like the card's.
-    /// PROGRESSIVE: the band's gradient mask holds full frost through the
-    /// nav zone and dissolves to zero at the partition line (locations
-    /// re-tuned from the frozen insets at install) — rows scrolling up
-    /// blend from crisp into blur with no geometric seam.
+    /// The header zone's frost: screen top → the stream's first row, layered
+    /// between the stream (behind) and the chrome (in front), so rows
+    /// scrolling under the nav pill dissolve rather than colliding with it.
+    /// The system's `.regular` material — the standard separator blur,
+    /// which adapts to light and dark on its own. HIT-INERT by construction. Effect
+    /// nil until engagement IN A WINDOW (the headless-CI doctrine),
+    /// materialized inside the master spring.
     private let headerFrost = ProgressiveFrostView(
-        maskColors: [.black, .black, .clear],
-        maskLocations: [0, 0.4, 1]
+        maskColors: SnapCommentsLayout.headerFrostMaskColors,
+        maskLocations: SnapCommentsLayout.headerFrostMaskLocations
     )
     private var headerFrostConstraints: [NSLayoutConstraint] = []
-    /// The post-info component: caption + right-aligned counters, its OWN
-    /// floating glass card. Populated at `configure` (engaging is
-    /// choreography, never a fetch); its content rests offstage (alpha 0,
-    /// slight downward offset) and rises with the one engagement spring,
-    /// carrying its caption. Positioned BESIDE the media card on media posts
-    /// (`infoCardFrame(hasMedia: true)`), or standalone full-width on text
-    /// posts — a distinct glass surface either way.
-    private let infoCard = SnapPostInfoCardView()
-    private var infoCardConstraints: [NSLayoutConstraint] = []
     /// Remembers a visible pause glyph across an engagement (the glyph is
     /// centered on the full page and would float mid-strip while docked).
     private var pauseGlyphSuppressedByEngagement = false
@@ -165,38 +150,41 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // Text-only posts' gradient page background lives inside the chrome
         // (shared with the hero flight's replica, so the landing swap can't
         // mismatch), not here. The media card hosts both render surfaces
-        // full-bleed; it docks them into the strip slot when engaged.
+        // full-bleed — in both states: it is the page at rest AND the
+        // background of the engaged screen.
         mediaCard.pin(to: contentView)
 
-        // The comments region sits between the media (which vacates it when
-        // docked) and the chrome (whose rail floats over it). Constraints
-        // are minted at install (they depend on the frozen insets).
-        // The comments stream: FULL cell height, layered BEHIND the docked
-        // strip — its content rests below the strip via scroll inset and
-        // glides underneath it when scrolled. No internal header: the
-        // mutation itself says "comments".
-        commentsContainer.backgroundColor = .black
+        // The readability layer, directly over the media: inert until the
+        // engagement materializes it, and never moved again (it covers the
+        // whole cell in both states, it just isn't visible in one).
+        mediaBackdrop.pin(to: contentView)
+
+        // The header frost sits directly above the stream and below the
+        // chrome: media → backdrop → stream → frost → chrome.
+        // (Added after the container below.)
+        // The comments region sits between the readability layer and the
+        // chrome (whose rail floats over it). Constraints are minted at
+        // install (they depend on the frozen insets). The comments stream:
+        // FULL cell height, TRANSPARENT — its content rests below the card
+        // via scroll inset and glides underneath it when scrolled, with the
+        // post's own media visible behind every row. (This view was opaque
+        // black until the background-media layout: that one colour was the
+        // curtain that hid the post for the whole engagement.) No internal
+        // header: the mutation itself says "comments".
+        commentsContainer.backgroundColor = .clear
+        // SQUARE and UNCLIPPED. A screen-matched corner was tried twice:
+        // `containerConcentricRadius` resolves to ~0 for a view flush with
+        // its container, and reading `UIScreen._displayCornerRadius` meant
+        // private API for something that was visually inert anyway — the
+        // container is transparent, so a radius only clips content, and no
+        // content reaches those corners.
         commentsContainer.isHidden = true
         commentsContainer.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(commentsContainer)
 
-        // The header frost sits directly above the stream and below the
-        // two glass cards (added next), completing the z-sandwich: stream →
-        // frost → cards → docked media.
         headerFrost.isHidden = true
         headerFrost.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(headerFrost)
-
-        // The post-info glass card — its OWN floating surface (the media
-        // card is a SEPARATE component with its own glass). Hidden and
-        // unpositioned at rest; the feed positions it at `infoCardFrame`
-        // per post (beside the media card, or standalone full-width) at
-        // install. Its content rests offstage so engage/disengage are
-        // symmetric legs of one spring with no per-engagement preparation.
-        infoCard.isHidden = true
-        infoCard.setContentEntrance(offstage: true)
-        infoCard.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(infoCard)
 
         chrome.pin(to: contentView)
 
@@ -230,30 +218,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             commentsContainer.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
         ]
         NSLayoutConstraint.activate(commentsContainerConstraints)
-        // The header zone's frost: wall-to-wall, screen top → the strip's
-        // lower boundary (the comments partition line), dissolving from
-        // solid behind the nav zone to nothing at the partition — the
-        // ramp's start is the real inset boundary, not a guess.
-        // COMPACT DECISION (once per engagement): the caption is single-
-        // line when its natural width fits the info region — measured at
-        // the COMPACT region (a text post's full strip, or the media post's
-        // wider slot beside the SMALLER compact media square), so the choice
-        // is self-consistent (a caption that fits the compact region stays
-        // one line at the compact width). Every strip dimension below reads
-        // this one flag.
-        let stripWidth = SnapCommentsLayout.stripCardFrame(in: contentView.bounds, topInset: frozenInsets.top).width
-        let compactRegion = mediaURL != nil
-            ? stripWidth - SnapCommentsLayout.cardHeight(compact: true) - SnapCommentsLayout.cardGap
-            : stripWidth
-        isCompactCaption = infoCard.captionPreferredWidth <= compactRegion
-        infoCard.setCompact(isCompactCaption)
-        let compact = isCompactCaption
-
-        headerFrost.setFadeLocations([
-            0,
-            NSNumber(value: Double(SnapCommentsLayout.headerFrostSolidFraction(topInset: frozenInsets.top))),
-            1,
-        ])
+        // The header band spans EXACTLY its container — screen top to where
+        // the stream's content begins — and ramps across all of it: opaque
+        // at the screen's edge, fully clear at the container's inner edge.
+        // Nothing spills past the chrome the band exists to serve.
         headerFrost.isHidden = false
         NSLayoutConstraint.deactivate(headerFrostConstraints)
         headerFrostConstraints = [
@@ -261,55 +229,22 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             headerFrost.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             headerFrost.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             headerFrost.heightAnchor.constraint(
-                equalToConstant: SnapCommentsLayout.stripBottom(topInset: frozenInsets.top, compact: compact)
+                equalToConstant: SnapCommentsLayout.commentsTopInset(topInset: frozenInsets.top)
             ),
         ]
         NSLayoutConstraint.activate(headerFrostConstraints)
-        // The post-info glass card, positioned per post. Its WIDTH is
-        // DYNAMIC — it hugs its content (short caption → narrow card),
-        // floored at the card's own `minimumWidth` (the bottom row never
-        // clips) and clamped to the available region below. Positioning
-        // differs by format:
-        //   • MEDIA — leading-pinned immediately right of the media card
-        //     (`infoFrame.minX` = media card trailing + the card gap).
-        //   • TEXT — CENTERED horizontally in the strip when narrower than
-        //     the full width (no stretching into empty space).
-        // The card hugs its intrinsic width (required hugging) up to the
-        // region cap, so the caption wraps only when it would overflow.
-        let infoFrame = SnapCommentsLayout.infoCardFrame(
-            in: contentView.bounds, topInset: frozenInsets.top, hasMedia: mediaURL != nil, compact: compact
-        )
-        infoCard.isHidden = false
-        infoCard.setContentHuggingPriority(.required, for: .horizontal)
-        NSLayoutConstraint.deactivate(infoCardConstraints)
-        infoCardConstraints = [
-            infoCard.topAnchor.constraint(equalTo: contentView.topAnchor, constant: infoFrame.minY),
-            infoCard.heightAnchor.constraint(equalToConstant: infoFrame.height),
-            // Never exceed the region (media-adjacent slot, or the full
-            // strip for text); the intrinsic width fills below this.
-            infoCard.widthAnchor.constraint(lessThanOrEqualToConstant: infoFrame.width),
-        ]
-        if mediaURL == nil {
-            // Text: center within the strip; clamp inside its margins so a
-            // full-width card still respects the strip edges.
-            infoCardConstraints += [
-                infoCard.centerXAnchor.constraint(equalTo: contentView.leadingAnchor, constant: infoFrame.midX),
-                infoCard.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: infoFrame.minX),
-            ]
-        } else {
-            // Media: leading-pinned right of the media card.
-            infoCardConstraints.append(
-                infoCard.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: infoFrame.minX)
-            )
-        }
-        NSLayoutConstraint.activate(infoCardConstraints)
-        // The docked media card rides ABOVE the stream and the frosted
-        // header for the engagement's lifetime (restored on
-        // `clearComments`) — that's the layering that makes comments glide
-        // underneath it. It carries its OWN glass. (Hidden surfaces on a
-        // text page make this a no-op visually — text posts show only the
-        // info card.)
-        contentView.insertSubview(mediaCard, aboveSubview: headerFrost)
+        // NOTE: no caption card is installed here. The caption is the
+        // hosted stream's FIRST ROW now, so it scrolls with the comments
+        // instead of floating above them — which is what removed the
+        // measured caption height, the reserved strip rectangle, and the
+        // job of keeping a fixed card in sync with a moving list.
+        // NOTE: the media card is NOT z-lifted here. It stays at the back
+        // of the stack for the whole engagement — the stream reads over it
+        // through the backdrop, which is the entire point of this layout.
+        // (It used to be raised above the frost so the docked tile could
+        // float over the comments; that lift is what made its invisible
+        // full-bleed frame eat stream touches, and it is gone with the
+        // tile.)
         view.translatesAutoresizingMaskIntoConstraints = false
         commentsContainer.addSubview(view)
         view.pin(to: commentsContainer)
@@ -323,13 +258,43 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         chrome.railExclusionWidth
     }
 
-    /// The engaged stream's top inset — the frosted strip's bottom edge. A
-    /// single-line caption shrinks the cards, so this reads the cell's
-    /// settled compact state (valid after `installComments`); the VC threads
-    /// it into the hosted stream's `setEngagedInsets` so the rows start
-    /// flush against the shorter frost.
+    /// The engaged stream's top inset — where its content rests, just
+    /// below the screen chrome. A pure function of the safe area now: the
+    /// caption scrolls inside the stream, so nothing above it has to be
+    /// measured. The VC threads this into `setEngagedInsets`.
     func engagedCommentsTopInset(safeAreaTop: CGFloat) -> CGFloat {
-        SnapCommentsLayout.stripBottom(topInset: safeAreaTop, compact: isCompactCaption)
+        SnapCommentsLayout.commentsTopInset(topInset: safeAreaTop)
+    }
+
+    /// The engagement's INTERPOLATABLE state, as one function of progress:
+    /// 0 = fully engaged, 1 = fully dismissed. Every leg that can be driven
+    /// continuously lives here and nowhere else, which is what lets the
+    /// finger-driven pull-down and the animated engage/disengage share one
+    /// definition of what the two ends look like.
+    ///
+    /// (The blur bands and the bubble's glass are NOT here: a material
+    /// materializes through the `effect` property, which has no fractional
+    /// state. They switch at the ends and are hidden behind the fading
+    /// stream while the drag is in flight.)
+    func setCommentsEngagementProgress(_ progress: CGFloat) {
+        let t = min(max(0, progress), 1)
+        commentsContainer.alpha = 1 - t
+        // NO transform here. The shrink belongs to the STREAM alone (the
+        // hosted list scales itself), because the footer's blur band lives
+        // inside this container and a band that scales stops sitting at the
+        // screen's edge — it drifts inward and reads as part of the moving
+        // layer instead of as fixed chrome.
+        // The header band is a SIBLING, so it never scaled; it fades on its
+        // own alpha to leave with everything else. (Alpha on an effect view
+        // cannot MATERIALIZE a blur, which is why the band still switches
+        // its `effect` at the ends — but fading an already-built one out is
+        // exactly what alpha is for.)
+        headerFrost.alpha = 1 - t
+        mediaBackdrop.setDim(SnapCommentsLayout.backdropDimOpacity * (1 - t))
+        // The page's own chrome returns as the stream leaves — the ticker
+        // and caption fade back IN as the comments fade out, one crossfade
+        // rather than two sequential ones.
+        chrome.setCommentsEngagedProgress(t)
     }
 
     /// Reclaims the region after disengagement settles (the VC removes the
@@ -337,33 +302,26 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func clearComments() {
         commentsContainer.subviews.forEach { $0.removeFromSuperview() }
         commentsContainer.isHidden = true
-        commentsContainer.transform = .identity
         NSLayoutConstraint.deactivate(commentsContainerConstraints)
         commentsContainerConstraints = []
-        infoCard.isHidden = true
-        infoCard.setGlassActive(false)
-        // A nudge interrupted by disengagement must not leak into the
-        // next engagement's card position.
-        infoCard.transform = .identity
-        NSLayoutConstraint.deactivate(infoCardConstraints)
-        infoCardConstraints = []
-        mediaCard.hideGlass()
         headerFrost.isHidden = true
+        headerFrost.alpha = 1
         headerFrost.effect = nil
         NSLayoutConstraint.deactivate(headerFrostConstraints)
         headerFrostConstraints = []
-        // Restore the resting z-order: media at the bottom of the stack.
-        contentView.sendSubviewToBack(mediaCard)
-        mediaCard.clearMasks()
+        // The backdrop keeps its frame (it is pinned for the cell's life);
+        // only its treatment is state. Reset it unconditionally so an
+        // interrupted disengagement can't leave a recycled cell dimmed.
+        mediaBackdrop.setActive(false)
     }
 
     /// Applies or reverses the comments-engaged layout. Call inside a
     /// single `UIView.animate` spring block — every mutation here is
-    /// animatable (media transform + corner radius, chrome surface alphas,
-    /// caption flight, comments region lift), which is what keeps the
-    /// whole state change ONE motion on ONE surface. The player is
-    /// untouched by construction: its view's geometry animates, its
-    /// ownership and clock never change.
+    /// animatable (the backdrop's dim and blur, the media's recede, chrome
+    /// surface alphas, the card's glass and content), which is what keeps
+    /// the whole state change ONE motion on ONE surface. The player is
+    /// untouched by construction: nothing here re-hosts it, and after the
+    /// dock's removal nothing here even moves its surfaces.
     func setCommentsEngaged(_ engaged: Bool) {
         guard engaged != isCommentsEngaged else { return }
         isCommentsEngaged = engaged
@@ -375,55 +333,34 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // it never dismisses, so it's the right gesture on a text post's
         // permanent resting interface too.
         cardSwipeRecognizer.isEnabled = engaged
-        let bounds = contentView.bounds
-        let slot = SnapCommentsLayout.mediaSlotFrame(in: bounds, topInset: frozenInsets.top, compact: isCompactCaption)
 
         if engaged {
-            // The Ken Burns drift owns the same transform; it yields for the
-            // engagement and resumes on disengage (below).
+            // The drift yields for the engagement: a slowly zooming photo
+            // under body text is a readability problem, and the background
+            // should read as STILL while the reader is in the comments. It
+            // resumes on disengage (below).
             stopKenBurns()
             if !pauseGlyph.isHidden {
                 pauseGlyphSuppressedByEngagement = true
                 pauseGlyph.isHidden = true
             }
-            // The media card docks its surfaces into the slot (transform +
-            // animated crop mask) and raises its OWN glass card around the
-            // tile — a visual no-op for text posts, whose surfaces are
-            // hidden and whose media card is never positioned. Inside the
-            // master spring block.
-            mediaCard.dock(slot: slot, in: bounds)
-            if mediaURL != nil {
-                mediaCard.showGlass(at: SnapCommentsLayout.mediaCardFrame(in: bounds, topInset: frozenInsets.top, compact: isCompactCaption))
-            }
-            chrome.setCommentsEngaged(true)
-            commentsContainer.alpha = 1
-            // Each card materializes its OWN glass via the EFFECT property
-            // (the supported animatable path — alpha on an effect view is
-            // not); window-guarded inside the component (real blurs contact
-            // the render server, which headless CI hosts must never pay).
-            infoCard.setGlassActive(true)
-            // The header frost materializes on the same beat and the same
-            // supported path — one material family across cards and frame.
+            // THE BACKGROUND, not a tile: the media holds its full-bleed
+            // frame, its identity transform, and its playback — the
+            // engagement never touches it. Everything that DOES change is
+            // one interpolatable set (see `setCommentsEngagementProgress`),
+            // so the boolean legs and the finger-driven ones can never
+            // diverge. (A visual no-op on a text page, whose surfaces are
+            // hidden — the dim lands on black.)
+            setCommentsEngagementProgress(0)
+            // The band materializes on the same beat and the same supported
+            // path (the `effect` property — alpha on an effect view is not,
+            // which is also why the blur cannot ride the interactive drag).
             if window != nil, headerFrost.effect == nil {
-                headerFrost.effect = UIBlurEffect(style: .systemThinMaterialDark)
+                headerFrost.effect = UIBlurEffect(style: SnapCommentsLayout.frostStyle)
             }
-            // The info card's content rises into place inside the same
-            // spring — one fade for the caption AND the counters (it owns
-            // their internal balance); the chrome's caption copy fades out
-            // on the same beat (`chrome.setCommentsEngaged`), the cross-fade.
-            infoCard.setContentEntrance(offstage: false)
         } else {
-            mediaCard.undock(in: bounds)
-            mediaCard.hideGlass()
-            chrome.setCommentsEngaged(false)
-            commentsContainer.alpha = 0
-            infoCard.setGlassActive(false) // blur dissolves with the return spring
+            setCommentsEngagementProgress(1)
             headerFrost.effect = nil
-            // The info card's content sinks back to the entrance pose — the
-            // reverse leg of the same spring, and the ready state for the
-            // next engagement; the chrome caption fades back in as it fades
-            // out.
-            infoCard.setContentEntrance(offstage: true)
             if pauseGlyphSuppressedByEngagement {
                 pauseGlyphSuppressedByEngagement = false
                 pauseGlyph.isHidden = false
@@ -468,8 +405,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
         #endif
         let hasMedia = model.mediaURL != nil
-        infoCard.setCaption(model.caption)
-        infoCard.configure(with: model)
         // Composition is POSITIONAL now (the info card's frame is set at
         // install per `hasMedia`), so the info card itself is format-
         // agnostic — its caption always starts at its own inner padding.
@@ -535,7 +470,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         chrome.updateCommentStreams(streams)
         // The info card's comment metric rides the same seam (and the
         // same known-zero honesty flag) as the chrome's surfaces.
-        infoCard.setCommentCount(streams.commentCount, isLoaded: streams.isLoaded)
     }
 
     /// Visibility-scoped comment-surface control, driven by the view
@@ -850,14 +784,18 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         return cardSwipeRegionContains(cardSwipeRecognizer.location(in: contentView))
     }
 
-    /// The swipe's territory: the ENTIRE floating glass card — media,
-    /// caption, music line, metrics — with a thumb-sized margin. The
-    /// stream below the partition and the nav zone above the card stay
-    /// out. Internal (not private) so the boundary is unit-testable.
+    /// The page-drive swipe's territory: the HEADER BAND — everything above
+    /// where the stream's content begins.
+    ///
+    /// It used to be the floating caption card. With the caption scrolling
+    /// as a list row there is no non-scrolling card left to grab, and the
+    /// band above the stream is the only cell territory a drag can start in
+    /// without fighting the list: below this line a vertical drag scrolls
+    /// the comments, which is exactly what it should do. Internal (not
+    /// private) so the boundary stays unit-testable.
     func cardSwipeRegionContains(_ point: CGPoint) -> Bool {
-        SnapCommentsLayout.stripCardFrame(in: contentView.bounds, topInset: frozenInsets.top, compact: isCompactCaption)
-            .insetBy(dx: -Spacing.sm, dy: -Spacing.sm)
-            .contains(point)
+        guard point.y >= 0 else { return false }
+        return point.y <= SnapCommentsLayout.commentsTopInset(topInset: frozenInsets.top)
     }
 
     /// A vertical swipe on the glass card drives the feed pager
@@ -947,31 +885,19 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// Phase 1's visible proof that activation works: a slow zoom on the active
     /// page's media. Phase 2 replaces this body with `player.play()`.
     private func startKenBurns() {
-        // The engagement owns the media transform while docked — the cell
-        // gates WHEN, the card owns the drift.
+        // The background must read STILL while the reader is in the
+        // comments — the cell gates WHEN, the card owns the drift.
         guard !isCommentsEngaged else { return }
         mediaCard.startDrift()
     }
 
     private func stopKenBurns() {
-        // The engagement OWNS the media transform while docked: stopping
-        // the drift settles onto the CURRENT state's resting transform,
-        // never a blind identity. The blind reset stranded the docked
-        // tile as a frozen full-bleed center crop after an outbound push
-        // (didResignActive fires with the engagement alive), and the
-        // return could not heal it — startKenBurns rightly declines to
-        // restart while engaged.
-        let resting: CGAffineTransform
-        if isCommentsEngaged {
-            let bounds = contentView.bounds
-            resting = SnapCommentsLayout.mediaTransform(
-                bounds: bounds,
-                slot: SnapCommentsLayout.mediaSlotFrame(in: bounds, topInset: frozenInsets.top, compact: isCompactCaption)
-            )
-        } else {
-            resting = .identity
-        }
-        mediaCard.stopDrift(restingTransform: resting)
+        // Unconditional identity. This used to have to compute a resting
+        // transform per state, because the engagement and the drift shared
+        // the surfaces' transform while the media docked; the engagement's
+        // recede now lives on the card itself, so the drift owns the
+        // surface transform outright and there is no state to consult.
+        mediaCard.stopDrift()
     }
 
     /// Keyboard-session rail yield (engaged only — the rail must never
@@ -981,19 +907,16 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         chrome.setRailConcealed(concealed)
     }
 
-    /// Re-asserts the engaged dock geometry after the screen re-appears
-    /// from an outbound push — the belt to `stopKenBurns`' brace, covering
-    /// any path that disturbed the docked media while the feed was
-    /// covered. The synchronous layout pass runs FIRST: the slot math
-    /// must read settled coordinates, not a mid-transition hierarchy.
-    /// Idempotent — re-applying the dock to an already-docked tile is a
-    /// no-op.
+    /// Re-asserts the engaged treatment after the screen re-appears from an
+    /// outbound push: the backdrop's blur is window-guarded, so an
+    /// engagement that began off-window never materialized it. Layout runs
+    /// first so the pass reads settled coordinates, not a mid-transition
+    /// hierarchy. Idempotent — and it has nothing to say about the media,
+    /// which holds identity in both states.
     func reassertEngagedGeometry() {
         guard isCommentsEngaged else { return }
         contentView.layoutIfNeeded()
-        let bounds = contentView.bounds
-        let slot = SnapCommentsLayout.mediaSlotFrame(in: bounds, topInset: frozenInsets.top, compact: isCompactCaption)
-        mediaCard.reassertDock(slot: slot, in: bounds)
+        UIView.performWithoutAnimation { mediaBackdrop.setActive(true) }
     }
 
     override func prepareForReuse() {
@@ -1006,7 +929,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         onRequestComments = nil
         onRequestCommentsClose = nil
         onRequestCommentsPageDrive = nil
-        infoCard.reset()
         stopKenBurns()
         setPauseGlyphVisible(false)
         videoPlayback?.stop(mediaCard.renderView)
@@ -1054,28 +976,15 @@ extension SnapFeedCell {
         }
         #endif
         guard isCommentsEngaged, let hit else { return hit }
-        // DOCKED-MEDIA HIT CLIP: the crop mask trims PIXELS, not
-        // hit-testing — the docked render surface's frame is the full-
-        // bleed rect under the uniform scale (88×191 on portrait cells),
-        // extending ~65pt above and below the visible square tile. The
-        // z-lifted surface would eat stream touches in that invisible
-        // band (an avatar tap on the first comment row dismissed the
-        // whole engagement — the background tap read it as a strip tap).
-        // Touches on the media OUTSIDE the slot belong to whatever is
-        // beneath; only image-inert cells escaped by accident
-        // (UIImageView doesn't hit-test; the video surface does).
-        if mediaCard.containsSurface(hit) {
-            let slot = SnapCommentsLayout.mediaSlotFrame(
-                in: contentView.bounds, topInset: frozenInsets.top, compact: isCompactCaption
-            )
-            if !slot.contains(convert(point, to: contentView)) {
-                let containerPoint = convert(point, to: commentsContainer)
-                if let beneath = commentsContainer.hitTest(containerPoint, with: event) {
-                    return beneath
-                }
-            }
-            return hit
-        }
+        // NOTE: the docked-media hit clip that used to live here is gone
+        // with the dock. It existed because the crop mask trimmed PIXELS
+        // and not hit-testing: the docked surface kept its full-bleed frame
+        // under the uniform scale, so a z-lifted video tile ate stream
+        // touches ~65pt above and below the visible square (an avatar tap
+        // on the first comment row dismissed the whole engagement). The
+        // media is neither transformed nor z-lifted now — it sits at the
+        // back of the stack, beneath the stream — so the stream simply wins
+        // its own touches by z-order and there is nothing to clip.
         guard sequence(first: hit, next: { $0.superview }).contains(where: { $0 is SnapShortcutRailView })
         else { return hit }
         let containerPoint = convert(point, to: commentsContainer)
