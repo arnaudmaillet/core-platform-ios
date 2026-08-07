@@ -2,59 +2,38 @@ import CoreModels
 import DesignSystem
 import UIKit
 
-/// The post-info component of the engaged card: the caption text and the
-/// interaction counters, drawing its OWN independent Liquid Glass card
-/// (`SnapGlassCardView`) and managing its own internal padding and vertical
-/// balance. It lays out, inside its glass:
+/// The post's caption as a MESSAGE BUBBLE — one Liquid Glass surface
+/// (`SnapGlassCardView`) holding the caption over a right-aligned timestamp:
 ///
-///   [ caption, centered in its band ]
-///   [ …            ♥ 1.2k 💬 56 ⇄ 🔖 ]  ← RIGHT-aligned
+///   ┌─────────────────────────────┐
+///   │ Weekend build log: rebuilt  │
+///   │ the pipeline end to end…    │
+///   │                   10 weeks  │  ← timestamp, TRAILING
+///   └─────────────────────────────┘
 ///
-/// The counters are right-aligned on EVERY post type (the unified rule).
-/// The caption centers in the band above them via an internal layout guide,
-/// so equal breathing sits above and below the text whatever the line count
-/// — no injected margin, no format branch, no media inset (the media is a
-/// SEPARATE glass card beside this one).
+/// It is the comment list's FIRST ROW (see `CaptionBubbleCell`), not a
+/// floating card the feed cell reserves a region for. That move is why the
+/// interaction counters are gone from it: a scrolling row is a message in a
+/// thread, and the ♥/💬/⇄/🔖 cluster belonged to a fixed header. Bookmark and
+/// share live in the toolbar, which now keeps them onstage through the
+/// engagement.
 ///
-/// Composition is POSITIONAL: the feed sets this card's frame at
-/// `infoCardFrame` — beside the media card on media posts, standalone
-/// full-width on text posts. The component itself is format-agnostic.
-/// Author identity lives in the nav pill and the audio credit in the
-/// toolbar attribution — neither is duplicated here (keep-and-stack).
+/// It SELF-SIZES. Nothing measures its caption from the outside any more —
+/// the list cell's Auto Layout does it, which is what retired the line cap,
+/// the measured caption height, and the band slack that a fixed rectangle
+/// needed. Author identity is the avatar beside it and the nav pill above;
+/// the audio credit is the toolbar's attribution item. Nothing duplicated.
 final class SnapPostInfoCardView: UIView {
     private let captionLabel = UILabel()
-    /// Metrics with data render counts (likes from the hydration snapshot,
-    /// comments from the loaded streams); repost/save are affordance-only
-    /// seams — the BFF carries no counts for them yet.
-    private let likeButton = SnapPostInfoCardView.makeMetricButton(
-        symbol: "heart", accessibilityLabel: "Like"
-    )
-    private let commentButton = SnapPostInfoCardView.makeMetricButton(
-        symbol: "bubble.right", accessibilityLabel: "Comments"
-    )
-    private let repostButton = SnapPostInfoCardView.makeMetricButton(
-        symbol: "arrow.2.squarepath", accessibilityLabel: "Repost"
-    )
-    private let saveButton = SnapPostInfoCardView.makeMetricButton(
-        symbol: "bookmark", accessibilityLabel: "Save"
-    )
-    /// The post's age ("5d") — leading on the actions row, opposite the
-    /// counters. Secondary metadata styling (the comment-row timestamp
-    /// register). Yields FIRST when the row is tight (truncates), so it can
-    /// never push or overlap the counters.
+    /// The post's age ("10 weeks"), trailing-aligned under the caption —
+    /// the message-bubble convention, where the timestamp settles into the
+    /// bubble's bottom-right corner.
     private let timestampLabel = UILabel()
-    /// The counters cluster — stored so its intrinsic width feeds the card's
-    /// dynamic-width floor (the card never shrinks below the bottom row).
-    private lazy var actionsStack = UIStackView(
-        arrangedSubviews: [likeButton, commentButton, repostButton, saveButton]
-    )
-    /// This component's OWN floating glass card, filling it — so the info
-    /// renders as a distinct glass surface, independent of the media card
-    /// beside it (or standalone full-width on text posts).
+    /// This component's floating glass bubble, filling it.
     private let glass = SnapGlassCardView()
-    /// The caption + counters, hosted inside the glass and moved as one for
-    /// the entrance (alpha + rise) — SEPARATE from the glass, whose blur
-    /// materializes via `effect`, never alpha.
+    /// The caption + timestamp, hosted inside the glass and faded as one for
+    /// the entrance — SEPARATE from the glass, whose material materializes
+    /// via `effect`, never alpha.
     private let content = UIView()
 
     override init(frame: CGRect) {
@@ -66,12 +45,9 @@ final class SnapPostInfoCardView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     private func buildLayout() {
-        // ONE uniform inset on all four edges — the caption and the
-        // counters are insulated from the hairline border by the same
-        // margin top, bottom, leading, and trailing, so the card reads
-        // homogeneously balanced whether it's full-width (text) or
-        // side-by-side (media). The only interior spacing is the small gap
-        // between the caption band and the counters row.
+        // ONE uniform inset on all four edges — the message-bubble measure,
+        // so the text sits well clear of the rounded corner on every side.
+        // The only interior spacing is the gap down to the timestamp.
         let inset = Self.contentInset
 
         glass.translatesAutoresizingMaskIntoConstraints = false
@@ -83,225 +59,91 @@ final class SnapPostInfoCardView: UIView {
 
         captionLabel.font = UIFont.preferredFont(forTextStyle: .subheadline)
         captionLabel.adjustsFontForContentSizeCategory = true
+        // WHITE, not `.label`, and the glass is pinned dark to match (see
+        // `SnapGlassCardView`): the bubble floats over arbitrary post media,
+        // so its contrast must come from the material it sits on rather
+        // than from the device's appearance.
         captionLabel.textColor = .white
-        captionLabel.lineBreakMode = .byTruncatingTail
-        // The whole-line budget: everything between the top inset and the
-        // counters row, in whole lines — the line cap truncates honestly
-        // when the caption would exceed it.
-        captionLabel.numberOfLines = SnapCommentsLayout.captionLineCapacity(
-            columnHeight: SnapPostInfoCardView.captionBandHeight,
-            lineHeight: captionLabel.font.lineHeight
-        )
-        // The caption hugs its text and top-aligns — no vertical
-        // centering, so the text starts flush at the top inset with no
-        // artificial gap above it.
-        captionLabel.setContentHuggingPriority(.required, for: .vertical)
+        // Natural alignment — the bubble reads as a message, and a message's
+        // text starts at the reading edge in both LTR and RTL.
+        captionLabel.textAlignment = .natural
+        // NO line cap: the bubble grows to its caption, exactly like every
+        // other row in the list. A cap existed only to defend a fixed header
+        // region's height, and there is no such region now.
+        captionLabel.numberOfLines = 0
         captionLabel.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(captionLabel)
 
-        // Counters: the column's floor, RIGHT-ALIGNED on every post type.
-        let actions = actionsStack
-        actions.axis = .horizontal
-        actions.spacing = Spacing.lg
-        actions.alignment = .center
-        actions.translatesAutoresizingMaskIntoConstraints = false
-        content.addSubview(actions)
-
-        // The timestamp: secondary metadata, leading on the actions row.
         timestampLabel.font = .preferredFont(forTextStyle: .footnote)
         timestampLabel.adjustsFontForContentSizeCategory = true
-        timestampLabel.textColor = UIColor.white.withAlphaComponent(0.55)
+        // 0.7: the quietest text on the bubble, sitting on a refracting
+        // material rather than a flat tint, so it needs more than the 0.55
+        // a dark blur allowed. Still clearly subordinate to the caption.
+        timestampLabel.textColor = UIColor.white.withAlphaComponent(0.7)
+        timestampLabel.textAlignment = .right
         timestampLabel.numberOfLines = 1
-        timestampLabel.lineBreakMode = .byTruncatingTail
+        timestampLabel.setContentHuggingPriority(.required, for: .vertical)
         timestampLabel.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(timestampLabel)
 
-        // COUNTERS WIN: they never compress or move — required hugging AND
-        // compression resistance on the stack AND its buttons keep the
-        // cluster at its intrinsic width, trailing-pinned. The timestamp
-        // HUGS its text tightly (required hugging — it never expands to
-        // push the counters) but yields under pressure (required
-        // compression resistance dropped to the floor — a tight row
-        // truncates the date tail). The gap between them is the flex space.
-        actions.setContentHuggingPriority(.required, for: .horizontal)
-        actions.setContentCompressionResistancePriority(.required, for: .horizontal)
-        for button in [likeButton, commentButton, repostButton, saveButton] {
-            button.setContentCompressionResistancePriority(.required, for: .horizontal)
-        }
-        timestampLabel.setContentHuggingPriority(.required, for: .horizontal)
-        timestampLabel.setContentCompressionResistancePriority(UILayoutPriority(1), for: .horizontal)
-
-        // A clean linear top→bottom chain (no centering guide, no midpoint
-        // math): the caption pins to the TOP inset, the counters pin to the
-        // BOTTOM inset (the card's floor), and the counters clear the
-        // caption by the comfortable `captionActionsGap`. All four edge margins
-        // are the same uniform inset. The timestamp shares the counters'
-        // baseline row, anchored to the leading edge.
+        // A clean top→bottom chain, all four margins the same inset: caption
+        // from the top, timestamp trailing-pinned beneath it, and the
+        // content's own bottom closing the bubble — so the whole thing sizes
+        // to its text with no fixed heights anywhere.
         NSLayoutConstraint.activate([
             captionLabel.topAnchor.constraint(equalTo: content.topAnchor, constant: inset),
             captionLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: inset),
             captionLabel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -inset),
 
-            actions.topAnchor.constraint(greaterThanOrEqualTo: captionLabel.bottomAnchor, constant: Self.captionActionsGap),
-            actions.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -inset),
-            actions.heightAnchor.constraint(equalToConstant: SnapCommentsLayout.cardActionsHeight),
-            actions.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -inset),
-
-            timestampLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: inset),
-            timestampLabel.centerYAnchor.constraint(equalTo: actions.centerYAnchor),
-            // Never encroach on the counters — the min flex gap is the
-            // truncation boundary (required, so the date clips to fit).
-            timestampLabel.trailingAnchor.constraint(lessThanOrEqualTo: actions.leadingAnchor, constant: -Spacing.md),
+            timestampLabel.topAnchor.constraint(
+                equalTo: captionLabel.bottomAnchor, constant: Self.captionActionsGap
+            ),
+            timestampLabel.leadingAnchor.constraint(
+                greaterThanOrEqualTo: content.leadingAnchor, constant: inset
+            ),
+            timestampLabel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -inset),
+            timestampLabel.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -inset),
         ])
     }
 
     // MARK: - Glass + entrance
 
-    /// Materializes (or dissolves) this card's glass — window-guarded, via
+    /// Materializes (or dissolves) this bubble's glass — window-guarded, via
     /// the effect property. Call inside the engagement's animation block.
     func setGlassActive(_ active: Bool) { glass.setGlassActive(active) }
 
-    /// The content's entrance pose: a PURE fade — offstage = transparent
-    /// (the disengage/rest pose), onstage = opaque. No translation: the
-    /// content fades straight in and out in place, riding the engagement
-    /// spring alongside the glass's blur materialization. The glass frame
-    /// itself never moves.
+    /// The content's entrance pose: a pure fade. The bubble scrolls with the
+    /// list now, so it no longer carries the engagement's expand — that
+    /// belongs to the container (`streamEntranceScale`).
     func setContentEntrance(offstage: Bool) {
         content.alpha = offstage ? 0 : 1
     }
 
-    /// The content's current entrance state (a pure alpha fade) — read-only,
-    /// for the choreography test.
+    /// The content's current entrance state — read-only, for the
+    /// choreography test.
     var contentAlpha: CGFloat { content.alpha }
 
     // MARK: - Content
 
-    /// Sets the caption text. The card's DYNAMIC width follows the caption
-    /// (a short caption yields a narrow card), so a change re-derives the
-    /// intrinsic width.
-    func setCaption(_ text: String?) {
-        captionLabel.text = text
-        invalidateIntrinsicContentSize()
-    }
-
-    /// Fills the counters and the timestamp from the post's display model.
-    /// Called at cell configure — the card is populated long before an
-    /// engagement.
-    func configure(with model: FeedItemDisplayModel) {
-        Self.setCount(model.likeCount > 0 ? Int(clamping: model.likeCount) : nil, on: likeButton)
-        Self.setCount(nil, on: commentButton)
-        timestampLabel.text = model.timestampText
-        invalidateIntrinsicContentSize()
-    }
-
-    /// The comment metric follows the streams: shown once loaded, blank
-    /// while unknown (the `isLoaded` seam — no lying "0" mid-fetch). The
-    /// count widens the counters, so the card's minimum-width floor follows.
-    func setCommentCount(_ count: Int, isLoaded: Bool) {
-        Self.setCount(isLoaded ? count : nil, on: commentButton)
-        invalidateIntrinsicContentSize()
+    /// Fills the bubble. Both fields land synchronously; the bubble sizes
+    /// itself to them.
+    func configure(caption: String?, timestamp: String?) {
+        captionLabel.text = caption
+        timestampLabel.text = timestamp
     }
 
     /// Cell reuse: drop content.
     func reset() {
         captionLabel.text = nil
         timestampLabel.text = nil
-        Self.setCount(nil, on: likeButton)
-        Self.setCount(nil, on: commentButton)
-        invalidateIntrinsicContentSize()
-    }
-
-    // MARK: - Dynamic width
-
-    /// The card sizes its WIDTH to its content: the caption's single-line
-    /// width (the caption wraps only when the cell caps it at the region
-    /// width), floored at `minimumWidth` so the bottom row never clips. The
-    /// height stays layout-driven (the cell pins it to `cardHeight`). The
-    /// cell clamps this to the available region and positions it (centered
-    /// for text, leading-pinned for media).
-    override var intrinsicContentSize: CGSize {
-        CGSize(width: max(minimumWidth, captionPreferredWidth), height: UIView.noIntrinsicMetric)
-    }
-
-    /// The strict minimum width: the bottom row — the date, the `md` flex
-    /// gap, and the counters cluster — plus the two edge insets. Below this
-    /// the date or the interaction buttons would clip, so the card never
-    /// shrinks past it.
-    var minimumWidth: CGFloat {
-        let counters = actionsStack.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
-        let date = timestampLabel.intrinsicContentSize.width
-        return 2 * Self.contentInset + ceil(date) + Spacing.md + ceil(counters)
-    }
-
-    /// The width the caption wants on a single line, plus the two insets —
-    /// the card's content-driven upper reach before the cell's region clamp
-    /// forces it to wrap. Internal: the cell also uses it to decide whether
-    /// the caption is single-line (→ the compact card height).
-    var captionPreferredWidth: CGFloat {
-        guard let text = captionLabel.text, !text.isEmpty, let font = captionLabel.font else {
-            return 2 * Self.contentInset
-        }
-        let width = (text as NSString).size(withAttributes: [.font: font]).width
-        return 2 * Self.contentInset + ceil(width)
-    }
-
-    /// Caps the caption at the state's line count — ONE line on a compact
-    /// (single-line) card, the full band's capacity otherwise. The card
-    /// height (cell-set) matches, so the caption fills it with no slack.
-    func setCompact(_ compact: Bool) {
-        captionLabel.numberOfLines = compact ? 1 : SnapCommentsLayout.captionLineCapacity(
-            columnHeight: Self.captionBandHeight, lineHeight: captionLabel.font.lineHeight
-        )
     }
 
     // MARK: - Geometry
 
-    /// The uniform inner margin on ALL FOUR edges — homogeneous top, bottom,
-    /// leading, trailing. Sourced from `SnapCommentsLayout` so the compact
-    /// card height (which the strip geometry derives) and this interior use
-    /// the identical value.
+    /// The uniform inner margin on ALL FOUR edges. Sourced from
+    /// `SnapCommentsLayout` so the bubble's interior and the stream's other
+    /// geometry use the identical value.
     static var contentInset: CGFloat { SnapCommentsLayout.cardContentInset }
-    /// The one interior gap: between the caption band and the counters row
-    /// (an internal separation, not an edge margin). Shared with the layout.
+    /// The one interior gap: between the caption and the timestamp.
     static var captionActionsGap: CGFloat { SnapCommentsLayout.captionActionsGap }
-
-    /// The caption's available height, card-local: the card interior
-    /// (minus the two edge insets) minus the counters row and the one
-    /// interior gap — the line-cap budget, a pure function of the shared
-    /// card geometry and the uniform inset. The caption top-pins into the
-    /// TOP of this space (no centering).
-    private static var captionBandHeight: CGFloat {
-        SnapCommentsLayout.cardHeight
-            - 2 * contentInset
-            - SnapCommentsLayout.cardActionsHeight
-            - captionActionsGap
-    }
-
-    // MARK: - Metric buttons
-
-    /// One metric/action: a glyph with an optional count beside it. Buttons
-    /// (not labels) so each is a `UIControl` — the cell's tap arbitration
-    /// automatically exempts them from the strip's tap-to-close.
-    private static func makeMetricButton(symbol: String, accessibilityLabel: String) -> UIButton {
-        var config = UIButton.Configuration.plain()
-        config.image = UIImage(systemName: symbol)?
-            .withConfiguration(UIImage.SymbolConfiguration(pointSize: 14, weight: .semibold))
-        config.baseForegroundColor = UIColor.white.withAlphaComponent(0.9)
-        config.imagePadding = Spacing.xs
-        config.contentInsets = .zero
-        let button = UIButton(configuration: config)
-        button.accessibilityLabel = accessibilityLabel
-        button.setContentHuggingPriority(.required, for: .horizontal)
-        return button
-    }
-
-    private static func setCount(_ count: Int?, on button: UIButton) {
-        var config = button.configuration
-        config?.attributedTitle = count.map {
-            var title = AttributedString(SnapSubtitleView.countText($0))
-            title.font = UIFont.preferredFont(forTextStyle: .footnote).withWeight(.semibold)
-            return title
-        }
-        button.configuration = config
-    }
 }

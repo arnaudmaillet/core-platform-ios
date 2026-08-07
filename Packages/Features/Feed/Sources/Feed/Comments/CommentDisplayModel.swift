@@ -12,7 +12,16 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
     /// stubs).
     public let metaText: String
     public let body: String
+    /// The two-letter initials — the row's RENDERED identity, drawn
+    /// immediately and permanently. The picture (if any) is layered over
+    /// it; it is never swapped for it, so there is no empty disc at any
+    /// point and no third "loading" state.
     public let monogram: String
+    /// The author's picture, hydrated onto `CommentEntry` from profile.v1.
+    /// Optional at every step: an unresolved author, an author with no
+    /// avatar, and a failed fetch are all the same outcome — the monogram
+    /// stands.
+    public let avatarURL: URL?
     /// The thread parent's id for level-2 replies; nil at top level.
     public let parentID: String?
     /// Level-2 marker: replies render with the standard reply indentation
@@ -26,6 +35,7 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
         body = entry.body
         parentID = entry.parentID
         monogram = Self.monogram(entry.authorName)
+        avatarURL = entry.authorAvatarURL
         metaText = Self.relativeShort(from: entry.createdAt, to: now)
     }
 

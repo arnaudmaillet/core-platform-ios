@@ -8,10 +8,10 @@ import UIKit
 @testable import Feed
 
 /// The comments engagement's geometry and choreography contracts: one
-/// authority (`SnapCommentsLayout`) feeds both layers, so the strip (cell)
-/// and the panel (sheet) partition the container exactly; the cell's
-/// engaged layout docks the media without touching playback ownership and
-/// reverses to identity.
+/// authority (`SnapCommentsLayout`) sizes the expanded caption card and the
+/// comments region so they partition the container exactly, while the post's
+/// media stays full-bleed behind both — the engaged layout never moves it,
+/// and never touches playback ownership.
 @MainActor
 struct SnapCommentsPresentationTests {
     private static let container = CGRect(x: 0, y: 0, width: 390, height: 844)
@@ -19,64 +19,196 @@ struct SnapCommentsPresentationTests {
 
     // MARK: - Layout authority
 
-    /// The docked slot is a perfect 1:1 square tile, on the card's second
-    /// band — below the author header.
-    @Test func mediaSlotIsSquare() {
-        let slot = SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset)
-        #expect(slot.width == slot.height)
-        #expect(slot.height == SnapCommentsLayout.mediaSlotHeight)
-        #expect(slot.minX == Spacing.lg)
-        #expect(slot.minY == Self.topInset + SnapCommentsLayout.stripTopPadding
-            + SnapCommentsLayout.stripCardPadding)
+    /// The chrome zone and the comments region tile the cell with no gap and
+    /// no overlap. The boundary is now a pure function of the safe area —
+    /// no caption is measured into it, because the caption scrolls INSIDE
+    /// the region rather than sitting in a reserved band above it.
+    @Test func chromeZoneAndCommentsRegionPartitionTheCell() {
+        for inset in [CGFloat(0), 20, Self.topInset, 160] {
+            let top = SnapCommentsLayout.commentsTopInset(topInset: inset)
+            let region = SnapCommentsLayout.commentsRegionHeight(
+                containerHeight: Self.container.height, topInset: inset
+            )
+            #expect(top + region == Self.container.height)
+            // It clears the chrome and nothing more: a breath, not a band.
+            #expect(top > inset)
+            #expect(top - inset < 40)
+        }
     }
 
-    /// Squareness comes from a CENTERED CROP, never a squash: the crop is
-    /// the largest centered square of the media's own bounds, and the
-    /// docking transform is uniform.
-    @Test func mediaCropIsTheLargestCenteredSquare() {
-        let crop = SnapCommentsLayout.mediaCropFrame(in: Self.container)
-        #expect(crop.width == crop.height)
-        #expect(crop.width == Self.container.width)
-        #expect(abs(crop.midX - Self.container.midX) < 0.001)
-        #expect(abs(crop.midY - Self.container.midY) < 0.001)
-        let transform = SnapCommentsLayout.mediaTransform(
-            bounds: Self.container,
-            slot: SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset)
+    /// The background treatment is a real dim that still shows the post:
+    /// opaque enough for white body text, never a curtain (the opaque black
+    /// container this replaced is exactly what the layout exists to undo).
+    @Test func backdropDimsWithoutHidingTheMedia() {
+        #expect(SnapCommentsLayout.backdropDimOpacity > 0.25)
+        #expect(SnapCommentsLayout.backdropDimOpacity < 0.75)
+        // The bands are the system's standard separator blur — adaptive,
+        // semi-translucent. The protection comes from the LEAD, not from a
+        // denser material (thick was tried and read as too solid).
+        #expect(SnapCommentsLayout.frostStyle == .regular)
+        // The footer band leads the composer, so its ramp is finished by the
+        // capsule's top edge — a ramp that ended AT the composer left it
+        // floating over the clearest part of its own band.
+        #expect(SnapCommentsLayout.footerFrostLead > 0)
+    }
+
+    /// The caption card is a LIQUID GLASS bubble, and each clause here is a
+    /// rule the material imposes that a plain blur did not:
+    ///
+    /// - the shape lives in `cornerConfiguration`, so `layer.cornerRadius`
+    ///   must stay 0 and the view must not clip — a layer radius clips a
+    ///   material that doesn't know it has been clipped, and the specular
+    ///   edge is drawn on the unclipped shape;
+    /// - no border of our own, because the glass draws its own edge (a
+    ///   hairline on top reads as an outline sitting ON the material);
+    /// - the appearance is pinned dark, so white caption text keeps its
+    ///   contrast on a light-mode device over a pale photo;
+    /// - and the radius is the app's message-bubble radius, not a local pick.
+    @Test func theCaptionCardIsALiquidGlassBubble() throws {
+        let card = SnapPostInfoCardView(frame: CGRect(x: 0, y: 0, width: 374, height: 96))
+        let glass = try #require(card.subviews.compactMap { $0 as? SnapGlassCardView }.first)
+        card.layoutIfNeeded()
+
+        #expect(glass.layer.cornerRadius == 0)
+        #expect(glass.clipsToBounds == false)
+        #expect(glass.layer.borderWidth == 0)
+        #expect(glass.overrideUserInterfaceStyle == .dark)
+        #expect(glass.effectiveRadius(corner: .allCorners) == SnapCommentsLayout.stripCardCornerRadius)
+        // The bubble radius is the chat transcript's, not a number picked here.
+        #expect(SnapCommentsLayout.stripCardCornerRadius == 18)
+        // Bubble padding clears the corner on every side.
+        #expect(SnapPostInfoCardView.contentInset == Spacing.lg)
+
+        // Unwindowed, the glass stays nil — building a real effect off-screen
+        // stalls the render server on headless CI, the rule every glass
+        // surface in the app follows.
+        glass.setGlassActive(true)
+        #expect(glass.effect == nil)
+    }
+
+    /// The INTERACTIVE pull-down's progress model: the list's OVERSHOOT
+    /// past its top maps to a clamped 0…1, and release commits on distance
+    /// OR a flick. Driving from the overshoot is what welds the transition
+    /// to the rubber band — they are the same number — and what makes
+    /// arming unconditional without a rule, since overshoot exists only at
+    /// the top.
+    @Test func pullDismissProgressTracksTheFingerAndCommitsOnRelease() {
+        // Linear over the drag distance, clamped at both ends: an upward
+        // drag reads as 0 rather than running the transition backwards past
+        // its own resting state, and past the full distance it stays at 1.
+        #expect(SnapCommentsLayout.pullDismissProgress(translation: 0) == 0)
+        #expect(SnapCommentsLayout.pullDismissProgress(translation: -300) == 0)
+        #expect(SnapCommentsLayout.pullDismissProgress(
+            translation: SnapCommentsLayout.pullDismissDistance) == 1)
+        #expect(SnapCommentsLayout.pullDismissProgress(translation: 900) == 1)
+        // The distance is an OVERSHOOT, which UIKit damps to roughly half
+        // the finger's travel — so it has to be well under a finger-scale
+        // number or the gesture would need an implausible drag.
+        #expect(SnapCommentsLayout.pullDismissDistance <= 120)
+        let half = SnapCommentsLayout.pullDismissProgress(
+            translation: SnapCommentsLayout.pullDismissDistance / 2)
+        #expect(abs(half - 0.5) < 0.001)
+        // Monotonic through the middle.
+        #expect(SnapCommentsLayout.pullDismissProgress(translation: 40)
+            < SnapCommentsLayout.pullDismissProgress(translation: 80))
+
+        // Release: a decisive pull finishes…
+        #expect(SnapCommentsLayout.shouldCompletePullDismiss(
+            progress: SnapCommentsLayout.pullDismissCommitProgress, velocity: 0))
+        #expect(SnapCommentsLayout.shouldCompletePullDismiss(progress: 1, velocity: 0))
+        // …a hesitant one springs back…
+        #expect(SnapCommentsLayout.shouldCompletePullDismiss(progress: 0.1, velocity: 0) == false)
+        // …and a FLICK finishes from anywhere, which is what keeps a fast
+        // short throw from feeling ignored.
+        #expect(SnapCommentsLayout.shouldCompletePullDismiss(
+            progress: 0.05, velocity: SnapCommentsLayout.pullDismissCommitVelocity))
+        // The commit point is genuinely partial — committing only at the end
+        // would make the gesture feel like it had to be completed.
+        #expect(SnapCommentsLayout.pullDismissCommitProgress > 0)
+        #expect(SnapCommentsLayout.pullDismissCommitProgress < 0.5)
+    }
+
+    /// The engagement's interpolatable state is ONE function of progress,
+    /// and its endpoints are exactly what the animated engage/disengage
+    /// produce. That shared definition is what lets a committed drag hand
+    /// off to `dismissComments` mid-gesture without reconciling anything.
+    @Test func engagementProgressInterpolatesAndMatchesTheAnimatedEnds() throws {
+        let cell = SnapFeedCell(frame: Self.container)
+        cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
+        configurePost(cell)
+        cell.layoutIfNeeded()
+        let hosted = UIView()
+        cell.installComments(hosted)
+        cell.setCommentsEngaged(true)
+        let container = try #require(hosted.superview)
+        let backdrop = try backdrop(of: cell)
+
+        // Engaged IS progress 0.
+        #expect(container.alpha == 1)
+        #expect(container.transform == .identity)
+        #expect(abs(backdrop.dimOpacity - SnapCommentsLayout.backdropDimOpacity) < 0.001)
+
+        // Mid-drag: every leg sits between its ends, none of them switched.
+        cell.setCommentsEngagementProgress(0.5)
+        #expect(abs(container.alpha - 0.5) < 0.01)
+        #expect(backdrop.dimOpacity < SnapCommentsLayout.backdropDimOpacity)
+        #expect(backdrop.dimOpacity > 0)
+        // THE BANDS DO NOT SCALE. The container carries no transform at all
+        // now — the shrink belongs to the hosted stream — so the footer's
+        // band (which lives inside it) and the header's (a sibling) both
+        // hold their size at the screen's edge and only fade.
+        #expect(container.transform == .identity)
+        let frost = try #require(
+            cell.contentView.subviews.compactMap { $0 as? ProgressiveFrostView }.first
         )
-        #expect(transform.a == transform.d) // uniform scale — no distortion
+        #expect(frost.transform == .identity)
+        #expect(abs(frost.alpha - 0.5) < 0.01)
+
+        // Progress 1 lands on exactly what the animated disengage produces —
+        // asserted by driving the boolean path and comparing.
+        cell.setCommentsEngagementProgress(1)
+        let alphaAtOne = container.alpha, frostAtOne = frost.alpha
+        let dimAtOne = backdrop.dimOpacity
+        cell.setCommentsEngagementProgress(0)
+        cell.setCommentsEngaged(false)
+        #expect(container.alpha == alphaAtOne)
+        #expect(backdrop.dimOpacity == dimAtOne)
+        #expect(frost.alpha == frostAtOne)
+
+        // Clamped: nothing runs past either end.
+        cell.setCommentsEngagementProgress(-3)
+        #expect(container.alpha == 1)
+        cell.setCommentsEngagementProgress(9)
+        #expect(container.alpha == 0)
     }
 
-    /// Strip + comments region tile the cell with no gap and no overlap.
-    @Test func stripAndCommentsRegionPartitionTheCell() {
-        let stripBottom = SnapCommentsLayout.stripBottom(topInset: Self.topInset)
-        let region = SnapCommentsLayout.commentsRegionHeight(
-            containerHeight: Self.container.height, topInset: Self.topInset
-        )
-        #expect(stripBottom + region == Self.container.height)
-    }
-
-    /// The transform carries the CROP square exactly onto the slot — the
-    /// real contract, asserted on an actual view's resolved frame (view
-    /// transforms apply about the center anchor; `CGRect.applying` scales
-    /// about the origin and would test the wrong semantics). The crop is
-    /// centered, so the view's transformed center is the slot's center and
-    /// the transformed width equals the slot's side; the height overflow is
-    /// what the mask crops away.
-    @Test func mediaTransformMapsCropOntoSlot() {
-        let slot = SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset)
-        let view = UIView(frame: Self.container)
-        view.transform = SnapCommentsLayout.mediaTransform(bounds: Self.container, slot: slot)
-        #expect(abs(view.frame.midX - slot.midX) < 0.5)
-        #expect(abs(view.frame.midY - slot.midY) < 0.5)
-        #expect(abs(view.frame.width - slot.width) < 0.5)
-        let crop = SnapCommentsLayout.mediaCropFrame(in: Self.container)
-        let scale = view.frame.width / Self.container.width
-        #expect(abs(crop.height * scale - slot.height) < 0.5)
+    /// The treatment is a WASH AND NOTHING ELSE. No blur, no material, no
+    /// gradient anywhere in the layer — two rounds of dark material were
+    /// tried and both fogged the photo out, so "is there an effect view in
+    /// here" is now a real regression, not a style preference. It is also
+    /// what makes the layer free over a playing `AVPlayerLayer` and what
+    /// lets it behave identically on a headless CI host (no `UIBlurEffect`
+    /// means no render-server contact, so no window guard).
+    @Test func theBackdropIsAPlainWashWithNoBlur() throws {
+        let cell = makeEngagedCell()
+        let backdrop = try backdrop(of: cell)
+        var stack: [UIView] = [backdrop]
+        while let view = stack.popLast() {
+            #expect(view as? UIVisualEffectView == nil)
+            stack.append(contentsOf: view.subviews)
+        }
+        // The wash is the view itself — one layer, opaque black, alpha-driven.
+        let colour = try #require(backdrop.backgroundColor)
+        var white: CGFloat = -1, alpha: CGFloat = -1
+        #expect(colour.getWhite(&white, alpha: &alpha))
+        #expect(white == 0 && alpha == 1)
+        // And it raises OUT OF A WINDOW — unlike every blur in this feature,
+        // which stays nil until the view is windowed.
+        #expect(cell.window == nil)
+        #expect(abs(backdrop.dimOpacity - SnapCommentsLayout.backdropDimOpacity) < 0.001)
     }
 
     @Test func degenerateBoundsAreSafe() {
-        #expect(SnapCommentsLayout.mediaSlotFrame(in: .zero, topInset: 0) == .zero)
-        #expect(SnapCommentsLayout.mediaTransform(bounds: .zero, slot: .zero) == .identity)
         #expect(SnapCommentsLayout.commentsRegionHeight(containerHeight: 10, topInset: 500) == 0)
     }
 
@@ -121,18 +253,36 @@ struct SnapCommentsPresentationTests {
         return cell
     }
 
-    /// Engaging docks the media (both render surfaces — whichever is
-    /// visible rides the same transform), fades the comment surfaces while
-    /// the ACTION RAIL stays untouched (the blueprint's keep), and shows
-    /// the engaged caption; disengaging restores identity exactly.
-    @Test func engagementDocksMediaAndReverses() throws {
+    /// Engaging leaves the media EXACTLY where it was — full-bleed surfaces
+    /// at identity, the page's background rather than a docked tile — and
+    /// dims it behind the stream instead. It fades the comment surfaces
+    /// while the ACTION RAIL stays untouched (the blueprint's keep);
+    /// disengaging clears the treatment completely.
+    @Test func engagementBacksTheStreamWithTheMediaAndReverses() throws {
         let cell = makeEngagedCell()
         #expect(cell.isCommentsEngaged)
 
-        let slot = SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset)
-        let expected = SnapCommentsLayout.mediaTransform(bounds: Self.container, slot: slot)
-        let media = try mediaCard(of: cell).imageView
-        #expect(media.transform == expected)
+        let card = try mediaCard(of: cell)
+        let media = card.imageView
+        // The SURFACES never move: no dock transform, no crop mask. The
+        // whole "engagement owns the media transform" doctrine is gone.
+        #expect(media.transform == .identity)
+        #expect(media.mask == nil)
+        #expect(card.renderView.transform == .identity)
+        #expect(card.renderView.mask == nil)
+        // The engagement's only geometry is the card's own whisper of a
+        // recede, and the backdrop's dim over it.
+        // The engagement does not touch the media's geometry AT ALL: no
+        // scale, no corner rounding, no clip. A 6pt pullback with
+        // screen-concentric corners rode the engagement for a while and read
+        // as a phantom layer sliding under the content rather than as depth.
+        #expect(card.transform == .identity)
+        #expect(card.clipsToBounds == false)
+        #expect(card.layer.cornerRadius == 0)
+        let backdrop = try backdrop(of: cell)
+        // Tolerance, not equality: `UIView.alpha` round-trips through a
+        // Float, so the CGFloat constant never comes back bit-identical.
+        #expect(abs(backdrop.dimOpacity - SnapCommentsLayout.backdropDimOpacity) < 0.001)
         let chrome = try #require(cell.contentView.subviews.compactMap { $0 as? SnapChromeView }.first)
         // The chrome as a whole never fades — only its comment surfaces do;
         // the rail rides both states at full presence.
@@ -159,10 +309,34 @@ struct SnapCommentsPresentationTests {
         cell.setCommentsEngaged(false)
         #expect(cell.isCommentsEngaged == false)
         #expect(media.transform == .identity)
-        #expect(media.layer.cornerRadius == 0)
+        #expect(card.transform == .identity)
+        #expect(backdrop.dimOpacity == 0)
         #expect(ticker.alpha == 1)
         #expect(subtitle.alpha == 1)
         #expect(plus.alpha == 1)
+    }
+
+    /// The stream's floor is TRANSPARENT: the container the comments are
+    /// hosted in was opaque black for the docked-tile layout, and that one
+    /// colour is what hid the post for the whole engagement. Nothing may
+    /// quietly reintroduce it — the readability layer is the only thing
+    /// between the media and the rows.
+    @Test func theCommentsContainerNeverPaintsOverTheMedia() throws {
+        let cell = makeEngagedCell()
+        let container = try #require(
+            cell.contentView.subviews.compactMap { $0 as? SnapCommentsContainerView }.first
+        )
+        let colour = try #require(container.backgroundColor)
+        var alpha: CGFloat = -1
+        #expect(colour.getWhite(nil, alpha: &alpha))
+        #expect(alpha == 0)
+        // And it sits ABOVE the media and the backdrop, never below them.
+        let subviews = cell.contentView.subviews
+        let mediaIndex = try #require(subviews.firstIndex(of: mediaCard(of: cell)))
+        let backdropIndex = try #require(subviews.firstIndex(of: backdrop(of: cell)))
+        let streamIndex = try #require(subviews.firstIndex(of: container))
+        #expect(mediaIndex < backdropIndex)
+        #expect(backdropIndex < streamIndex)
     }
 
     /// The keyboard-up collision rule: wherever the rail and the engaged
@@ -207,59 +381,13 @@ struct SnapCommentsPresentationTests {
         #expect(sequence(first: railHit, next: { $0.superview }).contains { $0 is SnapShortcutRailView })
     }
 
-    /// The glass card is exactly one media row tall — the slot wrapped
-    /// with uniform padding, inset from the screen edges: a floating
-    /// object, not a band. The column's rows live INSIDE the slot's
-    /// vertical extent, so they add no height.
-    @Test func stripCardWrapsTheSlot() {
-        let slot = SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset)
-        let card = SnapCommentsLayout.stripCardFrame(in: Self.container, topInset: Self.topInset)
-        #expect(card.minY == slot.minY - SnapCommentsLayout.stripCardPadding)
-        #expect(card.maxY == slot.maxY + SnapCommentsLayout.stripCardPadding)
-        #expect(card.minX == slot.minX - SnapCommentsLayout.stripCardPadding)
-        #expect(card.maxX == Self.container.width - card.minX)
-        #expect(card.height == SnapCommentsLayout.cardHeight)
-        #expect(card.maxY < SnapCommentsLayout.stripBottom(topInset: Self.topInset))
-    }
-
-    /// The caption column's floor and line budget: the actions row is the
-    /// only bottom reservation (the audio credit lives in the native
-    /// toolbar — keep-and-stack), and the line cap is whole lines,
-    /// floored, never zero.
-    @Test func captionColumnReservesTheActionsRow() {
-        let slot = SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset)
-        let floor = SnapCommentsLayout.captionColumnMaxY(slotMaxY: slot.maxY)
-        #expect(floor == slot.maxY - SnapCommentsLayout.cardActionsHeight - Spacing.xs)
-        #expect(SnapCommentsLayout.captionLineCapacity(columnHeight: 100, lineHeight: 20) == 5)
-        #expect(SnapCommentsLayout.captionLineCapacity(columnHeight: 99, lineHeight: 20) == 4)
-        #expect(SnapCommentsLayout.captionLineCapacity(columnHeight: 5, lineHeight: 20) == 1)
-        #expect(SnapCommentsLayout.captionLineCapacity(columnHeight: 100, lineHeight: 0) == 1)
-    }
-
-    /// The frost ramps: the header's dissolve starts exactly at the nav
-    /// zone's boundary (the frozen top inset over the band's height),
-    /// never inverts on degenerate insets, and the footer's solid fraction
-    /// is a genuine mid-band stop — both ends of the frame dissolve, no
-    /// hard geometric edges.
-    @Test func frostRampsDeriveFromTheEngagedGeometry() {
-        let fraction = SnapCommentsLayout.headerFrostSolidFraction(topInset: Self.topInset)
-        let band = SnapCommentsLayout.stripBottom(topInset: Self.topInset)
-        #expect(abs(fraction - Self.topInset / band) < 0.001)
-        #expect(fraction > 0 && fraction < 1)
-        #expect(SnapCommentsLayout.headerFrostSolidFraction(topInset: 0) == 0)
-        #expect(SnapCommentsLayout.headerFrostSolidFraction(topInset: 100_000) <= 0.9)
-        #expect(SnapCommentsLayout.footerFrostSolidFraction > 0)
-        #expect(SnapCommentsLayout.footerFrostSolidFraction < 1)
-        #expect(SnapCommentsLayout.footerFrostLead > 0)
-    }
-
-    /// The layered engaged hierarchy: the comments host spans the FULL
-    /// cell (content rides under the strip), the wall-to-wall header
-    /// frost covers exactly screen-top → strip-bottom, the glass card
-    /// floats above the frost, and the media is z-lifted above all of it
-    /// for the engagement's lifetime — the sandwich is stream → frost →
-    /// card → media; `clearComments` restores everything.
-    @Test func installedCommentsLayerBehindTheStrip() throws {
+    /// The layered engaged hierarchy: the media stays at the BACK, the
+    /// readability layer covers it, the comments host spans the FULL cell
+    /// (content rides under the card), the wall-to-wall header frost covers
+    /// exactly screen-top → strip-bottom, and the glass card floats on top
+    /// — the sandwich is media → backdrop → stream → frost → card;
+    /// `clearComments` restores everything.
+    @Test func installedCommentsLayerOverTheBackgroundMedia() throws {
         let cell = SnapFeedCell(frame: Self.container)
         cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
         configurePost(cell)
@@ -269,106 +397,132 @@ struct SnapCommentsPresentationTests {
         cell.setCommentsEngaged(true)
         cell.contentView.layoutIfNeeded()
 
-        // Full-height stream…
+        // Full-height stream, SQUARE and unclipped — a screen-matched corner
+        // was tried twice and removed: `containerConcentric` resolves to ~0
+        // for a view flush with its container, and reading the display's own
+        // radius meant private API for something visually inert on a
+        // transparent container.
         let container = try #require(hosted.superview)
+        #expect(container.clipsToBounds == false)
+        #expect(container.layer.cornerRadius == 0)
         #expect(container.frame.minY == 0)
         #expect(container.frame.maxY == Self.container.height)
         #expect(container.frame.width == Self.container.width)
         #expect(container.alpha == 1)
 
-        // …under the header frost (wall-to-wall, top → the partition
-        // line, and hit-inert: the layer must never change the engaged
-        // touch surface)…
+        // …under the header frost, which spans EXACTLY its container —
+        // screen top to where the stream's content begins — and ramps
+        // across all of it. It must not overhang: blur spilling past the
+        // chrome it serves lands on the content, which is what the earlier
+        // 160pt runway did. Hit-inert throughout.
         let subviews = cell.contentView.subviews
         let frost = try #require(subviews.compactMap { $0 as? ProgressiveFrostView }.first)
         #expect(frost.isHidden == false)
-        // The "caption" fixture is a single line, so the cards (and the
-        // frost band above them) take the COMPACT height.
         #expect(frost.frame == CGRect(
             x: 0, y: 0,
             width: Self.container.width,
-            height: SnapCommentsLayout.stripBottom(topInset: Self.topInset, compact: true)
+            height: SnapCommentsLayout.commentsTopInset(topInset: Self.topInset)
         ))
+        // The band ENDS at the content line — no overhang, in either
+        // direction: this is the whole constraint.
+        #expect(frost.frame.maxY == SnapCommentsLayout.commentsTopInset(topInset: Self.topInset))
         #expect(frost.isUserInteractionEnabled == false)
         let frostMask = try #require(frost.mask)
         #expect(frostMask.frame == frost.bounds)
+        // The HEADER ramps endpoint to endpoint across its container:
+        // opaque at the screen's edge, clear at the content line, two stops
+        // so there is no knee partway down.
+        let header = SnapCommentsLayout.headerFrostMaskColors
+        #expect(header.count == 2)
+        #expect(SnapCommentsLayout.headerFrostMaskLocations == [0, 1])
+        func alpha(_ colour: UIColor) -> CGFloat {
+            var a: CGFloat = -1
+            _ = colour.getWhite(nil, alpha: &a)
+            return a
+        }
+        #expect(alpha(header[0]) == 1)
+        #expect(alpha(header[1]) == 0)
+        // The FOOTER is NOT symmetric, and deliberately so: it fades in over
+        // the lead and then HOLDS full material, so the composer sits on the
+        // solid part of the band rather than its clear end.
+        let footer = SnapCommentsLayout.footerFrostMaskColors
+        #expect(footer.count == 3)
+        #expect(alpha(footer[0]) == 0)   // clear at the band's top…
+        #expect(alpha(footer[1]) == 1)   // …full by the composer's top…
+        #expect(alpha(footer[2]) == 1)   // …and solid to the screen's bottom
 
-        // …under the info card, which draws its OWN glass (a distinct
-        // rounded, hairline-stroked surface). Its width is DYNAMIC (hugs
-        // the short "caption"), so on a media post it's LEADING-pinned at
-        // the media-adjacent region and no wider than that region.
-        let info = try #require(subviews.compactMap { $0 as? SnapPostInfoCardView }.first)
-        #expect(info.isHidden == false)
-        let mediaRegion = SnapCommentsLayout.infoCardFrame(in: Self.container, topInset: Self.topInset, hasMedia: true, compact: true)
-        #expect(abs(info.frame.minX - mediaRegion.minX) < 0.5)
-        #expect(info.frame.minY == mediaRegion.minY)
-        #expect(info.frame.height == mediaRegion.height)
-        #expect(info.frame.width <= mediaRegion.width + 0.5)
-        #expect(info.frame.width >= info.minimumWidth - 0.5) // never below the floor
-        let infoGlass = try #require(info.subviews.compactMap { $0 as? SnapGlassCardView }.first)
-        #expect(infoGlass.layer.cornerRadius == SnapCommentsLayout.stripCardCornerRadius)
+        // NO caption card in the cell at all any more — the caption is the
+        // hosted stream's first row, so the feed cell must not carry a
+        // second copy of it floating above.
+        #expect(subviews.compactMap { $0 as? SnapPostInfoCardView }.isEmpty)
 
-        // …with the media card (carrying its own glass) z-lifted above the
-        // stream and frost. Both cards sit above the frost; the media tile
-        // floats over everything.
+        // …with the media at the BACK of the stack, under the readability
+        // layer — never z-lifted over the stream (the lift is what let the
+        // docked tile's invisible full-bleed frame eat stream touches).
         let media = try #require(subviews.compactMap { $0 as? SnapMediaCardView }.first)
-        let containerIndex = try #require(subviews.firstIndex(of: container))
-        let frostIndex = try #require(subviews.firstIndex(of: frost))
-        let infoIndex = try #require(subviews.firstIndex(of: info))
+        let backdrop = try #require(subviews.compactMap { $0 as? SnapMediaBackdropView }.first)
         let mediaIndex = try #require(subviews.firstIndex(of: media))
-        #expect(containerIndex < frostIndex)
-        #expect(frostIndex < infoIndex)
-        #expect(frostIndex < mediaIndex)
+        let backdropIndex = try #require(subviews.firstIndex(of: backdrop))
+        let containerIndex = try #require(subviews.firstIndex(of: container))
+        #expect(mediaIndex == 0)
+        #expect(mediaIndex < backdropIndex)
+        #expect(backdropIndex < containerIndex)
+        // The backdrop covers the WHOLE cell — the stream reads over media
+        // at every row, not only under the card.
+        #expect(backdrop.frame == cell.contentView.bounds)
+        #expect(backdrop.isUserInteractionEnabled == false)
 
         cell.setCommentsEngaged(false)
         cell.clearComments()
         #expect(hosted.superview == nil)
         #expect(container.isHidden == true)
-        #expect(info.isHidden == true)
         #expect(frost.isHidden == true)
         #expect(frost.effect == nil)
-        // Resting z restored: media back at the bottom of the stack.
+        #expect(backdrop.dimOpacity == 0)
+        // The media never moved, so there is no z-order to restore.
         #expect(cell.contentView.subviews.firstIndex(of: media) == 0)
     }
 
-    /// REGRESSION (stranded center tile): an outbound push while engaged
-    /// fires the lifecycle resign, whose Ken Burns stop once reset the
-    /// media transform to identity — the docked tile became a frozen
-    /// full-bleed center crop, and the return couldn't heal it (the drift
-    /// rightly never restarts while engaged). The stop must settle onto
-    /// the ENGAGED resting transform, and the appearance sync's re-assert
-    /// must restore the dock even from a deliberately corrupted state.
-    @Test func outboundResignKeepsTheDockedMediaTransform() throws {
+    /// REGRESSION, inverted (stranded center tile): the outbound push's
+    /// lifecycle resign runs the Ken Burns stop, which once had to settle
+    /// onto a per-state resting transform — a blind identity stranded the
+    /// docked tile as a frozen full-bleed center crop that the return could
+    /// not heal. With the media full-bleed in BOTH states there is no such
+    /// state to get wrong: identity is correct throughout, and the recede
+    /// the engagement does own lives on the card, out of the drift's reach.
+    @Test func outboundResignLeavesTheBackgroundMediaAlone() throws {
         let cell = makeEngagedCell()
-        let slot = SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset)
-        let dock = SnapCommentsLayout.mediaTransform(bounds: Self.container, slot: slot)
-        let media = try mediaCard(of: cell).imageView
-        #expect(media.transform == dock)
+        let card = try mediaCard(of: cell)
+        let media = card.imageView
+        #expect(media.transform == .identity)
 
         // The outbound push's lifecycle: activate, then resign (image
         // cells run the Ken Burns stop on this path).
         cell.willBecomeActive()
         cell.didResignActive()
-        #expect(media.transform == dock)
+        #expect(media.transform == .identity)
+        // Nothing the engagement does can disturb the media, because the
+        // engagement no longer touches it.
+        #expect(card.transform == .identity)
 
-        // The belt: even a corrupted transform snaps back to the slot on
-        // the appearance re-assert; disengaged cells are untouched.
-        media.transform = .identity
-        cell.reassertEngagedGeometry()
-        #expect(media.transform == dock)
-        cell.setCommentsEngaged(false)
+        // The appearance re-assert is idempotent, and inert once disengaged.
         cell.reassertEngagedGeometry()
         #expect(media.transform == .identity)
+        #expect(card.transform == .identity)
+        cell.setCommentsEngaged(false)
+        cell.reassertEngagedGeometry()
+        #expect(card.transform == .identity)
     }
 
-    /// REGRESSION (phantom tile band): the docked video surface's FRAME
-    /// is the full-bleed rect under the dock's uniform scale — taller
-    /// than the visible square (the mask crops pixels, not hit-testing) —
-    /// and, z-lifted, it ate stream touches ~65pt above/below the tile
-    /// (an avatar tap on the first row dismissed the engagement). Hits on
-    /// the media OUTSIDE the slot must route to the stream beneath; hits
-    /// ON the tile stay the close target.
-    @Test func dockedMediaHitAreaIsClippedToTheVisibleTile() throws {
+    /// REGRESSION, inverted (phantom tile band): the docked video surface
+    /// kept its full-bleed FRAME under the dock's uniform scale — the mask
+    /// cropped pixels, not hit-testing — so once z-lifted it ate stream
+    /// touches ~65pt above and below the visible square, and an avatar tap
+    /// on the first comment row dismissed the whole engagement. The media
+    /// is now full-bleed AND at the back of the stack, so EVERY point over
+    /// the engaged stream must reach the stream, including points squarely
+    /// on the video surface.
+    @Test func backgroundMediaNeverStealsStreamTouches() throws {
         let cell = SnapFeedCell(frame: Self.container)
         cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
         cell.configure(
@@ -393,27 +547,18 @@ struct SnapCommentsPresentationTests {
         cell.setCommentsEngaged(true)
         cell.contentView.layoutIfNeeded()
 
-        // Single-line "caption" → the docked tile is the COMPACT square.
-        let slot = SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset, compact: true)
         let video = try mediaCard(of: cell).renderView
-        // The phantom band exists (the premise): the frame is taller than
-        // the visible square.
-        #expect(video.frame.height > slot.height + 50)
+        // The premise: the video surface is full-bleed, so it lies under
+        // the whole stream — the exact overlap that used to be a bug.
+        #expect(video.frame == cell.contentView.bounds)
 
-        // A point in the band BELOW the slot (the first comment row's
-        // territory) routes to the hosted stream, not the media. It sits
-        // squarely in the lower phantom band — below the visible tile, above
-        // the render frame's true bottom (the band shrinks with the compact
-        // tile, so a fixed offset would overshoot it).
-        let bandPoint = CGPoint(x: slot.midX, y: (slot.maxY + video.frame.maxY) / 2)
-        #expect(video.frame.contains(bandPoint))
-        let bandHit = try #require(cell.hitTest(bandPoint, with: nil))
-        #expect(sequence(first: bandHit, next: { $0.superview }).contains { $0 === hosted })
-
-        // A point ON the visible tile keeps hitting the media — the
-        // docked tile stays the tap-to-close target.
-        let tileHit = try #require(cell.hitTest(CGPoint(x: slot.midX, y: slot.midY), with: nil))
-        #expect(tileHit === video)
+        // Every probe down the stream reaches the hosted view, never the
+        // media beneath it.
+        let partition = SnapCommentsLayout.commentsTopInset(topInset: Self.topInset)
+        for y in stride(from: partition + 20, to: Self.container.height - 20, by: 120) {
+            let hit = try #require(cell.hitTest(CGPoint(x: Self.container.midX, y: y), with: nil))
+            #expect(sequence(first: hit, next: { $0.superview }).contains { $0 === hosted })
+        }
     }
 
     /// Reuse must never leak the mutated layout into the next post.
@@ -421,8 +566,11 @@ struct SnapCommentsPresentationTests {
         let cell = makeEngagedCell()
         cell.prepareForReuse()
         #expect(cell.isCommentsEngaged == false)
-        let media = try mediaCard(of: cell).imageView
-        #expect(media.transform == .identity)
+        let card = try mediaCard(of: cell)
+        #expect(card.imageView.transform == .identity)
+        #expect(card.transform == .identity)
+        #expect(card.clipsToBounds == false)
+        try #expect(backdrop(of: cell).dimOpacity == 0)
     }
 
     /// The chrome canvas is hit-transparent: bare-area touches fall through
@@ -501,102 +649,74 @@ struct SnapCommentsPresentationTests {
         return cell
     }
 
-    private func infoCard(of cell: SnapFeedCell) throws -> SnapPostInfoCardView {
-        // The info card is now a direct cell subview drawing its OWN glass
-        // (no shared backdrop wraps it).
-        try #require(cell.contentView.subviews.compactMap { $0 as? SnapPostInfoCardView }.first)
-    }
-
     /// The media component — the render surfaces now live inside it, not as
     /// loose cell subviews.
     private func mediaCard(of cell: SnapFeedCell) throws -> SnapMediaCardView {
         try #require(cell.contentView.subviews.compactMap { $0 as? SnapMediaCardView }.first)
     }
 
-    /// The engaged caption's frame in the CELL's coordinate space. The
-    /// caption now lives inside the INFO CARD (a media post also has the
-    /// chrome's own full-width caption label with the same text — so the
-    /// search is scoped to the info card), converted back to `contentView`.
-    private func engagedCaptionFrame(in cell: SnapFeedCell) throws -> CGRect {
-        var stack: [UIView] = try [infoCard(of: cell)]
-        while let view = stack.popLast() {
-            if let label = view as? UILabel, label.text == "caption", !label.isHidden {
-                return label.superview?.convert(label.frame, to: cell.contentView) ?? label.frame
-            }
-            stack.append(contentsOf: view.subviews)
-        }
-        throw NSError(domain: "test", code: 0)
+    /// The readability layer between the media and the stream.
+    private func backdrop(of cell: SnapFeedCell) throws -> SnapMediaBackdropView {
+        try #require(cell.contentView.subviews.compactMap { $0 as? SnapMediaBackdropView }.first)
     }
 
-    private func metricButton(_ label: String, in card: UIView) -> UIButton? {
-        var stack: [UIView] = [card]
-        while let view = stack.popLast() {
-            if let button = view as? UIButton, button.accessibilityLabel == label { return button }
-            stack.append(contentsOf: view.subviews)
-        }
-        return nil
-    }
+    /// The STREAM's entrance choreography: it fades AND expands into place,
+    /// and reverses exactly. The expand moved here from the caption card
+    /// when the caption became a scrolling row — the motion belongs to the
+    /// The engagement's fade, and WHERE THE SHRINK LIVES.
+    ///
+    /// The container fades but never transforms: the shrink moved to the
+    /// hosted stream so the footer's blur band — which lives inside this
+    /// container — keeps its size and seat at the screen's edge. A band that
+    /// scales stops reading as chrome. The header band, a sibling, fades on
+    /// its own alpha for the same reason it never scaled.
+    @Test func theEngagementFadesAndLeavesTheBandsUnscaled() throws {
+        let cell = SnapFeedCell(frame: Self.container)
+        cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
+        configurePost(cell)
+        cell.layoutIfNeeded()
+        let hosted = UIView()
+        cell.installComments(hosted)
+        let container = try #require(hosted.superview)
+        let frost = try #require(
+            cell.contentView.subviews.compactMap { $0 as? ProgressiveFrostView }.first
+        )
 
-    /// The card is the POST's column: the metrics row renders from the
-    /// same display model that feeds the page — likes from the hydration
-    /// snapshot, comments from the loaded streams (blank until loaded —
-    /// the known-zero honesty seam), repost/save as affordance seams.
-    /// Screen chrome must NOT duplicate here (keep-and-stack): the nav
-    /// pill owns identity, the native toolbar's attribution owns the
-    /// audio line.
-    @Test func engagedCardRendersTheFullPost() throws {
-        let cell = makeConfiguredCell(audioText: "Original audio · @ana", likeCount: 1234)
-        let card = try infoCard(of: cell)
+        // Offstage: transparent, and NOT transformed.
+        #expect(container.alpha == 0)
+        #expect(container.transform == .identity)
 
-        var labels: [UILabel] = []
-        var stack: [UIView] = [card]
-        while let view = stack.popLast() {
-            if let label = view as? UILabel { labels.append(label) }
-            stack.append(contentsOf: view.subviews)
-        }
-        let texts = labels.compactMap(\.text)
-        // Keep-and-stack: the native toolbar's attribution owns the audio
-        // line and the nav pill owns identity — the card renders NEITHER
-        // (zero duplication with visible screen chrome).
-        #expect(!texts.contains("Original audio · @ana"))
-        #expect(!texts.contains("Ana"))
-        #expect(!texts.contains("@ana · 3m"))
-
-        let like = try #require(metricButton("Like", in: card))
-        #expect(like.configuration?.attributedTitle.map { String($0.characters) } == "1.2k")
-        // Comments blank until the streams load…
-        let comments = try #require(metricButton("Comments", in: card))
-        #expect(comments.configuration?.attributedTitle == nil)
-        // …then follow the same seam as the chrome's surfaces.
-        cell.updateCommentStreams(FeedViewModel.CommentStreams(
-            reactions: [], subtitles: [], commentCount: 56, isLoaded: true
-        ))
-        #expect(comments.configuration?.attributedTitle.map { String($0.characters) } == "56")
-        // The affordance-only seams exist without counts.
-        #expect(metricButton("Repost", in: card) != nil)
-        #expect(metricButton("Save", in: card) != nil)
-    }
-
-    /// Zero likes render no count — a bare heart, not a lying "0".
-    @Test func engagedCardHidesZeroCounts() throws {
-        let cell = makeConfiguredCell(audioText: nil, likeCount: 0)
-        let card = try infoCard(of: cell)
-        let like = try #require(metricButton("Like", in: card))
-        #expect(like.configuration?.attributedTitle == nil)
-    }
-
-    /// The info card's CONTENT choreography: a PURE FADE — transparent at
-    /// rest (alpha 0), opaque while engaged, and back to transparent on
-    /// disengage — with NO translation (the content fades in place). The
-    /// glass frame never moves; the fade rides the content, not the blur.
-    @Test func engagedCardFadesInAndOutWithTheSpring() throws {
-        let cell = makeConfiguredCell(audioText: nil, likeCount: 0)
-        let card = try infoCard(of: cell)
-        #expect(card.contentAlpha == 0)
         cell.setCommentsEngaged(true)
-        #expect(card.contentAlpha == 1)
+        #expect(container.alpha == 1)
+        #expect(container.transform == .identity)
+        #expect(frost.alpha == 1)
+        #expect(frost.transform == .identity)
+
+        // Disengaged: faded out, still untransformed, band gone with it.
         cell.setCommentsEngaged(false)
-        #expect(card.contentAlpha == 0)
+        #expect(container.alpha == 0)
+        #expect(container.transform == .identity)
+        #expect(frost.alpha == 0)
+        #expect(frost.transform == .identity)
+
+        // The SHRINK is the stream's, and it is a real interpolation.
+        let detail = PostDetailViewController(
+            viewModel: PostDetailViewModel(
+                postID: PostID("p"), repository: EmptyFeedProvider()
+            ),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            mode: .commentsOnly
+        )
+        detail.loadViewIfNeeded()
+        let stream = try #require(Self.firstView(UICollectionView.self, in: detail.view))
+        detail.setStreamTransitionProgress(0)
+        #expect(stream.transform == .identity)
+        detail.setStreamTransitionProgress(1)
+        #expect(stream.transform.a == SnapCommentsLayout.streamEntranceScale)
+        #expect(stream.transform.a == stream.transform.d) // uniform
+        detail.setStreamTransitionProgress(0.5)
+        #expect(stream.transform.a > SnapCommentsLayout.streamEntranceScale)
+        #expect(stream.transform.a < 1)
     }
 
     /// The engaged tap boundary: a touch anywhere inside the hosted
@@ -618,33 +738,29 @@ struct SnapCommentsPresentationTests {
 
         #expect(SnapFeedCell.isCommentsStreamTouch(row, stopAt: cell.contentView))
         #expect(SnapFeedCell.isCommentsStreamTouch(hosted, stopAt: cell.contentView))
-        // The strip's layers (the info glass card and the docked media)
-        // remain close-eligible…
-        let card = try infoCard(of: cell)
-        #expect(SnapFeedCell.isCommentsStreamTouch(card, stopAt: cell.contentView) == false)
+        // …while the cell's own layers stay outside the stream walk.
         let media = try mediaCard(of: cell).imageView
         #expect(SnapFeedCell.isCommentsStreamTouch(media, stopAt: cell.contentView) == false)
     }
 
-    /// The card swipe's territory: the exit pan begins anywhere inside
-    /// the floating glass card — media tile, caption column, metrics row
-    /// — and nowhere else: the nav zone above the card, the mid-stream,
-    /// and the footer band (the composer bar owns its own exit) stay out.
-    @Test func cardSwipeRegionIsTheWholeGlassCard() {
+    /// The page-drive swipe's territory is the HEADER BAND — everything
+    /// above where the stream's content begins. It used to be the floating
+    /// caption card; with the caption scrolling as a list row there is no
+    /// stationary card to grab, and below this line a vertical drag has to
+    /// scroll the comments instead.
+    @Test func pageDriveSwipeRegionIsTheHeaderBand() {
         let cell = SnapFeedCell(frame: Self.container)
         cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
         cell.layoutIfNeeded()
-        let slot = SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset)
-        let card = SnapCommentsLayout.stripCardFrame(in: Self.container, topInset: Self.topInset)
-        // The media tile…
-        #expect(cell.cardSwipeRegionContains(CGPoint(x: slot.midX, y: slot.midY)))
-        // …the caption/metrics column, out to the card's far edge…
-        #expect(cell.cardSwipeRegionContains(CGPoint(x: card.maxX - 20, y: card.midY)))
-        #expect(cell.cardSwipeRegionContains(CGPoint(x: card.midX, y: card.maxY - 4)))
-        // …but not the nav zone above, the stream below, or the footer.
-        #expect(cell.cardSwipeRegionContains(CGPoint(x: card.midX, y: Self.topInset / 2)) == false)
-        #expect(cell.cardSwipeRegionContains(CGPoint(x: card.midX, y: Self.container.midY)) == false)
-        #expect(cell.cardSwipeRegionContains(CGPoint(x: card.midX, y: Self.container.height - 60)) == false)
+        let boundary = SnapCommentsLayout.commentsTopInset(topInset: Self.topInset)
+        // The nav zone and the breath under it belong to the drive…
+        #expect(cell.cardSwipeRegionContains(CGPoint(x: Self.container.midX, y: 10)))
+        #expect(cell.cardSwipeRegionContains(CGPoint(x: Self.container.midX, y: boundary - 2)))
+        // …and everything from the stream down does not: those drags scroll
+        // the comments, which is the whole point of moving the caption in.
+        #expect(cell.cardSwipeRegionContains(CGPoint(x: Self.container.midX, y: boundary + 2)) == false)
+        #expect(cell.cardSwipeRegionContains(CGPoint(x: Self.container.midX, y: Self.container.midY)) == false)
+        #expect(cell.cardSwipeRegionContains(CGPoint(x: Self.container.midX, y: Self.container.height - 60)) == false)
     }
 
     /// REGRESSION (feed paralysis): the card's exit pan is DISABLED for
@@ -672,83 +788,52 @@ struct SnapCommentsPresentationTests {
         #expect(pan.isEnabled == false)
     }
 
-    /// A text-only page's engagement is the media layout's card with the
-    /// media hole COLLAPSED and the exits LOCKED: identical glass card at
-    /// the identical frame and identical frost band, but the caption (and
-    /// the card column with it) stretches to the slot's own left edge —
-    /// no ghost space — and the card exit pan never arms (the engagement
-    /// is the page's PERMANENT resting state; paging is the only way
-    /// off). The dead-end lock is identical to media's: the container
-    /// claims every touch.
-    @Test func textOnlyEngagementCollapsesTheSlotAndLocksTheExits() throws {
-        let cell = SnapFeedCell(frame: Self.container)
-        cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
-        configurePost(cell, media: false)
-        cell.layoutIfNeeded()
-        let hosted = UIView()
-        cell.installComments(hosted)
-        cell.setCommentsEngaged(true)
-        cell.contentView.layoutIfNeeded()
+    /// FORMAT PARITY, still structural: a text page and a media page build
+    /// the IDENTICAL engaged shell — same chrome-zone boundary, same frost
+    /// band, same dead-end lock, same armed page-drive. With the caption
+    /// living in the hosted stream, the cell itself carries NO per-format
+    /// layout at all; the only difference left between the two pages is
+    /// whether anything is visible behind the backdrop.
+    @Test func textAndMediaEngagementsBuildTheIdenticalShell() throws {
+        func engagedShell(media: Bool) throws -> (SnapFeedCell, UIView) {
+            let cell = SnapFeedCell(frame: Self.container)
+            cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
+            configurePost(cell, media: media)
+            cell.layoutIfNeeded()
+            let hosted = UIView()
+            cell.installComments(hosted)
+            cell.setCommentsEngaged(true)
+            cell.contentView.layoutIfNeeded()
+            return (cell, hosted)
+        }
 
-        // Text posts show ONE standalone glass card. Its width is DYNAMIC
-        // (hugs the short "caption") and, being narrower than the full
-        // strip, it CENTERS horizontally within the strip — no stretching
-        // into empty space.
-        // Single-line "caption" → the standalone card takes the COMPACT height.
-        let strip = SnapCommentsLayout.stripCardFrame(in: Self.container, topInset: Self.topInset, compact: true)
-        let info = try infoCard(of: cell)
-        #expect(info.isHidden == false)
-        #expect(info.frame.width < strip.width)                 // hugged narrow
-        #expect(abs(info.frame.midX - strip.midX) < 0.5)        // centered in the strip
-        #expect(info.frame.minY == strip.minY && info.frame.height == strip.height)
-        #expect(info.frame.width >= info.minimumWidth - 0.5)    // never below the floor
-        #expect(info.subviews.compactMap { $0 as? SnapGlassCardView }.first != nil)
-        // No media card glass is shown on a text page.
-        #expect(cell.contentView.subviews.compactMap { $0 as? SnapMediaCardView }.first?
-            .subviews.contains { $0 is SnapGlassCardView && !$0.isHidden } == false)
-        let frost = try #require(cell.contentView.subviews.compactMap { $0 as? ProgressiveFrostView }.first)
-        #expect(frost.frame.height == SnapCommentsLayout.stripBottom(topInset: Self.topInset, compact: true))
-        // The caption sits at the (centered) card's own uniform inner inset.
-        let caption = try engagedCaptionFrame(in: cell)
-        #expect(abs(caption.minX - (info.frame.minX + SnapPostInfoCardView.contentInset)) < 0.5)
-        // …and TOP-PINS to the card's top inset (no centering — the text
-        // starts flush at the top, no artificial gap above).
-        #expect(abs(caption.minY - (info.frame.minY + SnapPostInfoCardView.contentInset)) < 0.5)
-        // The card page-drive pan IS armed — a vertical swipe on the card
-        // drives the pager interactively (it pages, never dismisses), so a
-        // text post's resting interface arms it exactly like media.
-        let pan = try #require(cell.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
-        #expect(pan.isEnabled == true)
-        // The dead-end lock is identical to media's.
-        #expect(SnapFeedCollectionView.claimsTouches(hosted))
-        // The reactions rail is PRESENT on the text page — the shared
-        // action column reserves its trailing exclusion, exactly as media.
-        #expect(cell.commentsRailExclusionWidth > 0)
-        // A MEDIA page keeps the media caption leading (past the slot) and
-        // the armed exits — but shares the SAME caption axis and the SAME
-        // right-aligned counters.
-        let mediaCell = makeEngagedCell()
-        let mediaHosted = UIView()
-        mediaCell.installComments(mediaHosted)
-        mediaCell.contentView.layoutIfNeeded()
-        #expect(SnapFeedCollectionView.claimsTouches(mediaHosted))
-        let mediaPan = try #require(mediaCell.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
-        #expect(mediaPan.isEnabled == true)
-        // On a media post the caption lives in the SEPARATE info card, so
-        // it starts at that card's own uniform inner inset (its frame sits
-        // past the media card + the gap) — the SAME inset as the text card,
-        // homogeneous on every format.
-        let mediaInfoFrame = SnapCommentsLayout.infoCardFrame(in: Self.container, topInset: Self.topInset, hasMedia: true, compact: true)
-        let mediaCaption = try engagedCaptionFrame(in: mediaCell)
-        #expect(abs(mediaCaption.minX - (mediaInfoFrame.minX + SnapPostInfoCardView.contentInset)) < 0.5)
-        #expect(abs(mediaCaption.minY - (mediaInfoFrame.minY + SnapPostInfoCardView.contentInset)) < 0.5)
+        let (text, textHosted) = try engagedShell(media: false)
+        let (media, mediaHosted) = try engagedShell(media: true)
+
+        for (cell, hosted) in [(text, textHosted), (media, mediaHosted)] {
+            // No caption card in the cell on EITHER format.
+            #expect(cell.contentView.subviews.compactMap { $0 as? SnapPostInfoCardView }.isEmpty)
+            // The stream fills the cell and starts below the chrome zone.
+            #expect(hosted.superview?.frame == cell.contentView.bounds)
+            #expect(cell.engagedCommentsTopInset(safeAreaTop: Self.topInset)
+                == SnapCommentsLayout.commentsTopInset(topInset: Self.topInset))
+            let frost = try #require(cell.contentView.subviews.compactMap { $0 as? ProgressiveFrostView }.first)
+            #expect(frost.frame.height == SnapCommentsLayout.commentsTopInset(topInset: Self.topInset))
+            // The dead-end lock and the armed page-drive, both formats.
+            #expect(SnapFeedCollectionView.claimsTouches(hosted))
+            let pan = try #require(cell.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
+            #expect(pan.isEnabled == true)
+            // The reactions rail reserves its trailing column on both.
+            #expect(cell.commentsRailExclusionWidth > 0)
+        }
     }
 
     /// `SnapMediaCardView` is HIT-TRANSPARENT: it hosts the surfaces
-    /// full-bleed, so once z-lifted over the stream its own frame must
-    /// never eat touches — only its surfaces are hittable (a self-hit
-    /// returns nil, falling through to whatever is beneath). Without this
-    /// the wrapped media card would swallow the entire comments stream.
+    /// full-bleed, so its own frame must never eat touches — only its
+    /// surfaces are hittable (a self-hit returns nil, falling through to
+    /// whatever is beneath). Load-bearing for the background layout too:
+    /// a full-bleed view that answered every point would claim the whole
+    /// page's background taps.
     @Test func mediaCardIsHitTransparentExceptItsSurfaces() {
         let card = SnapMediaCardView()
         card.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
@@ -764,241 +849,57 @@ struct SnapCommentsPresentationTests {
         #expect(card.hitTest(CGPoint(x: 195, y: 400), with: nil) == nil)
     }
 
-    /// TWO independent glass cards on media posts: the media card (a square
-    /// wrapping the slot at the strip's left) and the info card (from just
-    /// past it, plus the gap, to the strip's right edge) — with a clear
-    /// physical gap between them, tiling the strip with no overlap. On text
-    /// posts the info card is the WHOLE strip (the media card is omitted).
-    @Test func mediaAndInfoAreTwoSeparateCardsWithAGap() {
-        let media = SnapCommentsLayout.mediaCardFrame(in: Self.container, topInset: Self.topInset)
-        let slot = SnapCommentsLayout.mediaSlotFrame(in: Self.container, topInset: Self.topInset)
-        // The media card is a square wrapping the slot by the card padding.
-        #expect(media.width == media.height)
-        #expect(media.width == slot.width + 2 * SnapCommentsLayout.stripCardPadding)
-        #expect(abs(media.midX - slot.midX) < 0.5 && abs(media.midY - slot.midY) < 0.5)
-
-        let info = SnapCommentsLayout.infoCardFrame(in: Self.container, topInset: Self.topInset, hasMedia: true)
-        // A real gap sits between them — two distinct floating cards.
-        #expect(info.minX == media.maxX + SnapCommentsLayout.cardGap)
-        #expect(info.minX > media.maxX)
-        // …and together they span the strip (media left edge → info right).
-        let strip = SnapCommentsLayout.stripCardFrame(in: Self.container, topInset: Self.topInset)
-        #expect(media.minX == strip.minX)
-        #expect(abs(info.maxX - strip.maxX) < 0.5)
-        #expect(media.minY == strip.minY && info.minY == strip.minY)
-        #expect(media.height == strip.height && info.height == strip.height)
-
-        // Text: the info card IS the whole strip; no media card beside it.
-        let textInfo = SnapCommentsLayout.infoCardFrame(in: Self.container, topInset: Self.topInset, hasMedia: false)
-        #expect(textInfo == strip)
-    }
-
-    /// The counter cluster is RIGHT-ALIGNED on every post type — one
-    /// posture, no format branch: it hugs the card's trailing inner edge
-    /// and grows leftward as counts appear.
-    @Test func cardCountersAreAlwaysRightAligned() throws {
-        let width: CGFloat = 374
-        let pad = SnapPostInfoCardView.contentInset
-        let card = SnapPostInfoCardView(frame: CGRect(x: 0, y: 0, width: width, height: 104))
+    @Test func theCaptionBubblePadsEvenlyAndSizesItself() throws {
+        let inset = SnapPostInfoCardView.contentInset
+        let side: CGFloat = 300
+        let card = SnapPostInfoCardView()
+        card.translatesAutoresizingMaskIntoConstraints = false
+        card.widthAnchor.constraint(equalToConstant: side).isActive = true
+        card.configure(caption: "A caption that comfortably fills a line or two.", timestamp: "10 weeks")
+        card.setNeedsLayout()
         card.layoutIfNeeded()
-        // The counters stack is now nested inside the card's own glass.
-        var stack: [UIView] = [card]
-        var actions: UIStackView?
-        while let view = stack.popLast() {
-            if let s = view as? UIStackView { actions = s; break }
-            stack.append(contentsOf: view.subviews)
-        }
-        let row = try #require(actions)
-        // In the card's own coordinate space (the glass fills it).
-        let maxX = row.superview?.convert(row.frame, to: card).maxX ?? row.frame.maxX
-        #expect(abs(maxX - (width - pad)) < 0.5)
-    }
-
-    /// The card's DYNAMIC intrinsic width: a short caption yields a card
-    /// only as wide as its content, a long caption reaches wider, and the
-    /// width never drops below the bottom-row floor (`minimumWidth` — date +
-    /// gap + counters + insets), so the interaction row never clips.
-    @Test func infoCardWidthIsDynamicWithAFloor() {
-        let card = SnapPostInfoCardView(frame: .zero)
-        card.configure(with: FeedItemDisplayModel(
-            id: PostID("p"), authorID: ProfileID("a"), authorName: "Ava",
-            metaText: "@ava · 5d", avatarURL: nil, caption: "hi",
-            mediaURL: nil, mediaKind: .image, thumbnailURL: nil, audioText: nil,
-            likeCount: 1234, timestampText: "5 days"
-        ))
-        card.setCommentCount(56, isLoaded: true)
-
-        // A tiny caption ("hi") can't drive the card below the bottom row.
-        card.setCaption("hi")
-        let floor = card.minimumWidth
-        #expect(card.intrinsicContentSize.width == floor)
-
-        // A long caption reaches wider than the floor.
-        card.setCaption("A considerably longer caption that clearly outruns the counters row")
-        #expect(card.intrinsicContentSize.width > floor)
-
-        // The floor genuinely reserves the bottom row (date + md gap +
-        // counters + the two edge insets) — comfortably past the bare gap.
-        #expect(floor > 2 * SnapPostInfoCardView.contentInset + Spacing.md)
-    }
-
-    /// A single-line caption shrinks the strip to the COMPACT height — one
-    /// caption line with no two-line slack — and both floating glass cards
-    /// (the media square and the info card) shrink IN STEP, staying a
-    /// height-matched pair. A caption that wraps to two lines keeps the full
-    /// height. The height-match is by construction: both card frames derive
-    /// from `cardHeight(compact:)`, so they can never drift apart.
-    @Test func singleLineCaptionCompactsBothCardsAsAMatchedPair() throws {
-        // Pure geometry: the compact strip is shorter than the full one, and
-        // the two card frames share the SAME height in either state.
-        #expect(SnapCommentsLayout.compactCardHeight < SnapCommentsLayout.cardHeight)
-        for compact in [false, true] {
-            let mediaCard = SnapCommentsLayout.mediaCardFrame(
-                in: Self.container, topInset: Self.topInset, compact: compact)
-            let infoCard = SnapCommentsLayout.infoCardFrame(
-                in: Self.container, topInset: Self.topInset, hasMedia: true, compact: compact)
-            #expect(mediaCard.height == SnapCommentsLayout.cardHeight(compact: compact))
-            #expect(abs(mediaCard.height - infoCard.height) < 0.5) // matched pair
-            #expect(mediaCard.minY == infoCard.minY)               // and top-aligned
-        }
-
-        // The caption's LINE COUNT drives the decision on a real cell: a
-        // single-line caption lands the info card at the compact height…
-        let short = SnapFeedCell(frame: Self.container)
-        short.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
-        configurePost(short) // "caption" — one line
-        short.layoutIfNeeded()
-        short.installComments(UIView())
-        short.setCommentsEngaged(true)
-        short.contentView.layoutIfNeeded()
-        let shortInfo = try infoCard(of: short)
-        #expect(abs(shortInfo.frame.height - SnapCommentsLayout.compactCardHeight) < 0.5)
-
-        // …and a caption long enough to wrap beside the media keeps the FULL
-        // (two-line) height.
-        let tall = SnapFeedCell(frame: Self.container)
-        tall.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
-        tall.configure(
-            with: FeedItemDisplayModel(
-                id: PostID("post-0000"), authorID: ProfileID("profile-1"),
-                authorName: "Ava", metaText: "@ava · 3m", avatarURL: nil,
-                caption: "A considerably longer caption that clearly wraps onto a second line beside the docked media square",
-                mediaURL: URL(string: "mock://media/0.jpg"), mediaKind: .image,
-                thumbnailURL: nil, audioText: "Original audio · @ava",
-                likeCount: 0, timestampText: "5 days"
-            ),
-            pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            videoPlayback: nil
-        )
-        tall.layoutIfNeeded()
-        tall.installComments(UIView())
-        tall.setCommentsEngaged(true)
-        tall.contentView.layoutIfNeeded()
-        let tallInfo = try infoCard(of: tall)
-        #expect(abs(tallInfo.frame.height - SnapCommentsLayout.cardHeight) < 0.5)
-    }
-
-    /// The timestamp is a dual-anchor row with the counters: leading-
-    /// aligned, on the counters' baseline, and it YIELDS — a tight row
-    /// truncates the date (tail) so it never pushes or overlaps the
-    /// right-aligned counters (which keep their intrinsic width).
-    @Test func timestampAnchorsLeadingAndYieldsToCounters() throws {
-        let inset = SnapPostInfoCardView.contentInset
-
-        func labelledCard(_ width: CGFloat, timestamp: String) -> (SnapPostInfoCardView, UILabel, UIStackView) {
-            let card = SnapPostInfoCardView(frame: CGRect(x: 0, y: 0, width: width, height: SnapCommentsLayout.cardHeight))
-            card.configure(with: FeedItemDisplayModel(
-                id: PostID("p"), authorID: ProfileID("a"), authorName: "Ava",
-                metaText: "@ava · 5d", avatarURL: nil, caption: "caption",
-                mediaURL: nil, mediaKind: .image, thumbnailURL: nil, audioText: nil,
-                likeCount: 1234, timestampText: timestamp
-            ))
-            card.setCommentCount(56, isLoaded: true)
-            card.layoutIfNeeded()
-            var labels: [UILabel] = [], stacks: [UIStackView] = []
-            var stack: [UIView] = [card]
-            while let v = stack.popLast() {
-                if let l = v as? UILabel { labels.append(l) }
-                if let s = v as? UIStackView { stacks.append(s) }
-                stack.append(contentsOf: v.subviews)
-            }
-            let ts = labels.first { $0.text == timestamp }!
-            return (card, ts, stacks.first!)
-        }
-
-        // Roomy card: the timestamp sits at the leading inset, on the
-        // counters' baseline row, with the full date visible.
-        let (card, ts, actions) = labelledCard(374, timestamp: "5d")
-        let tsFrame = ts.superview!.convert(ts.frame, to: card)
-        let actionsFrame = actions.superview!.convert(actions.frame, to: card)
-        #expect(abs(tsFrame.minX - inset) < 0.5)
-        #expect(abs(tsFrame.midY - actionsFrame.midY) < 0.5)
-        // Counters keep their intrinsic width, trailing-pinned.
-        #expect(abs(actionsFrame.maxX - (374 - inset)) < 0.5)
-        // No overlap: the timestamp ends before the counters begin.
-        #expect(tsFrame.maxX <= actionsFrame.minX + 0.5)
-
-        // A card sized to hold the counters at full width with only a
-        // sliver of room for the timestamp, plus a very long date: the
-        // counters WIN (still trailing-pinned at full intrinsic width) and
-        // the timestamp YIELDS — truncating so it never crosses into them.
-        let sliver: CGFloat = 24
-        let narrow = ceil(inset + sliver + Spacing.md + actionsFrame.width + inset)
-        let (card2, ts2, actions2) = labelledCard(narrow, timestamp: "999 weeks ago, give or take")
-        let actions2Frame = actions2.superview!.convert(actions2.frame, to: card2)
-        let ts2Frame = ts2.superview!.convert(ts2.frame, to: card2)
-        // Counters uncompressed and trailing-pinned (full width preserved).
-        #expect(abs(actions2Frame.maxX - (narrow - inset)) < 0.5)
-        #expect(abs(actions2Frame.width - actionsFrame.width) < 0.5)
-        // The timestamp truncated into the sliver — no overlap with counters.
-        #expect(ts2Frame.maxX <= actions2Frame.minX + 0.5)
-        #expect(ts2Frame.width <= sliver + 0.5)
-        #expect(ts2.text == "999 weeks ago, give or take") // full text kept; the LABEL truncates at draw
-    }
-
-    /// HOMOGENEOUS PADDING: the info card insets its content by the SAME
-    /// margin on all four edges — the caption's leading/trailing and the
-    /// counters' trailing/bottom all sit exactly `contentInset` from the
-    /// card's border, and the caption band's top uses that same inset (no
-    /// extra top offset). Measured on a laid-out card.
-    @Test func infoCardPaddingIsHomogeneousOnAllEdges() throws {
-        let inset = SnapPostInfoCardView.contentInset
-        let side: CGFloat = 300, height = SnapCommentsLayout.cardHeight
-        let card = SnapPostInfoCardView(frame: CGRect(x: 0, y: 0, width: side, height: height))
-        card.setCaption("A caption that comfortably fills a line or two of the band.")
+        // SELF-SIZED: nothing set a height, so the fitting size is the
+        // bubble's own answer, and it must actually hold its content.
+        let height = card.systemLayoutSizeFitting(
+            CGSize(width: side, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        ).height
+        #expect(height > 2 * inset)
+        card.frame = CGRect(x: 0, y: 0, width: side, height: height)
         card.layoutIfNeeded()
 
         func frame(_ v: UIView) -> CGRect { v.superview?.convert(v.frame, to: card) ?? v.frame }
-        var labels: [UILabel] = [], stacks: [UIStackView] = []
+        var labels: [UILabel] = []
         var stack: [UIView] = [card]
         while let view = stack.popLast() {
-            if let l = view as? UILabel { labels.append(l) }
-            if let s = view as? UIStackView { stacks.append(s) }
+            if let l = view as? UILabel, l.text?.isEmpty == false { labels.append(l) }
             stack.append(contentsOf: view.subviews)
         }
-        let caption = try #require(labels.first { !($0.text ?? "").isEmpty })
-        let counters = try #require(stacks.first)
-        let captionFrame = frame(caption), countersFrame = frame(counters)
+        let caption = try #require(labels.first { $0.text?.hasPrefix("A caption") == true })
+        let timestamp = try #require(labels.first { $0.text == "10 weeks" })
+        let captionFrame = frame(caption), timeFrame = frame(timestamp)
 
-        // Leading: caption sits one inset from the left border.
+        // All four margins are the same inset.
         #expect(abs(captionFrame.minX - inset) < 0.5)
-        // Trailing: caption AND counters sit one inset from the right.
         #expect(abs(side - captionFrame.maxX - inset) < 0.5)
-        #expect(abs(side - countersFrame.maxX - inset) < 0.5)
-        // Bottom: counters sit one inset from the bottom border.
-        #expect(abs(height - countersFrame.maxY - inset) < 0.5)
-        // Top: the caption TOP-PINS exactly one inset from the top — no
-        // centering, no artificial gap above the text.
         #expect(abs(captionFrame.minY - inset) < 0.5)
-        // The counters clear the caption by the tight interior gap (never
-        // overlap, never a loose centered float).
-        #expect(countersFrame.minY >= captionFrame.maxY + SnapPostInfoCardView.captionActionsGap - 0.5)
+        #expect(abs(height - timeFrame.maxY - inset) < 0.5)
+        // The timestamp is TRAILING-aligned (the message-bubble corner) and
+        // clears the caption by the one interior gap.
+        #expect(abs(side - timeFrame.maxX - inset) < 0.5)
+        #expect(timeFrame.minX > captionFrame.midX)
+        #expect(timeFrame.minY >= captionFrame.maxY + SnapPostInfoCardView.captionActionsGap - 0.5)
+        // A longer caption yields a TALLER bubble — it grows to its text.
+        card.configure(caption: String(repeating: "wrapping caption text ", count: 12), timestamp: "10 weeks")
+        let tall = card.systemLayoutSizeFitting(
+            CGSize(width: side, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        ).height
+        #expect(tall > height)
     }
 
-    /// The engaged toolbar's sort selector: single-selection menu with a
-    /// checkmark following the chosen order, title mirroring it, the seam
-    /// firing only on genuine changes, and reset returning to the
-    /// engagement-scoped default.
     @Test func commentSortButtonKeepsHonestSelectionState() throws {
         let button = SnapCommentSortButton()
         #expect(button.order == .recent)
@@ -1020,27 +921,29 @@ struct SnapCommentsPresentationTests {
         #expect(changes == [.trending])
     }
 
-    /// The composer's trailing three-state machine (engaged bar — a close
-    /// handler is wired): keyboard closed → ✕ closes the engagement;
-    /// keyboard open + empty → the dismiss-keyboard face; keyboard open +
-    /// text → send. The pushed screen (no close handler) keeps its
-    /// permanent send regardless of the keyboard.
+    /// The trailing slot's three faces, and the one that changed: the ✕ is
+    /// GONE from this bar (the exit moved to the toolbar) and a MICROPHONE
+    /// holds the idle slot instead — the affordance a message composer
+    /// actually wants there. The page-swipe drive marks a feed engagement;
+    /// the pushed comments screen wires none and keeps a permanent send.
     @Test func composerTrailingSlotFollowsKeyboardAndText() throws {
         let bar = CommentsInputBar()
-        bar.onClose = {}
+        bar.onPageSwipe = { _, _, _ in }
         func button(_ label: String) -> UIButton? {
             bar.subviews.compactMap { $0 as? UIButton }.first { $0.accessibilityLabel == label }
         }
         let send = try #require(button("Send comment"))
 
-        // Keyboard closed, empty: the close ✕.
-        #expect(button("Close comments") != nil)
+        // Keyboard closed, empty: the microphone — and NO close affordance
+        // anywhere on the bar.
+        #expect(button("Record voice comment") != nil)
+        #expect(button("Close comments") == nil)
         #expect(send.alpha == 0)
 
-        // Keyboard closed, text drafted: STILL the ✕ (send needs the
-        // keyboard; a parked draft keeps the close affordance).
+        // Keyboard closed, text drafted: STILL the mic (send needs the
+        // keyboard; a parked draft does not claim the slot).
         bar.draftText = "draft"
-        #expect(button("Close comments") != nil)
+        #expect(button("Record voice comment") != nil)
         #expect(send.alpha == 0)
 
         // Keyboard opens over the draft: send takes the slot.
@@ -1052,14 +955,14 @@ struct SnapCommentsPresentationTests {
         // tapping must retire the keyboard, never the engagement.
         bar.draftText = ""
         #expect(button("Dismiss keyboard") != nil)
-        #expect(button("Close comments") == nil)
+        #expect(button("Record voice comment") == nil)
         #expect(send.alpha == 0)
 
-        // Keyboard retires: back to the ✕.
+        // Keyboard retires: back to the mic.
         bar.setKeyboardOpen(false)
-        #expect(button("Close comments") != nil)
+        #expect(button("Record voice comment") != nil)
 
-        // Pushed screen (no close handler): permanent send, no utility.
+        // Pushed screen (no engagement): permanent send, no utility face.
         let pushed = CommentsInputBar()
         let pushedSend = try #require(
             pushed.subviews.compactMap { $0 as? UIButton }.first { $0.accessibilityLabel == "Send comment" }
@@ -1069,27 +972,24 @@ struct SnapCommentsPresentationTests {
         #expect(pushedSend.alpha == 1)
     }
 
-    /// TEXT-POST edge case: the bar has NO ✕ (permanent resting → `onClose`
-    /// nil) but IS a feed engagement (`onPageSwipe` wired). The keyboard-
-    /// dismiss face must still appear over an empty field with the keyboard
-    /// up — and swap to send the moment text is entered — matching the
-    /// media layout, unlike the pushed screen (which keeps permanent send).
-    @Test func textPostBarShowsKeyboardDismissWhenEmpty() throws {
+    /// TEXT-POST parity: a text engagement wires the page-swipe drive and
+    /// nothing else, and its bar must behave exactly like a media post's —
+    /// the mic when idle, the dismiss chevron with the keyboard up over an
+    /// empty field, send the moment text is entered. (Before the ✕ left the
+    /// bar this was an edge case, because text posts had no close handler
+    /// to key off; the mic made both formats one path.)
+    @Test func textPostBarMatchesTheMediaBar() throws {
         let bar = CommentsInputBar()
-        bar.onPageSwipe = { _, _, _ in } // feed engagement, but no close (text)
+        bar.onPageSwipe = { _, _, _ in } // feed engagement, text post
         let buttons = bar.subviews.compactMap { $0 as? UIButton }
         let send = try #require(buttons.first { $0.accessibilityLabel == "Send comment" })
-        // The utility slot (label swaps xmark↔chevron; keyboard down here
-        // so it starts as the — hidden — ✕).
-        let utility = try #require(buttons.first { $0.accessibilityLabel == "Close comments" })
+        let utility = try #require(buttons.first { $0.accessibilityLabel == "Record voice comment" })
 
-        // Keyboard down: the permanent send shows; the utility is hidden
-        // (text has no ✕ to collapse to).
-        #expect(send.alpha == 1)
-        #expect(utility.alpha == 0)
+        // Keyboard down: the mic owns the slot, exactly as on media.
+        #expect(utility.alpha == 1)
+        #expect(send.alpha == 0)
 
-        // Keyboard up over an empty field: the dismiss-keyboard face — the
-        // fix (previously text forced send because it has no close handler).
+        // Keyboard up over an empty field: the dismiss-keyboard face.
         bar.setKeyboardOpen(true)
         #expect(utility.accessibilityLabel == "Dismiss keyboard")
         #expect(utility.alpha == 1)
@@ -1100,12 +1000,16 @@ struct SnapCommentsPresentationTests {
         #expect(send.alpha == 1)
         #expect(send.isEnabled)
         #expect(utility.alpha == 0)
-
-        // Cleared again: back to the dismiss face.
+        // Cleared with the keyboard still up: back to the dismiss face.
         bar.draftText = ""
         #expect(utility.accessibilityLabel == "Dismiss keyboard")
         #expect(utility.alpha == 1)
         #expect(send.alpha == 0)
+
+        // …and back to the mic once the keyboard retires.
+        bar.setKeyboardOpen(false)
+        #expect(utility.accessibilityLabel == "Record voice comment")
+        #expect(utility.alpha == 1)
     }
 
     /// The 2-level thread order: each top-level comment immediately
@@ -1155,6 +1059,296 @@ struct SnapCommentsPresentationTests {
         }
         #expect(try settledRow(parentModel).minX == 0)
         #expect(try settledRow(replyModel).minX == CommentRowView.replyIndent)
+    }
+
+    // MARK: - Comment avatars
+
+    /// Initials are the RENDERED state, not a loading state: two letters,
+    /// drawn SYNCHRONOUSLY at configure time, before any fetch exists. A
+    /// row is fully readable on the frame it appears.
+    @Test func commentRowsRenderTwoLetterInitialsImmediately() throws {
+        let model = CommentDisplayModel(entry: CommentEntry(
+            id: "c1", authorID: ProfileID("p1"), authorName: "Ava Moreau",
+            authorHandle: "ava", body: "hi", createdAt: Date()
+        ))
+        #expect(model.monogram == "AM")
+        // A one-word name still yields something; a mid-name never yields
+        // three letters (the disc is sized for two).
+        #expect(CommentDisplayModel(entry: CommentEntry(
+            id: "c2", authorID: ProfileID("p"), authorName: "Prince",
+            authorHandle: "p", body: "b", createdAt: Date()
+        )).monogram == "P")
+        #expect(CommentDisplayModel(entry: CommentEntry(
+            id: "c3", authorID: ProfileID("p"), authorName: "Ana Lucia Reyes Diaz",
+            authorHandle: "a", body: "b", createdAt: Date()
+        )).monogram == "AL")
+
+        // No pipeline at all — the disc still carries the initials.
+        let row = CommentRowView()
+        row.configure(with: model)
+        #expect(monogramText(in: row) == "AM")
+        #expect(avatarImage(in: row) == nil)
+    }
+
+    /// The URL travels: `comment.v1` carries no picture, so the repository
+    /// hydrates one from profile.v1 onto the ENTRY — and the display model
+    /// must actually forward it. It was dropped here for the whole life of
+    /// the comments surface, which is why the rows had nothing to load.
+    @Test func commentDisplayModelForwardsTheHydratedAvatarURL() {
+        let url = URL(string: "mock://avatar/1")!
+        let entry = CommentEntry(
+            id: "c1", authorID: ProfileID("p1"), authorName: "Ava Moreau",
+            authorHandle: "ava", authorAvatarURL: url, body: "hi", createdAt: Date()
+        )
+        #expect(CommentDisplayModel(entry: entry).avatarURL == url)
+        // Absent is a first-class outcome, not an error.
+        #expect(CommentDisplayModel(entry: CommentEntry(
+            id: "c2", authorID: ProfileID("p"), authorName: "Bo Chen",
+            authorHandle: "bo", body: "b", createdAt: Date()
+        )).avatarURL == nil)
+    }
+
+    /// The caption row aligns to the COMMENT rows, to the point: same
+    /// avatar diameter, same gap. That alignment is the whole reason the
+    /// caption reads as the thread's first message instead of a header
+    /// pasted above it — the bubble's glass is the only thing setting it
+    /// apart. It also carries the same async-avatar contract: monogram
+    /// first, picture over it, and an id guard so a recycled row can't
+    /// catch the previous post's face.
+    @Test func theCaptionRowIsAMessageInTheSameColumnAsTheComments() async throws {
+        let cell = CaptionBubbleCell(frame: CGRect(x: 0, y: 0, width: 374, height: 120))
+        let post = Self.post(caption: "Weekend build log.", avatar: URL(string: "mock://avatar/9"))
+        cell.configure(with: post, imagePipeline: nil)
+        cell.layoutIfNeeded()
+
+        // The avatar column matches the comment rows' exactly.
+        let avatar = try #require(Self.firstView(MonogramAvatarView.self, in: cell))
+        #expect(avatar.bounds.width == CommentRowView.avatarSize)
+        let bubble = try #require(Self.firstView(SnapPostInfoCardView.self, in: cell))
+        #expect(abs(bubble.frame.minX - (avatar.frame.maxX + CommentRowView.avatarGap)) < 0.5)
+
+        // Initials render immediately; no picture without a pipeline.
+        #expect(Self.monogramText(in: cell) == post.avatarMonogram)
+        #expect(Self.avatarImage(in: cell) == nil)
+
+        // The picture lands over the monogram when one is available…
+        let open = ImagePipeline(fetcher: GateddImageFetcher(openFrom: true))
+        cell.configure(with: post, imagePipeline: open)
+        await settle()
+        #expect(Self.avatarImage(in: cell) != nil)
+        #expect(Self.monogramText(in: cell) == post.avatarMonogram)
+
+        // …and a recycled row never catches it.
+        let gate = GateddImageFetcher()
+        let slow = ImagePipeline(fetcher: gate)
+        cell.prepareForReuse()
+        #expect(Self.avatarImage(in: cell) == nil)
+        cell.configure(with: post, imagePipeline: slow)
+        cell.prepareForReuse()
+        cell.configure(
+            with: Self.post(caption: "A different post entirely.", avatar: nil, id: "post-0002"),
+            imagePipeline: slow
+        )
+        await gate.release()
+        await settle()
+        #expect(Self.avatarImage(in: cell) == nil)
+    }
+
+    /// The caption bubble is NON-INTERACTIVE — a standard row in the list,
+    /// like every comment beside it. It carried a close tap for one round;
+    /// a row that silently dismisses the screen under a stray tap is not
+    /// what a message in a thread should do, and the toolbar's ✕ is the
+    /// single exit. The AVATAR keeps its own tap.
+    @Test func theCaptionBubbleIsAPlainRowAndOnlyTheAvatarTaps() throws {
+        let cell = CaptionBubbleCell(frame: CGRect(x: 0, y: 0, width: 374, height: 120))
+        cell.configure(with: Self.post(caption: "Weekend build log.", avatar: nil), imagePipeline: nil)
+        cell.layoutIfNeeded()
+
+        let bubble = try #require(Self.firstView(SnapPostInfoCardView.self, in: cell))
+        let avatar = try #require(Self.firstView(MonogramAvatarView.self, in: cell))
+        // No recognizer anywhere on the bubble or its content…
+        var stack: [UIView] = [bubble]
+        while let view = stack.popLast() {
+            #expect(view.gestureRecognizers?.isEmpty ?? true)
+            stack.append(contentsOf: view.subviews)
+        }
+        // …while the avatar keeps exactly its own. (The cell's contentView
+        // is not asserted: UIKit puts its own recognizers there.)
+        #expect(avatar.gestureRecognizers?.count == 1)
+
+        var profiles = 0
+        cell.onAvatarTap = { profiles += 1 }
+        cell.onAvatarTap?()
+        #expect(profiles == 1)
+        cell.prepareForReuse()
+        #expect(cell.onAvatarTap == nil)
+    }
+
+    private static func post(caption: String, avatar: URL?, id: String = "post-0001") -> PostDetailDisplayModel {
+        PostDetailDisplayModel(entry: FeedEntry(
+            post: Post(
+                id: PostID(id), authorID: ProfileID("p1"), caption: caption,
+                attachments: [], publishedAt: Date(timeIntervalSince1970: 0)
+            ),
+            author: AuthorSummary(
+                id: ProfileID("p1"), handle: "ava", displayName: "Ava Moreau",
+                avatarURL: avatar
+            )
+        ))
+    }
+
+    private static func firstView<T: UIView>(_ type: T.Type, in root: UIView) -> T? {
+        var stack: [UIView] = [root]
+        while let view = stack.popLast() {
+            if let match = view as? T { return match }
+            stack.append(contentsOf: view.subviews)
+        }
+        return nil
+    }
+
+    private static func monogramText(in root: UIView) -> String? {
+        firstView(MonogramAvatarView.self, in: root)?
+            .subviews.compactMap { $0 as? UILabel }.first?.text
+    }
+
+    private static func avatarImage(in root: UIView) -> UIImage? {
+        firstView(AvatarImageView.self, in: root)?.image
+    }
+
+    /// THE REUSE CONTRACT, exercised as the bug it prevents: a row starts a
+    /// slow fetch for one author, gets recycled onto another comment, and
+    /// the first fetch only then completes. The late image must not land —
+    /// the wrong person's face on a stranger's comment is the failure mode.
+    ///
+    /// Both recycling sequences are covered, because they are not the same
+    /// path: going through `prepareForReuse` cancels the task, while a
+    /// straight re-`configure` (the collection view reusing a still-live
+    /// cell) relies on the identity check. The row keeps both guards for
+    /// that reason — the shipped chat-inbox pattern.
+    @Test func aRecycledRowNeverCatchesThePreviousAuthorsFace() async throws {
+        let slow = URL(string: "mock://avatar/slow")!
+        func stale(_ id: String) -> CommentDisplayModel {
+            CommentDisplayModel(entry: CommentEntry(
+                id: id, authorID: ProfileID("p1"), authorName: "Ava Moreau",
+                authorHandle: "ava", authorAvatarURL: slow, body: "b", createdAt: Date()
+            ))
+        }
+        func faceless(_ id: String) -> CommentDisplayModel {
+            CommentDisplayModel(entry: CommentEntry(
+                id: id, authorID: ProfileID("p2"), authorName: "Bo Chen",
+                authorHandle: "bo", body: "b", createdAt: Date()
+            ))
+        }
+
+        for viaPrepareForReuse in [true, false] {
+            let gate = GateddImageFetcher()
+            let pipeline = ImagePipeline(fetcher: gate)
+            let row = CommentRowView()
+            row.configure(with: stale("first"), imagePipeline: pipeline)
+
+            // Recycled onto a DIFFERENT comment whose author has no
+            // picture — the disc must stay bare.
+            if viaPrepareForReuse { row.prepareForReuse() }
+            row.configure(with: faceless("second"), imagePipeline: pipeline)
+            #expect(monogramText(in: row) == "BC")
+
+            // Only NOW does the first author's fetch finish.
+            await gate.release()
+            await settle()
+            #expect(avatarImage(in: row) == nil)
+            #expect(monogramText(in: row) == "BC")
+        }
+    }
+
+    /// The happy path, and the contract's shape: the picture arrives and is
+    /// drawn OVER the monogram, never swapped for it — so the disc is never
+    /// empty, at any point, and a failed fetch degrades to exactly what was
+    /// already on screen.
+    @Test func theAvatarLandsOverTheMonogramAndFailureLeavesIt() async throws {
+        let pipeline = ImagePipeline(fetcher: GateddImageFetcher(openFrom: true))
+        let row = CommentRowView()
+        row.configure(with: CommentDisplayModel(entry: CommentEntry(
+            id: "c1", authorID: ProfileID("p1"), authorName: "Ava Moreau",
+            authorHandle: "ava", authorAvatarURL: URL(string: "mock://avatar/1")!,
+            body: "b", createdAt: Date()
+        )), imagePipeline: pipeline)
+        await settle()
+        #expect(avatarImage(in: row) != nil)
+        #expect(monogramText(in: row) == "AM") // still there, underneath
+
+        // A FAILING fetch is indistinguishable from no avatar at all.
+        let failing = ImagePipeline(fetcher: FailingImageFetcher())
+        let row2 = CommentRowView()
+        row2.configure(with: CommentDisplayModel(entry: CommentEntry(
+            id: "c2", authorID: ProfileID("p2"), authorName: "Bo Chen",
+            authorHandle: "bo", authorAvatarURL: URL(string: "mock://avatar/2")!,
+            body: "b", createdAt: Date()
+        )), imagePipeline: failing)
+        await settle()
+        #expect(avatarImage(in: row2) == nil)
+        #expect(monogramText(in: row2) == "BC")
+    }
+
+    /// The cell owns ONE row for its lifetime and re-points it — it does
+    /// not rebuild a view tree, two gesture recognizers, and a context-menu
+    /// interaction for every row that scrolls past. `prepareForReuse` is
+    /// the seam that lets the row drop its fetch and its stale handlers.
+    @Test func theCommentCellReusesItsRowAndResetsItOnRecycle() throws {
+        let cell = CommentCell(frame: CGRect(x: 0, y: 0, width: 320, height: 80))
+        let row = cell.row
+        let model = CommentDisplayModel(entry: CommentEntry(
+            id: "c1", authorID: ProfileID("p1"), authorName: "Ava Moreau",
+            authorHandle: "ava", body: "b", createdAt: Date()
+        ))
+        row.configure(with: model)
+        row.onAvatarTap = {}
+        #expect(monogramText(in: row) == "AM")
+
+        cell.prepareForReuse()
+        #expect(cell.row === row)            // same instance, not rebuilt
+        #expect(row.onAvatarTap == nil)      // stale seams dropped
+        #expect(avatarImage(in: row) == nil)
+
+        // And it re-points cleanly, including switching thread depth.
+        let reply = CommentDisplayModel(entry: CommentEntry(
+            id: "c2", authorID: ProfileID("p2"), authorName: "Bo Chen",
+            authorHandle: "bo", body: "b", createdAt: Date(), parentID: "c1"
+        ))
+        row.configure(with: reply)
+        row.frame = CGRect(x: 0, y: 0, width: 320, height: 80)
+        row.layoutIfNeeded()
+        #expect(monogramText(in: row) == "BC")
+        let stack = try #require(row.subviews.first { $0 is UIStackView })
+        #expect(stack.frame.minX == CommentRowView.replyIndent)
+    }
+
+    /// The monogram label inside the row's identity disc.
+    private func monogramText(in row: CommentRowView) -> String? {
+        var stack: [UIView] = [row]
+        while let view = stack.popLast() {
+            if view is MonogramAvatarView {
+                return view.subviews.compactMap { $0 as? UILabel }.first?.text
+            }
+            stack.append(contentsOf: view.subviews)
+        }
+        return nil
+    }
+
+    /// The picture layered over that disc, if one has landed.
+    private func avatarImage(in row: CommentRowView) -> UIImage? {
+        var stack: [UIView] = [row]
+        while let view = stack.popLast() {
+            if let image = view as? AvatarImageView { return image.image }
+            stack.append(contentsOf: view.subviews)
+        }
+        return nil
+    }
+
+    /// Lets the row's detached avatar task run to completion. Yields rather
+    /// than sleeping — a fixed sleep is the flake this suite has been bitten
+    /// by before.
+    private func settle() async {
+        for _ in 0..<50 { await Task.yield() }
     }
 
     /// The fold's two faces: a collapsed popular thread shows the
@@ -1232,7 +1426,7 @@ struct SnapCommentsPresentationTests {
     /// the host's reset seam, a drafted one does not.
     @Test func composerReplyStateSwapsPlaceholderAndResetsOnIdleDismiss() throws {
         let bar = CommentsInputBar()
-        bar.onClose = {}
+        bar.onPageSwipe = { _, _, _ in }
         func placeholder() -> String? {
             var stack: [UIView] = [bar]
             while let view = stack.popLast() {
@@ -1376,4 +1570,66 @@ struct SnapCommentsPresentationTests {
         }
     }
 
+}
+
+/// A fetcher whose completion the test controls, so the "slow avatar lands
+/// on a recycled row" race can be exercised deterministically instead of
+/// raced against a sleep.
+private actor GateddImageFetcher: ImageFetching {
+    private var isOpen: Bool
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(openFrom: Bool = false) { isOpen = openFrom }
+
+    /// Lets every pending (and future) fetch complete.
+    func release() {
+        isOpen = true
+        let pending = waiters
+        waiters = []
+        for waiter in pending { waiter.resume() }
+    }
+
+    func fetchImageData(for url: URL) async throws -> Data {
+        if !isOpen {
+            await withCheckedContinuation { waiters.append($0) }
+        }
+        return Self.onePixelPNG
+    }
+
+    /// The smallest thing `CGImageSourceCreateThumbnailAtIndex` will decode.
+    private static let onePixelPNG = Data(base64Encoded: """
+        iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==
+        """)!
+}
+
+/// Every fetch fails — the "no picture ever arrives" path, which must be
+/// indistinguishable from having no avatar URL at all.
+private struct FailingImageFetcher: ImageFetching {
+    func fetchImageData(for url: URL) async throws -> Data {
+        throw URLError(.notConnectedToInternet)
+    }
+}
+
+/// The least a `PostDetailViewController` needs to stand up for a layout
+/// assertion — no network, no comments, no router.
+private final class EmptyFeedProvider: FeedProviding, @unchecked Sendable {
+    func cachedFirstPage() async -> [FeedEntry]? { nil }
+    func loadFirstPage() async throws -> FeedPage {
+        FeedPage(entries: [], nextPageToken: nil, isCold: false)
+    }
+    func loadPage(afterToken token: String) async throws -> FeedPage {
+        FeedPage(entries: [], nextPageToken: nil, isCold: false)
+    }
+    func loadPost(_ id: PostID) async throws -> FeedEntry {
+        FeedEntry(
+            post: Post(
+                id: id, authorID: ProfileID("p"), caption: "hi",
+                attachments: [], publishedAt: Date(timeIntervalSince1970: 0)
+            ),
+            author: AuthorSummary(
+                id: ProfileID("p"), handle: "ava", displayName: "Ava", avatarURL: nil
+            ),
+            likeCount: 0
+        )
+    }
 }
