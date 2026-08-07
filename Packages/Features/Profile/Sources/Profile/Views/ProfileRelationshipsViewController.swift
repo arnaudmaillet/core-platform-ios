@@ -6,21 +6,22 @@ import UIKit
 /// The followers / following / friends screen, pushed from the profile
 /// header's counter row.
 ///
-/// **One screen, three lists, a swipeable pager between them.** This began as a
-/// `UISegmentedControl` in the navigation bar's title slot, which was right
-/// while there were two lists: the platform's own answer, one navigation entry,
-/// no custom chrome. A third tab broke it. The bar caps a title view at 258pt,
-/// and three counted titles ("12.4K Followers") do not fit that on any device —
-/// the control truncated them to "12.4K Follow…" and "200+ Follow…", the two
-/// labels a viewer most needs to tell apart. A fallback that dropped the counts
-/// on narrow screens bought correctness by giving up the numbers.
+/// **One screen, three lists, a swipeable pager between them.** The selector is
+/// a `PagedTabBar` in the navigation bar's title slot — where the screen's
+/// title would otherwise be — and the lists are pages in a
+/// `HorizontalPagerView` beneath it.
 ///
-/// So the selector left the title slot. `PagedTabBar` floats under the
-/// navigation bar on the screen's full width, and its segments live in a scroll
-/// view — past the capsule's width they scroll rather than truncate, so a title
-/// is never clipped whatever it says or however large the text is set. The same
-/// component the Messages inbox and the For You grid wear, in the same
-/// `.floating` style it was originally built for.
+/// **Why the title slot survives three counted titles when a segmented control
+/// did not.** This began as a `UISegmentedControl` there, and a third tab broke
+/// it: the bar caps the slot (measured at 258pt), and `UISegmentedControl`
+/// answers "too much text" by TRUNCATING — "12.4K Followers" and
+/// "200+ Following" both become "…Follow…", which are the two labels a viewer
+/// most needs to tell apart. A fallback that dropped the counts on narrow
+/// screens was built and deleted. `PagedTabBar` answers the same question by
+/// SCROLLING: its segments are pinned to their own measured widths inside a
+/// scroll view, so a crowded strip slides instead of clipping and every count
+/// stays whole. That property is the reason this control is here, and
+/// `PagedTabBarTitleOverflowTests` pins it.
 ///
 /// **The pager is what the tab bar was always for.** `PagedTabBar.setProgress`
 /// takes a *fractional* page position, so the lens tracks a finger mid-swipe
@@ -28,6 +29,10 @@ import UIKit
 /// progress the same way, so taps and swipes drive the header through one path.
 /// The two directions of that sync are `pager.onProgress` and the control's
 /// `.valueChanged`; the view model is told only once a page settles.
+///
+/// The @handle the title slot used to carry survives as the screen's
+/// accessibility label, and the back button and search glyph keep their slots
+/// either side.
 final class ProfileRelationshipsViewController: UIViewController {
     private let viewModel: ProfileRelationshipsViewModel
     private let imagePipeline: ImagePipeline?
@@ -57,7 +62,7 @@ final class ProfileRelationshipsViewController: UIViewController {
     init(viewModel: ProfileRelationshipsViewModel, imagePipeline: ImagePipeline?) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
-        self.tabBar = PagedTabBar(titles: viewModel.segmentTitles, style: .floating)
+        self.tabBar = PagedTabBar(titles: viewModel.segmentTitles, style: .navigationTitle)
         self.pages = Self.directions.map {
             ProfileRelationshipListViewController(
                 direction: $0, viewModel: viewModel, imagePipeline: imagePipeline
@@ -102,15 +107,6 @@ final class ProfileRelationshipsViewController: UIViewController {
         applySearchAvailability()
     }
 
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        // The lists scroll UNDER the floating capsule, so each one is inset by
-        // exactly the room the bar occupies. Read from the bar rather than
-        // stated: its height moves with Dynamic Type.
-        let inset = tabBar.bounds.height
-        for page in pages { page.topContentInset = inset }
-    }
-
     // MARK: - Pager
 
     private func configurePager() {
@@ -120,13 +116,6 @@ final class ProfileRelationshipsViewController: UIViewController {
         }
 
         pager.pin(to: view)
-        // Above the pager, and NOT inside it: the bar belongs to the screen,
-        // not to any one page, so it must not travel with the pages it labels.
-        tabBar.constrain(in: view) { parent in
-            tabBar.topAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.topAnchor)
-            tabBar.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
-            tabBar.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
-        }
 
         // Tap → page. Animated, so the lens rides the same progress stream a
         // finger produces rather than jumping.
@@ -298,10 +287,13 @@ final class ProfileRelationshipsViewController: UIViewController {
     // MARK: - Setup
 
     private func configureNavigationBar() {
-        // The title slot is free now that the selector floats below the bar,
-        // so it carries whose lists these are instead of a control.
-        navigationItem.title = viewModel.title
+        // The selector IS the title. It sits where the @handle used to, between
+        // the back button and the search glyph, and the bar sizes the slot from
+        // the bar's intrinsic width — see `PagedTabBar`'s `intrinsicContentSize`.
+        navigationItem.titleView = tabBar
         navigationItem.largeTitleDisplayMode = .never
+        // The @handle is gone from the bar, so it survives as the screen's
+        // accessibility label rather than being lost with the title.
         navigationItem.backButtonTitle = "Back"
         navigationItem.accessibilityLabel = viewModel.title
     }

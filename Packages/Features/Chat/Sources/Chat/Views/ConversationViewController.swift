@@ -1,4 +1,6 @@
+import CoreModels
 import DesignSystem
+import MediaCore
 import UIKit
 
 /// The conversation thread, Telegram-grade on stock UIKit: a compositional-
@@ -75,10 +77,25 @@ final class ConversationViewController: UIViewController {
     /// sheet. Applied once, on first load; never sent automatically.
     private let prefill: String
 
-    init(viewModel: ConversationViewModel, mode: Mode = .full, prefill: String = "") {
+    private let imagePipeline: ImagePipeline?
+    private let avatars: (any PeerAvatarProviding)?
+    private var headerAvatarTask: Task<Void, Never>?
+    /// The peer the header is currently showing, so a late fetch cannot land
+    /// on a thread that has since been rebound.
+    private var headerPeerID: ProfileID?
+
+    init(
+        viewModel: ConversationViewModel,
+        mode: Mode = .full,
+        prefill: String = "",
+        imagePipeline: ImagePipeline? = nil,
+        avatars: (any PeerAvatarProviding)? = nil
+    ) {
         self.viewModel = viewModel
         self.mode = mode
         self.prefill = prefill
+        self.imagePipeline = imagePipeline
+        self.avatars = avatars
         super.init(nibName: nil, bundle: nil)
         // A thread takes the full screen height: the system hides the tab bar
         // with the push and restores it on pop. Safe here — unlike the feed's
@@ -89,6 +106,25 @@ final class ConversationViewController: UIViewController {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Fetches the correspondent's picture for the header pill. The initials
+    /// are already on screen — this only ever replaces them, never delays them.
+    private func loadHeaderAvatar(for peerID: ProfileID?) {
+        guard peerID != headerPeerID || peerID == nil else { return }
+        headerAvatarTask?.cancel()
+        headerAvatarTask = nil
+        headerPeerID = peerID
+        identityView.setPicture(nil)
+
+        guard let peerID, let avatars, let imagePipeline else { return }
+        headerAvatarTask = Task { [weak self] in
+            let urls = await avatars.avatarURLs(for: [peerID])
+            guard !Task.isCancelled, let url = urls[peerID] else { return }
+            guard let image = try? await imagePipeline.image(for: url) else { return }
+            guard let self, !Task.isCancelled, self.headerPeerID == peerID else { return }
+            self.identityView.setPicture(image)
+        }
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -125,6 +161,9 @@ final class ConversationViewController: UIViewController {
                 name: name,
                 monogram: ConversationDisplayModel.monogram(name)
             )
+        }
+        viewModel.onPeerChange = { [weak self] peerID in
+            self?.loadHeaderAvatar(for: peerID)
         }
         viewModel.onReplyStateChange = { [weak self] draft in
             guard let self else { return }

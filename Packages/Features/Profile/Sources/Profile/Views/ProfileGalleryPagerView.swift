@@ -42,6 +42,8 @@ final class ProfileGalleryPagerView: UIView {
     /// The active page bounced past its top and let go — the profile's
     /// pull-to-refresh.
     var onPullToRefresh: (() -> Void)?
+    /// A drag on the active page ended, with its overscroll distance.
+    var onPullReleased: ((CGFloat) -> Void)?
 
     /// The pan that pages; exposed so the owner can subordinate it to the
     /// navigation stack's edge-swipe pop.
@@ -95,6 +97,10 @@ final class ProfileGalleryPagerView: UIView {
                 onVerticalScroll?(offset)
             }
             page.onPullToRefresh = { [weak self] in self?.onPullToRefresh?() }
+            page.onPullReleased = { [weak self] distance in
+                guard let self, page === pages[activeIndex] else { return }
+                onPullReleased?(distance)
+            }
         }
         NSLayoutConstraint.activate([
             leading.constraint(equalTo: content.trailingAnchor),

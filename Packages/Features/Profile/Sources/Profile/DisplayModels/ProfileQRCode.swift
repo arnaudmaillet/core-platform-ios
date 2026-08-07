@@ -24,6 +24,19 @@ enum ProfileQRCode {
     ///     filter as a string, so a handle with non-ASCII characters survives.
     ///   - side: the rendered side length, in points.
     ///   - scale: the target screen scale.
+    /// One context for the process, not one per render.
+    ///
+    /// ⚠️ **Building a `CIContext` is the expensive half of this function** —
+    /// it stands up GPU resources, and the first one in a process costs
+    /// noticeably more than the QR render it exists to perform. Allocating it
+    /// inline meant every call paid that price, on whatever thread called;
+    /// from `viewDidLoad` that was the main thread, and it showed up as the
+    /// share sheet being slow to open.
+    ///
+    /// `nonisolated(unsafe)` because `CIContext` is documented as safe to use
+    /// from multiple threads, and this is only ever read.
+    private nonisolated(unsafe) static let sharedContext = CIContext()
+
     static func makeImage(for url: URL, side: CGFloat, scale: CGFloat) -> UIImage? {
         guard side > 0, scale > 0 else { return nil }
 
@@ -43,7 +56,7 @@ enum ProfileQRCode {
         let factor = max(1, ((side * scale) / modules).rounded(.down))
         let enlarged = output.samplingNearest().transformed(by: CGAffineTransform(scaleX: factor, y: factor))
 
-        guard let cgImage = CIContext().createCGImage(enlarged, from: enlarged.extent) else { return nil }
+        guard let cgImage = sharedContext.createCGImage(enlarged, from: enlarged.extent) else { return nil }
 
         let format = UIGraphicsImageRendererFormat()
         format.scale = scale

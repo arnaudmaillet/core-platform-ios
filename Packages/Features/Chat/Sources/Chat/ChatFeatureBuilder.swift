@@ -56,12 +56,20 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         onUnreadCountChange: ((Int) -> Void)? = nil
     ) -> UIViewController {
         let conversations = ConversationListViewController(
-            viewModel: ConversationListViewModel(catalog: catalog, router: router)
+            viewModel: ConversationListViewModel(catalog: catalog, router: router),
+            imagePipeline: imagePipeline,
+            // The suggestions repository doubles as the avatar source: it
+            // already caches the profiles these rows need, and the two
+            // surfaces are one tab apart.
+            avatars: connections as? any PeerAvatarProviding
         )
         // Context-menu previews show the real thread screen in `.preview`
         // mode: same transcript construction as the router's `.conversation`
         // push, minus the compose bar (typing is impossible in a peek).
-        conversations.threadPreviewProvider = { [repository, directory, router] id in
+        // One provider, both surfaces: the peek is the real thread screen in
+        // `.preview` mode, and Requests earns the same long-press as All.
+        let makeThreadPreview: (ConversationID) -> UIViewController = {
+            [repository, directory, router] id in
             ConversationViewController(
                 viewModel: ConversationViewModel(
                     conversationID: id,
@@ -72,10 +80,14 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
                 mode: .preview
             )
         }
+        conversations.threadPreviewProvider = makeThreadPreview
 
         let requests = MessageRequestsViewController(
-            viewModel: MessageRequestsViewModel(catalog: catalog, router: router)
+            viewModel: MessageRequestsViewModel(catalog: catalog, router: router),
+            imagePipeline: imagePipeline,
+            avatars: connections as? any PeerAvatarProviding
         )
+        requests.threadPreviewProvider = makeThreadPreview
         let suggestions = SuggestionsViewController(
             viewModel: SuggestionsViewModel(
                 repository: connections ?? EmptySuggestionsRepository(),
@@ -92,7 +104,11 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             viewer: repository,
             people: people
         )
-        let searchResults = InboxSearchResultsViewController(viewModel: searchViewModel)
+        let searchResults = InboxSearchResultsViewController(
+            viewModel: searchViewModel,
+            imagePipeline: imagePipeline,
+            avatars: connections as? any PeerAvatarProviding
+        )
         // A target, not a conversation — the same seam the compose picker rides,
         // so a result opens by exactly the path a picked contact does and neither
         // waits on a round trip.
@@ -143,7 +159,12 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         // the viewer would otherwise swipe back from a thread they started to
         // a list without it.
         viewModel.onDidResolveConversation = { [catalog] _ in catalog.refresh() }
-        return ConversationViewController(viewModel: viewModel, prefill: prefill)
+        return ConversationViewController(
+            viewModel: viewModel,
+            prefill: prefill,
+            imagePipeline: imagePipeline,
+            avatars: connections as? any PeerAvatarProviding
+        )
     }
 
     /// A thread with `profileID`, opened before anyone knows whether one
@@ -183,7 +204,11 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             people: people,
             suggestionPageSize: Self.suggestionPageSize
         )
-        let picker = NewMessageViewController(viewModel: viewModel)
+        let picker = NewMessageViewController(
+            viewModel: viewModel,
+            imagePipeline: imagePipeline,
+            avatars: connections as? any PeerAvatarProviding
+        )
         // A target, not a conversation: the pick is resolved and the push
         // begins in the same runloop turn, and whether the thread has to be
         // created is the thread's own problem once it is on screen.

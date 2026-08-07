@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNavigation
 import DesignSystem
+import MediaCore
 import UIKit
 
 /// The compose picker: search the directory, or pick someone off the two lists
@@ -68,8 +69,19 @@ final class NewMessageViewController: UIViewController, TransientDestinationPick
     private var hasRunDebugSequence = false
     #endif
 
-    init(viewModel: NewMessageViewModel) {
+    /// Optional, like every other surface on the avatar path: the picker is
+    /// complete on initials and the pictures are an enhancement.
+    private let imagePipeline: ImagePipeline?
+    private let avatars: (any PeerAvatarProviding)?
+
+    init(
+        viewModel: NewMessageViewModel,
+        imagePipeline: ImagePipeline? = nil,
+        avatars: (any PeerAvatarProviding)? = nil
+    ) {
         self.viewModel = viewModel
+        self.imagePipeline = imagePipeline
+        self.avatars = avatars
         super.init(nibName: nil, bundle: nil)
         // Compose is a focused, dead-end task, and every other pushed screen in
         // the app already does this (`ProfileViewController`,
@@ -239,6 +251,36 @@ final class NewMessageViewController: UIViewController, TransientDestinationPick
         definesPresentationContext = true
     }
 
+    /// Resolves the person's picture and applies it if the cell still belongs
+    /// to them.
+    ///
+    /// ⚠️ **The directory carries no avatar URL** — `DirectoryPerson` is id,
+    /// handle, name, verified — so this resolves the id through the same
+    /// `PeerAvatarProviding` the inbox uses, which reads a cache the
+    /// suggestions ranker has usually already filled. The row is drawn with its
+    /// initials long before any of that answers.
+    ///
+    /// The guard is the cell's CURRENT item, not a captured id: registrations
+    /// re-run on reuse, and a scroll during the fetch would otherwise stamp
+    /// one person's face onto another's row.
+    private func loadAvatar(
+        for model: PersonDisplayModel, into cell: PersonListCell, stillShowing item: Item
+    ) {
+        cell.setAvatarImage(nil)
+        guard let avatars, let imagePipeline else { return }
+        Task { [weak self, weak cell] in
+            let urls = await avatars.avatarURLs(for: [model.id])
+            guard let url = urls[model.id],
+                  let image = try? await imagePipeline.image(for: url)
+            else { return }
+            guard let self, let cell,
+                  let indexPath = self.collectionView.indexPath(for: cell),
+                  self.dataSource.itemIdentifier(for: indexPath) == item
+            else { return }
+            cell.setAvatarImage(image)
+        }
+    }
+
     private func configureCollectionView() {
         // Built per section rather than from one list configuration: search
         // results carry no header, and `headerMode = .supplementary` applied
@@ -268,6 +310,7 @@ final class NewMessageViewController: UIViewController, TransientDestinationPick
             [weak self] cell, _, item in
             guard let self, let model = self.modelsByItem[item] else { return }
             cell.configure(with: model.rowContent)
+            self.loadAvatar(for: model, into: cell, stillShowing: item)
         }
 
         let skeletonRegistration = UICollectionView.CellRegistration<PersonSkeletonCell, Int> {

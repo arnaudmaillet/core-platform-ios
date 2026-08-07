@@ -121,9 +121,8 @@ public final class ProfileRelationshipsViewModel {
     public var onDirectionChange: ((RelationshipDirection) -> Void)?
     /// Fires when a segment's title changes — today only when removing a
     /// follower decrements the viewer's own count.
-    /// Fires when a segment title changes — the Friends count only becomes
-    /// known once that tab has loaded, and removing a follower moves the
-    /// Followers count.
+    /// Fires when a segment title changes — today only when removing a
+    /// follower decrements the viewer's own count.
     public var onSegmentTitlesChange: (([String]) -> Void)?
     public var onActionResult: ((ActionResult) -> Void)?
 
@@ -162,10 +161,8 @@ public final class ProfileRelationshipsViewModel {
     /// loaded — the graph exposes no search-within-followers RPC, and a
     /// server round trip per keystroke would be the wrong shape for it anyway.
     private var query = ""
-    /// Counts behind the segment titles. Followers and Following are seeded
-    /// from the subject; Friends has no backend count at all (there is no
-    /// mutuals RPC — `dev/BACKEND_GAPS.md` §13d) and is filled in from what
-    /// the tab actually loads.
+    /// Counts behind the segment titles — Followers and Following only, seeded
+    /// from the subject. Friends is deliberately absent; see `segmentTitle`.
     private var counts: [RelationshipDirection: CountEstimate] = [:]
     public init(
         subject: Subject,
@@ -198,20 +195,22 @@ public final class ProfileRelationshipsViewModel {
         RelationshipDirection.allCases.map(Self.noun)
     }
 
-    /// "1.2K Followers", or the bare noun when the count is unknown.
+    /// "1.2K Followers", or the bare noun when there is no count to show.
     ///
     /// A count the backend never answered degrades to "Followers" rather than
-    /// showing "—  Followers", which reads as a broken string. Friends starts
-    /// out unknown on every profile and gains its count when the tab loads.
+    /// showing "—  Followers", which reads as a broken string.
     ///
-    /// ⚠️ Three counted titles are wider than two, and this control is the
-    /// navigation item's `titleView`. The width that makes them fit is set in
-    /// `ProfileRelationshipsViewController` — changing the wording here can
-    /// push a segment into truncation, and "35 Follow…" is indistinguishable
-    /// from "12 Follow…".
+    /// ⚠️ **Friends never carries one.** There is no mutuals count on the wire
+    /// (no mutuals RPC at all — `dev/BACKEND_GAPS.md` §13d), and the only
+    /// number this screen could show is how many rows that tab happens to have
+    /// loaded. That is a page size wearing the costume of a total: it reads
+    /// "2 Friends" next to two genuine totals, and it changes as you scroll.
+    /// The bare noun is the honest label, and it is what ships.
     private func segmentTitle(for direction: RelationshipDirection) -> String {
         let noun = Self.noun(for: direction)
-        guard let count = counts[direction], count != .unavailable else { return noun }
+        guard direction != .friends,
+              let count = counts[direction], count != .unavailable
+        else { return noun }
         return "\(ProfileDisplayModel.format(count)) \(noun)"
     }
 
@@ -427,19 +426,6 @@ public final class ProfileRelationshipsViewModel {
         state.isAppending = false
         state.failure = nil
         states[direction] = state
-        // Friends is the one tab whose count has no other source, so it is
-        // taken from the rows in hand: exact once the cursor is spent, "n+"
-        // while pages remain. Followers and Following keep the subject's own
-        // numbers — those are the whole list's size, not the part loaded.
-        if direction == .friends {
-            let updated = CountEstimate.fromSample(
-                count: state.relations.count, hasMore: !state.nextPageToken.isEmpty
-            )
-            if counts[.friends] != updated {
-                counts[.friends] = updated
-                onSegmentTitlesChange?(segmentTitles)
-            }
-        }
         emit(for: direction)
     }
 

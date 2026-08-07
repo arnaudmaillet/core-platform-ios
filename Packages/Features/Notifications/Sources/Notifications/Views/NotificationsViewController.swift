@@ -6,7 +6,16 @@ final class NotificationsViewController: UIViewController {
 
     private let viewModel: NotificationsViewModel
 
-    private let tableView = UITableView(frame: .zero, style: .plain)
+    /// ⚠️ Built with its horizontal indicator off explicitly. The app-wide
+    /// appearance default (`ScrollIndicatorStyle`) covers the vertical one and
+    /// covers collection views entirely, but `UITableView` sets
+    /// `showsHorizontalScrollIndicator` on itself at init, and an instance
+    /// value outranks an appearance default.
+    private let tableView: UITableView = {
+        let table = UITableView(frame: .zero, style: .plain)
+        table.showsHorizontalScrollIndicator = false
+        return table
+    }()
     private let refreshControl = UIRefreshControl()
     private let spinner = UIActivityIndicatorView(style: .large)
     private let statusLabel = UILabel()

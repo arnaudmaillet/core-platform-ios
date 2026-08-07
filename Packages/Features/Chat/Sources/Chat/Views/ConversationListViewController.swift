@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import MediaCore
 import UIKit
 
 /// The inbox's "All" surface: every active direct message, with unread ones
@@ -17,12 +18,21 @@ import UIKit
 final class ConversationListViewController: UIViewController {
     private let viewModel: ConversationListViewModel
 
-    private let tableView = UITableView(frame: .zero, style: .plain)
+    /// ⚠️ Built with its horizontal indicator off explicitly. The app-wide
+    /// appearance default (`ScrollIndicatorStyle`) covers the vertical one and
+    /// covers collection views entirely, but `UITableView` sets
+    /// `showsHorizontalScrollIndicator` on itself at init, and an instance
+    /// value outranks an appearance default.
+    private let tableView: UITableView = {
+        let table = UITableView(frame: .zero, style: .plain)
+        table.showsHorizontalScrollIndicator = false
+        return table
+    }()
     private let refreshControl = UIRefreshControl()
     private let skeletonView = ConversationListSkeletonView()
     private let statusView = InboxStatusView()
 
-    private var dataSource: SectionedConversationDataSource!
+    private var adapter: ConversationListTableAdapter!
     private var modelsByID: [ConversationID: ConversationDisplayModel] = [:]
     private var hasRenderedContent = false
 
@@ -44,8 +54,20 @@ final class ConversationListViewController: UIViewController {
         chrome = InboxSurfaceChrome(badgeCount: viewModel.newCount)
     }
 
-    init(viewModel: ConversationListViewModel) {
+    /// `imagePipeline` and `avatars` are optional: the list is complete
+    /// without them (see `ConversationCell.configure`), and mock builds that
+    /// wire neither still render initials.
+    private let imagePipeline: ImagePipeline?
+    private let avatars: (any PeerAvatarProviding)?
+
+    init(
+        viewModel: ConversationListViewModel,
+        imagePipeline: ImagePipeline? = nil,
+        avatars: (any PeerAvatarProviding)? = nil
+    ) {
         self.viewModel = viewModel
+        self.imagePipeline = imagePipeline
+        self.avatars = avatars
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -64,26 +86,65 @@ final class ConversationListViewController: UIViewController {
         render(.loading)
 
         #if DEBUG
-        // `-chat-pin-demo` pins the LAST row ~2s in — swipes can't be
-        // injected in-sim; shows the pinned tint and the reorder-to-top.
+        // `-chat-pin-demo` pins the last VISIBLE row ~2s in and shows the tint
+        // plus the reorder-to-top.
+        //
+        // ⚠️ Visible, not `itemIdentifiers.last` — which is usually off-screen,
+        // where there is no cell to paint and the whole point of the fix
+        // (front-running the data source on the live cell) goes unexercised.
+        // Watch it with Slow Animations on: the band must be there on frame 0
+        // of the slide, not when it lands.
         if ProcessInfo.processInfo.arguments.contains("-chat-pin-demo") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                guard let self, let id = self.dataSource.snapshot().itemIdentifiers.last else { return }
-                self.viewModel.togglePin(id)
+                guard let self,
+                      let indexPath = self.tableView.indexPathsForVisibleRows?.last,
+                      let id = self.adapter.itemIdentifier(for: indexPath)
+                else { return }
+                self.pin(id)
             }
         }
-        // `-chat-preview-demo` presents the context-menu preview
-        // construction (`.preview` mode) as a sheet ~2s in — long-presses
-        // can't be injected in-sim; verifies the stripped compose bar and
-        // the live transcript.
+        // `-chat-preview-demo` presents the context-menu preview construction
+        // (`.preview` mode) as a sheet ~2s in, which isolates the preview
+        // screen itself — the stripped compose bar and the live transcript.
+        //
+        // ⚠️ It is NOT needed to reach the menu: a long-press CAN be injected,
+        // via a held CGEvent drag (mouse down, jitter for ~1.4s, up). The
+        // comment here used to say otherwise. Both halves were verified that
+        // way on the Requests tab, which wears the same seam.
         if ProcessInfo.processInfo.arguments.contains("-chat-preview-demo") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                guard let self, let id = self.dataSource.snapshot().itemIdentifiers.first,
+                guard let self, let id = self.adapter.allIdentifiers.first,
                       let make = self.threadPreviewProvider else { return }
                 self.present(make(id), animated: true)
             }
         }
         #endif
+    }
+
+    /// Toggles the pin, painting the row's band before the move begins.
+    ///
+    /// The paint is a plain, unanimated property set on the live cell; the
+    /// movement belongs entirely to `performBatchUpdates` in
+    /// `ConversationListTableAdapter`. Nothing is flushed and nothing is
+    /// deferred.
+    ///
+    /// ⚠️ **Both of those were here and both were wrong.** A
+    /// `CATransaction.flush()` committed a frame in the middle of the update
+    /// UIKit was assembling, and a `DispatchQueue.main.async` hop split the
+    /// state change away from it — between them the moving cell was dropped
+    /// for the length of the animation, which is the blank hole the row left
+    /// behind. They were compensating for a diffable data source that faded
+    /// rather than moved; with a real `moveRow` there is nothing to
+    /// compensate for.
+    ///
+    /// Unpinning is the same call with the flag inverted.
+    private func pin(_ id: ConversationID) {
+        let willPin = !viewModel.isPinned(id)
+        if let indexPath = adapter.indexPath(for: id),
+           let cell = tableView.cellForRow(at: indexPath) as? ConversationCell {
+            cell.setPinnedStyle(willPin, animated: false)
+        }
+        viewModel.togglePin(id)
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -120,13 +181,27 @@ final class ConversationListViewController: UIViewController {
         refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
         tableView.refreshControl = refreshControl
 
-        dataSource = SectionedConversationDataSource(tableView: tableView) {
+        adapter = ConversationListTableAdapter(tableView: tableView) {
             [weak self] tableView, indexPath, id in
             let cell = tableView.dequeueReusableCell(
                 withIdentifier: ConversationCell.reuseIdentifier, for: indexPath
             ) as! ConversationCell
-            if let model = self?.modelsByID[id] { cell.configure(with: model) }
+            if let self, let model = self.modelsByID[id] {
+                cell.configure(with: model, imagePipeline: self.imagePipeline, avatars: self.avatars)
+            }
             return cell
+        }
+    }
+
+    /// Re-renders rows whose content changed but whose position did not,
+    /// straight onto the live cells.
+    private func reconfigureVisible(_ ids: [ConversationID]) {
+        for id in ids {
+            guard let indexPath = adapter.indexPath(for: id),
+                  let cell = tableView.cellForRow(at: indexPath) as? ConversationCell,
+                  let model = modelsByID[id]
+            else { continue }
+            cell.configure(with: model, imagePipeline: imagePipeline, avatars: avatars)
         }
     }
 
@@ -152,28 +227,32 @@ final class ConversationListViewController: UIViewController {
             refreshControl.endRefreshing()
             statusView.isHidden = true
             let models = sections.all
-            var snapshot = NSDiffableDataSourceSnapshot<InboxListSection, ConversationID>()
-            // Empty sections are never appended, so a list with no arrivals is
-            // one plain list rather than a header over nothing.
-            if !sections.new.isEmpty {
-                snapshot.appendSections([.new])
-                snapshot.appendItems(sections.new.map(\.id), toSection: .new)
-            }
-            if !sections.earlier.isEmpty {
-                snapshot.appendSections([.earlier])
-                snapshot.appendItems(sections.earlier.map(\.id), toSection: .earlier)
-            }
-            // Same-identity rows whose content changed (pin/mute flags, a read
-            // that cleared the bold preview) re-render in place; identity
-            // moves/removals animate, so swipe outcomes read as system row
-            // animations, not reloads. See `InboxRowDiff`.
-            snapshot.reconfigureItems(InboxRowDiff.changedRows(in: models, against: modelsByID))
+            // Rows whose content changed without moving. Applied straight to
+            // the visible cells below — there is no snapshot to reconcile, so
+            // this cannot collide with the move animation the way a diffable
+            // `reconfigureItems` did. See `InboxRowDiff`, and
+            // `ConversationListTableAdapter` for why this list is hand-driven.
+            //
+            // The row `pin(_:)` just painted is excluded: its cell is already
+            // correct, and re-configuring it mid-move would fight the paint.
+            let changed = InboxRowDiff.changedRows(in: models, against: modelsByID)
+            // BEFORE the apply: `cellForRowAt` reads this.
             modelsByID = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
             // Animate only while visible. A change that arrives while a thread
             // is pushed over the inbox — reading one, say — would otherwise
             // play its row animation on the way back, turning a settled screen
             // into a moving one right after the pop.
-            dataSource.apply(snapshot, animatingDifferences: hasRenderedContent && view.window != nil)
+            // ⚠️ **BEFORE the move, at the rows' OLD positions.** `moveRow`
+            // reuses a cell as-is — it never re-asks for one — so a row that
+            // travels wearing stale content keeps it for the whole flight and
+            // only corrects when something re-configures it afterwards. That
+            // is the pinned row arriving grey a beat late.
+            //
+            // Reconfiguring here, while the old index paths are still the live
+            // ones, means the cell already looks right when the batch picks it
+            // up and the band travels with it.
+            reconfigureVisible(changed)
+            adapter.apply(sections, animated: hasRenderedContent && view.window != nil)
             hasRenderedContent = true
             revealContent()
         case .empty:
@@ -225,8 +304,8 @@ final class ConversationListViewController: UIViewController {
         else { return }
         let section: InboxListSection = name == "new" ? .new : .earlier
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            guard let self, let target = dataSource.index(of: section) else { return }
-            dataSource.scroll(tableView, toSectionAt: target)
+            guard let self, let target = adapter.index(of: section) else { return }
+            adapter.scroll(tableView, toSectionAt: target)
         }
     }
     #endif
@@ -237,7 +316,7 @@ extension ConversationListViewController: UITableViewDelegate {
 
     /// The glass pill, and the tap that scrolls to the section it names.
     func tableView(_ tableView: UITableView, viewForHeaderInSection index: Int) -> UIView? {
-        guard let section = dataSource.headedSection(at: index) else { return nil }
+        guard let section = adapter.headedSection(at: index) else { return nil }
         let header = tableView.dequeueReusableHeaderFooterView(
             withIdentifier: InboxSectionHeaderView.reuseIdentifier
         ) as? InboxSectionHeaderView
@@ -246,7 +325,7 @@ extension ConversationListViewController: UITableViewDelegate {
         // the header rather than wherever the list happened to be.
         header?.onTap = { [weak self] in
             guard let self else { return }
-            dataSource.scroll(tableView, toSectionAt: index)
+            adapter.scroll(tableView, toSectionAt: index)
         }
         return header
     }
@@ -255,12 +334,12 @@ extension ConversationListViewController: UITableViewDelegate {
     /// section a default height even when its header view is nil, which would
     /// leave a blank band above a list that has no header at all.
     func tableView(_ tableView: UITableView, heightForHeaderInSection index: Int) -> CGFloat {
-        dataSource.headedSection(at: index) == nil ? .leastNormalMagnitude : UITableView.automaticDimension
+        adapter.headedSection(at: index) == nil ? .leastNormalMagnitude : UITableView.automaticDimension
     }
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        guard let id = dataSource.itemIdentifier(for: indexPath) else { return }
+        guard let id = adapter.itemIdentifier(for: indexPath) else { return }
         viewModel.didSelect(id)
     }
 
@@ -274,7 +353,7 @@ extension ConversationListViewController: UITableViewDelegate {
         contextMenuConfigurationForRowAt indexPath: IndexPath,
         point: CGPoint
     ) -> UIContextMenuConfiguration? {
-        guard let id = dataSource.itemIdentifier(for: indexPath) else { return nil }
+        guard let id = adapter.itemIdentifier(for: indexPath) else { return nil }
         let makePreview = threadPreviewProvider
         return UIContextMenuConfiguration(
             identifier: id.rawValue as NSString,
@@ -302,7 +381,7 @@ extension ConversationListViewController: UITableViewDelegate {
         let pin = UIAction(
             title: isPinned ? "Unpin" : "Pin",
             image: UIImage(systemName: isPinned ? "pin.slash" : "pin")
-        ) { [weak self] _ in self?.viewModel.togglePin(id) }
+        ) { [weak self] _ in self?.pin(id) }
         let mute = UIAction(
             title: isMuted ? "Unmute" : "Mute",
             image: UIImage(systemName: isMuted ? "bell" : "bell.slash")

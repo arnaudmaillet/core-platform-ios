@@ -55,7 +55,14 @@ public final class ConversationViewModel {
     /// True while a message is being sent (disables the send control).
     public var onSendingChange: ((Bool) -> Void)?
     /// Fires once the peer's name resolves; best-effort (no title on failure).
+    /// The header's name changed. Carries the peer id alongside it so the
+    /// host can fetch a face — a DM resolves its correspondent at the same
+    /// moment it resolves the name, and a group passes `nil` and keeps
+    /// initials.
     public var onTitleChange: ((String) -> Void)?
+    /// Fired with `onTitleChange`, for the avatar. Separate so the existing
+    /// title path stays untouched for callers that only want the name.
+    public var onPeerChange: ((ProfileID?) -> Void)?
     /// The active reply target (or `nil` when cleared) — drives the compose
     /// bar's reply preview.
     public var onReplyStateChange: ((ReplyDraft?) -> Void)?
@@ -343,6 +350,7 @@ public final class ConversationViewModel {
             peerProfileID = peer
             peerName = displayName
             onTitleChange?(displayName)
+            onPeerChange?(peerProfileID)
             return
         }
         guard let conversationID else { return }
@@ -354,6 +362,7 @@ public final class ConversationViewModel {
             peerProfileID = cached.directPeerID
             peerName = cached.title
             onTitleChange?(cached.title)
+            onPeerChange?(peerProfileID)
             return
         }
         // Cold entry (deep link, push payload): fetch, then ease the identity
@@ -365,6 +374,7 @@ public final class ConversationViewModel {
                 self.peerProfileID = summary.directPeerID
                 self.peerName = summary.title
                 self.onTitleChange?(summary.title)
+                self.onPeerChange?(self.peerProfileID)
                 // Re-render so quotes from the peer pick up their now-known
                 // author name (content may have landed before the title did).
                 if case .content = self.phase { self.emit() }

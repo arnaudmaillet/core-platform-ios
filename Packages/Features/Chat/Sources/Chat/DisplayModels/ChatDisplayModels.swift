@@ -8,6 +8,9 @@ public struct ConversationDisplayModel: Equatable, Sendable, Identifiable {
     public let preview: String
     public let timeText: String
     public let monogram: String
+    /// The other member, when there is exactly one — what an avatar is fetched
+    /// for. `nil` for a group, which keeps its initials.
+    public let peerID: ProfileID?
     public let isPinned: Bool
     public let isMuted: Bool
     /// Drives the row's whole unread treatment — bold text and a badge — rather
@@ -31,6 +34,7 @@ public struct ConversationDisplayModel: Equatable, Sendable, Identifiable {
         preview = conversation.lastMessage
         timeText = conversation.lastActivityAt.map { Self.relativeShort(from: $0, to: now) } ?? ""
         monogram = Self.monogram(conversation.title)
+        peerID = conversation.otherMemberIDs.count == 1 ? conversation.otherMemberIDs.first : nil
         self.isPinned = isPinned
         self.isMuted = isMuted
         self.isUnread = isUnread

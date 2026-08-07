@@ -1,4 +1,6 @@
+import CoreModels
 import DesignSystem
+import MediaCore
 import UIKit
 
 /// A pending message request, laid out as a standard two-line messaging row
@@ -34,6 +36,9 @@ final class MessageRequestCell: UITableViewCell {
     var onDismiss: (() -> Void)?
 
     private let avatarView = BadgedAvatarView()
+    private var avatarTask: Task<Void, Never>?
+    /// Guards a late fetch against cell reuse — see `ConversationCell`.
+    private var avatarPeerID: ProfileID?
     private let nameLabel = UILabel()
     private let previewLabel = UILabel()
     private let timeLabel = UILabel()
@@ -52,10 +57,21 @@ final class MessageRequestCell: UITableViewCell {
         super.prepareForReuse()
         onAccept = nil
         onDismiss = nil
+        avatarTask?.cancel()
+        avatarTask = nil
+        avatarPeerID = nil
+        avatarView.setPicture(nil, animated: false)
     }
 
-    func configure(with model: ConversationDisplayModel) {
+    /// Same contract as `ConversationCell`: the row is complete on initials,
+    /// and the picture streams in behind it if `profile.v1` has one.
+    func configure(
+        with model: ConversationDisplayModel,
+        imagePipeline: ImagePipeline? = nil,
+        avatars: (any PeerAvatarProviding)? = nil
+    ) {
         avatarView.setMonogram(model.monogram)
+        loadAvatar(for: model, imagePipeline: imagePipeline, avatars: avatars)
         // The same count, on the same corner, as an All row — and it clears the
         // same way, when the viewer opens the thread and the read cursor moves.
         avatarView.setBadge(model.isUnread ? .count(model.unreadCount) : .none)
@@ -100,6 +116,26 @@ final class MessageRequestCell: UITableViewCell {
             ? UIFont.systemFont(ofSize: plain.pointSize, weight: .semibold)
             : plain
         previewLabel.textColor = isUnread ? .label : .secondaryLabel
+    }
+
+    private func loadAvatar(
+        for model: ConversationDisplayModel,
+        imagePipeline: ImagePipeline?,
+        avatars: (any PeerAvatarProviding)?
+    ) {
+        avatarTask?.cancel()
+        avatarTask = nil
+        avatarPeerID = model.peerID
+        avatarView.setPicture(nil, animated: false)
+
+        guard let peerID = model.peerID, let avatars, let imagePipeline else { return }
+        avatarTask = Task { [weak self] in
+            let urls = await avatars.avatarURLs(for: [peerID])
+            guard !Task.isCancelled, let url = urls[peerID] else { return }
+            guard let image = try? await imagePipeline.image(for: url) else { return }
+            guard let self, !Task.isCancelled, self.avatarPeerID == peerID else { return }
+            self.avatarView.setPicture(image, animated: true)
+        }
     }
 
     private func configure() {

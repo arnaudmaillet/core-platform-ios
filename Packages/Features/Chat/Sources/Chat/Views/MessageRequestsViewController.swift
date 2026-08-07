@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import MediaCore
 import UIKit
 
 /// The inbox's "Requests" surface: conversations from accounts the viewer
@@ -11,7 +12,16 @@ import UIKit
 final class MessageRequestsViewController: UIViewController {
     private let viewModel: MessageRequestsViewModel
 
-    private let tableView = UITableView(frame: .zero, style: .plain)
+    /// ⚠️ Built with its horizontal indicator off explicitly. The app-wide
+    /// appearance default (`ScrollIndicatorStyle`) covers the vertical one and
+    /// covers collection views entirely, but `UITableView` sets
+    /// `showsHorizontalScrollIndicator` on itself at init, and an instance
+    /// value outranks an appearance default.
+    private let tableView: UITableView = {
+        let table = UITableView(frame: .zero, style: .plain)
+        table.showsHorizontalScrollIndicator = false
+        return table
+    }()
     private let refreshControl = UIRefreshControl()
     private let skeletonView = ConversationListSkeletonView()
     private let statusView = InboxStatusView()
@@ -32,8 +42,21 @@ final class MessageRequestsViewController: UIViewController {
         chrome = InboxSurfaceChrome(badgeCount: viewModel.newCount)
     }
 
-    init(viewModel: MessageRequestsViewModel) {
+    /// Builds the thread screen shown in a long-press preview. Supplied by the
+    /// composition root, exactly as the All tab's is — the peek is the real
+    /// screen in `.preview` mode, not a facsimile.
+    var threadPreviewProvider: ((ConversationID) -> UIViewController)?
+    private let imagePipeline: ImagePipeline?
+    private let avatars: (any PeerAvatarProviding)?
+
+    init(
+        viewModel: MessageRequestsViewModel,
+        imagePipeline: ImagePipeline? = nil,
+        avatars: (any PeerAvatarProviding)? = nil
+    ) {
         self.viewModel = viewModel
+        self.imagePipeline = imagePipeline
+        self.avatars = avatars
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -88,7 +111,9 @@ final class MessageRequestsViewController: UIViewController {
             let cell = tableView.dequeueReusableCell(
                 withIdentifier: MessageRequestCell.reuseIdentifier, for: indexPath
             ) as! MessageRequestCell
-            if let model = self?.modelsByID[id] { cell.configure(with: model) }
+            if let self, let model = self.modelsByID[id] {
+                cell.configure(with: model, imagePipeline: self.imagePipeline, avatars: self.avatars)
+            }
             // Decisions are captured per row: the diffable snapshot animates
             // the row out, so neither handler needs an index path.
             cell.onAccept = { [weak self] in self?.viewModel.accept(id) }
@@ -223,6 +248,55 @@ extension MessageRequestsViewController: UITableViewDelegate {
         tableView.deselectRow(at: indexPath, animated: true)
         guard let id = dataSource.itemIdentifier(for: indexPath) else { return }
         viewModel.didSelect(id)
+    }
+
+    // MARK: - Context menu (haptic long-press)
+
+    /// The same seam the All tab uses: long-press lifts the row and previews
+    /// the actual thread screen through `threadPreviewProvider`.
+    ///
+    /// ⚠️ The MENU differs, and has to. A request is not yet a conversation —
+    /// it cannot be pinned or muted, and the view model exposes no such calls.
+    /// What a request offers is the decision it is waiting on, which is also
+    /// what its row's two buttons offer.
+    func tableView(
+        _ tableView: UITableView,
+        contextMenuConfigurationForRowAt indexPath: IndexPath,
+        point: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard let id = dataSource.itemIdentifier(for: indexPath) else { return nil }
+        let makePreview = threadPreviewProvider
+        return UIContextMenuConfiguration(
+            identifier: id.rawValue as NSString,
+            previewProvider: makePreview.map { make in { make(id) } },
+            actionProvider: { [weak self] _ in self?.contextMenu(for: id) }
+        )
+    }
+
+    /// Tapping the lifted preview commits to the real thing, through the same
+    /// route seam as a row tap.
+    func tableView(
+        _ tableView: UITableView,
+        willPerformPreviewActionForMenuWith configuration: UIContextMenuConfiguration,
+        animator: UIContextMenuInteractionCommitAnimating
+    ) {
+        guard let raw = configuration.identifier as? String else { return }
+        animator.addCompletion { [weak self] in
+            self?.viewModel.didSelect(ConversationID(raw))
+        }
+    }
+
+    private func contextMenu(for id: ConversationID) -> UIMenu {
+        let accept = UIAction(
+            title: "Accept",
+            image: UIImage(systemName: "checkmark")
+        ) { [weak self] _ in self?.viewModel.accept(id) }
+        let decline = UIAction(
+            title: "Delete",
+            image: UIImage(systemName: "trash"),
+            attributes: .destructive
+        ) { [weak self] _ in self?.viewModel.decline(id) }
+        return UIMenu(children: [accept, decline])
     }
 }
 

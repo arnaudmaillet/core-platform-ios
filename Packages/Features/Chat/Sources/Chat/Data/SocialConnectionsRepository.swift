@@ -78,7 +78,20 @@ public enum SuggestionsError: Error, Equatable, Sendable {
 ///
 /// One repository for both because they read the same two edge lists — asking
 /// separately would double the traffic to answer from identical data.
-public actor SocialConnectionsRepository: SuggestionsProviding, PeerRelationProviding {
+/// Resolves a person's avatar, for surfaces that hold an id and need a face.
+///
+/// **Separate from the row's own data on purpose.** A conversation arrives from
+/// `chat.v1` with a title and member ids and no pictures — the avatar lives in
+/// `profile.v1` — so a list that waited for faces would wait on a second
+/// service before drawing anything. Every caller here renders its monogram
+/// first and asks for the picture afterwards.
+public protocol PeerAvatarProviding: Sendable {
+    /// The avatar for each id that has one. Ids absent from the result have no
+    /// avatar, or could not be read; both mean "keep the initials".
+    func avatarURLs(for ids: [ProfileID]) async -> [ProfileID: URL]
+}
+
+public actor SocialConnectionsRepository: SuggestionsProviding, PeerRelationProviding, PeerAvatarProviding {
     /// How many of the viewer's follows are expanded for friend-of-friend
     /// candidates. Each costs one `ListFollowing`, so the fan-out is bounded
     /// rather than proportional to how social the viewer is.
@@ -212,6 +225,25 @@ public actor SocialConnectionsRepository: SuggestionsProviding, PeerRelationProv
         switch response.result {
         case .success(let body): return Set(body.followers.map { ProfileID($0.profileID) })
         case .failure(let error): throw SuggestionsError.transport(message: error.message ?? "code \(error.code)")
+        }
+    }
+
+    // MARK: - Avatars
+
+    /// Reads through the same `profileCache` the suggestions ranker fills, so a
+    /// face already fetched for one surface is free for the next — the inbox
+    /// and the Suggestions tab overlap heavily, and they are one tab apart.
+    ///
+    /// Absence is cached as well as presence: `hydrateProfiles` records every
+    /// id it managed to read, so a profile with no avatar is asked for once,
+    /// not once per cell reuse.
+    public func avatarURLs(for ids: [ProfileID]) async -> [ProfileID: URL] {
+        await hydrateProfiles(for: ids)
+        return ids.reduce(into: [:]) { result, id in
+            guard let view = profileCache[id],
+                  let url = URL(string: view.avatarURL), !view.avatarURL.isEmpty
+            else { return }
+            result[id] = url
         }
     }
 
