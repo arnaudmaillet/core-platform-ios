@@ -246,9 +246,19 @@ public final class FeedViewModel {
         // Silent on failure: the load slot frees up, so the next activation
         // of this page retries.
         guard let entries = try? await commentsProvider.loadComments(for: id) else { return }
+        // ORDER MATTERS: the band resolves first, and whether it came back
+        // with a queue is what tells the zone how much of the post it has to
+        // speak for. A band below its engagement gate renders nothing, so
+        // the zone must then carry every comment — otherwise a sparse post's
+        // comments are claimed by a surface that never shows them, which is
+        // exactly how the zone ended up blank on posts that had a
+        // conversation.
+        let reactions = tickerBuilder.build(entries, postID: id)
         let streams = CommentStreams(
-            reactions: tickerBuilder.build(entries, postID: id),
-            subtitles: subtitleBuilder.build(entries, postID: id),
+            reactions: reactions,
+            subtitles: subtitleBuilder.build(
+                entries, postID: id, tickerIsRendering: !reactions.isEmpty
+            ),
             commentCount: entries.count
         )
         streamsByPost[id] = streams

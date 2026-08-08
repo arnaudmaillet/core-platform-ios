@@ -184,18 +184,34 @@ struct FeedViewModelStreamsTests {
         #expect(provider.loads == 1)
     }
 
-    /// Both surfaces gate below their minimums, but `commentCount` is a
-    /// post fact, not a surface artifact — it carries the true total even
-    /// when nothing renders (the hidden zone never shows it).
-    @Test func gatedPostEmitsEmptySurfacesButTheTrueCount() async {
+    /// A post BELOW the band's gate hands every comment to the zone. The
+    /// band and the zone used to gate independently, so three short comments
+    /// cleared neither and the page rendered a blank comment zone on a post
+    /// that had a conversation. The band's RESOLVED emptiness is now what
+    /// decides the partition, so nothing can be claimed by a surface that
+    /// never shows it.
+    @Test func aPostBelowTheBandsGateHandsEveryCommentToTheZone() async {
         let provider = FakeCommentsProvider(comments: shortEntries(3))
         let viewModel = FeedViewModel(repository: StubFeedProvider(), commentsProvider: provider)
 
         let (_, streams) = await awaitStreamsEmission(viewModel, activating: PostID("post-0001"))
         #expect(streams.reactions.isEmpty)
-        #expect(streams.subtitles.isEmpty)
-        #expect(streams.commentCount == 3)
+        #expect(streams.subtitles.count == 3)
+        #expect(streams.commentCount == 3) // a post fact, not a surface artifact
         #expect(streams.isLoaded)
+    }
+
+    /// A single comment is a stream. Nothing about the zone's rendering may
+    /// depend on how many comments a post happens to have — only zero is
+    /// special, and that is the empty-state pill's job.
+    @Test func oneCommentStillFillsTheZone() async {
+        let provider = FakeCommentsProvider(comments: [entry("only", "Where was this taken?")])
+        let viewModel = FeedViewModel(repository: StubFeedProvider(), commentsProvider: provider)
+
+        let (_, streams) = await awaitStreamsEmission(viewModel, activating: PostID("post-0001"))
+        #expect(streams.reactions.isEmpty)
+        #expect(streams.subtitles.map(\.id) == ["only"])
+        #expect(streams.commentCount == 1)
     }
 
     /// A post the backend answers with NO comments at all loads as
