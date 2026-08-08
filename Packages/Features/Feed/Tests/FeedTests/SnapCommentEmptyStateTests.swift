@@ -212,10 +212,11 @@ struct SnapCommentEmptyStateTests {
         try #require(prompt.subviews.compactMap { $0 as? SubtitlePillLabel }.first)
     }
 
-    /// The words hold for a reading beat and then retire onto a parked-at-0
-    /// model value. Ending ON the model is what stops backgrounding — which
-    /// strips CA animations — from snapping them back on.
-    @Test func theLabelDwellsThenRetires() throws {
+    /// The words hold at full strength for a reading beat, then settle onto
+    /// a parked resting opacity — MUTED, never gone. Ending ON the model
+    /// value is what stops backgrounding, which strips CA animations, from
+    /// snapping them back to full.
+    @Test func theLabelDwellsThenSettlesToMuted() throws {
         let chrome = makeChrome()
         let prompt = try emptyState(in: chrome)
         let label = try pill(in: prompt)
@@ -230,15 +231,20 @@ struct SnapCommentEmptyStateTests {
 
         chrome.setSubtitlesActive(true)
         let dwell = try #require(label.layer.animation(forKey: "empty-state-label-dwell") as? CAKeyframeAnimation)
-        #expect((dwell.values as? [NSNumber])?.map(\.doubleValue) == [1, 1, 0])
+        let resting = Double(SnapCommentEmptyStateView.labelRestingOpacity)
+        #expect((dwell.values as? [NSNumber])?.map(\.doubleValue) == [1, 1, resting])
         #expect(dwell.fillMode == .forwards)
         #expect(dwell.isRemovedOnCompletion == false)
         #expect(dwell.duration == SnapCommentEmptyStateView.labelDwell + SnapCommentEmptyStateView.labelFadeDuration)
         // Holds at full opacity for the whole reading beat, then ramps.
         let holdUntil = try #require(dwell.keyTimes?[1]).doubleValue
         #expect(abs(holdUntil * dwell.duration - SnapCommentEmptyStateView.labelDwell) < 0.001)
-        // Parked hidden, so the fill-forwards end and the model agree.
-        #expect(label.layer.opacity == 0)
+        // Parked at the resting value, so the fill-forwards end and the
+        // model agree.
+        #expect(label.layer.opacity == SnapCommentEmptyStateView.labelRestingOpacity)
+        // Muted, not gone: still readable, no longer prominent.
+        #expect(SnapCommentEmptyStateView.labelRestingOpacity > 0.1)
+        #expect(SnapCommentEmptyStateView.labelRestingOpacity < 1)
     }
 
     /// Leaving the screen restores the words: a page revisited, or the
@@ -267,10 +273,10 @@ struct SnapCommentEmptyStateTests {
         #expect(label.layer.opacity == 1)
     }
 
-    /// THE POINT OF KEEPING THE ROW. The label retires visually but keeps
-    /// its place in the layout, so the emptied text column is still one tap
-    /// into the comments. Shrinking to the mark would take the target too.
-    @Test func theRowStaysTappableAfterTheLabelRetires() throws {
+    /// The row's geometry survives the settle untouched, so the whole slot —
+    /// glyph, gap and words alike — is one tap into the comments at every
+    /// point in the animation.
+    @Test func theRowStaysTappableAfterTheLabelSettles() throws {
         let chrome = makeChrome()
         chrome.setFixedInsets(UIEdgeInsets(top: 103, left: 0, bottom: 34, right: 0))
         let prompt = try emptyState(in: chrome)
@@ -294,16 +300,15 @@ struct SnapCommentEmptyStateTests {
         #expect(label.frame.width > 0)
         // …and a touch in the now-invisible text column still lands inside
         // the row, which is the chrome's declared interaction root.
-        // …and a touch in the now-invisible text column still lands inside
-        // the row, which is the chrome's declared interaction root.
-        //
-        // Note WHICH view comes back: the retired label is at zero opacity,
-        // so hit-testing skips it and the ROW answers for that column. That
-        // is the case the arbitration has to accept — a hit on the root
-        // itself, not on a descendant of it — so it is asserted through the
-        // real predicate rather than by inspecting the view.
+        // …and a touch in the text column still resolves through the
+        // arbitration. The ROW answers for that column whatever the label's
+        // opacity, because a `UILabel` is not interactive to begin with —
+        // which is why the resting value can be tuned freely (or taken to 0)
+        // without the tap target moving with it. Asserted through the real
+        // predicate: a hit on an interaction root ITSELF, not a descendant.
         let inTextColumn = CGPoint(x: label.frame.midX, y: label.frame.midY)
         let hit = try #require(prompt.hitTest(inTextColumn, with: nil))
+        #expect(label.isUserInteractionEnabled == false)
         #expect(hit === prompt)
         #expect(chrome.interactionRoots.contains(prompt))
         #expect(SnapFeedCell.isInteractiveTouch(
