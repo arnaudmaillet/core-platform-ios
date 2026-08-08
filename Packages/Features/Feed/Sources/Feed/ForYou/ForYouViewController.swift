@@ -693,15 +693,44 @@ final class ForYouViewController: UIViewController {
     /// rebuild and nothing else. Never dropped while it is on screen.
     override func didReceiveMemoryWarning() {
         super.didReceiveMemoryWarning()
-        if reusableFeed?.navigationController == nil {
-            reusableFeed = nil
+        releaseCachedFeed()
+    }
+
+    /// Hands the cached feed back when the grid is no longer on screen.
+    ///
+    /// The discriminator is the one `viewWillDisappear` already uses, and it
+    /// carries the whole correctness of this: a PUSHED feed also disappears
+    /// this controller, leaving it on the stack underneath. Releasing there
+    /// would defeat the reuse entirely — the very next thing that happens is
+    /// a pop straight back to here — so only a departure that leaves this
+    /// controller topmost counts as leaving.
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        guard navigationController?.topViewController === self else { return }
+        releaseCachedFeed()
+    }
+
+    /// Never drops a feed that is still on screen; a detached one costs the
+    /// next tap a rebuild and nothing else.
+    private func releaseCachedFeed() {
+        guard reusableFeed?.navigationController == nil else { return }
+        #if DEBUG
+        if reusableFeed != nil, ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
+            print("[feed-reuse] RELEASED cached feed")
         }
+        #endif
+        reusableFeed = nil
     }
 
     /// Re-aims the cached feed at this window, or builds one if there is no
     /// usable instance. `repoint` refuses while the controller is still in a
     /// navigation stack, which is the case that must not be reused.
-    private func snapFeed(for ids: [PostID]) -> UIViewController {
+    ///
+    /// Internal, not private, so the cache's lifetime is unit-testable without
+    /// driving a whole hero flight — the rules that matter (a push must not
+    /// drop it, leaving the tab must) are lifecycle-ordering rules, and those
+    /// are exactly what a sim run is worst at pinning.
+    func snapFeed(for ids: [PostID]) -> UIViewController {
         if let cached = reusableFeed, cached.repoint(to: ids) {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
