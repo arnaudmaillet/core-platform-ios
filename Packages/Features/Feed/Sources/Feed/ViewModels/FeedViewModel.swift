@@ -290,6 +290,43 @@ public final class FeedViewModel {
         emit()
     }
 
+    /// Aims this view model at a different window of posts and reloads, so the
+    /// screen around it can be REUSED rather than rebuilt.
+    ///
+    /// Everything derived from the old corpus goes: items, engagement, comment
+    /// streams, paging. Everything in flight for it is cancelled first, or a
+    /// late response would land against the new window and render posts the
+    /// viewer did not open. What survives is deliberately narrow —
+    /// `authorStubs` is a profile-keyed identity cache that is correct
+    /// regardless of which posts are on screen, and re-fetching it would only
+    /// slow the next push down.
+    ///
+    /// Silent no-op when the provider cannot be re-aimed: the open-ended
+    /// timeline has no fixed window to replace, and its caller does not reuse.
+    public func repoint(to ids: [PostID]) {
+        guard let repointable = repository as? any RepointableFeedProviding else { return }
+        initialLoad?.cancel()
+        pagingLoad?.cancel()
+        for task in streamLoads.values { task.cancel() }
+        streamLoads = [:]
+        streamsByPost = [:]
+        items = []
+        engagement = [:]
+        likesInFlight = []
+        nextPageToken = nil
+        isColdRefreshing = false
+        phase = .loading
+        // A fresh builder, matching `viewDidLoad` — it carries per-corpus
+        // derivation state, and reusing one across windows is the kind of
+        // thing that shows up later as one post wearing another's furniture.
+        builder = FeedDisplayModelBuilder()
+        initialLoad = Task {
+            await repointable.repoint(to: ids)
+            guard !Task.isCancelled else { return }
+            await loadInitial()
+        }
+    }
+
     private func loadInitial() async {
         // Offline-first: render the snapshot immediately if there is one…
         if let cached = await repository.cachedFirstPage(), let models = await build(cached) {

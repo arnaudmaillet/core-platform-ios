@@ -37,6 +37,23 @@ struct FixedPostsFeedProviderTests {
         #expect(page.nextPageToken == nil)
     }
 
+    /// Re-aiming is what lets the screen above be reused instead of rebuilt —
+    /// the next load serves the NEW set, in the new order, with nothing of the
+    /// old one left behind.
+    @Test func repointServesTheNewWindowOnTheNextLoad() async throws {
+        let base = StubBase(entries: [
+            "a": entry("a"), "b": entry("b"), "c": entry("c")
+        ])
+        let provider = FixedPostsFeedProvider(base: base, ids: [PostID("a"), PostID("b")])
+        #expect(try await provider.loadFirstPage().entries.map(\.post.id)
+                == [PostID("a"), PostID("b")])
+
+        await provider.repoint(to: [PostID("c"), PostID("a")])
+
+        let page = try await provider.loadFirstPage()
+        #expect(page.entries.map(\.post.id) == [PostID("c"), PostID("a")])
+    }
+
     @Test func cachedFirstPageIsNil() async {
         let provider = FixedPostsFeedProvider(base: StubBase(entries: [:]), ids: [])
         #expect(await provider.cachedFirstPage() == nil)

@@ -674,6 +674,52 @@ final class ForYouViewController: UIViewController {
         )
     }
 
+    /// The feed this grid opens, reused across pushes when it can be.
+    ///
+    /// Held by THIS controller rather than by the builder on purpose. A single
+    /// shared instance would be a bug the moment two tabs want a feed at once
+    /// — the Maps pin path pushes onto its own navigation stack and can be on
+    /// screen while this one is — so the cache belongs to the call site, and
+    /// every other entry point keeps building its own.
+    /// STRONG, and that is the whole mechanism: the reference has to outlive
+    /// the pop. Held weakly it would be released the moment the navigation
+    /// controller let go, and the next tap would rebuild exactly what this
+    /// exists to avoid.
+    private var reusableFeed: SnapFeedViewController?
+
+    /// The cache is an OPTIMISATION, not state — a held feed keeps a whole
+    /// collection view and its players alive off-screen, which is exactly the
+    /// kind of thing to give back first. Dropping it costs the next tap a
+    /// rebuild and nothing else. Never dropped while it is on screen.
+    override func didReceiveMemoryWarning() {
+        super.didReceiveMemoryWarning()
+        if reusableFeed?.navigationController == nil {
+            reusableFeed = nil
+        }
+    }
+
+    /// Re-aims the cached feed at this window, or builds one if there is no
+    /// usable instance. `repoint` refuses while the controller is still in a
+    /// navigation stack, which is the case that must not be reused.
+    private func snapFeed(for ids: [PostID]) -> UIViewController {
+        if let cached = reusableFeed, cached.repoint(to: ids) {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
+                print("[feed-reuse] REPOINTED to \(ids.prefix(3).map(\.rawValue))")
+            }
+            #endif
+            return cached
+        }
+        let feed = makeSnapFeed(ids)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
+            print("[feed-reuse] BUILT fresh for \(ids.prefix(3).map(\.rawValue))")
+        }
+        #endif
+        reusableFeed = feed as? SnapFeedViewController
+        return feed
+    }
+
     private func openFeed(from format: GalleryFilter.Format, at index: Int) {
         // One flight at a time: a second tap while a card is in the air would
         // stage a transition over a live one. Same guard as the map's.
@@ -688,7 +734,7 @@ final class ForYouViewController: UIViewController {
         // post becomes invisible to reconcile, so nothing can restart or stop
         // it while its player is in flight.
         pager.beginPlaybackHandoff(of: tapped.id)
-        let feed = makeSnapFeed(Array(ids))
+        let feed = snapFeed(for: Array(ids))
         // Hand the feed the projection this grid already holds, so its first
         // page configures at push time rather than when its own fetch returns.
         // Measured at ~0.69s of empty destination without it.
@@ -1404,8 +1450,12 @@ final class ForYouViewController: UIViewController {
                     DispatchQueue.main.asyncAfter(deadline: .now() + base) { [weak self] in
                         self?.navigationController?.popViewController(animated: true)
                     }
+                    // A DIFFERENT tile each round. Reopening the same one
+                    // cannot tell a re-pointed feed from a stale one — both
+                    // render the same post — so the harness would pass while
+                    // reuse served the previous window.
                     DispatchQueue.main.asyncAfter(deadline: .now() + base + 1.5) { [weak self] in
-                        self?.openFeed(from: format, at: index)
+                        self?.openFeed(from: format, at: index + round)
                     }
                 }
             }
