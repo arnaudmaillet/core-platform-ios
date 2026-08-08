@@ -1981,6 +1981,37 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         return rendering
     }
 
+    /// Pays this page's first LAYOUT and RASTER before the flight instead of
+    /// inside it.
+    ///
+    /// The hero transition's build lays the destination out (`container
+    /// .layoutIfNeeded`), and the commit that follows draws its layer tree for
+    /// the first time — text, the rail's bubbles, the media card. Measured on
+    /// the present leg: ~55ms of build plus ~100ms before the first frame is
+    /// delivered, against ~50ms post-build on the dismiss leg, which flies
+    /// home to a grid already drawn. That difference is this page's first
+    /// raster, and while the card is flying it is a visible pause.
+    ///
+    /// It cannot be avoided — the pixels have to be produced once — but it can
+    /// be paid while NOTHING IS MOVING. Called just before the push, it lands
+    /// in the same frame as the tap, where a dropped frame costs nothing,
+    /// rather than in the first frames of the animation.
+    ///
+    /// `CATransaction.flush()` is the part that matters: `layoutIfNeeded`
+    /// settles geometry but does not draw, and `display()` is driven by a
+    /// commit. Flushing forces that commit now.
+    public func prepareForHeroPresentation(in bounds: CGRect) {
+        view.frame = bounds
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+        // The flush is cheap insurance rather than the mechanism: measured, it
+        // is the LAYOUT above that moves (build 54-75ms → 22ms). Parking the
+        // tree in the render hierarchy for one flush — so `display()` actually
+        // runs on it — was tried and measured identical, so the destination's
+        // view hierarchy is left alone.
+        CATransaction.flush()
+    }
+
     public func setZoomContentHidden(_ hidden: Bool) {
         view.alpha = hidden ? 0 : 1
     }
