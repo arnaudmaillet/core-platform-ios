@@ -2363,42 +2363,6 @@ struct SnapCommentsPresentationTests {
         #expect(SnapCommentsLayout.emptyPageMinimumHeight > 0)
     }
 
-    /// The correction fits the page so the stream produces EXACTLY one
-    /// viewport of content — the whole point being that a post with nothing
-    /// to say must not be scrollable.
-    @Test func theCorrectionMakesTheContentExactlyFillTheViewport() {
-        // Seeded at 700 in a 700 region, the caption row pushed content to
-        // 780 — 80 too tall, and that 80 is what the page gives back.
-        let fitted = SnapCommentsLayout.correctedEmptyPageHeight(
-            current: 700, availableHeight: 700, contentHeight: 780
-        )
-        #expect(fitted == 620)
-
-        // Re-measured after the correction, the content now matches the room
-        // and the result is a fixed point — this is what lets the caller's
-        // tolerance end the layout loop.
-        #expect(
-            SnapCommentsLayout.correctedEmptyPageHeight(
-                current: fitted, availableHeight: 700, contentHeight: 700
-            ) == fitted
-        )
-
-        // It also grows: a page that came out SHORT of the viewport (nothing
-        // above it at all) takes the slack back rather than leaving a gap.
-        #expect(
-            SnapCommentsLayout.correctedEmptyPageHeight(
-                current: 300, availableHeight: 700, contentHeight: 340
-            ) == 660
-        )
-
-        // Never below the floor, however cramped the room.
-        #expect(
-            SnapCommentsLayout.correctedEmptyPageHeight(
-                current: 300, availableHeight: 100, contentHeight: 900
-            ) == SnapCommentsLayout.emptyPageMinimumHeight
-        )
-    }
-
     // MARK: - Entry point
 
     /// Every comments surface is an engagement entry point — the empty-state

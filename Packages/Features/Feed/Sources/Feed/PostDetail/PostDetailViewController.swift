@@ -63,10 +63,6 @@ final class PostDetailViewController: UIViewController {
         return view
     }()
     private var streamDataSource: UICollectionViewDiffableDataSource<StreamSection, StreamItem>!
-    /// The empty page row's height, held so `updateEmptyPageHeight` can fit
-    /// it to the room the caption leaves. Nil whenever the stream carries no
-    /// empty state.
-    private var emptyPageHeightConstraint: NSLayoutConstraint?
     /// Snapshot bookkeeping: the first apply lands without animation (a
     /// cold load has nothing to animate FROM); everything after — folds,
     /// sorts, submissions — animates natively.
@@ -147,14 +143,13 @@ final class PostDetailViewController: UIViewController {
         for task in imageTasks { task.cancel() }
     }
 
-    /// The empty page is fitted to the room the stream has, and that room
-    /// moves — rotation, the composer growing to a second line, the keyboard
-    /// opening. Re-fit on every settled layout; the correction's own
-    /// tolerance makes a no-op call free.
+    /// Rows re-measure on a genuine WIDTH change — rotation, iPad size
+    /// classes. Nothing here touches the empty page's HEIGHT: that is
+    /// resolved once at configuration time and deliberately never revisited
+    /// per layout, because a height that changes after frame 0 is the jump.
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         remeasureStreamOnWidthChange()
-        updateEmptyPageHeight()
     }
 
     /// The width the stream's self-sizing rows were last measured against.
@@ -547,6 +542,9 @@ final class PostDetailViewController: UIViewController {
         }
     }
 
+    /// Extra bottom room so resting content clears the composer band.
+    private static let engagedFooterClearance: CGFloat = 62
+
     func setEngagedInsets(top: CGFloat, bottomInset: CGFloat) {
         // The strip inset is the ONLY top authority in the engaged context:
         // the full-cell scroll view would otherwise also inherit the safe
@@ -568,7 +566,14 @@ final class PostDetailViewController: UIViewController {
             scrollBottomEngaged = collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         }
         scrollBottomEngaged?.isActive = true
-        collectionView.contentInset.bottom = max(0, bottomInset) + 62
+        collectionView.contentInset.bottom = max(0, bottomInset) + Self.engagedFooterClearance
+        // Recorded so the empty page can be sized against the SETTLED
+        // geometry on frame 0 — the stream is still growing into these
+        // numbers while the transition runs.
+        engagedStreamInsets = (
+            top: max(0, top),
+            bottom: max(0, bottomInset) + Self.engagedFooterClearance
+        )
         composerBackdrop.isHidden = false
         // Z-ORDER, load-bearing: the scroll view is added AFTER the compose
         // bar at build time (harmless while it ended at the bar's top), so
@@ -767,56 +772,42 @@ final class PostDetailViewController: UIViewController {
         // emptiness is the page's emptiness, and that is exactly what
         // `EmptyStateView` is for.
         let mode = mode
-        let emptyCell = UICollectionView.CellRegistration<UICollectionViewCell, StreamItem> {
-            [weak self] cell, _, _ in
+        // COMMENTS-ONLY gets the app's shared empty PAGE; the full post
+        // detail keeps a one-line note. The difference is what the surface
+        // is: with the post above it the comments are a SECTION, and a
+        // centred illustration block inside a section reads as a broken
+        // layout — but in comments-only the comments ARE the page, so its
+        // emptiness is the page's emptiness, and that is exactly what
+        // `EmptyStateView` is for.
+        let emptyNoteCell = UICollectionView.CellRegistration<UICollectionViewCell, StreamItem> { cell, _, _ in
             cell.contentView.subviews.forEach { $0.removeFromSuperview() }
-            guard mode == .commentsOnly else {
-                let empty = UILabel()
-                empty.text = "No comments yet. Be the first."
-                empty.font = .preferredFont(forTextStyle: .subheadline)
-                empty.adjustsFontForContentSizeCategory = true
-                empty.textColor = .secondaryLabel
-                empty.translatesAutoresizingMaskIntoConstraints = false
-                cell.contentView.addSubview(empty)
-                NSLayoutConstraint.activate([
-                    empty.topAnchor.constraint(equalTo: cell.contentView.topAnchor),
-                    empty.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor),
-                    empty.trailingAnchor.constraint(lessThanOrEqualTo: cell.contentView.trailingAnchor),
-                    empty.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor),
-                ])
-                return
-            }
-            let empty = EmptyStateView()
-            empty.configure(
-                symbolName: "bubble.left.and.bubble.right",
-                title: SnapCommentEmptyStateView.promptText,
-                subtitle: "Be the first to comment."
-            )
+            let empty = UILabel()
+            empty.text = "No comments yet. Be the first."
+            empty.font = .preferredFont(forTextStyle: .subheadline)
+            empty.adjustsFontForContentSizeCategory = true
+            empty.textColor = .secondaryLabel
             empty.translatesAutoresizingMaskIntoConstraints = false
             cell.contentView.addSubview(empty)
-            // `EmptyStateView` centres its block and carries no vertical
-            // intrinsic size, so a self-sizing row must be given a height —
-            // and it must be the RIGHT height on frame 0.
-            //
-            // This used to be seeded at the full available region and
-            // corrected once the layout had measured the caption above it.
-            // The correction was a real geometry change arriving a frame
-            // late, and what it looked like was the empty state rendering
-            // low and then teleporting up at the end of the presentation.
-            // A number that is only right on the second pass is a jump, so
-            // it is computed in full here instead (see `emptyPageHeight`),
-            // and `updateEmptyPageHeight` is left with nothing to correct.
-            let height = empty.heightAnchor.constraint(
-                equalToConstant: self?.emptyPageHeight() ?? SnapCommentsLayout.emptyPageMinimumHeight
-            )
-            self?.emptyPageHeightConstraint = height
             NSLayoutConstraint.activate([
                 empty.topAnchor.constraint(equalTo: cell.contentView.topAnchor),
                 empty.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor),
-                empty.trailingAnchor.constraint(equalTo: cell.contentView.trailingAnchor),
+                empty.trailingAnchor.constraint(lessThanOrEqualTo: cell.contentView.trailingAnchor),
                 empty.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor),
-                height,
             ])
+        }
+        // The height is decided HERE, once, from geometry that is already
+        // final on frame 0 — `CommentsEmptyPageCell` then returns it
+        // unchanged for the life of the configuration. Nothing recomputes
+        // it later, which is what stops the block moving at the end of the
+        // presentation.
+        let emptyPageCell = UICollectionView.CellRegistration<CommentsEmptyPageCell, StreamItem> {
+            [weak self] cell, _, _ in
+            cell.configure(
+                symbolName: "bubble.left.and.bubble.right",
+                title: SnapCommentEmptyStateView.promptText,
+                subtitle: "Be the first to comment.",
+                height: self?.emptyPageHeight() ?? SnapCommentsLayout.emptyPageMinimumHeight
+            )
         }
         let captionCell = UICollectionView.CellRegistration<CaptionBubbleCell, StreamItem> {
             [weak self] cell, _, _ in
@@ -833,7 +824,13 @@ final class PostDetailViewController: UIViewController {
             case .caption:
                 return collectionView.dequeueConfiguredReusableCell(using: captionCell, for: indexPath, item: item)
             case .emptyState:
-                return collectionView.dequeueConfiguredReusableCell(using: emptyCell, for: indexPath, item: item)
+                return mode == .commentsOnly
+                    ? collectionView.dequeueConfiguredReusableCell(
+                        using: emptyPageCell, for: indexPath, item: item
+                    )
+                    : collectionView.dequeueConfiguredReusableCell(
+                        using: emptyNoteCell, for: indexPath, item: item
+                    )
             case .skeletonPlaceholder(let index):
                 return collectionView.dequeueConfiguredReusableCell(using: skeletonCell, for: indexPath, item: index)
             case .comment(let id):
@@ -899,14 +896,7 @@ final class PostDetailViewController: UIViewController {
         let items = streamItems()
         snapshot.appendItems(items)
         hasAppliedStream = true
-        // The held constraint belongs to a row that may not exist in this
-        // snapshot; drop it rather than let a later correction write through
-        // to a discarded cell's view.
-        if !items.contains(.emptyState) { emptyPageHeightConstraint = nil }
-        streamDataSource.apply(snapshot, animatingDifferences: animated) { [weak self] in
-            self?.updateEmptyPageHeight()
-            completion?()
-        }
+        streamDataSource.apply(snapshot, animatingDifferences: animated) { completion?() }
     }
 
     /// Re-asks every row how tall it wants to be.
@@ -925,21 +915,37 @@ final class PostDetailViewController: UIViewController {
         var snapshot = streamDataSource.snapshot()
         guard !snapshot.itemIdentifiers.isEmpty else { return }
         snapshot.reconfigureItems(snapshot.itemIdentifiers)
-        streamDataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
-            self?.updateEmptyPageHeight()
-        }
+        streamDataSource.apply(snapshot, animatingDifferences: false)
     }
 
     // MARK: - The empty page's fit
 
-    /// The room the stream actually has: the viewport minus its adjusted
-    /// content insets, which is where the header, the composer and the safe
-    /// areas have already been subtracted (and where the keyboard's own
-    /// inset shows up when it is open).
+    /// The room the stream will have WHEN IT HAS SETTLED — deliberately not
+    /// the room it has right now.
+    ///
+    /// This is the crux of the jump. Engaging moves the stream's bottom to
+    /// the view's bottom (`setEngagedInsets`), so during the transition the
+    /// collection view is still GROWING: measured live, the available height
+    /// is smaller mid-animation than it ends up, and anything sized from it
+    /// has to move when the animation lands. The engaged numbers are known
+    /// up front though — they were handed in — so the final geometry is
+    /// computable on frame 0 and that is what the empty page is sized
+    /// against.
+    ///
+    /// The view's own height is the stable term (it does not animate); the
+    /// collection view's is not, and is used only in the un-engaged case,
+    /// where nothing is in flight.
     private var availableStreamHeight: CGFloat {
+        if let engaged = engagedStreamInsets {
+            return view.bounds.height - engaged.top - engaged.bottom
+        }
         let inset = collectionView.adjustedContentInset
         return collectionView.bounds.height - inset.top - inset.bottom
     }
+
+    /// The engaged context's own insets, kept so the settled geometry can be
+    /// computed before the transition has produced it. Nil until engaged.
+    private var engagedStreamInsets: (top: CGFloat, bottom: CGFloat)?
 
     /// The empty page's height, resolved SYNCHRONOUSLY: the room the stream
     /// has, less the section's own insets, less the caption row that sits
@@ -953,7 +959,14 @@ final class PostDetailViewController: UIViewController {
     /// visible jump, because anything learned after frame 0 arrives as
     /// motion the presentation did not ask for.
     private func emptyPageHeight() -> CGFloat {
-        let rowWidth = collectionView.bounds.width - Spacing.lg * 2
+        // The view's width, when the stream has not been laid out yet: the
+        // resting engagement configures rows before the container has run a
+        // pass, and a zero width would measure the caption as zero-height
+        // and hand the empty page the whole viewport.
+        let streamWidth = collectionView.bounds.width > 0
+            ? collectionView.bounds.width
+            : view.bounds.width
+        let rowWidth = streamWidth - Spacing.lg * 2
         let occupied = Spacing.lg * 2 + captionRowHeight(width: rowWidth)
         return SnapCommentsLayout.emptyPageHeight(
             availableHeight: availableStreamHeight - occupied
@@ -981,35 +994,6 @@ final class PostDetailViewController: UIViewController {
     /// Offscreen, never in the hierarchy — it exists to be measured. Held
     /// rather than rebuilt so a re-fit costs a layout pass, not a view tree.
     private lazy var captionSizingCell = CaptionBubbleCell()
-
-    /// Keeps the empty page fitted when the room changes underneath it —
-    /// rotation, the keyboard, the composer growing a line. Not the initial
-    /// sizing: that is resolved in full at configuration time, so this
-    /// normally finds nothing to do.
-    ///
-    /// NOT `isScrollEnabled = false`, though that is the obvious way to stop
-    /// a short page scrolling: this list's rubber band IS the interactive
-    /// dismissal (`scrollViewDidScroll` reads its overshoot), so disabling
-    /// the scroll would take the pull-to-close gesture with it on exactly
-    /// the pages that have the least reason to scroll. Sizing the content to
-    /// the viewport leaves nothing to scroll TO while the bounce, and the
-    /// gesture riding it, stay intact.
-    private func updateEmptyPageHeight() {
-        guard let constraint = emptyPageHeightConstraint else { return }
-        let available = availableStreamHeight
-        guard available > 0, collectionView.contentSize.height > 0 else { return }
-        let target = SnapCommentsLayout.correctedEmptyPageHeight(
-            current: constraint.constant,
-            availableHeight: available,
-            contentHeight: collectionView.contentSize.height
-        )
-        // The tolerance is what stops this: each correction re-triggers
-        // layout, and without a dead band the pair would trade half-points
-        // forever.
-        guard abs(target - constraint.constant) > 0.5 else { return }
-        constraint.constant = target
-        collectionView.collectionViewLayout.invalidateLayout()
-    }
 
     /// The engaged toolbar's sort selector lands here — the view model
     /// re-ranks the data and the diffable apply animates the moves.
