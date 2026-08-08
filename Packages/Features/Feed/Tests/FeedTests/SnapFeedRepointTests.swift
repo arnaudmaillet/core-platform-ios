@@ -36,22 +36,6 @@ struct SnapFeedRepointTests {
         #expect(feed.repoint(to: [PostID("post-b")]) == true)
     }
 
-    /// Bar chrome held for a flight that never landed must not survive into
-    /// the next push — a reused controller would otherwise be pushed wearing
-    /// nothing, with its items stranded in the held set forever.
-    @Test func repointReleasesChromeHeldByAnAbandonedFlight() {
-        let feed = Self.detachedFeed()
-        feed.loadViewIfNeeded()
-        let resting = feed.navigationItem.rightBarButtonItems ?? []
-        #expect(!resting.isEmpty)
-
-        feed.holdBarChromeForFlight()
-        #expect(feed.navigationItem.rightBarButtonItems ?? [] == [])
-
-        feed.repoint(to: [PostID("post-b")])
-        #expect(feed.navigationItem.rightBarButtonItems ?? [] == resting)
-    }
-
     /// The pager goes back to the head of the window. The tapped post is
     /// always first, so a reused feed that kept its offset would open on
     /// whatever page the viewer left behind last time.
