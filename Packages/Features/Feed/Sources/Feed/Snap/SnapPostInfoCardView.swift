@@ -80,6 +80,12 @@ final class SnapPostInfoCardView: UIView {
         // visible, measurable, and what a self-sizing row is supposed to
         // resolve by growing.
         captionLabel.lineBreakMode = .byWordWrapping
+        // The caption's height is the bubble's height. Nothing above it in
+        // the stream is allowed to negotiate that away — a squeezed label
+        // is a swallowed caption, and this bubble has no fixed region to
+        // defend any more.
+        captionLabel.setContentCompressionResistancePriority(.required, for: .vertical)
+        captionLabel.setContentHuggingPriority(.required, for: .vertical)
         captionLabel.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(captionLabel)
 
@@ -114,6 +120,30 @@ final class SnapPostInfoCardView: UIView {
             timestampLabel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -inset),
             timestampLabel.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -inset),
         ])
+    }
+
+    /// Teaches the caption its wrapping width before anything asks how tall
+    /// it is.
+    ///
+    /// A multi-line `UILabel`'s intrinsic height is a function of a width it
+    /// does not know: asked in the abstract it answers as ONE long line.
+    /// Auto Layout resolves that in a second pass — but a self-sizing cell
+    /// measures with `systemLayoutSizeFitting`, and that measurement takes
+    /// the first answer. `preferredMaxLayoutWidth` is what makes the first
+    /// answer the right one.
+    ///
+    /// Sourced from this view's own resolved width minus its insets, so the
+    /// number lives where the insets do rather than being re-derived by the
+    /// cell. The re-run of `super.layoutSubviews()` is the standard idiom:
+    /// the new width changes the label's intrinsic height, and the pass that
+    /// already ran used the old one. The guard makes the second pass a
+    /// no-op, so it cannot recur.
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let wrapWidth = bounds.width - Self.contentInset * 2
+        guard wrapWidth > 0, abs(captionLabel.preferredMaxLayoutWidth - wrapWidth) > 0.5 else { return }
+        captionLabel.preferredMaxLayoutWidth = wrapWidth
+        super.layoutSubviews()
     }
 
     // MARK: - Glass + entrance
