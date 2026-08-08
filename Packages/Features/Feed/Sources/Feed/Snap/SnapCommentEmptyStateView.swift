@@ -18,6 +18,15 @@ import UIKit
 /// zero count too, so without that seam the pill would flash on every page
 /// while its fetch is in flight.
 ///
+/// # The label retires; the row does not
+/// The words are an EXPLANATION, not a permanent label. They hold for a
+/// reading beat and then fade, leaving the bubble mark alone in the avatar
+/// slot — the page gets its media back and the affordance stays. What does
+/// NOT change is the row: the pill keeps its place in the layout at zero
+/// opacity, so the whole slot — the emptied text column included — is still
+/// one tap into the comments. Shrinking to the mark would have taken the
+/// target with it.
+///
 /// Renders the subtitle zone's pill grammar (`SubtitlePillLabel`, footnote/
 /// medium) on the caption's leading axis, so the placeholder reads as the
 /// comment system's voice — one typographic tier below the caption, like a
@@ -136,6 +145,72 @@ final class SnapCommentEmptyStateView: UIView {
             alpha = 0
             UIView.animate(withDuration: 0.2) { self.alpha = restingAlpha }
         }
+        applyLabelDwell()
+    }
+
+    // MARK: - The label's dwell
+
+    /// How long "No comments yet" is READ before it retires, and how long it
+    /// takes to go. The words are an explanation, not a permanent label:
+    /// once they have been read, the mark alone carries the affordance and
+    /// the page gets its media back.
+    static let labelDwell: TimeInterval = 2.8
+    static let labelFadeDuration: TimeInterval = 0.35
+    private static let dwellKey = "empty-state-label-dwell"
+
+    /// Mirrors the owning page's on-screen state, the same seam the subtitle
+    /// zone rides (`SnapChromeView.setSubtitlesActive`). The dwell is a
+    /// READING clock, so it must not start on a page nobody is looking at —
+    /// armed at the dequeue pull it would burn while the cell is off-screen
+    /// and the words would already be gone by the time the page arrives.
+    private var isActive = false
+    private var hasArmedDwell = false
+
+    func setActive(_ active: Bool) {
+        guard active != isActive else { return }
+        isActive = active
+        applyLabelDwell()
+    }
+
+    private func applyLabelDwell() {
+        if isActive, !isHidden {
+            armLabelDwell()
+        } else {
+            cancelLabelDwell()
+        }
+    }
+
+    /// One fill-forwards keyframe rather than a timer — the band's and the
+    /// zone's doctrine, for the same reason: wall-clock cadence desyncs from
+    /// the layer clock while a page rides a percent-driven transition, and a
+    /// layer animation also stops paying for itself the moment the page
+    /// leaves the screen.
+    ///
+    /// The model value is parked at 0 (hidden) and the animation HOLDS the
+    /// label visible for the dwell before ramping down onto it. Ending on
+    /// the model value is what keeps backgrounding — which strips CA
+    /// animations — from snapping the words back on.
+    private func armLabelDwell() {
+        guard !hasArmedDwell else { return }
+        hasArmedDwell = true
+        let total = Self.labelDwell + Self.labelFadeDuration
+        let animation = CAKeyframeAnimation(keyPath: "opacity")
+        animation.values = [1, 1, 0]
+        animation.keyTimes = [0, NSNumber(value: Self.labelDwell / total), 1]
+        animation.duration = total
+        animation.fillMode = .forwards
+        animation.isRemovedOnCompletion = false
+        label.layer.opacity = 0
+        label.layer.add(animation, forKey: Self.dwellKey)
+    }
+
+    /// Restores the words, ready to be read again the next time this row
+    /// appears — a page revisited, or the scaffold recycled onto another
+    /// zero-comment post.
+    private func cancelLabelDwell() {
+        hasArmedDwell = false
+        label.layer.removeAnimation(forKey: Self.dwellKey)
+        label.layer.opacity = 1
     }
 
     /// One tier below the caption, the cue pill's exact type recipe
