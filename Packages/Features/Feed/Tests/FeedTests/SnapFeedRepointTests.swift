@@ -69,9 +69,65 @@ struct SnapFeedRepointTests {
         #expect(collection?.contentOffset == .zero)
     }
 
+    // MARK: - The cache's lifetime
+
+    /// Two taps, one feed. This is the whole point of the cache, and the
+    /// cheapest thing to regress by accident.
+    @Test func aSecondOpenReusesTheCachedFeed() {
+        let (grid, counter) = Self.grid()
+        let first = grid.snapFeed(for: [PostID("a")])
+        let second = grid.snapFeed(for: [PostID("b")])
+
+        #expect(first === second)
+        #expect(counter.built == 1)
+    }
+
+    /// A PUSH also disappears the grid, and dropping the cache there would
+    /// defeat the reuse entirely — the next thing that happens is a pop
+    /// straight back. Only a departure that leaves the grid topmost counts.
+    @Test func aPushedFeedSurvivesTheGridsDisappearance() {
+        let (grid, counter) = Self.grid()
+        let nav = UINavigationController(rootViewController: grid)
+        let feed = grid.snapFeed(for: [PostID("a")])
+        nav.pushViewController(feed, animated: false)
+
+        grid.viewDidDisappear(false)
+        // Popped, and the next tap must still find it.
+        nav.popToRootViewController(animated: false)
+
+        #expect(grid.snapFeed(for: [PostID("b")]) === feed)
+        #expect(counter.built == 1)
+    }
+
+    /// Leaving the TAB hands it back: the grid is topmost, so nothing was
+    /// pushed over it and the feed is just an off-screen retain.
+    @Test func leavingTheTabReleasesTheCachedFeed() {
+        let (grid, counter) = Self.grid()
+        let nav = UINavigationController(rootViewController: grid)
+        _ = nav
+        let first = grid.snapFeed(for: [PostID("a")])
+
+        grid.viewDidDisappear(false)
+
+        let second = grid.snapFeed(for: [PostID("b")])
+        #expect(first !== second)
+        #expect(counter.built == 2)
+    }
+
     // MARK: - Helpers
 
-    private static func detachedFeed() -> SnapFeedViewController {
+    private static func grid() -> (ForYouViewController, FeedBuildCounter) {
+        let counter = FeedBuildCounter()
+        let grid = ForYouViewController(
+            viewModel: ForYouViewModel(repository: StubForYouProvider()),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            makeSnapFeed: { _ in counter.make() },
+            prewarm: { _ in }
+        )
+        return (grid, counter)
+    }
+
+    fileprivate static func detachedFeed() -> SnapFeedViewController {
         SnapFeedViewController(
             viewModel: FeedViewModel(repository: SilentFeedProvider()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
@@ -80,6 +136,29 @@ struct SnapFeedRepointTests {
 
     private static func collectionView(in feed: SnapFeedViewController) -> UICollectionView? {
         feed.view.subviews.compactMap { $0 as? UICollectionView }.first
+    }
+}
+
+/// Counts how many feeds were actually CONSTRUCTED — the thing the cache
+/// exists to keep down. The factory closure is the only honest place to count
+/// it; identity alone would also pass for a cache that rebuilt and happened to
+/// be handed back the same address.
+@MainActor
+private final class FeedBuildCounter {
+    private(set) var built = 0
+
+    func make() -> UIViewController {
+        built += 1
+        return SnapFeedRepointTests.detachedFeed()
+    }
+}
+
+private final class StubForYouProvider: ForYouProviding, @unchecked Sendable {
+    func firstPage() async throws -> ForYouPage {
+        ForYouPage(posts: [], nextPageToken: nil)
+    }
+    func page(after token: String) async throws -> ForYouPage {
+        ForYouPage(posts: [], nextPageToken: nil)
     }
 }
 
