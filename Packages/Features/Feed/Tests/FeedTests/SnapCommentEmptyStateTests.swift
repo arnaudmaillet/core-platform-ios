@@ -273,6 +273,61 @@ struct SnapCommentEmptyStateTests {
         #expect(label.layer.opacity == 1)
     }
 
+    /// CLOSING THE COMMENTS REWINDS THE BEAT. Coming back out of the
+    /// engagement is a return to the page, and the page introduces itself
+    /// again — the alternative is meeting a pre-muted label at the exact
+    /// moment the viewer last expressed interest in this post's comments.
+    @Test func closingTheCommentsReadsTheWordsAgain() throws {
+        let chrome = makeChrome()
+        let prompt = try emptyState(in: chrome)
+        let label = try pill(in: prompt)
+        chrome.updateCommentStreams(FeedViewModel.CommentStreams(
+            reactions: [], subtitles: [], commentCount: 0
+        ))
+        chrome.setSubtitlesActive(true)
+        let first = try #require(label.layer.animation(forKey: "empty-state-label-dwell"))
+
+        // Engaged: the chrome fades out, beat included.
+        chrome.setCommentsEngaged(true)
+        #expect(prompt.alpha == 0)
+
+        // …and back. A NEW animation, from full strength.
+        chrome.setCommentsEngaged(false)
+        #expect(prompt.alpha == 1)
+        let second = try #require(label.layer.animation(forKey: "empty-state-label-dwell"))
+        #expect(second !== first)
+        #expect(label.layer.opacity == SnapCommentEmptyStateView.labelRestingOpacity)
+    }
+
+    /// The interactive pull-down shares the seam: it lands on the same
+    /// progress == 1 the animated close does. A drag that springs BACK never
+    /// reaches 1, so it must not rewind anything.
+    @Test func onlyAFullReturnToRestRewindsTheBeat() throws {
+        let chrome = makeChrome()
+        let prompt = try emptyState(in: chrome)
+        let label = try pill(in: prompt)
+        chrome.updateCommentStreams(FeedViewModel.CommentStreams(
+            reactions: [], subtitles: [], commentCount: 0
+        ))
+        chrome.setSubtitlesActive(true)
+
+        chrome.setCommentsEngagedProgress(0)
+        chrome.setCommentsEngagedProgress(0.4) // dragging out…
+        let midDrag = label.layer.animation(forKey: "empty-state-label-dwell")
+        chrome.setCommentsEngagedProgress(0) // …and it springs back
+        #expect(label.layer.animation(forKey: "empty-state-label-dwell") === midDrag)
+
+        // Committing to the end is what rewinds it.
+        chrome.setCommentsEngagedProgress(0.7)
+        chrome.setCommentsEngagedProgress(1)
+        let rewound = try #require(label.layer.animation(forKey: "empty-state-label-dwell"))
+        #expect(rewound !== midDrag)
+
+        // Already at rest: nothing re-arms on a repeated write.
+        chrome.setCommentsEngagedProgress(1)
+        #expect(label.layer.animation(forKey: "empty-state-label-dwell") === rewound)
+    }
+
     /// The row's geometry survives the settle untouched, so the whole slot —
     /// glyph, gap and words alike — is one tap into the comments at every
     /// point in the animation.

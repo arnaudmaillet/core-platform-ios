@@ -743,10 +743,25 @@ final class SnapChromeView: UIView {
     /// caption return under the finger instead of appearing at the end.
     func setCommentsEngagedProgress(_ progress: CGFloat) {
         let alpha = min(max(0, progress), 1)
+        // Landing back ON 1 from anywhere below it is the RETURN to the
+        // resting page — the one seam both dismissal paths share (the
+        // animated close and the interactive pull-down both end here, and
+        // the cell has no other way to disengage). The empty state reads its
+        // words out again from full strength, because closing the comments
+        // is the moment a viewer has most recently asked about them and the
+        // worst moment to meet a pre-muted label.
+        //
+        // Guarded on the TRANSITION: at rest this is already 1 and nothing
+        // re-arms; a pull that springs back to 0 doesn't either, since it
+        // never reached 1 on the way.
+        let returnedToRest = alpha >= 1 && commentsEngagedProgress < 1
         // Remembered because the empty-state pill's own entrance writes
         // alpha too: a stream arriving mid-engagement must settle it here,
         // not at full opacity over the comments layout.
         commentsEngagedProgress = alpha
+        if returnedToRest {
+            commentEmptyState.restartLabelDwell()
+        }
         captionLabel.alpha = alpha
         scrimView.alpha = alpha
         commentTicker.alpha = alpha

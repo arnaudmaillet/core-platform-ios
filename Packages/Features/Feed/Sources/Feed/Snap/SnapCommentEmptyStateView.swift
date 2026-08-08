@@ -150,8 +150,11 @@ final class SnapCommentEmptyStateView: UIView {
     // MARK: - The label's dwell
 
     /// How long "No comments yet" is read at full strength before it settles
-    /// back, and how long the settling takes.
-    static let labelDwell: TimeInterval = 2.8
+    /// back, and how long the settling takes. The dwell is a READING beat,
+    /// not a transition — it is generous on purpose, and it is measured from
+    /// the moment the words are actually in front of someone (see
+    /// `setActive`), never from when their stream landed.
+    static let labelDwell: TimeInterval = 4.5
     static let labelFadeDuration: TimeInterval = 0.35
     /// Where the words SETTLE — muted, not gone. They recede so the page can
     /// have its media back, and they stay legible so a viewer arriving late
@@ -174,6 +177,23 @@ final class SnapCommentEmptyStateView: UIView {
     func setActive(_ active: Bool) {
         guard active != isActive else { return }
         isActive = active
+        applyLabelDwell()
+    }
+
+    /// Rewinds the beat and reads the words again from full strength.
+    ///
+    /// The comments engagement is the caller: coming back out of it is a
+    /// RETURN to the page, and the page introduces itself the way it did
+    /// the first time. Without this the viewer closes the comments onto a
+    /// pre-muted label — the one moment they have most recently expressed
+    /// interest in this post's comments is the moment the explanation would
+    /// be at its faintest.
+    ///
+    /// Unconditional restart, not a resume: `cancelLabelDwell` restores full
+    /// opacity even when nothing is armed, so a row that never got to speak
+    /// (engaged before its beat finished) still gets a whole one.
+    func restartLabelDwell() {
+        cancelLabelDwell()
         applyLabelDwell()
     }
 
