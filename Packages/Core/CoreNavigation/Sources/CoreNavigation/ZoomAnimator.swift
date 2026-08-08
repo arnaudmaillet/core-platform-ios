@@ -90,6 +90,9 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // `startInteractiveTransition` and UIKit does not call this, but
         // building a second flight here would be silent and total.
         guard !isSupersededByInteractiveDriver else { return }
+        // NOTE: UIKit does not take this path for an interruptible
+        // transition — it asks for `interruptibleAnimator` and drives that
+        // itself. Waypoints placed here to profile the flight never fired.
         interruptibleAnimator(using: context).startAnimation()
     }
 
@@ -152,12 +155,16 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             return interruptible
         }
         #if DEBUG
+        // The watch starts BEFORE the build, or the build's own stall is
+        // outside the window being measured — which is how the first pass of
+        // this profile managed to report a gap that never included it.
+        ZoomFlightProfiler.shared.flightWillBuild(presenting: isPresenting)
         let buildStart = CACurrentMediaTime()
         #endif
         let animator = isPresenting ? present(context) : dismiss(context)
         #if DEBUG
         ZoomFlightProfiler.shared.flightBuilt(
-            presenting: isPresenting, buildMilliseconds: (CACurrentMediaTime() - buildStart) * 1000
+            buildMilliseconds: (CACurrentMediaTime() - buildStart) * 1000
         )
         #endif
         interruptible = animator
@@ -995,37 +1002,51 @@ final class ZoomFlightProfiler: NSObject {
 
     private var link: CADisplayLink?
     private var last: CFTimeInterval = 0
-    private var worst: CFTimeInterval = 0
-    private var dropped = 0
-    private var label = ""
+    private var watchStart: CFTimeInterval = 0
+    private var buildEndedAt: CFTimeInterval = 0
+    private var gaps: [(offset: Double, gap: Double)] = []
+    private var leg = ""
 
     private var isEnabled: Bool {
         ProcessInfo.processInfo.arguments.contains("-zoom-profile")
     }
 
-    func flightBuilt(presenting: Bool, buildMilliseconds: Double) {
+    func flightWillBuild(presenting: Bool) {
         guard isEnabled else { return }
-        let leg = presenting ? "present" : "dismiss"
-        print(String(format: "[zoom] %@ flight built %6.2f ms", leg, buildMilliseconds))
-        beginWatch(leg)
-    }
-
-    /// A window wide enough to cover the flight and its settle.
-    private func beginWatch(_ label: String) {
-        self.label = label
+        leg = presenting ? "present" : "dismiss"
         link?.invalidate()
-        last = CACurrentMediaTime()
-        worst = 0
-        dropped = 0
+        watchStart = CACurrentMediaTime()
+        last = watchStart
+        buildEndedAt = 0
+        gaps = []
         let link = CADisplayLink(target: self, selector: #selector(tick))
         link.add(to: .main, forMode: .common)
         self.link = link
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            guard let self else { return }
-            self.link?.invalidate()
-            self.link = nil
-            print(String(format: "[zoom] %@ frames: worst gap %5.1f ms, %d dropped (>25ms) in 1.5s",
-                         self.label, self.worst * 1000, self.dropped))
+            self?.report()
+        }
+    }
+
+    func flightBuilt(buildMilliseconds: Double) {
+        guard isEnabled else { return }
+        buildEndedAt = CACurrentMediaTime()
+        print(String(format: "[zoom] %@ flight built %6.2f ms", leg, buildMilliseconds))
+    }
+
+    /// Every dropped frame WITH ITS OFFSET, and where the build ended, so a
+    /// gap can be attributed instead of guessed at. A total alone cannot say
+    /// whether the stall is the setup or the first frames after it.
+    private func report() {
+        link?.invalidate()
+        link = nil
+        let buildOffset = (buildEndedAt - watchStart) * 1000
+        let worst = gaps.map(\.gap).max() ?? 0
+        print(String(format: "[zoom] %@ frames: worst %5.1f ms, %d dropped; build ended at +%.1f ms",
+                     leg, worst * 1000, gaps.count, buildOffset))
+        for (offset, gap) in gaps {
+            let side = offset * 1000 < buildOffset ? "during build" : "AFTER build"
+            print(String(format: "[zoom]     drop at +%6.1f ms  gap %5.1f ms  (%@)",
+                         offset * 1000, gap * 1000, side))
         }
     }
 
@@ -1033,8 +1054,7 @@ final class ZoomFlightProfiler: NSObject {
         let now = CACurrentMediaTime()
         let gap = now - last
         last = now
-        worst = max(worst, gap)
-        if gap > 0.025 { dropped += 1 }
+        if gap > 0.025 { gaps.append((offset: now - watchStart, gap: gap)) }
     }
 }
 #endif
