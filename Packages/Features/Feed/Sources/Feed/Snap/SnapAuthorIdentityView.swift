@@ -37,6 +37,45 @@ final class SnapAuthorIdentityView: UIView {
     /// footprint instead of a nub, so hydration is a small glide, not a pop.
     private static let minWidth: CGFloat = 150
 
+    /// Narrows the pill without changing what it IS.
+    ///
+    /// The budget above is real — the system overflows the whole item into a
+    /// `•••` menu the moment the trailing run does not fit, and losing the
+    /// author entirely is worse than any amount of truncation. `setCompact`
+    /// paid for it by dropping the handle line and the follow button, which
+    /// made the pill a visibly different component in the two states. This
+    /// pays for it in WIDTH instead: same two lines, same follow button,
+    /// same platter — the name simply truncates earlier, exactly as a long
+    /// name already does at rest.
+    ///
+    /// The floor comes off below `minWidth`: it exists to hold the pill open
+    /// while a name hydrates, and it would otherwise out-argue the budget.
+    /// The narrowest this pill can be while the HANDLE still reads whole —
+    /// everything that is not the label column, plus the handle's own
+    /// natural width. Below it the handle starts truncating, which is the
+    /// last rung of the run's degradation and the signal to buy width from
+    /// the sort pill first.
+    ///
+    /// Measured off the live labels rather than assumed, because the answer
+    /// moves with the handle, the Dynamic Type size and the avatar's
+    /// diameter — the name is deliberately absent from the sum, since it is
+    /// allowed to be squeezed to nothing before the handle gives anything.
+    var widthKeepingHandleWhole: CGFloat {
+        let avatarBreathing = (Self.barItemWrapperHeight - AvatarImageView.barDiameter) / 2
+        let chrome = AvatarImageView.barDiameter
+            + Spacing.sm * 2            // avatar → labels → follow
+            + followButton.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+            + avatarBreathing + Spacing.sm   // the row's own leading/trailing insets
+        return chrome + ceil(metaLabel.intrinsicContentSize.width)
+    }
+
+    func setWidthBudget(_ budget: CGFloat?) {
+        let target = min(Self.maxWidth, budget ?? Self.maxWidth)
+        guard target > 0, maxWidthConstraint?.constant != target else { return }
+        maxWidthConstraint?.constant = target
+        minWidthConstraint?.isActive = target >= Self.minWidth
+    }
+
     /// Called when the identity is tapped, with the shown author.
     var onAuthorTapped: ((ProfileID) -> Void)?
     /// Called when the follow icon is tapped, with the shown author.
@@ -75,6 +114,15 @@ final class SnapAuthorIdentityView: UIView {
         nameLabel.textColor = .label
         metaLabel.font = .preferredFont(forTextStyle: .caption2)
         metaLabel.textColor = .secondaryLabel
+        // THE ORDER THE PILL GIVES WAY IN, when the bar is too narrow to
+        // hold everything: the display NAME truncates first, the handle
+        // line only once the name has nothing left to give. A name is the
+        // thing a reader can still recognize half-written ("Rosa Igle…");
+        // a half-written handle is not an identifier at all. Resistance,
+        // not two width rules — Auto Layout squeezes the lower one first
+        // and never has to be told about the second.
+        nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        metaLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
         // The bar is transparent over arbitrary media; shadows keep the
         // identity legible without a background.

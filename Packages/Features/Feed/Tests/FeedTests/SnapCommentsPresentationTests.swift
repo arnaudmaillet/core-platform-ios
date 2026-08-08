@@ -1122,15 +1122,90 @@ struct SnapCommentsPresentationTests {
         }
         let resting = settledWidth()
 
-        view.setCompact(true, animated: false)
-        let compact = settledWidth()
-        #expect(compact < resting)
-        // The budget: ~222pt is what the bar leaves beside a 96pt sort pill
-        // and a 44pt leading platter on the 402pt reference device.
-        #expect(compact <= 150)
+        // THE PILL NEVER CHANGES WHAT IT IS. It used to drop the handle line
+        // and the follow button for the engagement, which made it a visibly
+        // different component in the two states. It pays the bar's width
+        // budget in WIDTH now: same two lines, same follow button, same
+        // platter — the name truncates earlier, exactly as a long name
+        // already does at rest.
+        view.setWidthBudget(160)
+        let budgeted = settledWidth()
+        #expect(budgeted <= 160)
+        #expect(budgeted < resting)
 
-        view.setCompact(false, animated: false)
+        // And it comes back whole.
+        view.setWidthBudget(nil)
         #expect(abs(settledWidth() - resting) < 0.5)
+    }
+
+    /// The order the trailing run gives way in, rung by rung. The handle
+    /// outranks the name, so a budget that only bites into the name leaves
+    /// the handle whole — and `widthKeepingHandleWhole` is the threshold
+    /// that says when the sort pill should surrender its word instead.
+    @Test func theAuthorPillYieldsItsNameBeforeItsHandle() throws {
+        let view = SnapAuthorIdentityView()
+        view.setAuthor(
+            FeedItemDisplayModel(
+                id: PostID("post-1"), authorID: ProfileID("profile-1"),
+                authorName: "Quentin Dubois", metaText: "@quentin.dubois · 71d",
+                avatarURL: nil, caption: "c", mediaURL: URL(string: "mock://media/1"),
+                mediaKind: .image, thumbnailURL: nil, audioText: nil
+            ),
+            pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+
+        // The threshold is everything that is NOT the name: the chrome plus
+        // the handle's own width. Above it the name absorbs the squeeze.
+        let threshold = view.widthKeepingHandleWhole
+        // `<=`, not `<`: this author's handle is WIDER than their name, so
+        // the name contributes nothing to the natural width and the two
+        // coincide. That is the threshold doing its job, not a miss.
+        #expect(threshold > 0)
+        #expect(threshold <= ceil(view.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width))
+
+        // The name label is the designated absorber; the handle resists.
+        func labels(in root: UIView) -> [UILabel] {
+            root.subviews.flatMap { [$0 as? UILabel].compactMap { $0 } + labels(in: $0) }
+        }
+        let found = labels(in: view)
+        let name = try #require(found.first { $0.text == "Quentin Dubois" })
+        let meta = try #require(found.first { $0.text == "@quentin.dubois · 71d" })
+        #expect(
+            name.contentCompressionResistancePriority(for: .horizontal)
+                < meta.contentCompressionResistancePriority(for: .horizontal)
+        )
+    }
+
+    /// Rung two: the sort pill trades its word for the glyph, and gives the
+    /// reserved width back with it — a pill that kept its footprint would
+    /// have bought the author nothing.
+    @Test func theSortPillCanSurrenderItsTitleForWidth() {
+        let button = SnapCommentSortButton()
+        button.setNeedsLayout()
+        button.layoutIfNeeded()
+        let titled = button.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+        #expect(button.isTitleHidden == false)
+        #expect(button.configuration?.attributedTitle != nil)
+
+        button.setTitleHidden(true)
+        let glyphOnly = button.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+        #expect(button.isTitleHidden)
+        #expect(button.configuration?.attributedTitle == nil)
+        #expect(glyphOnly < titled)
+        // The glyph alone still announces the control and its current order.
+        #expect(button.accessibilityLabel?.contains("Recent") == true)
+        // Selection still works, and still says so.
+        button.select(.trending)
+        #expect(button.accessibilityLabel?.contains("Trending") == true)
+        #expect(button.configuration?.attributedTitle == nil)
+
+        // Restored: the title is back AND so is the longest-title floor, so
+        // the wider "Trending" is not asked to fit a "Recent"-sized platter.
+        button.setTitleHidden(false)
+        #expect(button.configuration?.attributedTitle != nil)
+        #expect(button.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width >= titled - 0.5)
     }
 
     /// The bar's four slots, in order: the viewer's AVATAR opens it, the
