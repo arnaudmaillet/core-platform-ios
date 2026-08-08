@@ -125,6 +125,35 @@ struct ZoomFlight {
             }
         }
 
+        // NOT rasterised, and the reasoning is worth keeping because this is
+        // the obvious next idea whenever the flight is accused of stuttering.
+        //
+        // This replica is the ONLY live view hierarchy the flight animates —
+        // the destination is hidden the whole way (`setZoomContentHidden`), so
+        // the card is already the lightweight proxy a "snapshot instead of the
+        // live view" strategy asks for. Its bounds are fixed before the first
+        // frame, so nothing in it relayouts either; flattening it could only
+        // remove per-frame COMPOSITING of its sublayers.
+        //
+        // Measured (`shouldRasterize` on this layer, 3 runs each): the
+        // flight-start gap did not improve — 56.6 ms against 61.3 ms — though
+        // total drops over the window fell from 22 to 16 per run. It is
+        // declined anyway, because the card is TRANSFORM-scaled from tile to
+        // full screen: a texture cached at display scale is then magnified,
+        // and the chrome's text goes soft for the length of the flight. A
+        // sharper settle is not worth a blurry flight.
+        //
+        // Flattening the whole CARD is worse than useless: it carries the live
+        // video surface, and a cached texture freezes it — which is precisely
+        // the pause this work exists to remove.
+        //
+        // The stall this keeps being reached for is not compositing at all. It
+        // is ~85-115 ms of synchronous main-thread work inside
+        // `pushViewController`, sampled to UIKit materialising the
+        // destination's bar glass, and it happens BEFORE any frame is
+        // rendered. No proxy for the content can move it. See
+        // `ZoomFlightProfiler`.
+
         let shadow = UIView(frame: sourceFrame)
         shadow.backgroundColor = .clear
         shadow.isUserInteractionEnabled = false
