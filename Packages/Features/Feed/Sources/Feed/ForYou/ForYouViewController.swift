@@ -845,6 +845,9 @@ final class ForYouViewController: UIViewController {
         (feed as? SnapFeedViewController)?
             .prepareForHeroPresentation(in: navigationController.view.bounds)
         navigationController.pushViewController(feed, animated: true)
+        #if DEBUG
+        zoomProfilerNote("push returned")
+        #endif
 
         #if DEBUG
         // `-foryou-demo-grab`: once the feed has landed, drive the grab twice —
@@ -1386,6 +1389,22 @@ final class ForYouViewController: UIViewController {
                 return
             }
             openFeed(from: format, at: index)
+            // `-zoom-repeat`: open, pop, open again (twice over). The hero's
+            // stall has only ever been measured on the FIRST push of a
+            // process, which cannot distinguish per-push cost from one-time
+            // warm-up of whatever the push touches first. Two more rounds
+            // separate them.
+            if ProcessInfo.processInfo.arguments.contains("-zoom-repeat") {
+                for round in 1...2 {
+                    let base = 3.0 * Double(round)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + base) { [weak self] in
+                        self?.navigationController?.popViewController(animated: true)
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + base + 1.5) { [weak self] in
+                        self?.openFeed(from: format, at: index)
+                    }
+                }
+            }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + openDelay, execute: attempt)
     }

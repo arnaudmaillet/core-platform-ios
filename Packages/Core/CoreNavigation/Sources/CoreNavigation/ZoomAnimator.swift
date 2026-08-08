@@ -300,10 +300,16 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         )
         let animator = UIViewPropertyAnimator(duration: duration, timingParameters: spring)
         animator.addAnimations {
+            #if DEBUG
+            ZoomFlightProfiler.shared.note("pose block >")
+            #endif
             flight.poseAsPage(cornerRadius: screenRadius)
             presentingView?.transform = CGAffineTransform(
                 scaleX: ZoomFlight.presenterDepthScale, y: ZoomFlight.presenterDepthScale
             )
+            #if DEBUG
+            ZoomFlightProfiler.shared.note("pose block <")
+            #endif
         }
         // The dim was a second, plainly-curved animation ("opacity should never
         // bounce"). A property animator carries one curve, and a separate
@@ -990,12 +996,93 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
 
 
 #if DEBUG
+// MARK: - Poor-man's main-thread sampler
+//
+// The phase timeline can prove the main thread is busy inside ONE stack, but
+// not whose code that stack is running — and when the answer turns out to be
+// "UIKit's own transition machinery", there is no mark left to place. So we
+// sample: `ITIMER_PROF` fires on the thread burning CPU, and the handler
+// records a raw backtrace. Symbolisation happens later, on the main thread,
+// because it allocates and a signal handler may not.
+//
+// Nothing here runs unless `-zoom-profile` is passed, and the whole block is
+// DEBUG-only — this is a diagnostic instrument, not shipped behaviour.
+private let zoomSampleMaxFrames = 96
+private let zoomSampleMaxCount = 512
+private nonisolated(unsafe) let zoomSampleFrames =
+    UnsafeMutablePointer<UnsafeMutableRawPointer?>.allocate(
+        capacity: zoomSampleMaxFrames * zoomSampleMaxCount
+    )
+private nonisolated(unsafe) let zoomSampleDepths =
+    UnsafeMutablePointer<Int32>.allocate(capacity: zoomSampleMaxCount)
+private nonisolated(unsafe) let zoomSampleTimes =
+    UnsafeMutablePointer<UInt64>.allocate(capacity: zoomSampleMaxCount)
+private nonisolated(unsafe) var zoomSampleCount: Int32 = 0
+
+/// Async-signal-safe by construction: `backtrace` walks the stack and
+/// `clock_gettime_nsec_np` reads the clock; neither allocates, and nothing
+/// else is touched.
+private let zoomSampleTick: @convention(c) (Int32) -> Void = { _ in
+    let index = Int(zoomSampleCount)
+    guard index < zoomSampleMaxCount else { return }
+    let slot = zoomSampleFrames.advanced(by: index * zoomSampleMaxFrames)
+    zoomSampleDepths[index] = backtrace(slot, Int32(zoomSampleMaxFrames))
+    zoomSampleTimes[index] = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+    zoomSampleCount = Int32(index + 1)
+}
+
+/// Stamps the hero flight's phase timeline from outside `CoreNavigation` —
+/// the push's CALLER, which is the only place that can say when
+/// `pushViewController` returned. No-op unless `-zoom-profile` is set.
+@MainActor
+public func zoomProfilerNote(_ label: String) {
+    ZoomFlightProfiler.shared.note(label)
+}
+
 /// Frame-gap and build-cost watch for the hero flight, behind `-zoom-profile`.
 ///
 /// The same two numbers the comments engagement is profiled with, for the same
 /// reason: a "stutter" report needs the synchronous cost AND how long the
 /// screen actually went without an update, because those are different
 /// questions and only one of them is usually the answer.
+///
+/// # What this found, so the next reader starts where it left off
+/// The flight's build is ~22 ms, but no frame reaches the screen for ~120 ms.
+/// Four instruments, each answering what the previous one could not:
+///
+///  1. A main-queue hop: it waited 85-108 ms, so the main thread is BUSY. The
+///     wait is work, not the render server being slow.
+///  2. Run-loop observers: NOTHING fires for that whole window — no
+///     `beforeWaiting`, so CoreAnimation's commit cannot even have run. The
+///     stall is one uninterrupted UIKit stack, and layout/display is not it.
+///  3. Marks inside the animation blocks: our own pose work is 4 ms and ends
+///     at +27 ms. Everything after it is UIKit's.
+///  4. `ITIMER_PROF` stack sampling of the remainder: `-[UINavigationBar
+///     _setItems:transition:]` and `-[UINavigationItem
+///     _accumulateViewsFromItems:]`, Auto Layout engine churn as each custom
+///     bar view moves in, `_UIVisualEffectHost` filter configuration, and —
+///     dominating it — SwiftUI AttributeGraph type/conformance resolution and
+///     `SDFLayer`/`DisplayList` updates. That last pair is iOS 26 Liquid Glass
+///     being materialised, by UIKit, inside the push.
+///
+/// About HALF of it is one-time, and the split only shows up if you push more
+/// than once per process (`-zoom-repeat`): the first push waits ~93 ms and
+/// drops to a ~142 ms gap, while the second and third wait ~46-49 ms for a
+/// ~65 ms gap. So the SwiftUI/glass machinery is warming up on first use, and
+/// what remains after it is warm is the per-push half — a fresh destination
+/// controller per tap, whose chrome's glass is built from scratch every time.
+///
+/// Two consequences worth keeping. Measure this on a warm push unless you
+/// mean to measure launch, or you will attribute one-time cost to the flight.
+/// And the per-push half is only reachable by not rebuilding the destination:
+/// everything above runs inside UIKit's bar transition, where nothing outside
+/// can pre-pay it (`prepareForHeroPresentation` tried, and its comment records
+/// what that cost).
+///
+/// One caveat on the numbers: 54 of 79 samples in the window were the
+/// SOFTWARE H.264 codec on worker threads. The simulator has no hardware
+/// decode, so the main thread is fighting it for CPU and the wall-clock here
+/// is inflated relative to a device.
 @MainActor
 final class ZoomFlightProfiler: NSObject {
     static let shared = ZoomFlightProfiler()
@@ -1006,6 +1093,7 @@ final class ZoomFlightProfiler: NSObject {
     private var buildEndedAt: CFTimeInterval = 0
     private var gaps: [(offset: Double, gap: Double)] = []
     private var leg = ""
+    private var generation = 0
 
     private var isEnabled: Bool {
         ProcessInfo.processInfo.arguments.contains("-zoom-profile")
@@ -1019,11 +1107,24 @@ final class ZoomFlightProfiler: NSObject {
         last = watchStart
         buildEndedAt = 0
         gaps = []
+        marks = []
+        removeRunLoopProbe()
+        installRunLoopProbe()
+        armSampler()
+        mark("build >")
         let link = CADisplayLink(target: self, selector: #selector(tick))
         link.add(to: .main, forMode: .common)
         self.link = link
+        // Tagged, because legs overlap: a pop 3 s after a push starts its own
+        // watch, and the earlier leg's pending report would then describe the
+        // NEW leg's freshly-cleared state — which reads as a clean flight
+        // rather than as a report that outlived its subject. (It did: repeat
+        // pushes appeared to drop 0 frames.)
+        generation += 1
+        let token = generation
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            self?.report()
+            guard let self, self.generation == token else { return }
+            self.report()
         }
     }
 
@@ -1031,6 +1132,114 @@ final class ZoomFlightProfiler: NSObject {
         guard isEnabled else { return }
         buildEndedAt = CACurrentMediaTime()
         print(String(format: "[zoom] %@ flight built %6.2f ms", leg, buildMilliseconds))
+        // IS THE MAIN THREAD BUSY, or is the wait render-side? A main-queue
+        // hop answers without depending on display timing at all: it runs the
+        // instant the main thread is free. A display-link tick can be late for
+        // either reason, which is not good enough to attribute a stall.
+        let queuedAt = CACurrentMediaTime()
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.mark("main-queue hop ran")
+            let now = CACurrentMediaTime()
+            print(String(format: "[zoom]   main-queue hop waited %6.2f ms (at +%.1f ms)",
+                         (now - queuedAt) * 1000, (now - self.watchStart) * 1000))
+        }
+    }
+
+    // MARK: - Where the busy window actually goes
+
+    /// The main thread being BUSY narrows a stall to "work", not "waiting on
+    /// the render server" — but not to WHICH work. These observers split the
+    /// run loop's own phases apart, and in particular bracket CoreAnimation's
+    /// commit: CA installs its commit as a `beforeWaiting` observer at order
+    /// 2_000_000, so a mark either side of that order measures layout+display
+    /// of everything the flight just added, separately from the UIKit source
+    /// work that queued it. Those are the two candidates, and they are not
+    /// distinguishable from the outside.
+    private var probes: [CFRunLoopObserver] = []
+    private var marks: [(label: String, at: CFTimeInterval)] = []
+
+    private func mark(_ label: String) {
+        guard marks.count < 400 else { return }
+        marks.append((label, CACurrentMediaTime()))
+    }
+
+    /// Lets the CALLER of the push stamp the same timeline — the window opens
+    /// inside `pushViewController`, so "did the push return yet" is the seam
+    /// that splits UIKit's own transition work from the tap handler's.
+    func note(_ label: String) {
+        guard isEnabled else { return }
+        mark(label)
+    }
+
+    private func installRunLoopProbe() {
+        let loop = CFRunLoopGetMain()
+        func add(_ activity: CFRunLoopActivity, order: CFIndex, label: String) {
+            let observer = CFRunLoopObserverCreateWithHandler(
+                nil, activity.rawValue, true, order
+            ) { _, _ in
+                MainActor.assumeIsolated { self.mark(label) }
+            }
+            guard let observer else { return }
+            CFRunLoopAddObserver(loop, observer, .commonModes)
+            probes.append(observer)
+        }
+        add(.afterWaiting, order: 0, label: "woke")
+        add(.beforeSources, order: 0, label: "sources")
+        add(.beforeWaiting, order: 1_999_999, label: "CA commit >")
+        add(.beforeWaiting, order: 2_000_001, label: "CA commit <")
+        add(.beforeWaiting, order: CFIndex.max - 1, label: "sleeping")
+    }
+
+    private func removeRunLoopProbe() {
+        let loop = CFRunLoopGetMain()
+        for observer in probes { CFRunLoopRemoveObserver(loop, observer, .commonModes) }
+        probes = []
+    }
+
+    /// 4 ms of CPU time per sample — fine enough to resolve an 85 ms stall
+    /// into distinct phases, coarse enough that the sampler is not itself the
+    /// thing being measured.
+    private static let sampleIntervalMicroseconds: Int32 = 4000
+
+    private func armSampler() {
+        zoomSampleCount = 0
+        signal(SIGPROF, zoomSampleTick)
+        let tick = timeval(tv_sec: 0, tv_usec: Self.sampleIntervalMicroseconds)
+        var timer = itimerval(it_interval: tick, it_value: tick)
+        setitimer(ITIMER_PROF, &timer, nil)
+    }
+
+    private func disarmSampler() {
+        var off = itimerval()
+        setitimer(ITIMER_PROF, &off, nil)
+        signal(SIGPROF, SIG_IGN)
+    }
+
+    /// Prints the sampled stacks that landed in the stall, innermost frame
+    /// first, with each sample's offset into the flight. Frames from this
+    /// file's own instrumentation are kept — seeing where the sampler itself
+    /// lands is how you tell a real stack from an artefact.
+    private func reportSamples(from windowStart: Double, to windowEnd: Double) {
+        let taken = Int(zoomSampleCount)
+        guard taken > 0 else { return print("[zoom]   sampler: no samples") }
+        print(String(format: "[zoom]   sampler: %d samples, stacks inside +%.0f..%.0f ms",
+                     taken, windowStart, windowEnd))
+        for index in 0..<taken {
+            let offset = (Double(zoomSampleTimes[index]) / 1_000_000) - (watchStart * 1000)
+            guard offset >= windowStart, offset <= windowEnd else { continue }
+            let depth = Int(zoomSampleDepths[index])
+            let slot = zoomSampleFrames.advanced(by: index * zoomSampleMaxFrames)
+            guard depth > 1, let symbols = backtrace_symbols(slot, Int32(depth)) else { continue }
+            print(String(format: "[zoom]   --- sample at +%6.1f ms", offset))
+            // Frame 0 is the handler itself; start past it, and stop before
+            // the run loop's own boilerplate at the base of every stack.
+            for frame in 1..<min(depth, 26) {
+                guard let symbol = symbols[frame] else { continue }
+                print("[zoom]       \(String(cString: symbol))")
+            }
+            free(symbols)
+        }
     }
 
     /// Every dropped frame WITH ITS OFFSET, and where the build ended, so a
@@ -1039,7 +1248,30 @@ final class ZoomFlightProfiler: NSObject {
     private func report() {
         link?.invalidate()
         link = nil
+        removeRunLoopProbe()
         let buildOffset = (buildEndedAt - watchStart) * 1000
+        // The phase timeline, with each phase's DURATION (mark to next mark) —
+        // the gap between two marks is the cost of whatever ran between them,
+        // which is the only way a "CA commit <" 90 ms after "CA commit >"
+        // reads as "the commit took 90 ms" rather than as a bare timestamp.
+        var previous = watchStart
+        var widestGap = (start: 0.0, end: 0.0, cost: 0.0)
+        for (label, at) in marks where (at - watchStart) < 0.4 {
+            let cost = (at - previous) * 1000
+            print(String(format: "[zoom]   %-16@ at +%6.1f ms  (+%5.1f ms since last)",
+                         label as NSString, (at - watchStart) * 1000, cost))
+            if cost > widestGap.cost {
+                widestGap = ((previous - watchStart) * 1000, (at - watchStart) * 1000, cost)
+            }
+            previous = at
+        }
+        // Sample the WIDEST unexplained span, whichever it turns out to be —
+        // hardcoding the span found today would stop reporting the moment a
+        // change moves the stall somewhere else.
+        disarmSampler()
+        if widestGap.cost > 20 {
+            reportSamples(from: widestGap.start, to: widestGap.end)
+        }
         let worst = gaps.map(\.gap).max() ?? 0
         print(String(format: "[zoom] %@ frames: worst %5.1f ms, %d dropped; build ended at +%.1f ms",
                      leg, worst * 1000, gaps.count, buildOffset))
