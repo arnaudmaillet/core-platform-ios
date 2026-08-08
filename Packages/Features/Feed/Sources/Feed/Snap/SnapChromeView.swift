@@ -623,13 +623,15 @@ final class SnapChromeView: UIView {
         commentTicker.setComments(streams.reactions)
         subtitleView.setCommentCount(streams.commentCount)
         subtitleView.setCues(streams.subtitles)
-        // THE COUNT IS THE WHOLE CONDITION (product decision 2026-08-08):
-        // no comments → the pill; one or more → the comment stream speaks
-        // for the post and the pill stays down, INCLUDING when both
-        // surfaces above gate themselves away and leave the zone blank.
-        // A count standing in for the stream ("2 comments") was tried in
-        // that slot and removed — it reads as a substitute for the stream
-        // rather than as the stream.
+        // THE COUNT IS THE WHOLE CONDITION (product rule 2026-08-08): no
+        // comments → the pill; one or more → the comment stream speaks for
+        // the post and the pill stays down. The zone is never blank on
+        // either side of that line, and this view is not where that is
+        // enforced — `SubtitleCommentBuilder` guarantees a non-empty cue
+        // list for any post the band isn't already carrying, so "has
+        // comments" and "the zone renders" cannot come apart. A count pill
+        // ("2 comments") was tried in this slot as a stand-in for the
+        // stream and removed; the stream itself is the answer.
         //
         // `isLoaded` is the load/zero seam: an unloaded stream carries a
         // zero count too, so without it the pill would flash on every page
