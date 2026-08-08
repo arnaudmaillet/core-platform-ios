@@ -34,7 +34,17 @@ final class SnapCommentSortButton: UIButton {
         config.image = UIImage(systemName: "arrow.up.arrow.down")?
             .withConfiguration(UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold))
         config.imagePadding = Spacing.xs
-        config.baseForegroundColor = .white
+        // SEMANTIC, never `.white`. The bar this rides carries the page's
+        // theme (`SnapChromeTheme`, applied to the navigation bar itself so
+        // UIKit draws the Liquid Glass platter from its traits), which is
+        // `.dark` over media and UNSPECIFIED on a text post — where, in
+        // light mode, hardcoded white put invisible glyphs on a light
+        // platter. That is the exact failure `applyChromeTheme` was written
+        // to prevent; this item was the one that never got the memo. Every
+        // other bar item already reads `.label` (see `SnapNavControls` and
+        // `SnapAuthorIdentityView`), so this joins them rather than
+        // inventing a rule.
+        config.baseForegroundColor = .label
         config.contentInsets = NSDirectionalEdgeInsets(
             top: 0, leading: Spacing.sm, bottom: 0, trailing: Spacing.sm
         )

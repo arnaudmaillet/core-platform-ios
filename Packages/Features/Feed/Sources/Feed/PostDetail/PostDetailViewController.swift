@@ -63,6 +63,10 @@ final class PostDetailViewController: UIViewController {
         return view
     }()
     private var streamDataSource: UICollectionViewDiffableDataSource<StreamSection, StreamItem>!
+    /// The empty page row's height, held so `updateEmptyPageHeight` can fit
+    /// it to the room the caption leaves. Nil whenever the stream carries no
+    /// empty state.
+    private var emptyPageHeightConstraint: NSLayoutConstraint?
     /// Snapshot bookkeeping: the first apply lands without animation (a
     /// cold load has nothing to animate FROM); everything after — folds,
     /// sorts, submissions — animates natively.
@@ -141,6 +145,15 @@ final class PostDetailViewController: UIViewController {
 
     deinit {
         for task in imageTasks { task.cancel() }
+    }
+
+    /// The empty page is fitted to the room the stream has, and that room
+    /// moves — rotation, the composer growing to a second line, the keyboard
+    /// opening. Re-fit on every settled layout; the correction's own
+    /// tolerance makes a no-op call free.
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        updateEmptyPageHeight()
     }
 
     override func viewDidLoad() {
@@ -750,17 +763,22 @@ final class PostDetailViewController: UIViewController {
             empty.translatesAutoresizingMaskIntoConstraints = false
             cell.contentView.addSubview(empty)
             // `EmptyStateView` centres its block and carries no vertical
-            // intrinsic size, so a self-sizing row must be given a height —
-            // see `SnapCommentsLayout.emptyPageHeight`.
-            let viewport = self?.collectionView.bounds.height ?? 0
+            // intrinsic size, so a self-sizing row must be given a height.
+            // Seeded here and corrected against real geometry in
+            // `updateEmptyPageHeight` — the constraint is held so that pass
+            // can reach it.
+            let height = empty.heightAnchor.constraint(
+                equalToConstant: SnapCommentsLayout.emptyPageHeight(
+                    availableHeight: self?.availableStreamHeight ?? 0
+                )
+            )
+            self?.emptyPageHeightConstraint = height
             NSLayoutConstraint.activate([
                 empty.topAnchor.constraint(equalTo: cell.contentView.topAnchor),
                 empty.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor),
                 empty.trailingAnchor.constraint(equalTo: cell.contentView.trailingAnchor),
                 empty.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor),
-                empty.heightAnchor.constraint(
-                    equalToConstant: SnapCommentsLayout.emptyPageHeight(viewportHeight: viewport)
-                ),
+                height,
             ])
         }
         let captionCell = UICollectionView.CellRegistration<CaptionBubbleCell, StreamItem> {
@@ -841,9 +859,59 @@ final class PostDetailViewController: UIViewController {
     private func applyStream(animated: Bool, completion: (() -> Void)? = nil) {
         var snapshot = NSDiffableDataSourceSnapshot<StreamSection, StreamItem>()
         snapshot.appendSections([.main])
-        snapshot.appendItems(streamItems())
+        let items = streamItems()
+        snapshot.appendItems(items)
         hasAppliedStream = true
-        streamDataSource.apply(snapshot, animatingDifferences: animated) { completion?() }
+        // The held constraint belongs to a row that may not exist in this
+        // snapshot; drop it rather than let a later correction write through
+        // to a discarded cell's view.
+        if !items.contains(.emptyState) { emptyPageHeightConstraint = nil }
+        streamDataSource.apply(snapshot, animatingDifferences: animated) { [weak self] in
+            self?.updateEmptyPageHeight()
+            completion?()
+        }
+    }
+
+    // MARK: - The empty page's fit
+
+    /// The room the stream actually has: the viewport minus its adjusted
+    /// content insets, which is where the header, the composer and the safe
+    /// areas have already been subtracted (and where the keyboard's own
+    /// inset shows up when it is open).
+    private var availableStreamHeight: CGFloat {
+        let inset = collectionView.adjustedContentInset
+        return collectionView.bounds.height - inset.top - inset.bottom
+    }
+
+    /// Fits the empty page to the room left beside the caption, so a post
+    /// with nothing to say produces content exactly one viewport tall.
+    ///
+    /// The seed assumes the whole viewport is free; the caption row is not
+    /// measured until the layout runs, so this corrects afterwards by the
+    /// difference between the room available and the content produced.
+    ///
+    /// NOT `isScrollEnabled = false`, though that is the obvious way to stop
+    /// a short page scrolling: this list's rubber band IS the interactive
+    /// dismissal (`scrollViewDidScroll` reads its overshoot), so disabling
+    /// the scroll would take the pull-to-close gesture with it on exactly
+    /// the pages that have the least reason to scroll. Sizing the content to
+    /// the viewport leaves nothing to scroll TO while the bounce, and the
+    /// gesture riding it, stay intact.
+    private func updateEmptyPageHeight() {
+        guard let constraint = emptyPageHeightConstraint else { return }
+        let available = availableStreamHeight
+        guard available > 0, collectionView.contentSize.height > 0 else { return }
+        let target = SnapCommentsLayout.correctedEmptyPageHeight(
+            current: constraint.constant,
+            availableHeight: available,
+            contentHeight: collectionView.contentSize.height
+        )
+        // The tolerance is what stops this: each correction re-triggers
+        // layout, and without a dead band the pair would trade half-points
+        // forever.
+        guard abs(target - constraint.constant) > 0.5 else { return }
+        constraint.constant = target
+        collectionView.collectionViewLayout.invalidateLayout()
     }
 
     /// The engaged toolbar's sort selector lands here — the view model

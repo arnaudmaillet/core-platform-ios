@@ -2275,25 +2275,53 @@ struct SnapCommentsPresentationTests {
 
     /// The comments-only empty PAGE row. `EmptyStateView` centres its block
     /// and has no vertical intrinsic size, so a self-sizing list row has to
-    /// be told a height — and it must scale with the device rather than sit
-    /// at a constant, or the block reads as centred on one phone and tucked
-    /// under the caption on another.
-    @Test func theEmptyPageRowScalesWithTheViewport() {
-        let se = SnapCommentsLayout.emptyPageHeight(viewportHeight: 667)
-        let proMax = SnapCommentsLayout.emptyPageHeight(viewportHeight: 932)
-        let pad = SnapCommentsLayout.emptyPageHeight(viewportHeight: 1366)
-
-        #expect(se < proMax && proMax < pad)
-        // Never the whole viewport: the caption sits above and the input bar
-        // below, and a full-height row would push the block under the bar.
-        #expect(se < 667)
-        #expect(pad < 1366)
+    /// be told a height. The seed claims the whole available region (which
+    /// already excludes header, composer and safe areas); the correction
+    /// gives back whatever the caption row above it turned out to take.
+    @Test func theEmptyPageRowSeedsFromTheAvailableRoom() {
+        #expect(SnapCommentsLayout.emptyPageHeight(availableHeight: 700) == 700)
         // The floor covers the pre-layout call, where bounds are still zero.
         #expect(
-            SnapCommentsLayout.emptyPageHeight(viewportHeight: 0)
+            SnapCommentsLayout.emptyPageHeight(availableHeight: 0)
                 == SnapCommentsLayout.emptyPageMinimumHeight
         )
         #expect(SnapCommentsLayout.emptyPageMinimumHeight > 0)
+    }
+
+    /// The correction fits the page so the stream produces EXACTLY one
+    /// viewport of content — the whole point being that a post with nothing
+    /// to say must not be scrollable.
+    @Test func theCorrectionMakesTheContentExactlyFillTheViewport() {
+        // Seeded at 700 in a 700 region, the caption row pushed content to
+        // 780 — 80 too tall, and that 80 is what the page gives back.
+        let fitted = SnapCommentsLayout.correctedEmptyPageHeight(
+            current: 700, availableHeight: 700, contentHeight: 780
+        )
+        #expect(fitted == 620)
+
+        // Re-measured after the correction, the content now matches the room
+        // and the result is a fixed point — this is what lets the caller's
+        // tolerance end the layout loop.
+        #expect(
+            SnapCommentsLayout.correctedEmptyPageHeight(
+                current: fitted, availableHeight: 700, contentHeight: 700
+            ) == fitted
+        )
+
+        // It also grows: a page that came out SHORT of the viewport (nothing
+        // above it at all) takes the slack back rather than leaving a gap.
+        #expect(
+            SnapCommentsLayout.correctedEmptyPageHeight(
+                current: 300, availableHeight: 700, contentHeight: 340
+            ) == 660
+        )
+
+        // Never below the floor, however cramped the room.
+        #expect(
+            SnapCommentsLayout.correctedEmptyPageHeight(
+                current: 300, availableHeight: 100, contentHeight: 900
+            ) == SnapCommentsLayout.emptyPageMinimumHeight
+        )
     }
 
     // MARK: - Entry point
