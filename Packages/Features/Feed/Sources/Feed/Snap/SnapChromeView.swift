@@ -623,27 +623,19 @@ final class SnapChromeView: UIView {
         commentTicker.setComments(streams.reactions)
         subtitleView.setCommentCount(streams.commentCount)
         subtitleView.setCues(streams.subtitles)
-        // THE ZONE'S FLOOR. The pill fills the comment zone whenever the two
-        // live surfaces above render nothing — read off their RESOLVED
-        // hidden state rather than re-deriving their gates here, so the
-        // floor can never disagree with what is actually on screen (the
-        // ticker also hides itself under Reduce Motion, which no count
-        // predicate would have caught).
+        // THE COUNT IS THE WHOLE CONDITION (product decision 2026-08-08):
+        // no comments → the pill; one or more → the comment stream speaks
+        // for the post and the pill stays down, INCLUDING when both
+        // surfaces above gate themselves away and leave the zone blank.
+        // A count standing in for the stream ("2 comments") was tried in
+        // that slot and removed — it reads as a substitute for the stream
+        // rather than as the stream.
         //
-        // This used to admit KNOWN-ZERO posts only, on the theory that a
-        // sparse post's blank zone was the gates speaking deliberately. It
-        // reads as broken instead: the sparse seed is the common case, so
-        // most media pages showed an unexplained hole where the comment
-        // system should be. The pill now covers both causes and says which
-        // one it is (see `promptText(count:)`) — zero gets "No comments
-        // yet", gated-but-nonzero gets the count.
-        //
-        // `isLoaded` stays the load/zero seam: an unloaded stream keeps the
-        // zone blank, so nothing flashes while a fetch is in flight.
-        let surfacesAreSilent = commentTicker.isHidden && subtitleView.isHidden
+        // `isLoaded` is the load/zero seam: an unloaded stream carries a
+        // zero count too, so without it the pill would flash on every page
+        // while its fetch is in flight.
         commentEmptyState.setVisible(
-            streams.isLoaded && surfacesAreSilent,
-            count: streams.commentCount,
+            streams.isLoaded && streams.commentCount == 0,
             restingAlpha: commentsEngagedProgress
         )
     }
