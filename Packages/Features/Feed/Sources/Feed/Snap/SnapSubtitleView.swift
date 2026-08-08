@@ -92,7 +92,10 @@ final class SnapSubtitleView: UIView {
     /// stays clamped visible; each hard-cut handoff swaps in the new author's
     /// image, so it rides the cue cycle rather than the flicker-free pill
     /// pipeline (a separate layer, so it can't disturb it).
-    private static let avatarDiameter: CGFloat = 28
+    /// Internal, not private: the empty state stands in this row's place and
+    /// puts its glyph in the avatar's slot, so the two must resolve the same
+    /// leading column from ONE constant or they drift apart.
+    static let avatarDiameter: CGFloat = 28
     /// The single leading anchor: a non-clipping wrapper the exact size of
     /// the avatar. It — not the avatar or the text — is what centers on the
     /// pill and what the text measures its leading gap from, so the layout

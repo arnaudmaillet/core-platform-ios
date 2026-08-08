@@ -714,20 +714,53 @@ final class PostDetailViewController: UIViewController {
                 row.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -Spacing.lg),
             ])
         }
-        let emptyCell = UICollectionView.CellRegistration<UICollectionViewCell, StreamItem> { cell, _, _ in
+        // COMMENTS-ONLY gets the app's shared empty PAGE; the full post
+        // detail keeps a one-line note. The difference is what the surface
+        // is: with the post above it the comments are a SECTION, and a
+        // centred illustration block inside a section reads as a broken
+        // layout — but in comments-only the comments ARE the page, so its
+        // emptiness is the page's emptiness, and that is exactly what
+        // `EmptyStateView` is for.
+        let mode = mode
+        let emptyCell = UICollectionView.CellRegistration<UICollectionViewCell, StreamItem> {
+            [weak self] cell, _, _ in
             cell.contentView.subviews.forEach { $0.removeFromSuperview() }
-            let empty = UILabel()
-            empty.text = "No comments yet. Be the first."
-            empty.font = .preferredFont(forTextStyle: .subheadline)
-            empty.adjustsFontForContentSizeCategory = true
-            empty.textColor = .secondaryLabel
+            guard mode == .commentsOnly else {
+                let empty = UILabel()
+                empty.text = "No comments yet. Be the first."
+                empty.font = .preferredFont(forTextStyle: .subheadline)
+                empty.adjustsFontForContentSizeCategory = true
+                empty.textColor = .secondaryLabel
+                empty.translatesAutoresizingMaskIntoConstraints = false
+                cell.contentView.addSubview(empty)
+                NSLayoutConstraint.activate([
+                    empty.topAnchor.constraint(equalTo: cell.contentView.topAnchor),
+                    empty.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor),
+                    empty.trailingAnchor.constraint(lessThanOrEqualTo: cell.contentView.trailingAnchor),
+                    empty.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor),
+                ])
+                return
+            }
+            let empty = EmptyStateView()
+            empty.configure(
+                symbolName: "bubble.left.and.bubble.right",
+                title: SnapCommentEmptyStateView.promptText,
+                subtitle: "Be the first to comment."
+            )
             empty.translatesAutoresizingMaskIntoConstraints = false
             cell.contentView.addSubview(empty)
+            // `EmptyStateView` centres its block and carries no vertical
+            // intrinsic size, so a self-sizing row must be given a height —
+            // see `SnapCommentsLayout.emptyPageHeight`.
+            let viewport = self?.collectionView.bounds.height ?? 0
             NSLayoutConstraint.activate([
                 empty.topAnchor.constraint(equalTo: cell.contentView.topAnchor),
                 empty.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor),
-                empty.trailingAnchor.constraint(lessThanOrEqualTo: cell.contentView.trailingAnchor),
+                empty.trailingAnchor.constraint(equalTo: cell.contentView.trailingAnchor),
                 empty.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor),
+                empty.heightAnchor.constraint(
+                    equalToConstant: SnapCommentsLayout.emptyPageHeight(viewportHeight: viewport)
+                ),
             ])
         }
         let captionCell = UICollectionView.CellRegistration<CaptionBubbleCell, StreamItem> {

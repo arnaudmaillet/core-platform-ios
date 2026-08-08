@@ -109,6 +109,23 @@ enum SnapCommentsLayout {
         return Int(ceil(viewportHeight / skeletonRowEstimate))
     }
 
+    /// The empty page's row height in the comments-only stream. The shared
+    /// `EmptyStateView` centres its block in whatever bounds it is given and
+    /// has no vertical intrinsic size of its own, so a self-sizing list row
+    /// has to be told — and what it should be told is "the room the stream
+    /// has", so the block lands optically centred in the empty surface
+    /// rather than tucked under the caption.
+    ///
+    /// Two thirds, not all of it: the caption row sits above and the input
+    /// bar below, and a full-viewport row would push the block under the
+    /// bar on short devices. The floor covers the pre-layout call (bounds
+    /// not yet set) and any viewport too small for the fraction to be
+    /// usable.
+    static let emptyPageMinimumHeight: CGFloat = 260
+    static func emptyPageHeight(viewportHeight: CGFloat) -> CGFloat {
+        max(emptyPageMinimumHeight, viewportHeight * 0.66)
+    }
+
     /// Where the engaged stream's content begins — the comments region's
     /// upper boundary, and the scroll view's top inset.
     ///
