@@ -113,11 +113,7 @@ final class SnapChromeView: UIView {
 
     private var representedID: PostID?
 
-    /// The chrome's current engagement fade — 1 resting, 0 fully engaged.
-    /// Only the empty-state pill reads it back (see `updateCommentStreams`);
-    /// every other surface is written by `setCommentsEngagedProgress` and
-    /// never writes its own alpha.
-    private var commentsEngagedProgress: CGFloat = 1
+
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -676,10 +672,7 @@ final class SnapChromeView: UIView {
         // `isLoaded` is the load/zero seam: an unloaded stream carries a
         // zero count too, so without it the pill would flash on every page
         // while its fetch is in flight.
-        commentEmptyState.setVisible(
-            streams.isLoaded && streams.commentCount == 0,
-            restingAlpha: commentsEngagedProgress
-        )
+        commentEmptyState.setVisible(streams.isLoaded && streams.commentCount == 0)
     }
 
     /// Seats the subtitle zone against the band's RESOLVED visibility: on
@@ -741,37 +734,35 @@ final class SnapChromeView: UIView {
     /// hidden), 1 = fully resting (all of them back). The interactive
     /// pull-down dismissal drives this continuously, so the ticker and the
     /// caption return under the finger instead of appearing at the end.
+    /// The last progress seen, kept ONLY to spot the return to rest — the
+    /// empty state's reading beat restarts on it. It used to double as the
+    /// alpha the pill settled at; that coupling is gone with the container
+    /// fade, but the EDGE it detected is still needed.
+    private var lastEngagedProgress: CGFloat = 1
+
     func setCommentsEngagedProgress(_ progress: CGFloat) {
-        let alpha = min(max(0, progress), 1)
-        // Landing back ON 1 from anywhere below it is the RETURN to the
-        // resting page — the one seam both dismissal paths share (the
-        // animated close and the interactive pull-down both end here, and
-        // the cell has no other way to disengage). The empty state reads its
-        // words out again from full strength, because closing the comments
-        // is the moment a viewer has most recently asked about them and the
-        // worst moment to meet a pre-muted label.
+        // ONE LAYER, not seven — and under Core Animation that is one
+        // animation object instead of seven.
         //
-        // Guarded on the TRANSITION: at rest this is already 1 and nothing
-        // re-arms; a pull that springs back to 0 doesn't either, since it
-        // never reached 1 on the way.
-        let returnedToRest = alpha >= 1 && commentsEngagedProgress < 1
-        // Remembered because the empty-state pill's own entrance writes
-        // alpha too: a stream arriving mid-engagement must settle it here,
-        // not at full opacity over the comments layout.
-        commentsEngagedProgress = alpha
-        if returnedToRest {
-            commentEmptyState.restartLabelDwell()
-        }
-        captionLabel.alpha = alpha
-        scrimView.alpha = alpha
-        commentTicker.alpha = alpha
-        subtitleView.alpha = alpha
-        commentEmptyState.alpha = alpha
-        // The rail and its "+" leave with everything else. They are the
-        // page's action column, and the engaged layout has its own — the
-        // composer's trailing controls stand where the rail used to.
-        shortcutRail.alpha = alpha
-        composeButton.alpha = alpha
+        // Every view this chrome owns fades together on the same curve: the
+        // scrim, the caption, the band, the subtitle zone, the empty-state
+        // floor, the rail and its "+". Fading each was seven properties
+        // describing one intention. Equivalent by construction, not by luck —
+        // this view holds nothing that stays visible while engaged, so a
+        // container fade cannot catch a member by mistake. Hit-testing agrees:
+        // below 0.01 UIKit skips the whole chrome, where before it skipped
+        // each surface, and the engaged state wants exactly that.
+        let resolved = min(max(0, progress), 1)
+        // Landing back ON 1 from anywhere below it is the RETURN to the
+        // resting page — the one seam both dismissal paths share. The empty
+        // state reads its words out again from full strength, because closing
+        // the comments is the moment a viewer has most recently asked about
+        // them. Guarded on the TRANSITION, so a pull that springs back part
+        // way without ever reaching 1 re-arms nothing.
+        let returnedToRest = resolved >= 1 && lastEngagedProgress < 1
+        lastEngagedProgress = resolved
+        alpha = resolved
+        if returnedToRest { commentEmptyState.restartLabelDwell() }
     }
 
     /// Cycles while the owning cell is on screen — the band's visibility
@@ -790,11 +781,10 @@ final class SnapChromeView: UIView {
     /// Clears post-specific content (cell reuse).
     func reset() {
         representedID = nil
-        // The cell disengages before it resets, so this is normally already
-        // 1 — but the chrome owns its own state, and a scaffold handed the
-        // next post while it still believes it is faded would keep that
-        // post's empty-state pill invisible.
-        commentsEngagedProgress = 1
+        // A scaffold handed the next post while still faded would keep that
+        // post's chrome invisible.
+        alpha = 1
+        lastEngagedProgress = 1
         caption = nil
         applyCaptionVisibility()
         onCommentsTapped = nil

@@ -542,6 +542,44 @@ final class PostDetailViewController: UIViewController {
         }
     }
 
+    /// The stream's two moving parts, driven by Core Animation directly
+    /// rather than inside a `UIView.animate` block. Symmetric: the exit runs
+    /// the same three animations towards the offstage pose.
+    ///
+    /// Model values are set FIRST and unanimated (so the settled state is
+    /// correct even if the animation is removed), then one explicit
+    /// animation per property carries the eye from where it actually was.
+    /// `presentation()` rather than the model value as the start, so an
+    /// interrupted entrance continues from what is on screen instead of
+    /// snapping back.
+    func animateEngagedTransition(toEngaged engaged: Bool, duration: TimeInterval) {
+        let stream = collectionView.layer
+        let bar = composeBar.layer
+        let fromStream = (stream.presentation() ?? stream).transform
+        let fromBarOpacity = (bar.presentation() ?? bar).opacity
+        let fromBarTransform = (bar.presentation() ?? bar).transform
+
+        UIView.performWithoutAnimation {
+            setStreamTransitionProgress(engaged ? 0 : 1)
+            setComposerEntranceState(offstage: !engaged)
+        }
+
+        addEntranceAnimation(stream, "transform", from: fromStream, to: stream.transform, duration: duration)
+        addEntranceAnimation(bar, "opacity", from: fromBarOpacity, to: bar.opacity, duration: duration)
+        addEntranceAnimation(bar, "transform", from: fromBarTransform, to: bar.transform, duration: duration)
+    }
+
+    private func addEntranceAnimation(
+        _ layer: CALayer, _ keyPath: String, from: Any, to: Any, duration: TimeInterval
+    ) {
+        let animation = CABasicAnimation(keyPath: keyPath)
+        animation.fromValue = from
+        animation.toValue = to
+        animation.duration = duration
+        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.add(animation, forKey: "comments-engage-\(keyPath)")
+    }
+
     /// Materializes the footer band's blur AHEAD of the engagement — the
     /// composer's half of `SnapFeedCell.prematerializeEngagedChrome`, and the
     /// same reasoning: build the material while nothing is moving.

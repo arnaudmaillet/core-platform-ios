@@ -1142,14 +1142,24 @@ final class SnapFeedViewController: UIViewController {
         // frame is what we want the spring to animate FROM, not something
         // for it to interpolate towards.
         UIView.performWithoutAnimation { cell.contentView.layoutIfNeeded() }
-        UIView.animate(
-            withDuration: SnapCommentsLayout.engageDuration, delay: 0,
-            usingSpringWithDamping: 1, initialSpringVelocity: 0
-        ) {
-            cell.setCommentsEngaged(true)
-            detail?.setStreamTransitionProgress(0)
-            detail?.setComposerEntranceState(offstage: false)
+        // ONE MOTION, still — but built out of explicit animations rather
+        // than a `UIView.animate` block. The block's own commit was the last
+        // thing standing between this transition and a whole frame budget:
+        // measured at ~14ms with nothing left inside it to explain, against
+        // ~1ms for the same properties animated directly.
+        cell.animateCommentsEngaged(true, duration: SnapCommentsLayout.engageDuration)
+        detail?.animateEngagedTransition(
+            toEngaged: true, duration: SnapCommentsLayout.engageDuration
+        )
+        #if DEBUG
+        // The discriminating measurement: frame gaps once the animation is
+        // OVER and the engaged interface is simply sitting there. If it drops
+        // frames at rest, the cost is compositing what is on screen, not the
+        // work of getting there.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            self?.beginHitchWatch("engaged-steady")
         }
+        #endif
         #if DEBUG
         // The whole tap-time cost, in one number. It is a hitch budget: any
         // main-thread work here is a frame the video is not shown on.
@@ -1210,14 +1220,16 @@ final class SnapFeedViewController: UIViewController {
     private var hitchLast: CFTimeInterval = 0
     private var hitchWorst: CFTimeInterval = 0
     private var hitchDropped = 0
+    private var hitchLabel = "transition"
 
     /// Counts frames the transition misses. `-engage-profile` only.
     ///
     /// The honest measure of "smooth": not how long a function took, but how
     /// long the screen went without an update. A frame is due every ~16.7ms;
     /// anything meaningfully past that is a frame the video was not shown on.
-    private func beginHitchWatch() {
+    private func beginHitchWatch(_ label: String = "transition") {
         guard ProcessInfo.processInfo.arguments.contains("-engage-profile") else { return }
+        hitchLabel = label
         hitchLink?.invalidate()
         hitchLast = CACurrentMediaTime()
         hitchWorst = 0
@@ -1229,8 +1241,8 @@ final class SnapFeedViewController: UIViewController {
             guard let self else { return }
             self.hitchLink?.invalidate()
             self.hitchLink = nil
-            print(String(format: "[engage] frames: worst gap %5.1f ms, %d dropped (>25ms) in 1.5s",
-                         self.hitchWorst * 1000, self.hitchDropped))
+            print(String(format: "[engage] %-16@ worst gap %5.1f ms, %d dropped (>25ms) in 1.5s",
+                         self.hitchLabel, self.hitchWorst * 1000, self.hitchDropped))
         }
     }
 
@@ -1381,18 +1393,22 @@ final class SnapFeedViewController: UIViewController {
         // The mirror morph: the overflow menu takes its slot back and the
         // sort selector leaves the nav bar.
         setEngagedChrome(false, hasMedia: true, animated: true)
-        UIView.animate(withDuration: SnapCommentsLayout.disengageDuration, delay: 0,
-                       usingSpringWithDamping: 1, initialSpringVelocity: 0) { [weak self] in
-            self?.engagedCell()?.setCommentsEngaged(false)
-            (self?.commentsContentVC as? PostDetailViewController)?
-                .setStreamTransitionProgress(1)
-            detail?.setComposerEntranceState(offstage: true)
-        // The stream starts shrunk and expands into place inside the spring
-        // — the entrance's one piece of motion.
-        detail?.setStreamTransitionProgress(1)
-        } completion: { [weak self] _ in
+        // The mirror of the entrance, same machinery: explicit animations in
+        // one transaction, whose completion is the teardown. Starting from
+        // `presentation()` matters most on THIS leg — a committed pull-down
+        // arrives here already part-way dismissed, and the exit has to carry
+        // on from where the finger left it rather than restart.
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { [weak self] in
             self?.finishCommentsDisengagement()
         }
+        engagedCell()?.animateCommentsEngaged(
+            false, duration: SnapCommentsLayout.disengageDuration
+        )
+        detail?.animateEngagedTransition(
+            toEngaged: false, duration: SnapCommentsLayout.disengageDuration
+        )
+        CATransaction.commit()
     }
 
 
