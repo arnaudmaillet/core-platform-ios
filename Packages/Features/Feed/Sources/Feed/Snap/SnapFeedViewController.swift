@@ -1353,6 +1353,22 @@ final class SnapFeedViewController: UIViewController {
         installCommentsPanel(for: id, host: cell)
     }
 
+    /// How long after a transition the warm waits for genuine idle.
+    ///
+    /// Long enough to clear the flight (0.45s) and the settle behind it. The
+    /// warm costs nothing in hit rate for waiting: engaging the comments is a
+    /// deliberate act that arrives seconds later, not frames.
+    private static let idleWarmDelay: TimeInterval = 0.6
+
+    /// Warms the active page's comments once the screen has actually gone
+    /// quiet, re-checking on arrival — the page may have moved on, or the
+    /// viewer may have engaged already, in which case there is nothing to do.
+    private func scheduleIdleCommentsWarm() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.idleWarmDelay) { [weak self] in
+            self?.rewarmActivePageComments()
+        }
+    }
+
     /// Warms the page that is active RIGHT NOW — the disengagement's tail,
     /// where the settle seam has long since passed.
     private func rewarmActivePageComments() {
@@ -2025,10 +2041,13 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // so attaching here is the hand-off rather than a theft. Adopts the
         // parked player, so the page resumes instead of restarting.
         activeSnapCell?.startDeferredPlayback()
-        // The comments warm was held back across the flight too (see
-        // `prewarmComments`). Landed and settled is exactly the moment it is
-        // free, so it happens now rather than never.
-        rewarmActivePageComments()
+        // The comments warm was held back across the flight (see
+        // `prewarmComments`) — and it does NOT resume here, because "landed"
+        // is not yet "idle". Measured: run at this instant it produced a
+        // 156ms stall at +776ms from the flight's start, against ~33ms
+        // without it. That is the flight's stall moved rather than removed:
+        // off the card, but still inside the settle a viewer is watching.
+        scheduleIdleCommentsWarm()
     }
 
     /// The hero transition's dismiss-leg live seam: mirrors the active cell's
