@@ -900,36 +900,22 @@ final class PostDetailViewController: UIViewController {
         if !items.contains(.emptyState) { emptyPageHeightConstraint = nil }
         streamDataSource.apply(snapshot, animatingDifferences: animated) { [weak self] in
             self?.updateEmptyPageHeight()
-            self?.remeasureStreamOnce()
             completion?()
         }
     }
 
-    /// Whether the one-shot post-install re-measure has already run.
-    private var hasRemeasuredStream = false
-
-    /// Re-measures the stream ONCE, a turn after its first apply.
-    ///
-    /// The width-change trigger cannot catch this one: the rows are measured
-    /// at a width that never subsequently CHANGES, it was simply not settled
-    /// when they were asked. On the feed's resting engagement the comments
-    /// are installed into a cell from `willDisplay`, mid-arrival, so whether
-    /// the caption row measures right is a race — the same launch measured
-    /// it three lines tall twice and one line tall the third time.
+    /// Re-asks every row how tall it wants to be.
     ///
     /// `reconfigureItems`, not `invalidateLayout`: UIKit caches a
     /// self-sizing cell's preferred attributes, and invalidating the layout
     /// re-runs the layout against that same cached size. Reconfiguring is
-    /// what actually re-asks the cell how tall it wants to be.
-    private func remeasureStreamOnce() {
-        guard !hasRemeasuredStream else { return }
-        hasRemeasuredStream = true
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.remeasureStream()
-        }
-    }
-
+    /// what actually re-asks the cell.
+    ///
+    /// This is for width CHANGES only. It used to also run once after the
+    /// first apply, papering over rows that measured against an unsettled
+    /// width; `CaptionBubbleCell.preferredLayoutAttributesFitting` measures
+    /// against the authoritative width now, so there is nothing left to
+    /// paper over.
     private func remeasureStream() {
         var snapshot = streamDataSource.snapshot()
         guard !snapshot.itemIdentifiers.isEmpty else { return }

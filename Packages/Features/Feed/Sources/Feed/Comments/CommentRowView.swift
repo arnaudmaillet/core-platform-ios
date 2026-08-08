@@ -322,6 +322,50 @@ final class CaptionBubbleCell: UICollectionViewCell {
         onAvatarTap = nil
     }
 
+    /// Measures this row at the width the layout is actually going to give
+    /// it, rather than at whatever width the cell happens to be carrying.
+    ///
+    /// THE RACE THIS CLOSES. A self-sizing cell is asked its height once,
+    /// and on the feed's resting engagement it is asked early — the
+    /// comments are installed into a feed cell from `willDisplay`, while
+    /// the page is still arriving, so the container's width is not final.
+    /// Measured against a too-wide box the caption is one line, and one
+    /// line is the height the layout keeps: the row never grows back, and
+    /// the label — which HAS the full string — renders as much of it as
+    /// fits and clips the rest. That is the "clipped to one line, end of
+    /// the text missing" report, and it reproduced about one launch in
+    /// three.
+    ///
+    /// So the width comes from the ATTRIBUTES, which are authoritative, and
+    /// the layout is forced through synchronously before measuring, so
+    /// nothing downstream can hand back a cached one-line height.
+    override func preferredLayoutAttributesFitting(
+        _ layoutAttributes: UICollectionViewLayoutAttributes
+    ) -> UICollectionViewLayoutAttributes {
+        let targetWidth = layoutAttributes.frame.width
+        guard targetWidth > 0 else {
+            return super.preferredLayoutAttributesFitting(layoutAttributes)
+        }
+        // Adopt the target width FIRST: `preferredMaxLayoutWidth` is derived
+        // from the bubble's resolved bounds (see `SnapPostInfoCardView`), so
+        // the label only learns its real wrapping width once the cell is
+        // actually that wide.
+        if abs(bounds.width - targetWidth) > 0.5 {
+            bounds.size.width = targetWidth
+        }
+        contentView.setNeedsLayout()
+        contentView.layoutIfNeeded()
+        let fitted = contentView.systemLayoutSizeFitting(
+            CGSize(width: targetWidth, height: 0),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        // Ceil, not round: half a point short of the caption is a clipped
+        // descender on the last line.
+        layoutAttributes.frame.size.height = ceil(fitted.height)
+        return layoutAttributes
+    }
+
     override func didMoveToWindow() {
         super.didMoveToWindow()
         // The glass materializes only in a window (the render-server rule
