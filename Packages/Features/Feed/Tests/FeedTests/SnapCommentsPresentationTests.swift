@@ -286,21 +286,24 @@ struct SnapCommentsPresentationTests {
         // Float, so the CGFloat constant never comes back bit-identical.
         #expect(abs(backdrop.dimOpacity - SnapCommentsLayout.backdropDimOpacity) < 0.001)
         let chrome = try #require(cell.contentView.subviews.compactMap { $0 as? SnapChromeView }.first)
-        // The chrome as a whole never fades — its individual surfaces do.
-        #expect(chrome.alpha == 1)
+        // THE CHROME IS THE FADED LAYER — one alpha for every surface it
+        // owns, which is what makes the engagement one animation instead of
+        // seven (see `setCommentsEngagedProgress`).
+        #expect(chrome.alpha == 0)
         let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
         let ticker = try #require(chrome.subviews.compactMap { $0 as? SnapCommentTickerView }.first)
         let subtitle = try #require(chrome.subviews.compactMap { $0 as? SnapSubtitleView }.first)
-        #expect(ticker.alpha == 0)
-        #expect(subtitle.alpha == 0)
+        // The members keep their own alpha and inherit the container's.
+        #expect(ticker.alpha == 1)
+        #expect(subtitle.alpha == 1)
         // The action column goes with them. It used to ride both states at
         // full presence, floating over the comment list; the engaged layout
         // owns the full width now, so the rail and its "+" anchor fade out
         // together (alpha < 0.01 also retires them from hit-testing, which
         // is what removed the composer-vs-rail overlap entirely).
         let plus = try #require(chrome.subviews.compactMap { $0 as? SnapRailComposeButton }.first)
-        #expect(rail.alpha == 0)
-        #expect(plus.alpha == 0)
+        #expect(rail.alpha == 1)
+        #expect(plus.alpha == 1)
         #expect(chrome.interactionRoots.contains(plus))
 
         cell.setCommentsEngaged(false)
@@ -308,6 +311,7 @@ struct SnapCommentsPresentationTests {
         #expect(media.transform == .identity)
         #expect(card.transform == .identity)
         #expect(backdrop.dimOpacity == 0)
+        #expect(chrome.alpha == 1)
         #expect(ticker.alpha == 1)
         #expect(subtitle.alpha == 1)
         #expect(plus.alpha == 1)
@@ -914,7 +918,7 @@ struct SnapCommentsPresentationTests {
             let rail = try #require(
                 chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first
             )
-            #expect(rail.alpha == 0)
+            #expect(rail.superview?.alpha == 0) // the chrome carries the fade
         }
     }
 
@@ -2381,7 +2385,7 @@ struct SnapCommentsPresentationTests {
         #expect(rail.alpha == 1) // at rest
 
         cell.setCommentsEngaged(true)
-        #expect(rail.alpha == 0)
+        #expect(rail.superview?.alpha == 0) // the chrome carries the fade
 
         cell.setCommentsEngaged(false)
         #expect(rail.alpha == 1)

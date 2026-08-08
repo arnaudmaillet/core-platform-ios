@@ -130,23 +130,24 @@ struct SnapCommentEmptyStateTests {
         #expect(prompt.isHidden == true)
     }
 
-    /// Alpha is shared between the pill's entrance and the comments
-    /// engagement's chrome fade, and this is the one surface that writes it
-    /// itself. Cached streams re-emit on every page activation, so a
-    /// re-emission arriving while the comments layout is open must settle at
-    /// the faded alpha instead of animating the pill back over it.
-    @Test func aStreamArrivingMidEngagementStaysFaded() throws {
+    /// A stream arriving mid-engagement cannot show the pill over the open
+    /// comments layout — and it no longer needs to be told not to. The
+    /// engagement's fade lives on the CHROME's alpha, which multiplies
+    /// through, so this pill is free to animate its own alpha to 1 and stay
+    /// invisible. That is what let its `restingAlpha` plumbing go.
+    @Test func aStreamArrivingMidEngagementStaysHiddenByTheChrome() throws {
         let chrome = makeChrome()
         let prompt = try emptyState(in: chrome)
         chrome.setCommentsEngaged(true)
         chrome.updateCommentStreams(FeedViewModel.CommentStreams(
             reactions: [], subtitles: [], commentCount: 0
         ))
-        #expect(prompt.alpha == 0)
+        #expect(chrome.alpha == 0)          // the container carries it…
+        #expect(prompt.alpha == 1)          // …so the pill needs no help
 
-        // …and the pull-down brings it back with everything else.
+        // …and the pull-down brings the whole chrome back at once.
         chrome.setCommentsEngaged(false)
-        #expect(prompt.alpha == 1)
+        #expect(chrome.alpha == 1)
         #expect(prompt.isHidden == false)
     }
 
@@ -289,11 +290,11 @@ struct SnapCommentEmptyStateTests {
 
         // Engaged: the chrome fades out, beat included.
         chrome.setCommentsEngaged(true)
-        #expect(prompt.alpha == 0)
+        #expect(chrome.alpha == 0)
 
         // …and back. A NEW animation, from full strength.
         chrome.setCommentsEngaged(false)
-        #expect(prompt.alpha == 1)
+        #expect(chrome.alpha == 1)
         let second = try #require(label.layer.animation(forKey: "empty-state-label-dwell"))
         #expect(second !== first)
         #expect(label.layer.opacity == SnapCommentEmptyStateView.labelRestingOpacity)

@@ -249,6 +249,39 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         contentView.layoutIfNeeded()
     }
 
+    /// The engagement, driven by Core Animation.
+    ///
+    /// Four opacities move, and after the chrome's own collapse each is ONE
+    /// layer: the comments container, the header band, the readability wash,
+    /// and the page chrome. Model values are set first and unanimated — so
+    /// the settled state is right even if an animation is removed — then one
+    /// explicit animation per layer carries the eye.
+    ///
+    /// `presentation()` is the start value, not the model: an engagement
+    /// interrupted mid-flight continues from what is on screen rather than
+    /// snapping back to where the last one began. That is the same property
+    /// the interactive pull-down relies on, which is why both paths can share
+    /// `setCommentsEngagementProgress` as their definition of the two ends.
+    func animateCommentsEngaged(_ engaged: Bool, duration: TimeInterval) {
+        guard engaged != isCommentsEngaged else { return }
+        let layers = engagementFadeLayers
+        let starts = layers.map { ($0.presentation() ?? $0).opacity }
+        UIView.performWithoutAnimation { setCommentsEngaged(engaged) }
+        for (layer, start) in zip(layers, starts) {
+            let animation = CABasicAnimation(keyPath: "opacity")
+            animation.fromValue = start
+            animation.toValue = layer.opacity
+            animation.duration = duration
+            animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            layer.add(animation, forKey: "comments-engage-opacity")
+        }
+    }
+
+    /// The four layers the engagement fades, in no particular order.
+    private var engagementFadeLayers: [CALayer] {
+        [commentsContainer.layer, headerFrost.layer, mediaBackdrop.layer, chrome.layer]
+    }
+
     /// Materializes the header band's blur AHEAD of the engagement.
     ///
     /// A material arrives through `effect`, and building one is render-server

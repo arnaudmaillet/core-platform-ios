@@ -574,11 +574,15 @@ struct SnapShortcutRailViewTests {
         let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
         let anchor = try #require(chrome.subviews.compactMap { $0 as? SnapRailComposeButton }.first)
 
+        // ONE FADED LAYER: the chrome's own alpha carries every surface it
+        // owns, so the rail and its anchor keep alpha 1 and inherit.
         chrome.setCommentsEngaged(true)
-        #expect(rail.alpha == 0)
-        #expect(anchor.alpha == 0)
+        #expect(chrome.alpha == 0)
+        #expect(rail.alpha == 1)
+        #expect(anchor.alpha == 1)
 
         chrome.setCommentsEngaged(false)
+        #expect(chrome.alpha == 1)
         #expect(rail.alpha == 1)
         #expect(anchor.alpha == 1)
     }
@@ -592,6 +596,6 @@ struct SnapShortcutRailViewTests {
         let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
 
         chrome.setCommentsEngagedProgress(0.5)
-        #expect(abs(rail.alpha - 0.5) < 0.001)
+        #expect(abs(chrome.alpha - 0.5) < 0.001)
     }
 }

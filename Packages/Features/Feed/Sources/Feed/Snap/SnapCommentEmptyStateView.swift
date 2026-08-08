@@ -126,23 +126,20 @@ final class SnapCommentEmptyStateView: UIView {
     /// dequeue pull) it appears instantly and rides the swipe like static
     /// chrome. Fade-only, so it stays on under Reduce Motion.
     ///
-    /// `restingAlpha` is the chrome's current engagement fade (see
-    /// `SnapChromeView.setCommentsEngagedProgress`), and it is the opacity
-    /// this pill settles at — NOT 1. Alpha is shared state between the
-    /// entrance here and that fade, and this surface is the only one that
-    /// writes it directly; a stream re-emitting while the comments layout is
-    /// open (cached streams re-emit on every page activation) would
-    /// otherwise animate the pill back to full opacity on top of it.
-    func setVisible(_ visible: Bool, restingAlpha: CGFloat = 1) {
+    /// This pill owns its own alpha, and only its own: the engagement's fade
+    /// lives on the CHROME's alpha now and multiplies through. A stream
+    /// re-emitting mid-engagement (cached streams re-emit on every page
+    /// activation) can animate this to 1 all it likes — the chrome is at 0
+    /// and nothing shows.
+    func setVisible(_ visible: Bool) {
         guard isHidden == visible else { return }
         layer.removeAllAnimations()
-        alpha = restingAlpha
+        alpha = 1
         isHidden = !visible
-        // The entrance is for content landing under the viewer's eyes on a
-        // RESTING page. A faded-out page has no entrance to make.
-        if visible, window != nil, restingAlpha > 0 {
+        // Content landing under the viewer's eyes announces itself.
+        if visible, window != nil {
             alpha = 0
-            UIView.animate(withDuration: 0.2) { self.alpha = restingAlpha }
+            UIView.animate(withDuration: 0.2) { self.alpha = 1 }
         }
         applyLabelDwell()
     }
