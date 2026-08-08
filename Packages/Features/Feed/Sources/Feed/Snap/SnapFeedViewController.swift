@@ -1517,6 +1517,27 @@ extension SnapFeedViewController: UICollectionViewDelegate {
             if let model = modelsByID[id], model.mediaURL == nil, commentsEngagedID == nil {
                 presentRestingComments(for: id, host: snapCell)
             }
+            // PHASE 2, when this cell is ALREADY the active page.
+            //
+            // The settle path normally applies the lock, and normally it
+            // runs after the cell exists. A programmatic jump inverts that:
+            // `-snap-start-index` scrolls and settles in one turn, so the
+            // activation lands before the layout has realized the cell, the
+            // settle path finds nothing to mount, and the pre-render above
+            // arrives here afterwards — with no further activation coming,
+            // because the dispatcher is already on this page. The page kept
+            // the RESTING chrome for its whole life: no sort pill, and a
+            // caption cell measured under bars it no longer had.
+            //
+            // The active-index test is what keeps this phase 2 and not a
+            // second pre-render: a cell scrolling in normally is not the
+            // active page yet, so it falls through to the settle path
+            // exactly as before, and the pager is never locked mid-scroll.
+            // (Same test the `willBecomeActive` call above uses.)
+            if lifecycle.activeIndex == indexPath.item,
+               commentsEngagedID == id, commentsEngagementIsResting {
+                lockRestingEngagement()
+            }
         }
         // Re-pull the cached streams BEFORE raising the visibility gate: a
         // cell configured while the prefetch load was still in flight

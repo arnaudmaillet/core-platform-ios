@@ -153,7 +153,39 @@ final class PostDetailViewController: UIViewController {
     /// tolerance makes a no-op call free.
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        remeasureStreamOnWidthChange()
         updateEmptyPageHeight()
+    }
+
+    /// The width the stream's self-sizing rows were last measured against.
+    private var lastMeasuredStreamWidth: CGFloat = 0
+
+    /// Re-measures every row when the stream's width changes.
+    ///
+    /// Self-sizing rows are measured once, at whatever width the list has
+    /// when they are configured — and on the feed's RESTING engagement that
+    /// is a width the container has not finished resolving, because the
+    /// comments are installed into a cell from `willDisplay` while the page
+    /// is still arriving. The caption row got measured narrow, kept the
+    /// height that came out of it, and its label — tail-truncating by
+    /// default — ended a three-line caption in an ellipsis on line one. The
+    /// same run measured 58pt one launch and 33.67pt the next, which is the
+    /// tell: nothing was wrong with the text, only with WHEN it was asked.
+    ///
+    /// Nothing re-asked, because a compositional list does not re-measure
+    /// self-sizing content on a bounds change by itself. This does, once per
+    /// genuine width change — so rotation and the iPad's size classes are
+    /// covered by the same line.
+    private func remeasureStreamOnWidthChange() {
+        let width = collectionView.bounds.width
+        guard width > 0, abs(width - lastMeasuredStreamWidth) > 0.5 else { return }
+        let isFirst = lastMeasuredStreamWidth == 0
+        lastMeasuredStreamWidth = width
+        // The very first width is not a CHANGE — the rows have not been
+        // measured against anything yet, and re-applying inside the first
+        // layout pass would fight the apply that is putting them there.
+        guard !isFirst, hasAppliedStream else { return }
+        remeasureStream()
     }
 
     override func viewDidLoad() {
@@ -868,7 +900,42 @@ final class PostDetailViewController: UIViewController {
         if !items.contains(.emptyState) { emptyPageHeightConstraint = nil }
         streamDataSource.apply(snapshot, animatingDifferences: animated) { [weak self] in
             self?.updateEmptyPageHeight()
+            self?.remeasureStreamOnce()
             completion?()
+        }
+    }
+
+    /// Whether the one-shot post-install re-measure has already run.
+    private var hasRemeasuredStream = false
+
+    /// Re-measures the stream ONCE, a turn after its first apply.
+    ///
+    /// The width-change trigger cannot catch this one: the rows are measured
+    /// at a width that never subsequently CHANGES, it was simply not settled
+    /// when they were asked. On the feed's resting engagement the comments
+    /// are installed into a cell from `willDisplay`, mid-arrival, so whether
+    /// the caption row measures right is a race — the same launch measured
+    /// it three lines tall twice and one line tall the third time.
+    ///
+    /// `reconfigureItems`, not `invalidateLayout`: UIKit caches a
+    /// self-sizing cell's preferred attributes, and invalidating the layout
+    /// re-runs the layout against that same cached size. Reconfiguring is
+    /// what actually re-asks the cell how tall it wants to be.
+    private func remeasureStreamOnce() {
+        guard !hasRemeasuredStream else { return }
+        hasRemeasuredStream = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.remeasureStream()
+        }
+    }
+
+    private func remeasureStream() {
+        var snapshot = streamDataSource.snapshot()
+        guard !snapshot.itemIdentifiers.isEmpty else { return }
+        snapshot.reconfigureItems(snapshot.itemIdentifiers)
+        streamDataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
+            self?.updateEmptyPageHeight()
         }
     }
 
