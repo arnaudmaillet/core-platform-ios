@@ -18,14 +18,13 @@ import UIKit
 /// zero count too, so without that seam the pill would flash on every page
 /// while its fetch is in flight.
 ///
-/// # The label retires; the row does not
-/// The words are an EXPLANATION, not a permanent label. They hold for a
-/// reading beat and then fade, leaving the bubble mark alone in the avatar
-/// slot — the page gets its media back and the affordance stays. What does
-/// NOT change is the row: the pill keeps its place in the layout at zero
-/// opacity, so the whole slot — the emptied text column included — is still
-/// one tap into the comments. Shrinking to the mark would have taken the
-/// target with it.
+/// # The label recedes; it never leaves
+/// The words hold at full strength for a reading beat, then settle to
+/// `labelRestingOpacity` and stay there. Muted, not gone: the page gets its
+/// media back, while a viewer arriving late — or glancing down after the
+/// beat has passed — is still told why the zone is empty instead of being
+/// left a bare glyph to interpret. The row's geometry never changes through
+/// any of it, so the whole slot stays one tap into the comments.
 ///
 /// Renders the subtitle zone's pill grammar (`SubtitlePillLabel`, footnote/
 /// medium) on the caption's leading axis, so the placeholder reads as the
@@ -150,12 +149,18 @@ final class SnapCommentEmptyStateView: UIView {
 
     // MARK: - The label's dwell
 
-    /// How long "No comments yet" is READ before it retires, and how long it
-    /// takes to go. The words are an explanation, not a permanent label:
-    /// once they have been read, the mark alone carries the affordance and
-    /// the page gets its media back.
+    /// How long "No comments yet" is read at full strength before it settles
+    /// back, and how long the settling takes.
     static let labelDwell: TimeInterval = 2.8
     static let labelFadeDuration: TimeInterval = 0.35
+    /// Where the words SETTLE — muted, not gone. They recede so the page can
+    /// have its media back, and they stay legible so a viewer arriving late
+    /// (or glancing back) still gets told why the zone is empty rather than
+    /// being left with a bare glyph to interpret. Both the pill's backing
+    /// and its text ride this one layer, so the contrast pairing survives
+    /// the fade intact — it dims as a unit instead of leaving white text
+    /// stranded over bright media.
+    static let labelRestingOpacity: Float = 0.45
     private static let dwellKey = "empty-state-label-dwell"
 
     /// Mirrors the owning page's on-screen state, the same seam the subtitle
@@ -186,27 +191,27 @@ final class SnapCommentEmptyStateView: UIView {
     /// layer animation also stops paying for itself the moment the page
     /// leaves the screen.
     ///
-    /// The model value is parked at 0 (hidden) and the animation HOLDS the
-    /// label visible for the dwell before ramping down onto it. Ending on
-    /// the model value is what keeps backgrounding — which strips CA
-    /// animations — from snapping the words back on.
+    /// The model value is parked at the RESTING opacity and the animation
+    /// HOLDS the label at full strength for the dwell before ramping down
+    /// onto it. Ending on the model value is what keeps backgrounding —
+    /// which strips CA animations — from snapping the words back to full.
     private func armLabelDwell() {
         guard !hasArmedDwell else { return }
         hasArmedDwell = true
         let total = Self.labelDwell + Self.labelFadeDuration
         let animation = CAKeyframeAnimation(keyPath: "opacity")
-        animation.values = [1, 1, 0]
+        animation.values = [1, 1, Self.labelRestingOpacity]
         animation.keyTimes = [0, NSNumber(value: Self.labelDwell / total), 1]
         animation.duration = total
         animation.fillMode = .forwards
         animation.isRemovedOnCompletion = false
-        label.layer.opacity = 0
+        label.layer.opacity = Self.labelRestingOpacity
         label.layer.add(animation, forKey: Self.dwellKey)
     }
 
-    /// Restores the words, ready to be read again the next time this row
-    /// appears — a page revisited, or the scaffold recycled onto another
-    /// zero-comment post.
+    /// Restores the words to full strength, ready to be read again the next
+    /// time this row appears — a page revisited, or the scaffold recycled
+    /// onto another zero-comment post.
     private func cancelLabelDwell() {
         hasArmedDwell = false
         label.layer.removeAnimation(forKey: Self.dwellKey)
