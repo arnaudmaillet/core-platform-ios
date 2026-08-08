@@ -370,6 +370,19 @@ final class SnapFeedViewController: UIViewController {
                       let after = Double(arguments[flag + 1]) else { return }
                 DispatchQueue.main.asyncAfter(deadline: .now() + after) { [weak self] in
                     self?.dismissComments()
+                    // `-snap-comments-reopen N`: taps the entry point again N
+                    // seconds after the close. The REOPEN is what a broken
+                    // teardown kills — the page still looks right, and every
+                    // comment surface is simply dead — so the QA path has to
+                    // go all the way round.
+                    guard let flag = arguments.firstIndex(of: "-snap-comments-reopen"),
+                          arguments.indices.contains(flag + 1),
+                          let reopenAfter = Double(arguments[flag + 1]) else { return }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + reopenAfter) { [weak self] in
+                        guard let self, let index = self.lifecycle.activeIndex,
+                              self.orderedIDs.indices.contains(index) else { return }
+                        self.presentComments(for: self.orderedIDs[index])
+                    }
                 }
             }
         }
@@ -1398,17 +1411,19 @@ final class SnapFeedViewController: UIViewController {
         // `presentation()` matters most on THIS leg — a committed pull-down
         // arrives here already part-way dismissed, and the exit has to carry
         // on from where the finger left it rather than restart.
-        CATransaction.begin()
-        CATransaction.setCompletionBlock { [weak self] in
-            self?.finishCommentsDisengagement()
-        }
+        // The teardown rides the CELL's animation, and it is scoped to THIS
+        // dismissal: an interrupted exit fires the delegate too, and by then a
+        // fresh engagement may own the slot — tearing that one down would be
+        // worse than not tearing this one down.
         engagedCell()?.animateCommentsEngaged(
             false, duration: SnapCommentsLayout.disengageDuration
-        )
+        ) { [weak self] in
+            guard let self, self.commentsEngagedID == engagedID else { return }
+            self.finishCommentsDisengagement()
+        }
         detail?.animateEngagedTransition(
             toEngaged: false, duration: SnapCommentsLayout.disengageDuration
         )
-        CATransaction.commit()
     }
 
 

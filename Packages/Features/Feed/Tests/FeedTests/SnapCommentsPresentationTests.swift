@@ -511,6 +511,43 @@ struct SnapCommentsPresentationTests {
         #expect(card.transform == .identity)
     }
 
+    /// THE DISENGAGE'S COMPLETION MUST RIDE THE ANIMATION, not the
+    /// transaction — this is the regression that made the ✕ leave every
+    /// comment entry point dead.
+    ///
+    /// The teardown is what clears the screen's `commentsEngagedID`, and while
+    /// that is set `presentComments` refuses to open. Hanging the completion
+    /// off `CATransaction.setCompletionBlock` looked right and never fired:
+    /// `animateCommentsEngaged` calls `performWithoutAnimation`, which opens
+    /// and commits a NESTED transaction, and the block set on the outer one
+    /// was lost. The drag-down exit hid it, because it drives the progress to
+    /// the end itself before handing off, so the page looked correct either
+    /// way — only the reopen was broken.
+    @Test func theDisengageCarriesItsCompletionOnTheAnimation() throws {
+        let cell = makeEngagedCell()
+        var completions = 0
+        cell.animateCommentsEngaged(false, duration: 0.3) { completions += 1 }
+
+        // Some layer in the transition carries it — deliberately not asserting
+        // WHICH, because that is the cell's business; what matters is that the
+        // completion is attached to an ANIMATION and so cannot be lost by a
+        // nested transaction.
+        func engageAnimations(_ layer: CALayer) -> [CAAnimation] {
+            let mine = layer.animation(forKey: "comments-engage-opacity").map { [$0] } ?? []
+            return mine + (layer.sublayers ?? []).flatMap(engageAnimations)
+        }
+        let animations = engageAnimations(cell.contentView.layer)
+        #expect(!animations.isEmpty)
+        #expect(animations.contains { $0.delegate != nil })
+        #expect(cell.isCommentsEngaged == false)
+
+        // A call with nothing to change still reports back — a caller whose
+        // teardown hangs off this must never be stranded by a no-op.
+        completions = 0
+        cell.animateCommentsEngaged(false, duration: 0.3) { completions += 1 }
+        #expect(completions == 1)
+    }
+
     /// A WARM panel is invisible and inert. Building the comments ahead of
     /// the tap is what removed the transition's main-thread stall (~115ms of
     /// construction and layout, measured, which is about seven frames the
