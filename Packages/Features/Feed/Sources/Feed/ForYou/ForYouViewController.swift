@@ -839,6 +839,11 @@ final class ForYouViewController: UIViewController {
             self?.navigationController?.popViewController(animated: true)
         }
         navigationController.delegate = transition
+        // Pay the destination's first layout and raster HERE — see
+        // `prepareForHeroPresentation`. In the tap's own frame a stall is
+        // invisible; in the flight's first frames it is the pause.
+        (feed as? SnapFeedViewController)?
+            .prepareForHeroPresentation(in: navigationController.view.bounds)
         navigationController.pushViewController(feed, animated: true)
 
         #if DEBUG
