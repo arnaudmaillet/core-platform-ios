@@ -687,26 +687,25 @@ final class ForYouViewController: UIViewController {
     /// exists to avoid.
     private var reusableFeed: SnapFeedViewController?
 
-    /// The cache is an OPTIMISATION, not state — a held feed keeps a whole
-    /// collection view and its players alive off-screen, which is exactly the
-    /// kind of thing to give back first. Dropping it costs the next tap a
-    /// rebuild and nothing else. Never dropped while it is on screen.
+    /// The cache is an OPTIMISATION, not state: under real pressure, give it
+    /// back. This is the ONLY thing that drops it — a tab switch does not.
+    ///
+    /// # Why a cached feed is cheap to keep
+    /// The reason to drop it would be the media it holds, except it holds
+    /// none. Being popped runs the FEED's own `viewDidDisappear`, which
+    /// resigns its active cell and calls `VideoPlaybackController.stop`: the
+    /// item is replaced with nil, the renderer is invalidated and unhooked
+    /// from the display link, and the `AVPlayer` returns to a pool that is
+    /// app-wide rather than this screen's. By the time anything here could
+    /// release a player, the players are already gone.
+    ///
+    /// What is left is a view hierarchy, and that measured as nothing: phys
+    /// footprint after a tab-away was 83/75/82 MB holding it against 75/86/74
+    /// MB dropping it — fully overlapping, and in both directions. So it is
+    /// kept, and the next tap stays a re-point rather than a rebuild. A tab
+    /// switch was never the signal that means "give something back"; this is.
     override func didReceiveMemoryWarning() {
         super.didReceiveMemoryWarning()
-        releaseCachedFeed()
-    }
-
-    /// Hands the cached feed back when the grid is no longer on screen.
-    ///
-    /// The discriminator is the one `viewWillDisappear` already uses, and it
-    /// carries the whole correctness of this: a PUSHED feed also disappears
-    /// this controller, leaving it on the stack underneath. Releasing there
-    /// would defeat the reuse entirely — the very next thing that happens is
-    /// a pop straight back to here — so only a departure that leaves this
-    /// controller topmost counts as leaving.
-    override func viewDidDisappear(_ animated: Bool) {
-        super.viewDidDisappear(animated)
-        guard navigationController?.topViewController === self else { return }
         releaseCachedFeed()
     }
 

@@ -82,36 +82,53 @@ struct SnapFeedRepointTests {
         #expect(counter.built == 1)
     }
 
-    /// A PUSH also disappears the grid, and dropping the cache there would
-    /// defeat the reuse entirely — the next thing that happens is a pop
-    /// straight back. Only a departure that leaves the grid topmost counts.
-    @Test func aPushedFeedSurvivesTheGridsDisappearance() {
+    /// The cache outlives the grid going away — being pushed over AND the tab
+    /// switching away. A cached feed holds no players (the feed released them
+    /// on its own disappearance), and holding its view hierarchy measured
+    /// inside the noise, so there is nothing to reclaim by dropping it.
+    @Test func theCachedFeedSurvivesTheGridDisappearing() {
         let (grid, counter) = Self.grid()
         let nav = UINavigationController(rootViewController: grid)
         let feed = grid.snapFeed(for: [PostID("a")])
         nav.pushViewController(feed, animated: false)
 
+        // Pushed over…
         grid.viewDidDisappear(false)
-        // Popped, and the next tap must still find it.
         nav.popToRootViewController(animated: false)
+        // …and the tab switching away, with the grid topmost.
+        grid.viewDidDisappear(false)
 
         #expect(grid.snapFeed(for: [PostID("b")]) === feed)
         #expect(counter.built == 1)
     }
 
-    /// Leaving the TAB hands it back: the grid is topmost, so nothing was
-    /// pushed over it and the feed is just an off-screen retain.
-    @Test func leavingTheTabReleasesTheCachedFeed() {
+    /// Pressure is the one signal that means "give something back", and the
+    /// only thing that drops the cache.
+    @Test func aMemoryWarningReleasesTheCachedFeed() {
         let (grid, counter) = Self.grid()
-        let nav = UINavigationController(rootViewController: grid)
-        _ = nav
         let first = grid.snapFeed(for: [PostID("a")])
 
-        grid.viewDidDisappear(false)
+        grid.didReceiveMemoryWarning()
 
         let second = grid.snapFeed(for: [PostID("b")])
         #expect(first !== second)
         #expect(counter.built == 2)
+    }
+
+    /// …but never one that is still on screen: dropping the reference while
+    /// the feed is pushed would release the controller the viewer is looking
+    /// at.
+    @Test func aMemoryWarningSparesAFeedThatIsStillOnScreen() {
+        let (grid, counter) = Self.grid()
+        let nav = UINavigationController(rootViewController: grid)
+        let feed = grid.snapFeed(for: [PostID("a")])
+        nav.pushViewController(feed, animated: false)
+
+        grid.didReceiveMemoryWarning()
+        nav.popToRootViewController(animated: false)
+
+        #expect(grid.snapFeed(for: [PostID("b")]) === feed)
+        #expect(counter.built == 1)
     }
 
     // MARK: - Helpers
