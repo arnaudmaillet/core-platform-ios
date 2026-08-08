@@ -1147,6 +1147,49 @@ struct SnapCommentsPresentationTests {
         #expect(feed.toolbarItems ?? [] == resting)
     }
 
+    /// A hero flight strips the bar and gets every piece of it back on
+    /// landing — the whole point being that the glass is built off the
+    /// flight's critical path, not that it is lost.
+    @Test func heldBarChromeIsRestoredWhenTheFlightLands() {
+        let (_, feed) = Self.chromeHost()
+        let restingRight = feed.navigationItem.rightBarButtonItems ?? []
+        let restingLeft = feed.navigationItem.leftBarButtonItems ?? []
+        let restingToolbar = feed.toolbarItems ?? []
+        #expect(!restingRight.isEmpty)
+        #expect(!restingToolbar.isEmpty)
+
+        feed.holdBarChromeForFlight()
+        #expect(feed.navigationItem.rightBarButtonItems ?? [] == [])
+        #expect(feed.navigationItem.leftBarButtonItems ?? [] == [])
+        #expect(feed.toolbarItems ?? [] == [])
+
+        feed.zoomTransitionDidEnd()
+        #expect(feed.navigationItem.rightBarButtonItems ?? [] == restingRight)
+        #expect(feed.navigationItem.leftBarButtonItems ?? [] == restingLeft)
+        // The toolbar goes back one turn later, so that the two sets of glass
+        // do not materialise in the same pass.
+        #expect(feed.toolbarItems ?? [] == [])
+    }
+
+    /// An engagement landing mid-flight must not put the glass back on the
+    /// critical path — it changes what gets installed at landing instead.
+    /// Without this the hold is defeated by whatever calls `setEngagedChrome`
+    /// while the card is still in the air.
+    @Test func engagingDuringAFlightUpdatesTheHeldChromeRatherThanTheBar() {
+        let (_, feed) = Self.chromeHost()
+        feed.holdBarChromeForFlight()
+
+        feed.setEngagedChrome(true, hasMedia: true, animated: false)
+        #expect(feed.navigationItem.rightBarButtonItems ?? [] == [])
+        #expect(feed.navigationItem.leftBarButtonItems ?? [] == [])
+
+        // ...and landing installs the ENGAGED bar, not the resting one it was
+        // holding when the flight began.
+        feed.zoomTransitionDidEnd()
+        #expect(Self.leadingLabels(feed) == ["Close comments"])
+        #expect((feed.navigationItem.rightBarButtonItems ?? []).count == 3)
+    }
+
     /// The LEADING slot carries the exit now: a media post's comments put a
     /// ✕ where the back arrow sits, and closing restores the arrow.
     @Test func mediaCommentsPutTheCloseButtonInTheBackArrowsSlot() {
