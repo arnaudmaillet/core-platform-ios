@@ -74,6 +74,11 @@ final class SnapChromeView: UIView {
     /// The rail's top edge as a cell-relative constant (see `buildLayout`).
     /// Optional: margins change during `init` before the layout exists.
     private var railTopConstraint: NSLayoutConstraint?
+    /// The subtitle zone's two bottom seats — stacked ON the band, or in the
+    /// band's own seat when it isn't rendering. Exactly one is ever active;
+    /// `applyBandPresence` is the only thing that switches them.
+    private var subtitleAboveBandConstraint: NSLayoutConstraint?
+    private var subtitleInBandSeatConstraint: NSLayoutConstraint?
     /// A zero-content region that RESERVES the caption's locked two-line box
     /// on EVERY post — a real two-line media caption or an (empty) text-only
     /// post alike. The ticker (and, riding it, the rail + "+") pins to this
@@ -303,10 +308,37 @@ final class SnapChromeView: UIView {
         subtitleView.constrain(in: self) { parent in
             subtitleView.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor, constant: Spacing.lg)
             subtitleView.trailingAnchor.constraint(equalTo: shortcutRail.leadingAnchor, constant: -Spacing.md)
-            // md: same inter-container seam as band→caption — the three
-            // stacked containers share one breathing rhythm.
-            subtitleView.bottomAnchor.constraint(equalTo: commentTicker.topAnchor, constant: -Spacing.md)
         }
+        // The zone's bottom has TWO seats, and which one it takes is the
+        // band's presence (`applyBandPresence`).
+        //
+        // A hidden UIView still occupies its frame, so stacking the zone on
+        // the band's top edge left a band-height hole under the pill on
+        // every page the band declines — which is now most of them, since
+        // the zone speaks for sparse posts. The band's height cannot simply
+        // collapse: it is the engagement corner's HEIGHT AUTHORITY (the "+"
+        // pins to its top and bottom edges, the rail's width and reserved
+        // strip derive from it), so shrinking it would take the whole
+        // trailing column with it.
+        //
+        // So the band keeps its frame and the ZONE moves instead: with no
+        // band it drops into the band's own seat, one md above the caption
+        // floor — the same slot the empty-state pill occupies, so all three
+        // comment surfaces render at one position and the corner never
+        // shows a gap it isn't using.
+        //
+        // Both seats are md off their reference — the same inter-container
+        // seam as band→caption, so the stack keeps one breathing rhythm
+        // either way.
+        let aboveBand = subtitleView.bottomAnchor.constraint(
+            equalTo: commentTicker.topAnchor, constant: -Spacing.md
+        )
+        let inBandSeat = subtitleView.bottomAnchor.constraint(
+            equalTo: captionFloorGuide.topAnchor, constant: -Spacing.md
+        )
+        subtitleAboveBandConstraint = aboveBand
+        subtitleInBandSeatConstraint = inBandSeat
+        aboveBand.isActive = true
 
         // The comments empty state sits in the BAND's slot (bottom on the
         // caption's top, leading on the caption's text axis — where a
@@ -431,6 +463,10 @@ final class SnapChromeView: UIView {
             subtitleView.setCues([])
             commentEmptyState.setVisible(false)
         }
+        // Every configure, not just the text branch: a recycled scaffold
+        // arrives seated for the PREVIOUS post's band, and a media page
+        // whose stream hasn't landed yet has no band either.
+        applyBandPresence()
         // The reactions rail is seeded for EVERY post — the shared action
         // column. Static chrome, so it loads here (not via
         // `updateCommentStreams`) and the flight replica shows it too; the
@@ -621,6 +657,10 @@ final class SnapChromeView: UIView {
     func updateCommentStreams(_ streams: FeedViewModel.CommentStreams) {
         guard hasMedia else { return }
         commentTicker.setComments(streams.reactions)
+        // Read AFTER the band has resolved its own hidden state — it also
+        // stands down under Reduce Motion, which the queue alone wouldn't
+        // tell us.
+        applyBandPresence()
         subtitleView.setCommentCount(streams.commentCount)
         subtitleView.setCues(streams.subtitles)
         // THE COUNT IS THE WHOLE CONDITION (product rule 2026-08-08): no
@@ -640,6 +680,28 @@ final class SnapChromeView: UIView {
             streams.isLoaded && streams.commentCount == 0,
             restingAlpha: commentsEngagedProgress
         )
+    }
+
+    /// Seats the subtitle zone against the band's RESOLVED visibility: on
+    /// top of it when it renders, in its seat when it doesn't. Idempotent
+    /// (no-ops when the seat is already right), and it deactivates before
+    /// activating — both constraints live at once would be an unsatisfiable
+    /// pair, not a preference.
+    private func applyBandPresence() {
+        let bandRenders = !commentTicker.isHidden
+        guard subtitleAboveBandConstraint?.isActive != bandRenders else { return }
+        if bandRenders {
+            subtitleInBandSeatConstraint?.isActive = false
+            subtitleAboveBandConstraint?.isActive = true
+        } else {
+            subtitleAboveBandConstraint?.isActive = false
+            subtitleInBandSeatConstraint?.isActive = true
+        }
+        // Swapping `isActive` does not reliably flag this view for layout,
+        // so a caller that lays out SYNCHRONOUSLY — the flight replica, and
+        // any test — reads the previous seat's frames. The run loop hides
+        // this; an explicit `layoutIfNeeded` does not.
+        setNeedsLayout()
     }
 
     /// Streams while the owning cell is on screen (visibility-scoped — a
@@ -719,6 +781,7 @@ final class SnapChromeView: UIView {
         onCommentsTapped = nil
         hasMedia = true
         commentTicker.reset()
+        applyBandPresence()
         composeButton.isHidden = true
         subtitleView.reset()
         commentEmptyState.setVisible(false)
