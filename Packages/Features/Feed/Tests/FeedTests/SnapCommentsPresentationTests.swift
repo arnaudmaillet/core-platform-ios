@@ -2273,6 +2273,29 @@ struct SnapCommentsPresentationTests {
         #expect(SnapCommentsLayout.skeletonPlaceholderCount(viewportHeight: 0) >= proMax)
     }
 
+    /// The comments-only empty PAGE row. `EmptyStateView` centres its block
+    /// and has no vertical intrinsic size, so a self-sizing list row has to
+    /// be told a height — and it must scale with the device rather than sit
+    /// at a constant, or the block reads as centred on one phone and tucked
+    /// under the caption on another.
+    @Test func theEmptyPageRowScalesWithTheViewport() {
+        let se = SnapCommentsLayout.emptyPageHeight(viewportHeight: 667)
+        let proMax = SnapCommentsLayout.emptyPageHeight(viewportHeight: 932)
+        let pad = SnapCommentsLayout.emptyPageHeight(viewportHeight: 1366)
+
+        #expect(se < proMax && proMax < pad)
+        // Never the whole viewport: the caption sits above and the input bar
+        // below, and a full-height row would push the block under the bar.
+        #expect(se < 667)
+        #expect(pad < 1366)
+        // The floor covers the pre-layout call, where bounds are still zero.
+        #expect(
+            SnapCommentsLayout.emptyPageHeight(viewportHeight: 0)
+                == SnapCommentsLayout.emptyPageMinimumHeight
+        )
+        #expect(SnapCommentsLayout.emptyPageMinimumHeight > 0)
+    }
+
     // MARK: - Entry point
 
     /// Every comments surface is an engagement entry point — the empty-state

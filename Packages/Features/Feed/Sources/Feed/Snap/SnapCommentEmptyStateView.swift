@@ -37,19 +37,67 @@ final class SnapCommentEmptyStateView: UIView {
     var onTap: (() -> Void)?
 
     private let label = SubtitlePillLabel()
+    /// The comment glyph's seat — the AVATAR SLOT of the row this stands in
+    /// for. Same circle a cue's author gets: same diameter, same fill, same
+    /// leading edge, so the empty state and a real comment occupy one
+    /// column rather than two nearly-aligned ones.
+    private let glyphSlot = UIView()
+    private let glyphView = UIImageView()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         isHidden = true
         label.numberOfLines = 1
-        label.pin(to: self)
+
+        // THE ROW SHAPE: [avatar slot] [gap] [content], exactly as a cue is
+        // built. This used to be one pill with the glyph tucked inside it as
+        // a text attachment, which put the WORDS on the caption's leading
+        // axis where every comment row puts its AVATAR — the placeholder sat
+        // half a slot left of the thing it is a placeholder for.
+        //
+        // The glyph is the comment system's own face: the avatar's
+        // placeholder fill, so the slot reads as an author circle with no
+        // author in it.
+        glyphSlot.backgroundColor = UIColor.white.withAlphaComponent(0.15)
+        glyphSlot.layer.cornerRadius = SnapSubtitleView.avatarDiameter / 2
+        glyphSlot.layer.cornerCurve = .continuous
+        glyphSlot.clipsToBounds = true
+        glyphView.contentMode = .center
+        glyphView.tintColor = UIColor.white.withAlphaComponent(0.85)
+
+        for view in [glyphSlot, glyphView, label] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+        }
+        addSubview(glyphSlot)
+        addSubview(label)
+        glyphSlot.addSubview(glyphView)
+        NSLayoutConstraint.activate([
+            // The slot owns the leading column and centers on the row, the
+            // same relationship the cue's avatar wrapper has to its zone.
+            glyphSlot.widthAnchor.constraint(equalToConstant: SnapSubtitleView.avatarDiameter),
+            glyphSlot.heightAnchor.constraint(equalToConstant: SnapSubtitleView.avatarDiameter),
+            glyphSlot.leadingAnchor.constraint(equalTo: leadingAnchor),
+            glyphSlot.centerYAnchor.constraint(equalTo: centerYAnchor),
+            glyphSlot.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
+            glyphSlot.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
+            glyphView.centerXAnchor.constraint(equalTo: glyphSlot.centerXAnchor),
+            glyphView.centerYAnchor.constraint(equalTo: glyphSlot.centerYAnchor),
+            // The pill is the content slot: sm off the slot's trailing edge
+            // (the cue's gap), and the taller of the two, so it sets the
+            // row's height.
+            label.leadingAnchor.constraint(equalTo: glyphSlot.trailingAnchor, constant: Spacing.sm),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor),
+            label.topAnchor.constraint(equalTo: topAnchor),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+
         addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleTap)))
         isAccessibilityElement = true
         accessibilityTraits = .button
         renderPrompt()
-        // The font is baked into the attributed string (the glyph rides as a
-        // text attachment), which `adjustsFontForContentSizeCategory` cannot
-        // track — re-resolve on Dynamic Type changes.
+        // The glyph's point size is derived from the text style, which no
+        // `adjustsFontForContentSizeCategory` tracks — re-resolve on Dynamic
+        // Type changes so the slot's mark scales with its label.
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: SnapCommentEmptyStateView, _) in
             self.renderPrompt()
         }
@@ -91,25 +139,18 @@ final class SnapCommentEmptyStateView: UIView {
     }
 
     /// One tier below the caption, the cue pill's exact type recipe
-    /// (footnote/medium, white on the translucent pill) with a small
-    /// comment-bubble glyph leading the line — the mark that this pill
-    /// speaks for the comment system, not for a commenter.
+    /// (footnote/medium, white on the translucent pill) — and, in the slot
+    /// beside it, the comment-bubble mark that says this row speaks for the
+    /// comment system rather than for a commenter.
     private func renderPrompt() {
         accessibilityLabel = Self.promptText
         let font = UIFont.preferredFont(forTextStyle: .footnote).withWeight(.medium)
-        let text = NSMutableAttributedString()
-        if let glyph = UIImage(
+        label.font = font
+        label.textColor = .white
+        label.text = Self.promptText
+        glyphView.image = UIImage(
             systemName: "bubble.left",
             withConfiguration: UIImage.SymbolConfiguration(font: font, scale: .small)
-        )?.withTintColor(UIColor.white.withAlphaComponent(0.85), renderingMode: .alwaysOriginal) {
-            text.append(NSAttributedString(attachment: NSTextAttachment(image: glyph)))
-            text.append(NSAttributedString(string: "  "))
-        }
-        text.append(NSAttributedString(string: Self.promptText))
-        text.addAttributes(
-            [.font: font, .foregroundColor: UIColor.white],
-            range: NSRange(location: 0, length: text.length)
         )
-        label.attributedText = text
     }
 }

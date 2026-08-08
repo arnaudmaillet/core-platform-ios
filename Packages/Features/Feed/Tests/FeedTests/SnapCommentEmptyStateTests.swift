@@ -150,6 +150,62 @@ struct SnapCommentEmptyStateTests {
         #expect(prompt.isHidden == false)
     }
 
+    /// THE ROW SHAPE. The empty state stands in a comment row's place, so it
+    /// is built like one: `[avatar slot] [gap] [content]`. It used to be a
+    /// single pill with the glyph inside it as a text attachment, which put
+    /// the WORDS on the leading axis where every comment row puts its
+    /// AVATAR — the placeholder sat half a slot left of the thing it stands
+    /// in for.
+    @Test func thePromptIsBuiltLikeACommentRow() throws {
+        let chrome = makeChrome()
+        chrome.setFixedInsets(UIEdgeInsets(top: 103, left: 0, bottom: 34, right: 0))
+        let prompt = try emptyState(in: chrome)
+        chrome.updateCommentStreams(FeedViewModel.CommentStreams(
+            reactions: [], subtitles: [], commentCount: 0
+        ))
+        chrome.layoutIfNeeded()
+
+        let slot = try #require(prompt.subviews.first { $0 !== prompt.subviews.compactMap { $0 as? UILabel }.first })
+        let pill = try #require(prompt.subviews.compactMap { $0 as? SubtitlePillLabel }.first)
+
+        // The glyph's seat IS the avatar's: same diameter, same circle, on
+        // the row's own leading edge — one constant, so the two can't drift.
+        #expect(slot.frame.width == SnapSubtitleView.avatarDiameter)
+        #expect(slot.frame.height == SnapSubtitleView.avatarDiameter)
+        #expect(slot.frame.minX == 0)
+        #expect(slot.layer.cornerRadius == SnapSubtitleView.avatarDiameter / 2)
+        // Content slot: the cue's gap off the avatar's trailing edge.
+        #expect(abs(pill.frame.minX - (slot.frame.maxX + Spacing.sm)) < 0.5)
+        // Both centred on the row, as the cue's avatar and pill are.
+        #expect(abs(pill.frame.midY - slot.frame.midY) < 0.5)
+    }
+
+    /// The zone and the empty state occupy ONE leading column: whichever of
+    /// them is showing, its avatar-slot circle starts at the same x. This is
+    /// the alignment the row shape exists to get right — a chrome-level
+    /// assertion, because that is where the two are placed.
+    @Test func thePromptAndACueShareTheSameLeadingColumn() throws {
+        let chrome = makeChrome()
+        chrome.setFixedInsets(UIEdgeInsets(top: 103, left: 0, bottom: 34, right: 0))
+        let prompt = try emptyState(in: chrome)
+        let zone = try #require(chrome.subviews.compactMap { $0 as? SnapSubtitleView }.first)
+
+        chrome.updateCommentStreams(FeedViewModel.CommentStreams(
+            reactions: [], subtitles: [], commentCount: 0
+        ))
+        chrome.layoutIfNeeded()
+        let promptColumn = prompt.frame.minX
+
+        chrome.updateCommentStreams(FeedViewModel.CommentStreams(
+            reactions: [],
+            subtitles: [SubtitleCue(id: "s0", text: "A whole sentence worth reading here.")],
+            commentCount: 1
+        ))
+        chrome.layoutIfNeeded()
+
+        #expect(zone.frame.minX == promptColumn)
+    }
+
     @Test func reuseResetHidesThePrompt() throws {
         let chrome = makeChrome()
         let prompt = try emptyState(in: chrome)
