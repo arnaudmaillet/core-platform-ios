@@ -507,6 +507,50 @@ struct SnapCommentsPresentationTests {
         #expect(card.transform == .identity)
     }
 
+    /// A WARM panel is invisible and inert. Building the comments ahead of
+    /// the tap is what removed the transition's main-thread stall (~115ms of
+    /// construction and layout, measured, which is about seven frames the
+    /// video is not shown on), but a panel installed early must not be
+    /// VISIBLE early — `installComments` unhides the header frost and a
+    /// freshly installed panel has never been through the engagement's
+    /// interpolator, so the dismissed pose has to be asserted explicitly.
+    ///
+    /// Alpha 0 is also what keeps the full-cell container out of hit-testing,
+    /// so a warm panel cannot eat the resting page's taps.
+    @Test func aWarmCommentsPanelIsInvisibleAndInert() throws {
+        let cell = SnapFeedCell(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        cell.configure(
+            with: FeedItemDisplayModel(
+                id: PostID("post-1"), authorID: ProfileID("profile-1"), authorName: "Ana",
+                metaText: "@ana · 3m", avatarURL: nil, caption: "caption",
+                mediaURL: URL(string: "mock://media/1"), mediaKind: .image,
+                thumbnailURL: nil, audioText: nil
+            ),
+            pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            videoPlayback: nil
+        )
+        let panel = UIView()
+        cell.installComments(panel)
+        // The warm's pose: fully dismissed, which is progress 1.
+        cell.setCommentsEngagementProgress(1)
+        cell.layoutIfNeeded()
+
+        let container = try #require(panel.superview)
+        #expect(container.alpha == 0)
+        // Below UIKit's hit-testing floor, so the resting page keeps its taps.
+        #expect(container.alpha < 0.01)
+        // The frost band came out of hiding with the install; the pose is
+        // what keeps it from being seen.
+        let frost = try #require(
+            cell.contentView.subviews.compactMap { $0 as? ProgressiveFrostView }.first
+        )
+        #expect(frost.alpha == 0)
+        // And the page's own chrome is fully present, as at rest.
+        let chrome = try #require(cell.contentView.subviews.compactMap { $0 as? SnapChromeView }.first)
+        #expect(chrome.alpha == 1)
+        #expect(cell.isCommentsEngaged == false)
+    }
+
     /// THE MEDIA NEVER SCALES — not at rest, not while the comments open,
     /// not while they close, not on any lifecycle edge in between.
     ///

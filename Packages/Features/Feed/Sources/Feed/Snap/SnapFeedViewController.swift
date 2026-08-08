@@ -112,6 +112,13 @@ final class SnapFeedViewController: UIViewController {
     /// never aborted (the pager lock can only land once the page has
     /// settled — disabling it mid-drag would freeze the user's scroll).
     private var commentsEngagementIsResting = false
+    /// The page whose comments panel is BUILT but not engaged (the settle
+    /// seam's warm). Distinct from `commentsEngagedID`, which means on
+    /// screen and interactive.
+    private var prewarmedCommentsID: PostID?
+    /// The cell hosting a warm panel, so it can be cleared when the warm is
+    /// discarded without the page still being active.
+    private weak var engagedCellForPrewarm: SnapFeedCell?
     /// Whether the resting engagement's settle-time lock (pager freeze +
     /// engaged toolbar context) has been applied — set when the page
     /// activates, so a pre-render that never settles never locks.
@@ -1077,31 +1084,38 @@ final class SnapFeedViewController: UIViewController {
     /// reveal, the pager lock, and the toolbar swap all fire together;
     /// text pages take the pre-rendered resting path instead.
     private func presentComments(for id: PostID) {
-        guard commentsEngagedID == nil, commentsContentVC == nil,
-              let makeCommentsPanelContent,
+        guard commentsEngagedID == nil,
               let indexPath = dataSource.indexPath(for: id),
               let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell
         else { return }
 
-        let content = makeCommentsPanelContent(id)
-        content.view.backgroundColor = .clear
-        // No style of its own: the panel is hosted INSIDE the cell and
-        // inherits the page's theme from it (see `SnapChromeTheme`). It
-        // used to pin itself dark here, which is precisely how it came to
-        // disagree with the bars on the same screen.
-        content.overrideUserInterfaceStyle = .unspecified
+        // THE WORK IS ALREADY DONE, on the settle seam: building this panel
+        // and laying it out costs ~115ms of main thread (measured: 18ms to
+        // construct the controller, 15ms to load its view, 62ms to install
+        // and lay out its tree, and the rest in the entrance poses). Spent
+        // at tap time that blocks the CA commit for about seven frames, and
+        // a video underneath does not stall so much as stop being SHOWN —
+        // which is the micro-pause. Spent on activation it costs nothing
+        // visible, because nothing is moving yet.
+        //
+        // The fallback path still builds here: a tap can outrun the warm
+        // (a page tapped before it settled), and a correct-but-hitchy
+        // engagement beats a missing one.
+        let detail: PostDetailViewController?
+        #if DEBUG
+        let __engageStart = CACurrentMediaTime()
+        beginHitchWatch()
+        #endif
+        let wasPrewarmed = prewarmedCommentsID == id && commentsContentVC != nil
+        if wasPrewarmed, let warmed = commentsContentVC as? PostDetailViewController {
+            prewarmedCommentsID = nil
+            detail = warmed
+        } else {
+            discardPrewarmedComments()
+            detail = installCommentsPanel(for: id, host: cell)
+            guard detail != nil || commentsContentVC != nil else { return }
+        }
         commentsEngagedID = id
-        commentsContentVC = content
-        // FOOTER CROSSFADE, zero layout churn BY CONSTRUCTION: the native
-        // toolbar is NEVER structurally concealed — it stays fully present
-        // in the hierarchy for the whole engagement, so the safe area
-        // cannot move at any point (structural hide/show was the root
-        // cause of every footer jump: it forces an immediate safe-area
-        // layout pass). Its PIXELS crossfade against the composer — which
-        // anchors to the window's home-indicator inset, not the safe area,
-        // so it occupies the toolbar's exact band while both coexist —
-        // inside the one spring. Alpha < 0.01 also removes the invisible
-        // toolbar from hit-testing, so its buttons can't be tapped blind.
         // TOTAL DEAD-END for vertical scrolling: the pager is disabled for
         // the engagement's whole lifetime. This is the structural answer
         // to UIKit's nested-scroll chaining — outer and inner scroll pans
@@ -1109,56 +1123,9 @@ final class SnapFeedViewController: UIViewController {
         // off to the outer the moment the inner pins to an edge; no
         // begin-time veto can prevent a handoff on a pan that already
         // began. A disabled pan cannot receive the handoff, full stop.
-        // The inner list keeps its rubber-band (alwaysBounceVertical), and
-        // the exits all survive the lock: taps (✕, docked media) don't
-        // need the pager, and the footer's swipe exit is the bar's OWN
-        // pan driving a PROGRAMMATIC scrollToItem — which works on a
-        // scroll-disabled pager.
         collectionView.isScrollEnabled = false
-        addChild(content)
-        cell.installComments(content.view)
-        content.didMove(toParent: self)
-        let detail = content as? PostDetailViewController
-        // The stream rests below the frosted strip (full-height scroll,
-        // inset content) and spans the FULL width — the rail that used to
-        // own a trailing column leaves with the rest of the page chrome.
-        detail?.setEngagedInsets(
-            top: cell.engagedCommentsTopInset(safeAreaTop: view.safeAreaInsets.top),
-            // KEEP-AND-STACK: the composer's rest band clears the NATIVE
-            // TOOLBAR, not just the home indicator — the feed's own
-            // settled safe-area bottom is exactly that threshold (the bar
-            // is structurally present in both states, so this value is
-            // stable; same frozen-threshold doctrine as the chrome's top).
-            bottomInset: view.safeAreaInsets.bottom
-        )
-        // Dragging the list down from its top collapses back to media — the
-        // sheet gesture. MEDIA pages only: a text engagement is the page's
-        // permanent resting state, so there is nothing to collapse to and
-        // the handler stays nil (which makes the gesture a plain scroll).
-        if modelsByID[id]?.mediaURL != nil {
-            detail?.setPullDismissDriveHandler { [weak self] phase, translation, velocity in
-                self?.drivePullDismiss(phase, translation: translation, velocity: velocity)
-            }
-        }
-        detail?.setEngagedPageSwipeHandler { [weak self] phase, translation, velocity in
-            self?.drivePageSwipe(phase, translation: translation, velocity: velocity)
-        }
-        // ONE unified motion profile: the composer starts offstage (alpha
-        // 0, slight downward offset) and physically slides into its
-        // STACKED seat — above the native toolbar, which stays exactly
-        // where it is (keep-and-stack: the bar is never faded, never
-        // touched; transitions remain the system's alone).
-        detail?.setComposerEntranceState(offstage: true)
-        // The stream starts shrunk and expands into place inside the spring
-        // — the entrance's one piece of motion.
-        detail?.setStreamTransitionProgress(1)
-        // The living bar changes CONTEXT, not presence: the trailing
-        // action cluster yields its territory to the comments sort
-        // selector through the system's own item morph, on the spring's
-        // beat — the audio attribution stays anchored on the left. Sort
-        // is engagement-scoped — every fresh engagement starts at Recent,
-        // and the selection drives the STREAM: the detail's view model
-        // re-ranks and the diffable snapshot animates the moves.
+        // Sort is engagement-scoped — every fresh engagement starts at
+        // Recent, and the selection drives the STREAM.
         commentSortButton.reset()
         commentSortButton.onOrderChange = { [weak detail] order in
             detail?.setCommentSortOrder(order)
@@ -1173,6 +1140,15 @@ final class SnapFeedViewController: UIViewController {
             detail?.setStreamTransitionProgress(0)
             detail?.setComposerEntranceState(offstage: false)
         }
+        #if DEBUG
+        // The whole tap-time cost, in one number. It is a hitch budget: any
+        // main-thread work here is a frame the video is not shown on.
+        if ProcessInfo.processInfo.arguments.contains("-engage-profile") {
+            print(String(format: "[engage] TAP→animating %6.2f ms (warm=%@)",
+                         (CACurrentMediaTime() - __engageStart) * 1000,
+                         wasPrewarmed ? "yes" : "NO"))
+        }
+        #endif
     }
 
     /// The TEXT page's resting engagement, PHASE 1 (visual pre-render):
@@ -1217,6 +1193,121 @@ final class SnapFeedViewController: UIViewController {
         detail?.setComposerEntranceState(offstage: false)
         cell.setCommentsEngaged(true)
         cell.contentView.layoutIfNeeded()
+    }
+
+    #if DEBUG
+    private var hitchLink: CADisplayLink?
+    private var hitchLast: CFTimeInterval = 0
+    private var hitchWorst: CFTimeInterval = 0
+    private var hitchDropped = 0
+
+    /// Counts frames the transition misses. `-engage-profile` only.
+    ///
+    /// The honest measure of "smooth": not how long a function took, but how
+    /// long the screen went without an update. A frame is due every ~16.7ms;
+    /// anything meaningfully past that is a frame the video was not shown on.
+    private func beginHitchWatch() {
+        guard ProcessInfo.processInfo.arguments.contains("-engage-profile") else { return }
+        hitchLink?.invalidate()
+        hitchLast = CACurrentMediaTime()
+        hitchWorst = 0
+        hitchDropped = 0
+        let link = CADisplayLink(target: self, selector: #selector(hitchTick))
+        link.add(to: .main, forMode: .common)
+        hitchLink = link
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self else { return }
+            self.hitchLink?.invalidate()
+            self.hitchLink = nil
+            print(String(format: "[engage] frames: worst gap %5.1f ms, %d dropped (>25ms) in 1.5s",
+                         self.hitchWorst * 1000, self.hitchDropped))
+        }
+    }
+
+    @objc private func hitchTick(_ link: CADisplayLink) {
+        let now = CACurrentMediaTime()
+        let gap = now - hitchLast
+        hitchLast = now
+        hitchWorst = max(hitchWorst, gap)
+        if gap > 0.025 { hitchDropped += 1 }
+    }
+    #endif
+
+    /// Builds the comments panel for `id` and installs it into `cell` in its
+    /// FULLY DISMISSED pose — hosted, laid out, and invisible. Shared by the
+    /// warm and the tap, so there is one definition of "installed".
+    ///
+    /// The dismissed pose is not cosmetic: `installComments` unhides the
+    /// header frost and leaves the container at alpha 0, and a freshly
+    /// installed panel has never been through the engagement's interpolator,
+    /// so without `setCommentsEngagementProgress(1)` the frost band would sit
+    /// visible over a resting page. Alpha 0 also keeps the full-cell
+    /// container out of hit-testing, so a warm panel cannot eat the page's
+    /// taps.
+    @discardableResult
+    private func installCommentsPanel(
+        for id: PostID, host cell: SnapFeedCell
+    ) -> PostDetailViewController? {
+        guard commentsContentVC == nil, let makeCommentsPanelContent else { return nil }
+        let content = makeCommentsPanelContent(id)
+        content.view.backgroundColor = .clear
+        // No style of its own: the panel is hosted INSIDE the cell and
+        // inherits the page's theme from it (see `SnapChromeTheme`).
+        content.overrideUserInterfaceStyle = .unspecified
+        commentsContentVC = content
+        addChild(content)
+        cell.installComments(content.view)
+        content.didMove(toParent: self)
+        let detail = content as? PostDetailViewController
+        detail?.setEngagedInsets(
+            top: cell.engagedCommentsTopInset(safeAreaTop: view.safeAreaInsets.top),
+            // KEEP-AND-STACK: the composer's rest band clears the NATIVE
+            // TOOLBAR, not just the home indicator.
+            bottomInset: view.safeAreaInsets.bottom
+        )
+        // Dragging the list down from its top collapses back to media — the
+        // sheet gesture. MEDIA pages only: a text engagement is the page's
+        // permanent resting state, so there is nothing to collapse to.
+        if modelsByID[id]?.mediaURL != nil {
+            detail?.setPullDismissDriveHandler { [weak self] phase, translation, velocity in
+                self?.drivePullDismiss(phase, translation: translation, velocity: velocity)
+            }
+        }
+        detail?.setEngagedPageSwipeHandler { [weak self] phase, translation, velocity in
+            self?.drivePageSwipe(phase, translation: translation, velocity: velocity)
+        }
+        detail?.setComposerEntranceState(offstage: true)
+        detail?.setStreamTransitionProgress(1)
+        cell.setCommentsEngagementProgress(1)
+        return detail
+    }
+
+    /// Builds a MEDIA page's comments panel on the settle seam, so the tap
+    /// that opens it has nothing left to build. The text pages' resting
+    /// pre-render doctrine, applied to the cost rather than to the layout:
+    /// one page at a time, discarded when it resigns.
+    private func prewarmComments(for id: PostID, host cell: SnapFeedCell) {
+        guard commentsEngagedID == nil, commentsContentVC == nil,
+              prewarmedCommentsID == nil,
+              modelsByID[id]?.mediaURL != nil else { return }
+        prewarmedCommentsID = id
+        engagedCellForPrewarm = cell
+        installCommentsPanel(for: id, host: cell)
+    }
+
+    /// Drops a warm panel that was never engaged — the page moved on, or its
+    /// cell is being recycled underneath it.
+    private func discardPrewarmedComments() {
+        guard prewarmedCommentsID != nil, commentsEngagedID == nil else { return }
+        prewarmedCommentsID = nil
+        if let content = commentsContentVC {
+            content.willMove(toParent: nil)
+            content.view.removeFromSuperview()
+            content.removeFromParent()
+        }
+        commentsContentVC = nil
+        engagedCellForPrewarm?.clearComments()
+        engagedCellForPrewarm = nil
     }
 
     /// The TEXT page's resting engagement, PHASE 2 (settle lock): once the
@@ -1392,6 +1483,8 @@ final class SnapFeedViewController: UIViewController {
         cell?.clearComments()
         commentsContentVC = nil
         commentsEngagedID = nil
+        prewarmedCommentsID = nil
+        engagedCellForPrewarm = nil
         commentsEngagementIsResting = false
         restingLockApplied = false
         collectionView.isScrollEnabled = true
@@ -1432,6 +1525,13 @@ final class SnapFeedViewController: UIViewController {
                engaged == orderedIDs[resign] {
                 finishCommentsDisengagement()
             }
+            // A warm panel belongs to the page that was active. Once that
+            // page is not, the warm is stale — and holding it would block
+            // the next page's.
+            if let warm = prewarmedCommentsID, orderedIDs.indices.contains(resign),
+               warm == orderedIDs[resign] {
+                discardPrewarmedComments()
+            }
         }
         if let activate = transition.activate {
             // The cell that will be active almost never exists yet when
@@ -1470,6 +1570,15 @@ final class SnapFeedViewController: UIViewController {
                     if commentsEngagedID == id, commentsEngagementIsResting {
                         lockRestingEngagement()
                     }
+                } else if let cell = collectionView.cellForItem(
+                    at: IndexPath(item: activate, section: 0)
+                ) as? SnapFeedCell {
+                    // MEDIA pages warm their comments panel here instead of
+                    // at tap time — see `prewarmComments`. The settle seam
+                    // is where the page has stopped moving and nothing is
+                    // animating, which is the only moment ~115ms of layout
+                    // is free.
+                    prewarmComments(for: id, host: cell)
                 }
             }
         }
@@ -1629,6 +1738,16 @@ extension SnapFeedViewController: UICollectionViewDelegate {
             if lifecycle.activeIndex == indexPath.item,
                commentsEngagedID == id, commentsEngagementIsResting {
                 lockRestingEngagement()
+            }
+            // And a MEDIA page warms its comments panel here for the same
+            // reason the lock above lands here: on a programmatic jump the
+            // settle runs before the layout has realized the cell, so the
+            // settle's own warm found nothing to host. Gated on being the
+            // ACTIVE page, so a page merely scrolling past never pays for a
+            // panel it will not open.
+            if lifecycle.activeIndex == indexPath.item,
+               let model = modelsByID[id], model.mediaURL != nil {
+                prewarmComments(for: id, host: snapCell)
             }
         }
         // Re-pull the cached streams BEFORE raising the visibility gate: a
