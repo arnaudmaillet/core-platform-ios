@@ -262,17 +262,38 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// snapping back to where the last one began. That is the same property
     /// the interactive pull-down relies on, which is why both paths can share
     /// `setCommentsEngagementProgress` as their definition of the two ends.
-    func animateCommentsEngaged(_ engaged: Bool, duration: TimeInterval) {
-        guard engaged != isCommentsEngaged else { return }
+    func animateCommentsEngaged(
+        _ engaged: Bool, duration: TimeInterval, completion: (() -> Void)? = nil
+    ) {
+        guard engaged != isCommentsEngaged else { return completion?() ?? () }
         let layers = engagementFadeLayers
         let starts = layers.map { ($0.presentation() ?? $0).opacity }
         UIView.performWithoutAnimation { setCommentsEngaged(engaged) }
+        // The completion rides ONE designated layer, chosen by identity
+        // rather than by position in the list: the comments container exists
+        // for the cell's whole life and is always part of this transition, and
+        // an ordinal would silently move if the list were ever reordered.
+        let completionLayer = commentsContainer.layer
         for (layer, start) in zip(layers, starts) {
             let animation = CABasicAnimation(keyPath: "opacity")
             animation.fromValue = start
             animation.toValue = layer.opacity
             animation.duration = duration
             animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            // The completion hangs off ONE animation's delegate, not off the
+            // transaction.
+            //
+            // `CATransaction.setCompletionBlock` is the obvious place for it
+            // and it DOES NOT FIRE here — `performWithoutAnimation` above
+            // opens and commits a nested transaction, and the block set on the
+            // outer one never ran. That cost a real regression: the disengage's
+            // teardown is what clears `commentsEngagedID`, and while it is set
+            // `presentComments` refuses to open, so closing with the ✕ left
+            // every comment entry point dead. A delegate is attached to the
+            // animation itself and cannot be lost that way.
+            if layer === completionLayer, let completion {
+                animation.delegate = CALayerAnimationCompletion(completion)
+            }
             layer.add(animation, forKey: "comments-engage-opacity")
         }
     }
@@ -1090,5 +1111,26 @@ extension SnapFeedCell: UIGestureRecognizerDelegate {
             view = current.superview
         }
         return false
+    }
+}
+
+
+/// Runs a closure when a `CAAnimation` stops — completed OR removed.
+///
+/// Core Animation retains an animation's delegate for its lifetime, so this
+/// needs no owner. It fires on removal too (`finished == false`), which is
+/// what an interruptible transition wants: the caller decides whether the
+/// world still needs the teardown, rather than the teardown being skipped
+/// because the animation did not run to the end.
+final class CALayerAnimationCompletion: NSObject, CAAnimationDelegate {
+    private let body: () -> Void
+
+    init(_ body: @escaping () -> Void) {
+        self.body = body
+        super.init()
+    }
+
+    func animationDidStop(_ animation: CAAnimation, finished: Bool) {
+        body()
     }
 }
