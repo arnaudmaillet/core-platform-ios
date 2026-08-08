@@ -151,7 +151,15 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         if let interruptible, interruptibleContext === (context as AnyObject) {
             return interruptible
         }
+        #if DEBUG
+        let buildStart = CACurrentMediaTime()
+        #endif
         let animator = isPresenting ? present(context) : dismiss(context)
+        #if DEBUG
+        ZoomFlightProfiler.shared.flightBuilt(
+            presenting: isPresenting, buildMilliseconds: (CACurrentMediaTime() - buildStart) * 1000
+        )
+        #endif
         interruptible = animator
         interruptibleContext = context as AnyObject
         return animator
@@ -972,3 +980,61 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         return animator
     }
 }
+
+
+#if DEBUG
+/// Frame-gap and build-cost watch for the hero flight, behind `-zoom-profile`.
+///
+/// The same two numbers the comments engagement is profiled with, for the same
+/// reason: a "stutter" report needs the synchronous cost AND how long the
+/// screen actually went without an update, because those are different
+/// questions and only one of them is usually the answer.
+@MainActor
+final class ZoomFlightProfiler: NSObject {
+    static let shared = ZoomFlightProfiler()
+
+    private var link: CADisplayLink?
+    private var last: CFTimeInterval = 0
+    private var worst: CFTimeInterval = 0
+    private var dropped = 0
+    private var label = ""
+
+    private var isEnabled: Bool {
+        ProcessInfo.processInfo.arguments.contains("-zoom-profile")
+    }
+
+    func flightBuilt(presenting: Bool, buildMilliseconds: Double) {
+        guard isEnabled else { return }
+        let leg = presenting ? "present" : "dismiss"
+        print(String(format: "[zoom] %@ flight built %6.2f ms", leg, buildMilliseconds))
+        beginWatch(leg)
+    }
+
+    /// A window wide enough to cover the flight and its settle.
+    private func beginWatch(_ label: String) {
+        self.label = label
+        link?.invalidate()
+        last = CACurrentMediaTime()
+        worst = 0
+        dropped = 0
+        let link = CADisplayLink(target: self, selector: #selector(tick))
+        link.add(to: .main, forMode: .common)
+        self.link = link
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self else { return }
+            self.link?.invalidate()
+            self.link = nil
+            print(String(format: "[zoom] %@ frames: worst gap %5.1f ms, %d dropped (>25ms) in 1.5s",
+                         self.label, self.worst * 1000, self.dropped))
+        }
+    }
+
+    @objc private func tick(_ link: CADisplayLink) {
+        let now = CACurrentMediaTime()
+        let gap = now - last
+        last = now
+        worst = max(worst, gap)
+        if gap > 0.025 { dropped += 1 }
+    }
+}
+#endif

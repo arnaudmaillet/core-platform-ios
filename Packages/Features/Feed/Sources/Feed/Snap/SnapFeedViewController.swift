@@ -1336,6 +1336,15 @@ final class SnapFeedViewController: UIViewController {
     /// pre-render doctrine, applied to the cost rather than to the layout:
     /// one page at a time, discarded when it resigns.
     private func prewarmComments(for id: PostID, host cell: SnapFeedCell) {
+        // NEVER DURING A FLIGHT. This is ~100ms of layout, and `willDisplay`
+        // fires inside the hero transition's own `container.layoutIfNeeded` —
+        // so warming here paid for the comments panel out of the FLIGHT's
+        // frame budget. Measured: the present leg's first layout went from
+        // 36–64ms to 139–145ms with this running, which is the same mistake
+        // the warm exists to fix, moved to a worse place. Playback is deferred
+        // across the flight for exactly this reason; so is this now, and
+        // `zoomTransitionDidEnd` picks it up on landing.
+        guard !isAwaitingZoomPresentation else { return }
         guard commentsEngagedID == nil, commentsContentVC == nil,
               prewarmedCommentsID == nil,
               modelsByID[id]?.mediaURL != nil else { return }
@@ -2016,6 +2025,10 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // so attaching here is the hand-off rather than a theft. Adopts the
         // parked player, so the page resumes instead of restarting.
         activeSnapCell?.startDeferredPlayback()
+        // The comments warm was held back across the flight too (see
+        // `prewarmComments`). Landed and settled is exactly the moment it is
+        // free, so it happens now rather than never.
+        rewarmActivePageComments()
     }
 
     /// The hero transition's dismiss-leg live seam: mirrors the active cell's
