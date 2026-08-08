@@ -28,6 +28,37 @@ final class SnapCommentSortButton: UIButton {
     /// Fired on a genuine change (not re-selection). The sorting seam.
     var onOrderChange: ((Order) -> Void)?
 
+    /// Whether the pill has surrendered its title and shows the glyph alone.
+    ///
+    /// RUNG TWO of the trailing run's degradation, below truncating the
+    /// author's name and above truncating their handle. The order is
+    /// deliberate: a sort control that has been set once is recognized by
+    /// its glyph, and the current order is still one tap away in the menu —
+    /// whereas an author reduced past their handle stops identifying anyone.
+    /// So the sort gives up its word before the author gives up their
+    /// address.
+    private(set) var isTitleHidden = false
+
+    /// Shows or hides the title. The reserved width goes with it, or the
+    /// pill would keep the footprint it just gave up.
+    ///
+    /// The floor's CONSTANT drops to zero rather than the constraint being
+    /// deactivated: a deactivated floor did not reliably come back (caught
+    /// by the round-trip test), and the floor is what stops "Trending"
+    /// wrapping inside a "Recent"-sized platter — a bug worth never
+    /// re-earning.
+    func setTitleHidden(_ hidden: Bool) {
+        guard hidden != isTitleHidden else { return }
+        isTitleHidden = hidden
+        widthFloor?.constant = hidden ? 0 : titledWidthFloor
+        apply(order)
+    }
+
+    /// The longest-title floor, held so `setTitleHidden` can lower it, and
+    /// the value it is restored to.
+    private var widthFloor: NSLayoutConstraint?
+    private var titledWidthFloor: CGFloat = 0
+
     init() {
         super.init(frame: .zero)
         var config = UIButton.Configuration.plain()
@@ -72,9 +103,11 @@ final class SnapCommentSortButton: UIButton {
                 return holder.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
             }
             .max() ?? 0
-        let width = widthAnchor.constraint(greaterThanOrEqualToConstant: longest.rounded(.up))
+        titledWidthFloor = longest.rounded(.up)
+        let width = widthAnchor.constraint(greaterThanOrEqualToConstant: titledWidthFloor)
         width.priority = UILayoutPriority(999)
         width.isActive = true
+        widthFloor = width
     }
 
     @available(*, unavailable)
@@ -98,10 +131,16 @@ final class SnapCommentSortButton: UIButton {
     private func apply(_ new: Order) {
         order = new
         var config = configuration
-        var title = AttributedString(new.rawValue)
-        title.font = UIFont.preferredFont(forTextStyle: .footnote).withWeight(.semibold)
-        config?.attributedTitle = title
+        if isTitleHidden {
+            config?.attributedTitle = nil
+        } else {
+            var title = AttributedString(new.rawValue)
+            title.font = UIFont.preferredFont(forTextStyle: .footnote).withWeight(.semibold)
+            config?.attributedTitle = title
+        }
         configuration = config
+        // The glyph alone still has to say what it is.
+        accessibilityLabel = isTitleHidden ? "Sort comments: \(new.rawValue)" : nil
         menu = UIMenu(options: .singleSelection, children: Order.allCases.map { option in
             UIAction(
                 title: option.rawValue,

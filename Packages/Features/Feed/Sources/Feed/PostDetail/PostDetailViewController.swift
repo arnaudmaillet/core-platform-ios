@@ -795,14 +795,19 @@ final class PostDetailViewController: UIViewController {
             empty.translatesAutoresizingMaskIntoConstraints = false
             cell.contentView.addSubview(empty)
             // `EmptyStateView` centres its block and carries no vertical
-            // intrinsic size, so a self-sizing row must be given a height.
-            // Seeded here and corrected against real geometry in
-            // `updateEmptyPageHeight` — the constraint is held so that pass
-            // can reach it.
+            // intrinsic size, so a self-sizing row must be given a height —
+            // and it must be the RIGHT height on frame 0.
+            //
+            // This used to be seeded at the full available region and
+            // corrected once the layout had measured the caption above it.
+            // The correction was a real geometry change arriving a frame
+            // late, and what it looked like was the empty state rendering
+            // low and then teleporting up at the end of the presentation.
+            // A number that is only right on the second pass is a jump, so
+            // it is computed in full here instead (see `emptyPageHeight`),
+            // and `updateEmptyPageHeight` is left with nothing to correct.
             let height = empty.heightAnchor.constraint(
-                equalToConstant: SnapCommentsLayout.emptyPageHeight(
-                    availableHeight: self?.availableStreamHeight ?? 0
-                )
+                equalToConstant: self?.emptyPageHeight() ?? SnapCommentsLayout.emptyPageMinimumHeight
             )
             self?.emptyPageHeightConstraint = height
             NSLayoutConstraint.activate([
@@ -936,12 +941,51 @@ final class PostDetailViewController: UIViewController {
         return collectionView.bounds.height - inset.top - inset.bottom
     }
 
-    /// Fits the empty page to the room left beside the caption, so a post
-    /// with nothing to say produces content exactly one viewport tall.
+    /// The empty page's height, resolved SYNCHRONOUSLY: the room the stream
+    /// has, less the section's own insets, less the caption row that sits
+    /// above it.
     ///
-    /// The seed assumes the whole viewport is free; the caption row is not
-    /// measured until the layout runs, so this corrects afterwards by the
-    /// difference between the room available and the content produced.
+    /// The caption row is measured here rather than waited for. It is the
+    /// only other row in this stream, and a throwaway `CaptionBubbleCell`
+    /// answers for it exactly — same cell class, same width, same sizing
+    /// path the layout itself would take. Measuring costs one offscreen
+    /// layout pass per empty-state configuration; NOT measuring costs a
+    /// visible jump, because anything learned after frame 0 arrives as
+    /// motion the presentation did not ask for.
+    private func emptyPageHeight() -> CGFloat {
+        let rowWidth = collectionView.bounds.width - Spacing.lg * 2
+        let occupied = Spacing.lg * 2 + captionRowHeight(width: rowWidth)
+        return SnapCommentsLayout.emptyPageHeight(
+            availableHeight: availableStreamHeight - occupied
+        )
+    }
+
+    /// The caption row's height at `width`, or 0 when this stream has no
+    /// caption row. Sized through the real cell so the answer cannot drift
+    /// from what the layout will produce.
+    private func captionRowHeight(width: CGFloat) -> CGFloat {
+        guard width > 0, mode == .commentsOnly,
+              let post = latestPost, post.hasCaption else { return 0 }
+        let sizingCell = captionSizingCell
+        sizingCell.configure(with: post, imagePipeline: nil)
+        sizingCell.bounds.size.width = width
+        sizingCell.contentView.setNeedsLayout()
+        sizingCell.contentView.layoutIfNeeded()
+        return ceil(sizingCell.contentView.systemLayoutSizeFitting(
+            CGSize(width: width, height: 0),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        ).height)
+    }
+
+    /// Offscreen, never in the hierarchy — it exists to be measured. Held
+    /// rather than rebuilt so a re-fit costs a layout pass, not a view tree.
+    private lazy var captionSizingCell = CaptionBubbleCell()
+
+    /// Keeps the empty page fitted when the room changes underneath it —
+    /// rotation, the keyboard, the composer growing a line. Not the initial
+    /// sizing: that is resolved in full at configuration time, so this
+    /// normally finds nothing to do.
     ///
     /// NOT `isScrollEnabled = false`, though that is the obvious way to stop
     /// a short page scrolling: this list's rubber band IS the interactive

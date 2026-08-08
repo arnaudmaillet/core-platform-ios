@@ -176,6 +176,20 @@ final class SnapFeedViewController: UIViewController {
             didStartLoading = true
             viewModel.viewDidLoad()
         }
+        // The author pill's budget is a share of the NAVIGATION BAR's width,
+        // and the bar is not guaranteed to have one when the engagement
+        // mounts — a text page's resting engagement can be applied from
+        // `willDisplay`, before the bar has laid out, and a budget computed
+        // against a zero width is no budget at all. The pill then keeps its
+        // full cap, the trailing run does not fit, and the whole item
+        // disappears into a `•••` menu — which is precisely the failure this
+        // budget exists to prevent, arriving through the back door.
+        //
+        // Re-applied here, where the width is real. Idempotent (the setter
+        // no-ops on an unchanged cap), so a settled page pays nothing.
+        if commentsEngagedID != nil {
+            applyEngagedTrailingRunFit()
+        }
     }
 
     /// True when this feed was opened *onto* another surface — pushed above
@@ -549,13 +563,33 @@ final class SnapFeedViewController: UIViewController {
         // navigation bar's own item animator — the same slide-and-fade the
         // system uses for a push — so the sort pill morphs in beside the
         // author instead of appearing on top of it.
-        // The author pill goes COMPACT before the sort pill joins it. Both at
-        // full size overflow the run, and the system's answer to an
-        // overflowing run is to hide the whole item behind a `•••` menu — so
-        // the "two pills" layout would silently become one pill and a menu.
-        // Ordered first so the shrink is in the same layout pass as the
-        // insertion, not a beat behind it.
-        authorIdentityView.setCompact(engaged, animated: animated)
+        // ONE author pill, identical in both states: same component, same
+        // platter, same handle-and-age line, same follow button.
+        //
+        // It used to shrink to a name-only COMPACT form for the engagement,
+        // because at full size the two-pill run once overflowed and the
+        // system's answer to an overflow is to hide the whole item behind a
+        // `•••` menu. That was measured against the bar as it stood then —
+        // the toolbar has since become state-invariant and the leading slot
+        // is a single 36pt bubble — and re-measured now the run fits with
+        // room to spare on the narrowest device the app targets. So the
+        // pill stops changing identity halfway through a state it is
+        // supposed to persist across.
+        //
+        // The run's width budget is REAL, though, and it is paid in width
+        // rather than in layout: the pill keeps every part of itself and
+        // truncates a long name earlier while the sort pill is beside it —
+        // which is what a long name already does at rest. Measured on the
+        // narrowest device: a full-width pill DID overflow the whole item
+        // into a `•••` menu, and losing the author entirely is worse than
+        // any truncation.
+        authorIdentityView.setCompact(false, animated: animated)
+        if engaged {
+            applyEngagedTrailingRunFit()
+        } else {
+            authorIdentityView.setWidthBudget(nil)
+            commentSortButton.setTitleHidden(false)
+        }
 
         let navItems: [UIBarButtonItem] = engaged
             ? [authorItem, .fixedSpace(Spacing.sm), sortItem]
@@ -566,6 +600,64 @@ final class SnapFeedViewController: UIViewController {
 
         applyLeadingNavItem(engaged: engaged, hasMedia: hasMedia, animated: animated)
         // The toolbar is state-invariant now; nothing to swap.
+    }
+
+    /// Fits the trailing run to the bar, giving way in a fixed order.
+    ///
+    /// The system does not negotiate here: the instant the run does not fit
+    /// it hides the whole item behind a `•••` menu, and the author vanishes
+    /// rather than shrinking. So the fitting is arithmetic done up front,
+    /// and what gives way gives way in the order that costs the reader
+    /// least:
+    ///
+    ///   1. the display NAME truncates (`SnapAuthorIdentityView`'s
+    ///      compression priorities — the handle outranks the name)
+    ///   2. the SORT PILL drops its word and keeps its glyph
+    ///   3. the HANDLE truncates, once the pill is narrower still
+    ///
+    /// Rungs 1 and 3 are the same mechanism at two depths: cap the pill and
+    /// Auto Layout spends the name first, the handle only when the name is
+    /// exhausted. Rung 2 is the one explicit switch, taken when the cap
+    /// would otherwise fall below what a pill can usefully show.
+    ///
+    /// `itemPlatterPadding` is the glass wrapper UIKit puts around every
+    /// custom bar item. It is not published, so it is MEASURED: on a 390pt
+    /// bar an author view of 170 fits beside an 88pt sort pill and 195 does
+    /// not, which puts the per-item padding at ~18 and is what these
+    /// numbers are calibrated against.
+    private static let itemPlatterPadding: CGFloat = 18
+    private static let barSideMargin: CGFloat = 16
+    private static let leadingItemWidth: CGFloat = 36
+    private func applyEngagedTrailingRunFit() {
+        let bar = navigationController?.navigationBar.bounds.width ?? view.bounds.width
+        guard bar > 0 else { return }
+
+        func authorBudget(sortWidth: CGFloat) -> CGFloat {
+            let pad = Self.itemPlatterPadding
+            return bar
+                - Self.barSideMargin * 2
+                - (Self.leadingItemWidth + pad)
+                - (sortWidth + pad)
+                - Spacing.sm
+                - pad
+        }
+        func sortWidth() -> CGFloat {
+            commentSortButton.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+        }
+
+        // Rung 1: the name truncates inside whatever the run can spare.
+        commentSortButton.setTitleHidden(false)
+        var budget = authorBudget(sortWidth: sortWidth())
+        // Rung 2: the name alone cannot absorb it — the HANDLE would start
+        // truncating next, so the sort pill gives up its word first and the
+        // width it frees goes to the author.
+        if budget < authorIdentityView.widthKeepingHandleWhole {
+            commentSortButton.setTitleHidden(true)
+            budget = authorBudget(sortWidth: sortWidth())
+        }
+        // Rung 3 needs no branch: if it is STILL below that threshold the
+        // handle truncates on its own, because the name has nothing left.
+        authorIdentityView.setWidthBudget(budget)
     }
 
     /// The leading slot's two faces:
