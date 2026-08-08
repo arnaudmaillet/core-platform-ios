@@ -112,18 +112,36 @@ enum SnapCommentsLayout {
     /// The empty page's row height in the comments-only stream. The shared
     /// `EmptyStateView` centres its block in whatever bounds it is given and
     /// has no vertical intrinsic size of its own, so a self-sizing list row
-    /// has to be told — and what it should be told is "the room the stream
-    /// has", so the block lands optically centred in the empty surface
-    /// rather than tucked under the caption.
+    /// has to be told one.
     ///
-    /// Two thirds, not all of it: the caption row sits above and the input
-    /// bar below, and a full-viewport row would push the block under the
-    /// bar on short devices. The floor covers the pre-layout call (bounds
-    /// not yet set) and any viewport too small for the fraction to be
-    /// usable.
+    /// This is only the SEED. The row must consume exactly the room left
+    /// between the header and the composer once the caption row above it is
+    /// measured — too little and the block drifts up under the caption, too
+    /// much and a page with nothing on it becomes scrollable. Neither is
+    /// knowable here (the caption's height is resolved by the layout, and
+    /// the composer's inset moves with the keyboard), so the seed is the
+    /// whole available height and `PostDetailViewController` corrects it
+    /// down against the measured content — see `updateEmptyPageHeight`.
+    ///
+    /// `availableHeight` is the viewport MINUS its adjusted content insets:
+    /// header, composer and safe areas are already out of it.
     static let emptyPageMinimumHeight: CGFloat = 260
-    static func emptyPageHeight(viewportHeight: CGFloat) -> CGFloat {
-        max(emptyPageMinimumHeight, viewportHeight * 0.66)
+    static func emptyPageHeight(availableHeight: CGFloat) -> CGFloat {
+        max(emptyPageMinimumHeight, availableHeight)
+    }
+
+    /// The corrected row height: whatever the current row is, plus the gap
+    /// between the room available and the content actually produced.
+    ///
+    /// Expressed as a CORRECTION rather than a subtraction of the rows above
+    /// it, so it needs to know nothing about what those rows are — caption
+    /// or no caption, one line or three. Applied against a fresh measurement
+    /// it converges in a single pass, and the caller's tolerance stops it
+    /// re-triggering layout forever.
+    static func correctedEmptyPageHeight(
+        current: CGFloat, availableHeight: CGFloat, contentHeight: CGFloat
+    ) -> CGFloat {
+        max(emptyPageMinimumHeight, current + (availableHeight - contentHeight))
     }
 
     /// Where the engaged stream's content begins — the comments region's
