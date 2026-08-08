@@ -2010,6 +2010,17 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // runs on it — was tried and measured identical, so the destination's
         // view hierarchy is left alone.
         CATransaction.flush()
+        // NOT here: pre-sizing the BAR's custom views. Bar items live on the
+        // navigation bar rather than in this view, so they are first measured
+        // inside `-[UINavigationBar _setItems:transition:]` — synchronously in
+        // the push, inside the flight's stack — which makes them look like the
+        // obvious next thing to pre-pay. Measured: laying them out and asking
+        // for their fitting size here left the stall unchanged (91-101 ms vs
+        // 85-108 ms) and added ~7 ms to the build. Their cost is not the
+        // MEASURING; it is iOS 26 materialising each platter's glass once the
+        // view is inside the bar's own effect host, which nothing outside the
+        // bar can trigger early. See `ZoomFlightProfiler` for the sampled
+        // attribution.
     }
 
     public func setZoomContentHidden(_ hidden: Bool) {
