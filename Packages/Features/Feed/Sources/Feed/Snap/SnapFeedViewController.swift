@@ -336,6 +336,20 @@ final class SnapFeedViewController: UIViewController {
                 guard let self, let index = self.lifecycle.activeIndex,
                       self.orderedIDs.indices.contains(index) else { return }
                 self.presentComments(for: self.orderedIDs[index])
+                // `-snap-comments-close N`: dismisses the engagement N
+                // seconds after it opens, landing the page back at rest.
+                // The RETURN leg is a state change of its own — the page's
+                // chrome comes back and the empty state re-reads its words
+                // — and it was the one leg no launch arg could reach, so it
+                // could only be reasoned about. Chained off the open rather
+                // than scheduled from appear, so the delay means what it
+                // says whatever the open cost.
+                guard let flag = arguments.firstIndex(of: "-snap-comments-close"),
+                      arguments.indices.contains(flag + 1),
+                      let after = Double(arguments[flag + 1]) else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + after) { [weak self] in
+                    self?.dismissComments()
+                }
             }
         }
         // `-dump-bars`: prints the navigation view hierarchy (class, frame,
