@@ -496,11 +496,12 @@ struct SnapShortcutRailViewTests {
         #expect(chrome.insetsLayoutMarginsFromSafeArea == false)
     }
 
-    /// The reactions rail is FORMAT-AGNOSTIC chrome — it persists on a
-    /// text-only post exactly as on media (the shared action column the
-    /// engaged layout floats over). The media danmaku surfaces (ticker,
-    /// subtitle) still drop for text, but the rail stays and reserves its
-    /// trailing exclusion column.
+    /// The reactions rail is FORMAT-AGNOSTIC chrome — it is seeded on a
+    /// text-only post exactly as on media. The media danmaku surfaces
+    /// (ticker, subtitle) drop for text; the rail stays.
+    ///
+    /// What it is NOT is state-agnostic: see
+    /// `commentsEngagementFadesTheRailAndItsAnchor` below.
     @Test func textOnlyPostsKeepTheReactionsRail() throws {
         let chrome = SnapChromeView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         chrome.configure(with: FeedItemDisplayModel(
@@ -518,6 +519,48 @@ struct SnapShortcutRailViewTests {
         chrome.layoutIfNeeded()
         let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
         #expect(rail.isHidden == false)
-        #expect(chrome.railExclusionWidth > 0)
+    }
+
+    /// The comments layout owns the FULL width: engaging fades the rail and
+    /// its "+" anchor out with the rest of the page chrome, and disengaging
+    /// brings them back. The rail used to be the one survivor, floating over
+    /// the comment list in a column the stream had to inset around.
+    @Test func commentsEngagementFadesTheRailAndItsAnchor() throws {
+        let chrome = SnapChromeView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        chrome.configure(with: FeedItemDisplayModel(
+            id: PostID("post-1"),
+            authorID: ProfileID("profile-1"),
+            authorName: "Ana",
+            metaText: "@ana · 3m",
+            avatarURL: nil,
+            caption: "a photo",
+            mediaURL: URL(string: "https://example.com/a.jpg"),
+            mediaKind: .image,
+            thumbnailURL: nil,
+            audioText: nil
+        ))
+        chrome.layoutIfNeeded()
+        let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
+        let anchor = try #require(chrome.subviews.compactMap { $0 as? SnapRailComposeButton }.first)
+
+        chrome.setCommentsEngaged(true)
+        #expect(rail.alpha == 0)
+        #expect(anchor.alpha == 0)
+
+        chrome.setCommentsEngaged(false)
+        #expect(rail.alpha == 1)
+        #expect(anchor.alpha == 1)
+    }
+
+    /// The interactive pull-down brings the column back UNDER THE FINGER,
+    /// in step with everything else the progress drives — not in a jump at
+    /// the end of the gesture.
+    @Test func railFadesProportionallyWithPullDownProgress() throws {
+        let chrome = SnapChromeView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        chrome.layoutIfNeeded()
+        let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
+
+        chrome.setCommentsEngagedProgress(0.5)
+        #expect(abs(rail.alpha - 0.5) < 0.001)
     }
 }

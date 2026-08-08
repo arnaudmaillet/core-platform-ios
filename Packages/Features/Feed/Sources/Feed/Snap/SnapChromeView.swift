@@ -391,8 +391,11 @@ final class SnapChromeView: UIView {
         // ticker, the subtitle zone, the scrim over the (absent) media —
         // since those overlay a full-bleed image the page doesn't have.
         // But the ACTION COLUMN (reactions rail + "+") is format-agnostic
-        // chrome: it stays visible on every post type, exactly as the
-        // engaged layout floats over it identically on all of them.
+        // chrome: it is seeded on every post type. What it is not is
+        // state-agnostic — the engagement fades it (see
+        // `setCommentsEngagedProgress`), so a TEXT page, whose engagement
+        // is its permanent resting state, shows the column only for the
+        // frames before that resting engagement mounts.
         hasMedia = model.mediaURL != nil
         scrimView.isHidden = !hasMedia
         // Set the timestamp before the caption so the caption's didSet
@@ -628,29 +631,19 @@ final class SnapChromeView: UIView {
         subtitleView.setImagePipeline(pipeline)
     }
 
-    /// How much trailing width the engaged comments content must reserve
-    /// for the rail's exclusive column: from the rail's leading edge to the
-    /// chrome's trailing edge, plus a breathing gap. Zero when the rail is
-    /// hidden (text-only pages).
-    var railExclusionWidth: CGFloat {
-        guard !shortcutRail.isHidden, shortcutRail.frame.width > 0 else { return 0 }
-        return max(0, bounds.width - shortcutRail.frame.minX) + Spacing.sm
-    }
-
-    /// The comments engagement's chrome cut: fades the comment surfaces
-    /// and the scrim — the pieces the engaged layout replaces or orphans —
-    /// while the SHORTCUT RAIL and its "+" anchor stay untouched (the
-    /// blueprint keeps the whole vertical action column through both
-    /// states; it floats over the comments region, and its touches keep
-    /// winning via `interactionRoots` + the pager's rail veto). The "+"
-    /// holds its native seat below the rail for visual continuity — it is
-    /// RAIL territory, not ticker content, even though its frame borrows
-    /// the ticker band's edges. The caption fades with the rest — a
-    /// synchronous in-place cross-fade against the engaged caption's own
-    /// fade, no geometric flight. Alpha, not isHidden, so a single
-    /// animation block drives both directions; alpha < 0.01 also removes
-    /// the faded surfaces from hit-testing, so the entry pill can't
-    /// re-fire mid-engagement.
+    /// The comments engagement's chrome cut: fades EVERY page surface —
+    /// the comment surfaces, the scrim, the caption, and the shortcut rail
+    /// with its "+" anchor. The caption's is a synchronous in-place
+    /// cross-fade against the engaged caption's own fade, no geometric
+    /// flight. Alpha, not isHidden, so a single animation block drives both
+    /// directions; alpha < 0.01 also removes the faded surfaces from
+    /// hit-testing, so the entry pill can't re-fire mid-engagement.
+    ///
+    /// The rail used to be the one survivor, floating over the comments
+    /// region through both states. It reserved a trailing column the stream
+    /// then had to inset around, and it collided with the composer's own
+    /// trailing controls — two problems that both dissolve now that the
+    /// engaged layout owns the full width.
     func setCommentsEngaged(_ engaged: Bool) {
         setCommentsEngagedProgress(engaged ? 0 : 1)
     }
@@ -666,23 +659,11 @@ final class SnapChromeView: UIView {
         commentTicker.alpha = alpha
         subtitleView.alpha = alpha
         commentEmptyState.alpha = alpha
-        // The rail (and its "+") stays fully INTERACTIVE through the
-        // engagement; the keyboard-up overlap with the composer's trailing
-        // ✕ is arbitrated at the cell level (`SnapFeedCell.hitTest`: the
-        // composer outranks the rail only where the two physically
-        // overlap).
-    }
-
-    /// The keyboard-session yield: while the engaged composer rises into
-    /// the rail's column, the rail CONCEDES the band visually (alpha —
-    /// which also removes it from hit-testing below 0.01). zPosition
-    /// cannot express this: the rail and the composer live in different
-    /// subtrees, and Core Animation only reorders SIBLINGS by zPosition —
-    /// the input bar structurally cannot outrank chrome from inside the
-    /// comments container, so the chrome steps back instead. Driven by
-    /// the feed VC's keyboard observers, inside its own animation block.
-    func setRailConcealed(_ concealed: Bool) {
-        shortcutRail.alpha = concealed ? 0 : 1
+        // The rail and its "+" leave with everything else. They are the
+        // page's action column, and the engaged layout has its own — the
+        // composer's trailing controls stand where the rail used to.
+        shortcutRail.alpha = alpha
+        composeButton.alpha = alpha
     }
 
     /// Cycles while the owning cell is on screen — the band's visibility

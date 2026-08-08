@@ -61,8 +61,10 @@ struct SnapCommentsPresentationTests {
     ///   edge is drawn on the unclipped shape;
     /// - no border of our own, because the glass draws its own edge (a
     ///   hairline on top reads as an outline sitting ON the material);
-    /// - the appearance is pinned dark, so white caption text keeps its
-    ///   contrast on a light-mode device over a pale photo;
+    /// - the appearance is INHERITED, not pinned, so a standard dynamic
+    ///   `.regular` glass resolves its translucency and contrast for the
+    ///   ambient theme — dark on a media panel (its host pins that), the
+    ///   device's own on a text one;
     /// - and the radius is the app's message-bubble radius, not a local pick.
     @Test func theCaptionCardIsALiquidGlassBubble() throws {
         let card = SnapPostInfoCardView(frame: CGRect(x: 0, y: 0, width: 374, height: 96))
@@ -72,7 +74,7 @@ struct SnapCommentsPresentationTests {
         #expect(glass.layer.cornerRadius == 0)
         #expect(glass.clipsToBounds == false)
         #expect(glass.layer.borderWidth == 0)
-        #expect(glass.overrideUserInterfaceStyle == .dark)
+        #expect(glass.overrideUserInterfaceStyle == .unspecified)
         #expect(glass.effectiveRadius(corner: .allCorners) == SnapCommentsLayout.stripCardCornerRadius)
         // The bubble radius is the chat transcript's, not a number picked here.
         #expect(SnapCommentsLayout.stripCardCornerRadius == 18)
@@ -154,9 +156,9 @@ struct SnapCommentsPresentationTests {
         #expect(backdrop.dimOpacity < SnapCommentsLayout.backdropDimOpacity)
         #expect(backdrop.dimOpacity > 0)
         // THE BANDS DO NOT SCALE. The container carries no transform at all
-        // now — the shrink belongs to the hosted stream — so the footer's
-        // band (which lives inside it) and the header's (a sibling) both
-        // hold their size at the screen's edge and only fade.
+        // — the shrink belongs to the hosted stream — so the footer's band
+        // (inside it) and the header's (a sibling) both hold their size at
+        // the screen's edge and only fade.
         #expect(container.transform == .identity)
         let frost = try #require(
             cell.contentView.subviews.compactMap { $0 as? ProgressiveFrostView }.first
@@ -284,26 +286,21 @@ struct SnapCommentsPresentationTests {
         // Float, so the CGFloat constant never comes back bit-identical.
         #expect(abs(backdrop.dimOpacity - SnapCommentsLayout.backdropDimOpacity) < 0.001)
         let chrome = try #require(cell.contentView.subviews.compactMap { $0 as? SnapChromeView }.first)
-        // The chrome as a whole never fades — only its comment surfaces do;
-        // the rail rides both states at full presence.
+        // The chrome as a whole never fades — its individual surfaces do.
         #expect(chrome.alpha == 1)
         let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
         let ticker = try #require(chrome.subviews.compactMap { $0 as? SnapCommentTickerView }.first)
         let subtitle = try #require(chrome.subviews.compactMap { $0 as? SnapSubtitleView }.first)
-        #expect(rail.alpha == 1)
-        // Fully interactive through the engagement — the keyboard-up
-        // overlap with the composer's ✕ is arbitrated in the cell's
-        // hitTest, not by disabling the rail.
-        #expect(rail.isUserInteractionEnabled == true)
         #expect(ticker.alpha == 0)
         #expect(subtitle.alpha == 0)
-        // The "+" anchor is RAIL territory, not ticker content: it holds
-        // its native seat at full presence through the engagement (only
-        // its frame borrows the ticker band's edges) and it is a declared
-        // interaction root, so the cell's tap arbitration yields to it in
-        // both states.
+        // The action column goes with them. It used to ride both states at
+        // full presence, floating over the comment list; the engaged layout
+        // owns the full width now, so the rail and its "+" anchor fade out
+        // together (alpha < 0.01 also retires them from hit-testing, which
+        // is what removed the composer-vs-rail overlap entirely).
         let plus = try #require(chrome.subviews.compactMap { $0 as? SnapRailComposeButton }.first)
-        #expect(plus.alpha == 1)
+        #expect(rail.alpha == 0)
+        #expect(plus.alpha == 0)
         #expect(chrome.interactionRoots.contains(plus))
 
         cell.setCommentsEngaged(false)
@@ -339,11 +336,15 @@ struct SnapCommentsPresentationTests {
         #expect(backdropIndex < streamIndex)
     }
 
-    /// The keyboard-up collision rule: wherever the rail and the engaged
-    /// composer physically overlap, the composer wins the touch; the rail
-    /// keeps everything else. Exercised through the cell's real hitTest
-    /// with a composer positioned inside the rail's column.
-    @Test func engagedComposerOutranksTheRailWhereTheyOverlap() throws {
+    /// The engaged cell has NO rail to collide with: the column is faded
+    /// out, and a view under alpha 0.01 is not hit-tested, so every touch
+    /// in what used to be the rail's territory reaches the stream beneath.
+    ///
+    /// (This replaces a keyboard-up collision rule — the composer used to
+    /// have to out-rank the rail wherever the two physically overlapped,
+    /// arbitrated by hand in the cell's hitTest. Fading the rail removed
+    /// the collision instead of refereeing it.)
+    @Test func engagedCellHasNoRailToCollideWith() throws {
         let cell = SnapFeedCell(frame: Self.container)
         cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
         let chrome = try #require(cell.contentView.subviews.compactMap { $0 as? SnapChromeView }.first)
@@ -361,24 +362,21 @@ struct SnapCommentsPresentationTests {
         ))
         cell.layoutIfNeeded()
         let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
-        // Host a composer whose frame overlaps the rail's column (the
-        // keyboard-up geometry), plus a probe point in the rail clear of it.
+        let railPoint = CGPoint(x: rail.frame.midX, y: rail.frame.midY)
+
+        // At rest the column owns its touches.
+        let restingHit = try #require(cell.hitTest(railPoint, with: nil))
+        #expect(sequence(first: restingHit, next: { $0.superview }).contains { $0 is SnapShortcutRailView })
+
         let hosted = UIView()
         cell.installComments(hosted)
         cell.setCommentsEngaged(true)
         cell.contentView.layoutIfNeeded()
-        let bar = CommentsInputBar()
-        let overlap = CGPoint(x: rail.frame.midX, y: rail.frame.midY)
-        let barOrigin = hosted.convert(CGPoint(x: overlap.x - 20, y: overlap.y - 20), from: cell)
-        bar.frame = CGRect(origin: barOrigin, size: CGSize(width: 120, height: 46))
-        hosted.addSubview(bar)
 
-        let overlapHit = try #require(cell.hitTest(overlap, with: nil))
-        #expect(sequence(first: overlapHit, next: { $0.superview }).contains { $0 is CommentsInputBar })
-        // Above the composer, the rail still owns its column.
-        let railPoint = CGPoint(x: rail.frame.midX, y: rail.frame.minY + 10)
-        let railHit = try #require(cell.hitTest(railPoint, with: nil))
-        #expect(sequence(first: railHit, next: { $0.superview }).contains { $0 is SnapShortcutRailView })
+        // Engaged, the same point falls through to the comments host.
+        let engagedHit = try #require(cell.hitTest(railPoint, with: nil))
+        #expect(!sequence(first: engagedHit, next: { $0.superview }).contains { $0 is SnapShortcutRailView })
+        #expect(engagedHit === hosted)
     }
 
     /// The layered engaged hierarchy: the media stays at the BACK, the
@@ -413,8 +411,7 @@ struct SnapCommentsPresentationTests {
         // …under the header frost, which spans EXACTLY its container —
         // screen top to where the stream's content begins — and ramps
         // across all of it. It must not overhang: blur spilling past the
-        // chrome it serves lands on the content, which is what the earlier
-        // 160pt runway did. Hit-inert throughout.
+        // chrome it serves lands on the content. Hit-inert throughout.
         let subviews = cell.contentView.subviews
         let frost = try #require(subviews.compactMap { $0 as? ProgressiveFrostView }.first)
         #expect(frost.isHidden == false)
@@ -423,15 +420,12 @@ struct SnapCommentsPresentationTests {
             width: Self.container.width,
             height: SnapCommentsLayout.commentsTopInset(topInset: Self.topInset)
         ))
-        // The band ENDS at the content line — no overhang, in either
-        // direction: this is the whole constraint.
         #expect(frost.frame.maxY == SnapCommentsLayout.commentsTopInset(topInset: Self.topInset))
         #expect(frost.isUserInteractionEnabled == false)
         let frostMask = try #require(frost.mask)
         #expect(frostMask.frame == frost.bounds)
         // The HEADER ramps endpoint to endpoint across its container:
-        // opaque at the screen's edge, clear at the content line, two stops
-        // so there is no knee partway down.
+        // opaque at the screen's edge, clear at the content line.
         let header = SnapCommentsLayout.headerFrostMaskColors
         #expect(header.count == 2)
         #expect(SnapCommentsLayout.headerFrostMaskLocations == [0, 1])
@@ -443,13 +437,12 @@ struct SnapCommentsPresentationTests {
         #expect(alpha(header[0]) == 1)
         #expect(alpha(header[1]) == 0)
         // The FOOTER is NOT symmetric, and deliberately so: it fades in over
-        // the lead and then HOLDS full material, so the composer sits on the
-        // solid part of the band rather than its clear end.
+        // the lead and then HOLDS full material.
         let footer = SnapCommentsLayout.footerFrostMaskColors
         #expect(footer.count == 3)
-        #expect(alpha(footer[0]) == 0)   // clear at the band's top…
-        #expect(alpha(footer[1]) == 1)   // …full by the composer's top…
-        #expect(alpha(footer[2]) == 1)   // …and solid to the screen's bottom
+        #expect(alpha(footer[0]) == 0)
+        #expect(alpha(footer[1]) == 1)
+        #expect(alpha(footer[2]) == 1)
 
         // NO caption card in the cell at all any more — the caption is the
         // hosted stream's first row, so the feed cell must not carry a
@@ -817,14 +810,24 @@ struct SnapCommentsPresentationTests {
             #expect(hosted.superview?.frame == cell.contentView.bounds)
             #expect(cell.engagedCommentsTopInset(safeAreaTop: Self.topInset)
                 == SnapCommentsLayout.commentsTopInset(topInset: Self.topInset))
-            let frost = try #require(cell.contentView.subviews.compactMap { $0 as? ProgressiveFrostView }.first)
+            let frost = try #require(
+                cell.contentView.subviews.compactMap { $0 as? ProgressiveFrostView }.first
+            )
             #expect(frost.frame.height == SnapCommentsLayout.commentsTopInset(topInset: Self.topInset))
             // The dead-end lock and the armed page-drive, both formats.
             #expect(SnapFeedCollectionView.claimsTouches(hosted))
             let pan = try #require(cell.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
             #expect(pan.isEnabled == true)
-            // The reactions rail reserves its trailing column on both.
-            #expect(cell.commentsRailExclusionWidth > 0)
+            // The engaged layout owns the FULL width on both formats: the
+            // reactions rail (which used to hold a trailing column open) is
+            // faded out with the rest of the page chrome.
+            let chrome = try #require(
+                cell.contentView.subviews.compactMap { $0 as? SnapChromeView }.first
+            )
+            let rail = try #require(
+                chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first
+            )
+            #expect(rail.alpha == 0)
         }
     }
 
@@ -970,6 +973,369 @@ struct SnapCommentsPresentationTests {
         #expect(pushedSend.alpha == 1)
         pushed.setKeyboardOpen(true)
         #expect(pushedSend.alpha == 1)
+    }
+
+    // MARK: - Screen chrome
+
+    /// Builds a feed screen far enough to have real bars, on a nav stack it
+    /// can go back from (so the back item exists to be displaced).
+    private static func chromeHost() -> (nav: UINavigationController, feed: SnapFeedViewController) {
+        let feed = SnapFeedViewController(
+            viewModel: FeedViewModel(repository: EmptyFeedProvider()),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        // A root beneath it: `isClosable` is what mints the back item, and it
+        // is false for a stack root.
+        let nav = UINavigationController(rootViewController: UIViewController())
+        nav.pushViewController(feed, animated: false)
+        feed.loadViewIfNeeded()
+        feed.beginAppearanceTransition(true, animated: false)
+        feed.endAppearanceTransition()
+        return (nav, feed)
+    }
+
+    private static func leadingLabels(_ feed: SnapFeedViewController) -> [String?] {
+        (feed.navigationItem.leftBarButtonItems ?? []).map {
+            ($0.customView as? UIButton)?.accessibilityLabel
+        }
+    }
+
+    /// The FOOTER IS STATE-INVARIANT: ⋯ holds the trailing corner in every
+    /// state. It used to swap to a red ✕ while a media post's comments were
+    /// open — which meant text and media engagements disagreed about what
+    /// that corner meant.
+    @Test func toolbarIsIdenticalInEveryState() {
+        let (_, feed) = Self.chromeHost()
+        let resting = feed.toolbarItems ?? []
+        #expect(!resting.isEmpty)
+
+        feed.setEngagedChrome(true, hasMedia: true, animated: false)
+        #expect(feed.toolbarItems ?? [] == resting)
+
+        feed.setEngagedChrome(true, hasMedia: false, animated: false)
+        #expect(feed.toolbarItems ?? [] == resting)
+
+        feed.setEngagedChrome(false, hasMedia: true, animated: false)
+        #expect(feed.toolbarItems ?? [] == resting)
+    }
+
+    /// The LEADING slot carries the exit now: a media post's comments put a
+    /// ✕ where the back arrow sits, and closing restores the arrow.
+    @Test func mediaCommentsPutTheCloseButtonInTheBackArrowsSlot() {
+        let (_, feed) = Self.chromeHost()
+        // At rest, a pushed feed shows its back arrow (a bare chevron — it
+        // carries no accessibility label of its own).
+        let restingItems = feed.navigationItem.leftBarButtonItems ?? []
+        #expect(restingItems.count == 1)
+        #expect(!Self.leadingLabels(feed).contains("Close comments"))
+
+        feed.setEngagedChrome(true, hasMedia: true, animated: false)
+        #expect(Self.leadingLabels(feed) == ["Close comments"])
+
+        feed.setEngagedChrome(false, hasMedia: true, animated: false)
+        #expect(feed.navigationItem.leftBarButtonItems ?? [] == restingItems)
+    }
+
+    /// TEXT POSTS KEEP THE BACK ARROW. Their engagement is the page's
+    /// permanent resting state, so a ✕ would promise a media layout that
+    /// does not exist — the asymmetry that used to live in the toolbar,
+    /// moved to the slot where it reads as a navigation choice.
+    @Test func textCommentsKeepTheBackArrow() {
+        let (_, feed) = Self.chromeHost()
+        let restingItems = feed.navigationItem.leftBarButtonItems ?? []
+
+        feed.setEngagedChrome(true, hasMedia: false, animated: false)
+        #expect(feed.navigationItem.leftBarButtonItems ?? [] == restingItems)
+        #expect(!Self.leadingLabels(feed).contains("Close comments"))
+    }
+
+    /// A TAB-ROOT feed has no back arrow — and still gains the ✕. The two
+    /// answer different questions (leave the screen vs. leave the layout),
+    /// and only the second is always available.
+    @Test func tabRootFeedHasNoBackArrowButStillGetsTheCloseButton() {
+        let feed = SnapFeedViewController(
+            viewModel: FeedViewModel(repository: EmptyFeedProvider()),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        let nav = UINavigationController(rootViewController: feed) // root: not closable
+        _ = nav
+        feed.loadViewIfNeeded()
+        feed.beginAppearanceTransition(true, animated: false)
+        feed.endAppearanceTransition()
+        #expect(feed.navigationItem.leftBarButtonItems ?? [] == [])
+
+        feed.setEngagedChrome(true, hasMedia: true, animated: false)
+        #expect(Self.leadingLabels(feed) == ["Close comments"])
+
+        feed.setEngagedChrome(false, hasMedia: true, animated: false)
+        #expect(feed.navigationItem.leftBarButtonItems ?? [] == [])
+    }
+
+    /// The trailing pair reads [⇅ sort] [author] — `rightBarButtonItems` is
+    /// indexed right-to-left, so the author is index 0 and the sort lands to
+    /// its left, separated by the fixed space that keeps them two pills
+    /// instead of one shared iOS 26 platter.
+    @Test func commentModeAddsTheSortPillLeftOfTheAuthor() throws {
+        let (_, feed) = Self.chromeHost()
+        #expect((feed.navigationItem.rightBarButtonItems ?? []).count == 1)
+
+        feed.setEngagedChrome(true, hasMedia: true, animated: false)
+        let engaged = feed.navigationItem.rightBarButtonItems ?? []
+        #expect(engaged.count == 3)
+        #expect(engaged[0].customView is SnapAuthorIdentityView)
+        #expect(engaged[1].customView == nil) // the fixed space
+        #expect(engaged[2].customView is SnapCommentSortButton)
+
+        feed.setEngagedChrome(false, hasMedia: true, animated: false)
+        #expect((feed.navigationItem.rightBarButtonItems ?? []).count == 1)
+    }
+
+    /// The author pill goes COMPACT so both pills fit the trailing run.
+    ///
+    /// This is the guard on a width budget, not a style preference: at full
+    /// size the run overflowed and iOS 26 hid the WHOLE author item behind a
+    /// `•••` menu — the "[sort] [author]" layout silently became "[sort]
+    /// [menu]". The compact pill must therefore stay meaningfully narrower
+    /// than the resting one, and the meta line and follow "+" are what it
+    /// sheds to get there.
+    @Test func authorPillCompactsWhenTheSortPillJoinsIt() throws {
+        let view = SnapAuthorIdentityView()
+        view.setAuthor(
+            FeedItemDisplayModel(
+                id: PostID("post-1"),
+                authorID: ProfileID("profile-1"),
+                authorName: "Sam Whitfield",
+                metaText: "@sam.whitfield · 28 May",
+                avatarURL: nil,
+                caption: "a photo",
+                mediaURL: URL(string: "https://example.com/a.jpg"),
+                mediaKind: .image,
+                thumbnailURL: nil,
+                audioText: nil
+            ),
+            pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        func settledWidth() -> CGFloat {
+            view.setNeedsLayout()
+            view.layoutIfNeeded()
+            return view.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+        }
+        let resting = settledWidth()
+
+        view.setCompact(true, animated: false)
+        let compact = settledWidth()
+        #expect(compact < resting)
+        // The budget: ~222pt is what the bar leaves beside a 96pt sort pill
+        // and a 44pt leading platter on the 402pt reference device.
+        #expect(compact <= 150)
+
+        view.setCompact(false, animated: false)
+        #expect(abs(settledWidth() - resting) < 0.5)
+    }
+
+    /// The bar's four slots, in order: the viewer's AVATAR opens it, the
+    /// field takes the flexible width, then the mic/send toggle, then "+"
+    /// at the trailing edge.
+    ///
+    /// The "+" used to lead the bar. It moved so the avatar could — a
+    /// composer says who is speaking before it offers what to attach — which
+    /// also gathers both action controls into one thumb cluster.
+    @Test func composerSlotsRunAvatarFieldToggleThenAttach() throws {
+        let bar = CommentsInputBar()
+        bar.onPageSwipe = { _, _, _ in }
+        bar.frame = CGRect(x: 0, y: 0, width: 340, height: 38)
+        bar.layoutIfNeeded()
+
+        // TWO effect views in the bar now (the avatar's bubble and the
+        // field), so identify them by content rather than by order.
+        let effects = bar.subviews.compactMap { $0 as? UIVisualEffectView }
+        #expect(effects.count == 2)
+        let avatar = try #require(
+            effects.first { Self.firstView(MonogramAvatarView.self, in: $0) != nil }
+        )
+        let field = try #require(
+            effects.first { Self.firstView(UITextView.self, in: $0) != nil }
+        )
+        let buttons = bar.subviews.compactMap { $0 as? UIButton }
+        let send = try #require(buttons.first { $0.accessibilityLabel == "Send comment" })
+        let mic = try #require(buttons.first { $0.accessibilityLabel == "Record voice comment" })
+        let attach = try #require(buttons.first { $0.configuration?.image != nil && $0 !== send && $0 !== mic })
+
+        // Leading to trailing, no overlaps — except the toggle pair, which
+        // SHARE one slot by design.
+        #expect(avatar.frame.minX == 0)
+        #expect(field.frame.minX >= avatar.frame.maxX)
+        #expect(send.frame.minX >= field.frame.maxX)
+        #expect(attach.frame.minX >= send.frame.maxX)
+        #expect(attach.frame.maxX == bar.bounds.width)
+        #expect(mic.frame == send.frame)
+
+        // Every control keeps a full tap target, and they share the bottom
+        // baseline the field grows away from.
+        for control in [avatar, send, attach] {
+            #expect(control.frame.height == 38)
+            #expect(control.frame.maxY == bar.bounds.height)
+        }
+    }
+
+    /// The avatar is a GLASS BUBBLE, matching the mic and "+" beside it, and
+    /// the whole 38pt bubble is the tap target — not just the 30pt face,
+    /// which would leave the glass rim dead and the target under the 44pt
+    /// guidance by even more than it already is.
+    @Test func composerAvatarSitsInAnInteractiveGlassBubble() throws {
+        let bar = CommentsInputBar()
+        bar.frame = CGRect(x: 0, y: 0, width: 340, height: 38)
+        bar.layoutIfNeeded()
+
+        let bubble = try #require(
+            bar.subviews.compactMap { $0 as? UIVisualEffectView }
+                .first { Self.firstView(MonogramAvatarView.self, in: $0) != nil }
+        )
+        // Capsule via the corner CONFIGURATION, the house rule for glass —
+        // never `layer.cornerRadius` + `clipsToBounds`.
+        #expect(bubble.cornerConfiguration != nil)
+        let face = try #require(Self.firstView(MonogramAvatarView.self, in: bubble))
+        #expect(face.bounds.width == 30)
+        #expect(bubble.bounds.width == 38)
+
+        // The button spans the bubble and lives in the CONTENT view (adding
+        // it to the effect view itself raises).
+        let button = try #require(Self.firstView(UIButton.self, in: bubble))
+        #expect(button.superview === bubble.contentView)
+        #expect(button.bounds.size == bubble.bounds.size)
+        #expect(button.showsMenuAsPrimaryAction)
+    }
+
+    /// The switcher menu arms the face and nothing else does: with no menu
+    /// the button is disabled, so a host that wires no switcher (the pushed
+    /// comments screen) can't present an empty one.
+    @Test func profileMenuArmsTheAvatarAndNilDisarmsIt() throws {
+        let bar = CommentsInputBar()
+        let button = try #require(
+            Self.firstView(UIButton.self, in: bar.subviews.compactMap { $0 as? UIVisualEffectView }
+                .first { Self.firstView(MonogramAvatarView.self, in: $0) != nil }!)
+        )
+        #expect(button.isEnabled == false)
+        #expect(button.menu == nil)
+
+        bar.setProfileMenu(UIMenu(children: [UIAction(title: "Ava") { _ in }]))
+        #expect(button.isEnabled)
+        #expect(button.menu != nil)
+
+        bar.setProfileMenu(nil)
+        #expect(button.isEnabled == false)
+        #expect(button.menu == nil)
+    }
+
+    /// The disc is never blank: before any identity resolves the bar already
+    /// wears the unknown-viewer monogram, which is the whole point of
+    /// "the monogram is the rendered state".
+    @Test func composerAvatarIsNeverAnEmptyDisc() {
+        let bar = CommentsInputBar()
+        #expect(Self.monogramText(in: bar) == "?")
+        #expect(Self.avatarImage(in: bar) == nil)
+    }
+
+    /// The composer's avatar follows the app-wide contract: the monogram is
+    /// the rendered identity (drawn on the configuring frame), the picture
+    /// layers over it, and an unknown viewer keeps a neutral disc rather
+    /// than borrowing anyone's face.
+    @Test func composerAvatarRendersTheViewerMonogramImmediately() async throws {
+        let bar = CommentsInputBar()
+
+        // Unknown viewer: the placeholder, never a stranger's initials.
+        bar.setViewerIdentity(nil, imagePipeline: nil)
+        #expect(Self.monogramText(in: bar) == "?")
+        #expect(Self.avatarImage(in: bar) == nil)
+
+        // Identity resolves: initials NOW, picture when the fetch lands.
+        let gate = GateddImageFetcher()
+        bar.setViewerIdentity(
+            ViewerIdentity(name: "Ava Moreau", avatarURL: URL(string: "mock://avatar/me")!),
+            imagePipeline: ImagePipeline(fetcher: gate)
+        )
+        #expect(Self.monogramText(in: bar) == "AM")
+        #expect(Self.avatarImage(in: bar) == nil)
+        await gate.release()
+        await settle()
+        #expect(Self.avatarImage(in: bar) != nil)
+    }
+
+    /// THE FOUR WAYS THERE IS NO PICTURE, in one place: no URL, no pipeline,
+    /// a fetch still in flight, and a fetch that failed. All four land on the
+    /// same outcome — the monogram, already drawn — so the bar never shows a
+    /// blank disc, a spinner, or a broken-image state.
+    @Test func composerAvatarFallsBackToInitialsOnEveryFailurePath() async {
+        let name = "Ava Moreau"
+        let url = URL(string: "mock://avatar/me")!
+
+        // 1. An identity with no avatar at all.
+        let noURL = CommentsInputBar()
+        noURL.setViewerIdentity(
+            ViewerIdentity(name: name, avatarURL: nil),
+            imagePipeline: ImagePipeline(fetcher: GateddImageFetcher(openFrom: true))
+        )
+        await settle()
+        #expect(Self.monogramText(in: noURL) == "AM")
+        #expect(Self.avatarImage(in: noURL) == nil)
+
+        // 2. A URL but no pipeline to load it with.
+        let noPipeline = CommentsInputBar()
+        noPipeline.setViewerIdentity(ViewerIdentity(name: name, avatarURL: url), imagePipeline: nil)
+        await settle()
+        #expect(Self.monogramText(in: noPipeline) == "AM")
+        #expect(Self.avatarImage(in: noPipeline) == nil)
+
+        // 3. Still loading — the readable state is on screen meanwhile.
+        let loading = CommentsInputBar()
+        loading.setViewerIdentity(
+            ViewerIdentity(name: name, avatarURL: url),
+            imagePipeline: ImagePipeline(fetcher: GateddImageFetcher())
+        )
+        await settle()
+        #expect(Self.monogramText(in: loading) == "AM")
+        #expect(Self.avatarImage(in: loading) == nil)
+
+        // 4. The fetch failed outright.
+        let failed = CommentsInputBar()
+        failed.setViewerIdentity(
+            ViewerIdentity(name: name, avatarURL: url),
+            imagePipeline: ImagePipeline(fetcher: FailingImageFetcher())
+        )
+        await settle()
+        #expect(Self.monogramText(in: failed) == "AM")
+        #expect(Self.avatarImage(in: failed) == nil)
+    }
+
+    /// The composer is re-identified per engagement, so it needs the rows'
+    /// reuse guard: a slow fetch for one viewer must never land on the next.
+    @Test func composerAvatarRefusesAStaleFetch() async throws {
+        let gate = GateddImageFetcher()
+        let pipeline = ImagePipeline(fetcher: gate)
+        let bar = CommentsInputBar()
+
+        bar.setViewerIdentity(
+            ViewerIdentity(name: "Ava Moreau", avatarURL: URL(string: "mock://avatar/ava")!),
+            imagePipeline: pipeline
+        )
+        // Re-identified onto someone with no picture before the first
+        // fetch completes — the disc must stay bare.
+        bar.setViewerIdentity(ViewerIdentity(name: "Bo Chen", avatarURL: nil), imagePipeline: pipeline)
+        #expect(Self.monogramText(in: bar) == "BC")
+
+        await gate.release()
+        await settle()
+        #expect(Self.avatarImage(in: bar) == nil)
+    }
+
+    /// The monogram rule, at its edges — the comment stream's rule applied
+    /// to the viewer (first letters of the first two words).
+    @Test func composerMonogramMatchesTheStreamRule() {
+        #expect(CommentsInputBar.monogram("Ava Moreau") == "AM")
+        #expect(CommentsInputBar.monogram("ava moreau nguyen") == "AM")
+        #expect(CommentsInputBar.monogram("Ava") == "A")
+        #expect(CommentsInputBar.monogram("") == "?")
+        #expect(CommentsInputBar.monogram(nil) == "?")
     }
 
     /// TEXT-POST parity: a text engagement wires the page-swipe drive and
@@ -1421,23 +1787,72 @@ struct SnapCommentsPresentationTests {
         #expect(abs(frameInRow.maxX - 320) < 1)
     }
 
+    /// The composer's placeholder label — found by ELIMINATION rather than by
+    /// matching its text, so it is still found when the copy changes.
+    private static func placeholderText(in bar: UIView) -> String? {
+        var stack: [UIView] = [bar]
+        while let view = stack.popLast() {
+            // The text view carries its own (empty) label; the placeholder is
+            // the standalone one.
+            if let label = view as? UILabel, !(label.superview is UITextView) {
+                return label.text
+            }
+            stack.append(contentsOf: view.subviews)
+        }
+        return nil
+    }
+
+    /// The placeholder NAMES the viewer, and re-names them on a switch.
+    ///
+    /// It matters on this bar specifically: the avatar beside it can change
+    /// which of your profiles is speaking, and a picture alone is a weak
+    /// answer to "who am I posting as".
+    @Test func placeholderNamesTheViewerAndFollowsAProfileSwitch() {
+        let bar = CommentsInputBar()
+        bar.onPageSwipe = { _, _, _ in }
+        #expect(Self.placeholderText(in: bar) == "Add a comment…")
+
+        bar.setViewerIdentity(ViewerIdentity(name: "Ava Moreau", avatarURL: nil), imagePipeline: nil)
+        #expect(Self.placeholderText(in: bar) == "Comment as Ava Moreau")
+
+        // The switcher lands a new identity: the prompt follows the face.
+        bar.setViewerIdentity(ViewerIdentity(name: "Demo Viewer", avatarURL: nil), imagePipeline: nil)
+        #expect(Self.placeholderText(in: bar) == "Comment as Demo Viewer")
+
+        // An unresolvable viewer falls back rather than naming nobody.
+        bar.setViewerIdentity(nil, imagePipeline: nil)
+        #expect(Self.placeholderText(in: bar) == "Add a comment…")
+    }
+
+    /// REPLYING WINS the slot: the target of a reply is the more urgent fact,
+    /// and the avatar keeps answering "as whom". Clearing the reply returns
+    /// to the viewer's name — not to the generic prompt, which would read as
+    /// having forgotten who is posting.
+    @Test func replyTargetOutranksTheViewerNameInThePlaceholder() {
+        let bar = CommentsInputBar()
+        bar.setViewerIdentity(ViewerIdentity(name: "Ava Moreau", avatarURL: nil), imagePipeline: nil)
+        #expect(Self.placeholderText(in: bar) == "Comment as Ava Moreau")
+
+        bar.setReplyPlaceholder(name: "Kenji Tanaka")
+        #expect(Self.placeholderText(in: bar) == "Reply to Kenji Tanaka…")
+
+        // A switch made mid-reply must not steal the slot back.
+        bar.setViewerIdentity(ViewerIdentity(name: "Demo Viewer", avatarURL: nil), imagePipeline: nil)
+        #expect(Self.placeholderText(in: bar) == "Reply to Kenji Tanaka…")
+
+        bar.setReplyPlaceholder(name: nil)
+        #expect(Self.placeholderText(in: bar) == "Comment as Demo Viewer")
+    }
+
     /// The composer's reply state: the placeholder names the target and
     /// restores on clear; an idle keyboard dismissal (empty field) fires
     /// the host's reset seam, a drafted one does not.
     @Test func composerReplyStateSwapsPlaceholderAndResetsOnIdleDismiss() throws {
         let bar = CommentsInputBar()
         bar.onPageSwipe = { _, _, _ in }
-        func placeholder() -> String? {
-            var stack: [UIView] = [bar]
-            while let view = stack.popLast() {
-                if let label = view as? UILabel, label.text?.hasPrefix("Reply to") == true || label.text == "Add a comment…" {
-                    return label.text
-                }
-                stack.append(contentsOf: view.subviews)
-            }
-            return nil
-        }
+        func placeholder() -> String? { Self.placeholderText(in: bar) }
 
+        // No viewer resolved: the generic prompt is the floor.
         #expect(placeholder() == "Add a comment…")
         bar.setReplyPlaceholder(name: "Ana Reyes")
         #expect(placeholder() == "Reply to Ana Reyes…")
@@ -1459,24 +1874,354 @@ struct SnapCommentsPresentationTests {
         #expect(placeholder() == "Add a comment…")
     }
 
-    /// The keyboard-session rail yield: engaged cells concede the rail
-    /// (alpha 0 — also retiring it from hit-testing) while the composer
-    /// owns its risen band; resting cells never yield, and the restore
-    /// side is unconditional so no teardown path can strand a hidden rail.
-    @Test func keyboardRailYieldIsEngagementScoped() throws {
+    /// A TEXT page's ground follows the system appearance; a MEDIA page's
+    /// stays black, because black is what letterboxing should be.
+    @Test func textPagesTakeAnAdaptiveGroundAndMediaPagesStayBlack() throws {
+        func cell(media: Bool) -> SnapFeedCell {
+            let cell = SnapFeedCell(frame: Self.container)
+            cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
+            cell.configure(
+                with: FeedItemDisplayModel(
+                    id: PostID(media ? "post-media" : "post-text"),
+                    authorID: ProfileID("profile-1"),
+                    authorName: "Ana",
+                    metaText: "@ana · 3m",
+                    avatarURL: nil,
+                    caption: "a caption",
+                    mediaURL: media ? URL(string: "mock://media/1") : nil,
+                    mediaKind: .image,
+                    thumbnailURL: nil,
+                    audioText: nil
+                ),
+                pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+                videoPlayback: nil
+            )
+            return cell
+        }
+
+        let light = UITraitCollection(userInterfaceStyle: .light)
+        let dark = UITraitCollection(userInterfaceStyle: .dark)
+
+        // Media: black in BOTH appearances — a fixed colour, not a dynamic one.
+        let mediaGround = try #require(cell(media: true).contentView.backgroundColor)
+        #expect(mediaGround.resolvedColor(with: light) == UIColor.black)
+        #expect(mediaGround.resolvedColor(with: dark) == UIColor.black)
+
+        // Text: genuinely dynamic — the two appearances must differ, which is
+        // what a hardcoded colour could never satisfy.
+        let textGround = try #require(cell(media: false).contentView.backgroundColor)
+        #expect(textGround.resolvedColor(with: light) != textGround.resolvedColor(with: dark))
+        #expect(textGround.resolvedColor(with: light) == UIColor.systemBackground.resolvedColor(with: light))
+
+        // Reuse must not strand the adaptive ground under an incoming photo.
+        let recycled = cell(media: false)
+        recycled.prepareForReuse()
+        #expect(recycled.contentView.backgroundColor?.resolvedColor(with: light) == UIColor.black)
+    }
+
+    /// The readability wash is FOR MEDIA. Pouring 50% black over a text
+    /// page's own ground was invisible while that ground was black; with an
+    /// adaptive ground it would read as flat grey in light mode.
+    @Test func theReadabilityWashSkipsTextPages() throws {
+        func engagedBackdropOpacity(media: Bool) throws -> CGFloat {
+            let cell = SnapFeedCell(frame: Self.container)
+            cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
+            cell.configure(
+                with: FeedItemDisplayModel(
+                    id: PostID("post-1"),
+                    authorID: ProfileID("profile-1"),
+                    authorName: "Ana",
+                    metaText: "@ana · 3m",
+                    avatarURL: nil,
+                    caption: "a caption",
+                    mediaURL: media ? URL(string: "mock://media/1") : nil,
+                    mediaKind: .image,
+                    thumbnailURL: nil,
+                    audioText: nil
+                ),
+                pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+                videoPlayback: nil
+            )
+            cell.setCommentsEngaged(true)
+            return try backdrop(of: cell).dimOpacity
+        }
+
+        #expect(try abs(engagedBackdropOpacity(media: true) - SnapCommentsLayout.backdropDimOpacity) < 0.001)
+        #expect(try engagedBackdropOpacity(media: false) == 0)
+    }
+
+    /// …and the RE-ASSERT path must agree with it. That path used
+    /// `setActive(true)`, a convenience that applies the full wash
+    /// unconditionally, so a text page got its wash back every time the
+    /// screen re-appeared from a pushed profile — which is how the sim
+    /// showed a flat #7F7F7F page over what should have been white.
+    @Test func reassertingEngagedGeometryKeepsTextPagesUnwashed() throws {
+        let cell = SnapFeedCell(frame: Self.container)
+        cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
+        cell.configure(
+            with: FeedItemDisplayModel(
+                id: PostID("post-text"),
+                authorID: ProfileID("profile-1"),
+                authorName: "Ana",
+                metaText: "@ana · 3m",
+                avatarURL: nil,
+                caption: "a thought",
+                mediaURL: nil,
+                mediaKind: .image,
+                thumbnailURL: nil,
+                audioText: nil
+            ),
+            pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            videoPlayback: nil
+        )
+        cell.setCommentsEngaged(true)
+        cell.reassertEngagedGeometry()
+        #expect(try backdrop(of: cell).dimOpacity == 0)
+    }
+
+    /// THE CAPTION ROW IS NEVER FADED IN, and that is a rendering
+    /// requirement rather than a taste one.
+    ///
+    /// Diffable animates an insertion by fading the cell, and the caption
+    /// cell hosts a `UIVisualEffectView` — alpha on an effect view is
+    /// unsupported and renders the material as a flat opaque grey for the
+    /// fade's duration. In light mode that read as the bubble loading dark
+    /// and snapping to light (measured #8F8F8F → #A7A7A7 → #AEAEAE →
+    /// #FCFCFC, an alpha ramp, while the glass logged `.light` throughout).
+    ///
+    /// Later applies — sorts, folds, submissions — still animate; only the
+    /// one that introduces the caption is exempt.
+    @Test func theApplyThatIntroducesTheCaptionNeverAnimates() {
+        // Cold: nothing to animate from.
+        #expect(PostDetailViewController.animatesStreamApply(
+            hasAppliedStream: false, introducesCaption: true) == false)
+        #expect(PostDetailViewController.animatesStreamApply(
+            hasAppliedStream: false, introducesCaption: false) == false)
+        // The post lands after the skeletons: the stream HAS been applied,
+        // and this is exactly the apply that used to fade the glass in.
+        #expect(PostDetailViewController.animatesStreamApply(
+            hasAppliedStream: true, introducesCaption: true) == false)
+        // Everything else keeps its native animation.
+        #expect(PostDetailViewController.animatesStreamApply(
+            hasAppliedStream: true, introducesCaption: false) == true)
+    }
+
+    /// The caption bubble's TEXT is dynamic too — pinning the glass and
+    /// hardcoding white were one decision, so unpinning the glass without
+    /// unpinning the text would leave white glyphs under a material free to
+    /// render bright: the one combination that reliably disappears.
+    @Test func captionBubbleTextResolvesPerAppearance() throws {
+        let card = SnapPostInfoCardView(frame: CGRect(x: 0, y: 0, width: 374, height: 96))
+        card.configure(caption: "A caption.", timestamp: "28 May 2026")
+        card.layoutIfNeeded()
+
+        var labels: [UILabel] = []
+        var stack: [UIView] = [card]
+        while let view = stack.popLast() {
+            if let label = view as? UILabel { labels.append(label) }
+            stack.append(contentsOf: view.subviews)
+        }
+        #expect(labels.count >= 2)
+
+        let light = UITraitCollection(userInterfaceStyle: .light)
+        let dark = UITraitCollection(userInterfaceStyle: .dark)
+        for label in labels {
+            let colour = try #require(label.textColor)
+            // Genuinely dynamic: a hardcoded white resolves identically in
+            // both, which is exactly what this replaced.
+            #expect(colour.resolvedColor(with: light) != colour.resolvedColor(with: dark))
+        }
+        // …and the hierarchy survives: the timestamp stays subordinate.
+        let caption = try #require(labels.first { $0.numberOfLines == 0 }).textColor!
+        let timestamp = try #require(labels.first { $0.textAlignment == .right }).textColor!
+        #expect(caption != timestamp)
+    }
+
+    /// The cell is the theme's authority for everything it OWNS — the frost
+    /// band and the hosted comment panel both inherit from its content view
+    /// rather than each pinning a style of their own.
+    ///
+    /// This is what makes the page internally consistent: the panel used to
+    /// pin itself dark, so it stayed dark on a text page that had gone
+    /// light. Anything hosted later inherits for free.
+    @Test func theCellPropagatesOnePageThemeToEverythingItOwns() throws {
+        func themedCell(media: Bool) -> SnapFeedCell {
+            let cell = SnapFeedCell(frame: Self.container)
+            cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
+            cell.configure(
+                with: FeedItemDisplayModel(
+                    id: PostID(media ? "post-media" : "post-text"),
+                    authorID: ProfileID("profile-1"),
+                    authorName: "Ana",
+                    metaText: "@ana · 3m",
+                    avatarURL: nil,
+                    caption: "a caption",
+                    mediaURL: media ? URL(string: "mock://media/1") : nil,
+                    mediaKind: .image,
+                    thumbnailURL: nil,
+                    audioText: nil
+                ),
+                pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+                videoPlayback: nil
+            )
+            return cell
+        }
+
+        let mediaCell = themedCell(media: true)
+        #expect(mediaCell.contentView.overrideUserInterfaceStyle == .dark)
+        let textCell = themedCell(media: false)
+        #expect(textCell.contentView.overrideUserInterfaceStyle == .unspecified)
+
+        // A hosted panel takes the cell's answer, not one of its own.
+        let hosted = UIView()
+        textCell.installComments(hosted)
+        #expect(hosted.overrideUserInterfaceStyle == .unspecified)
+        #expect(hosted.traitCollection.userInterfaceStyle
+            == textCell.contentView.traitCollection.userInterfaceStyle)
+
+        // Reuse hands the cell back as a MEDIA page — a text page's
+        // inherited theme must not be stranded under an incoming photo.
+        textCell.prepareForReuse()
+        #expect(textCell.contentView.overrideUserInterfaceStyle == .dark)
+    }
+
+    /// THE FROST VEIL, and why it only exists on text pages.
+    ///
+    /// Blur is refraction: it can only show what it has to work with. Over a
+    /// photo it is obvious; over a text page's flat ground it is
+    /// arithmetically almost a no-op, which is why the bands read as
+    /// "missing" there (measured: #F9F9F9 against a #FFFFFF page). Over
+    /// media a veil would only mute the thing the layout exists to show.
+    @Test func theFrostVeilIsForFlatGroundsOnly() {
+        #expect(SnapCommentsLayout.frostVeilOpacity(hasMedia: true) == 0)
+        #expect(SnapCommentsLayout.frostVeilOpacity(hasMedia: false)
+            == SnapCommentsLayout.frostVeilOpacity)
+        // A ramp, not a lid: the solid end stays short of fully opaque so
+        // the blur still contributes there.
+        #expect(SnapCommentsLayout.frostVeilOpacity > 0.5)
+        #expect(SnapCommentsLayout.frostVeilOpacity < 1)
+    }
+
+    /// The veil rides INSIDE the effect view's content view, so the gradient
+    /// that masks the blur masks it too — one ramp governs both layers and
+    /// they cannot disagree about where the band ends.
+    ///
+    /// Its colour is `secondarySystemBackground`, one step recessed from the
+    /// page. The page's OWN colour was the first attempt and is invisible by
+    /// construction — a white veil over a white page changes nothing.
+    @Test func theFrostVeilSharesTheBlursRampAndRecedesFromThePage() throws {
+        let frost = ProgressiveFrostView(
+            maskColors: SnapCommentsLayout.headerFrostMaskColors,
+            maskLocations: SnapCommentsLayout.headerFrostMaskLocations
+        )
+        frost.frame = CGRect(x: 0, y: 0, width: 390, height: 120)
+        frost.layoutIfNeeded()
+
+        let veil = try #require(frost.contentView.subviews.first { $0.backgroundColor != nil })
+        #expect(veil.superview === frost.contentView)
+        #expect(frost.mask != nil)
+        #expect(veil.bounds.size == frost.bounds.size)
+
+        // Semantic and dynamic, so it follows the page's theme…
+        let colour = try #require(veil.backgroundColor)
+        let light = UITraitCollection(userInterfaceStyle: .light)
+        let dark = UITraitCollection(userInterfaceStyle: .dark)
+        #expect(colour.resolvedColor(with: light) != colour.resolvedColor(with: dark))
+        // …and RECESSED from the page in both, never equal to it.
+        for traits in [light, dark] {
+            #expect(colour.resolvedColor(with: traits)
+                != UIColor.systemBackground.resolvedColor(with: traits))
+        }
+
+        // Off by default: a band must opt in, so media pages stay unveiled.
+        #expect(veil.alpha == 0)
+        frost.setVeilOpacity(SnapCommentsLayout.frostVeilOpacity)
+        #expect(abs(veil.alpha - SnapCommentsLayout.frostVeilOpacity) < 0.001)
+        frost.setVeilOpacity(0)
+        #expect(veil.alpha == 0)
+    }
+
+    /// ONE THEME RULE for the whole page, and it follows from what is behind
+    /// the chrome: a media page pins dark (contrast over an arbitrary photo
+    /// cannot come from the device's appearance), a text page inherits (its
+    /// own ground already follows the system).
+    @Test func chromeThemeIsPinnedOverMediaAndInheritedOverText() {
+        #expect(SnapChromeTheme.style(hasMedia: true) == .dark)
+        #expect(SnapChromeTheme.style(hasMedia: false) == .unspecified)
+    }
+
+    /// The bars carry NO private opinion about light and dark. Their text is
+    /// semantic and resolves from the theme above; `setOverMedia` moves only
+    /// the SHADOW, which is not a theme question — it exists because a pill
+    /// over a photo has no background of its own.
+    ///
+    /// The two used to be one switch (white+shadow vs semantic+none), which
+    /// is how the bars ended up disagreeing with the page: the colour said
+    /// "dark page" while the platter behind it was drawn light.
+    @Test func barTextIsSemanticAndOnlyTheShadowFollowsTheGround() throws {
+        let identity = SnapAuthorIdentityView()
+        let attribution = SnapMediaAttributionView()
+
+        func labels(_ root: UIView) -> [UILabel] {
+            var found: [UILabel] = []
+            var stack: [UIView] = [root]
+            while let view = stack.popLast() {
+                if let label = view as? UILabel { found.append(label) }
+                stack.append(contentsOf: view.subviews)
+            }
+            return found
+        }
+
+        let light = UITraitCollection(userInterfaceStyle: .light)
+        let dark = UITraitCollection(userInterfaceStyle: .dark)
+
+        for view in [identity, attribution] as [UIView] {
+            func setOverMedia(_ value: Bool) {
+                (view as? SnapAuthorIdentityView)?.setOverMedia(value)
+                (view as? SnapMediaAttributionView)?.setOverMedia(value)
+            }
+
+            setOverMedia(true)
+            let withShadow = labels(view).filter { $0.textColor != nil }
+            #expect(withShadow.contains { $0.layer.shadowOpacity > 0 })
+            // Colours are dynamic in BOTH states — they never hardcode white.
+            for label in withShadow {
+                let colour = try #require(label.textColor)
+                #expect(colour.resolvedColor(with: light) != colour.resolvedColor(with: dark))
+            }
+
+            setOverMedia(false)
+            let withoutShadow = labels(view)
+            #expect(withoutShadow.allSatisfy { $0.layer.shadowOpacity == 0 })
+            // …and the colours did NOT move: only the shadow did.
+            for label in withoutShadow where label.textColor != nil {
+                let colour = try #require(label.textColor)
+                #expect(colour.resolvedColor(with: light) != colour.resolvedColor(with: dark))
+            }
+        }
+    }
+
+    /// The rail is ENGAGEMENT-scoped, through the cell: a resting page keeps
+    /// its action column, an engaged one hands the width to the comments.
+    ///
+    /// This replaces a keyboard-session "rail yield" — the rail used to
+    /// survive the engagement and concede its band only while the composer
+    /// rose into it. The engagement fades it outright now, so the keyboard
+    /// has no overlap left to arbitrate and the observers that drove it are
+    /// gone.
+    @Test func railIsEngagementScopedThroughTheCell() throws {
         let cell = SnapFeedCell(frame: Self.container)
         cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
         cell.layoutIfNeeded()
         let chrome = try #require(cell.contentView.subviews.compactMap { $0 as? SnapChromeView }.first)
         let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
 
-        cell.setRailConcealed(true) // disengaged: refused
-        #expect(rail.alpha == 1)
+        #expect(rail.alpha == 1) // at rest
 
         cell.setCommentsEngaged(true)
-        cell.setRailConcealed(true)
         #expect(rail.alpha == 0)
-        cell.setRailConcealed(false)
+
+        cell.setCommentsEngaged(false)
         #expect(rail.alpha == 1)
     }
 

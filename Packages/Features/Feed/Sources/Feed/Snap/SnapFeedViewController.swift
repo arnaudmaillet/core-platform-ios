@@ -42,22 +42,24 @@ final class SnapFeedViewController: UIViewController {
     /// bookmark/share/more cluster yields — those live in the engaged
     /// card; the audio attribution stays anchored on the left).
     private let commentSortButton = SnapCommentSortButton()
-    /// The two faces of the one living toolbar (keep-and-stack): built
-    /// once, swapped via `setToolbarItems(_:animated:)` on the engagement
-    /// seams — the leading attribution shared between both, so only the
-    /// trailing platters morph.
+    /// The one living toolbar's items (keep-and-stack): built once and never
+    /// swapped. The engagement no longer touches the footer — see
+    /// `configureToolbarItems` for why the trailing ✕ left it.
     private var defaultToolbarItems: [UIBarButtonItem] = []
-    /// The engaged band for a MEDIA post — trailing ✕, because there is a
-    /// media layout to close back to.
-    private var engagedMediaToolbarItems: [UIBarButtonItem] = []
-    /// The engaged band for a TEXT post — trailing ⋯, identical to resting.
-    /// A text engagement is the page's permanent state, so it has nothing to
-    /// close to and must not offer an exit that lands on an empty shell.
-    private var engagedTextToolbarItems: [UIBarButtonItem] = []
     /// The nav bar's two trailing items, held so comment mode can add the
     /// sort selector beside the author pill and take it away again.
     private var authorItem = UIBarButtonItem()
     private var sortItem = UIBarButtonItem()
+    /// The nav bar's LEADING item at rest: the back arrow, when the feed was
+    /// opened onto a stack it can leave (never on the tab root). Built on
+    /// first appearance, when the stack relationship is finally knowable.
+    private var backItem: UIBarButtonItem?
+    /// The nav bar's LEADING item while a MEDIA post's comments are open: a
+    /// ✕ that collapses back to the media layout. It stands in the back
+    /// arrow's slot because it means the same kind of thing one level in —
+    /// leave what is open — and it exists independently of `isClosable`,
+    /// since it closes the LAYOUT, not the screen.
+    private var closeCommentsItem = UIBarButtonItem()
     /// The viewer's saved pile.
     ///
     /// It used to be a `Set` on this screen, which meant a save survived
@@ -201,12 +203,24 @@ final class SnapFeedViewController: UIViewController {
         // The back item exists only when there is somewhere to go back to — a
         // map-opened feed, not the Timeline tab root — and the stack/
         // presentation relationship is known only here, not at viewDidLoad.
-        if isClosable, navigationItem.leftBarButtonItem == nil {
+        if isClosable, backItem == nil {
             let back = SnapNavControls.makeBackButton()
             back.addAction(UIAction { [weak self] _ in self?.closeFeed() }, for: .primaryActionTriggered)
-            navigationItem.leftBarButtonItem = UIBarButtonItem(customView: back)
+            backItem = UIBarButtonItem(customView: back)
         }
+        // Install through the same resolver the engagement uses, so
+        // re-appearing under a LIVE engagement (returning from a pushed
+        // profile with a media post's comments still open) restores the ✕
+        // rather than stamping the back arrow over it.
+        applyLeadingNavItem(
+            engaged: commentsEngagedID != nil,
+            hasMedia: !commentsEngagementIsResting,
+            animated: false
+        )
         presentToolbar()
+        // Re-borrow the bars for whatever page is settled: they are shared,
+        // and anything pushed on top has since reset them.
+        if let model = activeModel { applyChromeTheme(hasMedia: model.mediaURL != nil) }
         // Returning from a pushed screen with engagement state:
         // `presentToolbar` just re-lit the shared bar, so the engagement's
         // claim on the footer band must be re-arbitrated — enforce or
@@ -376,6 +390,8 @@ final class SnapFeedViewController: UIViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        // Hand the shared bars back on the way out (see `releaseChromeTheme`).
+        releaseChromeTheme()
         // Unlike the visibility bookkeeping below, the toolbar choreography
         // runs for every disappearance: it registers on the coordinator when
         // one exists (fade, restore-on-cancel) and hides instantly otherwise.
@@ -489,12 +505,19 @@ final class SnapFeedViewController: UIViewController {
     /// once — they are one state, and splitting them across call sites is
     /// how a half-engaged bar happens.
     ///
-    ///   NAV      [‹ back]  …  [⇅ sort] [author pill]
-    ///   TOOLBAR  [♫ attribution] … [🔖 ⬆︎] [✕ or ⋯]
+    ///   resting          NAV [‹ back] … [author pill]
+    ///   comments (media) NAV [✕]      … [⇅ sort] [author pill]
+    ///   comments (text)  NAV [‹ back] … [⇅ sort] [author pill]
+    ///   TOOLBAR          [♫ attribution] … [🔖 ⬆︎] [⋯]   — in every state
     ///
-    /// `hasMedia` picks the toolbar's trailing slot: a media post can close
-    /// back to its layout, a text post has none to close to.
-    private func setEngagedChrome(_ engaged: Bool, hasMedia: Bool, animated: Bool) {
+    /// `hasMedia` picks the LEADING slot: a media post can collapse back to
+    /// its layout, a text post has none to collapse to. (It used to pick the
+    /// toolbar's trailing slot instead; the footer is invariant now.)
+    ///
+    /// Internal, not private, so the bar contracts are unit-testable without
+    /// driving a whole engagement — which needs a live cell, a hosted child,
+    /// and a spring to settle.
+    func setEngagedChrome(_ engaged: Bool, hasMedia: Bool, animated: Bool) {
         // `rightBarButtonItems` reads RIGHT TO LEFT: index 0 is the
         // rightmost, so the sort lands just LEFT of the author pill.
         //
@@ -512,6 +535,14 @@ final class SnapFeedViewController: UIViewController {
         // navigation bar's own item animator — the same slide-and-fade the
         // system uses for a push — so the sort pill morphs in beside the
         // author instead of appearing on top of it.
+        // The author pill goes COMPACT before the sort pill joins it. Both at
+        // full size overflow the run, and the system's answer to an
+        // overflowing run is to hide the whole item behind a `•••` menu — so
+        // the "two pills" layout would silently become one pill and a menu.
+        // Ordered first so the shrink is in the same layout pass as the
+        // insertion, not a beat behind it.
+        authorIdentityView.setCompact(engaged, animated: animated)
+
         let navItems: [UIBarButtonItem] = engaged
             ? [authorItem, .fixedSpace(Spacing.sm), sortItem]
             : [authorItem]
@@ -519,11 +550,32 @@ final class SnapFeedViewController: UIViewController {
             navigationItem.setRightBarButtonItems(navItems, animated: animated)
         }
 
-        let barItems = engaged
-            ? (hasMedia ? engagedMediaToolbarItems : engagedTextToolbarItems)
-            : defaultToolbarItems
-        guard toolbarItems ?? [] != barItems else { return }
-        setToolbarItems(barItems, animated: animated)
+        applyLeadingNavItem(engaged: engaged, hasMedia: hasMedia, animated: animated)
+        // The toolbar is state-invariant now; nothing to swap.
+    }
+
+    /// The leading slot's two faces:
+    ///
+    ///   media comments open → ✕ (collapse to the media layout)
+    ///   anything else       → the back arrow, if there is one
+    ///
+    /// TEXT POSTS KEEP THE BACK ARROW. Their engagement is the page's
+    /// permanent resting state, so a ✕ would promise a media layout that
+    /// does not exist — the same asymmetry that used to live in the
+    /// toolbar's trailing slot, now expressed in the slot where it reads as
+    /// a navigation choice instead of an action.
+    ///
+    /// A tab-root feed has no back arrow at rest, and gains a ✕ all the
+    /// same: the two answer different questions (leave the screen vs. leave
+    /// the layout), and only the second is always available.
+    ///
+    /// SET, don't ASSIGN — same reason as the trailing items: the animated
+    /// form hands the change to the bar's own item animator, so the ✕ morphs
+    /// into the arrow's place instead of popping over it.
+    private func applyLeadingNavItem(engaged: Bool, hasMedia: Bool, animated: Bool) {
+        let items = [engaged && hasMedia ? closeCommentsItem : backItem].compactMap { $0 }
+        guard navigationItem.leftBarButtonItems ?? [] != items else { return }
+        navigationItem.setLeftBarButtonItems(items, animated: animated)
     }
 
     private func configureNavigationItem() {
@@ -547,6 +599,27 @@ final class SnapFeedViewController: UIViewController {
         authorItem = UIBarButtonItem(customView: authorIdentityView)
         sortItem = UIBarButtonItem(customView: commentSortButton)
         navigationItem.rightBarButtonItems = [authorItem]
+
+        // The comments exit, built once and held: it takes the leading slot
+        // whenever a media post's comments are open.
+        //
+        // UNTINTED, deliberately — it wears whatever the bar gives it, like
+        // the back chevron whose slot it takes. It carried `.systemRed` in
+        // the toolbar, where the exit had to be told apart from three
+        // controls that act ON the post; in the leading slot its POSITION
+        // already says what it is.
+        //
+        // Note for anyone re-reaching for a colour here: the nav bar's
+        // Liquid Glass platter renders its own adaptive glyph colour and
+        // ignores `baseForegroundColor` outright (measured — the ✕ came out
+        // #06123D against a request for red, exactly as the back chevron
+        // comes out dark against a request for white). Baking the colour
+        // into the image with `.alwaysOriginal` does defeat it, at the cost
+        // of resolving the dynamic colour once at build time.
+        let close = SnapNavControls.makeNavActionButton(systemName: "xmark")
+        close.accessibilityLabel = "Close comments"
+        close.addAction(UIAction { [weak self] _ in self?.dismissComments() }, for: .primaryActionTriggered)
+        closeCommentsItem = UIBarButtonItem(customView: close)
         authorIdentityView.onAuthorTapped = { [weak self] id in self?.viewModel.didTapAuthor(id) }
         // The feed layer has no follow API (follow state/toggling lives in the
         // Profile feature), so the follow affordance routes to the author's
@@ -597,34 +670,22 @@ final class SnapFeedViewController: UIViewController {
             }
         ])
 
-        // The comments exit: a ✕ in the toolbar's trailing slot, where the
-        // layout's other mode controls live. It replaced the ✕ that used to
-        // sit in the composer bar (which now carries a microphone).
-        let close = SnapNavControls.makeToolbarActionButton(systemName: "xmark")
-        // RED, alone among the bar's controls: every other item acts ON the
-        // post (bookmark, share, more) while this one LEAVES the layout.
-        // The colour is the signal that it is the exit, not another action.
-        close.configuration?.baseForegroundColor = .systemRed
-        close.accessibilityLabel = "Close comments"
-        close.addAction(UIAction { [weak self] _ in self?.dismissComments() }, for: .primaryActionTriggered)
-
-        // THREE item sets over one living bar (keep-and-stack). All three
-        // open with the audio attribution and carry the bookmark/share
-        // cluster — the SAME item instances, so those platters never move —
-        // and only the TRAILING slot swaps via `setToolbarItems(_:animated:)`
-        // (the system's own platter morph, the same choreography a push uses):
+        // ONE item set, for every state:
         //
-        //   media resting     [♫ attribution] … [🔖 ⬆︎] [⋯]
-        //   comments (media)  [♫ attribution] … [🔖 ⬆︎] [✕]
-        //   comments (text)   [♫ attribution] … [🔖 ⬆︎] [⋯]
+        //   [♫ attribution] … [🔖 ⬆︎] [⋯]
         //
-        // TEXT POSTS KEEP THE ⋯ because they have nowhere to close TO: their
-        // engagement is the page's permanent resting state, so a ✕ there
-        // would promise a media layout that does not exist. That asymmetry
-        // is the whole reason there are three sets and not two.
+        // The toolbar is now STATE-INVARIANT. It used to carry three sets
+        // whose only difference was the trailing slot — a red ✕ while a
+        // media post's comments were open, ⋯ otherwise — which meant a text
+        // engagement and a media engagement disagreed about what that corner
+        // meant. The comments exit moved to the navigation bar's LEADING
+        // slot, where it replaces the back arrow and reads as "leave this
+        // layout" the way a back arrow reads as "leave this screen"; ⋯ keeps
+        // the trailing corner in all states, so the footer no longer changes
+        // under the engagement at all.
         //
-        // The sort selector is NOT here any more — it moved to the nav bar,
-        // beside the author pill (`setEngagedNavigation`).
+        // The sort selector is not here either — it moved to the nav bar
+        // beside the author pill (`setEngagedChrome`).
         let leading: [UIBarButtonItem] = [
             UIBarButtonItem(customView: mediaAttributionView),
             .flexibleSpace(),
@@ -633,12 +694,6 @@ final class SnapFeedViewController: UIViewController {
         let trailingGap: UIBarButtonItem = .fixedSpace(Spacing.sm)
         let moreItem = UIBarButtonItem(customView: more)
         defaultToolbarItems = leading + [shareItem, trailingGap, moreItem]
-        engagedMediaToolbarItems = leading + [
-            shareItem,
-            trailingGap,
-            UIBarButtonItem(customView: close),
-        ]
-        engagedTextToolbarItems = defaultToolbarItems
         toolbarItems = defaultToolbarItems
     }
 
@@ -836,30 +891,10 @@ final class SnapFeedViewController: UIViewController {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.setForeground(true) }
         })
-        // The keyboard-session rail yield: the engaged composer rises into
-        // the rail's column, and the rail concedes the band while typing —
-        // zPosition cannot lift the bar over chrome across subtrees (CA
-        // reorders siblings only), so the chrome steps back instead. Alpha
-        // also retires the rail from hit-testing, so the risen bar owns
-        // its whole band. Engagement-gated in the cell; restored on hide
-        // and at disengage teardown.
-        appObservers.add(center.addObserver(
-            forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.setEngagedRailConcealed(true) }
-        })
-        appObservers.add(center.addObserver(
-            forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.setEngagedRailConcealed(false) }
-        })
-    }
-
-    private func setEngagedRailConcealed(_ concealed: Bool) {
-        guard commentsEngagedID != nil || !concealed else { return }
-        UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseOut, .beginFromCurrentState]) {
-            self.engagedCell()?.setRailConcealed(concealed)
-        }
+        // (A keyboard-session rail yield used to live here: the engaged
+        // composer rose into the rail's column, so the rail conceded the
+        // band while typing. The engagement fades the rail outright now, so
+        // there is no overlap left to arbitrate.)
     }
 
     private func setForeground(_ foreground: Bool) {
@@ -944,7 +979,11 @@ final class SnapFeedViewController: UIViewController {
 
         let content = makeCommentsPanelContent(id)
         content.view.backgroundColor = .clear
-        content.overrideUserInterfaceStyle = .dark
+        // No style of its own: the panel is hosted INSIDE the cell and
+        // inherits the page's theme from it (see `SnapChromeTheme`). It
+        // used to pin itself dark here, which is precisely how it came to
+        // disagree with the bars on the same screen.
+        content.overrideUserInterfaceStyle = .unspecified
         commentsEngagedID = id
         commentsContentVC = content
         // FOOTER CROSSFADE, zero layout churn BY CONSTRUCTION: the native
@@ -975,10 +1014,10 @@ final class SnapFeedViewController: UIViewController {
         content.didMove(toParent: self)
         let detail = content as? PostDetailViewController
         // The stream rests below the frosted strip (full-height scroll,
-        // inset content) and its rows end where the rail's column begins.
+        // inset content) and spans the FULL width — the rail that used to
+        // own a trailing column leaves with the rest of the page chrome.
         detail?.setEngagedInsets(
             top: cell.engagedCommentsTopInset(safeAreaTop: view.safeAreaInsets.top),
-            trailing: cell.commentsRailExclusionWidth,
             // KEEP-AND-STACK: the composer's rest band clears the NATIVE
             // TOOLBAR, not just the home indicator — the feed's own
             // settled safe-area bottom is exactly that threshold (the bar
@@ -1046,7 +1085,8 @@ final class SnapFeedViewController: UIViewController {
 
         let content = makeCommentsPanelContent(id)
         content.view.backgroundColor = .clear
-        content.overrideUserInterfaceStyle = .dark
+        // Inherited, exactly like the media panel — the cell decides.
+        content.overrideUserInterfaceStyle = .unspecified
         commentsEngagedID = id
         commentsContentVC = content
         commentsEngagementIsResting = true
@@ -1058,7 +1098,6 @@ final class SnapFeedViewController: UIViewController {
         let detail = content as? PostDetailViewController
         detail?.setEngagedInsets(
             top: cell.engagedCommentsTopInset(safeAreaTop: view.safeAreaInsets.top),
-            trailing: cell.commentsRailExclusionWidth,
             bottomInset: view.safeAreaInsets.bottom
         )
         // No close handler — a resting page is undismissable; the swipe
@@ -1238,8 +1277,6 @@ final class SnapFeedViewController: UIViewController {
         guard commentsEngagedID != nil else { return }
         // Belt and braces for non-animated/interrupted paths.
         let cell = engagedCell()
-        // A keyboard-session rail yield must never outlive the engagement.
-        cell?.setRailConcealed(false)
         cell?.setCommentsEngaged(false)
         if let content = commentsContentVC {
             content.willMove(toParent: nil)
@@ -1337,7 +1374,50 @@ final class SnapFeedViewController: UIViewController {
               let model = modelsByID[orderedIDs[index]] else { return }
         authorIdentityView.setAuthor(model, pipeline: imagePipeline)
         mediaAttributionView.setPost(model, pipeline: imagePipeline)
+        // The bars float over the PAGE, so their text has to know what kind
+        // of ground it is floating over. A media page is arbitrary and dark
+        // enough to want white-and-shadowed; a text page follows the system
+        // appearance, where white text on a white ground is just gone.
+        let overMedia = model.mediaURL != nil
+        applyChromeTheme(hasMedia: overMedia)
+        // The SHADOWS are not a theme question: they exist because the bars
+        // float over an arbitrary photo with no background of their own, and
+        // a text page's own ground makes them unnecessary. The colours now
+        // come from the theme above.
+        authorIdentityView.setOverMedia(overMedia)
+        mediaAttributionView.setOverMedia(overMedia)
         refreshBookmarkGlyph(for: model.id)
+    }
+
+    /// Puts the SCREEN's bars on the page's theme.
+    ///
+    /// The bars are the half of the page that the cell cannot reach: they
+    /// belong to the navigation controller, not to the cell's view tree, so
+    /// nothing propagates into them. Overriding the bars themselves — rather
+    /// than each item's custom view — is what matters, because the Liquid
+    /// Glass PLATTER behind an item is drawn by UIKit from the bar's own
+    /// traits. Styling only the contents produced the exact bug this fixes:
+    /// white text sitting on a light platter, over a dark page.
+    ///
+    /// Applied per settled page (`updateBarChrome`) and re-applied on
+    /// appearance, since the bars are shared with whatever the feed pushes.
+    private func applyChromeTheme(hasMedia: Bool) {
+        let style = SnapChromeTheme.style(hasMedia: hasMedia)
+        navigationController?.navigationBar.overrideUserInterfaceStyle = style
+        navigationController?.toolbar.overrideUserInterfaceStyle = style
+        overrideUserInterfaceStyle = style
+    }
+
+    /// Hands the shared bars back before anything else uses them.
+    ///
+    /// The feed does not own the navigation bar or the toolbar — it borrows
+    /// them under the keep-and-stack contract. A pushed profile inheriting
+    /// a dark-pinned bar because the feed happened to be showing a photo is
+    /// exactly the kind of leak that shared chrome invites.
+    private func releaseChromeTheme() {
+        navigationController?.navigationBar.overrideUserInterfaceStyle = .unspecified
+        navigationController?.toolbar.overrideUserInterfaceStyle = .unspecified
+        overrideUserInterfaceStyle = .unspecified
     }
 
     /// The settled page's model — what the toolbar's share/more act on.

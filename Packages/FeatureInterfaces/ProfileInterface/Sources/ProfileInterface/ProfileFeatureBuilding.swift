@@ -111,7 +111,27 @@ public protocol ProfileSwitcherPresenting: AnyObject {
     /// Pre-fetch + pre-format the account's profiles.
     func reload() async
     /// A synchronous switcher menu built from the last `reload`.
-    func makeMenu(onSwitch: @escaping () -> Void, onAddProfile: @escaping () -> Void) -> UIMenu
+    ///
+    /// `includesAddProfile` false builds a SWITCH-ONLY menu. Surfaces that
+    /// cannot reach the add-profile flow ask for that rather than passing an
+    /// empty handler — the row is appended unconditionally otherwise, and a
+    /// visible row that does nothing is worse than an absent one. The
+    /// comments composer's avatar is the case: it switches who is speaking,
+    /// and creating an identity belongs to the profile screen.
+    func makeMenu(
+        includesAddProfile: Bool,
+        onSwitch: @escaping () -> Void,
+        onAddProfile: @escaping () -> Void
+    ) -> UIMenu
+}
+
+public extension ProfileSwitcherPresenting {
+    /// The full menu, add-profile row included — what the profile header
+    /// wants, and the shape this protocol had before switch-only surfaces
+    /// existed.
+    func makeMenu(onSwitch: @escaping () -> Void, onAddProfile: @escaping () -> Void) -> UIMenu {
+        makeMenu(includesAddProfile: true, onSwitch: onSwitch, onAddProfile: onAddProfile)
+    }
 }
 
 public extension Notification.Name {

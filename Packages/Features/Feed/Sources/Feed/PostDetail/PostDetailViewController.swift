@@ -1,6 +1,7 @@
 import MediaCore
 import DesignSystem
 import FeedInterface
+import ProfileInterface
 import UIKit
 
 /// The stream's diffable identity space. Content is looked up at cell-
@@ -25,6 +26,13 @@ final class PostDetailViewController: UIViewController {
     private let viewModel: PostDetailViewModel
     private let imagePipeline: ImagePipeline
     private let mode: PostDetailMode
+    /// Builds the composer avatar's profile switcher menu. Nil on the pushed
+    /// comments screen and wherever the app wires none — the face is then a
+    /// plain, inert identity.
+    private let profileSwitcher: (any ProfileSwitcherPresenting)?
+    /// Watches for profile switches made ANYWHERE — this composer's menu, or
+    /// the profile header while the comments sit open underneath.
+    private let activeProfileObservers = NotificationObserverTokenBag()
 
     /// The stream surface: a compositional-list collection view driven by
     /// a diffable data source — thread folds and sort re-ranks land as
@@ -32,18 +40,20 @@ final class PostDetailViewController: UIViewController {
     /// never manual view surgery. Still a UIScrollView underneath, so the
     /// engaged inset/keyboard machinery operates on it unchanged.
     private lazy var collectionView: UICollectionView = {
-        let layout = UICollectionViewCompositionalLayout { [weak self] _, environment in
+        let layout = UICollectionViewCompositionalLayout { _, environment in
             var config = UICollectionLayoutListConfiguration(appearance: .plain)
             config.showsSeparators = false
             config.backgroundColor = .clear
             let section = NSCollectionLayoutSection.list(using: config, layoutEnvironment: environment)
-            // The trailing inset carries the engaged rail exclusion — the
-            // stream's rows end where the action rail's column begins.
+            // Symmetric margins: the stream owns the full width. (The
+            // trailing inset used to carry an exclusion for the shortcut
+            // rail's column; the engagement fades the rail now, so there is
+            // no column to leave clear.)
             section.contentInsets = NSDirectionalEdgeInsets(
                 top: Spacing.lg,
                 leading: Spacing.lg,
                 bottom: Spacing.lg,
-                trailing: Spacing.lg + (self?.railExclusion ?? 0)
+                trailing: Spacing.lg
             )
             return section
         }
@@ -53,8 +63,6 @@ final class PostDetailViewController: UIViewController {
         return view
     }()
     private var streamDataSource: UICollectionViewDiffableDataSource<StreamSection, StreamItem>!
-    /// The engaged rail exclusion, read by the layout's section provider.
-    private var railExclusion: CGFloat = 0
     /// Snapshot bookkeeping: the first apply lands without animation (a
     /// cold load has nothing to animate FROM); everything after — folds,
     /// sorts, submissions — animates natively.
@@ -89,13 +97,12 @@ final class PostDetailViewController: UIViewController {
     private var scrollBottomEngaged: NSLayoutConstraint?
     /// The engaged footer's frost: rows gliding behind the composer stay
     /// visible but dissolve into a LIGHT blur, so the bar reads over them
-    /// without the band reading as an overlay on the post. The system's `.regular`
-    /// material, which adapts to light and dark on its own. Clear at the band's top edge, attenuated
-    /// from `footerFrostSolidFraction` down to the screen's bottom; the
-    /// mask re-frames itself when the keyboard grows the band. HIT-INERT:
-    /// it must never eat the bar's taps or the swipe pan. Effect nil until
-    /// the engaged entrance IN A WINDOW; it rides the master spring via
-    /// `setComposerEntranceState`, the one seam already inside that block.
+    /// without the band reading as an overlay on the post. Clear at the
+    /// band's top edge, full material by the composer's top, solid to the
+    /// screen's bottom; the mask re-frames itself when the keyboard grows
+    /// the band. HIT-INERT: it must never eat the bar's taps or the swipe
+    /// pan. Effect nil until the engaged entrance IN A WINDOW; it rides the
+    /// master spring via `setComposerEntranceState`.
     private let composerBackdrop = ProgressiveFrostView(
         maskColors: SnapCommentsLayout.footerFrostMaskColors,
         maskLocations: [0, 0.5, 1],
@@ -116,10 +123,16 @@ final class PostDetailViewController: UIViewController {
     /// plus the tapped author's name for the placeholder.
     private var replyTarget: (parentID: String, name: String)?
 
-    init(viewModel: PostDetailViewModel, imagePipeline: ImagePipeline, mode: PostDetailMode = .full) {
+    init(
+        viewModel: PostDetailViewModel,
+        imagePipeline: ImagePipeline,
+        mode: PostDetailMode = .full,
+        profileSwitcher: (any ProfileSwitcherPresenting)? = nil
+    ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
         self.mode = mode
+        self.profileSwitcher = profileSwitcher
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -140,8 +153,66 @@ final class PostDetailViewController: UIViewController {
         viewModel.onEngagementChange = { [weak self] state in self?.renderEngagement(state) }
         viewModel.onCommentsChange = { [weak self] state in self?.renderComments(state) }
         viewModel.onComposingChange = { [weak self] composing in self?.renderComposing(composing) }
+        viewModel.onViewerIdentityChange = { [weak self] identity in
+            guard let self else { return }
+            composeBar.setViewerIdentity(identity, imagePipeline: imagePipeline)
+        }
+        configureProfileSwitcher()
         render(.loading)
         viewModel.viewDidLoad()
+    }
+
+    /// Arms the composer avatar's profile switcher.
+    ///
+    /// Two independent halves, and the observer is the one that matters:
+    ///
+    ///  • The MENU is built from the switcher's pre-formatted rows, which
+    ///    need one async `reload()` first. `makeMenu` is then synchronous, so
+    ///    the menu opens fully rendered on its first frame.
+    ///  • The OBSERVER adopts whatever profile becomes active, whether the
+    ///    switch came from this menu or from the profile header with the
+    ///    comments still open. Listening to the broadcast rather than to the
+    ///    menu's own callback is what keeps the composer's face and the
+    ///    identity that posts the comment from drifting apart.
+    private func configureProfileSwitcher() {
+        activeProfileObservers.tokens = [
+            NotificationCenter.default.addObserver(
+                forName: .activeProfileDidChange, object: nil, queue: .main
+            ) { [weak self] notification in
+                guard let id = ActiveProfileChange.profileID(from: notification) else { return }
+                MainActor.assumeIsolated { self?.viewModel.adoptActiveViewer(id) }
+            },
+        ]
+
+        guard let profileSwitcher else { return }
+        Task { [weak self] in
+            await profileSwitcher.reload()
+            guard let self else { return }
+            composeBar.setProfileMenu(profileSwitcher.makeMenu(
+                // Adding a profile is the Profile feature's flow and this
+                // composer has no route to it, so the row is omitted rather
+                // than shown inert.
+                includesAddProfile: false,
+                // The switch itself lands through the notification above;
+                // rebuilding here only re-marks which row is active, so the
+                // menu is correct the NEXT time it opens.
+                onSwitch: { [weak self] in self?.refreshProfileMenu() },
+                onAddProfile: {}
+            ))
+        }
+    }
+
+    private func refreshProfileMenu() {
+        guard let profileSwitcher else { return }
+        Task { [weak self] in
+            await profileSwitcher.reload()
+            guard let self else { return }
+            composeBar.setProfileMenu(profileSwitcher.makeMenu(
+                includesAddProfile: false,
+                onSwitch: { [weak self] in self?.refreshProfileMenu() },
+                onAddProfile: {}
+            ))
+        }
     }
 
     @objc private func handleStreamTap() {
@@ -429,15 +500,9 @@ final class PostDetailViewController: UIViewController {
         } else if view.window != nil, !composerBackdrop.isHidden, composerBackdrop.effect == nil {
             composerBackdrop.effect = UIBlurEffect(style: SnapCommentsLayout.frostStyle)
         }
-        // The footer frost rides the same seam — this method already runs
-        // inside the master spring in both directions, and the `effect`
-        // property is the one supported animatable path for blur. Window-
-        // guarded (real blurs contact the render server; headless CI test
-        // hosts must never pay), and gated on the engaged context (the
-        // backdrop stays hidden — and frost-free — on the pushed screen).
     }
 
-    func setEngagedInsets(top: CGFloat, trailing: CGFloat, bottomInset: CGFloat) {
+    func setEngagedInsets(top: CGFloat, bottomInset: CGFloat) {
         // The strip inset is the ONLY top authority in the engaged context:
         // the full-cell scroll view would otherwise also inherit the safe
         // area's automatic adjustment and double-inset the resting position.
@@ -468,10 +533,6 @@ final class PostDetailViewController: UIViewController {
         // The footer must cap the stack in the engaged context.
         view.bringSubviewToFront(composerBackdrop)
         view.bringSubviewToFront(composeBar)
-        // The rail exclusion feeds the list layout's section insets — the
-        // stream's rows end where the action rail's column begins.
-        railExclusion = max(0, trailing)
-        collectionView.collectionViewLayout.invalidateLayout()
 
         // The composer OCCUPIES THE NATIVE FOOTER'S BAND: the feed keeps
         // its toolbar structurally present for the whole engagement (the
@@ -530,8 +591,31 @@ final class PostDetailViewController: UIViewController {
         // this, and a re-render must not have to go back to the view model.
         let hadCaption = latestPost?.hasCaption == true
         latestPost = model
+        // The footer band's veil, from the post's own format — the model
+        // already knows, so this needs no signal from the host.
+        composerBackdrop.setVeilOpacity(
+            SnapCommentsLayout.frostVeilOpacity(hasMedia: model.hasMedia)
+        )
         if mode == .commentsOnly, model.hasCaption != hadCaption || hasAppliedStream {
-            applyStream(animated: hasAppliedStream)
+            // The apply that FIRST introduces the caption row lands without
+            // animation, even though the stream has been applied before.
+            //
+            // Diffable animates an insertion by fading the cell in, and the
+            // caption cell is a `UIVisualEffectView` — alpha on an effect
+            // view is unsupported and renders the material as a flat opaque
+            // grey for the fade's duration. That is the "bubble loads dark
+            // then flashes light" report: measured #8F8F8F → #A7A7A7 →
+            // #AEAEAE → #FCFCFC, an alpha ramp, while the glass logged
+            // `.light` at every step. The appearance was never wrong — the
+            // row was being faded in.
+            //
+            // There is nothing to animate FROM in any case: the caption is
+            // the post's own content arriving, exactly like the cold load
+            // the first apply already lands unanimated.
+            applyStream(animated: Self.animatesStreamApply(
+                hasAppliedStream: hasAppliedStream,
+                introducesCaption: model.hasCaption && !hadCaption
+            ))
         }
         monogramLabel.text = model.avatarMonogram
         nameLabel.text = model.authorName
@@ -711,6 +795,14 @@ final class PostDetailViewController: UIViewController {
             }
         }
         return items
+    }
+
+    /// Whether a stream apply may animate. A cold apply never does (nothing
+    /// to animate from), and neither does the one that introduces the
+    /// CAPTION row — see `configure` for why a faded-in glass bubble reads
+    /// as a dark-mode flash. Pure, so the rule is testable on its own.
+    static func animatesStreamApply(hasAppliedStream: Bool, introducesCaption: Bool) -> Bool {
+        hasAppliedStream && !introducesCaption
     }
 
     private func applyStream(animated: Bool, completion: (() -> Void)? = nil) {

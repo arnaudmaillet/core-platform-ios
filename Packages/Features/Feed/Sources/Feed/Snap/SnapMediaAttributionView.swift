@@ -45,9 +45,9 @@ final class SnapMediaAttributionView: UIView {
         coverView.heightAnchor.constraint(equalToConstant: AvatarImageView.barDiameter).isActive = true
 
         titleLabel.font = UIFont.preferredFont(forTextStyle: .footnote).withWeight(.semibold)
-        titleLabel.textColor = .white
+        titleLabel.textColor = .label
         trackLabel.font = .preferredFont(forTextStyle: .caption2)
-        trackLabel.textColor = UIColor.white.withAlphaComponent(0.75)
+        trackLabel.textColor = .secondaryLabel
 
         // The toolbar is transparent over arbitrary media; shadows keep the
         // text legible without a background (same treatment as the identity
@@ -87,6 +87,14 @@ final class SnapMediaAttributionView: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// The SHADOW only — the identity pill's rule, for the same reason: the
+    /// colours are semantic and come from the toolbar's theme.
+    func setOverMedia(_ overMedia: Bool) {
+        for label in [titleLabel, trackLabel] {
+            label.layer.shadowOpacity = overMedia ? 0.5 : 0
+        }
+    }
 
     /// Shows `model`'s attribution. A page change cross-fades the labels and
     /// reloads the cover (guarded against fast page-past); the same post is a
