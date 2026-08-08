@@ -433,32 +433,63 @@ struct SnapShortcutRailViewTests {
         #expect(compose.contentCompressionResistancePriority(for: .vertical) == UILayoutPriority(1))
     }
 
-    @Test func composeAnchorMirrorsTheTickerBand() throws {
-        let chrome = SnapChromeView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
-        chrome.configure(with: FeedItemDisplayModel(
-            id: PostID("post-3"),
-            authorID: ProfileID("profile-1"),
-            authorName: "Ana",
-            metaText: "@ana · 3m",
-            avatarURL: nil,
-            caption: "caption",
-            mediaURL: URL(string: "mock://media/3"),
-            mediaKind: .image,
-            thumbnailURL: nil,
-            audioText: nil
-        ))
-        let compose = try #require(chrome.subviews.compactMap { $0 as? SnapRailComposeButton }.first)
-        // No band content → no "+" anchor floating over bare media.
-        #expect(compose.isHidden == true)
-        // The band arriving brings its anchor with it…
-        chrome.updateCommentStreams(FeedViewModel.CommentStreams(
-            reactions: (0..<8).map { TickerCommentModel(id: "c\($0)", text: "fire \($0)") },
-            subtitles: [],
-            commentCount: 8
-        ))
-        #expect(compose.isHidden == UIAccessibility.isReduceMotionEnabled)
-        // …and an emptied stream takes it back down.
-        chrome.updateCommentStreams(.empty)
+    /// The "+" is FORMAT-scoped, not stream-scoped: every media page owns it
+    /// from `configure`, before any stream exists and whatever the stream
+    /// later turns out to hold. It used to mirror the ticker's hidden state,
+    /// which took the anchor away on exactly the pages that needed it most —
+    /// zero-comment posts, the sparse seed, and every page under Reduce
+    /// Motion.
+    @Test func composeAnchorIsPresentOnEveryMediaPageRegardlessOfStream() throws {
+        func chrome(mediaURL: URL?) -> SnapChromeView {
+            let chrome = SnapChromeView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+            chrome.configure(with: FeedItemDisplayModel(
+                id: PostID("post-3"),
+                authorID: ProfileID("profile-1"),
+                authorName: "Ana",
+                metaText: "@ana · 3m",
+                avatarURL: nil,
+                caption: "caption",
+                mediaURL: mediaURL,
+                mediaKind: .image,
+                thumbnailURL: nil,
+                audioText: nil
+            ))
+            return chrome
+        }
+        func anchor(in chrome: SnapChromeView) throws -> SnapRailComposeButton {
+            try #require(chrome.subviews.compactMap { $0 as? SnapRailComposeButton }.first)
+        }
+
+        // Configured, nothing loaded: the anchor is already there.
+        let media = chrome(mediaURL: URL(string: "mock://media/3"))
+        let compose = try anchor(in: media)
+        #expect(compose.isHidden == false)
+
+        // Every stream shape a media page can reach keeps it: unloaded,
+        // known-zero, gated-but-nonzero (no band), and a full band.
+        for streams: FeedViewModel.CommentStreams in [
+            .empty,
+            FeedViewModel.CommentStreams(reactions: [], subtitles: [], commentCount: 0),
+            FeedViewModel.CommentStreams(reactions: [], subtitles: [], commentCount: 2),
+            FeedViewModel.CommentStreams(
+                reactions: (0..<8).map { TickerCommentModel(id: "c\($0)", text: "fire \($0)") },
+                subtitles: [],
+                commentCount: 8
+            ),
+        ] {
+            media.updateCommentStreams(streams)
+            #expect(compose.isHidden == false)
+        }
+
+        // Text-only pages are the one exception: their engagement is a
+        // permanent resting state carrying its own composer, so the rail's
+        // anchor never belongs to them — and it is hidden from the FIRST
+        // frame, not merely faded once that engagement mounts.
+        let text = chrome(mediaURL: nil)
+        #expect(try anchor(in: text).isHidden == true)
+
+        // Reuse hands the next post a clean slate; configure re-establishes.
+        media.reset()
         #expect(compose.isHidden == true)
     }
 

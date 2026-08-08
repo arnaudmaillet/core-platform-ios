@@ -4,11 +4,13 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// The comments empty state's visibility contract: the "No comments yet"
-/// pill renders exactly when a media post's streams are LOADED with a zero
-/// count — never on the pre-load `.empty` default (no flash while a fetch
-/// is in flight), never on a gated-but-nonzero post (the surfaces' quiet
-/// is deliberate there), and never on a text-only page (the empty shell).
+/// The comment zone's FLOOR contract: the pill renders whenever a media
+/// post's live surfaces (ticker band, subtitle zone) render nothing on a
+/// LOADED stream — never on the pre-load `.empty` default (no flash while a
+/// fetch is in flight), never on a text-only page (the empty shell), and
+/// never alongside a surface that is already speaking. Its copy tells the
+/// two silences apart: "No comments yet" at zero, the count when the post
+/// has comments the gates declined to animate.
 @MainActor
 struct SnapCommentEmptyStateTests {
     private func makeChrome(mediaURL: URL? = URL(string: "mock://media/9")) -> SnapChromeView {
@@ -32,23 +34,26 @@ struct SnapCommentEmptyStateTests {
         try #require(chrome.subviews.compactMap { $0 as? SnapCommentEmptyStateView }.first)
     }
 
-    @Test func promptRendersOnlyOnKnownZero() throws {
+    @Test func promptFillsTheZoneWheneverTheSurfacesAreSilent() throws {
         let chrome = makeChrome()
         let prompt = try emptyState(in: chrome)
 
         // Configured but unloaded (the flight replica's and the dequeue
-        // pull's state): blank zone, no prompt.
+        // pull's state): blank zone, no prompt — nothing may flash while a
+        // fetch is in flight.
         #expect(prompt.isHidden == true)
         chrome.updateCommentStreams(.empty)
         #expect(prompt.isHidden == true)
 
-        // A loaded zero-comment stream is the one admitting state…
+        // A loaded zero-comment stream admits the pill…
         chrome.updateCommentStreams(FeedViewModel.CommentStreams(
             reactions: [], subtitles: [], commentCount: 0
         ))
         #expect(prompt.isHidden == false)
+        #expect(prompt.accessibilityLabel == SnapCommentEmptyStateView.promptText)
 
-        // …and comments arriving (e.g. the viewer composed one) retire it.
+        // …and comments arriving (e.g. the viewer composed one) hand the
+        // zone back to the band.
         chrome.updateCommentStreams(FeedViewModel.CommentStreams(
             reactions: (0..<8).map { TickerCommentModel(id: "c\($0)", text: "fire \($0)") },
             subtitles: [],
@@ -57,14 +62,62 @@ struct SnapCommentEmptyStateTests {
         #expect(prompt.isHidden == true)
     }
 
-    /// Gated-but-nonzero posts (below both surfaces' engagement minimums)
-    /// keep their deliberate quiet: the zone is blank because the gates
-    /// chose so, not because there is nothing to say.
-    @Test func sparseButNonzeroPostsShowNoPrompt() throws {
+    /// THE COMMON CASE, and the reason the floor exists. A sparse post's
+    /// comments fail both surfaces' engagement gates, so the band and the
+    /// zone both stand down — which used to leave an unexplained hole where
+    /// the comment system should be. The pill fills it, and says the honest
+    /// thing: the post HAS comments, here is how many.
+    @Test func gatedButNonzeroPostsShowTheCount() throws {
         let chrome = makeChrome()
         let prompt = try emptyState(in: chrome)
         chrome.updateCommentStreams(FeedViewModel.CommentStreams(
             reactions: [], subtitles: [], commentCount: 2
+        ))
+        #expect(prompt.isHidden == false)
+        #expect(prompt.accessibilityLabel == "2 comments")
+    }
+
+    /// The copy is the pill's whole job here — it must never claim "no
+    /// comments" about a post that has them, and it writes numbers the way
+    /// the subtitle zone's own count badge does.
+    @Test func promptCopyTracksTheCount() {
+        #expect(SnapCommentEmptyStateView.promptText(count: 0) == "No comments yet")
+        #expect(SnapCommentEmptyStateView.promptText(count: 1) == "1 comment")
+        #expect(SnapCommentEmptyStateView.promptText(count: 2) == "2 comments")
+        // Past a thousand it abbreviates through the subtitle zone's
+        // formatter, so the two comment surfaces never disagree.
+        #expect(SnapCommentEmptyStateView.promptText(count: 1200) == "1.2k comments")
+    }
+
+    /// A count landing on an ALREADY-shown pill re-renders in place. The
+    /// visibility guard used to be the first thing `setVisible` did, so a
+    /// gated post gaining a comment would have kept the stale copy.
+    @Test func countUpdatesInPlaceWithoutASecondEntrance() throws {
+        let chrome = makeChrome()
+        let prompt = try emptyState(in: chrome)
+        chrome.updateCommentStreams(FeedViewModel.CommentStreams(
+            reactions: [], subtitles: [], commentCount: 0
+        ))
+        #expect(prompt.accessibilityLabel == SnapCommentEmptyStateView.promptText)
+        chrome.updateCommentStreams(FeedViewModel.CommentStreams(
+            reactions: [], subtitles: [], commentCount: 1
+        ))
+        #expect(prompt.isHidden == false)
+        #expect(prompt.accessibilityLabel == "1 comment")
+    }
+
+    /// A speaking surface owns the zone; the floor never doubles it. The
+    /// subtitle zone alone (cues but no band-worthy reactions) is the case
+    /// a count-only predicate would have got wrong.
+    @Test func aSpeakingSurfaceKeepsTheFloorDown() throws {
+        let chrome = makeChrome()
+        let prompt = try emptyState(in: chrome)
+        chrome.updateCommentStreams(FeedViewModel.CommentStreams(
+            reactions: [],
+            subtitles: (0..<3).map {
+                SubtitleCue(id: "s\($0)", text: "A whole sentence worth reading \($0).")
+            },
+            commentCount: 3
         ))
         #expect(prompt.isHidden == true)
     }
@@ -78,6 +131,26 @@ struct SnapCommentEmptyStateTests {
             reactions: [], subtitles: [], commentCount: 0
         ))
         #expect(prompt.isHidden == true)
+    }
+
+    /// Alpha is shared between the pill's entrance and the comments
+    /// engagement's chrome fade, and this is the one surface that writes it
+    /// itself. Cached streams re-emit on every page activation, so a
+    /// re-emission arriving while the comments layout is open must settle at
+    /// the faded alpha instead of animating the pill back over it.
+    @Test func aStreamArrivingMidEngagementStaysFaded() throws {
+        let chrome = makeChrome()
+        let prompt = try emptyState(in: chrome)
+        chrome.setCommentsEngaged(true)
+        chrome.updateCommentStreams(FeedViewModel.CommentStreams(
+            reactions: [], subtitles: [], commentCount: 0
+        ))
+        #expect(prompt.alpha == 0)
+
+        // …and the pull-down brings it back with everything else.
+        chrome.setCommentsEngaged(false)
+        #expect(prompt.alpha == 1)
+        #expect(prompt.isHidden == false)
     }
 
     @Test func reuseResetHidesThePrompt() throws {
