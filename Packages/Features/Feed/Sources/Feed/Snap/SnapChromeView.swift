@@ -67,8 +67,9 @@ final class SnapChromeView: UIView {
     /// dissolve it. The rail reserves its bottom strip
     /// (`bottomReservedInset`) so nothing settles behind it; the band's
     /// bubbles are born under this glass and slide out of its seam.
-    /// Visibility mirrors the ticker's (no band → no anchor floating
-    /// over bare media).
+    /// Present on every MEDIA page and no text page — set from `configure`,
+    /// never from the stream (see there for why the band's hidden state is
+    /// the wrong authority for it).
     private let composeButton = SnapRailComposeButton()
     /// The rail's top edge as a cell-relative constant (see `buildLayout`).
     /// Optional: margins change during `init` before the layout exists.
@@ -106,6 +107,12 @@ final class SnapChromeView: UIView {
     var onCommentsTapped: (() -> Void)?
 
     private var representedID: PostID?
+
+    /// The chrome's current engagement fade — 1 resting, 0 fully engaged.
+    /// Only the empty-state pill reads it back (see `updateCommentStreams`);
+    /// every other surface is written by `setCommentsEngagedProgress` and
+    /// never writes its own alpha.
+    private var commentsEngagedProgress: CGFloat = 1
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -388,14 +395,11 @@ final class SnapChromeView: UIView {
         representedID = model.id
 
         // Text-only posts drop the MEDIA comment surfaces — the danmaku
-        // ticker, the subtitle zone, the scrim over the (absent) media —
-        // since those overlay a full-bleed image the page doesn't have.
-        // But the ACTION COLUMN (reactions rail + "+") is format-agnostic
-        // chrome: it is seeded on every post type. What it is not is
-        // state-agnostic — the engagement fades it (see
-        // `setCommentsEngagedProgress`), so a TEXT page, whose engagement
-        // is its permanent resting state, shows the column only for the
-        // frames before that resting engagement mounts.
+        // ticker, the subtitle zone, the empty-state floor, the scrim over
+        // the (absent) media — since those overlay a full-bleed image the
+        // page doesn't have. The reactions RAIL is still format-agnostic
+        // chrome (seeded on every post type below); the "+" that rides it
+        // is not — see its assignment.
         hasMedia = model.mediaURL != nil
         scrimView.isHidden = !hasMedia
         // Set the timestamp before the caption so the caption's didSet
@@ -403,13 +407,29 @@ final class SnapChromeView: UIView {
         timestampText = hasMedia ? model.timestampText : nil
         caption = hasMedia ? model.caption : nil
         applyCaptionVisibility()
+        // THE "+" IS FORMAT-SCOPED, NOT STATE-SCOPED. Every media page owns
+        // the compose anchor from its first frame — it is the entry point to
+        // the comment system, and a page whose comments are empty is exactly
+        // where writing the first one matters most. It used to mirror the
+        // ticker's hidden state (`updateCommentStreams`), which meant it
+        // vanished on every page the band declined to animate: zero-comment
+        // posts, the sparse seed, and any page at all under Reduce Motion —
+        // the anchor disappearing precisely where it was most useful.
+        //
+        // Text-only pages keep it hidden. Their engagement is a permanent
+        // resting state with its own composer, so the anchor there is chrome
+        // for a layout the page never shows; setting it here rather than
+        // leaving the engagement's fade to swallow it also kills the flash
+        // it used to make in the frames before that engagement mounts.
+        //
+        // Owned by `configure` (static chrome, like the rail's symbols), so
+        // it needs no stream to appear and the flight replica — which never
+        // receives one — draws the identical corner.
+        composeButton.isHidden = !hasMedia
         if !hasMedia {
             commentTicker.setComments([])
             subtitleView.setCues([])
             commentEmptyState.setVisible(false)
-            // The rail's "+" persists (media refines its visibility off
-            // the ticker in `updateCommentStreams`, which text skips).
-            composeButton.isHidden = false
         }
         // The reactions rail is seeded for EVERY post — the shared action
         // column. Static chrome, so it loads here (not via
@@ -601,18 +621,31 @@ final class SnapChromeView: UIView {
     func updateCommentStreams(_ streams: FeedViewModel.CommentStreams) {
         guard hasMedia else { return }
         commentTicker.setComments(streams.reactions)
-        // The "+" anchor exists exactly when the band beneath it does
-        // (mirrors the ticker's own hidden state, Reduce Motion included) —
-        // it must never float over bare media.
-        composeButton.isHidden = commentTicker.isHidden
         subtitleView.setCommentCount(streams.commentCount)
         subtitleView.setCues(streams.subtitles)
-        // KNOWN-zero only (`isLoaded` is the load/zero seam): an unloaded
-        // stream keeps the zone blank — the empty state must never flash
-        // while a fetch is in flight — and a sparse-but-nonzero post keeps
-        // its deliberate quiet (the surfaces' engagement gates, not an
-        // absence worth captioning).
-        commentEmptyState.setVisible(streams.isLoaded && streams.commentCount == 0)
+        // THE ZONE'S FLOOR. The pill fills the comment zone whenever the two
+        // live surfaces above render nothing — read off their RESOLVED
+        // hidden state rather than re-deriving their gates here, so the
+        // floor can never disagree with what is actually on screen (the
+        // ticker also hides itself under Reduce Motion, which no count
+        // predicate would have caught).
+        //
+        // This used to admit KNOWN-ZERO posts only, on the theory that a
+        // sparse post's blank zone was the gates speaking deliberately. It
+        // reads as broken instead: the sparse seed is the common case, so
+        // most media pages showed an unexplained hole where the comment
+        // system should be. The pill now covers both causes and says which
+        // one it is (see `promptText(count:)`) — zero gets "No comments
+        // yet", gated-but-nonzero gets the count.
+        //
+        // `isLoaded` stays the load/zero seam: an unloaded stream keeps the
+        // zone blank, so nothing flashes while a fetch is in flight.
+        let surfacesAreSilent = commentTicker.isHidden && subtitleView.isHidden
+        commentEmptyState.setVisible(
+            streams.isLoaded && surfacesAreSilent,
+            count: streams.commentCount,
+            restingAlpha: commentsEngagedProgress
+        )
     }
 
     /// Streams while the owning cell is on screen (visibility-scoped — a
@@ -654,6 +687,10 @@ final class SnapChromeView: UIView {
     /// caption return under the finger instead of appearing at the end.
     func setCommentsEngagedProgress(_ progress: CGFloat) {
         let alpha = min(max(0, progress), 1)
+        // Remembered because the empty-state pill's own entrance writes
+        // alpha too: a stream arriving mid-engagement must settle it here,
+        // not at full opacity over the comments layout.
+        commentsEngagedProgress = alpha
         captionLabel.alpha = alpha
         scrimView.alpha = alpha
         commentTicker.alpha = alpha
@@ -678,6 +715,11 @@ final class SnapChromeView: UIView {
     /// Clears post-specific content (cell reuse).
     func reset() {
         representedID = nil
+        // The cell disengages before it resets, so this is normally already
+        // 1 — but the chrome owns its own state, and a scaffold handed the
+        // next post while it still believes it is faded would keep that
+        // post's empty-state pill invisible.
+        commentsEngagedProgress = 1
         caption = nil
         applyCaptionVisibility()
         onCommentsTapped = nil
