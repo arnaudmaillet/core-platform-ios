@@ -2094,6 +2094,60 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// `CATransaction.flush()` is the part that matters: `layoutIfNeeded`
     /// settles geometry but does not draw, and `display()` is driven by a
     /// commit. Flushing forces that commit now.
+    /// Aims an ALREADY-BUILT feed at a different window of posts, so a second
+    /// hero push can reuse this controller instead of constructing one.
+    ///
+    /// Rebuilding is what the push was paying for. A fresh controller means
+    /// fresh bar items, and iOS 26 materialises their glass inside
+    /// `pushViewController` where it is the flight's stall — a cost that
+    /// cannot be pre-paid from outside the bar, only avoided by not incurring
+    /// it (see `ZoomFlightProfiler` and `holdBarChromeForFlight`). A reused
+    /// controller keeps its bar, its layout, and its cells.
+    ///
+    /// Reuse is only sound if NOTHING survives that describes the old window,
+    /// so this is deliberately a hard reset rather than a diff: an open
+    /// engagement is torn down, a warm panel is dropped, the pager returns to
+    /// the top, and the flight flags are cleared in case a previous flight
+    /// ended somewhere other than its landing. The corpus itself is the view
+    /// model's to replace.
+    ///
+    /// Returns false if this controller is not in a reusable state, so the
+    /// caller can build a fresh one rather than push a controller that is
+    /// still on screen.
+    @discardableResult
+    public func repoint(to ids: [PostID]) -> Bool {
+        guard navigationController == nil, parent == nil else { return false }
+        loadViewIfNeeded()
+
+        // The engagement first: it owns a child controller and a cell's
+        // interior, and both must be gone before the corpus underneath them
+        // changes. This is the same teardown the animated dismiss lands on,
+        // taken synchronously.
+        finishCommentsDisengagement()
+        // …including whatever that teardown just re-warmed for the OLD active
+        // page, which is about to stop existing.
+        discardPrewarmedComments()
+
+        // Flight state, in case a flight ended anywhere other than its
+        // landing — a cancelled push leaves these set, and a reused
+        // controller would then start its next flight already believing it is
+        // in one.
+        isAwaitingZoomPresentation = false
+        donatedLiveView = nil
+        flightChrome = nil
+        pageDriveStartOffset = nil
+        releaseHeldBarChrome()
+
+        // The tapped post is always the head of the window, so the pager goes
+        // back to the top. Done BEFORE the new items land, so the first
+        // snapshot applies against a settled offset rather than scrolling
+        // under one.
+        collectionView.setContentOffset(.zero, animated: false)
+
+        viewModel.repoint(to: ids)
+        return true
+    }
+
     public func prepareForHeroPresentation(in bounds: CGRect) {
         view.frame = bounds
         view.setNeedsLayout()
@@ -2166,6 +2220,12 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     }
 
     public func zoomTransitionDidEnd() {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
+            print("[feed-reuse] LANDED showing \(activePostID?.rawValue ?? "nil")"
+                  + " of \(orderedIDs.prefix(3).map(\.rawValue))")
+        }
+        #endif
         flightChrome = nil
         isAwaitingZoomPresentation = false
         // The bar's glass, held off the flight's critical path, goes on now.
