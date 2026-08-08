@@ -477,12 +477,12 @@ struct SnapCommentsPresentationTests {
     }
 
     /// REGRESSION, inverted (stranded center tile): the outbound push's
-    /// lifecycle resign runs the Ken Burns stop, which once had to settle
+    /// lifecycle resign used to run a Ken Burns stop, which had to settle
     /// onto a per-state resting transform — a blind identity stranded the
     /// docked tile as a frozen full-bleed center crop that the return could
-    /// not heal. With the media full-bleed in BOTH states there is no such
-    /// state to get wrong: identity is correct throughout, and the recede
-    /// the engagement does own lives on the card, out of the drift's reach.
+    /// not heal. The drift is gone entirely now (see
+    /// `theBackgroundMediaNeverScales`), so identity is not merely correct
+    /// throughout: it is the only value these surfaces ever hold.
     @Test func outboundResignLeavesTheBackgroundMediaAlone() throws {
         let cell = makeEngagedCell()
         let card = try mediaCard(of: cell)
@@ -505,6 +505,49 @@ struct SnapCommentsPresentationTests {
         cell.setCommentsEngaged(false)
         cell.reassertEngagedGeometry()
         #expect(card.transform == .identity)
+    }
+
+    /// THE MEDIA NEVER SCALES — not at rest, not while the comments open,
+    /// not while they close, not on any lifecycle edge in between.
+    ///
+    /// An 8s Ken Burns zoom to 1.12× used to run on photo pages. The
+    /// comments have to read over a still background, so engaging stopped it
+    /// (a snap back from wherever the zoom had reached) and disengaging
+    /// restarted it — beginning a zoom INSIDE the transition's own animation
+    /// block. From the reader's side that is the background scaling as the
+    /// comments open and close. Nothing sets a transform on these surfaces
+    /// any more, and this walks the whole cycle to say so.
+    @Test func theBackgroundMediaNeverScales() throws {
+        let cell = makeEngagedCell()
+        let card = try mediaCard(of: cell)
+        let media = card.imageView
+
+        func expectStill(_ stage: String) {
+            #expect(media.transform == .identity, "media scaled at: \(stage)")
+            #expect(card.transform == .identity, "card scaled at: \(stage)")
+            // The presentation layer too: a CA animation in flight would
+            // show here even while the model value reads identity, which is
+            // exactly how the drift used to hide from a transform check.
+            #expect(media.layer.animation(forKey: "transform") == nil, "media animating at: \(stage)")
+        }
+
+        expectStill("engaged")
+        cell.willBecomeActive()
+        expectStill("active + engaged")
+
+        cell.setCommentsEngaged(false)
+        expectStill("disengaged")
+        // The interactive dismissal's continuous drive, end to end.
+        for progress in stride(from: CGFloat(0), through: 1, by: 0.25) {
+            cell.setCommentsEngagementProgress(progress)
+            expectStill("progress \(progress)")
+        }
+        cell.setCommentsEngaged(true)
+        expectStill("re-engaged")
+        cell.didResignActive()
+        expectStill("resigned")
+        cell.prepareForReuse()
+        expectStill("reused")
     }
 
     /// REGRESSION, inverted (phantom tile band): the docked video surface
