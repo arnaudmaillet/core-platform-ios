@@ -542,6 +542,18 @@ final class PostDetailViewController: UIViewController {
         }
     }
 
+    /// Materializes the footer band's blur AHEAD of the engagement — the
+    /// composer's half of `SnapFeedCell.prematerializeEngagedChrome`, and the
+    /// same reasoning: build the material while nothing is moving.
+    ///
+    /// Called after the offstage pose, which nils the effect; the entrance
+    /// then finds it already built and skips.
+    func prematerializeComposerChrome() {
+        guard view.window != nil, !composerBackdrop.isHidden,
+              composerBackdrop.effect == nil else { return }
+        composerBackdrop.effect = UIBlurEffect(style: SnapCommentsLayout.frostStyle)
+    }
+
     /// Extra bottom room so resting content clears the composer band.
     private static let engagedFooterClearance: CGFloat = 62
 

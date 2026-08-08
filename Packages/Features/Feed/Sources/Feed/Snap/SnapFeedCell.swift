@@ -249,6 +249,23 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         contentView.layoutIfNeeded()
     }
 
+    /// Materializes the header band's blur AHEAD of the engagement.
+    ///
+    /// A material arrives through `effect`, and building one is render-server
+    /// work on the main thread — paid at engage it is part of the tap's frame
+    /// budget. Paid on the warm it is free, and the band is invisible either
+    /// way: its alpha is 0 in the dismissed pose, so a materialized-but-unseen
+    /// blur costs nothing to composite (a fully transparent layer is not
+    /// rendered).
+    ///
+    /// Window-guarded, like every glass surface here — headless CI never pays
+    /// for a real blur — and idempotent, so the engagement's own attempt finds
+    /// it already done.
+    func prematerializeEngagedChrome() {
+        guard window != nil, headerFrost.effect == nil, !headerFrost.isHidden else { return }
+        headerFrost.effect = UIBlurEffect(style: SnapCommentsLayout.frostStyle)
+    }
+
     /// The engaged stream's top inset — where its content rests, just
     /// below the screen chrome. A pure function of the safe area now: the
     /// caption scrolls inside the stream, so nothing above it has to be

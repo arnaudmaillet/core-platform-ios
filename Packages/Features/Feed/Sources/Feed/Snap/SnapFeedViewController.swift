@@ -1125,10 +1125,14 @@ final class SnapFeedViewController: UIViewController {
         // began. A disabled pan cannot receive the handoff, full stop.
         collectionView.isScrollEnabled = false
         // Sort is engagement-scoped — every fresh engagement starts at
-        // Recent, and the selection drives the STREAM.
-        commentSortButton.reset()
-        commentSortButton.onOrderChange = { [weak detail] order in
-            detail?.setCommentSortOrder(order)
+        // Recent, and the selection drives the STREAM. Already done for a
+        // warm panel (see `installCommentsPanel`), so this is the fallback
+        // path's copy.
+        if !wasPrewarmed {
+            commentSortButton.reset()
+            commentSortButton.onOrderChange = { [weak detail] order in
+                detail?.setCommentSortOrder(order)
+            }
         }
         setEngagedChrome(true, hasMedia: true, animated: true)
         UIView.animate(
@@ -1279,6 +1283,20 @@ final class SnapFeedViewController: UIViewController {
         detail?.setComposerEntranceState(offstage: true)
         detail?.setStreamTransitionProgress(1)
         cell.setCommentsEngagementProgress(1)
+        // EVERYTHING THE TAP WOULD OTHERWISE PAY FOR, paid here instead.
+        //
+        // Both blur bands materialize now (ordered after the offstage pose,
+        // which nils the composer's), and the sort menu is built now — a
+        // `UIMenu` with its actions is an allocation the tap does not need to
+        // make. All three are invisible or inert in the dismissed pose, and
+        // all three are idempotent, so the engagement's own attempts find
+        // the work already done.
+        cell.prematerializeEngagedChrome()
+        detail?.prematerializeComposerChrome()
+        commentSortButton.reset()
+        commentSortButton.onOrderChange = { [weak detail] order in
+            detail?.setCommentSortOrder(order)
+        }
         return detail
     }
 
@@ -1293,6 +1311,16 @@ final class SnapFeedViewController: UIViewController {
         prewarmedCommentsID = id
         engagedCellForPrewarm = cell
         installCommentsPanel(for: id, host: cell)
+    }
+
+    /// Warms the page that is active RIGHT NOW — the disengagement's tail,
+    /// where the settle seam has long since passed.
+    private func rewarmActivePageComments() {
+        guard let index = lifecycle.activeIndex, orderedIDs.indices.contains(index),
+              let cell = collectionView.cellForItem(
+                  at: IndexPath(item: index, section: 0)
+              ) as? SnapFeedCell else { return }
+        prewarmComments(for: orderedIDs[index], host: cell)
     }
 
     /// Drops a warm panel that was never engaged — the page moved on, or its
@@ -1488,6 +1516,11 @@ final class SnapFeedViewController: UIViewController {
         commentsEngagementIsResting = false
         restingLockApplied = false
         collectionView.isScrollEnabled = true
+        // REOPENING must be as cheap as opening. The warm is consumed by the
+        // engagement, and no further activation is coming for a page that
+        // never moved — so without this, engage → close → engage pays the
+        // full ~115ms on the second tap.
+        rewarmActivePageComments()
         // The bar's pixels were never touched (keep-and-stack), but its
         // ITEMS are engagement context — settle them for the paths that
         // never ran the animated mirror (orphaned teardown, instant
