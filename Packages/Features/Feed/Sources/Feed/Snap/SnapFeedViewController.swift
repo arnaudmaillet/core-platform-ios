@@ -1135,12 +1135,18 @@ final class SnapFeedViewController: UIViewController {
             }
         }
         setEngagedChrome(true, hasMedia: true, animated: true)
+        // LAYOUT FIRST, UNANIMATED. Inside the spring, `layoutIfNeeded`
+        // turns every frame the layout resolves into an animated property —
+        // and the tree under it is the whole comments panel. On a warm panel
+        // there is nothing pending anyway; on the fallback path a settled
+        // frame is what we want the spring to animate FROM, not something
+        // for it to interpolate towards.
+        UIView.performWithoutAnimation { cell.contentView.layoutIfNeeded() }
         UIView.animate(
             withDuration: SnapCommentsLayout.engageDuration, delay: 0,
             usingSpringWithDamping: 1, initialSpringVelocity: 0
         ) {
             cell.setCommentsEngaged(true)
-            cell.contentView.layoutIfNeeded()
             detail?.setStreamTransitionProgress(0)
             detail?.setComposerEntranceState(offstage: false)
         }
@@ -1606,6 +1612,7 @@ final class SnapFeedViewController: UIViewController {
                 } else if let cell = collectionView.cellForItem(
                     at: IndexPath(item: activate, section: 0)
                 ) as? SnapFeedCell {
+
                     // MEDIA pages warm their comments panel here instead of
                     // at tap time — see `prewarmComments`. The settle seam
                     // is where the page has stopped moving and nothing is
@@ -1781,6 +1788,15 @@ extension SnapFeedViewController: UICollectionViewDelegate {
             if lifecycle.activeIndex == indexPath.item,
                let model = modelsByID[id], model.mediaURL != nil {
                 prewarmComments(for: id, host: snapCell)
+                #if DEBUG
+                // `-engage-baseline`: run the frame-gap watch on a RESTING
+                // page instead of a transition, to learn what the floor is.
+                if ProcessInfo.processInfo.arguments.contains("-engage-baseline") {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                        self?.beginHitchWatch()
+                    }
+                }
+                #endif
             }
         }
         // Re-pull the cached streams BEFORE raising the visibility gate: a
