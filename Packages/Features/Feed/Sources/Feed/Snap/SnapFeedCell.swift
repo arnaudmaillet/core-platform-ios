@@ -342,11 +342,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         cardSwipeRecognizer.isEnabled = engaged
 
         if engaged {
-            // The drift yields for the engagement: a slowly zooming photo
-            // under body text is a readability problem, and the background
-            // should read as STILL while the reader is in the comments. It
-            // resumes on disengage (below).
-            stopKenBurns()
             if !pauseGlyph.isHidden {
                 pauseGlyphSuppressedByEngagement = true
                 pauseGlyph.isHidden = true
@@ -372,9 +367,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
                 pauseGlyphSuppressedByEngagement = false
                 pauseGlyph.isHidden = false
             }
-            // Image pages resume their drift where activation would have
-            // started it.
-            if isActive { startKenBurns() }
         }
     }
 
@@ -528,15 +520,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // different thing from blanking something we already had.
         if let cached = pipeline.cachedImage(for: url) {
             mediaCard.setImage(cached)
-            if isActive { startKenBurns() }
             return
         }
         imageTasks.append(Task { [weak self] in
             guard let image = try? await pipeline.image(for: url) else { return }
             guard let self, self.representedID == id else { return }
             self.mediaCard.setImage(image)
-            // If the media arrives after activation, kick the motion now.
-            if self.isActive { self.startKenBurns() }
         })
     }
 
@@ -578,7 +567,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             let view = mediaCard.renderView
             Task { await videoPlayback.play(url, in: view) }
         case .image:
-            startKenBurns()
+            // Nothing to start: a photo page's media is STATIC. The slow
+            // zoom that used to prove activation here is gone (see
+            // `SnapMediaCardView`), and video is the only kind with
+            // motion of its own.
+            break
         }
     }
 
@@ -893,30 +886,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // feed's own disappearance, where no `didEndDisplaying` fires.
         chrome.setTickerActive(false)
         chrome.setSubtitlesActive(false)
-        switch mediaKind {
-        case .video:
+        // Video is the only kind with anything to stop: a photo page's media
+        // is static, so resigning leaves it exactly as it was.
+        if mediaKind == .video {
             videoPlayback?.stop(mediaCard.renderView)
-        case .image:
-            stopKenBurns()
         }
-    }
-
-    /// Phase 1's visible proof that activation works: a slow zoom on the active
-    /// page's media. Phase 2 replaces this body with `player.play()`.
-    private func startKenBurns() {
-        // The background must read STILL while the reader is in the
-        // comments — the cell gates WHEN, the card owns the drift.
-        guard !isCommentsEngaged else { return }
-        mediaCard.startDrift()
-    }
-
-    private func stopKenBurns() {
-        // Unconditional identity. This used to have to compute a resting
-        // transform per state, because the engagement and the drift shared
-        // the surfaces' transform while the media docked; the engagement's
-        // recede now lives on the card itself, so the drift owns the
-        // surface transform outright and there is no state to consult.
-        mediaCard.stopDrift()
     }
 
     /// Re-asserts the engaged treatment after the screen re-appears from an
@@ -944,7 +918,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         onRequestComments = nil
         onRequestCommentsClose = nil
         onRequestCommentsPageDrive = nil
-        stopKenBurns()
         setPauseGlyphVisible(false)
         videoPlayback?.stop(mediaCard.renderView)
         representedID = nil
