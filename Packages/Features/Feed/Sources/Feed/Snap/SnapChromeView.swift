@@ -766,6 +766,10 @@ final class SnapChromeView: UIView {
     /// does instead of popping in after settle.
     func setSubtitlesActive(_ active: Bool) {
         subtitleView.setActive(active)
+        // The empty state rides the same seam — its label's dwell is a
+        // READING clock, so it starts when the page is actually on screen,
+        // not when the stream lands on a cell still off in the pager.
+        commentEmptyState.setActive(active)
     }
 
     /// Clears post-specific content (cell reuse).
@@ -784,6 +788,12 @@ final class SnapChromeView: UIView {
         applyBandPresence()
         composeButton.isHidden = true
         subtitleView.reset()
+        // Both, and in this order: `setActive(false)` clears the visibility
+        // seam the scaffold arrived with (the cell's streaming flag is not
+        // guaranteed to have been lowered), so the NEXT zero-comment post
+        // starts its label's reading dwell when it is actually looked at
+        // rather than the instant its stream lands.
+        commentEmptyState.setActive(false)
         commentEmptyState.setVisible(false)
         shortcutRail.reset()
     }
