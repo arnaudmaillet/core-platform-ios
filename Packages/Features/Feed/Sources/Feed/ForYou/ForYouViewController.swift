@@ -844,6 +844,10 @@ final class ForYouViewController: UIViewController {
         // invisible; in the flight's first frames it is the pause.
         (feed as? SnapFeedViewController)?
             .prepareForHeroPresentation(in: navigationController.view.bounds)
+        // And the bar's chrome comes off, to be put back at landing — the
+        // push's remaining stall is UIKit building its glass, and unlike the
+        // layout above that cost cannot be paid early from out here.
+        (feed as? SnapFeedViewController)?.holdBarChromeForFlight()
         navigationController.pushViewController(feed, animated: true)
         #if DEBUG
         zoomProfilerNote("push returned")
