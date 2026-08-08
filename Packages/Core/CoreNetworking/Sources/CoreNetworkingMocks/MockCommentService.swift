@@ -65,6 +65,21 @@ public final class MockCommentService: @unchecked Sendable {
     /// state's exit once the composer exists.
     private static let zeroCommentPostIDs: Set<String> = ["post-0009", "post-0010"]
 
+    /// Media posts seeded with a sparse set of comments that are ALL
+    /// reaction-shaped — below the band's `minTickerCount`, so the band
+    /// renders nothing and every one of them falls through to the subtitle
+    /// zone via its shape-blind pass. The zone then has to render "W" and
+    /// "🔥🔥" in a pill sized for sentences, which is the only place that
+    /// typography is exercised; without a fixture it can only be reasoned
+    /// about, not looked at. Adjacent to the zero-comment pair and in the
+    /// same order — post-0012 (video) then post-0013 (image).
+    private static let reactionOnlySparsePostIDs: Set<String> = ["post-0012", "post-0013"]
+
+    /// Deliberately the short end of the reaction bank: one grapheme, a bare
+    /// emoji run, and a two-letter token. Three is under the band's gate of
+    /// six, which is what routes them to the zone.
+    private static let reactionOnlySparseBank: [String] = ["W", "🔥🔥", "GG"]
+
     /// Micro-reaction bodies for the dense seed — the ticker is a reaction
     /// dump, so the bank is emoji runs and short slang, not sentences. The
     /// three entries at indices 20–22 intentionally violate the ticker's
@@ -163,7 +178,18 @@ public final class MockCommentService: @unchecked Sendable {
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
 
         let raw: [Comment_V1_CommentView]
-        if Self.denselySeededPostIDs.contains(postID) {
+        if Self.reactionOnlySparsePostIDs.contains(postID) {
+            let offset = Int(postID.suffix(4)) ?? 0
+            raw = Self.reactionOnlySparseBank.indices.map { position in
+                makeComment(
+                    id: "\(postID)-react-\(position)",
+                    postID: postID,
+                    author: authors[(offset + position) % authors.count].profileID,
+                    body: Self.reactionOnlySparseBank[position],
+                    ageMs: Int64(position + 1) * 4 * 60_000
+                )
+            }
+        } else if Self.denselySeededPostIDs.contains(postID) {
             // Rotate the bank by the post's index so each dense post gets a
             // different (but stable) slice, authors cycling the whole cast.
             let offset = Int(postID.suffix(4)) ?? 0
