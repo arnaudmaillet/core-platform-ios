@@ -72,6 +72,14 @@ final class SnapPostInfoCardView: UIView {
         // other row in the list. A cap existed only to defend a fixed header
         // region's height, and there is no such region now.
         captionLabel.numberOfLines = 0
+        // …and NO tail truncation to go with it. `.byTruncatingTail` is
+        // UILabel's default even at `numberOfLines = 0`, which makes a short
+        // frame silently swallow the rest of the caption — the label reports
+        // itself as fitting and the text just ends in an ellipsis. Word
+        // wrapping makes the same situation OVERFLOW instead, which is
+        // visible, measurable, and what a self-sizing row is supposed to
+        // resolve by growing.
+        captionLabel.lineBreakMode = .byWordWrapping
         captionLabel.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(captionLabel)
 
