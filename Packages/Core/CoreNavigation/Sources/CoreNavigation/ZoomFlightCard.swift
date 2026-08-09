@@ -62,6 +62,19 @@ public protocol ZoomFlightCard: UIView {
     /// source's own, over everything.
     var zoomRestingChrome: UIView? { get }
 
+    /// Whether that furniture fades out as the card becomes the page.
+    ///
+    /// True for a card whose furniture belongs to its SOURCE — a grid brick's
+    /// counters and play badge are the grid's, and leaving them lit over a
+    /// full-screen page would be furniture the page never had.
+    ///
+    /// False when the card has nothing else to carry. A text card's furniture
+    /// IS the post: its caption, which the destination also shows. Fading it
+    /// emptied the card at full screen and left a blank window before the page
+    /// arrived — visible in the first crossfade prototype as one clear frame of
+    /// nothing between the morph and the comments.
+    var zoomRestingChromeFadesOut: Bool { get }
+
 
     /// The surface live media renders on — non-nil only while the card is
     /// actually carrying live media. Typed as `UIView` to keep this module
@@ -120,6 +133,8 @@ public protocol ZoomFlightCard: UIView {
 }
 
 public extension ZoomFlightCard {
+    /// Fading out is the norm — most source furniture is its source's own.
+    var zoomRestingChromeFadesOut: Bool { true }
     var zoomLiveMediaIsDrawing: Bool { true }
     var zoomLiveMediaDebugState: String { "" }
     var zoomLiveMediaNativeSize: CGSize? { nil }

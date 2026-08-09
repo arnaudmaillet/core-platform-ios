@@ -246,6 +246,11 @@ final class PostGridFlightCard: UIView {
 extension PostGridFlightCard: ZoomFlightCard {
     var zoomRestingCornerRadius: CGFloat { style.cornerRadius }
 
+    /// A text card carries the post's own caption, and the page it lands on
+    /// shows that same caption. It rides the whole flight so the card is never
+    /// empty while the page fades in over it.
+    var zoomRestingChromeFadesOut: Bool { style != .listCard }
+
     var zoomRestingChrome: UIView? { restingChromeView }
 
     /// The live surface, but ONLY while this card still contains it.

@@ -2020,7 +2020,10 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // could not be captured (not engaged yet), which falls back to the
         // previous behaviour rather than flying the wrong layout.
         if let model = activeModel, model.mediaURL == nil {
-            let still = engagedFlightStill
+            // Nothing to hand over when the page fades itself in — the card
+            // carries only what is continuous (the caption), and the comments
+            // arrive as themselves.
+            let still = zoomCrossfadesDuringFlight ? nil : engagedFlightStill
             engagedFlightStill = nil
             return still
         }
@@ -2051,6 +2054,22 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     }
 
     public var zoomDestinationContentIsReady: Bool { !orderedIDs.isEmpty }
+
+    /// TEXT pages fade themselves in; media pages are revealed at landing.
+    ///
+    /// A media card can BE the page — same pixels, full-bleed — so the landing
+    /// swap is invisible and there is nothing to gain from a crossfade. A text
+    /// page is its COMMENTS, which a row card has none of, and every attempt to
+    /// stand in for them went through a photograph of the destination. Fading
+    /// the real one in has nothing to photograph.
+    public var zoomCrossfadesDuringFlight: Bool {
+        #if DEBUG
+        // `-text-flight-still`: the previous behaviour (fly a rendered still of
+        // the comment layout) for comparison in one binary.
+        if ProcessInfo.processInfo.arguments.contains("-text-flight-still") { return false }
+        #endif
+        return activeModel?.mediaURL == nil && !orderedIDs.isEmpty
+    }
 
     /// The render half of landing readiness: the active page's media area is
     /// compositing something (surface or poster). Nil cell — not realized
@@ -2162,7 +2181,8 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // moment that accessor is nil and the capture came back empty. The
         // tapped post is always the head of the window, which is item 0.
         engagedFlightStill = nil
-        if let id = orderedIDs.first, let model = modelsByID[id], model.mediaURL == nil {
+        if let id = orderedIDs.first, let model = modelsByID[id], model.mediaURL == nil,
+           !zoomCrossfadesDuringFlight {
             // MOUNT the comment layout rather than hoping it is already there.
             //
             // It is normally mounted by `willDisplay` during the layout above,

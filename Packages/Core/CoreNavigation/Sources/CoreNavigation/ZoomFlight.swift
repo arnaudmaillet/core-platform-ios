@@ -213,7 +213,7 @@ struct ZoomFlight {
     func poseAsPage(cornerRadius: CGFloat) {
         card.frame = pageFrame
         card.setZoomCornerRadius(cornerRadius)
-        card.zoomRestingChrome?.alpha = 0
+        card.zoomRestingChrome?.alpha = card.zoomRestingChromeFadesOut ? 0 : 1
         shadow.alpha = 0
         let center = CGPoint(x: pageFrame.width / 2, y: pageFrame.height / 2)
         if let surface = card.zoomLiveMediaSurface, !card.zoomLiveMediaTracksCardBounds {
@@ -238,7 +238,7 @@ struct ZoomFlight {
             size: CGSize(width: pageFrame.width * scale, height: pageFrame.height * scale)
         )
         card.setZoomCornerRadius(cornerRadius)
-        card.zoomRestingChrome?.alpha = 0
+        card.zoomRestingChrome?.alpha = card.zoomRestingChromeFadesOut ? 0 : 1
         shadow.alpha = 0
         let center = CGPoint(x: card.bounds.width / 2, y: card.bounds.height / 2)
         if let surface = card.zoomLiveMediaSurface {
