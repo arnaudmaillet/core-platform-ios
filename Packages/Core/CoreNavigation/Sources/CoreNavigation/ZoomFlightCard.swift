@@ -114,6 +114,11 @@ public protocol ZoomFlightCard: UIView {
     /// keeps the uniform-scale behaviour for cards that rely on it.
     var zoomLiveMediaTracksCardBounds: Bool { get }
 
+    /// Places the card's caption at `frame`, given in the card's PAGE-pose
+    /// coordinates, so it lands on the destination's own caption. Cards
+    /// without a caption ignore it.
+    func positionZoomCaption(at frame: CGRect)
+
     /// Rounds the card and any furniture that must round with it. Animatable:
     /// called inside an animation block, it sweeps.
     func setZoomCornerRadius(_ radius: CGFloat)
@@ -144,4 +149,5 @@ public extension ZoomFlightCard {
     var zoomLiveMediaTracksCardBounds: Bool { false }
     func prepareZoomLiveMediaForFlight(destinationSize: CGSize) {}
     func applyZoomRestingShadow(to layer: CALayer) {}
+    func positionZoomCaption(at frame: CGRect) {}
 }

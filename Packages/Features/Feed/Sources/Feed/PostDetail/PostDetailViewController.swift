@@ -761,6 +761,19 @@ final class PostDetailViewController: UIViewController {
     /// Marking it explicitly and laying it out is what produces the cells.
     /// Returns what the stream ended up holding, so a caller can trace a still
     /// that still looks wrong.
+    /// Where the caption row sits, in `space`.
+    ///
+    /// The flight lands its own caption here so the two are the same object as
+    /// far as the eye is concerned: the card's caption arrives exactly where
+    /// the page's is, and the page fading in underneath replaces it without
+    /// anything moving. Nil until the row exists.
+    func captionRowFrame(in space: UICoordinateSpace) -> CGRect? {
+        guard let indexPath = streamDataSource?.indexPath(for: .caption),
+              let attributes = collectionView.layoutAttributesForItem(at: indexPath)
+        else { return nil }
+        return collectionView.convert(attributes.frame, to: space)
+    }
+
     @discardableResult
     func settleStreamForCapture() -> String {
         view.setNeedsLayout()

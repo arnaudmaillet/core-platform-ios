@@ -922,13 +922,7 @@ final class ForYouViewController: UIViewController {
         // `prepareForHeroPresentation`. In the tap's own frame a stall is
         // invisible; in the flight's first frames it is the pause.
         (feed as? SnapFeedViewController)?
-            .prepareForHeroPresentation(
-                in: navigationController.view.bounds,
-                // The destination cannot know its own safe area yet — it is
-                // not in the hierarchy — and the panel it mounts during that
-                // call needs one. This is the same window's.
-                safeArea: navigationController.view.safeAreaInsets
-            )
+            .prepareForHeroPresentation(in: navigationController.view.bounds)
         navigationController.pushViewController(feed, animated: true)
         #if DEBUG
         zoomProfilerNote("push returned")

@@ -154,6 +154,13 @@ struct ZoomFlight {
         // rendered. No proxy for the content can move it. See
         // `ZoomFlightProfiler`.
 
+        // The card's caption goes where the PAGE keeps its caption, not where
+        // the row does. The card is at page pose right now, so the frame maps
+        // straight across; every pose after this scales it with the card.
+        if let captionFrame = destination?.zoomFlightCaptionFrame {
+            card.positionZoomCaption(at: captionFrame)
+        }
+
         let shadow = UIView(frame: sourceFrame)
         shadow.backgroundColor = .clear
         shadow.isUserInteractionEnabled = false

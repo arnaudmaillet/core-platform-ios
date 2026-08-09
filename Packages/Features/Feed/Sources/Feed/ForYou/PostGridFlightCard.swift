@@ -111,6 +111,9 @@ final class PostGridFlightCard: UIView {
     /// Only populated for `.listCard` — a text row's words, standing in for
     /// the row while it flies.
     private let captionLabel = UILabel()
+    /// Held so the caption can be re-placed onto the destination's own caption
+    /// once the flight knows where that is.
+    private var captionConstraints: [NSLayoutConstraint] = []
 
     init(post: GalleryPost, cover: UIImage?, style: Style) {
         self.style = style
@@ -153,17 +156,23 @@ final class PostGridFlightCard: UIView {
             captionLabel.adjustsFontForContentSizeCategory = true
             captionLabel.textColor = .label
             captionLabel.numberOfLines = 0
-            captionLabel.constrain(in: restingChromeView) { parent in
+            captionLabel.translatesAutoresizingMaskIntoConstraints = false
+            restingChromeView.addSubview(captionLabel)
+            // The ROW's placement to begin with — correct at the source end,
+            // and replaced by the destination's the moment the flight knows it
+            // (`positionZoomCaption`).
+            captionConstraints = [
                 captionLabel.topAnchor.constraint(
-                    equalTo: parent.topAnchor, constant: PostGridListRowCell.captionTopInset
-                )
+                    equalTo: restingChromeView.topAnchor, constant: PostGridListRowCell.captionTopInset
+                ),
                 captionLabel.leadingAnchor.constraint(
-                    equalTo: parent.leadingAnchor, constant: PostGridListRowCell.captionInset
-                )
+                    equalTo: restingChromeView.leadingAnchor, constant: PostGridListRowCell.captionInset
+                ),
                 captionLabel.trailingAnchor.constraint(
-                    equalTo: parent.trailingAnchor, constant: -PostGridListRowCell.captionInset
-                )
-            }
+                    equalTo: restingChromeView.trailingAnchor, constant: -PostGridListRowCell.captionInset
+                ),
+            ]
+            NSLayoutConstraint.activate(captionConstraints)
             // …and the METRIC LINE, because the row hides whole for this
             // flight and the card is standing in for all of it. Carrying only
             // the caption left the counters and the age missing for the
@@ -206,6 +215,24 @@ final class PostGridFlightCard: UIView {
             counters.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -7)
             counters.trailingAnchor.constraint(lessThanOrEqualTo: parent.trailingAnchor, constant: -8)
         }
+    }
+
+    /// Lands the caption on the destination's, so the page fading in
+    /// underneath replaces it without anything moving. `frame` is in the
+    /// card's page-pose coordinates, which is the space these constants live
+    /// in — every pose after this scales the label with the card.
+    func positionZoomCaption(at frame: CGRect) {
+        guard style == .listCard, bounds.width > 0 else { return }
+        NSLayoutConstraint.deactivate(captionConstraints)
+        captionConstraints = [
+            captionLabel.topAnchor.constraint(equalTo: restingChromeView.topAnchor, constant: frame.minY),
+            captionLabel.leadingAnchor.constraint(equalTo: restingChromeView.leadingAnchor, constant: frame.minX),
+            captionLabel.trailingAnchor.constraint(
+                equalTo: restingChromeView.trailingAnchor, constant: frame.maxX - bounds.width
+            ),
+        ]
+        NSLayoutConstraint.activate(captionConstraints)
+        layoutIfNeeded()
     }
 
     /// The row's own closing line, rebuilt: views, reactions and comments

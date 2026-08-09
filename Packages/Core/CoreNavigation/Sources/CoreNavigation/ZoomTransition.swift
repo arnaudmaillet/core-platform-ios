@@ -168,6 +168,17 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// row's caption). It simply stops pretending to be the rest.
     var zoomCrossfadesDuringFlight: Bool { get }
 
+    /// Where the destination will show the post's caption, in its own view's
+    /// coordinates, or nil if it shows none.
+    ///
+    /// A hero is only continuous for the elements that exist at BOTH ends. A
+    /// caption does — the source row has one and the page has one — so the
+    /// card lands its copy on the page's, and the page fading in underneath
+    /// takes over without anything moving. Left alone, the card's caption sat
+    /// where the ROW puts one and the page's appeared somewhere else, which
+    /// reads as two captions rather than one.
+    var zoomFlightCaptionFrame: CGRect? { get }
+
     /// Whether the destination's active page is actually COMPOSITING its
     /// media area — a drawing surface, or a poster/cover in place.
     ///
@@ -273,6 +284,7 @@ public protocol ZoomTransitionDestination: AnyObject {
 public extension ZoomTransitionDestination {
     var zoomDestinationContentIsReady: Bool { true }
     var zoomCrossfadesDuringFlight: Bool { false }
+    var zoomFlightCaptionFrame: CGRect? { nil }
     var zoomDestinationMediaIsRendering: Bool { true }
     func zoomMirrorLiveMedia(onto surface: UIView) -> Bool { false }
     func zoomDonateLiveMediaView() -> UIView? { nil }
