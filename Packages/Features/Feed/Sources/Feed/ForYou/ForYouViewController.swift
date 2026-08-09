@@ -1532,6 +1532,41 @@ final class ForYouViewController: UIViewController {
         }
     }
 
+    /// Steps the active page down the corpus, reporting at each stop what the
+    /// page thinks SHOULD be playing.
+    ///
+    /// The independent half matters as much as the scrolling: the page
+    /// recomputes the visible video rows and their distance from the viewport
+    /// centre from geometry, and `[grid-rank]` reports what the coordinator
+    /// actually chose. Agreement between two answers derived separately is the
+    /// evidence; the coordinator agreeing with itself would be none.
+    private func scheduleScrollDemo(steps: Int) {
+        var attempts = 0
+        func begin() {
+            attempts += 1
+            // Wait for content: a page with nothing in it scrolls nowhere, and
+            // a fixed delay silently no-ops under `-mock-latency`.
+            guard let page = pager.page(for: viewModel.format), page.debugScrollableHeight > 0 else {
+                if attempts < 80 { DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: begin) }
+                return
+            }
+            for step in 0...steps {
+                // 2.5s a stop: a start is asynchronous (the URL resolves, then
+                // the player attaches), so a shorter dwell reports the previous
+                // stop's answer.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5 * Double(step)) { [weak self] in
+                    guard let self, let page = pager.page(for: viewModel.format) else { return }
+                    let target = min(page.debugScrollableHeight,
+                                     CGFloat(step) * page.debugViewportHeight * 0.6)
+                    print("[foryou-scroll] step \(step)/\(steps) y=\(Int(target)) "
+                          + "expect=\(page.debugVisibleVideoRanking.map { "\($0.id)@\($0.distance)" })")
+                    page.debugScroll(toY: target)
+                }
+            }
+        }
+        begin()
+    }
+
     /// `-foryou-open <index>` taps a tile once content has landed (the sim
     /// injects no taps); `-foryou-source <trending|recent|following>` drives the
     /// drop-down (a `UIMenu` needs a real tap to open); and
@@ -1578,6 +1613,15 @@ final class ForYouViewController: UIViewController {
                     self?.tabBar.select(index)
                 }
             }
+        }
+        // `-foryou-scroll-demo <steps>` walks the active page down the corpus,
+        // pausing long enough at each stop for playback to settle. The only way
+        // to exercise autoplay's ranking under scroll: the reconcile that
+        // decides which videos play is driven by scroll callbacks, and the
+        // simulator injects no touches.
+        if let position = arguments.firstIndex(of: "-foryou-scroll-demo"),
+           position + 1 < arguments.count, let steps = Int(arguments[position + 1]) {
+            scheduleScrollDemo(steps: steps)
         }
         guard let position = arguments.firstIndex(of: "-foryou-open"), position + 1 < arguments.count,
               let index = Int(arguments[position + 1])
