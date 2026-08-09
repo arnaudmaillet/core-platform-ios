@@ -475,6 +475,27 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
         #endif
         let hasMedia = model.mediaURL != nil
+        #if DEBUG
+        // `-media-audit`: every page that configures WITHOUT a media payload,
+        // and under `-rich-media` whether that is by design.
+        //
+        // The distinction this exists to draw: a text-only post rendering as a
+        // coloured page is the product working, while a MEDIA post arriving
+        // with no URL — or with one that never resolves — is a pipeline
+        // failure, and the two are indistinguishable on screen. Both look like
+        // "a solid colour where a photo should be".
+        if ProcessInfo.processInfo.arguments.contains("-media-audit") {
+            let rich = ProcessInfo.processInfo.arguments.contains("-rich-media")
+            if !hasMedia {
+                print("[media-audit] \(model.id.rawValue) NO MEDIA PAYLOAD"
+                      + " kind=\(model.mediaKind) rich=\(rich)"
+                      + " caption=\(model.caption?.isEmpty == false ? "yes" : "no")")
+            } else {
+                print("[media-audit] \(model.id.rawValue) media kind=\(model.mediaKind)"
+                      + " url=\(model.mediaURL?.absoluteString ?? "-")")
+            }
+        }
+        #endif
         // THE PAGE'S GROUND. A media page is black because black is what
         // letterboxing should be — the surface exists to disappear behind a
         // photo. A TEXT page has nothing to disappear behind, so its ground
@@ -594,7 +615,22 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             return
         }
         imageTasks.append(Task { [weak self] in
-            guard let image = try? await pipeline.image(for: url) else { return }
+            let image: UIImage?
+            do {
+                image = try await pipeline.image(for: url)
+            } catch {
+                // A post that HAS a media URL and cannot load it leaves the
+                // card on its floor — visually identical to a text page, and
+                // silent until now. This is the failure the audit is for.
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("-media-audit") {
+                    print("[media-audit] \(id.rawValue) IMAGE LOAD FAILED"
+                          + " url=\(url.absoluteString) error=\(error)")
+                }
+                #endif
+                return
+            }
+            guard let image else { return }
             guard let self, self.representedID == id else { return }
             self.mediaCard.setImage(image)
         })

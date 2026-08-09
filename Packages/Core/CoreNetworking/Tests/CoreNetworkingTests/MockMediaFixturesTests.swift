@@ -64,6 +64,59 @@ struct MockMediaFixturesTests {
         }
     }
 
+    /// Under `.realAssets`, every media post must draw its URL FROM the
+    /// catalog — no seed group may invent its own.
+    ///
+    /// The catalog itself was never the problem, which is why the fixture
+    /// tests above all passed while `-rich-media` was visibly broken: they
+    /// check what is IN the catalog, not that the dataset uses it. The
+    /// "just arrived" group seeded `mock://media/new-N` unconditionally, so
+    /// the five newest posts — the first pages the feed opens on — kept their
+    /// synthesized placeholders under the flag, and a synthesized video
+    /// placeholder is a flat colour. Reported as "some posts render as a plain
+    /// solid colour with `-rich-media`".
+    ///
+    /// Not "no `mock://` at all": the catalog deliberately declares one
+    /// synthetic square clip, because no stable public square encode exists
+    /// and square never autoplays. Coming from the catalog is the invariant;
+    /// being remote is `everyAutoplayableRealAssetFixtureIsARealEncode`'s.
+    @Test func everyRealAssetPostDrawsItsMediaFromTheCatalog() {
+        let dataset = MockSocialDataset(mediaCatalog: .realAssets)
+        let catalogVideos = Set(MockMediaFixtures.videos.map(\.url))
+        for post in dataset.posts {
+            guard let media = post.media else { continue }
+            let isRemote = media.url.hasPrefix("https://")
+            #expect(isRemote || catalogVideos.contains(media.url),
+                    "\(post.postID) bypasses the catalog: \(media.url)")
+        }
+    }
+
+    /// The arrivals specifically, because they are the group that regressed
+    /// and the one a corpus-wide sweep can hide: they are five posts among
+    /// 120, so a single missed branch is under 5% of the assertions above.
+    @Test func theJustArrivedPostsHonourTheRealAssetCatalog() {
+        let dataset = MockSocialDataset(mediaCatalog: .realAssets)
+        let arrivals = dataset.posts.filter { $0.postID.hasPrefix("post-new-") }
+        #expect(!arrivals.isEmpty)
+        for post in arrivals where post.media != nil {
+            #expect(post.media?.url.hasPrefix("mock://media/new-") == false,
+                    "\(post.postID) still seeds an ad-hoc placeholder")
+            #expect(post.media?.url.hasPrefix("mock://video/new-") == false,
+                    "\(post.postID) still seeds an ad-hoc placeholder")
+        }
+    }
+
+    /// …and the default catalog stays entirely offline, which is what keeps
+    /// CI and previews network-free.
+    @Test func theSyntheticCatalogNeverReachesTheNetwork() {
+        let dataset = MockSocialDataset()
+        for post in dataset.posts {
+            guard let media = post.media else { continue }
+            #expect(media.url.hasPrefix("mock://"),
+                    "\(post.postID) escapes the offline catalog: \(media.url)")
+        }
+    }
+
     /// Landscape and square still come from this catalog. Portrait coverage
     /// deliberately moved to the DEFAULT synthetic catalog: every stable public
     /// encode is landscape, and declaring one as 9:16 would mis-drive
