@@ -747,6 +747,32 @@ final class PostDetailViewController: UIViewController {
         likeButton.configuration = config
     }
 
+    /// Forces the stream to produce its cells NOW, for a caller that is about
+    /// to photograph it.
+    ///
+    /// A diffable apply commits its snapshot immediately, but cells are
+    /// dequeued in the next layout pass — and the hero flight's still is taken
+    /// in the same turn as the mount, so it caught the skeleton the stream had
+    /// a moment earlier with the real rows already in the data source behind
+    /// it. Laying out the controller's root view is not enough on its own: the
+    /// apply happens INSIDE the feed's own layout pass, so the collection view
+    /// is not marked dirty again until that pass unwinds.
+    ///
+    /// Marking it explicitly and laying it out is what produces the cells.
+    /// Returns what the stream ended up holding, so a caller can trace a still
+    /// that still looks wrong.
+    @discardableResult
+    func settleStreamForCapture() -> String {
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+        collectionView.setNeedsLayout()
+        collectionView.layoutIfNeeded()
+        let items = streamDataSource?.snapshot().numberOfItems ?? -1
+        return "items=\(items) visible=\(collectionView.visibleCells.count)"
+            + " bounds=\(Int(collectionView.bounds.width))x\(Int(collectionView.bounds.height))"
+            + " loaded=\(commentsLoaded)"
+    }
+
     private func renderComments(_ state: PostDetailViewModel.CommentsState) {
         // Comments-only contexts already carry a "Comments" title (the nav
         // bar when pushed, the panel header when sheeted) — the inline

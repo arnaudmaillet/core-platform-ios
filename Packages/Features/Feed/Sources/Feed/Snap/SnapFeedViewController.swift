@@ -2170,10 +2170,14 @@ extension SnapFeedViewController: ZoomTransitionDestination {
             // of laid-out rows. Without this pass the capture caught the
             // skeleton the panel had a moment earlier, with the real comments
             // already in hand behind it.
-            commentsContentVC?.view.setNeedsLayout()
-            commentsContentVC?.view.layoutIfNeeded()
+            let state = (commentsContentVC as? PostDetailViewController)?.settleStreamForCapture()
             view.layoutIfNeeded()
             CATransaction.flush()
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
+                print("[still] stream \(state ?? "no panel")")
+            }
+            #endif
             let head = collectionView.cellForItem(at: IndexPath(item: 0, section: 0))
             engagedFlightStill = (head as? SnapFeedCell)?.engagedLayoutSnapshot()
         }

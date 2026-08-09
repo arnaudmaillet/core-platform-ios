@@ -1132,7 +1132,14 @@ final class ForYouViewController: UIViewController {
         // Before the tap is the only useful moment: the panel mounts during
         // `prepareForHeroPresentation`, in the same turn as the push, so a
         // fetch started there cannot land in time however light it is.
-        let textIDs = visible.filter { $0.kind == .text }.map(\.id)
+        // The PAGE's list, not the view model's. They are not the same order:
+        // the page groups the arrivals into their own "New" section and shows
+        // them first, so the view model's leading 12 skipped every arrival —
+        // and the arrivals are exactly the posts a viewer opens first. It is
+        // also the list `openFeed` indexes into, so warming from it means
+        // warming the post that will actually be tapped.
+        let onPage = pager.posts(for: viewModel.format).prefix(12)
+        let textIDs = onPage.filter { $0.kind == .text }.map(\.id)
         guard !textIDs.isEmpty, let prefetchTopComments else { return }
         Task { for id in textIDs { await prefetchTopComments(id) } }
     }
