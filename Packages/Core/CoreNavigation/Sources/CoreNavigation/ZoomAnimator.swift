@@ -319,6 +319,12 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // card lands.
         animator.addAnimations({ dim.alpha = 1 }, delayFactor: 0.35)
         animator.addCompletion { _ in
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
+                print(String(format: "[zoom] present completion at +%.1f ms",
+                             ZoomFlightProfiler.shared.elapsedMilliseconds))
+            }
+            #endif
             if context.transitionWasCancelled {
                 // REVERSED push: the grid is staying. The card has already been
                 // animated back onto the tile, so this only has to put the tile
@@ -377,6 +383,15 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             //
             // Everything below stays in one block so the ordering note above
             // still holds: reveal, THEN adopt the surface, then drop the card.
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
+                let d = self.destination
+                print(String(format: "[zoom] reveal gate armed at +%.1f ms (content=%@ media=%@)",
+                             ZoomFlightProfiler.shared.elapsedMilliseconds,
+                             d?.zoomDestinationContentIsReady.description ?? "-",
+                             d?.zoomDestinationMediaIsRendering.description ?? "-"))
+            }
+            #endif
             Self.whenReady(ceiling: Self.maximumHydrationHold,
                            afterTicks: 1,
                            condition: { [weak destination = self.destination] in

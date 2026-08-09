@@ -1995,6 +1995,22 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// mid-flight — the scaffold's geometry is data-independent, so late text
     /// never moves anything.
     public func zoomFlightChrome() -> UIView? {
+        // A TEXT page has no resting chrome to replicate, because it is never
+        // at rest: it mounts its comment layout on `willDisplay` and stays
+        // there (`presentRestingComments`). The replica below is configured at
+        // REST, so a text post's flight crossfaded INTO the media layout —
+        // rail, subtitle zone, the empty media card — and the comment layout
+        // only appeared when the card was removed. That is the reported "wrong
+        // mode for the whole flight, snapping at the last frame", and it is
+        // the replica's doing: the destination itself is already engaged
+        // before the push (`destinationEngaged=true` at flight-build time).
+        //
+        // There is nothing to replace it with. In comment layout the caption
+        // belongs to the comments child, not the chrome, so an engaged replica
+        // is an empty view. The card carries the SOURCE's caption the whole
+        // way instead (`zoomRestingChromeFadesOut`) — the one thing genuinely
+        // continuous between the row and the page.
+        if activeModel?.mediaURL == nil { return nil }
         let chrome = SnapChromeView()
         chrome.isUserInteractionEnabled = false
         // Captured, not ambient: the replica must render at the live cell's
