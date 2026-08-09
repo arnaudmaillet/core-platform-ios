@@ -42,8 +42,8 @@ public final class PostGridListRowCell: UICollectionViewCell {
     /// frame, because nothing in the air was standing in for them.
     ///
     /// The invariant, in one line: CONCEAL EXACTLY WHAT THE FLIGHT
-    /// REPRODUCES. A tile is its media, so the tile hides whole; a media row
-    /// is not, so it does not; a TEXT row flies its whole card, so it does.
+    /// REPRODUCES. A tile is its media, so the tile hides whole; a row is not,
+    /// so it does not. A text row never flies at all — it pushes natively.
     ///
     /// Alpha, not `isHidden`, and that is load-bearing: `mediaHeroRect`
     /// reports nil for a hidden preview, so hiding it would make the row
@@ -54,16 +54,6 @@ public final class PostGridListRowCell: UICollectionViewCell {
         playBadge.alpha = concealed ? 0 : 1
     }
 
-    /// The whole card's rect in this cell's own space.
-    ///
-    /// What a TEXT row flies. A text row has no media, so there is no part of
-    /// it that is "the thing being opened" — the card IS the post, and the
-    /// flight carries the card. Media rows keep flying `mediaHeroRect`,
-    /// because there the media is the element continuous with the page.
-    public var cardHeroRect: CGRect {
-        layoutIfNeeded()
-        return card.frame
-    }
 
     /// The card's own rounding and fill, so a flight impersonating this row
     /// is its twin rather than an approximation of it. Restating either as a

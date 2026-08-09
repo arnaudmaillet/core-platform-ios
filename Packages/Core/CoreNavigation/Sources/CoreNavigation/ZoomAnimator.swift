@@ -216,19 +216,6 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // its items ("Maps" → back + author capsule) natively alongside this
         // animator. The card flies beneath it.
         destination?.setZoomContentHidden(true)
-        // A destination that fades ITSELF in stays hidden only until the
-        // animator starts; the alpha ramp below is what reveals it, over the
-        // spring, underneath the card. The card is inserted BELOW `toView`, so
-        // a rising destination progressively covers it — the crossfade is the
-        // z-order, not a second animation to keep in sync.
-        let crossfades = destination?.zoomCrossfadesDuringFlight ?? false
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
-            print("[flight] crossfades=\(crossfades) toViewAlpha=\(toView.alpha)"
-                  + " sourceFrame=\(Int(sourceFrame.width))x\(Int(sourceFrame.height))"
-                  + " page=\(Int(pageFrame.width))x\(Int(pageFrame.height))")
-        }
-        #endif
 
         let flight = ZoomFlight.build(
             source: source, destination: destination, sourceFrame: sourceFrame, pageFrame: pageFrame
@@ -337,19 +324,6 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // rides this one delayed instead — which keeps what the curve was FOR:
         // the map reads through for most of the flight and goes to black as the
         // card lands.
-        if crossfades {
-            // DELAYED, and the first prototype is why. Started at t=0 the page
-            // was legible within ~80 ms of a 550 ms flight and the card's
-            // growth was never visible: the row card and the page are both
-            // light, so even 60% alpha reads as "arrived", and the whole thing
-            // became a cross-dissolve with a hero underneath it that nobody
-            // could see.
-            //
-            // Tail-weighted instead, the same shape and for the same reason as
-            // the dim: the card owns the first half — which is the half that
-            // carries the morph — and the page takes over as it lands.
-            animator.addAnimations({ toView.alpha = 1 }, delayFactor: 0.45)
-        }
         animator.addAnimations({ dim.alpha = 1 }, delayFactor: 0.35)
         animator.addCompletion { _ in
             #if DEBUG

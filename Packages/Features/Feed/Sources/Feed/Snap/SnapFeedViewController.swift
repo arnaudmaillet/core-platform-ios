@@ -90,9 +90,6 @@ final class SnapFeedViewController: UIViewController {
     /// mid-flight (cold tap) can still fill in the replica's labels; the card
     /// owns the view itself.
     private weak var flightChrome: SnapChromeView?
-    /// A text page's comment layout, rendered before the push and handed to
-    /// the flight as its crossfade target. Consumed by `zoomFlightChrome`.
-    private var engagedFlightStill: UIView?
     /// Unregisters its notification tokens when this VC (and thus the bag) is
     /// released — a nonisolated deinit can't touch the VC's main-actor state.
     private let appObservers = NotificationObserverBag()
@@ -2040,25 +2037,6 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // the replica's doing: the destination itself is already engaged
         // before the push (`destinationEngaged=true` at flight-build time).
         //
-        // What it gets instead is a STILL of the comment layout, captured
-        // before the push while the page was still visible
-        // (`prepareForHeroPresentation`). It rides inside the card exactly as
-        // the live replica does — morphing with it, fading up over the spring
-        // — so the comment interface is on screen and arriving throughout the
-        // flight rather than appearing when the card is removed.
-        //
-        // A still is enough because the replica never animates internally: it
-        // only tracks the card's morph and its own alpha. Nil when the page
-        // could not be captured (not engaged yet), which falls back to the
-        // previous behaviour rather than flying the wrong layout.
-        if let model = activeModel, model.mediaURL == nil {
-            // Nothing to hand over when the page fades itself in — the card
-            // carries only what is continuous (the caption), and the comments
-            // arrive as themselves.
-            let still = zoomCrossfadesDuringFlight ? nil : engagedFlightStill
-            engagedFlightStill = nil
-            return still
-        }
         let chrome = SnapChromeView()
         chrome.isUserInteractionEnabled = false
         // Captured, not ambient: the replica must render at the live cell's
@@ -2087,40 +2065,8 @@ extension SnapFeedViewController: ZoomTransitionDestination {
 
     public var zoomDestinationContentIsReady: Bool { !orderedIDs.isEmpty }
 
-    /// The card has the caption now, on either leg, so this page hides its
-    /// own until the flight is over.
-    public func zoomFlightDidTakeCaption() {
-        (commentsContentVC as? PostDetailViewController)?.setCaptionHiddenForFlight(true)
-    }
 
-    public var zoomFlightCaptionFrame: CGRect? {
-        guard zoomCrossfadesDuringFlight,
-              let detail = commentsContentVC as? PostDetailViewController
-        else { return nil }
-        let frame = detail.captionRowFrame(in: view)
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
-            print("[caption] frame=\(frame.map { "\(Int($0.minX)),\(Int($0.minY)) \(Int($0.width))x\(Int($0.height))" } ?? "NIL")")
-        }
-        #endif
-        return frame
-    }
 
-    /// TEXT pages fade themselves in; media pages are revealed at landing.
-    ///
-    /// A media card can BE the page — same pixels, full-bleed — so the landing
-    /// swap is invisible and there is nothing to gain from a crossfade. A text
-    /// page is its COMMENTS, which a row card has none of, and every attempt to
-    /// stand in for them went through a photograph of the destination. Fading
-    /// the real one in has nothing to photograph.
-    public var zoomCrossfadesDuringFlight: Bool {
-        #if DEBUG
-        // `-text-flight-still`: the previous behaviour (fly a rendered still of
-        // the comment layout) for comparison in one binary.
-        if ProcessInfo.processInfo.arguments.contains("-text-flight-still") { return false }
-        #endif
-        return activeModel?.mediaURL == nil && !orderedIDs.isEmpty
-    }
 
     /// The render half of landing readiness: the active page's media area is
     /// compositing something (surface or poster). Nil cell — not realized
@@ -2221,65 +2167,6 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // runs on it — was tried and measured identical, so the destination's
         // view hierarchy is left alone.
         CATransaction.flush()
-        // A TEXT page's crossfade target is rendered HERE, off the flight's
-        // critical path. Taken inside `zoomFlightChrome` instead it cost ~100
-        // ms — the build went 20 ms -> 126 ms — and that build is the stall
-        // this whole file has been fighting. Here it lands in the tap's own
-        // frame, where the layout above is already being paid for.
-        //
-        // The cell is resolved by INDEX, not through `activeSnapCell`: the
-        // active page is not settled until the pager reports one, so at this
-        // moment that accessor is nil and the capture came back empty. The
-        // tapped post is always the head of the window, which is item 0.
-        engagedFlightStill = nil
-        if let id = orderedIDs.first, let model = modelsByID[id], model.mediaURL == nil,
-           !zoomCrossfadesDuringFlight {
-            // MOUNT the comment layout rather than hoping it is already there.
-            //
-            // It is normally mounted by `willDisplay` during the layout above,
-            // and that is what the first version relied on — which held for a
-            // freshly built controller opening the head of a fresh window, and
-            // is exactly the case that gets tested. It does not hold in
-            // general: a REUSED controller whose cell is already displayed
-            // gets no new `willDisplay`, and a page reached by scrolling may
-            // have had its engagement torn down. In both the panel is absent
-            // at this instant, the capture returns nil, and the card flies
-            // blank — the comment layout then appearing when the card is
-            // removed, which is the reported symptom exactly.
-            //
-            // `presentRestingComments` is already slot-guarded (it returns
-            // immediately if anything is engaged), so calling it here is a
-            // no-op whenever `willDisplay` did its job.
-            if commentsEngagedID == nil,
-               let head = collectionView.cellForItem(at: IndexPath(item: 0, section: 0)) as? SnapFeedCell {
-                presentRestingComments(for: id, host: head)
-                view.layoutIfNeeded()
-            }
-            // A SECOND settle before the capture. The panel mounted during the
-            // layout above and, with its first page already cached, filled
-            // itself synchronously — but filling a diffable data source is not
-            // the same as having laid its rows out, and the still is a picture
-            // of laid-out rows. Without this pass the capture caught the
-            // skeleton the panel had a moment earlier, with the real comments
-            // already in hand behind it.
-            let state = (commentsContentVC as? PostDetailViewController)?.settleStreamForCapture()
-            view.layoutIfNeeded()
-            CATransaction.flush()
-            #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
-                print("[still] stream \(state ?? "NO PANEL")")
-            }
-            #endif
-            let head = collectionView.cellForItem(at: IndexPath(item: 0, section: 0))
-            engagedFlightStill = (head as? SnapFeedCell)?.engagedLayoutSnapshot()
-            #if DEBUG
-            // A nil still for a TEXT page means the card flies blank. Loud,
-            // because it was silent and shipped.
-            if engagedFlightStill == nil {
-                print("[still] ⚠️ NO REPLICA for \(id.rawValue) — the card will fly blank")
-            }
-            #endif
-        }
         // NOT here: pre-sizing the BAR's custom views. Bar items live on the
         // navigation bar rather than in this view, so they are first measured
         // inside `-[UINavigationBar _setItems:transition:]` — synchronously in
@@ -2342,7 +2229,6 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     }
 
     public func zoomTransitionDidEnd() {
-        (commentsContentVC as? PostDetailViewController)?.setCaptionHiddenForFlight(false)
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
             print("[feed-reuse] LANDED showing \(activePostID?.rawValue ?? "nil")"

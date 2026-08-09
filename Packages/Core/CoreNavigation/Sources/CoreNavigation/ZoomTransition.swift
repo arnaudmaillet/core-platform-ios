@@ -148,43 +148,6 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// (anything not network-backed) opts out by saying nothing.
     var zoomDestinationContentIsReady: Bool { get }
 
-    /// Whether the destination fades ITSELF in over the flight instead of
-    /// being revealed at landing.
-    ///
-    /// The default is the original contract: the destination is hidden for the
-    /// whole flight and the card stands in for all of it, which is right when
-    /// the card can BE the destination — a media page is its media, and the
-    /// card carries the same pixels full-bleed, so the swap is invisible.
-    ///
-    /// It is wrong when the card cannot be the destination. A text page is its
-    /// COMMENTS, and a row card has no comments in it; standing in for them
-    /// meant photographing the page and flying the photo, which put every
-    /// failure on the same fault line — the photograph taken a moment too
-    /// early, or of a page not yet mounted, or of glass that does not survive
-    /// `layer.render(in:)`. Fading the real thing in has nothing to photograph
-    /// and nothing to keep in sync: what arrives IS the destination.
-    ///
-    /// The card still flies, and still carries what IS continuous (a text
-    /// row's caption). It simply stops pretending to be the rest.
-    var zoomCrossfadesDuringFlight: Bool { get }
-
-    /// Where the destination will show the post's caption, in its own view's
-    /// coordinates, or nil if it shows none.
-    ///
-    /// A hero is only continuous for the elements that exist at BOTH ends. A
-    /// caption does — the source row has one and the page has one — so the
-    /// card lands its copy on the page's, and the page fading in underneath
-    /// takes over without anything moving. Left alone, the card's caption sat
-    /// where the ROW puts one and the page's appeared somewhere else, which
-    /// reads as two captions rather than one.
-    var zoomFlightCaptionFrame: CGRect? { get }
-
-    /// The flight has taken this post's caption onto its card, so the
-    /// destination must not also show one. Called on BOTH legs as the flight
-    /// is built — on a dismissal that is the first act of leaving, which is
-    /// what stops the page's caption sitting there while the card carries an
-    /// identical one away.
-    func zoomFlightDidTakeCaption()
 
     /// Whether the destination's active page is actually COMPOSITING its
     /// media area — a drawing surface, or a poster/cover in place.
@@ -290,9 +253,6 @@ public protocol ZoomTransitionDestination: AnyObject {
 
 public extension ZoomTransitionDestination {
     var zoomDestinationContentIsReady: Bool { true }
-    var zoomCrossfadesDuringFlight: Bool { false }
-    var zoomFlightCaptionFrame: CGRect? { nil }
-    func zoomFlightDidTakeCaption() {}
     var zoomDestinationMediaIsRendering: Bool { true }
     func zoomMirrorLiveMedia(onto surface: UIView) -> Bool { false }
     func zoomDonateLiveMediaView() -> UIView? { nil }

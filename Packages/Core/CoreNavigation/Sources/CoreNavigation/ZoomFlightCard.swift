@@ -62,31 +62,6 @@ public protocol ZoomFlightCard: UIView {
     /// source's own, over everything.
     var zoomRestingChrome: UIView? { get }
 
-    /// Whether that furniture fades out as the card becomes the page.
-    ///
-    /// True for a card whose furniture belongs to its SOURCE — a grid brick's
-    /// counters and play badge are the grid's, and leaving them lit over a
-    /// full-screen page would be furniture the page never had.
-    ///
-    /// False when the card has nothing else to carry. A text card's furniture
-    /// IS the post: its caption, which the destination also shows. Fading it
-    /// emptied the card at full screen and left a blank window before the page
-    /// arrived — visible in the first crossfade prototype as one clear frame of
-    /// nothing between the morph and the comments.
-    var zoomRestingChromeFadesOut: Bool { get }
-
-    /// Whether that furniture is laid out in PAGE space and scaled by the
-    /// flight, rather than resized with the card.
-    ///
-    /// The card animates its FRAME, so its subviews resize with it and any
-    /// placement expressed in points stays put in absolute terms — a caption
-    /// pinned 152pt down is 152pt down inside a 78pt-tall card, which is
-    /// outside it. The destination's chrome replica never had that problem
-    /// because it is page-sized and carries a SCALE: the flight shrinks it
-    /// bodily. Furniture that has to hold a position relative to the PAGE
-    /// wants the same treatment, and asking for it here is what keeps the
-    /// caption inside the card at every size.
-    var zoomRestingChromeTracksPageSpace: Bool { get }
 
 
     /// The surface live media renders on — non-nil only while the card is
@@ -127,11 +102,6 @@ public protocol ZoomFlightCard: UIView {
     /// keeps the uniform-scale behaviour for cards that rely on it.
     var zoomLiveMediaTracksCardBounds: Bool { get }
 
-    /// Places the card's caption at `frame`, given in the card's PAGE-pose
-    /// coordinates, so it lands on the destination's own caption. Cards
-    /// without a caption ignore it.
-    func positionZoomCaption(at frame: CGRect)
-
     /// Rounds the card and any furniture that must round with it. Animatable:
     /// called inside an animation block, it sweeps.
     func setZoomCornerRadius(_ radius: CGFloat)
@@ -151,9 +121,6 @@ public protocol ZoomFlightCard: UIView {
 }
 
 public extension ZoomFlightCard {
-    /// Fading out is the norm — most source furniture is its source's own.
-    var zoomRestingChromeFadesOut: Bool { true }
-    var zoomRestingChromeTracksPageSpace: Bool { false }
     var zoomLiveMediaIsDrawing: Bool { true }
     var zoomLiveMediaDebugState: String { "" }
     var zoomLiveMediaNativeSize: CGSize? { nil }
@@ -163,5 +130,4 @@ public extension ZoomFlightCard {
     var zoomLiveMediaTracksCardBounds: Bool { false }
     func prepareZoomLiveMediaForFlight(destinationSize: CGSize) {}
     func applyZoomRestingShadow(to layer: CALayer) {}
-    func positionZoomCaption(at frame: CGRect) {}
 }

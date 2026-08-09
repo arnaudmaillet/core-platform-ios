@@ -789,38 +789,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
     }
 
-    /// A still of this page's ENGAGED layout, for a flight to crossfade into.
-    ///
-    /// The media path gives the flight a live `SnapChromeView` replica, and a
-    /// text page has no equivalent: in comment layout its interface is a child
-    /// controller's view (caption bubble, comment rows, composer), which
-    /// cannot be duplicated cheaply. A still can, and it is enough — the
-    /// replica never animates internally, it only rides the card's morph and
-    /// fades up, which is exactly what an image does.
-    ///
-    /// Drawn with `layer.render(in:)` rather than `snapshotView`, and that is
-    /// the difference between a still and nil. `snapshotView(afterScreenUpdates:
-    /// false)` reads what the render server has already DRAWN, and this page
-    /// has never been drawn: the flight hides it (`setZoomContentHidden`)
-    /// before any frame containing it is presented, so it returned nil every
-    /// time — a blank card for the whole flight. `afterScreenUpdates: true`
-    /// would fix that by committing a frame mid-staging, which is exactly what
-    /// a transition must not do. Rendering the layer tree needs neither: it is
-    /// synchronous, offscreen, and indifferent to whether the view was ever
-    /// visible.
-    func engagedLayoutSnapshot() -> UIView? {
-        guard isCommentsEngaged, !commentsContainer.isHidden,
-              commentsContainer.bounds.width > 0, commentsContainer.bounds.height > 0
-        else { return nil }
-        let renderer = UIGraphicsImageRenderer(bounds: commentsContainer.bounds)
-        let still = renderer.image { context in
-            commentsContainer.layer.render(in: context.cgContext)
-        }
-        let host = UIImageView(image: still)
-        host.frame = commentsContainer.bounds
-        host.contentMode = .scaleToFill
-        return host
-    }
 
     #if DEBUG
     /// The media area's full state for the landing trace.

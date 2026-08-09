@@ -125,8 +125,6 @@ final class PostDetailViewController: UIViewController {
     /// flight had no target and the caption appeared as a second one when the
     /// post arrived.
     private var seededCaption: (text: String, timestamp: String)?
-    /// Set while a hero flight is carrying this post's caption.
-    private var captionHiddenForFlight = false
     /// Parents whose full reply pool is shown (the "view more" seam's
     /// state). Per-screen, like scroll position.
     private var expandedReplyParents: Set<String> = []
@@ -759,70 +757,19 @@ final class PostDetailViewController: UIViewController {
         likeButton.configuration = config
     }
 
-    /// Forces the stream to produce its cells NOW, for a caller that is about
-    /// to photograph it.
-    ///
-    /// A diffable apply commits its snapshot immediately, but cells are
-    /// dequeued in the next layout pass — and the hero flight's still is taken
-    /// in the same turn as the mount, so it caught the skeleton the stream had
-    /// a moment earlier with the real rows already in the data source behind
-    /// it. Laying out the controller's root view is not enough on its own: the
-    /// apply happens INSIDE the feed's own layout pass, so the collection view
-    /// is not marked dirty again until that pass unwinds.
-    ///
-    /// Marking it explicitly and laying it out is what produces the cells.
-    /// Returns what the stream ended up holding, so a caller can trace a still
-    /// that still looks wrong.
-    /// Hides the page's OWN caption bubble while a flight carries one.
-    ///
-    /// Exactly one caption may be on screen at a time. During a flight the
-    /// card's copy is the one that moves, so the page's is held at zero and
-    /// restored when the card is gone — on the presentation as the last act of
-    /// landing, on the dismissal as the first act of leaving. Alpha on the
-    /// cell rather than a snapshot edit: the row keeps its height, so nothing
-    /// below it moves when the caption appears.
-    func setCaptionHiddenForFlight(_ hidden: Bool) {
-        captionHiddenForFlight = hidden
-        guard let indexPath = streamDataSource?.indexPath(for: .caption) else { return }
-        collectionView.cellForItem(at: indexPath)?.contentView.alpha = hidden ? 0 : 1
-    }
-
     /// Renders the caption row NOW, from what the opener already knows.
     ///
-    /// Called before the push so the row exists — and therefore has a frame —
-    /// while the hero is in the air. The real post replaces it a moment later
-    /// with the same text, so nothing moves when it lands.
+    /// The row is the stream's first item and it existed only once the POST had
+    /// loaded — a network round trip after the panel mounts — so a text page
+    /// opened from the feed showed its comments before its own caption, and the
+    /// caption dropped in afterwards. The feed already holds the caption and
+    /// the timestamp, so it hands them over at mount and the real post replaces
+    /// the row later with the same text, moving nothing.
     func seedCaption(_ text: String, timestamp: String) {
         guard mode == .commentsOnly, !text.isEmpty, latestPost == nil else { return }
         seededCaption = (text, timestamp)
         loadViewIfNeeded()
         applyStream(animated: false)
-        view.layoutIfNeeded()
-    }
-
-    /// Where the caption row sits, in `space`.
-    ///
-    /// The flight lands its own caption here so the two are the same object as
-    /// far as the eye is concerned: the card's caption arrives exactly where
-    /// the page's is, and the page fading in underneath replaces it without
-    /// anything moving. Nil until the row exists.
-    func captionRowFrame(in space: UICoordinateSpace) -> CGRect? {
-        guard let indexPath = streamDataSource?.indexPath(for: .caption),
-              let attributes = collectionView.layoutAttributesForItem(at: indexPath)
-        else { return nil }
-        return collectionView.convert(attributes.frame, to: space)
-    }
-
-    @discardableResult
-    func settleStreamForCapture() -> String {
-        view.setNeedsLayout()
-        view.layoutIfNeeded()
-        collectionView.setNeedsLayout()
-        collectionView.layoutIfNeeded()
-        let items = streamDataSource?.snapshot().numberOfItems ?? -1
-        return "items=\(items) visible=\(collectionView.visibleCells.count)"
-            + " bounds=\(Int(collectionView.bounds.width))x\(Int(collectionView.bounds.height))"
-            + " loaded=\(commentsLoaded)"
     }
 
     private func renderComments(_ state: PostDetailViewModel.CommentsState) {
@@ -948,9 +895,6 @@ final class PostDetailViewController: UIViewController {
                 return
             }
             cell.onAvatarTap = { [weak self] in self?.viewModel.didTapAuthor() }
-            // Re-applied on every dequeue: an apply mid-flight would otherwise
-            // hand back a fresh, visible cell and put the second caption back.
-            cell.contentView.alpha = self.captionHiddenForFlight ? 0 : 1
         }
         streamDataSource = UICollectionViewDiffableDataSource<StreamSection, StreamItem>(
             collectionView: collectionView

@@ -774,11 +774,11 @@ final class ForYouGridPage: UIView {
             return nil
         }
         let rect: CGRect = switch cell {
-        // A brick IS its media, edge to edge; a media row is a card of which
-        // the media is one part, so fly that part; a TEXT row has no such
-        // part, so the card itself is what flies.
+        // A brick IS its media, edge to edge; a row is a card of which the
+        // media is one part, so fly that part. A TEXT row has no media and no
+        // hero — see `heroAppearance`.
         case let tile as PostGridTileCell: tile.bounds
-        case let row as PostGridListRowCell: row.mediaHeroRect ?? row.cardHeroRect
+        case let row as PostGridListRowCell: row.mediaHeroRect ?? .zero
         default: .zero
         }
         guard rect != .zero else { return nil }
@@ -793,10 +793,20 @@ final class ForYouGridPage: UIView {
         case let tile as PostGridTileCell:
             (cover: tile.renderedCover, style: .tile)
         case let row as PostGridListRowCell:
-            // A text row flies its card and carries no cover; a media row
-            // flies its preview and carries the exact pixels it is showing.
+            // A TEXT row answers nil, and that is the whole of its transition
+            // policy: no hero, so `openFeed` pushes it natively.
+            //
+            // It used to fly its whole card, and the attempt is worth one line
+            // of warning. A media hero works because the media is the same
+            // object at both ends. A text page is its COMMENTS, which a row
+            // card has none of, so the card had to impersonate them — first by
+            // photographing the page, then by fading the real one in behind a
+            // growing card. Each version fixed the previous one's artifact and
+            // introduced its own: a skeleton in the still, a blank card, wrong
+            // safe area, two captions, a caption floating outside the card. A
+            // native push has none of them and is what the platform does.
             row.mediaHeroRect == nil
-                ? (cover: nil, style: .listCard)
+                ? nil
                 : (cover: row.renderedCover, style: .listMedia)
         default:
             nil
@@ -1015,11 +1025,9 @@ final class ForYouGridPage: UIView {
     /// tile.
     static func applyHeroConcealment(_ concealed: Bool, to cell: UICollectionViewCell?) {
         switch cell {
-        // A media row keeps everything the flight is not carrying; a TEXT row
-        // flies its whole card, so the whole row goes — same invariant, and
-        // it lands on opposite answers only because the two rows put different
-        // amounts of themselves in the air.
-        case let row as PostGridListRowCell where row.mediaHeroRect != nil:
+        // A row keeps everything the flight is not carrying. Only media rows
+        // ever fly, and what flies is their preview.
+        case let row as PostGridListRowCell:
             row.isHidden = false
             row.setHeroMediaConcealed(concealed)
         case let other?:
