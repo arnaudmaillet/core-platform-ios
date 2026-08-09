@@ -787,9 +787,27 @@ final class ForYouViewController: UIViewController {
 
         // The feed owns the whole screen: hide the bar with the push. Managed
         // by hand rather than via `hidesBottomBarWhenPushed`, because that
-        // flag's choreography doesn't scrub with a custom interactive pop —
-        // the bar snaps in at pop-begin and flashes over the feed when a grab
-        // cancels (measured on both the pin and timeline paths).
+        // flag's choreography does not scrub with a custom interactive pop —
+        // the bar arrives at pop-begin and stands over the feed for the length
+        // of a grab.
+        //
+        // Re-tested since, on the plain `UIPercentDrivenInteractiveTransition`
+        // the text path uses, on the theory that the earlier verdict came from
+        // the pin's free-floating interaction controller and might not survive
+        // a percent driver. It survives. Wired up, the bar was at its resting
+        // position and fully opaque in the FIRST frame after pop-begin and did
+        // not move again while the scrub ran 0.000 → 0.150 — captured
+        // composited over the feed's own author pill, mid-drag.
+        //
+        // The reason is structural, which is why no amount of driving fixes it:
+        // the tab bar lives in the TAB BAR CONTROLLER's view, above the
+        // navigation controller, so it is not in the transition's container and
+        // not on the timeline the percent driver scrubs. UIKit animates it
+        // beside the transition, not inside it.
+        //
+        // Worth recording what it got right, because it is the half this
+        // screen had wrong: cancel and commit both settled correctly by
+        // themselves. Only the mid-drag frames were unusable.
         tabBarController?.setTabBarHidden(true, animated: true)
 
         guard let page = pager.page(for: format),
