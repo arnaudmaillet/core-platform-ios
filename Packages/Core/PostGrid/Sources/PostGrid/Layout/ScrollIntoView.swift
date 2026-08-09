@@ -68,4 +68,40 @@ public enum ScrollIntoView {
         guard abs(clamped - bounds.minY) > 0.5 else { return nil }
         return CGPoint(x: bounds.minX, y: clamped)
     }
+
+    /// Reveals `rect` NOW — no animation, no waiting — and reports whether
+    /// anything moved.
+    ///
+    /// Instant on purpose. A tap on these grids starts a hero flight, and the
+    /// flight measures the cell's rect as it opens, so the reveal has to be
+    /// finished by then or the card departs from a rect that is already stale.
+    /// The alternatives were both worse: animating and opening together flies
+    /// from the pre-scroll position, and waiting for the animation puts a
+    /// delay in front of every obscured tap — friction before the one thing
+    /// the viewer asked for.
+    ///
+    /// Unanimated also means there is nothing to see. The offset changes in
+    /// the same turn as the tap, one frame before the card lifts off the cell
+    /// and covers it, and the grid is on its way to being hidden anyway.
+    @discardableResult
+    public static func revealImmediately(
+        _ rect: CGRect?,
+        in scrollView: UIScrollView,
+        padding: CGFloat = defaultPadding
+    ) -> Bool {
+        guard let rect, let offset = offset(
+            toReveal: rect,
+            bounds: scrollView.bounds,
+            contentInset: scrollView.adjustedContentInset,
+            contentSize: scrollView.contentSize,
+            padding: padding
+        ) else { return false }
+        scrollView.setContentOffset(offset, animated: false)
+        // Settle the geometry in this turn too. The offset lands immediately,
+        // but cells the move brought into range are realized on the next
+        // layout pass — and the hero is about to ask the page where things
+        // are.
+        scrollView.layoutIfNeeded()
+        return true
+    }
 }

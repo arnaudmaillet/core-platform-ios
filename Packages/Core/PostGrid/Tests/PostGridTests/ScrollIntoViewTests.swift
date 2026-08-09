@@ -137,3 +137,70 @@ struct ScrollIntoViewTests {
         #expect(result.x == expected)
     }
 }
+
+/// THE REVEAL MUST NOT COST THE VIEWER A WAIT.
+///
+/// An earlier version animated the reveal and held the open until the scroll
+/// settled, so the hero would measure a landed rect. That put a delay in front
+/// of the one thing the tap asked for. Unanimated gets both: the offset is
+/// already correct when the flight measures, and nothing is gated behind an
+/// animation or the timer that would be needed to survive a missing callback.
+@MainActor
+struct ScrollIntoViewImmediateTests {
+    private func scrollView(offsetY: CGFloat = 0) -> UIScrollView {
+        let view = UIScrollView(frame: CGRect(x: 0, y: 0, width: 390, height: 800))
+        view.contentInsetAdjustmentBehavior = .never
+        view.contentInset = UIEdgeInsets(top: 100, left: 0, bottom: 90, right: 0)
+        view.contentSize = CGSize(width: 390, height: 5000)
+        view.contentOffset = CGPoint(x: 0, y: offsetY)
+        return view
+    }
+
+    /// The offset has landed by the time the call returns — synchronously, in
+    /// the same turn as the tap, which is what lets the open follow at once.
+    @Test func anObscuredItemIsRevealedSynchronously() {
+        let view = scrollView()
+
+        let moved = ScrollIntoView.revealImmediately(
+            CGRect(x: 0, y: 40, width: 390, height: 200), in: view
+        )
+
+        #expect(moved)
+        let expected: CGFloat = 40 - 100 - 12
+        #expect(view.contentOffset.y == expected, "the reveal had not landed when the call returned")
+    }
+
+    /// A visible item is not touched, and says so — the caller can open
+    /// without a second thought either way.
+    @Test func aVisibleItemIsLeftExactlyWhereItIs() {
+        let view = scrollView(offsetY: 200)
+
+        let moved = ScrollIntoView.revealImmediately(
+            CGRect(x: 0, y: 500, width: 390, height: 200), in: view
+        )
+
+        #expect(moved == false)
+        #expect(view.contentOffset.y == 200)
+    }
+
+    /// No layout attributes is not a reason to move anything — and never a
+    /// reason to fail, since the tap still has to open.
+    @Test func anUnknownRectMovesNothing() {
+        let view = scrollView(offsetY: 120)
+
+        #expect(ScrollIntoView.revealImmediately(nil, in: view) == false)
+        #expect(view.contentOffset.y == 120)
+    }
+
+    /// Never parks in rubber band: the reveal clamps to the last legal offset
+    /// even when the item's far edge cannot be cleared.
+    @Test func theRevealNeverLeavesTheScrollPastItsEnd() {
+        let view = scrollView()
+        view.contentSize = CGSize(width: 390, height: 1000)
+
+        ScrollIntoView.revealImmediately(CGRect(x: 0, y: 900, width: 390, height: 100), in: view)
+
+        let maximum: CGFloat = 1000 + 90 - 800
+        #expect(view.contentOffset.y == maximum)
+    }
+}

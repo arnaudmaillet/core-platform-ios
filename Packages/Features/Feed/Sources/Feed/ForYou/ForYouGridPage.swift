@@ -249,8 +249,6 @@ final class ForYouGridPage: UIView {
     private var heroFlyingPostID: PostID?
     /// The inset to hand back when a flight ends; non-nil means frozen.
     private var frozenContentInset: UIEdgeInsets?
-    /// Defers a tap until an obscured item has been scrolled into sight.
-    private let selectionReveal = ScrollIntoViewSelection()
     /// Throttle state for the during-scroll autoplay reconcile.
     private var lastReconcileTime: CFTimeInterval = 0
     private var lastReconcileOffset: CGFloat = 0
@@ -1403,16 +1401,15 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         guard !showsSkeleton, posts.indices.contains(flatIndex(for: indexPath)) else { return }
         collectionView.deselectItem(at: indexPath, animated: false)
-        let index = flatIndex(for: indexPath)
-        // Reveal before opening when the chrome is covering the item — and the
-        // open then waits, because the hero measures this cell's rect. See
-        // `ScrollIntoViewSelection`. A fully visible item opens with no delay.
-        selectionReveal.select(
-            revealing: collectionView.layoutAttributesForItem(at: indexPath)?.frame,
+        // Reveal, then open, in this turn. The reveal is unanimated precisely
+        // so nothing gates the open: the hero measures this cell's rect as it
+        // departs, and by then the offset has already landed. See
+        // `ScrollIntoView.revealImmediately`.
+        ScrollIntoView.revealImmediately(
+            collectionView.layoutAttributesForItem(at: indexPath)?.frame,
             in: collectionView
-        ) { [weak self] in
-            self?.onItemTapped?(index)
-        }
+        )
+        onItemTapped?(flatIndex(for: indexPath))
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -1479,8 +1476,6 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
 
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
         updateAutoplay()
-        // A reveal-then-open is waiting on exactly this.
-        selectionReveal.scrollAnimationDidEnd()
     }
 
     /// A recycled cell hands its player back immediately rather than waiting
