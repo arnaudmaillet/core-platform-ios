@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// WHEN the grid may put the system tab bar back after a screen it pushed
@@ -52,5 +53,24 @@ enum TabBarRevealPolicy {
     /// to delete on purpose rather than one nobody wrote.
     static func shouldReveal(afterTransitionCancelled cancelled: Bool) -> Bool {
         !cancelled
+    }
+
+    /// Shortest fade the bar is allowed, however little of the pop is left.
+    ///
+    /// Matching the remainder exactly is right up to a point and then stops
+    /// being: release at 95% and the pop has ~17ms to run, which is a hard cut
+    /// on the one element that was absent a moment ago. Below this floor the
+    /// bar simply outlasts the screen by a few frames and reads as settling in.
+    static let minimumFade: TimeInterval = 0.2
+
+    /// How long the bar has to fade in, given where the finger let go.
+    ///
+    /// Read off the coordinator's context rather than hardcoded, so the bar is
+    /// on the pop's clock and not its own: an early release leaves most of the
+    /// transition to run and the fade stretches to match it.
+    static func fadeDuration(transitionDuration: TimeInterval, percentComplete: CGFloat) -> TimeInterval {
+        let travelled = min(max(percentComplete, 0), 1)
+        let remaining = max(0, transitionDuration) * TimeInterval(1 - travelled)
+        return max(minimumFade, remaining)
     }
 }

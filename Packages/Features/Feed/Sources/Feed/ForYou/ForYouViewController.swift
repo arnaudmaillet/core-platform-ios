@@ -812,7 +812,7 @@ final class ForYouViewController: UIViewController {
                 // `viewWillAppear` normally gets there first via the
                 // transition's completion; this is the backstop for the case
                 // where its `topViewController` guard declined.
-                self?.revealTabBar(animated: true)
+                self?.revealTabBar(fadingOver: TabBarRevealPolicy.minimumFade)
                 self?.restoreChromeAfterTransition()
             }
             textSlideDismissal.install(on: navigationController)
@@ -1124,7 +1124,7 @@ final class ForYouViewController: UIViewController {
         case .immediately:
             // A tab switch back, or a back-button pop: nothing here can be
             // taken back, so revealing now simply runs the bar alongside it.
-            revealTabBar(animated: animated)
+            revealTabBar(fadingOver: animated ? nil : 0)
             return
         case .whenTransitionCommits:
             // A swipe on the plain-push fallback for a text-only row. This
@@ -1162,7 +1162,12 @@ final class ForYouViewController: UIViewController {
         coordinator.notifyWhenInteractionChanges { [weak self] context in
             guard TabBarRevealPolicy.shouldReveal(afterTransitionCancelled: context.isCancelled)
             else { return }
-            self?.revealTabBar(animated: true)
+            // Fade on what is LEFT of the pop, read from the context the
+            // release hands us, so the bar and the screen finish together.
+            self?.revealTabBar(fadingOver: TabBarRevealPolicy.fadeDuration(
+                transitionDuration: context.transitionDuration,
+                percentComplete: context.percentComplete
+            ))
         }
         // Backstop for a scrub that never reports a release — a gesture the
         // system cancels outright, or an interaction handed off to a
@@ -1170,25 +1175,83 @@ final class ForYouViewController: UIViewController {
         coordinator.animate(alongsideTransition: nil) { [weak self] context in
             guard TabBarRevealPolicy.shouldReveal(afterTransitionCancelled: context.isCancelled)
             else { return }
-            self?.revealTabBar(animated: true)
+            // Nothing left of the pop to match here — it has landed — so this
+            // fades on the floor alone rather than cutting to full opacity.
+            self?.revealTabBar(fadingOver: TabBarRevealPolicy.minimumFade)
         }
     }
 
-    /// Reveals the bar at full opacity, idempotently.
+    /// Reveals the bar, idempotently.
     ///
-    /// Two owners can reach this on a completed pop — the transition's
-    /// completion above, and `onFeedPopped` — and their order is not
-    /// guaranteed. Whichever arrives first animates; the second finds the bar
-    /// already shown and does nothing, so the reveal can never double up. The
-    /// backstop is deliberate: a bar stuck hidden is a far worse failure than a
-    /// redundant call, and it is the failure this method's guard makes
-    /// impossible.
-    private func revealTabBar(animated: Bool) {
+    /// `duration` is the fade's clock. Pass what remains of a pop and the bar
+    /// comes up WITH the screen; pass nil where there is no transition to match
+    /// and UIKit's own bar animation is the right one.
+    ///
+    /// Three owners can reach this on a committed pop — the release notifier,
+    /// its completion backstop, and `onFeedPopped` — and their order is not
+    /// guaranteed. The first un-hides the bar synchronously, so the others meet
+    /// the guard below and leave the fade already running alone; a fade in
+    /// flight also reads `alpha == 1` immediately, because `UIView.animate`
+    /// writes the model value up front and only the presentation layer ramps.
+    /// The redundancy is deliberate: a bar stuck hidden is a far worse failure
+    /// than a call that does nothing.
+    private func revealTabBar(fadingOver duration: TimeInterval?) {
         guard let tabBarController else { return }
-        tabBarController.tabBar.alpha = 1
-        guard tabBarController.isTabBarHidden else { return }
-        tabBarController.setTabBarHidden(false, animated: animated)
+        let wasHidden = tabBarController.isTabBarHidden
+        guard wasHidden || tabBarController.tabBar.alpha < 1 else { return }
+        guard wasHidden, let duration, duration > 0 else {
+            // Either there is nothing to synchronise with, or the bar is
+            // already in place and only its opacity is stale (a hero return
+            // that left it parked at zero).
+            tabBarController.tabBar.alpha = 1
+            if wasHidden { tabBarController.setTabBarHidden(false, animated: true) }
+            return
+        }
+        // Geometry now and instantly, opacity on the transition's clock. The
+        // same split `showTabBar(alpha:)` makes for a hero return and for the
+        // same reason: the STATE is what the grid's safe area — and therefore
+        // every tile's frame — depends on, while the OPACITY is what the viewer
+        // reads. Settling the state first also keeps the fade off the layout's
+        // critical path, so the grid never re-lays out mid-ramp.
+        // ORDER MATTERS, and not in the direction it reads: un-hiding restores
+        // the bar's own opacity, so an alpha parked BEFORE the state change is
+        // silently overwritten and the fade animates 1 → 1. Measured — the
+        // presentation layer sat flat at 1.000 for the whole ramp, a reveal
+        // that looked exactly like the snap it was meant to replace.
+        tabBarController.setTabBarHidden(false, animated: false)
+        tabBarController.view.layoutIfNeeded()
+        tabBarController.tabBar.alpha = 0
+        UIView.animate(withDuration: duration, delay: 0,
+                       options: [.curveEaseOut, .beginFromCurrentState]) {
+            tabBarController.tabBar.alpha = 1
+        }
+        #if DEBUG
+        traceTabBarReveal(over: duration)
+        #endif
     }
+
+    #if DEBUG
+    /// `-tabbar-reveal-trace`: samples the bar's PRESENTATION opacity every
+    /// frame while it comes back.
+    ///
+    /// The screen cannot answer this one. The bar fades in over exactly the
+    /// frames the grid is sliding in behind it, so captured brightness moves
+    /// for two reasons at once and a ramp in the pixels proves neither. The
+    /// presentation layer is the only place the fade exists on its own.
+    private func traceTabBarReveal(over duration: TimeInterval) {
+        guard ProcessInfo.processInfo.arguments.contains("-tabbar-reveal-trace"),
+              let bar = tabBarController?.tabBar else { return }
+        print("[tabbar-reveal] fade begins, duration=\(Int(duration * 1000))ms")
+        for step in 0...Int((duration + 0.12) / 0.016) {
+            let offset = Double(step) * 0.016
+            DispatchQueue.main.asyncAfter(deadline: .now() + offset) {
+                let opacity = bar.layer.presentation()?.opacity ?? -1
+                print(String(format: "[tabbar-reveal] +%4dms opacity=%.3f",
+                             Int(offset * 1000), opacity))
+            }
+        }
+    }
+    #endif
 
     /// Puts the tab bar back, at a given opacity, and settles the layout it
     /// changes.
