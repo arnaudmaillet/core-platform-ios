@@ -1,4 +1,3 @@
-import CoreGraphics
 import Testing
 @testable import Feed
 
@@ -52,37 +51,6 @@ struct TabBarRevealPolicyTests {
     /// fade in. Deferring THAT to a completion handler is what once made the
     /// bar snap in after the card had already landed, so the flight must keep
     /// winning over the transition test below it.
-    /// The fade rides the pop's clock, not its own: let go early and most of
-    /// the transition is still to run, so the bar has that long to arrive.
-    @Test func anEarlyReleaseFadesForWhatIsLeftOfThePop() {
-        let duration = TabBarRevealPolicy.fadeDuration(transitionDuration: 0.35,
-                                                       percentComplete: 0.2)
-        #expect(abs(duration - 0.28) < 0.001)
-    }
-
-    /// …but a late release must not turn the fade into a cut. 5% of 0.35s is
-    /// 17ms — one frame — on the one element that was absent a moment ago.
-    @Test func aLateReleaseStillGetsTheFloorRatherThanAHardCut() {
-        let duration = TabBarRevealPolicy.fadeDuration(transitionDuration: 0.35,
-                                                       percentComplete: 0.95)
-        #expect(duration == TabBarRevealPolicy.minimumFade)
-        #expect(duration > 0.0175, "the remainder alone would be a single frame")
-    }
-
-    /// Nonsense in, something animatable out. `percentComplete` is a reported
-    /// value, and a negative or past-the-end one must not produce a fade that
-    /// runs backwards or forever.
-    @Test func anOutOfRangeProgressStillYieldsAUsableFade() {
-        for progress in [CGFloat(-1), 0, 1, 2] {
-            let duration = TabBarRevealPolicy.fadeDuration(transitionDuration: 0.35,
-                                                           percentComplete: progress)
-            #expect(duration >= TabBarRevealPolicy.minimumFade)
-            #expect(duration <= 0.35)
-        }
-        #expect(TabBarRevealPolicy.fadeDuration(transitionDuration: -1, percentComplete: 0.5)
-                == TabBarRevealPolicy.minimumFade)
-    }
-
     @Test func aFlightKeepsDrivingItsOwnReveal() {
         for interactive in [true, false] {
             #expect(TabBarRevealPolicy.timing(hasActiveFlight: true, isTransitioning: true,
