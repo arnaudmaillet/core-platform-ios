@@ -131,6 +131,9 @@ final class SnapFeedViewController: UIViewController {
     /// engaged toolbar context) has been applied — set when the page
     /// activates, so a pre-render that never settles never locks.
     private var restingLockApplied = false
+    /// Held for the length of a dismissal gesture, so the release restores the
+    /// pager's engagement-owned state instead of enabling it. See `ScrollLock`.
+    private var pagerLock = ScrollLock()
     /// The pager's `contentOffset.y` captured when an interactive page-swipe
     /// begins — the datum the drive offsets from. Nil when no drive is
     /// live. The drive hand-moves `contentOffset` while the pager's own pan
@@ -2335,7 +2338,17 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     }
 
     public func setContentScrollEnabled(_ enabled: Bool) {
-        collectionView.isScrollEnabled = enabled
+        // Through a lock that RESTORES rather than an assignment that enables.
+        //
+        // An engaged comments panel disables the pager for the engagement's
+        // whole lifetime (see the note at the engage site) — that freeze is
+        // what stops the comment stream chaining into the feed. Thawing to
+        // `true` handed it back scrollable, and since nothing else re-applies
+        // the lock the chaining stayed broken for the rest of that
+        // engagement: the comments dragged the feed with them on every
+        // subsequent scroll. Reopening the post appeared to fix it, because
+        // that rebuilt the engagement.
+        if enabled { pagerLock.thaw(collectionView) } else { pagerLock.freeze(collectionView) }
         // The COMMENT STREAM too, and it is the one that was missed.
         //
         // This freezes "the content" for a dismissal swipe, and the pager was
@@ -2360,7 +2373,8 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // above rests on. A `stream=nil` here would mean the lock is a no-op.
         if ProcessInfo.processInfo.arguments.contains("-dismiss-lock-log") {
             print("[dismiss-lock] contentScroll=\(enabled ? "on" : "OFF") "
-                  + "stream=\(stream == nil ? "nil" : "engaged")")
+                  + "stream=\(stream == nil ? "nil" : "engaged") "
+                  + "pager=\(collectionView.isScrollEnabled ? "SCROLLABLE" : "frozen")")
         }
         #endif
     }

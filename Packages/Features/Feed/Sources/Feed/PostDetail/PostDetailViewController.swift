@@ -620,20 +620,12 @@ final class PostDetailViewController: UIViewController {
     /// stream is also frozen by the resting engagement's settle lock, and a
     /// gesture that ended inside that window must not thaw it early.
     func setStreamScrollEnabled(_ enabled: Bool) {
-        if enabled {
-            guard let wasEnabled = streamScrollEnabledBeforeLock else { return }
-            collectionView.isScrollEnabled = wasEnabled
-            streamScrollEnabledBeforeLock = nil
-        } else {
-            guard streamScrollEnabledBeforeLock == nil else { return }
-            streamScrollEnabledBeforeLock = collectionView.isScrollEnabled
-            collectionView.isScrollEnabled = false
-        }
+        if enabled { streamLock.thaw(collectionView) } else { streamLock.freeze(collectionView) }
     }
 
-    /// Non-nil exactly while a gesture holds the stream frozen; the value is
-    /// what to put back.
-    private var streamScrollEnabledBeforeLock: Bool?
+    /// Held for the length of a dismissal gesture. See `ScrollLock` for why
+    /// this restores rather than enables.
+    private var streamLock = ScrollLock()
 
     func setEngagedInsets(top: CGFloat, bottomInset: CGFloat) {
         // The strip inset is the ONLY top authority in the engaged context:

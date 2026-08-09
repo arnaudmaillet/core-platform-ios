@@ -132,3 +132,78 @@ private final class SilentFeedProvider: FeedProviding, @unchecked Sendable {
         )
     }
 }
+
+/// A THAW IS NOT AN ENABLE.
+///
+/// The pager is disabled for an engaged comments panel's whole lifetime —
+/// deliberately, as the structural answer to UIKit's nested-scroll chaining:
+/// outer and inner pans recognise simultaneously and boundary excess hands off
+/// to the outer one, and only a disabled pan cannot receive that handoff.
+///
+/// A dismissal swipe freezes the surfaces under it and thaws them on release.
+/// Thawing by assignment handed the pager back SCROLLABLE inside a live
+/// engagement, the chaining returned, and the comments dragged the feed with
+/// them for the rest of that engagement — nothing else re-applies the lock.
+/// Closing and reopening the post appeared to fix it, which is the tell: that
+/// rebuilds the engagement, and the engagement owns the freeze.
+@MainActor
+struct ScrollLockTests {
+    /// The regression, stated directly.
+    @Test func thawingInsideSomeoneElsesFreezeLeavesItFrozen() {
+        let scroll = UIScrollView()
+        scroll.isScrollEnabled = false        // the engagement's dead-end
+        var lock = ScrollLock()
+
+        lock.freeze(scroll)                   // a swipe begins
+        lock.thaw(scroll)                     // released below the threshold
+
+        #expect(scroll.isScrollEnabled == false,
+                "the gesture handed the pager back scrollable and the chaining returned")
+    }
+
+    /// …while an ordinarily scrollable surface still comes back.
+    @Test func anOrdinaryFreezeThawsBackToScrollable() {
+        let scroll = UIScrollView()
+        var lock = ScrollLock()
+
+        lock.freeze(scroll)
+        #expect(scroll.isScrollEnabled == false)
+        lock.thaw(scroll)
+
+        #expect(scroll.isScrollEnabled)
+    }
+
+    /// Re-entrant: a second freeze must not record `false` as the value to
+    /// restore, which would strand the surface unscrollable.
+    @Test func aSecondFreezeDoesNotOverwriteTheRememberedValue() {
+        let scroll = UIScrollView()
+        var lock = ScrollLock()
+
+        lock.freeze(scroll)
+        lock.freeze(scroll)
+        lock.thaw(scroll)
+
+        #expect(scroll.isScrollEnabled)
+    }
+
+    /// A thaw with nothing held must never be a way to ENABLE scrolling —
+    /// otherwise a stray release re-opens the very chaining this prevents.
+    @Test func anUnheldThawCannotEnableScrolling() {
+        let scroll = UIScrollView()
+        scroll.isScrollEnabled = false
+        var lock = ScrollLock()
+
+        lock.thaw(scroll)
+
+        #expect(scroll.isScrollEnabled == false)
+        #expect(lock.isHeld == false)
+    }
+
+    @Test func aNilSurfaceIsHarmlessAtBothEnds() {
+        var lock = ScrollLock()
+        lock.freeze(nil)
+        #expect(lock.isHeld == false)
+        lock.thaw(nil)
+        #expect(lock.isHeld == false)
+    }
+}
