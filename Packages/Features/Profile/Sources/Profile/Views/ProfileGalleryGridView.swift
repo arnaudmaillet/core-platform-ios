@@ -32,6 +32,8 @@ final class ProfileGalleryGridView: UIView {
     /// page's.
     var onVerticalScroll: ((CGFloat) -> Void)?
     var onPullToRefresh: (() -> Void)?
+    /// Defers a tap until an obscured tile has been scrolled into sight.
+    private let selectionReveal = ScrollIntoViewSelection()
     /// Fired when a drag ends, with how far the page was pulled past its top.
     var onPullReleased: ((CGFloat) -> Void)?
 
@@ -276,8 +278,17 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        guard !showsSkeleton else { return }
-        onItemTapped?(posts[indexPath.item])
+        guard !showsSkeleton, posts.indices.contains(indexPath.item) else { return }
+        let post = posts[indexPath.item]
+        // Same contract as the For You grids: an item the floating header or
+        // the tab bar is covering is scrolled into sight first, and the open
+        // waits for the scroll so the hero measures a cell that is all there.
+        selectionReveal.select(
+            revealing: collectionView.layoutAttributesForItem(at: indexPath)?.frame,
+            in: collectionView
+        ) { [weak self] in
+            self?.onItemTapped?(post)
+        }
     }
 }
 
@@ -402,6 +413,12 @@ extension ProfileGalleryGridView {
 }
 
 extension ProfileGalleryGridView: UIScrollViewDelegate {
+    /// A reveal-then-open is waiting on this. The page had no reason to
+    /// implement it before — nothing here animated its own offset.
+    func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        selectionReveal.scrollAnimationDidEnd()
+    }
+
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         positionStatusLabel()
         onVerticalScroll?(verticalOffset)
