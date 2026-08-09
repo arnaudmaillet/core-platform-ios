@@ -116,6 +116,9 @@ public final class GridVideoPlaybackCoordinator {
             .sorted { $0.distanceFromCentre < $1.distanceFromCentre }
         let chosen = isSurfaceVisible ? Array(ranked.prefix(maxConcurrent)) : []
         let chosenIDs = Set(chosen.map(\.id))
+        #if DEBUG
+        logRankingIfChanged(ranked, chosen: chosenIDs)
+        #endif
 
         for (id, cell) in playing where !chosenIDs.contains(id) && id != handoffID {
             stop(id: id, cell: cell)
@@ -627,6 +630,30 @@ public final class GridVideoPlaybackCoordinator {
         guard tracesTransitions else { return }
         print(String(format: "[grid-pool] %.3f slots=%d handoff=%@",
                      CACurrentMediaTime(), count, handoff?.rawValue ?? "-"))
+    }
+
+    /// The chosen set at the last reconcile, so the ranking is reported when it
+    /// CHANGES rather than on every tick.
+    private var lastLoggedChoice: Set<PostID>?
+
+    /// Under `-grid-playback-log`: the full ranking, printed at each moment the
+    /// selection changes.
+    ///
+    /// The reconcile runs ~30 times a second during a scroll and the answer is
+    /// the same almost every time, so logging unconditionally buries the events
+    /// that matter under its own noise. Printing on change gives one block per
+    /// handover — which is exactly the claim worth checking: that the nearest
+    /// `maxConcurrent` to the viewport centre are the ones playing, and that
+    /// rows falling out of that window stop.
+    private func logRankingIfChanged(_ ranked: [Candidate], chosen: Set<PostID>) {
+        guard Self.tracesTransitions, chosen != lastLoggedChoice else { return }
+        lastLoggedChoice = chosen
+        let line = ranked.map { candidate in
+            "\(chosen.contains(candidate.id) ? "▶" : "·")\(candidate.id.rawValue)"
+                + "@\(Int(candidate.distanceFromCentre))"
+        }.joined(separator: " ")
+        print(String(format: "[grid-rank] %.3f cap=%d %@",
+                     CACurrentMediaTime(), maxConcurrent, line))
     }
 
     static func logTransition(_ verb: String, _ id: PostID, count: Int) {

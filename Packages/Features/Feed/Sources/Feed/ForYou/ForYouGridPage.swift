@@ -594,6 +594,44 @@ final class ForYouGridPage: UIView {
     }
 
     #if DEBUG
+    /// `-foryou-scroll-demo`: scrolls the page the way a finger would, since
+    /// the simulator injects no touches.
+    ///
+    /// Deliberately `setContentOffset(animated:)` rather than assigning the
+    /// offset: an assignment jumps in one step and fires a single
+    /// `scrollViewDidScroll`, which would exercise none of what autoplay does
+    /// during a scroll. The animated form emits a callback per frame and ends
+    /// with `scrollViewDidEndScrollingAnimation`, so the throttled reconcile,
+    /// its velocity gate and the settle all run exactly as they do under a
+    /// flick.
+    func debugScroll(toY y: CGFloat) {
+        collectionView.setContentOffset(CGPoint(x: 0, y: y), animated: true)
+    }
+
+    var debugScrollableHeight: CGFloat {
+        max(0, collectionView.contentSize.height - collectionView.bounds.height)
+    }
+
+    var debugViewportHeight: CGFloat { collectionView.bounds.height }
+
+    /// The posts on screen that COULD play, with the same centre distance the
+    /// ranking uses — the independent check on what the coordinator chose.
+    var debugVisibleVideoRanking: [(id: String, distance: Int)] {
+        let viewport = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
+        let centreY = viewport.midY
+        return collectionView.indexPathsForVisibleItems.compactMap { indexPath in
+            let index = flatIndex(for: indexPath)
+            guard posts.indices.contains(index) else { return nil }
+            let post = posts[index]
+            guard autoplays(post), let cell = collectionView.cellForItem(at: indexPath) else { return nil }
+            let box = (cell as? PostGridListRowCell)?.mediaHeroRect
+                .map { cell.convert($0, to: collectionView) }
+                ?? cell.convert(cell.bounds, to: collectionView)
+            return (post.id.rawValue, Int(abs(box.midY - centreY)))
+        }
+        .sorted { $0.distance < $1.distance }
+    }
+
     /// `-grid-playback-log`: report which ladder rung each playing tile settled
     /// on, once the streams have had time to choose one.
     private func schedulePlaybackDiagnosticsIfNeeded() {
