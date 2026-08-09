@@ -202,10 +202,27 @@ public final class PostDetailViewModel {
     /// than failing the whole post.
     private func loadComments() {
         guard let commentsProvider else { return }
-        onCommentsChange?(.loading)
+        // A prefetched first page renders NOW, with no skeleton in between.
+        //
+        // This is the whole point of the cache being synchronous: the panel
+        // mounts inside a layout pass — during a hero flight, inside
+        // `prepareForHeroPresentation` — and anything it awaits is a skeleton
+        // on screen. With the page already in hand the destination is
+        // complete before the flight starts, so the transition carries real
+        // comments rather than placeholders that swap after landing.
+        let prefetched = commentsProvider.cachedTopComments(for: postID)
+        if let prefetched {
+            comments = prefetched
+            emitComments()
+        } else {
+            onCommentsChange?(.loading)
+        }
+        // Refreshed regardless: the cache is a head start, not the truth. A
+        // page prefetched a minute ago can have missed a comment since.
         Task { [weak self] in
             guard let self else { return }
             let loaded = (try? await commentsProvider.loadComments(for: self.postID)) ?? []
+            guard loaded != self.comments else { return }
             self.comments = loaded
             self.emitComments()
         }

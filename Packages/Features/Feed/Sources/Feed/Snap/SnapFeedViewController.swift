@@ -2022,11 +2022,6 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         if let model = activeModel, model.mediaURL == nil {
             let still = engagedFlightStill
             engagedFlightStill = nil
-            #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
-                print("[flight-chrome] text still=\(still != nil)")
-            }
-            #endif
             return still
         }
         let chrome = SnapChromeView()
@@ -2168,6 +2163,17 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // tapped post is always the head of the window, which is item 0.
         engagedFlightStill = nil
         if let model = orderedIDs.first.flatMap({ modelsByID[$0] }), model.mediaURL == nil {
+            // A SECOND settle before the capture. The panel mounted during the
+            // layout above and, with its first page already cached, filled
+            // itself synchronously — but filling a diffable data source is not
+            // the same as having laid its rows out, and the still is a picture
+            // of laid-out rows. Without this pass the capture caught the
+            // skeleton the panel had a moment earlier, with the real comments
+            // already in hand behind it.
+            commentsContentVC?.view.setNeedsLayout()
+            commentsContentVC?.view.layoutIfNeeded()
+            view.layoutIfNeeded()
+            CATransaction.flush()
             let head = collectionView.cellForItem(at: IndexPath(item: 0, section: 0))
             engagedFlightStill = (head as? SnapFeedCell)?.engagedLayoutSnapshot()
         }

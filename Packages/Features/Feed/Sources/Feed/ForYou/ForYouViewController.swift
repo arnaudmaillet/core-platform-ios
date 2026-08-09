@@ -38,6 +38,9 @@ final class ForYouViewController: UIViewController {
     private let pager: ForYouPagerView
     private let makeSnapFeed: ([PostID]) -> UIViewController
     private let prewarm: ([PostID]) async -> Void
+    /// Loads a post's first page of comments into the panel's synchronous
+    /// cache. Optional so the other entry points need not supply one.
+    private let prefetchTopComments: ((PostID) async -> Void)?
     /// How this screen leaves itself. Weak, and held by the composition root —
     /// the screen never builds a destination, it names one.
     private weak var router: (any Router)?
@@ -384,11 +387,13 @@ final class ForYouViewController: UIViewController {
         videoPlayback: VideoPlaybackController? = nil,
         makeSnapFeed: @escaping ([PostID]) -> UIViewController,
         prewarm: @escaping ([PostID]) async -> Void,
+        prefetchTopComments: ((PostID) async -> Void)? = nil,
         router: (any Router)? = nil
     ) {
         self.viewModel = viewModel
         self.makeSnapFeed = makeSnapFeed
         self.prewarm = prewarm
+        self.prefetchTopComments = prefetchTopComments
         self.router = router
         pager = ForYouPagerView(imagePipeline: imagePipeline, videoPlayback: videoPlayback)
         super.init(nibName: nil, bundle: nil)
@@ -1111,9 +1116,25 @@ final class ForYouViewController: UIViewController {
     /// opens from memory instead of the network — the same trick Maps uses on
     /// viewport settle.
     private func prewarmVisible() {
-        let ids = viewModel.posts(for: viewModel.format).prefix(12).map(\.id)
+        let visible = Array(viewModel.posts(for: viewModel.format).prefix(12))
+        let ids = visible.map(\.id)
         guard !ids.isEmpty else { return }
         Task { [prewarm] in await prewarm(Array(ids)) }
+        // TEXT posts also prefetch their first page of comments, and only text
+        // posts do.
+        //
+        // A text post's page IS its comments — it opens straight into comment
+        // layout — so without this the hero flight carries a skeleton and the
+        // real rows swap in after landing. A media post opens onto its media
+        // and its comments are a secondary surface, so warming those would be
+        // a dozen extra requests to remove nothing visible.
+        //
+        // Before the tap is the only useful moment: the panel mounts during
+        // `prepareForHeroPresentation`, in the same turn as the push, so a
+        // fetch started there cannot land in time however light it is.
+        let textIDs = visible.filter { $0.kind == .text }.map(\.id)
+        guard !textIDs.isEmpty, let prefetchTopComments else { return }
+        Task { for id in textIDs { await prefetchTopComments(id) } }
     }
 
     #if DEBUG
