@@ -16,6 +16,20 @@ private final class PostOnlyFeedProvider: FeedProviding, @unchecked Sendable {
     }
 }
 
+/// Answers `cachedTopComments` synchronously, the way the real repository does
+/// once a page has been prefetched.
+private final class PrefetchedCommentsProvider: CommentsProviding, @unchecked Sendable {
+    private let entries: [CommentEntry]
+
+    init(_ entries: [CommentEntry]) { self.entries = entries }
+
+    nonisolated func cachedTopComments(for postID: PostID) -> [CommentEntry]? { entries }
+    func loadComments(for postID: PostID) async throws -> [CommentEntry] { entries }
+    func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry {
+        throw CommentsError.transport(message: "not used")
+    }
+}
+
 private actor StubCommentsProvider: CommentsProviding {
     private var comments: [CommentEntry]
     private(set) var addedBodies: [String] = []
@@ -69,7 +83,7 @@ struct PostDetailCommentsTests {
         try? await Task.sleep(for: .milliseconds(100))
     }
 
-    private func makeViewModel(_ comments: StubCommentsProvider) -> PostDetailViewModel {
+    private func makeViewModel(_ comments: any CommentsProviding) -> PostDetailViewModel {
         PostDetailViewModel(
             postID: PostID("post-1"),
             repository: PostOnlyFeedProvider(),
@@ -215,6 +229,51 @@ struct PostDetailCommentsTests {
         viewModel.setCommentSort(.recent)
         viewModel.setCommentSort(.trending)
         #expect(emitted.last == ["c2", "c2-r0", "c1"])
+    }
+
+    /// A first load must ALWAYS report `.loaded`, even when it returns the
+    /// same empty list the model started with.
+    ///
+    /// The stream renders a skeleton until it is told otherwise, so "nothing
+    /// changed" and "nothing loaded yet" are the same picture. Suppressing
+    /// this emit as a redundant one left every comment-less post skeletal
+    /// forever; the suite caught it as a 120-second poll, which is what a
+    /// never-satisfied `settle` looks like.
+    @Test func anEmptyFirstLoadStillReportsLoaded() async {
+        let viewModel = makeViewModel(StubCommentsProvider([]))
+        var states: [PostDetailViewModel.CommentsState] = []
+        viewModel.onCommentsChange = { states.append($0) }
+
+        viewModel.viewDidLoad()
+        await settle {
+            if case .loaded = states.last { return true } else { return false }
+        }
+
+        #expect(states.contains { if case .loaded(let m) = $0 { return m.isEmpty } else { return false } })
+    }
+
+    /// A prefetched first page skips the skeleton entirely: the very first
+    /// thing the stream is told is `.loaded`, never `.loading`. That is the
+    /// whole point of the cache being synchronous — the panel mounts inside a
+    /// layout pass, and anything it awaits is a skeleton on screen.
+    @Test func aPrefetchedPageRendersWithoutALoadingState() async {
+        let entry = CommentEntry(
+            id: "c1", authorID: ProfileID("p1"), authorName: "A", authorHandle: "a",
+            body: "hi", createdAt: Date(timeIntervalSince1970: 10), parentID: nil
+        )
+        let viewModel = makeViewModel(PrefetchedCommentsProvider([entry]))
+        var states: [PostDetailViewModel.CommentsState] = []
+        viewModel.onCommentsChange = { states.append($0) }
+
+        viewModel.viewDidLoad()
+
+        // Synchronous — no awaiting, which is the contract under test.
+        #expect(states.count == 1)
+        if case .loaded(let models) = states.first {
+            #expect(models.map(\.id) == ["c1"])
+        } else {
+            Issue.record("first emission was not .loaded: \(String(describing: states.first))")
+        }
     }
 
     @Test func blankCommentIsIgnored() async {

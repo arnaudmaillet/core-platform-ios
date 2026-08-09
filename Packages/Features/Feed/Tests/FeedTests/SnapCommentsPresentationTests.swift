@@ -286,21 +286,24 @@ struct SnapCommentsPresentationTests {
         // Float, so the CGFloat constant never comes back bit-identical.
         #expect(abs(backdrop.dimOpacity - SnapCommentsLayout.backdropDimOpacity) < 0.001)
         let chrome = try #require(cell.contentView.subviews.compactMap { $0 as? SnapChromeView }.first)
-        // The chrome as a whole never fades — its individual surfaces do.
-        #expect(chrome.alpha == 1)
+        // THE CHROME IS THE FADED LAYER — one alpha for every surface it
+        // owns, which is what makes the engagement one animation instead of
+        // seven (see `setCommentsEngagedProgress`).
+        #expect(chrome.alpha == 0)
         let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
         let ticker = try #require(chrome.subviews.compactMap { $0 as? SnapCommentTickerView }.first)
         let subtitle = try #require(chrome.subviews.compactMap { $0 as? SnapSubtitleView }.first)
-        #expect(ticker.alpha == 0)
-        #expect(subtitle.alpha == 0)
+        // The members keep their own alpha and inherit the container's.
+        #expect(ticker.alpha == 1)
+        #expect(subtitle.alpha == 1)
         // The action column goes with them. It used to ride both states at
         // full presence, floating over the comment list; the engaged layout
         // owns the full width now, so the rail and its "+" anchor fade out
         // together (alpha < 0.01 also retires them from hit-testing, which
         // is what removed the composer-vs-rail overlap entirely).
         let plus = try #require(chrome.subviews.compactMap { $0 as? SnapRailComposeButton }.first)
-        #expect(rail.alpha == 0)
-        #expect(plus.alpha == 0)
+        #expect(rail.alpha == 1)
+        #expect(plus.alpha == 1)
         #expect(chrome.interactionRoots.contains(plus))
 
         cell.setCommentsEngaged(false)
@@ -308,6 +311,7 @@ struct SnapCommentsPresentationTests {
         #expect(media.transform == .identity)
         #expect(card.transform == .identity)
         #expect(backdrop.dimOpacity == 0)
+        #expect(chrome.alpha == 1)
         #expect(ticker.alpha == 1)
         #expect(subtitle.alpha == 1)
         #expect(plus.alpha == 1)
@@ -477,12 +481,12 @@ struct SnapCommentsPresentationTests {
     }
 
     /// REGRESSION, inverted (stranded center tile): the outbound push's
-    /// lifecycle resign runs the Ken Burns stop, which once had to settle
+    /// lifecycle resign used to run a Ken Burns stop, which had to settle
     /// onto a per-state resting transform — a blind identity stranded the
     /// docked tile as a frozen full-bleed center crop that the return could
-    /// not heal. With the media full-bleed in BOTH states there is no such
-    /// state to get wrong: identity is correct throughout, and the recede
-    /// the engagement does own lives on the card, out of the drift's reach.
+    /// not heal. The drift is gone entirely now (see
+    /// `theBackgroundMediaNeverScales`), so identity is not merely correct
+    /// throughout: it is the only value these surfaces ever hold.
     @Test func outboundResignLeavesTheBackgroundMediaAlone() throws {
         let cell = makeEngagedCell()
         let card = try mediaCard(of: cell)
@@ -505,6 +509,130 @@ struct SnapCommentsPresentationTests {
         cell.setCommentsEngaged(false)
         cell.reassertEngagedGeometry()
         #expect(card.transform == .identity)
+    }
+
+    /// THE DISENGAGE'S COMPLETION MUST RIDE THE ANIMATION, not the
+    /// transaction — this is the regression that made the ✕ leave every
+    /// comment entry point dead.
+    ///
+    /// The teardown is what clears the screen's `commentsEngagedID`, and while
+    /// that is set `presentComments` refuses to open. Hanging the completion
+    /// off `CATransaction.setCompletionBlock` looked right and never fired:
+    /// `animateCommentsEngaged` calls `performWithoutAnimation`, which opens
+    /// and commits a NESTED transaction, and the block set on the outer one
+    /// was lost. The drag-down exit hid it, because it drives the progress to
+    /// the end itself before handing off, so the page looked correct either
+    /// way — only the reopen was broken.
+    @Test func theDisengageCarriesItsCompletionOnTheAnimation() throws {
+        let cell = makeEngagedCell()
+        var completions = 0
+        cell.animateCommentsEngaged(false, duration: 0.3) { completions += 1 }
+
+        // Some layer in the transition carries it — deliberately not asserting
+        // WHICH, because that is the cell's business; what matters is that the
+        // completion is attached to an ANIMATION and so cannot be lost by a
+        // nested transaction.
+        func engageAnimations(_ layer: CALayer) -> [CAAnimation] {
+            let mine = layer.animation(forKey: "comments-engage-opacity").map { [$0] } ?? []
+            return mine + (layer.sublayers ?? []).flatMap(engageAnimations)
+        }
+        let animations = engageAnimations(cell.contentView.layer)
+        #expect(!animations.isEmpty)
+        #expect(animations.contains { $0.delegate != nil })
+        #expect(cell.isCommentsEngaged == false)
+
+        // A call with nothing to change still reports back — a caller whose
+        // teardown hangs off this must never be stranded by a no-op.
+        completions = 0
+        cell.animateCommentsEngaged(false, duration: 0.3) { completions += 1 }
+        #expect(completions == 1)
+    }
+
+    /// A WARM panel is invisible and inert. Building the comments ahead of
+    /// the tap is what removed the transition's main-thread stall (~115ms of
+    /// construction and layout, measured, which is about seven frames the
+    /// video is not shown on), but a panel installed early must not be
+    /// VISIBLE early — `installComments` unhides the header frost and a
+    /// freshly installed panel has never been through the engagement's
+    /// interpolator, so the dismissed pose has to be asserted explicitly.
+    ///
+    /// Alpha 0 is also what keeps the full-cell container out of hit-testing,
+    /// so a warm panel cannot eat the resting page's taps.
+    @Test func aWarmCommentsPanelIsInvisibleAndInert() throws {
+        let cell = SnapFeedCell(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        cell.configure(
+            with: FeedItemDisplayModel(
+                id: PostID("post-1"), authorID: ProfileID("profile-1"), authorName: "Ana",
+                metaText: "@ana · 3m", avatarURL: nil, caption: "caption",
+                mediaURL: URL(string: "mock://media/1"), mediaKind: .image,
+                thumbnailURL: nil, audioText: nil
+            ),
+            pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            videoPlayback: nil
+        )
+        let panel = UIView()
+        cell.installComments(panel)
+        // The warm's pose: fully dismissed, which is progress 1.
+        cell.setCommentsEngagementProgress(1)
+        cell.layoutIfNeeded()
+
+        let container = try #require(panel.superview)
+        #expect(container.alpha == 0)
+        // Below UIKit's hit-testing floor, so the resting page keeps its taps.
+        #expect(container.alpha < 0.01)
+        // The frost band came out of hiding with the install; the pose is
+        // what keeps it from being seen.
+        let frost = try #require(
+            cell.contentView.subviews.compactMap { $0 as? ProgressiveFrostView }.first
+        )
+        #expect(frost.alpha == 0)
+        // And the page's own chrome is fully present, as at rest.
+        let chrome = try #require(cell.contentView.subviews.compactMap { $0 as? SnapChromeView }.first)
+        #expect(chrome.alpha == 1)
+        #expect(cell.isCommentsEngaged == false)
+    }
+
+    /// THE MEDIA NEVER SCALES — not at rest, not while the comments open,
+    /// not while they close, not on any lifecycle edge in between.
+    ///
+    /// An 8s Ken Burns zoom to 1.12× used to run on photo pages. The
+    /// comments have to read over a still background, so engaging stopped it
+    /// (a snap back from wherever the zoom had reached) and disengaging
+    /// restarted it — beginning a zoom INSIDE the transition's own animation
+    /// block. From the reader's side that is the background scaling as the
+    /// comments open and close. Nothing sets a transform on these surfaces
+    /// any more, and this walks the whole cycle to say so.
+    @Test func theBackgroundMediaNeverScales() throws {
+        let cell = makeEngagedCell()
+        let card = try mediaCard(of: cell)
+        let media = card.imageView
+
+        func expectStill(_ stage: String) {
+            #expect(media.transform == .identity, "media scaled at: \(stage)")
+            #expect(card.transform == .identity, "card scaled at: \(stage)")
+            // The presentation layer too: a CA animation in flight would
+            // show here even while the model value reads identity, which is
+            // exactly how the drift used to hide from a transform check.
+            #expect(media.layer.animation(forKey: "transform") == nil, "media animating at: \(stage)")
+        }
+
+        expectStill("engaged")
+        cell.willBecomeActive()
+        expectStill("active + engaged")
+
+        cell.setCommentsEngaged(false)
+        expectStill("disengaged")
+        // The interactive dismissal's continuous drive, end to end.
+        for progress in stride(from: CGFloat(0), through: 1, by: 0.25) {
+            cell.setCommentsEngagementProgress(progress)
+            expectStill("progress \(progress)")
+        }
+        cell.setCommentsEngaged(true)
+        expectStill("re-engaged")
+        cell.didResignActive()
+        expectStill("resigned")
+        cell.prepareForReuse()
+        expectStill("reused")
     }
 
     /// REGRESSION, inverted (phantom tile band): the docked video surface
@@ -827,7 +955,7 @@ struct SnapCommentsPresentationTests {
             let rail = try #require(
                 chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first
             )
-            #expect(rail.alpha == 0)
+            #expect(rail.superview?.alpha == 0) // the chrome carries the fade
         }
     }
 
@@ -1004,6 +1132,23 @@ struct SnapCommentsPresentationTests {
     /// state. It used to swap to a red ✕ while a media post's comments were
     /// open — which meant text and media engagements disagreed about what
     /// that corner meant.
+    /// The trailing run is ONE item, so iOS 26 gives it ONE glass platter.
+    ///
+    /// It reads as an implementation detail and is not: adjacent bar items
+    /// share a platter, and a fixed space between them is the only thing that
+    /// makes two. Re-introducing a spacer here would silently put the second
+    /// bubble back. (Worth knowing before trying: platter COUNT is not what
+    /// the hero push is paying for — see `configureToolbarItems` — so do not
+    /// split this on the theory that merging it was the performance fix.)
+    @Test func theToolbarsTrailingRunIsASingleItem() {
+        let (_, feed) = Self.chromeHost()
+        let items = feed.toolbarItems ?? []
+        // [attribution][flexible space][bookmark ⬆︎ ⋯]
+        #expect(items.count == 3)
+        #expect(items.last?.customView is UIStackView)
+        #expect((items.last?.customView as? UIStackView)?.arrangedSubviews.count == 3)
+    }
+
     @Test func toolbarIsIdenticalInEveryState() {
         let (_, feed) = Self.chromeHost()
         let resting = feed.toolbarItems ?? []
@@ -1122,15 +1267,90 @@ struct SnapCommentsPresentationTests {
         }
         let resting = settledWidth()
 
-        view.setCompact(true, animated: false)
-        let compact = settledWidth()
-        #expect(compact < resting)
-        // The budget: ~222pt is what the bar leaves beside a 96pt sort pill
-        // and a 44pt leading platter on the 402pt reference device.
-        #expect(compact <= 150)
+        // THE PILL NEVER CHANGES WHAT IT IS. It used to drop the handle line
+        // and the follow button for the engagement, which made it a visibly
+        // different component in the two states. It pays the bar's width
+        // budget in WIDTH now: same two lines, same follow button, same
+        // platter — the name truncates earlier, exactly as a long name
+        // already does at rest.
+        view.setWidthBudget(160)
+        let budgeted = settledWidth()
+        #expect(budgeted <= 160)
+        #expect(budgeted < resting)
 
-        view.setCompact(false, animated: false)
+        // And it comes back whole.
+        view.setWidthBudget(nil)
         #expect(abs(settledWidth() - resting) < 0.5)
+    }
+
+    /// The order the trailing run gives way in, rung by rung. The handle
+    /// outranks the name, so a budget that only bites into the name leaves
+    /// the handle whole — and `widthKeepingHandleWhole` is the threshold
+    /// that says when the sort pill should surrender its word instead.
+    @Test func theAuthorPillYieldsItsNameBeforeItsHandle() throws {
+        let view = SnapAuthorIdentityView()
+        view.setAuthor(
+            FeedItemDisplayModel(
+                id: PostID("post-1"), authorID: ProfileID("profile-1"),
+                authorName: "Quentin Dubois", metaText: "@quentin.dubois · 71d",
+                avatarURL: nil, caption: "c", mediaURL: URL(string: "mock://media/1"),
+                mediaKind: .image, thumbnailURL: nil, audioText: nil
+            ),
+            pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+
+        // The threshold is everything that is NOT the name: the chrome plus
+        // the handle's own width. Above it the name absorbs the squeeze.
+        let threshold = view.widthKeepingHandleWhole
+        // `<=`, not `<`: this author's handle is WIDER than their name, so
+        // the name contributes nothing to the natural width and the two
+        // coincide. That is the threshold doing its job, not a miss.
+        #expect(threshold > 0)
+        #expect(threshold <= ceil(view.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width))
+
+        // The name label is the designated absorber; the handle resists.
+        func labels(in root: UIView) -> [UILabel] {
+            root.subviews.flatMap { [$0 as? UILabel].compactMap { $0 } + labels(in: $0) }
+        }
+        let found = labels(in: view)
+        let name = try #require(found.first { $0.text == "Quentin Dubois" })
+        let meta = try #require(found.first { $0.text == "@quentin.dubois · 71d" })
+        #expect(
+            name.contentCompressionResistancePriority(for: .horizontal)
+                < meta.contentCompressionResistancePriority(for: .horizontal)
+        )
+    }
+
+    /// Rung two: the sort pill trades its word for the glyph, and gives the
+    /// reserved width back with it — a pill that kept its footprint would
+    /// have bought the author nothing.
+    @Test func theSortPillCanSurrenderItsTitleForWidth() {
+        let button = SnapCommentSortButton()
+        button.setNeedsLayout()
+        button.layoutIfNeeded()
+        let titled = button.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+        #expect(button.isTitleHidden == false)
+        #expect(button.configuration?.attributedTitle != nil)
+
+        button.setTitleHidden(true)
+        let glyphOnly = button.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+        #expect(button.isTitleHidden)
+        #expect(button.configuration?.attributedTitle == nil)
+        #expect(glyphOnly < titled)
+        // The glyph alone still announces the control and its current order.
+        #expect(button.accessibilityLabel?.contains("Recent") == true)
+        // Selection still works, and still says so.
+        button.select(.trending)
+        #expect(button.accessibilityLabel?.contains("Trending") == true)
+        #expect(button.configuration?.attributedTitle == nil)
+
+        // Restored: the title is back AND so is the longest-title floor, so
+        // the wider "Trending" is not asked to fit a "Recent"-sized platter.
+        button.setTitleHidden(false)
+        #expect(button.configuration?.attributedTitle != nil)
+        #expect(button.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width >= titled - 0.5)
     }
 
     /// The bar's four slots, in order: the viewer's AVATAR opens it, the
@@ -2219,7 +2439,7 @@ struct SnapCommentsPresentationTests {
         #expect(rail.alpha == 1) // at rest
 
         cell.setCommentsEngaged(true)
-        #expect(rail.alpha == 0)
+        #expect(rail.superview?.alpha == 0) // the chrome carries the fade
 
         cell.setCommentsEngaged(false)
         #expect(rail.alpha == 1)
@@ -2271,6 +2491,21 @@ struct SnapCommentsPresentationTests {
         #expect(SnapCommentsLayout.skeletonRowEstimate <= 48)
         // Pre-layout fallback (zero bounds) still blankets every iPhone.
         #expect(SnapCommentsLayout.skeletonPlaceholderCount(viewportHeight: 0) >= proMax)
+    }
+
+    /// The comments-only empty PAGE row. `EmptyStateView` centres its block
+    /// and has no vertical intrinsic size, so a self-sizing list row has to
+    /// be told a height. The seed claims the whole available region (which
+    /// already excludes header, composer and safe areas); the correction
+    /// gives back whatever the caption row above it turned out to take.
+    @Test func theEmptyPageRowSeedsFromTheAvailableRoom() {
+        #expect(SnapCommentsLayout.emptyPageHeight(availableHeight: 700) == 700)
+        // The floor covers the pre-layout call, where bounds are still zero.
+        #expect(
+            SnapCommentsLayout.emptyPageHeight(availableHeight: 0)
+                == SnapCommentsLayout.emptyPageMinimumHeight
+        )
+        #expect(SnapCommentsLayout.emptyPageMinimumHeight > 0)
     }
 
     // MARK: - Entry point

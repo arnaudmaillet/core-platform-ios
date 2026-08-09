@@ -1,4 +1,6 @@
 import CoreModels
+import MediaCore
+import UIKit
 import Foundation
 import Testing
 @testable import PostGrid
@@ -110,5 +112,70 @@ struct PostGridCountTests {
         #expect(PostGridCount.abbreviate(1_234) == "1.2K")
         #expect(PostGridCount.abbreviate(12_500) == "12.5K")
         #expect(PostGridCount.abbreviate(1_500_000) == "1.5M")
+    }
+}
+
+// MARK: - Hero concealment
+
+/// CONCEAL EXACTLY WHAT THE FLIGHT REPRODUCES.
+///
+/// A tile is its media edge to edge, so a flight departing one hides the whole
+/// cell. A ROW is a card of which the media is one part, and the flight
+/// carries only that part — so hiding the whole row removed the caption,
+/// author line and metrics that nothing in the air stood in for. They were
+/// absent for the length of the flight and snapped back on its last frame,
+/// reported as "the rest of the post pops in at the end".
+@MainActor
+struct ListRowHeroConcealmentTests {
+    private func row(kind: GalleryPost.Kind = .photo) -> PostGridListRowCell {
+        let cell = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: 390, height: 320))
+        cell.configure(with: tile("p", kind: kind),
+                       imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()))
+        cell.layoutIfNeeded()
+        return cell
+    }
+
+    @Test func concealingTheMediaLeavesTheRestOfTheRowVisible() {
+        let cell = row()
+        cell.setHeroMediaConcealed(true)
+
+        // The cell itself must stay on screen — everything that is NOT the
+        // media is what the viewer keeps looking at during the flight.
+        #expect(cell.isHidden == false)
+        #expect(cell.alpha == 1)
+    }
+
+    /// The reason it is alpha and not `isHidden`: a hidden preview reports no
+    /// `mediaHeroRect`, and that rect is what the DISMISSAL flies home to. Hide
+    /// it and the return leg loses its own landing target mid-flight.
+    @Test func aConcealedRowStillReportsWhereItsMediaIs() {
+        let cell = row()
+        let restingRect = cell.mediaHeroRect
+        #expect(restingRect != nil)
+
+        cell.setHeroMediaConcealed(true)
+
+        #expect(cell.mediaHeroRect == restingRect)
+    }
+
+    @Test func unconcealingRestoresThePreview() {
+        let cell = row()
+        cell.setHeroMediaConcealed(true)
+        cell.setHeroMediaConcealed(false)
+
+        #expect(cell.mediaHeroRect != nil)
+        #expect(cell.isHidden == false)
+    }
+
+    /// A text-only row has no media to conceal, and asking must not be an
+    /// error — the page applies concealment without knowing the post's kind.
+    @Test func aTextRowHasNothingToConcealAndSaysSo() {
+        let cell = row(kind: .text)
+        #expect(cell.mediaHeroRect == nil)
+
+        cell.setHeroMediaConcealed(true)
+
+        #expect(cell.isHidden == false)
+        #expect(cell.mediaHeroRect == nil)
     }
 }

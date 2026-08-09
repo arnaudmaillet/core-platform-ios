@@ -69,7 +69,19 @@ public struct MockSocialDataset: Sendable {
     /// search, so these decide the per-mode counts the menu shows — three that
     /// read as Work, one as Focus, one as neither. `MockForYouArrivalTests`
     /// pins those numbers so a caption edit cannot quietly change them.
-    static func justArrivedRecords(authors: [Author]) -> [PostRecord] {
+    ///
+    /// Takes the catalog for the same reason the main corpus does, and it did
+    /// NOT: these five seeded `mock://` unconditionally, so under
+    /// `-rich-media` the arrivals were the only posts still showing
+    /// synthesized placeholders — and a synthesized video placeholder is a
+    /// flat colour. Being newest-first they are also the first pages the feed
+    /// opens on, so the one group that ignored the flag was the group most
+    /// likely to be looked at. Reported as "some posts render as a plain solid
+    /// colour with `-rich-media`".
+    static func justArrivedRecords(
+        authors: [Author],
+        mediaCatalog: MediaCatalog
+    ) -> [PostRecord] {
         // Ahead of the clock by enough that a slow launch cannot overtake it.
         let epochMS = Int64(Date().timeIntervalSince1970 * 1000) + 5 * 60_000
         let captions = [
@@ -85,14 +97,32 @@ public struct MockSocialDataset: Sendable {
             // the arrivals do not all land in one cell path.
             let hasMedia = index % 3 != 2
             let shape = shapes[index % shapes.count]
-            let host = index % 2 == 0 ? "media" : "video"
+            let isVideo = index % 2 == 1
+            let host = isVideo ? "video" : "media"
+            // Same branch as the main corpus, and the same reason for the
+            // asymmetry inside it: a real video's declared size must come FROM
+            // the fixture, because the client pre-layouts from it and a wrong
+            // number shows up as a crop. Images keep `shapes` — Picsum returns
+            // exactly the size asked for.
+            let media: (url: String, width: Int, height: Int)? = switch (hasMedia, mediaCatalog) {
+            case (false, _):
+                nil
+            case (true, .synthetic):
+                ("mock://\(host)/new-\(index)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
+            case (true, .realAssets):
+                if isVideo {
+                    { let fixture = MockMediaFixtures.videos[index % MockMediaFixtures.videos.count]
+                      return (fixture.url, fixture.width, fixture.height) }()
+                } else {
+                    (MockMediaFixtures.imageURL(index: index, width: shape.0, height: shape.1),
+                     shape.0, shape.1)
+                }
+            }
             return PostRecord(
                 postID: String(format: "post-new-%02d", index),
                 authorProfileID: authors[index % authors.count].profileID,
                 caption: caption,
-                media: hasMedia
-                    ? ("mock://\(host)/new-\(index)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
-                    : nil,
+                media: media,
                 // Newest first, a minute apart, all of them ahead of the clock.
                 publishedAtMS: epochMS - Int64(index) * 60_000,
                 parentID: ""
@@ -286,7 +316,7 @@ public struct MockSocialDataset: Sendable {
         }
         // Five posts that arrived AFTER the viewer last looked, at the head of
         // the timeline. See `justArrivedRecords`.
-        posts = Self.justArrivedRecords(authors: authors) + records
+        posts = Self.justArrivedRecords(authors: authors, mediaCatalog: mediaCatalog) + records
 
         // Twelve follows, not four: the compose picker expands the viewer's
         // first eight follows into friend-of-friend candidates

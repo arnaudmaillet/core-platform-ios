@@ -90,11 +90,14 @@ struct CommentsRepositoryTests {
         #expect(queue.allSatisfy { $0.text.count <= CommentTickerBuilder.maxCharacterCount })
         #expect(queue.allSatisfy { !$0.text.contains(where: \.isNewline) })
 
-        let cues = SubtitleCommentBuilder().build(comments, postID: PostID("post-0006"))
+        // The band cleared its gate here, so the classic partition holds:
+        // it keeps first claim and the zone takes the semantic remainder.
+        let cues = SubtitleCommentBuilder().build(
+            comments, postID: PostID("post-0006"), tickerIsRendering: !queue.isEmpty
+        )
         // 6 semantic seeds + the 2 semantic bodies in the reaction bank +
         // the 2 sentence-shaped replies.
         #expect(cues.count == 10)
-        #expect(cues.count >= SubtitleCommentBuilder.minCueCount)
         #expect(Set(cues.map(\.id)).isDisjoint(with: queue.map(\.id))) // one comment, one surface
         #expect(cues.allSatisfy { !$0.text.contains(where: \.isNewline) })
     }

@@ -2,7 +2,7 @@ import CoreNavigation
 import UIKit
 
 /// Keeps the native edge-swipe-to-pop alive on a stack whose delegate slot is
-/// sometimes occupied by a custom transition owner (`TimelineSlideDismissal`,
+/// sometimes occupied by a custom transition owner (`InteractiveSlideDismissal`,
 /// `ZoomTransitionController` — the map's pin flight and the For You grid's).
 ///
 /// UIKit's built-in gesture delegate quietly refuses to *begin* the native
@@ -36,24 +36,14 @@ final class NativePopGestureEnabler: NSObject {
 
 extension NativePopGestureEnabler: UIGestureRecognizerDelegate {
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        guard let nav = navigationController,
-              // Never at a root: a begun pop with nothing to pop freezes the UI.
-              nav.viewControllers.count > 1,
-              // Never mid-transition: a second pop corrupts the stack.
-              nav.transitionCoordinator == nil,
-              let top = nav.topViewController,
-              // Snap surfaces (timeline slide, pin grab) own their dismissal.
-              !(top is any ZoomTransitionDestination),
-              // Honor a screen's explicit back suppression.
-              !top.navigationItem.hidesBackButton
-        else { return false }
-        // Preserve UIKit's own contract: a custom leading item replaces the
-        // back affordance — and the gesture with it — unless the screen
-        // declares the item supplemental (as the profile does).
-        if top.navigationItem.leftBarButtonItem != nil,
-           !top.navigationItem.leftItemsSupplementBackButton {
-            return false
-        }
-        return true
+        guard let nav = navigationController, let top = nav.topViewController else { return false }
+        return NativePopPolicy.shouldBegin(
+            isAtRoot: nav.viewControllers.count <= 1,
+            isTransitioning: nav.transitionCoordinator != nil,
+            hidesBackButton: top.navigationItem.hidesBackButton,
+            ownsInteractiveDismissal: (top as? any ZoomTransitionDestination)?.zoomOwnsInteractiveDismissal,
+            hasCustomLeadingItem: top.navigationItem.leftBarButtonItem != nil,
+            leadingItemsSupplementBackButton: top.navigationItem.leftItemsSupplementBackButton
+        )
     }
 }

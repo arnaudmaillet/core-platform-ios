@@ -38,6 +38,9 @@ final class ForYouViewController: UIViewController {
     private let pager: ForYouPagerView
     private let makeSnapFeed: ([PostID]) -> UIViewController
     private let prewarm: ([PostID]) async -> Void
+    /// Loads a post's first page of comments into the panel's synchronous
+    /// cache. Optional so the other entry points need not supply one.
+    private let prefetchTopComments: ((PostID) async -> Void)?
     /// How this screen leaves itself. Weak, and held by the composition root —
     /// the screen never builds a destination, it names one.
     private weak var router: (any Router)?
@@ -384,11 +387,13 @@ final class ForYouViewController: UIViewController {
         videoPlayback: VideoPlaybackController? = nil,
         makeSnapFeed: @escaping ([PostID]) -> UIViewController,
         prewarm: @escaping ([PostID]) async -> Void,
+        prefetchTopComments: ((PostID) async -> Void)? = nil,
         router: (any Router)? = nil
     ) {
         self.viewModel = viewModel
         self.makeSnapFeed = makeSnapFeed
         self.prewarm = prewarm
+        self.prefetchTopComments = prefetchTopComments
         self.router = router
         pager = ForYouPagerView(imagePipeline: imagePipeline, videoPlayback: videoPlayback)
         super.init(nibName: nil, bundle: nil)
@@ -674,6 +679,90 @@ final class ForYouViewController: UIViewController {
         )
     }
 
+    /// The feed this grid opens, reused across pushes when it can be.
+    ///
+    /// Held by THIS controller rather than by the builder on purpose. A single
+    /// shared instance would be a bug the moment two tabs want a feed at once
+    /// — the Maps pin path pushes onto its own navigation stack and can be on
+    /// screen while this one is — so the cache belongs to the call site, and
+    /// every other entry point keeps building its own.
+    /// The interactive swipe-to-pop for TEXT posts, which push natively.
+    ///
+    /// The same object the menu-pushed timeline uses, for the same reason: a
+    /// page with no hero still needs a way back by hand, and the system's own
+    /// gesture is edge-only and disabled by the feed's custom back item. It
+    /// scrubs the pop 1:1 and releases on the shared contract, so a text post
+    /// and a media post feel the same in the hand even though only one of them
+    /// flies.
+    private let textSlideDismissal = InteractiveSlideDismissal()
+
+    /// STRONG, and that is the whole mechanism: the reference has to outlive
+    /// the pop. Held weakly it would be released the moment the navigation
+    /// controller let go, and the next tap would rebuild exactly what this
+    /// exists to avoid.
+    private var reusableFeed: SnapFeedViewController?
+
+    /// The cache is an OPTIMISATION, not state: under real pressure, give it
+    /// back. This is the ONLY thing that drops it — a tab switch does not.
+    ///
+    /// # Why a cached feed is cheap to keep
+    /// The reason to drop it would be the media it holds, except it holds
+    /// none. Being popped runs the FEED's own `viewDidDisappear`, which
+    /// resigns its active cell and calls `VideoPlaybackController.stop`: the
+    /// item is replaced with nil, the renderer is invalidated and unhooked
+    /// from the display link, and the `AVPlayer` returns to a pool that is
+    /// app-wide rather than this screen's. By the time anything here could
+    /// release a player, the players are already gone.
+    ///
+    /// What is left is a view hierarchy, and that measured as nothing: phys
+    /// footprint after a tab-away was 83/75/82 MB holding it against 75/86/74
+    /// MB dropping it — fully overlapping, and in both directions. So it is
+    /// kept, and the next tap stays a re-point rather than a rebuild. A tab
+    /// switch was never the signal that means "give something back"; this is.
+    override func didReceiveMemoryWarning() {
+        super.didReceiveMemoryWarning()
+        releaseCachedFeed()
+    }
+
+    /// Never drops a feed that is still on screen; a detached one costs the
+    /// next tap a rebuild and nothing else.
+    private func releaseCachedFeed() {
+        guard reusableFeed?.navigationController == nil else { return }
+        #if DEBUG
+        if reusableFeed != nil, ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
+            print("[feed-reuse] RELEASED cached feed")
+        }
+        #endif
+        reusableFeed = nil
+    }
+
+    /// Re-aims the cached feed at this window, or builds one if there is no
+    /// usable instance. `repoint` refuses while the controller is still in a
+    /// navigation stack, which is the case that must not be reused.
+    ///
+    /// Internal, not private, so the cache's lifetime is unit-testable without
+    /// driving a whole hero flight — the rules that matter (a push must not
+    /// drop it, leaving the tab must) are lifecycle-ordering rules, and those
+    /// are exactly what a sim run is worst at pinning.
+    func snapFeed(for ids: [PostID]) -> UIViewController {
+        if let cached = reusableFeed, cached.repoint(to: ids) {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
+                print("[feed-reuse] REPOINTED to \(ids.prefix(3).map(\.rawValue))")
+            }
+            #endif
+            return cached
+        }
+        let feed = makeSnapFeed(ids)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
+            print("[feed-reuse] BUILT fresh for \(ids.prefix(3).map(\.rawValue))")
+        }
+        #endif
+        reusableFeed = feed as? SnapFeedViewController
+        return feed
+    }
+
     private func openFeed(from format: GalleryFilter.Format, at index: Int) {
         // One flight at a time: a second tap while a card is in the air would
         // stage a transition over a live one. Same guard as the map's.
@@ -688,7 +777,7 @@ final class ForYouViewController: UIViewController {
         // post becomes invisible to reconcile, so nothing can restart or stop
         // it while its player is in flight.
         pager.beginPlaybackHandoff(of: tapped.id)
-        let feed = makeSnapFeed(Array(ids))
+        let feed = snapFeed(for: Array(ids))
         // Hand the feed the projection this grid already holds, so its first
         // page configures at push time rather than when its own fetch returns.
         // Measured at ~0.69s of empty destination without it.
@@ -710,7 +799,37 @@ final class ForYouViewController: UIViewController {
             // No hero available — a text-only row has no media to fly, and a
             // destination without the seam can't be flown to. A plain push is
             // the honest fallback; it is still the same feed.
+            //
+            // A full-surface interactive swipe stands in for the flight's
+            // grab. It owns the dismissal from here, so the native edge
+            // gesture stays out of its way (see `NativePopGestureEnabler`) —
+            // the two would otherwise both try to drive one pop.
+            (feed as? SnapFeedViewController)?.zoomOwnsInteractiveDismissal = true
+            textSlideDismissal.attach(to: feed)
+            textSlideDismissal.onFeedPopped = { [weak self] _ in
+                // The bar was hidden for the push and nothing else restores it
+                // on this path — there is no transition controller to report a
+                // return.
+                self?.showTabBar(alpha: 1)
+                self?.restoreChromeAfterTransition()
+            }
+            textSlideDismissal.install(on: navigationController)
             navigationController.pushViewController(feed, animated: true)
+            #if DEBUG
+            // `-text-swipe-demo <peak>`: walks the exact begin/update/release
+            // path a finger drives. The simulator injects no touches, so this
+            // is the only way the scrub itself gets exercised — a peak below
+            // the release threshold must spring back, above it must pop.
+            let arguments = ProcessInfo.processInfo.arguments
+            if let position = arguments.firstIndex(of: "-text-swipe-demo"),
+               position + 1 < arguments.count,
+               let peak = Double(arguments[position + 1]) {
+                Task { @MainActor [textSlideDismissal] in
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    await textSlideDismissal.debugPerformSwipe(peakProgress: CGFloat(peak))
+                }
+            }
+            #endif
             return
         }
         let source = ForYouGridZoomSource(
@@ -765,6 +884,11 @@ final class ForYouViewController: UIViewController {
         )
         let transition = ZoomTransitionController(source: source, destination: destination)
         activeTransition = transition
+        // A flight is staging, and it attaches its own grab below — so this
+        // screen owns its dismissal and the native edge pop must stay out of
+        // its way. Stated rather than left at the default: the controller is
+        // reused, and the previous presentation may have said otherwise.
+        (feed as? SnapFeedViewController)?.zoomOwnsInteractiveDismissal = true
         // The bar's alpha is driven 1:1 by the grab (and by the flight's spring
         // on a tap-back), so it is revealed by the hand instead of appearing
         // after the card has already landed.
@@ -839,7 +963,15 @@ final class ForYouViewController: UIViewController {
             self?.navigationController?.popViewController(animated: true)
         }
         navigationController.delegate = transition
+        // Pay the destination's first layout and raster HERE — see
+        // `prepareForHeroPresentation`. In the tap's own frame a stall is
+        // invisible; in the flight's first frames it is the pause.
+        (feed as? SnapFeedViewController)?
+            .prepareForHeroPresentation(in: navigationController.view.bounds)
         navigationController.pushViewController(feed, animated: true)
+        #if DEBUG
+        zoomProfilerNote("push returned")
+        #endif
 
         #if DEBUG
         // `-foryou-demo-grab`: once the feed has landed, drive the grab twice —
@@ -1029,9 +1161,32 @@ final class ForYouViewController: UIViewController {
     /// opens from memory instead of the network — the same trick Maps uses on
     /// viewport settle.
     private func prewarmVisible() {
-        let ids = viewModel.posts(for: viewModel.format).prefix(12).map(\.id)
+        let visible = Array(viewModel.posts(for: viewModel.format).prefix(12))
+        let ids = visible.map(\.id)
         guard !ids.isEmpty else { return }
         Task { [prewarm] in await prewarm(Array(ids)) }
+        // TEXT posts also prefetch their first page of comments, and only text
+        // posts do.
+        //
+        // A text post's page IS its comments — it opens straight into comment
+        // layout — so without this the hero flight carries a skeleton and the
+        // real rows swap in after landing. A media post opens onto its media
+        // and its comments are a secondary surface, so warming those would be
+        // a dozen extra requests to remove nothing visible.
+        //
+        // Before the tap is the only useful moment: the panel mounts during
+        // `prepareForHeroPresentation`, in the same turn as the push, so a
+        // fetch started there cannot land in time however light it is.
+        // The PAGE's list, not the view model's. They are not the same order:
+        // the page groups the arrivals into their own "New" section and shows
+        // them first, so the view model's leading 12 skipped every arrival —
+        // and the arrivals are exactly the posts a viewer opens first. It is
+        // also the list `openFeed` indexes into, so warming from it means
+        // warming the post that will actually be tapped.
+        let onPage = pager.posts(for: viewModel.format).prefix(12)
+        let textIDs = onPage.filter { $0.kind == .text }.map(\.id)
+        guard !textIDs.isEmpty, let prefetchTopComments else { return }
+        Task { for id in textIDs { await prefetchTopComments(id) } }
     }
 
     #if DEBUG
@@ -1381,6 +1536,31 @@ final class ForYouViewController: UIViewController {
                 return
             }
             openFeed(from: format, at: index)
+            // `-zoom-repeat`: open, pop, open again (twice over). The hero's
+            // stall has only ever been measured on the FIRST push of a
+            // process, which cannot distinguish per-push cost from one-time
+            // warm-up of whatever the push touches first. Two more rounds
+            // separate them.
+            if ProcessInfo.processInfo.arguments.contains("-zoom-repeat") {
+                for round in 1...2 {
+                    let base = 3.0 * Double(round)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + base) { [weak self] in
+                        self?.navigationController?.popViewController(animated: true)
+                    }
+                    // A DIFFERENT tile each round. Reopening the same one
+                    // cannot tell a re-pointed feed from a stale one — both
+                    // render the same post — so the harness would pass while
+                    // reuse served the previous window.
+                    // `-zoom-repeat-same` reopens the SAME tile, which is what
+                    // a re-entry bug needs: a different tile exercises a fresh
+                    // window and hides state the previous flight left behind.
+                    let reopen = ProcessInfo.processInfo.arguments.contains("-zoom-repeat-same")
+                        ? index : index + round
+                    DispatchQueue.main.asyncAfter(deadline: .now() + base + 1.5) { [weak self] in
+                        self?.openFeed(from: format, at: reopen)
+                    }
+                }
+            }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + openDelay, execute: attempt)
     }

@@ -10,12 +10,29 @@ import Foundation
 /// feed shows genuine image/video media — not the Radar thumbnail — and inherits
 /// every feed behaviour unchanged. There is no pagination: the set is exactly the
 /// tapped posts.
-actor FixedPostsFeedProvider: FeedProviding {
+/// A fixed provider that can be re-aimed at a different window of posts.
+///
+/// The point is upstream of the data: a screen whose corpus can be replaced
+/// does not have to be REBUILT to show a different set, and rebuilding the
+/// snap feed is what makes a hero push expensive — a fresh controller means
+/// fresh bar chrome, and iOS 26 materialises that chrome's glass inside the
+/// push (see `ZoomFlightProfiler`).
+protocol RepointableFeedProviding: FeedProviding {
+    func repoint(to ids: [PostID]) async
+}
+
+actor FixedPostsFeedProvider: FeedProviding, RepointableFeedProviding {
     private let base: any FeedProviding
-    private let ids: [PostID]
+    private var ids: [PostID]
 
     init(base: any FeedProviding, ids: [PostID]) {
         self.base = base
+        self.ids = ids
+    }
+
+    /// Aims this provider at a different set. The next `loadFirstPage` serves
+    /// it; nothing is cached here, so there is nothing else to invalidate.
+    func repoint(to ids: [PostID]) {
         self.ids = ids
     }
 

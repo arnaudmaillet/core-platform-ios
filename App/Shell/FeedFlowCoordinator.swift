@@ -26,7 +26,7 @@ final class FeedFlowCoordinator: Coordinator {
     /// Swipe-right-to-pop, the timeline counterpart of the pin feed's grab.
     /// One instance for the one retained feed; re-installed on the target
     /// stack at every push.
-    private let slideDismissal = TimelineSlideDismissal()
+    private let slideDismissal = InteractiveSlideDismissal()
 
     init(container: AppContainer) {
         self.container = container

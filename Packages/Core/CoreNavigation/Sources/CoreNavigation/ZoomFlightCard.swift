@@ -62,6 +62,8 @@ public protocol ZoomFlightCard: UIView {
     /// source's own, over everything.
     var zoomRestingChrome: UIView? { get }
 
+
+
     /// The surface live media renders on — non-nil only while the card is
     /// actually carrying live media. Typed as `UIView` to keep this module
     /// playback-agnostic; the card owns the concrete render type.

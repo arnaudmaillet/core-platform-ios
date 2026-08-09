@@ -89,6 +89,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // The same seeded surface a Maps pin opens, from a tile instead.
             makeSnapFeed: { postIDs in makeSnapFeedViewController(postIDs: postIDs) },
             prewarm: { ids in await repository.prewarm(ids) },
+            // Text posts open straight into comment layout, so their first
+            // page is warmed while the grid is still on screen — see
+            // `prewarmVisible`.
+            prefetchTopComments: { [commentsProvider] id in
+                await commentsProvider?.prefetchTopComments(for: id)
+            },
             // For the `+` item, which routes to the composer rather than
             // building one.
             router: router

@@ -137,29 +137,29 @@ final class SnapMediaCardView: UIView {
                      renderView.debugSurfaceState))
         #endif
     }
-    /// Whether the drift has content to animate (a loaded, visible photo).
+    /// Whether the photo surface has something on screen — the landing
+    /// trace's readiness signal for an image page.
     var isImageReady: Bool { imageView.image != nil && !imageView.isHidden }
 
-    // MARK: - Ken Burns drift
-
-    /// Starts the slow zoom on the photo surface. The caller gates WHEN
-    /// (active and not engaged); the card owns the animation.
-    func startDrift() {
-        guard isImageReady else { return }
-        imageView.layer.removeAllAnimations()
-        UIView.animate(withDuration: 8, delay: 0, options: [.curveLinear, .allowUserInteraction]) {
-            self.imageView.transform = CGAffineTransform(scaleX: 1.12, y: 1.12)
-        }
-    }
-
-    /// Stops the drift and settles the photo back to identity. This USED to
-    /// take a caller-computed resting transform, because while the media
-    /// docked, the engagement and the drift shared one transform and a
-    /// blind identity here stranded the tile as a frozen full-bleed crop.
-    /// The engagement does not touch this view's geometry at all any more,
-    /// so identity is simply correct, in every state.
-    func stopDrift() {
-        imageView.layer.removeAllAnimations()
-        UIView.performWithoutAnimation { self.imageView.transform = .identity }
-    }
+    // MARK: - No transform. Ever.
+    //
+    // THE MEDIA IS STATIC, at `.identity`, for the whole life of the cell.
+    // A Ken Burns drift used to live here — an 8s linear zoom to 1.12× on
+    // the photo, started on activation — and it was the last thing scaling
+    // this surface. It came from Phase 1, as visible proof that the
+    // activation seam fired at all, back when video could not yet play; the
+    // player has made that point for a long time now.
+    //
+    // What it cost was the engagement's transition. The comments have to
+    // read over a STILL background, so engaging had to stop the drift — a
+    // snap back from wherever the zoom had reached — and disengaging
+    // restarted it, which began an 8s zoom inside the transition's own
+    // animation block. From the reader's side that is the media scaling as
+    // the comments open and close: not a designed motion, a side effect of
+    // one state having to undo another's transform.
+    //
+    // Nothing sets a transform on these surfaces now, so there is no state
+    // to reset, nothing to gate on `isCommentsEngaged`, and no path that
+    // can strand a scale. The two `.identity` assignments at build time are
+    // the whole story.
 }

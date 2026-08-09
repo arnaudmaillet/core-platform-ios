@@ -249,6 +249,77 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         contentView.layoutIfNeeded()
     }
 
+    /// The engagement, driven by Core Animation.
+    ///
+    /// Four opacities move, and after the chrome's own collapse each is ONE
+    /// layer: the comments container, the header band, the readability wash,
+    /// and the page chrome. Model values are set first and unanimated — so
+    /// the settled state is right even if an animation is removed — then one
+    /// explicit animation per layer carries the eye.
+    ///
+    /// `presentation()` is the start value, not the model: an engagement
+    /// interrupted mid-flight continues from what is on screen rather than
+    /// snapping back to where the last one began. That is the same property
+    /// the interactive pull-down relies on, which is why both paths can share
+    /// `setCommentsEngagementProgress` as their definition of the two ends.
+    func animateCommentsEngaged(
+        _ engaged: Bool, duration: TimeInterval, completion: (() -> Void)? = nil
+    ) {
+        guard engaged != isCommentsEngaged else { return completion?() ?? () }
+        let layers = engagementFadeLayers
+        let starts = layers.map { ($0.presentation() ?? $0).opacity }
+        UIView.performWithoutAnimation { setCommentsEngaged(engaged) }
+        // The completion rides ONE designated layer, chosen by identity
+        // rather than by position in the list: the comments container exists
+        // for the cell's whole life and is always part of this transition, and
+        // an ordinal would silently move if the list were ever reordered.
+        let completionLayer = commentsContainer.layer
+        for (layer, start) in zip(layers, starts) {
+            let animation = CABasicAnimation(keyPath: "opacity")
+            animation.fromValue = start
+            animation.toValue = layer.opacity
+            animation.duration = duration
+            animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            // The completion hangs off ONE animation's delegate, not off the
+            // transaction.
+            //
+            // `CATransaction.setCompletionBlock` is the obvious place for it
+            // and it DOES NOT FIRE here — `performWithoutAnimation` above
+            // opens and commits a nested transaction, and the block set on the
+            // outer one never ran. That cost a real regression: the disengage's
+            // teardown is what clears `commentsEngagedID`, and while it is set
+            // `presentComments` refuses to open, so closing with the ✕ left
+            // every comment entry point dead. A delegate is attached to the
+            // animation itself and cannot be lost that way.
+            if layer === completionLayer, let completion {
+                animation.delegate = CALayerAnimationCompletion(completion)
+            }
+            layer.add(animation, forKey: "comments-engage-opacity")
+        }
+    }
+
+    /// The four layers the engagement fades, in no particular order.
+    private var engagementFadeLayers: [CALayer] {
+        [commentsContainer.layer, headerFrost.layer, mediaBackdrop.layer, chrome.layer]
+    }
+
+    /// Materializes the header band's blur AHEAD of the engagement.
+    ///
+    /// A material arrives through `effect`, and building one is render-server
+    /// work on the main thread — paid at engage it is part of the tap's frame
+    /// budget. Paid on the warm it is free, and the band is invisible either
+    /// way: its alpha is 0 in the dismissed pose, so a materialized-but-unseen
+    /// blur costs nothing to composite (a fully transparent layer is not
+    /// rendered).
+    ///
+    /// Window-guarded, like every glass surface here — headless CI never pays
+    /// for a real blur — and idempotent, so the engagement's own attempt finds
+    /// it already done.
+    func prematerializeEngagedChrome() {
+        guard window != nil, headerFrost.effect == nil, !headerFrost.isHidden else { return }
+        headerFrost.effect = UIBlurEffect(style: SnapCommentsLayout.frostStyle)
+    }
+
     /// The engaged stream's top inset — where its content rests, just
     /// below the screen chrome. A pure function of the safe area now: the
     /// caption scrolls inside the stream, so nothing above it has to be
@@ -342,11 +413,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         cardSwipeRecognizer.isEnabled = engaged
 
         if engaged {
-            // The drift yields for the engagement: a slowly zooming photo
-            // under body text is a readability problem, and the background
-            // should read as STILL while the reader is in the comments. It
-            // resumes on disengage (below).
-            stopKenBurns()
             if !pauseGlyph.isHidden {
                 pauseGlyphSuppressedByEngagement = true
                 pauseGlyph.isHidden = true
@@ -372,9 +438,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
                 pauseGlyphSuppressedByEngagement = false
                 pauseGlyph.isHidden = false
             }
-            // Image pages resume their drift where activation would have
-            // started it.
-            if isActive { startKenBurns() }
         }
     }
 
@@ -412,6 +475,27 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
         #endif
         let hasMedia = model.mediaURL != nil
+        #if DEBUG
+        // `-media-audit`: every page that configures WITHOUT a media payload,
+        // and under `-rich-media` whether that is by design.
+        //
+        // The distinction this exists to draw: a text-only post rendering as a
+        // coloured page is the product working, while a MEDIA post arriving
+        // with no URL — or with one that never resolves — is a pipeline
+        // failure, and the two are indistinguishable on screen. Both look like
+        // "a solid colour where a photo should be".
+        if ProcessInfo.processInfo.arguments.contains("-media-audit") {
+            let rich = ProcessInfo.processInfo.arguments.contains("-rich-media")
+            if !hasMedia {
+                print("[media-audit] \(model.id.rawValue) NO MEDIA PAYLOAD"
+                      + " kind=\(model.mediaKind) rich=\(rich)"
+                      + " caption=\(model.caption?.isEmpty == false ? "yes" : "no")")
+            } else {
+                print("[media-audit] \(model.id.rawValue) media kind=\(model.mediaKind)"
+                      + " url=\(model.mediaURL?.absoluteString ?? "-")")
+            }
+        }
+        #endif
         // THE PAGE'S GROUND. A media page is black because black is what
         // letterboxing should be — the surface exists to disappear behind a
         // photo. A TEXT page has nothing to disappear behind, so its ground
@@ -528,15 +612,27 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // different thing from blanking something we already had.
         if let cached = pipeline.cachedImage(for: url) {
             mediaCard.setImage(cached)
-            if isActive { startKenBurns() }
             return
         }
         imageTasks.append(Task { [weak self] in
-            guard let image = try? await pipeline.image(for: url) else { return }
+            let image: UIImage?
+            do {
+                image = try await pipeline.image(for: url)
+            } catch {
+                // A post that HAS a media URL and cannot load it leaves the
+                // card on its floor — visually identical to a text page, and
+                // silent until now. This is the failure the audit is for.
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("-media-audit") {
+                    print("[media-audit] \(id.rawValue) IMAGE LOAD FAILED"
+                          + " url=\(url.absoluteString) error=\(error)")
+                }
+                #endif
+                return
+            }
+            guard let image else { return }
             guard let self, self.representedID == id else { return }
             self.mediaCard.setImage(image)
-            // If the media arrives after activation, kick the motion now.
-            if self.isActive { self.startKenBurns() }
         })
     }
 
@@ -578,7 +674,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             let view = mediaCard.renderView
             Task { await videoPlayback.play(url, in: view) }
         case .image:
-            startKenBurns()
+            // Nothing to start: a photo page's media is STATIC. The slow
+            // zoom that used to prove activation here is gone (see
+            // `SnapMediaCardView`), and video is the only kind with
+            // motion of its own.
+            break
         }
     }
 
@@ -688,6 +788,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             return mediaCard.isImageReady
         }
     }
+
 
     #if DEBUG
     /// The media area's full state for the landing trace.
@@ -893,30 +994,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // feed's own disappearance, where no `didEndDisplaying` fires.
         chrome.setTickerActive(false)
         chrome.setSubtitlesActive(false)
-        switch mediaKind {
-        case .video:
+        // Video is the only kind with anything to stop: a photo page's media
+        // is static, so resigning leaves it exactly as it was.
+        if mediaKind == .video {
             videoPlayback?.stop(mediaCard.renderView)
-        case .image:
-            stopKenBurns()
         }
-    }
-
-    /// Phase 1's visible proof that activation works: a slow zoom on the active
-    /// page's media. Phase 2 replaces this body with `player.play()`.
-    private func startKenBurns() {
-        // The background must read STILL while the reader is in the
-        // comments — the cell gates WHEN, the card owns the drift.
-        guard !isCommentsEngaged else { return }
-        mediaCard.startDrift()
-    }
-
-    private func stopKenBurns() {
-        // Unconditional identity. This used to have to compute a resting
-        // transform per state, because the engagement and the drift shared
-        // the surfaces' transform while the media docked; the engagement's
-        // recede now lives on the card itself, so the drift owns the
-        // surface transform outright and there is no state to consult.
-        mediaCard.stopDrift()
     }
 
     /// Re-asserts the engaged treatment after the screen re-appears from an
@@ -944,7 +1026,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         onRequestComments = nil
         onRequestCommentsClose = nil
         onRequestCommentsPageDrive = nil
-        stopKenBurns()
         setPauseGlyphVisible(false)
         videoPlayback?.stop(mediaCard.renderView)
         representedID = nil
@@ -1067,5 +1148,26 @@ extension SnapFeedCell: UIGestureRecognizerDelegate {
             view = current.superview
         }
         return false
+    }
+}
+
+
+/// Runs a closure when a `CAAnimation` stops — completed OR removed.
+///
+/// Core Animation retains an animation's delegate for its lifetime, so this
+/// needs no owner. It fires on removal too (`finished == false`), which is
+/// what an interruptible transition wants: the caller decides whether the
+/// world still needs the teardown, rather than the teardown being skipped
+/// because the animation did not run to the end.
+final class CALayerAnimationCompletion: NSObject, CAAnimationDelegate {
+    private let body: () -> Void
+
+    init(_ body: @escaping () -> Void) {
+        self.body = body
+        super.init()
+    }
+
+    func animationDidStop(_ animation: CAAnimation, finished: Bool) {
+        body()
     }
 }

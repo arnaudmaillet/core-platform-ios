@@ -158,6 +158,7 @@ final class PostGridFlightCard: UIView {
 extension PostGridFlightCard: ZoomFlightCard {
     var zoomRestingCornerRadius: CGFloat { style.cornerRadius }
 
+
     var zoomRestingChrome: UIView? { restingChromeView }
 
     /// The live surface, but ONLY while this card still contains it.

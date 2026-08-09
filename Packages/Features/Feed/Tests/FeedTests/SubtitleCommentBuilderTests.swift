@@ -21,19 +21,59 @@ private func semanticEntries(_ count: Int) -> [CommentEntry] {
 struct SubtitleCommentBuilderTests {
     private let builder = SubtitleCommentBuilder()
 
-    @Test func hidesZoneBelowMinimumGate() {
-        let sparse = builder.build(semanticEntries(SubtitleCommentBuilder.minCueCount - 1), postID: PostID("post-1"))
-        #expect(sparse.isEmpty)
+    /// NO MINIMUM GATE. The zone used to hide below three cues, which is
+    /// most posts — a page with a conversation showed no sign of it, and the
+    /// "No comments yet" pill couldn't cover for it either, because the post
+    /// is not empty. One comment is a stream now.
+    @Test func anySingleCommentIsAStream() {
+        #expect(builder.build(semanticEntries(1), postID: PostID("post-1")).count == 1)
+        #expect(builder.build(semanticEntries(2), postID: PostID("post-1")).count == 2)
+        #expect(builder.build([], postID: PostID("post-1")).isEmpty)
+    }
 
-        let dense = builder.build(semanticEntries(SubtitleCommentBuilder.minCueCount), postID: PostID("post-1"))
-        #expect(dense.count == SubtitleCommentBuilder.minCueCount)
+    /// THE NO-BLANK FLOOR. A post whose comments are ALL reaction-shaped
+    /// gets nothing from the band until it clears `minTickerCount`, so with
+    /// the band off those comments have to land here — shape-blind — or they
+    /// are invisible on a post that has them.
+    @Test func reactionOnlyPostsStillFillTheZoneWhenTheBandIsOff() {
+        let entries = [entry("a", "W"), entry("b", "🔥🔥"), entry("c", "so clean")]
+
+        // Band off: every comment shows, whatever its shape.
+        let withoutBand = builder.build(entries, postID: PostID("post-1"), tickerIsRendering: false)
+        #expect(withoutBand.map(\.id) == ["a", "b", "c"])
+
+        // Band on: it owns them, and the zone defers — one comment, one
+        // surface. (Nothing is lost: they are visibly riding the band.)
+        let withBand = builder.build(entries, postID: PostID("post-1"), tickerIsRendering: true)
+        #expect(withBand.isEmpty)
+    }
+
+    /// The sparse seed, end to end: two comments, one reaction-shaped and one
+    /// not, on a post whose band is below its gate. Both must be cues — this
+    /// is the exact case that rendered a blank comment zone.
+    @Test func theSparseSeedShowsBothOfItsComments() {
+        let entries = [
+            entry("c0", "Love this shot 🔥"),
+            entry("c1", "Where was this taken?"),
+        ]
+        let cues = builder.build(entries, postID: PostID("post-0001"), tickerIsRendering: false)
+        #expect(cues.map(\.id) == ["c0", "c1"])
+    }
+
+    /// The shape-blind fallback is a FLOOR, not a replacement: when semantic
+    /// bodies exist they still win the zone outright, and short reactions
+    /// beside them stay the band's.
+    @Test func semanticBodiesStillWinTheZoneOverReactions() {
+        let entries = semanticEntries(2) + [entry("react", "🔥🔥🔥")]
+        let cues = builder.build(entries, postID: PostID("post-1"), tickerIsRendering: false)
+        #expect(cues.map(\.id) == ["s0", "s1"])
     }
 
     /// The author's avatar rides from the comment entry into the cue, so the
     /// subtitle zone can draw it leading the text.
     @Test func carriesTheAuthorAvatarIntoTheCue() {
         let url = URL(string: "mock://avatar/5?w=128&h=128")!
-        let entries = (0..<SubtitleCommentBuilder.minCueCount).map { index in
+        let entries = (0..<3).map { index in
             CommentEntry(
                 id: "s\(index)", authorID: ProfileID("p\(index)"), authorName: "Ava",
                 authorHandle: "ava", authorAvatarURL: url,

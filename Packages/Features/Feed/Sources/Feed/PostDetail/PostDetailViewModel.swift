@@ -85,12 +85,31 @@ public final class PostDetailViewModel {
     // MARK: - Inputs
 
     public func viewDidLoad() {
+        // Comments FIRST, and not chained to the post.
+        //
+        // `loadComments` used to be called at the end of the post's load task,
+        // after `await repository.loadPost` — so a prefetched first page,
+        // sitting in the cache and readable synchronously, still could not
+        // reach the screen until a network round trip for the POST came back.
+        // The panel showed its skeleton throughout, which for a text page
+        // opened by a hero flight is the whole transition.
+        //
+        // Nothing in the comment stream depends on the post entry: it is keyed
+        // by `postID` and stamped with `now`. The caption row arrives with the
+        // post and introduces itself without animating
+        // (`animatesStreamApply(introducesCaption:)`), which is exactly the
+        // case that seam already existed for.
+        loadComments()
         reload()
         loadViewerIdentity()
     }
 
     public func refresh() {
         guard load == nil else { return }
+        // Explicitly, because the comment load is no longer chained to the
+        // post's: a pull-to-refresh that silently stopped refreshing the
+        // comments would be the obvious cost of unchaining them.
+        loadComments()
         reload()
     }
 
@@ -186,7 +205,6 @@ public final class PostDetailViewModel {
                 self.engagement = EngagementState(likeCount: entry.likeCount, isLiked: false)
                 self.phase = .content(PostDetailDisplayModel(entry: entry, now: self.now()))
                 self.onEngagementChange?(self.engagement)
-                self.loadComments()
             } catch is CancellationError {
                 // Superseded; leave the phase alone.
             } catch {
@@ -202,10 +220,33 @@ public final class PostDetailViewModel {
     /// than failing the whole post.
     private func loadComments() {
         guard let commentsProvider else { return }
-        onCommentsChange?(.loading)
+        // A prefetched first page renders NOW, with no skeleton in between.
+        //
+        // This is the whole point of the cache being synchronous: the panel
+        // mounts inside a layout pass — during a hero flight, inside
+        // `prepareForHeroPresentation` — and anything it awaits is a skeleton
+        // on screen. With the page already in hand the destination is
+        // complete before the flight starts, so the transition carries real
+        // comments rather than placeholders that swap after landing.
+        let prefetched = commentsProvider.cachedTopComments(for: postID)
+        if let prefetched {
+            comments = prefetched
+            emitComments()
+        } else {
+            onCommentsChange?(.loading)
+        }
+        let didShowPrefetch = prefetched != nil
+        // Refreshed regardless: the cache is a head start, not the truth. A
+        // page prefetched a minute ago can have missed a comment since.
         Task { [weak self] in
             guard let self else { return }
             let loaded = (try? await commentsProvider.loadComments(for: self.postID)) ?? []
+            // The equality skip applies ONLY when a prefetched page is already
+            // on screen. Without one the view is sitting in `.loading` and has
+            // to be told, even when the answer is the empty list it started
+            // with — skipping there left the stream on its skeleton forever,
+            // which the suite caught as a 120-second poll.
+            guard !didShowPrefetch || loaded != self.comments else { return }
             self.comments = loaded
             self.emitComments()
         }

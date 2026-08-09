@@ -148,6 +148,22 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// (anything not network-backed) opts out by saying nothing.
     var zoomDestinationContentIsReady: Bool { get }
 
+    /// Whether this screen is hosting its OWN dismissal gesture for the
+    /// presentation it is currently in.
+    ///
+    /// Conforming to this protocol used to be taken as the answer, and for a
+    /// long time it was the same answer: a snap surface was always arrived at
+    /// by a flight, and that flight attached a grab which must never race the
+    /// native edge pop. It stopped being the same answer when TEXT posts went
+    /// back to a plain push — same class, no flight, no grab, and therefore
+    /// nothing to race — yet the edge swipe was still refused because the type
+    /// conformed.
+    ///
+    /// Defaults to true, so every existing caller keeps the behaviour it had;
+    /// a screen pushed without a flight says false and gets the ordinary pop.
+    var zoomOwnsInteractiveDismissal: Bool { get }
+
+
     /// Whether the destination's active page is actually COMPOSITING its
     /// media area — a drawing surface, or a poster/cover in place.
     ///
@@ -252,6 +268,7 @@ public protocol ZoomTransitionDestination: AnyObject {
 
 public extension ZoomTransitionDestination {
     var zoomDestinationContentIsReady: Bool { true }
+    var zoomOwnsInteractiveDismissal: Bool { true }
     var zoomDestinationMediaIsRendering: Bool { true }
     func zoomMirrorLiveMedia(onto surface: UIView) -> Bool { false }
     func zoomDonateLiveMediaView() -> UIView? { nil }

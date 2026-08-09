@@ -115,6 +115,16 @@ final class PostDetailViewController: UIViewController {
     /// The post as last rendered — the caption row's model, kept so a
     /// snapshot re-apply can rebuild item #0 without a refetch.
     private var latestPost: PostDetailDisplayModel?
+    /// The caption the opener already had, used until this screen's own post
+    /// load returns.
+    ///
+    /// The caption row is the stream's first item and it existed only once the
+    /// POST had loaded — which is a network round trip after the panel mounts.
+    /// For a hero flight that is far too late: the row the card is supposed to
+    /// land its caption ON did not exist while the card was in the air, so the
+    /// flight had no target and the caption appeared as a second one when the
+    /// post arrived.
+    private var seededCaption: (text: String, timestamp: String)?
     /// Parents whose full reply pool is shown (the "view more" seam's
     /// state). Per-screen, like scroll position.
     private var expandedReplyParents: Set<String> = []
@@ -141,6 +151,46 @@ final class PostDetailViewController: UIViewController {
 
     deinit {
         for task in imageTasks { task.cancel() }
+    }
+
+    /// Rows re-measure on a genuine WIDTH change — rotation, iPad size
+    /// classes. Nothing here touches the empty page's HEIGHT: that is
+    /// resolved once at configuration time and deliberately never revisited
+    /// per layout, because a height that changes after frame 0 is the jump.
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        remeasureStreamOnWidthChange()
+    }
+
+    /// The width the stream's self-sizing rows were last measured against.
+    private var lastMeasuredStreamWidth: CGFloat = 0
+
+    /// Re-measures every row when the stream's width changes.
+    ///
+    /// Self-sizing rows are measured once, at whatever width the list has
+    /// when they are configured — and on the feed's RESTING engagement that
+    /// is a width the container has not finished resolving, because the
+    /// comments are installed into a cell from `willDisplay` while the page
+    /// is still arriving. The caption row got measured narrow, kept the
+    /// height that came out of it, and its label — tail-truncating by
+    /// default — ended a three-line caption in an ellipsis on line one. The
+    /// same run measured 58pt one launch and 33.67pt the next, which is the
+    /// tell: nothing was wrong with the text, only with WHEN it was asked.
+    ///
+    /// Nothing re-asked, because a compositional list does not re-measure
+    /// self-sizing content on a bounds change by itself. This does, once per
+    /// genuine width change — so rotation and the iPad's size classes are
+    /// covered by the same line.
+    private func remeasureStreamOnWidthChange() {
+        let width = collectionView.bounds.width
+        guard width > 0, abs(width - lastMeasuredStreamWidth) > 0.5 else { return }
+        let isFirst = lastMeasuredStreamWidth == 0
+        lastMeasuredStreamWidth = width
+        // The very first width is not a CHANGE — the rows have not been
+        // measured against anything yet, and re-applying inside the first
+        // layout pass would fight the apply that is putting them there.
+        guard !isFirst, hasAppliedStream else { return }
+        remeasureStream()
     }
 
     override func viewDidLoad() {
@@ -502,6 +552,59 @@ final class PostDetailViewController: UIViewController {
         }
     }
 
+    /// The stream's two moving parts, driven by Core Animation directly
+    /// rather than inside a `UIView.animate` block. Symmetric: the exit runs
+    /// the same three animations towards the offstage pose.
+    ///
+    /// Model values are set FIRST and unanimated (so the settled state is
+    /// correct even if the animation is removed), then one explicit
+    /// animation per property carries the eye from where it actually was.
+    /// `presentation()` rather than the model value as the start, so an
+    /// interrupted entrance continues from what is on screen instead of
+    /// snapping back.
+    func animateEngagedTransition(toEngaged engaged: Bool, duration: TimeInterval) {
+        let stream = collectionView.layer
+        let bar = composeBar.layer
+        let fromStream = (stream.presentation() ?? stream).transform
+        let fromBarOpacity = (bar.presentation() ?? bar).opacity
+        let fromBarTransform = (bar.presentation() ?? bar).transform
+
+        UIView.performWithoutAnimation {
+            setStreamTransitionProgress(engaged ? 0 : 1)
+            setComposerEntranceState(offstage: !engaged)
+        }
+
+        addEntranceAnimation(stream, "transform", from: fromStream, to: stream.transform, duration: duration)
+        addEntranceAnimation(bar, "opacity", from: fromBarOpacity, to: bar.opacity, duration: duration)
+        addEntranceAnimation(bar, "transform", from: fromBarTransform, to: bar.transform, duration: duration)
+    }
+
+    private func addEntranceAnimation(
+        _ layer: CALayer, _ keyPath: String, from: Any, to: Any, duration: TimeInterval
+    ) {
+        let animation = CABasicAnimation(keyPath: keyPath)
+        animation.fromValue = from
+        animation.toValue = to
+        animation.duration = duration
+        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.add(animation, forKey: "comments-engage-\(keyPath)")
+    }
+
+    /// Materializes the footer band's blur AHEAD of the engagement — the
+    /// composer's half of `SnapFeedCell.prematerializeEngagedChrome`, and the
+    /// same reasoning: build the material while nothing is moving.
+    ///
+    /// Called after the offstage pose, which nils the effect; the entrance
+    /// then finds it already built and skips.
+    func prematerializeComposerChrome() {
+        guard view.window != nil, !composerBackdrop.isHidden,
+              composerBackdrop.effect == nil else { return }
+        composerBackdrop.effect = UIBlurEffect(style: SnapCommentsLayout.frostStyle)
+    }
+
+    /// Extra bottom room so resting content clears the composer band.
+    private static let engagedFooterClearance: CGFloat = 62
+
     func setEngagedInsets(top: CGFloat, bottomInset: CGFloat) {
         // The strip inset is the ONLY top authority in the engaged context:
         // the full-cell scroll view would otherwise also inherit the safe
@@ -523,7 +626,14 @@ final class PostDetailViewController: UIViewController {
             scrollBottomEngaged = collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         }
         scrollBottomEngaged?.isActive = true
-        collectionView.contentInset.bottom = max(0, bottomInset) + 62
+        collectionView.contentInset.bottom = max(0, bottomInset) + Self.engagedFooterClearance
+        // Recorded so the empty page can be sized against the SETTLED
+        // geometry on frame 0 — the stream is still growing into these
+        // numbers while the transition runs.
+        engagedStreamInsets = (
+            top: max(0, top),
+            bottom: max(0, bottomInset) + Self.engagedFooterClearance
+        )
         composerBackdrop.isHidden = false
         // Z-ORDER, load-bearing: the scroll view is added AFTER the compose
         // bar at build time (harmless while it ended at the bar's top), so
@@ -647,6 +757,21 @@ final class PostDetailViewController: UIViewController {
         likeButton.configuration = config
     }
 
+    /// Renders the caption row NOW, from what the opener already knows.
+    ///
+    /// The row is the stream's first item and it existed only once the POST had
+    /// loaded — a network round trip after the panel mounts — so a text page
+    /// opened from the feed showed its comments before its own caption, and the
+    /// caption dropped in afterwards. The feed already holds the caption and
+    /// the timestamp, so it hands them over at mount and the real post replaces
+    /// the row later with the same text, moving nothing.
+    func seedCaption(_ text: String, timestamp: String) {
+        guard mode == .commentsOnly, !text.isEmpty, latestPost == nil else { return }
+        seededCaption = (text, timestamp)
+        loadViewIfNeeded()
+        applyStream(animated: false)
+    }
+
     private func renderComments(_ state: PostDetailViewModel.CommentsState) {
         // Comments-only contexts already carry a "Comments" title (the nav
         // bar when pushed, the panel header when sheeted) — the inline
@@ -714,7 +839,22 @@ final class PostDetailViewController: UIViewController {
                 row.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -Spacing.lg),
             ])
         }
-        let emptyCell = UICollectionView.CellRegistration<UICollectionViewCell, StreamItem> { cell, _, _ in
+        // COMMENTS-ONLY gets the app's shared empty PAGE; the full post
+        // detail keeps a one-line note. The difference is what the surface
+        // is: with the post above it the comments are a SECTION, and a
+        // centred illustration block inside a section reads as a broken
+        // layout — but in comments-only the comments ARE the page, so its
+        // emptiness is the page's emptiness, and that is exactly what
+        // `EmptyStateView` is for.
+        let mode = mode
+        // COMMENTS-ONLY gets the app's shared empty PAGE; the full post
+        // detail keeps a one-line note. The difference is what the surface
+        // is: with the post above it the comments are a SECTION, and a
+        // centred illustration block inside a section reads as a broken
+        // layout — but in comments-only the comments ARE the page, so its
+        // emptiness is the page's emptiness, and that is exactly what
+        // `EmptyStateView` is for.
+        let emptyNoteCell = UICollectionView.CellRegistration<UICollectionViewCell, StreamItem> { cell, _, _ in
             cell.contentView.subviews.forEach { $0.removeFromSuperview() }
             let empty = UILabel()
             empty.text = "No comments yet. Be the first."
@@ -730,10 +870,30 @@ final class PostDetailViewController: UIViewController {
                 empty.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor),
             ])
         }
+        // The height is decided HERE, once, from geometry that is already
+        // final on frame 0 — `CommentsEmptyPageCell` then returns it
+        // unchanged for the life of the configuration. Nothing recomputes
+        // it later, which is what stops the block moving at the end of the
+        // presentation.
+        let emptyPageCell = UICollectionView.CellRegistration<CommentsEmptyPageCell, StreamItem> {
+            [weak self] cell, _, _ in
+            cell.configure(
+                symbolName: "bubble.left.and.bubble.right",
+                title: SnapCommentEmptyStateView.promptText,
+                subtitle: "Be the first to comment.",
+                height: self?.emptyPageHeight() ?? SnapCommentsLayout.emptyPageMinimumHeight
+            )
+        }
         let captionCell = UICollectionView.CellRegistration<CaptionBubbleCell, StreamItem> {
             [weak self] cell, _, _ in
-            guard let self, let post = self.latestPost else { return }
-            cell.configure(with: post, imagePipeline: self.imagePipeline)
+            guard let self else { return }
+            if let post = self.latestPost {
+                cell.configure(with: post, imagePipeline: self.imagePipeline)
+            } else if let seed = self.seededCaption {
+                cell.configureSeed(caption: seed.text, timestamp: seed.timestamp)
+            } else {
+                return
+            }
             cell.onAvatarTap = { [weak self] in self?.viewModel.didTapAuthor() }
         }
         streamDataSource = UICollectionViewDiffableDataSource<StreamSection, StreamItem>(
@@ -745,7 +905,13 @@ final class PostDetailViewController: UIViewController {
             case .caption:
                 return collectionView.dequeueConfiguredReusableCell(using: captionCell, for: indexPath, item: item)
             case .emptyState:
-                return collectionView.dequeueConfiguredReusableCell(using: emptyCell, for: indexPath, item: item)
+                return mode == .commentsOnly
+                    ? collectionView.dequeueConfiguredReusableCell(
+                        using: emptyPageCell, for: indexPath, item: item
+                    )
+                    : collectionView.dequeueConfiguredReusableCell(
+                        using: emptyNoteCell, for: indexPath, item: item
+                    )
             case .skeletonPlaceholder(let index):
                 return collectionView.dequeueConfiguredReusableCell(using: skeletonCell, for: indexPath, item: index)
             case .comment(let id):
@@ -763,7 +929,9 @@ final class PostDetailViewController: UIViewController {
         // skeletons as well as above the comments, so it is on screen from
         // the first frame and never pops in behind a shimmer. The full mode
         // already carries the caption inside its post section.
-        if mode == .commentsOnly, latestPost?.hasCaption == true { items.append(.caption) }
+        if mode == .commentsOnly, latestPost?.hasCaption == true || seededCaption != nil {
+            items.append(.caption)
+        }
         guard commentsLoaded else {
             // The initial fetch renders as a skeleton stream (the
             // messages screens' doctrine — shimmering placeholder rows,
@@ -808,10 +976,107 @@ final class PostDetailViewController: UIViewController {
     private func applyStream(animated: Bool, completion: (() -> Void)? = nil) {
         var snapshot = NSDiffableDataSourceSnapshot<StreamSection, StreamItem>()
         snapshot.appendSections([.main])
-        snapshot.appendItems(streamItems())
+        let items = streamItems()
+        snapshot.appendItems(items)
         hasAppliedStream = true
         streamDataSource.apply(snapshot, animatingDifferences: animated) { completion?() }
     }
+
+    /// Re-asks every row how tall it wants to be.
+    ///
+    /// `reconfigureItems`, not `invalidateLayout`: UIKit caches a
+    /// self-sizing cell's preferred attributes, and invalidating the layout
+    /// re-runs the layout against that same cached size. Reconfiguring is
+    /// what actually re-asks the cell.
+    ///
+    /// This is for width CHANGES only. It used to also run once after the
+    /// first apply, papering over rows that measured against an unsettled
+    /// width; `CaptionBubbleCell.preferredLayoutAttributesFitting` measures
+    /// against the authoritative width now, so there is nothing left to
+    /// paper over.
+    private func remeasureStream() {
+        var snapshot = streamDataSource.snapshot()
+        guard !snapshot.itemIdentifiers.isEmpty else { return }
+        snapshot.reconfigureItems(snapshot.itemIdentifiers)
+        streamDataSource.apply(snapshot, animatingDifferences: false)
+    }
+
+    // MARK: - The empty page's fit
+
+    /// The room the stream will have WHEN IT HAS SETTLED — deliberately not
+    /// the room it has right now.
+    ///
+    /// This is the crux of the jump. Engaging moves the stream's bottom to
+    /// the view's bottom (`setEngagedInsets`), so during the transition the
+    /// collection view is still GROWING: measured live, the available height
+    /// is smaller mid-animation than it ends up, and anything sized from it
+    /// has to move when the animation lands. The engaged numbers are known
+    /// up front though — they were handed in — so the final geometry is
+    /// computable on frame 0 and that is what the empty page is sized
+    /// against.
+    ///
+    /// The view's own height is the stable term (it does not animate); the
+    /// collection view's is not, and is used only in the un-engaged case,
+    /// where nothing is in flight.
+    private var availableStreamHeight: CGFloat {
+        if let engaged = engagedStreamInsets {
+            return view.bounds.height - engaged.top - engaged.bottom
+        }
+        let inset = collectionView.adjustedContentInset
+        return collectionView.bounds.height - inset.top - inset.bottom
+    }
+
+    /// The engaged context's own insets, kept so the settled geometry can be
+    /// computed before the transition has produced it. Nil until engaged.
+    private var engagedStreamInsets: (top: CGFloat, bottom: CGFloat)?
+
+    /// The empty page's height, resolved SYNCHRONOUSLY: the room the stream
+    /// has, less the section's own insets, less the caption row that sits
+    /// above it.
+    ///
+    /// The caption row is measured here rather than waited for. It is the
+    /// only other row in this stream, and a throwaway `CaptionBubbleCell`
+    /// answers for it exactly — same cell class, same width, same sizing
+    /// path the layout itself would take. Measuring costs one offscreen
+    /// layout pass per empty-state configuration; NOT measuring costs a
+    /// visible jump, because anything learned after frame 0 arrives as
+    /// motion the presentation did not ask for.
+    private func emptyPageHeight() -> CGFloat {
+        // The view's width, when the stream has not been laid out yet: the
+        // resting engagement configures rows before the container has run a
+        // pass, and a zero width would measure the caption as zero-height
+        // and hand the empty page the whole viewport.
+        let streamWidth = collectionView.bounds.width > 0
+            ? collectionView.bounds.width
+            : view.bounds.width
+        let rowWidth = streamWidth - Spacing.lg * 2
+        let occupied = Spacing.lg * 2 + captionRowHeight(width: rowWidth)
+        return SnapCommentsLayout.emptyPageHeight(
+            availableHeight: availableStreamHeight - occupied
+        )
+    }
+
+    /// The caption row's height at `width`, or 0 when this stream has no
+    /// caption row. Sized through the real cell so the answer cannot drift
+    /// from what the layout will produce.
+    private func captionRowHeight(width: CGFloat) -> CGFloat {
+        guard width > 0, mode == .commentsOnly,
+              let post = latestPost, post.hasCaption else { return 0 }
+        let sizingCell = captionSizingCell
+        sizingCell.configure(with: post, imagePipeline: nil)
+        sizingCell.bounds.size.width = width
+        sizingCell.contentView.setNeedsLayout()
+        sizingCell.contentView.layoutIfNeeded()
+        return ceil(sizingCell.contentView.systemLayoutSizeFitting(
+            CGSize(width: width, height: 0),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        ).height)
+    }
+
+    /// Offscreen, never in the hierarchy — it exists to be measured. Held
+    /// rather than rebuilt so a re-fit costs a layout pass, not a view tree.
+    private lazy var captionSizingCell = CaptionBubbleCell()
 
     /// The engaged toolbar's sort selector lands here — the view model
     /// re-ranks the data and the diffable apply animates the moves.

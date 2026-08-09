@@ -92,7 +92,10 @@ final class SnapSubtitleView: UIView {
     /// stays clamped visible; each hard-cut handoff swaps in the new author's
     /// image, so it rides the cue cycle rather than the flicker-free pill
     /// pipeline (a separate layer, so it can't disturb it).
-    private static let avatarDiameter: CGFloat = 28
+    /// Internal, not private: the empty state stands in this row's place and
+    /// puts its glyph in the avatar's slot, so the two must resolve the same
+    /// leading column from ONE constant or they drift apart.
+    static let avatarDiameter: CGFloat = 28
     /// The single leading anchor: a non-clipping wrapper the exact size of
     /// the avatar. It — not the avatar or the text — is what centers on the
     /// pill and what the text measures its leading gap from, so the layout
@@ -483,15 +486,55 @@ final class SnapSubtitleView: UIView {
 final class SubtitlePillLabel: UILabel {
     static let textInsets = UIEdgeInsets(top: 6, left: 12, bottom: 6, right: 12)
 
+    /// The corner for a pill carrying a BLOCK of text — two wrapped lines of
+    /// a sentence cue, where a capsule would bow away from the glyphs and
+    /// read as a speech balloon.
+    static let blockCornerRadius: CGFloat = 12
+
+    /// A measuring box big enough never to constrain the text. Finite on
+    /// purpose — `CGRect.infinite` makes `textRect` return degenerate
+    /// geometry rather than the natural size.
+    private static let unboundedBox = CGRect(x: 0, y: 0, width: 100_000, height: 100_000)
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         layer.backgroundColor = UIColor.black.withAlphaComponent(0.45).cgColor
-        layer.cornerRadius = 12
+        layer.cornerRadius = Self.blockCornerRadius
         layer.cornerCurve = .continuous
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// A pill is never narrower than it is tall. A one-grapheme cue ("W")
+    /// otherwise renders as a sliver beside the 28pt avatar; at the floor it
+    /// is a neat round chip instead — the same min-width-equals-height rule
+    /// the count badge uses to keep a single digit circular.
+    override var intrinsicContentSize: CGSize {
+        let natural = super.intrinsicContentSize
+        return CGSize(width: max(natural.width, natural.height), height: natural.height)
+    }
+
+    /// SHORT CUES ARE CAPSULES. The zone renders reaction-shaped comments
+    /// now, not only sentences (a post below the band's gate hands it
+    /// everything it has), and a fixed 12pt corner on a ~30pt one-line pill
+    /// reads as a clipped rectangle rather than a chip. One line rounds to a
+    /// full capsule — the shape language the rest of this corner already
+    /// speaks, from the band's own clip to the count badge — while a wrapped
+    /// block keeps the softer block corner.
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        layer.cornerRadius = rendersOneLine
+            ? bounds.height / 2
+            : min(Self.blockCornerRadius, bounds.height / 2)
+    }
+
+    /// Measured, not counted: the text is attributed (fonts ride inside the
+    /// string), so `font.lineHeight` is not reliably this pill's line box.
+    private var rendersOneLine: Bool {
+        let oneLine = super.textRect(forBounds: Self.unboundedBox, limitedToNumberOfLines: 1).height
+        return bounds.height - Self.textInsets.top - Self.textInsets.bottom <= oneLine + 1
+    }
 
     override func textRect(forBounds bounds: CGRect, limitedToNumberOfLines numberOfLines: Int) -> CGRect {
         let textBounds = super.textRect(
@@ -506,7 +549,19 @@ final class SubtitlePillLabel: UILabel {
         )
     }
 
+    /// Normally a no-op beyond the insets: the pill hugs its content, so the
+    /// inset box IS the text's width. It only bites at the min-width floor
+    /// above, where the surplus is split evenly so the lone glyph sits in
+    /// the middle of its chip instead of against the leading inset — the
+    /// zone's `.left` alignment is there for wrapped lines, and a padded
+    /// single glyph is the one case it gets wrong.
     override func drawText(in rect: CGRect) {
-        super.drawText(in: rect.inset(by: Self.textInsets))
+        var text = rect.inset(by: Self.textInsets)
+        let natural = super.textRect(forBounds: Self.unboundedBox, limitedToNumberOfLines: numberOfLines).width
+        if natural < text.width {
+            text.origin.x += (text.width - natural) / 2
+            text.size.width = natural
+        }
+        super.drawText(in: text)
     }
 }

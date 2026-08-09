@@ -68,6 +68,14 @@ public struct ViewerIdentity: Equatable, Sendable {
 /// view-model tests.
 public protocol CommentsProviding: Sendable {
     func loadComments(for postID: PostID) async throws -> [CommentEntry]
+    /// Loads the first page of top-level comments into a cache the panel can
+    /// read WITHOUT awaiting, so a post opened later renders its comments on
+    /// frame one instead of a skeleton. Idempotent and best-effort.
+    func prefetchTopComments(for postID: PostID) async
+    /// The prefetched first page, or nil. Synchronous by design: the panel
+    /// mounts inside a layout pass, and anything it has to await it renders a
+    /// skeleton for.
+    nonisolated func cachedTopComments(for postID: PostID) -> [CommentEntry]?
     /// Who the viewer is, for the composer's avatar. Nil when nobody is
     /// signed in or the profile can't be resolved — the composer then shows
     /// its neutral placeholder rather than someone else's face.
@@ -86,6 +94,10 @@ public protocol CommentsProviding: Sendable {
 }
 
 public extension CommentsProviding {
+    /// Providers that do not prefetch simply keep the old behaviour: the
+    /// panel awaits its load and shows a skeleton meanwhile.
+    func prefetchTopComments(for postID: PostID) async {}
+    nonisolated func cachedTopComments(for postID: PostID) -> [CommentEntry]? { nil }
     /// Default: no viewer. The composer's avatar is an enhancement, so a
     /// provider that doesn't know who is signed in (every test fake, and
     /// any future read-only source) opts out by saying nothing.
@@ -104,6 +116,11 @@ public actor CommentsRepository: CommentsProviding {
 
     private var viewerProfileID: ProfileID?
     private var authorCache: [ProfileID: (name: String, handle: String, avatarURL: URL?)] = [:]
+    /// The prefetched first pages, OUTSIDE this actor's isolation so the panel
+    /// can read one synchronously while it mounts. Locked rather than
+    /// isolated for exactly that reason — an `await` here would put a
+    /// skeleton on screen, which is the thing being removed.
+    private nonisolated let topPages = TopCommentsCache()
 
     public init(
         commentClient: any Comment_V1_CommentServiceClientInterface,
@@ -118,6 +135,17 @@ public actor CommentsRepository: CommentsProviding {
     }
 
     // MARK: - CommentsProviding
+
+    /// Best-effort: a failed prefetch leaves the cache empty and the panel
+    /// falls back to loading with a skeleton, exactly as before.
+    public func prefetchTopComments(for postID: PostID) async {
+        guard topPages.value(for: postID) == nil else { return }
+        _ = try? await loadComments(for: postID)
+    }
+
+    public nonisolated func cachedTopComments(for postID: PostID) -> [CommentEntry]? {
+        topPages.value(for: postID)
+    }
 
     public func loadComments(for postID: PostID) async throws -> [CommentEntry] {
         var request = Comment_V1_ListTopLevelRequest()
@@ -161,7 +189,12 @@ public actor CommentsRepository: CommentsProviding {
 
         let thread = Self.threaded(topLevel: views, repliesByParent: repliesByParent)
         await hydrateAuthors(for: thread.map { ProfileID($0.authorID) })
-        return thread.map(makeEntry)
+        let entries = thread.map(makeEntry)
+        // Every load fills the cache, not just an explicit prefetch: a page
+        // opened once and returned to should render instantly the second time
+        // for the same reason it should the first.
+        topPages.set(entries, for: postID)
+        return entries
     }
 
     public func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry {
@@ -290,5 +323,29 @@ public actor CommentsRepository: CommentsProviding {
         case .failure(let error):
             throw CommentsError.transport(message: error.message ?? "code \(error.code)")
         }
+    }
+}
+
+
+/// The prefetched first pages, readable without awaiting.
+///
+/// A lock rather than actor isolation, deliberately: the comments panel mounts
+/// inside a layout pass and cannot await anything — whatever it has to await,
+/// it renders a skeleton for. This is the one piece of the repository that has
+/// to answer synchronously.
+private final class TopCommentsCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pages: [PostID: [CommentEntry]] = [:]
+
+    func value(for postID: PostID) -> [CommentEntry]? {
+        lock.lock()
+        defer { lock.unlock() }
+        return pages[postID]
+    }
+
+    func set(_ entries: [CommentEntry], for postID: PostID) {
+        lock.lock()
+        defer { lock.unlock() }
+        pages[postID] = entries
     }
 }

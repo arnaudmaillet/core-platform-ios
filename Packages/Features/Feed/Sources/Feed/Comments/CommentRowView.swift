@@ -322,6 +322,50 @@ final class CaptionBubbleCell: UICollectionViewCell {
         onAvatarTap = nil
     }
 
+    /// Measures this row at the width the layout is actually going to give
+    /// it, rather than at whatever width the cell happens to be carrying.
+    ///
+    /// THE RACE THIS CLOSES. A self-sizing cell is asked its height once,
+    /// and on the feed's resting engagement it is asked early — the
+    /// comments are installed into a feed cell from `willDisplay`, while
+    /// the page is still arriving, so the container's width is not final.
+    /// Measured against a too-wide box the caption is one line, and one
+    /// line is the height the layout keeps: the row never grows back, and
+    /// the label — which HAS the full string — renders as much of it as
+    /// fits and clips the rest. That is the "clipped to one line, end of
+    /// the text missing" report, and it reproduced about one launch in
+    /// three.
+    ///
+    /// So the width comes from the ATTRIBUTES, which are authoritative, and
+    /// the layout is forced through synchronously before measuring, so
+    /// nothing downstream can hand back a cached one-line height.
+    override func preferredLayoutAttributesFitting(
+        _ layoutAttributes: UICollectionViewLayoutAttributes
+    ) -> UICollectionViewLayoutAttributes {
+        let targetWidth = layoutAttributes.frame.width
+        guard targetWidth > 0 else {
+            return super.preferredLayoutAttributesFitting(layoutAttributes)
+        }
+        // Adopt the target width FIRST: `preferredMaxLayoutWidth` is derived
+        // from the bubble's resolved bounds (see `SnapPostInfoCardView`), so
+        // the label only learns its real wrapping width once the cell is
+        // actually that wide.
+        if abs(bounds.width - targetWidth) > 0.5 {
+            bounds.size.width = targetWidth
+        }
+        contentView.setNeedsLayout()
+        contentView.layoutIfNeeded()
+        let fitted = contentView.systemLayoutSizeFitting(
+            CGSize(width: targetWidth, height: 0),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        // Ceil, not round: half a point short of the caption is a clipped
+        // descender on the last line.
+        layoutAttributes.frame.size.height = ceil(fitted.height)
+        return layoutAttributes
+    }
+
     override func didMoveToWindow() {
         super.didMoveToWindow()
         // The glass materializes only in a window (the render-server rule
@@ -329,6 +373,14 @@ final class CaptionBubbleCell: UICollectionViewCell {
         // long before it is attached, so the seed lives here rather than in
         // `configure`.
         bubble.setGlassActive(window != nil)
+    }
+
+    /// Renders from what the FEED already knows, before this screen's own post
+    /// fetch returns. Caption and timestamp only — enough for the row to exist,
+    /// occupy its real height, and be somewhere a flight can aim at.
+    func configureSeed(caption: String, timestamp: String) {
+        representedID = nil
+        bubble.configure(caption: caption, timestamp: timestamp)
     }
 
     func configure(with model: PostDetailDisplayModel, imagePipeline: ImagePipeline?) {
@@ -552,4 +604,80 @@ final class CommentSkeletonRowView: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+}
+
+/// The comments-only stream's empty page: the app's shared `EmptyStateView`
+/// as a list row, at a height it is TOLD rather than one it works out.
+///
+/// # Why a class of its own
+/// `EmptyStateView` centres its block in whatever bounds it is given and has
+/// no vertical intrinsic size, so the row's height is a decision, not a
+/// measurement — and a decision made twice is a jump. This cell exists so
+/// there is exactly one place that decision lands: `targetHeight` in, the
+/// same number out of `preferredLayoutAttributesFitting`, every pass.
+///
+/// # The jump this ends
+/// The height used to be seeded and then corrected against the collection
+/// view's settled geometry. That geometry is not settled during the
+/// engagement — the stream's bottom constraint moves to the view's bottom as
+/// part of the transition, so the available height GROWS while the animation
+/// runs. Recomputing on each layout meant the last recomputation landed as
+/// the animation finished: the block rendered low and snapped up at the end.
+///
+/// The answer is not to recompute more carefully but to stop recomputing.
+/// The height is resolved once, from geometry that is already final on frame
+/// 0 (`PostDetailViewController.emptyPageHeight`), and this cell returns it
+/// unchanged for the life of the configuration.
+final class CommentsEmptyPageCell: UICollectionViewCell {
+    private let empty = EmptyStateView()
+
+    /// The row's height, decided by the owner. `preferredLayoutAttributesFitting`
+    /// returns exactly this — never a self-sized alternative.
+    private var targetHeight: CGFloat = 0
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        empty.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(empty)
+        NSLayoutConstraint.activate([
+            empty.topAnchor.constraint(equalTo: contentView.topAnchor),
+            empty.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            empty.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            empty.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    func configure(symbolName: String, title: String, subtitle: String, height: CGFloat) {
+        targetHeight = max(0, height)
+        empty.configure(symbolName: symbolName, title: title, subtitle: subtitle)
+        // No implicit animation may attach to the setup pass: this runs
+        // inside the engagement's animation block on the resting-engagement
+        // path, and an animatable layout here is a block sliding into place
+        // behind the transition.
+        UIView.performWithoutAnimation {
+            contentView.setNeedsLayout()
+            contentView.layoutIfNeeded()
+        }
+    }
+
+    /// The height, locked. Laid out synchronously first so what UIKit is
+    /// handed on frame 0 is byte-identical to what the settled layout would
+    /// produce — there is no second answer for a later pass to find.
+    override func preferredLayoutAttributesFitting(
+        _ layoutAttributes: UICollectionViewLayoutAttributes
+    ) -> UICollectionViewLayoutAttributes {
+        let width = layoutAttributes.frame.width
+        UIView.performWithoutAnimation {
+            if width > 0, abs(bounds.width - width) > 0.5 {
+                bounds.size.width = width
+            }
+            contentView.setNeedsLayout()
+            contentView.layoutIfNeeded()
+        }
+        layoutAttributes.frame.size.height = ceil(targetHeight)
+        return layoutAttributes
+    }
 }
