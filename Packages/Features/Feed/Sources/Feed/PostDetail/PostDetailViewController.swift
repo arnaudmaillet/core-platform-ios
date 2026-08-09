@@ -115,6 +115,16 @@ final class PostDetailViewController: UIViewController {
     /// The post as last rendered — the caption row's model, kept so a
     /// snapshot re-apply can rebuild item #0 without a refetch.
     private var latestPost: PostDetailDisplayModel?
+    /// The caption the opener already had, used until this screen's own post
+    /// load returns.
+    ///
+    /// The caption row is the stream's first item and it existed only once the
+    /// POST had loaded — which is a network round trip after the panel mounts.
+    /// For a hero flight that is far too late: the row the card is supposed to
+    /// land its caption ON did not exist while the card was in the air, so the
+    /// flight had no target and the caption appeared as a second one when the
+    /// post arrived.
+    private var seededCaption: (text: String, timestamp: String)?
     /// Parents whose full reply pool is shown (the "view more" seam's
     /// state). Per-screen, like scroll position.
     private var expandedReplyParents: Set<String> = []
@@ -761,6 +771,19 @@ final class PostDetailViewController: UIViewController {
     /// Marking it explicitly and laying it out is what produces the cells.
     /// Returns what the stream ended up holding, so a caller can trace a still
     /// that still looks wrong.
+    /// Renders the caption row NOW, from what the opener already knows.
+    ///
+    /// Called before the push so the row exists — and therefore has a frame —
+    /// while the hero is in the air. The real post replaces it a moment later
+    /// with the same text, so nothing moves when it lands.
+    func seedCaption(_ text: String, timestamp: String) {
+        guard mode == .commentsOnly, !text.isEmpty, latestPost == nil else { return }
+        seededCaption = (text, timestamp)
+        loadViewIfNeeded()
+        applyStream(animated: false)
+        view.layoutIfNeeded()
+    }
+
     /// Where the caption row sits, in `space`.
     ///
     /// The flight lands its own caption here so the two are the same object as
@@ -900,8 +923,14 @@ final class PostDetailViewController: UIViewController {
         }
         let captionCell = UICollectionView.CellRegistration<CaptionBubbleCell, StreamItem> {
             [weak self] cell, _, _ in
-            guard let self, let post = self.latestPost else { return }
-            cell.configure(with: post, imagePipeline: self.imagePipeline)
+            guard let self else { return }
+            if let post = self.latestPost {
+                cell.configure(with: post, imagePipeline: self.imagePipeline)
+            } else if let seed = self.seededCaption {
+                cell.configureSeed(caption: seed.text, timestamp: seed.timestamp)
+            } else {
+                return
+            }
             cell.onAvatarTap = { [weak self] in self?.viewModel.didTapAuthor() }
         }
         streamDataSource = UICollectionViewDiffableDataSource<StreamSection, StreamItem>(
@@ -937,7 +966,9 @@ final class PostDetailViewController: UIViewController {
         // skeletons as well as above the comments, so it is on screen from
         // the first frame and never pops in behind a shimmer. The full mode
         // already carries the caption inside its post section.
-        if mode == .commentsOnly, latestPost?.hasCaption == true { items.append(.caption) }
+        if mode == .commentsOnly, latestPost?.hasCaption == true || seededCaption != nil {
+            items.append(.caption)
+        }
         guard commentsLoaded else {
             // The initial fetch renders as a skeleton stream (the
             // messages screens' doctrine — shimmering placeholder rows,

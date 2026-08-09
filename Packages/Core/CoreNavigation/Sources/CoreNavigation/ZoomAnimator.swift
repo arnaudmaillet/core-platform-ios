@@ -147,6 +147,13 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         using context: any UIViewControllerContextTransitioning
     ) -> any UIViewImplicitlyAnimating {
         #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
+            print("[anim] asked presenting=\(isPresenting) cached=\(interruptible != nil)"
+                  + " sameCtx=\(interruptibleContext === (context as AnyObject))"
+                  + " superseded=\(isSupersededByInteractiveDriver)")
+        }
+        #endif
+        #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
             print("[zoom-live] interruptibleAnimator asked presenting=\(isPresenting) cached=\(interruptible != nil) sameCtx=\(interruptibleContext === (context as AnyObject))")
         }

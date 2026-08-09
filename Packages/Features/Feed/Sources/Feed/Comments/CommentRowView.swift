@@ -375,6 +375,14 @@ final class CaptionBubbleCell: UICollectionViewCell {
         bubble.setGlassActive(window != nil)
     }
 
+    /// Renders from what the FEED already knows, before this screen's own post
+    /// fetch returns. Caption and timestamp only — enough for the row to exist,
+    /// occupy its real height, and be somewhere a flight can aim at.
+    func configureSeed(caption: String, timestamp: String) {
+        representedID = nil
+        bubble.configure(caption: caption, timestamp: timestamp)
+    }
+
     func configure(with model: PostDetailDisplayModel, imagePipeline: ImagePipeline?) {
         representedID = model.postID
         bubble.configure(caption: model.caption, timestamp: model.timestampText)

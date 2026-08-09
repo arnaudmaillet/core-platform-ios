@@ -1304,6 +1304,11 @@ final class SnapFeedViewController: UIViewController {
             top: cell.engagedCommentsTopInset(safeAreaTop: view.safeAreaInsets.top),
             bottomInset: view.safeAreaInsets.bottom
         )
+        // The caption the FEED already has, so the row exists while the hero
+        // is in the air rather than arriving with the post fetch.
+        if let model = modelsByID[id], let caption = model.caption, !caption.isEmpty {
+            detail?.seedCaption(caption, timestamp: model.timestampText)
+        }
         // No close handler — a resting page is undismissable; the swipe
         // handler pages the feed (the only way off a text post).
         detail?.setEngagedPageSwipeHandler { [weak self] phase, translation, velocity in
@@ -2086,7 +2091,13 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         guard zoomCrossfadesDuringFlight,
               let detail = commentsContentVC as? PostDetailViewController
         else { return nil }
-        return detail.captionRowFrame(in: view)
+        let frame = detail.captionRowFrame(in: view)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
+            print("[caption] frame=\(frame.map { "\(Int($0.minX)),\(Int($0.minY)) \(Int($0.width))x\(Int($0.height))" } ?? "NIL")")
+        }
+        #endif
+        return frame
     }
 
     /// TEXT pages fade themselves in; media pages are revealed at landing.
