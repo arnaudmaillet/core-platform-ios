@@ -2256,6 +2256,13 @@ extension SnapFeedViewController: ZoomTransitionDestination {
               let model = modelsByID[orderedIDs[index]] else { return }
         chrome.configure(with: model)
         chrome.setImagePipeline(imagePipeline)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
+            print("[flight-chrome] \(model.id.rawValue) hasMedia=\(model.mediaURL != nil)"
+                  + " destinationEngaged=\(activeSnapCell?.isCommentsEngaged.description ?? "no cell")"
+                  + " engagedID=\(commentsEngagedID?.rawValue ?? "nil")")
+        }
+        #endif
     }
 
     /// A rightward grab may begin from any page — the horizontal axis is free

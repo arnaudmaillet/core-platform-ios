@@ -384,6 +384,13 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                                return destination.zoomDestinationContentIsReady
                                    && destination.zoomDestinationMediaIsRendering
                            }) {
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
+                    ZoomFlightProfiler.shared.note("card removed")
+                    print(String(format: "[zoom] card removed at +%.1f ms",
+                                 ZoomFlightProfiler.shared.elapsedMilliseconds))
+                }
+                #endif
                 shield.removeFromSuperview()
                 self.destination?.setZoomContentHidden(false)
                 if let surface = flight.card.zoomLiveMediaSurface {
@@ -1171,6 +1178,9 @@ final class ZoomFlightProfiler: NSObject {
         guard isEnabled else { return }
         mark(label)
     }
+
+    /// Milliseconds since the current flight's watch opened.
+    var elapsedMilliseconds: Double { (CACurrentMediaTime() - watchStart) * 1000 }
 
     private func installRunLoopProbe() {
         let loop = CFRunLoopGetMain()
