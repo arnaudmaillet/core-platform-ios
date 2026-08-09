@@ -84,7 +84,40 @@ final class SnapFeedViewController: UIViewController {
     /// should work. Written on BOTH paths rather than defaulted, because this
     /// controller is REUSED and a stale answer from the previous presentation
     /// is exactly the bug this would otherwise become.
-    public var zoomOwnsInteractiveDismissal = true
+    public var zoomOwnsInteractiveDismissal = true {
+        didSet { swipeBackRecognizer.isEnabled = !zoomOwnsInteractiveDismissal }
+    }
+
+    /// Swipe right from ANYWHERE to go back, for a page that arrived by an
+    /// ordinary push.
+    ///
+    /// The system's own gesture is a `UIScreenEdgePanGestureRecognizer` and its
+    /// edge is intrinsic — it cannot be widened. This page has no other
+    /// horizontal action, so the whole surface can mean "back", which also
+    /// makes it symmetric with the hero path, where a media page is dismissed
+    /// by a rightward grab anywhere on it.
+    ///
+    /// It POPS rather than scrubbing, and that is a deliberate trade. A
+    /// percent-driven interactive pop must supply its own animation
+    /// controller, which means reimplementing UIKit's slide, its parallax and
+    /// its dimming — a bespoke transition, which is the thing this screen just
+    /// finished removing. Triggering the native pop keeps the platform's
+    /// animation exactly.
+    private lazy var swipeBackRecognizer: UIPanGestureRecognizer = {
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handleSwipeBack))
+        pan.delegate = self
+        pan.isEnabled = false
+        return pan
+    }()
+
+    @objc private func handleSwipeBack(_ pan: UIPanGestureRecognizer) {
+        guard pan.state == .ended, !zoomOwnsInteractiveDismissal else { return }
+        guard SwipeBackPolicy.shouldPop(
+            translationX: pan.translation(in: view).x,
+            velocityX: pan.velocity(in: view).x
+        ) else { return }
+        navigationController?.popViewController(animated: true)
+    }
     /// The surface currently on loan to a dismissal's flight card, so a
     /// cancelled grab can take it back.
     private var donatedLiveView: VideoRenderView?
@@ -483,6 +516,14 @@ final class SnapFeedViewController: UIViewController {
     /// into every live cell. Page transitions never fire this — this view
     /// does not move with them, which is precisely why its safe area is
     /// the authority and the cells' ambient one is not.
+    /// Begins only for a clearly RIGHTWARD, clearly HORIZONTAL drag.
+    ///
+    /// The comment list scrolls vertically underneath, and a reader's thumb is
+    /// never perfectly straight — so a small horizontal tilt inside a vertical
+    /// scroll must not read as "go back". Requiring the horizontal component
+    /// to dominate is what keeps the two apart, and the recognizer stays
+    /// exclusive (no simultaneous recognition) so a swipe that does qualify
+    /// cannot also scroll the list.
     override func viewSafeAreaInsetsDidChange() {
         super.viewSafeAreaInsetsDidChange()
         guard let collectionView else { return }
@@ -541,6 +582,9 @@ final class SnapFeedViewController: UIViewController {
         collectionView.prefetchDataSource = self
         collectionView.register(SnapFeedCell.self, forCellWithReuseIdentifier: SnapFeedCell.reuseIdentifier)
         collectionView.pin(to: view)
+        // Above the pager, so a qualifying rightward drag is arbitrated by the
+        // delegate below rather than swallowed by the paging scroll view.
+        view.addGestureRecognizer(swipeBackRecognizer)
 
         refreshControl.tintColor = .white
         refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
@@ -2327,6 +2371,29 @@ extension SnapFeedViewController: ZoomTransitionDestination {
 
     public func setContentScrollEnabled(_ enabled: Bool) {
         collectionView.isScrollEnabled = enabled
+    }
+}
+
+extension SnapFeedViewController: UIGestureRecognizerDelegate {
+    /// Begins only for a clearly RIGHTWARD, clearly HORIZONTAL drag.
+    ///
+    /// The comment list scrolls vertically underneath and a reader's thumb is
+    /// never perfectly straight, so a small horizontal tilt inside a vertical
+    /// scroll must not read as "go back". Requiring the horizontal component to
+    /// dominate is what keeps the two apart.
+    public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === swipeBackRecognizer else { return true }
+        guard !zoomOwnsInteractiveDismissal else { return false }
+        return SwipeBackPolicy.shouldBegin(velocity: swipeBackRecognizer.velocity(in: view))
+    }
+
+    /// Exclusive on purpose: a drag that qualifies as "back" must not also
+    /// scroll the comment list under it.
+    public func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+    ) -> Bool {
+        false
     }
 }
 
