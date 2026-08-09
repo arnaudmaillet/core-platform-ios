@@ -2087,6 +2087,12 @@ extension SnapFeedViewController: ZoomTransitionDestination {
 
     public var zoomDestinationContentIsReady: Bool { !orderedIDs.isEmpty }
 
+    /// The card has the caption now, on either leg, so this page hides its
+    /// own until the flight is over.
+    public func zoomFlightDidTakeCaption() {
+        (commentsContentVC as? PostDetailViewController)?.setCaptionHiddenForFlight(true)
+    }
+
     public var zoomFlightCaptionFrame: CGRect? {
         guard zoomCrossfadesDuringFlight,
               let detail = commentsContentVC as? PostDetailViewController
@@ -2336,6 +2342,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     }
 
     public func zoomTransitionDidEnd() {
+        (commentsContentVC as? PostDetailViewController)?.setCaptionHiddenForFlight(false)
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
             print("[feed-reuse] LANDED showing \(activePostID?.rawValue ?? "nil")"

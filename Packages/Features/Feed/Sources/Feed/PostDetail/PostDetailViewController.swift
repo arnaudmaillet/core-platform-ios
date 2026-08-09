@@ -125,6 +125,8 @@ final class PostDetailViewController: UIViewController {
     /// flight had no target and the caption appeared as a second one when the
     /// post arrived.
     private var seededCaption: (text: String, timestamp: String)?
+    /// Set while a hero flight is carrying this post's caption.
+    private var captionHiddenForFlight = false
     /// Parents whose full reply pool is shown (the "view more" seam's
     /// state). Per-screen, like scroll position.
     private var expandedReplyParents: Set<String> = []
@@ -771,6 +773,20 @@ final class PostDetailViewController: UIViewController {
     /// Marking it explicitly and laying it out is what produces the cells.
     /// Returns what the stream ended up holding, so a caller can trace a still
     /// that still looks wrong.
+    /// Hides the page's OWN caption bubble while a flight carries one.
+    ///
+    /// Exactly one caption may be on screen at a time. During a flight the
+    /// card's copy is the one that moves, so the page's is held at zero and
+    /// restored when the card is gone — on the presentation as the last act of
+    /// landing, on the dismissal as the first act of leaving. Alpha on the
+    /// cell rather than a snapshot edit: the row keeps its height, so nothing
+    /// below it moves when the caption appears.
+    func setCaptionHiddenForFlight(_ hidden: Bool) {
+        captionHiddenForFlight = hidden
+        guard let indexPath = streamDataSource?.indexPath(for: .caption) else { return }
+        collectionView.cellForItem(at: indexPath)?.contentView.alpha = hidden ? 0 : 1
+    }
+
     /// Renders the caption row NOW, from what the opener already knows.
     ///
     /// Called before the push so the row exists — and therefore has a frame —
@@ -932,6 +948,9 @@ final class PostDetailViewController: UIViewController {
                 return
             }
             cell.onAvatarTap = { [weak self] in self?.viewModel.didTapAuthor() }
+            // Re-applied on every dequeue: an apply mid-flight would otherwise
+            // hand back a fresh, visible cell and put the second caption back.
+            cell.contentView.alpha = self.captionHiddenForFlight ? 0 : 1
         }
         streamDataSource = UICollectionViewDiffableDataSource<StreamSection, StreamItem>(
             collectionView: collectionView

@@ -179,6 +179,13 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// reads as two captions rather than one.
     var zoomFlightCaptionFrame: CGRect? { get }
 
+    /// The flight has taken this post's caption onto its card, so the
+    /// destination must not also show one. Called on BOTH legs as the flight
+    /// is built — on a dismissal that is the first act of leaving, which is
+    /// what stops the page's caption sitting there while the card carries an
+    /// identical one away.
+    func zoomFlightDidTakeCaption()
+
     /// Whether the destination's active page is actually COMPOSITING its
     /// media area — a drawing surface, or a poster/cover in place.
     ///
@@ -285,6 +292,7 @@ public extension ZoomTransitionDestination {
     var zoomDestinationContentIsReady: Bool { true }
     var zoomCrossfadesDuringFlight: Bool { false }
     var zoomFlightCaptionFrame: CGRect? { nil }
+    func zoomFlightDidTakeCaption() {}
     var zoomDestinationMediaIsRendering: Bool { true }
     func zoomMirrorLiveMedia(onto surface: UIView) -> Bool { false }
     func zoomDonateLiveMediaView() -> UIView? { nil }

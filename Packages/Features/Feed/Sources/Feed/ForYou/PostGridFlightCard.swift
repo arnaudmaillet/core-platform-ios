@@ -223,6 +223,12 @@ final class PostGridFlightCard: UIView {
     /// in — every pose after this scales the label with the card.
     func positionZoomCaption(at frame: CGRect) {
         guard style == .listCard, bounds.width > 0 else { return }
+        // PAGE space, fixed. The chrome view is pinned to the card's page-pose
+        // size and never resized again — the flight scales it
+        // (`zoomRestingChromeTracksPageSpace`), so these constants stay true at
+        // every card size and the caption cannot leave the card's bounds.
+        restingChromeView.autoresizingMask = []
+        restingChromeView.frame = bounds
         NSLayoutConstraint.deactivate(captionConstraints)
         captionConstraints = [
             captionLabel.topAnchor.constraint(equalTo: restingChromeView.topAnchor, constant: frame.minY),
@@ -277,6 +283,13 @@ extension PostGridFlightCard: ZoomFlightCard {
     /// shows that same caption. It rides the whole flight so the card is never
     /// empty while the page fades in over it.
     var zoomRestingChromeFadesOut: Bool { style != .listCard }
+
+    /// The text card's caption holds a position relative to the PAGE — it has
+    /// to land on the page's own caption — so it is laid out at page size and
+    /// scaled by the flight rather than resized with the card. Resized, its
+    /// absolute placement fell outside the card as the card shrank, which is
+    /// the caption seen floating in empty space on the dismissal.
+    var zoomRestingChromeTracksPageSpace: Bool { style == .listCard }
 
     var zoomRestingChrome: UIView? { restingChromeView }
 

@@ -159,6 +159,7 @@ struct ZoomFlight {
         // straight across; every pose after this scales it with the card.
         if let captionFrame = destination?.zoomFlightCaptionFrame {
             card.positionZoomCaption(at: captionFrame)
+            destination?.zoomFlightDidTakeCaption()
         }
 
         let shadow = UIView(frame: sourceFrame)
@@ -176,6 +177,22 @@ struct ZoomFlight {
             sourceFrame: sourceFrame, pageFrame: pageFrame,
             liveMediaSize: liveMediaSize
         )
+    }
+
+    /// Scales page-space resting furniture to the card's current size, the
+    /// same way the destination's chrome replica is scaled. A no-op for cards
+    /// whose furniture resizes with them, which is all of them but the text
+    /// card.
+    private func poseRestingChromeInPageSpace(size: CGSize, center: CGPoint) {
+        guard card.zoomRestingChromeTracksPageSpace,
+              let resting = card.zoomRestingChrome,
+              pageFrame.width > 0, pageFrame.height > 0
+        else { return }
+        resting.transform = CGAffineTransform(
+            scaleX: size.width / pageFrame.width,
+            y: size.height / pageFrame.height
+        )
+        resting.center = center
     }
 
     // MARK: - Poses
@@ -200,6 +217,7 @@ struct ZoomFlight {
         shadow.frame = CGRect(origin: landing.origin, size: shadow.frame.size)
         shadow.alpha = 1
         let center = CGPoint(x: landing.width / 2, y: landing.height / 2)
+        poseRestingChromeInPageSpace(size: landing.size, center: center)
         if let surface = card.zoomLiveMediaSurface, !card.zoomLiveMediaTracksCardBounds {
             let scale = Self.liveMediaScale(covering: landing.size, surface: liveMediaSize)
             surface.transform = CGAffineTransform(scaleX: scale, y: scale)
@@ -223,6 +241,7 @@ struct ZoomFlight {
         card.zoomRestingChrome?.alpha = card.zoomRestingChromeFadesOut ? 0 : 1
         shadow.alpha = 0
         let center = CGPoint(x: pageFrame.width / 2, y: pageFrame.height / 2)
+        poseRestingChromeInPageSpace(size: pageFrame.size, center: center)
         if let surface = card.zoomLiveMediaSurface, !card.zoomLiveMediaTracksCardBounds {
             surface.transform = .identity
             surface.center = center

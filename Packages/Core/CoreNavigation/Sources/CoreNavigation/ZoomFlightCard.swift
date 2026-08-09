@@ -75,6 +75,19 @@ public protocol ZoomFlightCard: UIView {
     /// nothing between the morph and the comments.
     var zoomRestingChromeFadesOut: Bool { get }
 
+    /// Whether that furniture is laid out in PAGE space and scaled by the
+    /// flight, rather than resized with the card.
+    ///
+    /// The card animates its FRAME, so its subviews resize with it and any
+    /// placement expressed in points stays put in absolute terms — a caption
+    /// pinned 152pt down is 152pt down inside a 78pt-tall card, which is
+    /// outside it. The destination's chrome replica never had that problem
+    /// because it is page-sized and carries a SCALE: the flight shrinks it
+    /// bodily. Furniture that has to hold a position relative to the PAGE
+    /// wants the same treatment, and asking for it here is what keeps the
+    /// caption inside the card at every size.
+    var zoomRestingChromeTracksPageSpace: Bool { get }
+
 
     /// The surface live media renders on — non-nil only while the card is
     /// actually carrying live media. Typed as `UIView` to keep this module
@@ -140,6 +153,7 @@ public protocol ZoomFlightCard: UIView {
 public extension ZoomFlightCard {
     /// Fading out is the norm — most source furniture is its source's own.
     var zoomRestingChromeFadesOut: Bool { true }
+    var zoomRestingChromeTracksPageSpace: Bool { false }
     var zoomLiveMediaIsDrawing: Bool { true }
     var zoomLiveMediaDebugState: String { "" }
     var zoomLiveMediaNativeSize: CGSize? { nil }
