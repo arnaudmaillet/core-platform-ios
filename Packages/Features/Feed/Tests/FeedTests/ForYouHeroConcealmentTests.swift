@@ -94,4 +94,30 @@ struct ForYouHeroConcealmentTests {
         ForYouGridPage.applyHeroConcealment(true, to: nil)
         ForYouGridPage.applyHeroConcealment(false, to: nil)
     }
+
+    /// A TEXT row hides WHOLE, and that is the same invariant reaching the
+    /// opposite answer: it has no media, so the flight carries its entire
+    /// card, so its entire card is what must be concealed. Leave it visible
+    /// and the row and its flying twin are on screen together.
+    @Test func aFlyingTextRowHidesWholeBecauseTheCardIsWhatFlies() {
+        let cell = row(.text)
+        #expect(cell.mediaHeroRect == nil, "a text row must have no media to fly")
+
+        ForYouGridPage.applyHeroConcealment(true, to: cell)
+        #expect(cell.isHidden == true)
+
+        ForYouGridPage.applyHeroConcealment(false, to: cell)
+        #expect(cell.isHidden == false)
+    }
+
+    /// And it has somewhere to fly FROM: the card's rect, which is what gives
+    /// text posts a hero at all. Without it they fell back to a plain push —
+    /// the one place in For You where opening a post did not fly.
+    @Test func aTextRowOffersItsCardAsTheFlightsOrigin() {
+        let cell = row(.text)
+
+        #expect(cell.cardHeroRect != .zero)
+        #expect(cell.cardHeroRect.width > 0)
+        #expect(cell.cardHeroRect.height > 0)
+    }
 }

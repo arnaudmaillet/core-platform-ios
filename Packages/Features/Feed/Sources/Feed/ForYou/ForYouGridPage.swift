@@ -774,10 +774,11 @@ final class ForYouGridPage: UIView {
             return nil
         }
         let rect: CGRect = switch cell {
-        // A brick IS its media, edge to edge; a row is a card of which the
-        // media is one part, so fly that part.
+        // A brick IS its media, edge to edge; a media row is a card of which
+        // the media is one part, so fly that part; a TEXT row has no such
+        // part, so the card itself is what flies.
         case let tile as PostGridTileCell: tile.bounds
-        case let row as PostGridListRowCell: row.mediaHeroRect ?? .zero
+        case let row as PostGridListRowCell: row.mediaHeroRect ?? row.cardHeroRect
         default: .zero
         }
         guard rect != .zero else { return nil }
@@ -792,7 +793,11 @@ final class ForYouGridPage: UIView {
         case let tile as PostGridTileCell:
             (cover: tile.renderedCover, style: .tile)
         case let row as PostGridListRowCell:
-            row.mediaHeroRect == nil ? nil : (cover: row.renderedCover, style: .listMedia)
+            // A text row flies its card and carries no cover; a media row
+            // flies its preview and carries the exact pixels it is showing.
+            row.mediaHeroRect == nil
+                ? (cover: nil, style: .listCard)
+                : (cover: row.renderedCover, style: .listMedia)
         default:
             nil
         }
@@ -1010,7 +1015,11 @@ final class ForYouGridPage: UIView {
     /// tile.
     static func applyHeroConcealment(_ concealed: Bool, to cell: UICollectionViewCell?) {
         switch cell {
-        case let row as PostGridListRowCell:
+        // A media row keeps everything the flight is not carrying; a TEXT row
+        // flies its whole card, so the whole row goes — same invariant, and
+        // it lands on opposite answers only because the two rows put different
+        // amounts of themselves in the air.
+        case let row as PostGridListRowCell where row.mediaHeroRect != nil:
             row.isHidden = false
             row.setHeroMediaConcealed(concealed)
         case let other?:

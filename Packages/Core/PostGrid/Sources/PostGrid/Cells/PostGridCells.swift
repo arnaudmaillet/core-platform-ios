@@ -42,8 +42,9 @@ public final class PostGridListRowCell: UICollectionViewCell {
     /// frame, because nothing in the air was standing in for them.
     ///
     /// The invariant, in one line: CONCEAL EXACTLY WHAT THE FLIGHT
-    /// REPRODUCES. A tile is its media, so the tile hides whole; a row is not,
-    /// so it does not.
+    /// REPRODUCES. A tile is its media, so the tile hides whole; a media row
+    /// is not, so it does not; a TEXT row flies its whole card, so it does.
+    ///
     /// Alpha, not `isHidden`, and that is load-bearing: `mediaHeroRect`
     /// reports nil for a hidden preview, so hiding it would make the row
     /// unable to answer where its own media is — which is the rect the
@@ -52,6 +53,30 @@ public final class PostGridListRowCell: UICollectionViewCell {
         mediaView.alpha = concealed ? 0 : 1
         playBadge.alpha = concealed ? 0 : 1
     }
+
+    /// The whole card's rect in this cell's own space.
+    ///
+    /// What a TEXT row flies. A text row has no media, so there is no part of
+    /// it that is "the thing being opened" — the card IS the post, and the
+    /// flight carries the card. Media rows keep flying `mediaHeroRect`,
+    /// because there the media is the element continuous with the page.
+    public var cardHeroRect: CGRect {
+        layoutIfNeeded()
+        return card.frame
+    }
+
+    /// The card's own rounding and fill, so a flight impersonating this row
+    /// is its twin rather than an approximation of it. Restating either as a
+    /// literal in the flight card is how the two drift.
+    public static let cardCornerRadius: CGFloat = 18
+    public static let cardFillColor: UIColor = .secondarySystemBackground
+    /// The caption's type and inset, for the same reason.
+    public static let captionInset: CGFloat = 16
+    public static let captionTopInset: CGFloat = 16
+    /// The closing metric line's placement, shared with the flight card that
+    /// stands in for a text row.
+    public static let metaBottomInset: CGFloat = 14
+    public static let metaSpacing: CGFloat = 14
 
     private let card = UIView()
     private let captionLabel = UILabel()
@@ -70,8 +95,8 @@ public final class PostGridListRowCell: UICollectionViewCell {
 
     override public init(frame: CGRect) {
         super.init(frame: frame)
-        card.backgroundColor = .secondarySystemBackground
-        card.layer.cornerRadius = 18
+        card.backgroundColor = Self.cardFillColor
+        card.layer.cornerRadius = Self.cardCornerRadius
         card.layer.cornerCurve = .continuous
         card.pin(to: contentView)
 
@@ -80,9 +105,9 @@ public final class PostGridListRowCell: UICollectionViewCell {
         captionLabel.textColor = .label
         captionLabel.numberOfLines = 0
         captionLabel.constrain(in: card) { parent in
-            captionLabel.topAnchor.constraint(equalTo: parent.topAnchor, constant: 16)
-            captionLabel.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: 16)
-            captionLabel.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -16)
+            captionLabel.topAnchor.constraint(equalTo: parent.topAnchor, constant: Self.captionTopInset)
+            captionLabel.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Self.captionInset)
+            captionLabel.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Self.captionInset)
         }
 
         mediaView.contentMode = .scaleAspectFill
@@ -114,11 +139,11 @@ public final class PostGridListRowCell: UICollectionViewCell {
         let metaRow = UIStackView(arrangedSubviews: [views, reactions, comments, spacer, ageLabel])
         metaRow.axis = .horizontal
         metaRow.alignment = .center
-        metaRow.spacing = 14
+        metaRow.spacing = Self.metaSpacing
         metaRow.constrain(in: card) { parent in
-            metaRow.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: 16)
-            metaRow.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -16)
-            metaRow.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -14)
+            metaRow.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Self.captionInset)
+            metaRow.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Self.captionInset)
+            metaRow.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Self.metaBottomInset)
         }
         metaFollowsCaption = metaRow.topAnchor.constraint(equalTo: captionLabel.bottomAnchor, constant: 12)
         metaFollowsCaption.isActive = true

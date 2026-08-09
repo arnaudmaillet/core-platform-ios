@@ -29,20 +29,33 @@ final class PostGridFlightCard: UIView {
         /// that row shows its metrics in a line *below* the media, so overlaying
         /// them on the flight would conjure furniture the source never had.
         case listMedia
+        /// A whole timeline row, for a TEXT post: the card's own 18pt corners
+        /// and fill, carrying the caption.
+        ///
+        /// A text row has no media, so there is no part of it that is "the
+        /// thing being opened" — the card IS the post. Without this such rows
+        /// had no hero at all and fell back to a plain push, which is the one
+        /// place in For You where opening a post did not fly.
+        case listCard
 
         var cornerRadius: CGFloat {
             switch self {
             case .tile: PostGridFlightCard.tileCornerRadius
             case .listMedia: PostGridListRowCell.mediaCornerRadius
+            case .listCard: PostGridListRowCell.cardCornerRadius
             }
         }
 
         var showsCounters: Bool { self == .tile }
+        /// The card's ground before it becomes a page. A text card is the row's
+        /// own fill; the media styles keep the floor their preview sits on.
+        var fillsWithCardColor: Bool { self == .listCard }
         /// The play badge's inset, matched to each cell's own.
         var badgeInset: CGFloat {
             switch self {
             case .tile: 8
             case .listMedia: 10
+            case .listCard: 10
             }
         }
     }
@@ -95,6 +108,9 @@ final class PostGridFlightCard: UIView {
     private let views = PostMetricLabel(
         symbol: "eye.fill", font: metaFont, color: .white, shadowed: true
     )
+    /// Only populated for `.listCard` — a text row's words, standing in for
+    /// the row while it flies.
+    private let captionLabel = UILabel()
 
     init(post: GalleryPost, cover: UIImage?, style: Style) {
         self.style = style
@@ -102,7 +118,9 @@ final class PostGridFlightCard: UIView {
         clipsToBounds = true
         // Video bricks keep a dark floor, exactly as the tile cell does: the
         // poster may be unrenderable and the glyph needs a stage.
-        backgroundColor = post.kind == .video ? .darkGray : .secondarySystemBackground
+        backgroundColor = style.fillsWithCardColor
+            ? PostGridListRowCell.cardFillColor
+            : (post.kind == .video ? .darkGray : .secondarySystemBackground)
         layer.cornerRadius = style.cornerRadius
         layer.cornerCurve = .continuous
 
@@ -123,6 +141,48 @@ final class PostGridFlightCard: UIView {
         restingChromeView.frame = bounds
         restingChromeView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         addSubview(restingChromeView)
+
+        // The CAPTION rides the resting chrome, which is the source's own
+        // furniture and is what crossfades out as the destination's chrome
+        // fades in. So the row's text is present at the tile end, dissolves
+        // through the flight, and the page's own caption takes over — rather
+        // than two captions being on screen at once, or the card flying empty.
+        if style == .listCard {
+            captionLabel.text = post.caption
+            captionLabel.font = .preferredFont(forTextStyle: .body)
+            captionLabel.adjustsFontForContentSizeCategory = true
+            captionLabel.textColor = .label
+            captionLabel.numberOfLines = 0
+            captionLabel.constrain(in: restingChromeView) { parent in
+                captionLabel.topAnchor.constraint(
+                    equalTo: parent.topAnchor, constant: PostGridListRowCell.captionTopInset
+                )
+                captionLabel.leadingAnchor.constraint(
+                    equalTo: parent.leadingAnchor, constant: PostGridListRowCell.captionInset
+                )
+                captionLabel.trailingAnchor.constraint(
+                    equalTo: parent.trailingAnchor, constant: -PostGridListRowCell.captionInset
+                )
+            }
+            // …and the METRIC LINE, because the row hides whole for this
+            // flight and the card is standing in for all of it. Carrying only
+            // the caption left the counters and the age missing for the
+            // length of the flight and popping back on its last frame — the
+            // very artifact this style was added to remove, one level down.
+            // Caught by frame-stepping the dismissal, not by reasoning.
+            let meta = Self.makeListCardMetaRow(for: post)
+            meta.constrain(in: restingChromeView) { parent in
+                meta.leadingAnchor.constraint(
+                    equalTo: parent.leadingAnchor, constant: PostGridListRowCell.captionInset
+                )
+                meta.trailingAnchor.constraint(
+                    equalTo: parent.trailingAnchor, constant: -PostGridListRowCell.captionInset
+                )
+                meta.bottomAnchor.constraint(
+                    equalTo: parent.bottomAnchor, constant: -PostGridListRowCell.metaBottomInset
+                )
+            }
+        }
 
         playBadge.tintColor = .white
         playBadge.isHidden = post.kind != .video
@@ -146,6 +206,34 @@ final class PostGridFlightCard: UIView {
             counters.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -7)
             counters.trailingAnchor.constraint(lessThanOrEqualTo: parent.trailingAnchor, constant: -8)
         }
+    }
+
+    /// The row's own closing line, rebuilt: views, reactions and comments
+    /// leading, the compact age trailing — same order, same type, same colour,
+    /// so the card is the row's twin rather than an approximation of it.
+    private static func makeListCardMetaRow(for post: GalleryPost) -> UIStackView {
+        let font = UIFont.preferredFont(forTextStyle: .footnote)
+        let views = PostMetricLabel(symbol: "eye", font: font, color: .secondaryLabel)
+        let reactions = PostMetricLabel(symbol: "heart", font: font, color: .secondaryLabel)
+        let comments = PostMetricLabel(symbol: "bubble.right", font: font, color: .secondaryLabel)
+        views.set(post.viewCount)
+        reactions.set(post.reactionCount)
+        comments.set(post.commentCount)
+
+        let age = UILabel()
+        age.font = font
+        age.textColor = .secondaryLabel
+        age.adjustsFontForContentSizeCategory = true
+        age.text = PostMetadata.compactAge(ofMillis: post.publishedAtMS)
+        age.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let spacer = UIView()
+        spacer.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
+        let row = UIStackView(arrangedSubviews: [views, reactions, comments, spacer, age])
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = PostGridListRowCell.metaSpacing
+        return row
     }
 
     @available(*, unavailable)
