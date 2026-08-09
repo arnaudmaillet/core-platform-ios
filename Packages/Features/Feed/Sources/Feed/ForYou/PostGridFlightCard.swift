@@ -246,11 +246,6 @@ final class PostGridFlightCard: UIView {
 extension PostGridFlightCard: ZoomFlightCard {
     var zoomRestingCornerRadius: CGFloat { style.cornerRadius }
 
-    /// A text card's furniture is the POST — its caption and metrics — and the
-    /// page shows the same caption when it lands. So it rides the whole
-    /// flight. Every other style's furniture belongs to the grid and goes.
-    var zoomRestingChromeFadesOut: Bool { style != .listCard }
-
     var zoomRestingChrome: UIView? { restingChromeView }
 
     /// The live surface, but ONLY while this card still contains it.

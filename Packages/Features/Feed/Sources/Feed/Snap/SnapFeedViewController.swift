@@ -90,6 +90,9 @@ final class SnapFeedViewController: UIViewController {
     /// mid-flight (cold tap) can still fill in the replica's labels; the card
     /// owns the view itself.
     private weak var flightChrome: SnapChromeView?
+    /// A text page's comment layout, rendered before the push and handed to
+    /// the flight as its crossfade target. Consumed by `zoomFlightChrome`.
+    private var engagedFlightStill: UIView?
     /// Unregisters its notification tokens when this VC (and thus the bag) is
     /// released — a nonisolated deinit can't touch the VC's main-actor state.
     private let appObservers = NotificationObserverBag()
@@ -2005,12 +2008,27 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // the replica's doing: the destination itself is already engaged
         // before the push (`destinationEngaged=true` at flight-build time).
         //
-        // There is nothing to replace it with. In comment layout the caption
-        // belongs to the comments child, not the chrome, so an engaged replica
-        // is an empty view. The card carries the SOURCE's caption the whole
-        // way instead (`zoomRestingChromeFadesOut`) — the one thing genuinely
-        // continuous between the row and the page.
-        if activeModel?.mediaURL == nil { return nil }
+        // What it gets instead is a STILL of the comment layout, captured
+        // before the push while the page was still visible
+        // (`prepareForHeroPresentation`). It rides inside the card exactly as
+        // the live replica does — morphing with it, fading up over the spring
+        // — so the comment interface is on screen and arriving throughout the
+        // flight rather than appearing when the card is removed.
+        //
+        // A still is enough because the replica never animates internally: it
+        // only tracks the card's morph and its own alpha. Nil when the page
+        // could not be captured (not engaged yet), which falls back to the
+        // previous behaviour rather than flying the wrong layout.
+        if let model = activeModel, model.mediaURL == nil {
+            let still = engagedFlightStill
+            engagedFlightStill = nil
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
+                print("[flight-chrome] text still=\(still != nil)")
+            }
+            #endif
+            return still
+        }
         let chrome = SnapChromeView()
         chrome.isUserInteractionEnabled = false
         // Captured, not ambient: the replica must render at the live cell's
@@ -2138,6 +2156,21 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // runs on it — was tried and measured identical, so the destination's
         // view hierarchy is left alone.
         CATransaction.flush()
+        // A TEXT page's crossfade target is rendered HERE, off the flight's
+        // critical path. Taken inside `zoomFlightChrome` instead it cost ~100
+        // ms — the build went 20 ms -> 126 ms — and that build is the stall
+        // this whole file has been fighting. Here it lands in the tap's own
+        // frame, where the layout above is already being paid for.
+        //
+        // The cell is resolved by INDEX, not through `activeSnapCell`: the
+        // active page is not settled until the pager reports one, so at this
+        // moment that accessor is nil and the capture came back empty. The
+        // tapped post is always the head of the window, which is item 0.
+        engagedFlightStill = nil
+        if let model = orderedIDs.first.flatMap({ modelsByID[$0] }), model.mediaURL == nil {
+            let head = collectionView.cellForItem(at: IndexPath(item: 0, section: 0))
+            engagedFlightStill = (head as? SnapFeedCell)?.engagedLayoutSnapshot()
+        }
         // NOT here: pre-sizing the BAR's custom views. Bar items live on the
         // navigation bar rather than in this view, so they are first measured
         // inside `-[UINavigationBar _setItems:transition:]` — synchronously in
