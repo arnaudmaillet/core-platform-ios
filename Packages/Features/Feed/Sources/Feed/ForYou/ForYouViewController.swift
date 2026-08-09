@@ -787,9 +787,27 @@ final class ForYouViewController: UIViewController {
 
         // The feed owns the whole screen: hide the bar with the push. Managed
         // by hand rather than via `hidesBottomBarWhenPushed`, because that
-        // flag's choreography doesn't scrub with a custom interactive pop —
-        // the bar snaps in at pop-begin and flashes over the feed when a grab
-        // cancels (measured on both the pin and timeline paths).
+        // flag's choreography does not scrub with a custom interactive pop —
+        // the bar arrives at pop-begin and stands over the feed for the length
+        // of a grab.
+        //
+        // Re-tested since, on the plain `UIPercentDrivenInteractiveTransition`
+        // the text path uses, on the theory that the earlier verdict came from
+        // the pin's free-floating interaction controller and might not survive
+        // a percent driver. It survives. Wired up, the bar was at its resting
+        // position and fully opaque in the FIRST frame after pop-begin and did
+        // not move again while the scrub ran 0.000 → 0.150 — captured
+        // composited over the feed's own author pill, mid-drag.
+        //
+        // The reason is structural, which is why no amount of driving fixes it:
+        // the tab bar lives in the TAB BAR CONTROLLER's view, above the
+        // navigation controller, so it is not in the transition's container and
+        // not on the timeline the percent driver scrubs. UIKit animates it
+        // beside the transition, not inside it.
+        //
+        // Worth recording what it got right, because it is the half this
+        // screen had wrong: cancel and commit both settled correctly by
+        // themselves. Only the mid-drag frames were unusable.
         tabBarController?.setTabBarHidden(true, animated: true)
 
         guard let page = pager.page(for: format),
@@ -807,10 +825,12 @@ final class ForYouViewController: UIViewController {
             (feed as? SnapFeedViewController)?.zoomOwnsInteractiveDismissal = true
             textSlideDismissal.attach(to: feed)
             textSlideDismissal.onFeedPopped = { [weak self] _ in
-                // The bar was hidden for the push and nothing else restores it
-                // on this path — there is no transition controller to report a
-                // return.
-                self?.showTabBar(alpha: 1)
+                // Completed pops only — a cancelled swipe reports nothing here,
+                // which is exactly why this is a safe place to reveal from.
+                // `viewWillAppear` normally gets there first via the
+                // transition's completion; this is the backstop for the case
+                // where its `topViewController` guard declined.
+                self?.revealTabBar(animated: true)
                 self?.restoreChromeAfterTransition()
             }
             textSlideDismissal.install(on: navigationController)
@@ -1116,13 +1136,23 @@ final class ForYouViewController: UIViewController {
         pager.setAutoplayActive(true)
         // Coming back from the feed: this screen owns the bottom again.
         guard navigationController?.topViewController === self else { return }
-        guard activeTransition != nil else {
-            // No hero in play: the plain-push fallback for a text-only row, and
-            // a tab switch back. Nothing is animating the bar, so show it
-            // outright.
-            tabBarController?.setTabBarHidden(false, animated: animated)
-            tabBarController?.tabBar.alpha = 1
+        switch TabBarRevealPolicy.timing(hasActiveFlight: activeTransition != nil,
+                                         isTransitioning: transitionCoordinator != nil,
+                                         isInteractive: transitionCoordinator?.isInteractive == true) {
+        case .immediately:
+            // A tab switch back, or a back-button pop: nothing here can be
+            // taken back, so revealing now simply runs the bar alongside it.
+            revealTabBar(animated: animated)
             return
+        case .whenTransitionCommits:
+            // A swipe on the plain-push fallback for a text-only row. This
+            // runs at pop-BEGIN, which for a scrub is a question and not yet
+            // an answer — so hand the reveal to the gesture's release (see
+            // `TabBarRevealPolicy`).
+            revealTabBarIfSwipeCommits()
+            return
+        case .drivenByFlight:
+            break
         }
         // A hero return: put the bar back INVISIBLE so the flight has something
         // to fade in, and so the grid's inset freeze captures the resting
@@ -1135,6 +1165,47 @@ final class ForYouViewController: UIViewController {
         // grab-begin, before this ran, so this is a no-op there. Either way the
         // opacity is the flight's to drive, never this method's.
         showTabBar(alpha: 0)
+    }
+
+    /// Puts the bar back on the far side of a scrubbed pop — but only if the
+    /// finger meant it.
+    ///
+    /// Both blocks below run for a CANCELLED transition too, which is the
+    /// entire point: that is the case that used to leave the bar stranded over
+    /// a feed that had sprung back.
+    private func revealTabBarIfSwipeCommits() {
+        guard let coordinator = transitionCoordinator else { return }
+        // The release. The outcome is decided here and the pop's tail is still
+        // running, so the bar comes in WITH the screen rather than onto it.
+        coordinator.notifyWhenInteractionChanges { [weak self] context in
+            guard TabBarRevealPolicy.shouldReveal(afterTransitionCancelled: context.isCancelled)
+            else { return }
+            self?.revealTabBar(animated: true)
+        }
+        // Backstop for a scrub that never reports a release — a gesture the
+        // system cancels outright, or an interaction handed off to a
+        // non-interactive finish. Idempotent against the notifier above.
+        coordinator.animate(alongsideTransition: nil) { [weak self] context in
+            guard TabBarRevealPolicy.shouldReveal(afterTransitionCancelled: context.isCancelled)
+            else { return }
+            self?.revealTabBar(animated: true)
+        }
+    }
+
+    /// Reveals the bar at full opacity, idempotently.
+    ///
+    /// Two owners can reach this on a completed pop — the transition's
+    /// completion above, and `onFeedPopped` — and their order is not
+    /// guaranteed. Whichever arrives first animates; the second finds the bar
+    /// already shown and does nothing, so the reveal can never double up. The
+    /// backstop is deliberate: a bar stuck hidden is a far worse failure than a
+    /// redundant call, and it is the failure this method's guard makes
+    /// impossible.
+    private func revealTabBar(animated: Bool) {
+        guard let tabBarController else { return }
+        tabBarController.tabBar.alpha = 1
+        guard tabBarController.isTabBarHidden else { return }
+        tabBarController.setTabBarHidden(false, animated: animated)
     }
 
     /// Puts the tab bar back, at a given opacity, and settles the layout it
