@@ -199,10 +199,24 @@ final class ForYouGridPage: UIView {
     }
 
     private let imagePipeline: ImagePipeline
-    /// Autoplay for the mosaic's video bricks. Absent on list pages — a
-    /// timeline row is a reading surface, not a viewing one — and absent
-    /// wherever the host didn't supply a player pool.
+    /// Autoplay for video media, on both shapes — absent only where the host
+    /// didn't supply a player pool.
+    ///
+    /// List pages used to be excluded outright ("a timeline row is a reading
+    /// surface, not a viewing one"). They now play, at ONE row at a time: a
+    /// column shows a reader at most a couple of previews at once and the
+    /// centre one is the only one being looked at, so the mosaic's six-slot
+    /// budget would buy nothing here and cost battery. The concurrency is the
+    /// whole difference between the two shapes' playback — everything below
+    /// this line is shared.
     private let playback: GridVideoPlaybackCoordinator?
+
+    /// How many videos may play at once, per shape. A mosaic genuinely shows
+    /// several bricks the eye moves between; a timeline shows one row you are
+    /// reading.
+    private static func concurrentPlayers(for style: Style) -> Int {
+        style == .grid ? 6 : 1
+    }
     private let style: Style
     private let collectionView: UICollectionView
     /// The centred "nothing here" block, shared with every other surface that
@@ -252,7 +266,9 @@ final class ForYouGridPage: UIView {
 
     init(imagePipeline: ImagePipeline, style: Style, videoPlayback: VideoPlaybackController? = nil) {
         self.imagePipeline = imagePipeline
-        playback = style == .grid ? videoPlayback.map { GridVideoPlaybackCoordinator(pool: $0) } : nil
+        playback = videoPlayback.map {
+            GridVideoPlaybackCoordinator(pool: $0, maxConcurrent: Self.concurrentPlayers(for: style))
+        }
         self.style = style
         // `headerHost` breaks the chicken-and-egg: the layout needs to ask the
         // page which sections are titled, and the page does not exist until
@@ -417,15 +433,29 @@ final class ForYouGridPage: UIView {
             indexPath -> GridVideoPlaybackCoordinator.Candidate? in
             guard !showsSkeleton, posts.indices.contains(flatIndex(for: indexPath)) else { return nil }
             let post = posts[flatIndex(for: indexPath)]
-            // `autoplaysInGrid` is the shape rule: video, with a stream, and
-            // not square. Square bricks stay still.
-            guard post.autoplaysInGrid, let url = post.videoURL,
+            // The shape rule differs by page, and only here. `autoplaysInGrid`
+            // excludes SQUARE video, which is a mosaic concern: a square brick
+            // competing for one of six slots is not worth the slot. A row's
+            // preview is a fixed landscape box that aspect-fills whatever it is
+            // given, so a square source is no different to it than any other —
+            // excluding it there would just leave a video row permanently
+            // still for a reason that does not apply to it.
+            let playsHere = style == .grid ? post.autoplaysInGrid : post.hasPlayableVideo
+            guard playsHere, let url = post.videoURL,
                   post.id != heroFlyingPostID, // its twin is in the air
-                  let cell = collectionView.cellForItem(at: indexPath) as? PostGridTileCell,
+                  let cell = collectionView.cellForItem(at: indexPath) as? any GridPlaybackCell,
                   hasCover(for: post, in: cell)
             else { return nil }
 
-            let frame = cell.convert(cell.bounds, to: collectionView)
+            // A ROW is measured by its PREVIEW, not by the card. The card is
+            // mostly caption and metadata, so a row scrolling off the top keeps
+            // 50% of its area on screen long after the video has gone — and one
+            // arriving from the bottom passes the gate on caption alone, with
+            // the preview still below the fold. Both are the wrong answer to
+            // "is the viewer looking at this video".
+            let mediaFrame = (cell as? PostGridListRowCell)?.mediaHeroRect
+                .map { cell.convert($0, to: collectionView) }
+            let frame = mediaFrame ?? cell.convert(cell.bounds, to: collectionView)
             let visible = frame.intersection(viewport)
             guard !visible.isNull, frame.height > 0,
                   (visible.height * visible.width) / (frame.height * frame.width)
@@ -456,7 +486,7 @@ final class ForYouGridPage: UIView {
     /// A post with no `thumbnailURL` is admitted rather than blocked. Nothing
     /// is coming for it, so waiting would mean never playing — and its first
     /// decoded frame is the only face it will ever have.
-    private func hasCover(for post: GalleryPost, in cell: PostGridTileCell) -> Bool {
+    private func hasCover(for post: GalleryPost, in cell: any GridPlaybackCell) -> Bool {
         guard let thumbnail = post.thumbnailURL else { return true }
         // The cell's own image first: it may hold a cover the pipeline has
         // since evicted from its cache.
@@ -983,7 +1013,7 @@ final class ForYouGridPage: UIView {
             return "\(path.item):\(id)\(cell.isHidden ? "/hidden" : "")\(cell.alpha == 0 ? "/alpha0" : "")"
         }
         let blank = visible.compactMap { path -> String? in
-            guard let cell = collectionView.cellForItem(at: path) as? PostGridTileCell,
+            guard let cell = collectionView.cellForItem(at: path) as? any GridPlaybackCell,
                   posts.indices.contains(path.item) else { return nil }
             let post = posts[path.item]
             guard post.thumbnailURL != nil, cell.renderedCover == nil,
@@ -1299,6 +1329,10 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
                 withReuseIdentifier: PostGridListRowCell.reuseID, for: indexPath
             ) as! PostGridListRowCell
             cell.configure(with: post, imagePipeline: imagePipeline)
+            // Same reason as the tile below: autoplay is gated on the cover, so
+            // a cover arriving is the only event that can re-open the gate for
+            // a row that came up faceless while the timeline sat still.
+            cell.onCoverLoaded = { [weak self] in self?.updateAutoplay() }
             Self.applyHeroConcealment(isFlying, to: cell)
             return cell
         case .grid:
@@ -1396,7 +1430,9 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         didEndDisplaying cell: UICollectionViewCell,
         forItemAt indexPath: IndexPath
     ) {
-        guard let tile = cell as? PostGridTileCell else { return }
-        playback?.stop(cell: tile)
+        // Rows as well as tiles: a cell that left the viewport must give its
+        // player back whatever the scroll is doing, or the pool starves.
+        guard let playable = cell as? any GridPlaybackCell else { return }
+        playback?.stop(cell: playable)
     }
 }
