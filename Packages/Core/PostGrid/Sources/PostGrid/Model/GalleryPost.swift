@@ -135,6 +135,18 @@ public struct GalleryPost: Equatable, Sendable {
     /// content. Portrait and landscape bricks are the ones large enough for
     /// motion to read as something.
     public var autoplaysInGrid: Bool {
-        kind == .video && videoURL != nil && shape != .square
+        hasPlayableVideo && shape != .square
+    }
+
+    /// Whether there is a video here to play at all, shape aside.
+    ///
+    /// What a TIMELINE ROW autoplays on. The square exclusion above is a mosaic
+    /// judgement — it is about small filler bricks in a dense wall — and a row's
+    /// preview is one fixed landscape box that aspect-fills whatever it is
+    /// handed. A square source is no different there to any other, so applying
+    /// the grid's rule would leave those rows permanently still for a reason
+    /// that never applied to them.
+    public var hasPlayableVideo: Bool {
+        kind == .video && videoURL != nil
     }
 }

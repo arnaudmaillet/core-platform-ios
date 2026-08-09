@@ -30,12 +30,12 @@ public final class GridVideoPlaybackCoordinator {
     public struct Candidate {
         public let id: PostID
         public let url: URL
-        public let cell: PostGridTileCell
+        public let cell: any GridPlaybackCell
         /// Distance from the viewport's vertical centre, in points. Lower wins;
         /// the caller measures it because only it knows the scroll geometry.
         public let distanceFromCentre: CGFloat
 
-        public init(id: PostID, url: URL, cell: PostGridTileCell, distanceFromCentre: CGFloat) {
+        public init(id: PostID, url: URL, cell: any GridPlaybackCell, distanceFromCentre: CGFloat) {
             self.id = id
             self.url = url
             self.cell = cell
@@ -77,7 +77,7 @@ public final class GridVideoPlaybackCoordinator {
     private let pool: VideoPlaybackController
     private let maxConcurrent: Int
     /// Playing posts → the cell their player is bound to.
-    private var playing: [PostID: PostGridTileCell] = [:]
+    private var playing: [PostID: any GridPlaybackCell] = [:]
     /// Posts whose cap is currently lifted (a tile that went full screen), so a
     /// reconcile doesn't quietly re-cap the item mid-flight.
     private var uncappedIDs: Set<PostID> = []
@@ -253,7 +253,7 @@ public final class GridVideoPlaybackCoordinator {
     public var isHandingOff: Bool { handoffID != nil }
 
     /// Stops whatever is playing in `cell` — the collection view recycled it.
-    public func stop(cell: PostGridTileCell) {
+    public func stop(cell: any GridPlaybackCell) {
         guard let id = playing.first(where: { $0.value === cell })?.key else { return }
         stop(id: id, cell: cell)
     }
@@ -391,7 +391,7 @@ public final class GridVideoPlaybackCoordinator {
     /// already showing the right pixels before the card is taken away; nothing
     /// moves and there is nothing to hold across.
     @discardableResult
-    public func adoptAttachedSurface(for id: PostID, url: URL, cell: PostGridTileCell) -> Bool {
+    public func adoptAttachedSurface(for id: PostID, url: URL, cell: any GridPlaybackCell) -> Bool {
         let view = cell.makeVideoRenderViewIfNeeded()
         #if DEBUG
         view.debugLabel = "tile"
@@ -460,7 +460,7 @@ public final class GridVideoPlaybackCoordinator {
     /// Installs the flight card's live surface on the landing tile and claims
     /// the player parked behind it, so the tile keeps rendering the frame the
     /// card was showing.
-    public func adoptLiveSurface(_ view: VideoRenderView, for id: PostID, url: URL, cell: PostGridTileCell) {
+    public func adoptLiveSurface(_ view: VideoRenderView, for id: PostID, url: URL, cell: any GridPlaybackCell) {
         cell.adoptVideoRenderView(view)
         cell.beginVideoPreview()
         guard pool.unparkPlayback(to: view, mediaURL: url) else { return }
@@ -488,7 +488,7 @@ public final class GridVideoPlaybackCoordinator {
     /// the cell publishes geometry instead of owning the view.
     @discardableResult
     public func adoptHostedSurface(
-        _ view: VideoRenderView, for id: PostID, url: URL, cell: PostGridTileCell
+        _ view: VideoRenderView, for id: PostID, url: URL, cell: any GridPlaybackCell
     ) -> Bool {
         // Two handoff models, and this has to use the one the producing side
         // actually used. Under N-surface rendering the feed page does NOT park:
@@ -596,7 +596,7 @@ public final class GridVideoPlaybackCoordinator {
         }
     }
 
-    private func stop(id: PostID, cell: PostGridTileCell) {
+    private func stop(id: PostID, cell: any GridPlaybackCell) {
         // A hosted surface is released here rather than kept alive: playback is
         // ending anyway, so the layer teardown is invisible.
         if let hosted = hostedSurfaces.removeValue(forKey: id) {
