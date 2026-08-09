@@ -90,6 +90,21 @@ final class SnapFeedViewController: UIViewController {
     /// mid-flight (cold tap) can still fill in the replica's labels; the card
     /// owns the view itself.
     private weak var flightChrome: SnapChromeView?
+    /// The safe area to lay the engaged layout out against while this
+    /// controller is not yet in the hierarchy.
+    ///
+    /// `view.safeAreaInsets` is ZERO until the view is in a window, and
+    /// `prepareForHeroPresentation` runs BEFORE the push on purpose — so a
+    /// comment layout mounted there was laid out against nothing and rendered
+    /// under the header and under the toolbar. That was invisible for as long
+    /// as the destination was hidden for the whole flight. The moment it fades
+    /// in instead, it is the first thing you see.
+    private var stagedSafeAreaInsets: UIEdgeInsets = .zero
+
+    /// The real insets when we have them, the staged ones until then.
+    private var effectiveSafeAreaInsets: UIEdgeInsets {
+        view.safeAreaInsets == .zero ? stagedSafeAreaInsets : view.safeAreaInsets
+    }
     /// A text page's comment layout, rendered before the push and handed to
     /// the flight as its crossfade target. Consumed by `zoomFlightChrome`.
     private var engagedFlightStill: UIView?
@@ -1274,8 +1289,8 @@ final class SnapFeedViewController: UIViewController {
         content.didMove(toParent: self)
         let detail = content as? PostDetailViewController
         detail?.setEngagedInsets(
-            top: cell.engagedCommentsTopInset(safeAreaTop: view.safeAreaInsets.top),
-            bottomInset: view.safeAreaInsets.bottom
+            top: cell.engagedCommentsTopInset(safeAreaTop: effectiveSafeAreaInsets.top),
+            bottomInset: effectiveSafeAreaInsets.bottom
         )
         // No close handler — a resting page is undismissable; the swipe
         // handler pages the feed (the only way off a text post).
@@ -1357,10 +1372,10 @@ final class SnapFeedViewController: UIViewController {
         content.didMove(toParent: self)
         let detail = content as? PostDetailViewController
         detail?.setEngagedInsets(
-            top: cell.engagedCommentsTopInset(safeAreaTop: view.safeAreaInsets.top),
+            top: cell.engagedCommentsTopInset(safeAreaTop: effectiveSafeAreaInsets.top),
             // KEEP-AND-STACK: the composer's rest band clears the NATIVE
             // TOOLBAR, not just the home indicator.
-            bottomInset: view.safeAreaInsets.bottom
+            bottomInset: effectiveSafeAreaInsets.bottom
         )
         // Dragging the list down from its top collapses back to media — the
         // sheet gesture. MEDIA pages only: a text engagement is the page's
@@ -2160,7 +2175,10 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         return true
     }
 
-    public func prepareForHeroPresentation(in bounds: CGRect) {
+    public func prepareForHeroPresentation(in bounds: CGRect, safeArea: UIEdgeInsets = .zero) {
+        // BEFORE the layout, because the layout is what mounts the comment
+        // panel and the panel reads these to place itself.
+        stagedSafeAreaInsets = safeArea
         view.frame = bounds
         view.setNeedsLayout()
         view.layoutIfNeeded()

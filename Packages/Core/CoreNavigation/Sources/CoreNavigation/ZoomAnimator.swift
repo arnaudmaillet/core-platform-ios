@@ -215,6 +215,13 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // a rising destination progressively covers it — the crossfade is the
         // z-order, not a second animation to keep in sync.
         let crossfades = destination?.zoomCrossfadesDuringFlight ?? false
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
+            print("[flight] crossfades=\(crossfades) toViewAlpha=\(toView.alpha)"
+                  + " sourceFrame=\(Int(sourceFrame.width))x\(Int(sourceFrame.height))"
+                  + " page=\(Int(pageFrame.width))x\(Int(pageFrame.height))")
+        }
+        #endif
 
         let flight = ZoomFlight.build(
             source: source, destination: destination, sourceFrame: sourceFrame, pageFrame: pageFrame

@@ -922,7 +922,13 @@ final class ForYouViewController: UIViewController {
         // `prepareForHeroPresentation`. In the tap's own frame a stall is
         // invisible; in the flight's first frames it is the pause.
         (feed as? SnapFeedViewController)?
-            .prepareForHeroPresentation(in: navigationController.view.bounds)
+            .prepareForHeroPresentation(
+                in: navigationController.view.bounds,
+                // The destination cannot know its own safe area yet — it is
+                // not in the hierarchy — and the panel it mounts during that
+                // call needs one. This is the same window's.
+                safeArea: navigationController.view.safeAreaInsets
+            )
         navigationController.pushViewController(feed, animated: true)
         #if DEBUG
         zoomProfilerNote("push returned")
@@ -1506,8 +1512,13 @@ final class ForYouViewController: UIViewController {
                     // cannot tell a re-pointed feed from a stale one — both
                     // render the same post — so the harness would pass while
                     // reuse served the previous window.
+                    // `-zoom-repeat-same` reopens the SAME tile, which is what
+                    // a re-entry bug needs: a different tile exercises a fresh
+                    // window and hides state the previous flight left behind.
+                    let reopen = ProcessInfo.processInfo.arguments.contains("-zoom-repeat-same")
+                        ? index : index + round
                     DispatchQueue.main.asyncAfter(deadline: .now() + base + 1.5) { [weak self] in
-                        self?.openFeed(from: format, at: index + round)
+                        self?.openFeed(from: format, at: reopen)
                     }
                 }
             }
