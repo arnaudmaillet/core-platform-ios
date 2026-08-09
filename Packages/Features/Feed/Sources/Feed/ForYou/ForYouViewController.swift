@@ -789,6 +789,11 @@ final class ForYouViewController: UIViewController {
             // No hero available — a text-only row has no media to fly, and a
             // destination without the seam can't be flown to. A plain push is
             // the honest fallback; it is still the same feed.
+            //
+            // And nothing attaches a grab on this path, so the screen does NOT
+            // own its dismissal: the native edge swipe is the only way back and
+            // must be allowed to begin (see `NativePopGestureEnabler`).
+            (feed as? SnapFeedViewController)?.zoomOwnsInteractiveDismissal = false
             navigationController.pushViewController(feed, animated: true)
             return
         }
@@ -844,6 +849,11 @@ final class ForYouViewController: UIViewController {
         )
         let transition = ZoomTransitionController(source: source, destination: destination)
         activeTransition = transition
+        // A flight is staging, and it attaches its own grab below — so this
+        // screen owns its dismissal and the native edge pop must stay out of
+        // its way. Stated rather than left at the default: the controller is
+        // reused, and the previous presentation may have said otherwise.
+        (feed as? SnapFeedViewController)?.zoomOwnsInteractiveDismissal = true
         // The bar's alpha is driven 1:1 by the grab (and by the flight's spring
         // on a tap-back), so it is revealed by the hand instead of appearing
         // after the card has already landed.

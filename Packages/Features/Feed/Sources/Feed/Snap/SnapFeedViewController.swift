@@ -79,6 +79,12 @@ final class SnapFeedViewController: UIViewController {
     /// realized inside that window inherit the playback deferral, so a page
     /// activating mid-flight cannot steal the render slot from the flying card.
     private var isAwaitingZoomPresentation = false
+    /// Set by whoever pushes this screen: true when a flight attached a grab to
+    /// it, false when it arrived by an ordinary push and the native edge swipe
+    /// should work. Written on BOTH paths rather than defaulted, because this
+    /// controller is REUSED and a stale answer from the previous presentation
+    /// is exactly the bug this would otherwise become.
+    public var zoomOwnsInteractiveDismissal = true
     /// The surface currently on loan to a dismissal's flight card, so a
     /// cancelled grab can take it back.
     private var donatedLiveView: VideoRenderView?
@@ -2064,6 +2070,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     }
 
     public var zoomDestinationContentIsReady: Bool { !orderedIDs.isEmpty }
+
 
 
 
