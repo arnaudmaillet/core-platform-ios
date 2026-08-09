@@ -37,6 +37,7 @@ final class SnapFeedViewController: UIViewController {
     /// The share bubble's bookmark action; a property because its glyph
     /// (bookmark / bookmark.fill) follows the active page's saved state.
     private let bookmarkButton = SnapNavControls.makeToolbarActionButton(systemName: "bookmark")
+
     /// The engaged toolbar's trailing item: the comments sort selector,
     /// occupying the action territory while comments are engaged (the
     /// bookmark/share/more cluster yields — those live in the engaged
@@ -785,9 +786,22 @@ final class SnapFeedViewController: UIViewController {
             self.presentShareSheet(for: model.id)
         }, for: .primaryActionTriggered)
 
-        // One glass capsule, two 36pt slots: the stack is the item's custom
-        // view, so the system wraps the pair in a single bubble — bookmark
-        // leading, share keeping its slot beside the more bubble.
+        // One glass capsule for the WHOLE trailing run — bookmark, share and
+        // ⋯ in three 36pt slots inside a single bubble.
+        //
+        // It used to be two bubbles, [🔖 ⬆︎] and [⋯], held apart by a fixed
+        // space: iOS 26 groups ADJACENT bar items into one shared platter, so
+        // a spacer is the only way to make two. That spacer is now gone, and
+        // the reason is cost rather than taste. Every platter is its own glass
+        // host, and UIKit materialises each one through SwiftUI inside
+        // `pushViewController` — which is the hero flight's stall (see
+        // `ZoomFlightProfiler`). The bar wore five; it wears four.
+        //
+        // The grouping still reads: everything in this capsule acts on THIS
+        // post, and ⋯ is the same kind of thing as share — one more action on
+        // it, just a folded-up one. The separation it lost was never carrying
+        // a distinction, which is why this is a cheap trade rather than a
+        // sacrifice.
         let shareCluster = UIStackView(arrangedSubviews: [bookmarkButton, share])
         shareCluster.axis = .horizontal
 
@@ -820,10 +834,51 @@ final class SnapFeedViewController: UIViewController {
             UIBarButtonItem(customView: mediaAttributionView),
             .flexibleSpace(),
         ]
-        let shareItem = UIBarButtonItem(customView: shareCluster)
-        let trailingGap: UIBarButtonItem = .fixedSpace(Spacing.sm)
-        let moreItem = UIBarButtonItem(customView: more)
-        defaultToolbarItems = leading + [shareItem, trailingGap, moreItem]
+        shareCluster.addArrangedSubview(more)
+        #if DEBUG
+        // `-split-toolbar-platters`: the A/B side, restoring the two-bubble
+        // trailing run so both arms come from one binary.
+        if ProcessInfo.processInfo.arguments.contains("-split-toolbar-platters") {
+            shareCluster.removeArrangedSubview(more)
+            more.removeFromSuperview()
+            defaultToolbarItems = leading + [
+                UIBarButtonItem(customView: shareCluster),
+                .fixedSpace(Spacing.sm),
+                UIBarButtonItem(customView: more),
+            ]
+            toolbarItems = defaultToolbarItems
+            return
+        }
+        #endif
+        defaultToolbarItems = leading + [UIBarButtonItem(customView: shareCluster)]
+        #if DEBUG
+        // `-no-toolbar`: the UPPER BOUND on what trimming the footer can buy,
+        // and the probe that settled where the flight's cost actually lives.
+        // Not shippable — it is the whole footer — but the numbers redirect
+        // the whole question. Push work, 3 runs each:
+        //
+        //   5 platters (two-bubble trailing run)   cold 95.4  warm 43.2 / 47.0
+        //   4 platters (merged, shipped)           cold 98.5  warm 40.4 / 45.4
+        //   4 platters, STANDARD items not custom  cold 103.9 warm 45.9 / 44.8
+        //   NO TOOLBAR AT ALL (2 platters)         cold 53.1  warm 32.6 / 31.0
+        //
+        // So it is not the platter COUNT (one fewer bought ~2 ms, inside the
+        // noise) and not the SwiftUI custom-view bridge either (standard items
+        // measured the same). It is having a floating bar at all: the
+        // `FloatingBarHostingView<FloatingBarContainer>` machinery costs ~45 ms
+        // cold and ~14 ms warm on every push, near enough regardless of what
+        // is in it.
+        //
+        // Which means the only real lever left is architectural — a footer the
+        // FEED owns, inside its own view, would be laid out by
+        // `prepareForHeroPresentation` and hidden with the rest of the content
+        // during the flight, and the navigation controller's floating bar
+        // would never run during the push. That trades the system's own glass
+        // for a hand-rolled one, so it is a product decision, not a cleanup.
+        if ProcessInfo.processInfo.arguments.contains("-no-toolbar") {
+            defaultToolbarItems = []
+        }
+        #endif
         toolbarItems = defaultToolbarItems
     }
 
