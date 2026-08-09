@@ -1132,6 +1132,23 @@ struct SnapCommentsPresentationTests {
     /// state. It used to swap to a red ✕ while a media post's comments were
     /// open — which meant text and media engagements disagreed about what
     /// that corner meant.
+    /// The trailing run is ONE item, so iOS 26 gives it ONE glass platter.
+    ///
+    /// It reads as an implementation detail and is not: adjacent bar items
+    /// share a platter, and a fixed space between them is the only thing that
+    /// makes two. Re-introducing a spacer here would silently put the second
+    /// bubble back. (Worth knowing before trying: platter COUNT is not what
+    /// the hero push is paying for — see `configureToolbarItems` — so do not
+    /// split this on the theory that merging it was the performance fix.)
+    @Test func theToolbarsTrailingRunIsASingleItem() {
+        let (_, feed) = Self.chromeHost()
+        let items = feed.toolbarItems ?? []
+        // [attribution][flexible space][bookmark ⬆︎ ⋯]
+        #expect(items.count == 3)
+        #expect(items.last?.customView is UIStackView)
+        #expect((items.last?.customView as? UIStackView)?.arrangedSubviews.count == 3)
+    }
+
     @Test func toolbarIsIdenticalInEveryState() {
         let (_, feed) = Self.chromeHost()
         let resting = feed.toolbarItems ?? []
