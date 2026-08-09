@@ -32,6 +32,99 @@ public final class PostGridListRowCell: UICollectionViewCell {
     /// cache lookup that could miss.
     public var renderedCover: UIImage? { mediaView.image }
 
+    // MARK: - Autoplay surface
+
+    /// The surface an autoplaying row renders into, built on first use so a
+    /// timeline of stills never allocates a player layer it will not use.
+    ///
+    /// Placed INSIDE the preview box, unlike the tile's, which fills the whole
+    /// cell. That is the row's shape talking: the media is one part of a card,
+    /// so the video has to be clipped to the part — and putting it in the box
+    /// also means it inherits the box's rounding and, for free, the alpha that
+    /// `setHeroMediaConcealed` applies while a twin is in the air. A sibling
+    /// surface would have needed concealing separately, and would have been
+    /// the thing left visible over a flight.
+    public func makeVideoRenderViewIfNeeded() -> VideoRenderView {
+        if let loadedVideoRenderView { return loadedVideoRenderView }
+        let view = VideoRenderView()
+        #if DEBUG
+        view.debugLabel = "row"
+        #endif
+        view.isHidden = true
+        view.isUserInteractionEnabled = false
+        mediaView.addSubview(view)
+        view.pin(to: mediaView)
+        sendVideoSurfaceBelowBadge(view)
+        loadedVideoRenderView = view
+        return view
+    }
+
+    public private(set) var loadedVideoRenderView: VideoRenderView?
+
+    public func adoptVideoRenderView(_ view: VideoRenderView) {
+        if let existing = loadedVideoRenderView, existing !== view {
+            existing.detachForReplacement()
+            existing.removeFromSuperview()
+        }
+        view.transform = .identity
+        view.isHidden = false
+        mediaView.addSubview(view)
+        view.pin(to: mediaView)
+        sendVideoSurfaceBelowBadge(view)
+        loadedVideoRenderView = view
+    }
+
+    /// Keeps the ▶ glyph over the video, the way the tile keeps its furniture
+    /// over a playing brick: the badge is what tells a video row apart, and it
+    /// should read the same whether the preview is a still or moving.
+    ///
+    /// Separate from the `pin` above, and it has to be — `pin(to:)` begins with
+    /// `addSubview`, which moves the view to the FRONT. Ordering the surface
+    /// before pinning it is therefore silently undone, which is exactly what
+    /// happened: the first playing row rendered correctly with its badge gone.
+    private func sendVideoSurfaceBelowBadge(_ view: VideoRenderView) {
+        mediaView.insertSubview(view, belowSubview: playBadge)
+    }
+
+    public func donateVideoRenderView() -> VideoRenderView? {
+        guard let view = loadedVideoRenderView else { return nil }
+        loadedVideoRenderView = nil
+        view.removeFromSuperview()
+        return view
+    }
+
+    /// Reveals the surface once a player has been attached. The cover stays
+    /// underneath as the poster, so the first frame replaces it rather than
+    /// flashing black.
+    public func beginVideoPreview() {
+        let view = makeVideoRenderViewIfNeeded()
+        view.setPoster(mediaView.image)
+        view.revealOnFirstFrame()
+    }
+
+    /// Back to a still row. Faded rather than switched off, so a sweep that
+    /// stops several rows at once does not snap their covers back in one frame.
+    public func endVideoPreview() {
+        loadedVideoRenderView?.hideCrossFading()
+    }
+
+    /// Puts a cover on immediately, without waiting for the async load already
+    /// in flight — the same race the tile closes, for the same reason: the
+    /// autoplay gate must not pass on a cover the row is not actually showing.
+    public func applyCover(_ image: UIImage) {
+        guard mediaView.image == nil else { return }
+        mediaView.image = image
+        loadedVideoRenderView?.setPoster(image)
+    }
+
+    /// Fired when the cover lands from an async load, so the autoplay gate is
+    /// re-run for a row that arrived faceless.
+    public var onCoverLoaded: (() -> Void)?
+
+    /// Called when the collection view recycles this row, so the coordinator
+    /// takes its player back before the cell is bound to another post.
+    public var onReuse: (() -> Void)?
+
     /// Hides ONLY the preview while its twin is in the air.
     ///
     /// A row is a card of which the media is one part, and the flight carries
@@ -151,6 +244,17 @@ public final class PostGridListRowCell: UICollectionViewCell {
 
     override public func prepareForReuse() {
         super.prepareForReuse()
+        // Hand the player back BEFORE anything else: a recycled row that kept
+        // its loan would show the previous post's video under the new post's
+        // cover. The coordinator clears its own bookkeeping in response.
+        onReuse?()
+        onReuse = nil
+        onCoverLoaded = nil
+        endVideoPreview()
+        // Concealment is per-flight state and must not ride a recycled cell to
+        // whatever post it is bound to next — the row equivalent of the tile's
+        // `isHidden` reset.
+        setHeroMediaConcealed(false)
         loadTask?.cancel()
         loadTask = nil
         mediaView.image = nil
@@ -186,9 +290,16 @@ public final class PostGridListRowCell: UICollectionViewCell {
             ) {
                 self.mediaView.image = image
             }
+            // The row now has a face, which is the one thing the autoplay gate
+            // was waiting for. Nothing else would ask again while the timeline
+            // sits still.
+            loadedVideoRenderView?.setPoster(image)
+            onCoverLoaded?()
         }
     }
 }
+
+extension PostGridListRowCell: GridPlaybackCell {}
 
 // MARK: - Media tile
 
@@ -445,3 +556,5 @@ public final class PostGridTileCell: UICollectionViewCell {
         }
     }
 }
+
+extension PostGridTileCell: GridPlaybackCell {}
