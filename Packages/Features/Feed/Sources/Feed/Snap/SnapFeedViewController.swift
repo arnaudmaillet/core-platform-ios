@@ -2162,7 +2162,28 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // moment that accessor is nil and the capture came back empty. The
         // tapped post is always the head of the window, which is item 0.
         engagedFlightStill = nil
-        if let model = orderedIDs.first.flatMap({ modelsByID[$0] }), model.mediaURL == nil {
+        if let id = orderedIDs.first, let model = modelsByID[id], model.mediaURL == nil {
+            // MOUNT the comment layout rather than hoping it is already there.
+            //
+            // It is normally mounted by `willDisplay` during the layout above,
+            // and that is what the first version relied on — which held for a
+            // freshly built controller opening the head of a fresh window, and
+            // is exactly the case that gets tested. It does not hold in
+            // general: a REUSED controller whose cell is already displayed
+            // gets no new `willDisplay`, and a page reached by scrolling may
+            // have had its engagement torn down. In both the panel is absent
+            // at this instant, the capture returns nil, and the card flies
+            // blank — the comment layout then appearing when the card is
+            // removed, which is the reported symptom exactly.
+            //
+            // `presentRestingComments` is already slot-guarded (it returns
+            // immediately if anything is engaged), so calling it here is a
+            // no-op whenever `willDisplay` did its job.
+            if commentsEngagedID == nil,
+               let head = collectionView.cellForItem(at: IndexPath(item: 0, section: 0)) as? SnapFeedCell {
+                presentRestingComments(for: id, host: head)
+                view.layoutIfNeeded()
+            }
             // A SECOND settle before the capture. The panel mounted during the
             // layout above and, with its first page already cached, filled
             // itself synchronously — but filling a diffable data source is not
@@ -2175,11 +2196,18 @@ extension SnapFeedViewController: ZoomTransitionDestination {
             CATransaction.flush()
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
-                print("[still] stream \(state ?? "no panel")")
+                print("[still] stream \(state ?? "NO PANEL")")
             }
             #endif
             let head = collectionView.cellForItem(at: IndexPath(item: 0, section: 0))
             engagedFlightStill = (head as? SnapFeedCell)?.engagedLayoutSnapshot()
+            #if DEBUG
+            // A nil still for a TEXT page means the card flies blank. Loud,
+            // because it was silent and shipped.
+            if engagedFlightStill == nil {
+                print("[still] ⚠️ NO REPLICA for \(id.rawValue) — the card will fly blank")
+            }
+            #endif
         }
         // NOT here: pre-sizing the BAR's custom views. Bar items live on the
         // navigation bar rather than in this view, so they are first measured
