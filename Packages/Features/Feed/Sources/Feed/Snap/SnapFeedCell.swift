@@ -77,13 +77,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// below the chrome (the action rail floats over it).
     private let commentsContainer = SnapCommentsContainerView()
     private var commentsContainerConstraints: [NSLayoutConstraint] = []
-    /// The header zone's frost: screen top → the stream's first row, layered
-    /// between the stream (behind) and the chrome (in front), so rows
-    /// scrolling under the nav pill dissolve rather than colliding with it.
-    /// The system's `.regular` material — the standard separator blur,
-    /// which adapts to light and dark on its own. HIT-INERT by construction. Effect
-    /// nil until engagement IN A WINDOW (the headless-CI doctrine),
-    /// materialized inside the master spring.
+    /// The engaged header's frost: a dissolving blur band across the top
+    /// inset, so the nav chrome stays legible where comment rows glide
+    /// under it. A SIBLING of the comments container, not a child, so it
+    /// never rides the stream's transform.
     private let headerFrost = ProgressiveFrostView(
         maskColors: SnapCommentsLayout.headerFrostMaskColors,
         maskLocations: SnapCommentsLayout.headerFrostMaskLocations
@@ -178,12 +175,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // private API for something that was visually inert anyway — the
         // container is transparent, so a radius only clips content, and no
         // content reaches those corners.
+        headerFrost.isHidden = true
+        headerFrost.translatesAutoresizingMaskIntoConstraints = false
         commentsContainer.isHidden = true
         commentsContainer.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(commentsContainer)
-
-        headerFrost.isHidden = true
-        headerFrost.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(headerFrost)
 
         chrome.pin(to: contentView)
@@ -223,6 +219,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // at the screen's edge, fully clear at the container's inner edge.
         // Nothing spills past the chrome the band exists to serve.
         headerFrost.isHidden = false
+        // The veil, on the pages where the blur alone cannot be seen.
+        headerFrost.setVeilOpacity(SnapCommentsLayout.frostVeilOpacity(hasMedia: mediaURL != nil))
         NSLayoutConstraint.deactivate(headerFrostConstraints)
         headerFrostConstraints = [
             headerFrost.topAnchor.constraint(equalTo: contentView.topAnchor),
@@ -249,13 +247,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         commentsContainer.addSubview(view)
         view.pin(to: commentsContainer)
         contentView.layoutIfNeeded()
-    }
-
-    /// The trailing width the engaged comment rows must leave clear so the
-    /// action rail's column is exclusively its own (zero overlap). Read
-    /// after layout: the rail's leading edge is the boundary.
-    var commentsRailExclusionWidth: CGFloat {
-        chrome.railExclusionWidth
     }
 
     /// The engaged stream's top inset — where its content rests, just
@@ -290,11 +281,27 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // its `effect` at the ends — but fading an already-built one out is
         // exactly what alpha is for.)
         headerFrost.alpha = 1 - t
-        mediaBackdrop.setDim(SnapCommentsLayout.backdropDimOpacity * (1 - t))
+        mediaBackdrop.setDim(backdropDim(at: t))
         // The page's own chrome returns as the stream leaves — the ticker
         // and caption fade back IN as the comments fade out, one crossfade
         // rather than two sequential ones.
         chrome.setCommentsEngagedProgress(t)
+    }
+
+    /// The readability wash's opacity for THIS page at engagement progress
+    /// `t` — the single answer both the interactive drive and the re-assert
+    /// path must use, because the wash has two callers and they disagreed
+    /// once already.
+    ///
+    /// The wash is a treatment FOR MEDIA and only media: it buys text
+    /// contrast against an arbitrary photo. A text page has no photo to
+    /// fight, and pouring 50% black over its own ground merely mutes it —
+    /// invisible while that ground was black, a flat 50% grey the moment it
+    /// started following the system appearance. (Measured exactly that:
+    /// #7F7F7F over what should have been white.)
+    private func backdropDim(at t: CGFloat) -> CGFloat {
+        guard mediaURL != nil else { return 0 }
+        return SnapCommentsLayout.backdropDimOpacity * (1 - t)
     }
 
     /// Reclaims the region after disengagement settles (the VC removes the
@@ -349,8 +356,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // engagement never touches it. Everything that DOES change is
             // one interpolatable set (see `setCommentsEngagementProgress`),
             // so the boolean legs and the finger-driven ones can never
-            // diverge. (A visual no-op on a text page, whose surfaces are
-            // hidden — the dim lands on black.)
+            // diverge. (Near-inert on a text page: its media surfaces are
+            // hidden and the readability wash is skipped entirely.)
             setCommentsEngagementProgress(0)
             // The band materializes on the same beat and the same supported
             // path (the `effect` property — alpha on an effect view is not,
@@ -405,6 +412,18 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
         #endif
         let hasMedia = model.mediaURL != nil
+        // THE PAGE'S GROUND. A media page is black because black is what
+        // letterboxing should be — the surface exists to disappear behind a
+        // photo. A TEXT page has nothing to disappear behind, so its ground
+        // is the page itself and it follows the system appearance.
+        contentView.backgroundColor = hasMedia ? .black : .systemBackground
+        // …and the page's THEME, applied once at the root of everything the
+        // cell owns: the frost band, and the whole comment panel hosted
+        // inside it. Both inherit from here rather than deciding for
+        // themselves, which is what keeps them from disagreeing (see
+        // `SnapChromeTheme`). The screen's bars live outside this tree and
+        // are set from the same rule in `SnapFeedViewController`.
+        contentView.overrideUserInterfaceStyle = SnapChromeTheme.style(hasMedia: hasMedia)
         // Composition is POSITIONAL now (the info card's frame is set at
         // install per `hasMedia`), so the info card itself is format-
         // agnostic — its caption always starts at its own inner padding.
@@ -900,13 +919,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         mediaCard.stopDrift()
     }
 
-    /// Keyboard-session rail yield (engaged only — the rail must never
-    /// vanish from a resting page): see `SnapChromeView.setRailConcealed`.
-    func setRailConcealed(_ concealed: Bool) {
-        guard !concealed || isCommentsEngaged else { return }
-        chrome.setRailConcealed(concealed)
-    }
-
     /// Re-asserts the engaged treatment after the screen re-appears from an
     /// outbound push: the backdrop's blur is window-guarded, so an
     /// engagement that began off-window never materialized it. Layout runs
@@ -916,7 +928,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func reassertEngagedGeometry() {
         guard isCommentsEngaged else { return }
         contentView.layoutIfNeeded()
-        UIView.performWithoutAnimation { mediaBackdrop.setActive(true) }
+        // Through the resolver, NOT `setActive(true)` — that convenience
+        // applies the full wash unconditionally, which put a text page's
+        // wash back every time the screen re-appeared.
+        UIView.performWithoutAnimation { mediaBackdrop.setDim(backdropDim(at: 0)) }
     }
 
     override func prepareForReuse() {
@@ -935,6 +950,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         representedID = nil
         mediaURL = nil
         mediaKind = .image
+        // Back to the media ground AND the media theme: a recycled cell is a
+        // media page until its next `configure` says otherwise, and a text
+        // page's adaptive ground flashing behind an incoming photo is
+        // exactly the kind of stranded state reuse produces.
+        contentView.backgroundColor = .black
+        contentView.overrideUserInterfaceStyle = SnapChromeTheme.style(hasMedia: true)
         for task in imageTasks { task.cancel() }
         imageTasks.removeAll()
         chrome.reset()
@@ -985,13 +1006,12 @@ extension SnapFeedCell {
         // media is neither transformed nor z-lifted now — it sits at the
         // back of the stack, beneath the stream — so the stream simply wins
         // its own touches by z-order and there is nothing to clip.
-        guard sequence(first: hit, next: { $0.superview }).contains(where: { $0 is SnapShortcutRailView })
-        else { return hit }
-        let containerPoint = convert(point, to: commentsContainer)
-        if let inner = commentsContainer.hitTest(containerPoint, with: event),
-           sequence(first: inner, next: { $0.superview }).contains(where: { $0 is CommentsInputBar }) {
-            return inner
-        }
+        // NOTE: the composer-vs-rail arbitration that used to live here is
+        // gone too. The engaged composer rose into the shortcut rail's
+        // column, and since the rail survived the engagement, every touch
+        // in the overlap had to be re-routed to the bar by hand. The
+        // engagement fades the rail out now — and UIKit does not hit-test a
+        // view under alpha 0.01 — so there is no overlap left to referee.
         return hit
     }
 }

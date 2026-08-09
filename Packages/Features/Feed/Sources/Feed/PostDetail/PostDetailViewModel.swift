@@ -32,6 +32,10 @@ public final class PostDetailViewModel {
     public var onCommentsChange: ((CommentsState) -> Void)?
     /// True while a comment is being posted (disables the send control).
     public var onComposingChange: ((Bool) -> Void)?
+    /// Who is composing — the bar's leading avatar. Fires once per load,
+    /// and only when the provider actually knows; a nil viewer simply never
+    /// emits, leaving the composer's placeholder disc alone.
+    public var onViewerIdentityChange: ((ViewerIdentity) -> Void)?
 
     private let postID: PostID
     private let repository: any FeedProviding
@@ -82,6 +86,7 @@ public final class PostDetailViewModel {
 
     public func viewDidLoad() {
         reload()
+        loadViewerIdentity()
     }
 
     public func refresh() {
@@ -203,6 +208,33 @@ public final class PostDetailViewModel {
             let loaded = (try? await commentsProvider.loadComments(for: self.postID)) ?? []
             self.comments = loaded
             self.emitComments()
+        }
+    }
+
+    /// The composer's avatar identity — its own task, not chained to the
+    /// comments load: the bar is on screen and typable long before (and
+    /// regardless of whether) the stream resolves.
+    private func loadViewerIdentity() {
+        guard let commentsProvider else { return }
+        Task { [weak self] in
+            guard let identity = await commentsProvider.viewerIdentity() else { return }
+            self?.onViewerIdentityChange?(identity)
+        }
+    }
+
+    /// The viewer switched which of their profiles is active (from this
+    /// screen's composer menu, or anywhere else while it is open).
+    ///
+    /// Tells the comments provider FIRST and re-reads the identity second,
+    /// in that order: the re-read resolves through the value just adopted,
+    /// so the face the composer ends up wearing is by construction the one
+    /// the next comment will be posted as.
+    public func adoptActiveViewer(_ id: ProfileID) {
+        guard let commentsProvider else { return }
+        Task { [weak self] in
+            await commentsProvider.setActiveViewer(id)
+            guard let identity = await commentsProvider.viewerIdentity() else { return }
+            self?.onViewerIdentityChange?(identity)
         }
     }
 

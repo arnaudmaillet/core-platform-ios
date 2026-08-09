@@ -22,6 +22,17 @@ final class SnapAuthorIdentityView: UIView {
     private static let barItemWrapperHeight: CGFloat = 36
     /// Long display names truncate here rather than crowding the back item.
     private static let maxWidth: CGFloat = 220
+    /// The COMPACT cap, used while the sort pill shares the trailing run.
+    ///
+    /// This is a width BUDGET, not a taste call. The bar is 402pt on the
+    /// reference device: 16pt margins each side, a 44pt leading platter, and
+    /// a 96pt sort platter leave ~222pt, and the system overflows the whole
+    /// item into a `•••` menu the moment the run does not fit — which is
+    /// exactly what it did with the full pill (measured: the author's view
+    /// chain dead-ended at its item wrapper, never reaching the window).
+    /// Compact keeps the author VISIBLE, which is the point of having it
+    /// there.
+    private static let compactMaxWidth: CGFloat = 150
     /// The unhydrated (cold-tap) floor: the pill opens at a plausible
     /// footprint instead of a nub, so hydration is a small glide, not a pop.
     private static let minWidth: CGFloat = 150
@@ -44,6 +55,11 @@ final class SnapAuthorIdentityView: UIView {
 
     private var authorID: ProfileID?
     private var avatarTask: Task<Void, Never>?
+    /// Whether the pill is sharing the trailing run with the sort selector.
+    private var isCompact = false
+    /// The width bounds, held so `setCompact` can retune them.
+    private var maxWidthConstraint: NSLayoutConstraint?
+    private var minWidthConstraint: NSLayoutConstraint?
 
     init() {
         super.init(frame: .zero)
@@ -56,9 +72,9 @@ final class SnapAuthorIdentityView: UIView {
         avatarView.heightAnchor.constraint(equalToConstant: AvatarImageView.barDiameter).isActive = true
 
         nameLabel.font = UIFont.preferredFont(forTextStyle: .footnote).withWeight(.semibold)
-        nameLabel.textColor = .white
+        nameLabel.textColor = .label
         metaLabel.font = .preferredFont(forTextStyle: .caption2)
-        metaLabel.textColor = UIColor.white.withAlphaComponent(0.75)
+        metaLabel.textColor = .secondaryLabel
 
         // The bar is transparent over arbitrary media; shadows keep the
         // identity legible without a background.
@@ -72,7 +88,7 @@ final class SnapAuthorIdentityView: UIView {
         var followConfig = UIButton.Configuration.plain()
         followConfig.image = UIImage(systemName: "plus")?
             .withConfiguration(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
-        followConfig.baseForegroundColor = .white
+        followConfig.baseForegroundColor = .label
         followConfig.contentInsets = .zero
         followButton.configuration = followConfig
         followButton.addAction(UIAction { [weak self] _ in
@@ -127,13 +143,16 @@ final class SnapAuthorIdentityView: UIView {
         let height = heightAnchor.constraint(equalToConstant: Self.height)
         height.priority = UILayoutPriority(999)
         height.isActive = true
-        widthAnchor.constraint(lessThanOrEqualToConstant: Self.maxWidth).isActive = true
+        let maxWidth = widthAnchor.constraint(lessThanOrEqualToConstant: Self.maxWidth)
+        maxWidth.isActive = true
+        maxWidthConstraint = maxWidth
         // The floor only binds while content is narrower than it (the redacted
         // cold state); real name+meta content exceeds it, keeping the flush
         // pill. 999 so it can never fight the bar's own constraints.
         let minWidth = widthAnchor.constraint(greaterThanOrEqualToConstant: Self.minWidth)
         minWidth.priority = UILayoutPriority(999)
         minWidth.isActive = true
+        minWidthConstraint = minWidth
 
         addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(authorTapped)))
     }
@@ -180,15 +199,70 @@ final class SnapAuthorIdentityView: UIView {
         onAuthorTapped?(authorID)
     }
 
+    /// The SHADOW only — the colours are semantic and resolve from the
+    /// bar's theme (`SnapChromeTheme`, applied to the navigation bar).
+    ///
+    /// The shadow is not a theme question: it exists because this pill
+    /// floats over an arbitrary photo with no background of its own, and a
+    /// text page's own ground makes it unnecessary. Keeping it here — while
+    /// the colour comes from the theme — is what stopped the pill from
+    /// having a second, private opinion about light and dark.
+    func setOverMedia(_ overMedia: Bool) {
+        for label in [nameLabel, metaLabel] {
+            label.layer.shadowOpacity = overMedia ? 0.5 : 0
+        }
+    }
+
+    /// COMPACT: avatar + display name only, under a tighter width cap — the
+    /// form the pill takes while the sort selector shares the trailing run.
+    ///
+    /// It sheds the meta line (@handle · age) and the follow "+", both of
+    /// which belong to the resting page's chrome: with the comments open the
+    /// author is context for what you are reading, not the thing you are
+    /// acting on, and the affordances for acting on them are a tap away in
+    /// the pill itself. Shedding them is what buys the ~70pt that keeps the
+    /// whole item out of the system's overflow menu.
+    func setCompact(_ compact: Bool, animated: Bool) {
+        guard compact != isCompact else { return }
+        isCompact = compact
+        let apply = {
+            self.applyLabelVisibility()
+            self.followButton.isHidden = compact
+            self.maxWidthConstraint?.constant = compact ? Self.compactMaxWidth : Self.maxWidth
+            // The cold-start floor is a RESTING metric (it holds the pill
+            // open while the name hydrates). Compact is only ever entered
+            // from a hydrated page, and 150 is the compact cap itself — it
+            // would pin the pill to exactly the cap and undo the shrink.
+            self.minWidthConstraint?.isActive = !compact
+        }
+        guard animated else { return apply() }
+        UIView.animate(withDuration: 0.22, delay: 0, options: [.curveEaseInOut, .allowUserInteraction]) {
+            apply()
+            self.superview?.superview?.layoutIfNeeded()
+        }
+    }
+
     /// Swaps the label area between redacted stand-ins and the real labels.
     /// The stand-in bars need a gap of their own; label line-heights carry it
     /// once hydrated.
     private func setRedacted(_ redacted: Bool) {
-        nameLabel.isHidden = redacted
-        metaLabel.isHidden = redacted
-        namePlaceholder.isHidden = !redacted
-        metaPlaceholder.isHidden = !redacted
-        labelsStack.spacing = redacted ? 5 : 0
+        isRedacted = redacted
+        applyLabelVisibility()
+    }
+
+    private var isRedacted = true
+
+    /// The label area's visibility, resolved from BOTH axes at once —
+    /// redaction (hydrated yet?) and compactness (is the meta line shown at
+    /// all?). One resolver, because two independent setters racing over
+    /// four `isHidden` flags is how a compact pill ends up wearing a
+    /// placeholder bar it never shows text in.
+    private func applyLabelVisibility() {
+        nameLabel.isHidden = isRedacted
+        namePlaceholder.isHidden = !isRedacted
+        metaLabel.isHidden = isRedacted || isCompact
+        metaPlaceholder.isHidden = !isRedacted || isCompact
+        labelsStack.spacing = isRedacted ? 5 : 0
     }
 
     /// Content changes resize the pill (content-sized by design). A snap here
@@ -228,6 +302,14 @@ enum SnapNavControls {
         makeCircularBarButton(systemName: "chevron.backward", pointSize: 17)
     }
 
+    /// A NAVIGATION-bar action that stands in the back button's slot (the
+    /// comments ✕). The back button's 17pt metric, not the toolbar's 15,
+    /// because it sits in the same slot and swaps with it — two glyphs at
+    /// different weights trading places would read as a size change.
+    static func makeNavActionButton(systemName: String) -> UIButton {
+        makeCircularBarButton(systemName: systemName, pointSize: 17)
+    }
+
     /// A bottom-toolbar action (share, more): the same 36pt circle as the
     /// back button, hosted as a bar item custom view so the system glass
     /// wraps each action in its own isolated bubble — custom views never
@@ -248,7 +330,7 @@ enum SnapNavControls {
         var config = UIButton.Configuration.plain()
         config.image = UIImage(systemName: systemName)?
             .withConfiguration(UIImage.SymbolConfiguration(pointSize: pointSize, weight: .semibold))
-        config.baseForegroundColor = .white
+        config.baseForegroundColor = .label
         config.contentInsets = .zero
         let button = UIButton(configuration: config)
         let height = button.heightAnchor.constraint(equalToConstant: 36)

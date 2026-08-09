@@ -47,14 +47,51 @@ public struct CommentEntry: Equatable, Sendable, Identifiable {
     }
 }
 
+/// The signed-in viewer's display identity — what the composer needs to
+/// render "you" BEFORE you have written anything. A comment carries its
+/// author on the way back; the empty composer has no entry to read from,
+/// so it asks for this directly.
+public struct ViewerIdentity: Equatable, Sendable {
+    public let name: String
+    /// Optional at every step, exactly like a comment author's: no avatar,
+    /// an unresolved profile, and a failed fetch all leave the monogram
+    /// standing.
+    public let avatarURL: URL?
+
+    public init(name: String, avatarURL: URL?) {
+        self.name = name
+        self.avatarURL = avatarURL
+    }
+}
+
 /// What the comments UI consumes; implemented by `CommentsRepository`, faked in
 /// view-model tests.
 public protocol CommentsProviding: Sendable {
     func loadComments(for postID: PostID) async throws -> [CommentEntry]
+    /// Who the viewer is, for the composer's avatar. Nil when nobody is
+    /// signed in or the profile can't be resolved — the composer then shows
+    /// its neutral placeholder rather than someone else's face.
+    func viewerIdentity() async -> ViewerIdentity?
+    /// Adopts `id` as the account profile that comments are posted AS.
+    ///
+    /// The account can hold several profiles and the viewer switches between
+    /// them; without this the repository resolves the account's FIRST profile
+    /// once and keeps it forever, so a switch would change the composer's
+    /// face while the comment still arrived from the old identity.
+    func setActiveViewer(_ id: ProfileID) async
     /// Posts a comment as the viewer and returns the created entry.
     /// `parentID` nil posts top-level; non-nil posts a level-2 reply under
     /// that top-level comment (comment.v1's two-depth contract).
     func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry
+}
+
+public extension CommentsProviding {
+    /// Default: no viewer. The composer's avatar is an enhancement, so a
+    /// provider that doesn't know who is signed in (every test fake, and
+    /// any future read-only source) opts out by saying nothing.
+    func viewerIdentity() async -> ViewerIdentity? { nil }
+    /// Default: nothing to adopt, for providers with no notion of a viewer.
+    func setActiveViewer(_ id: ProfileID) async {}
 }
 
 /// Reads/writes top-level comments via comment.v1, hydrating author names via
@@ -154,6 +191,28 @@ public actor CommentsRepository: CommentsProviding {
         case .failure(let error):
             throw CommentsError.transport(message: error.message ?? "code \(error.code)")
         }
+    }
+
+    /// The viewer's own profile, through the SAME hydration path and cache
+    /// every comment author takes — so the composer's avatar and the
+    /// viewer's own comment rows can never disagree about their face, and a
+    /// second engagement costs no fetch. Best-effort: not signed in, no
+    /// profile for the account, or a failed read all return nil.
+    public func viewerIdentity() async -> ViewerIdentity? {
+        guard let viewer = try? await resolveViewerProfileID() else { return nil }
+        await hydrateAuthors(for: [viewer])
+        guard let author = authorCache[viewer] else { return nil }
+        return ViewerIdentity(name: author.name, avatarURL: author.avatarURL)
+    }
+
+    /// Overrides the resolved viewer — the same one-line move
+    /// `ProfileRepository.setActiveProfile` makes, because the two actors
+    /// hold SEPARATE caches of "who am I" and only the profile side hears
+    /// about a switch. The author cache is keyed by profile id, so the new
+    /// identity's name and avatar are already there if that profile has
+    /// appeared in any thread.
+    public func setActiveViewer(_ id: ProfileID) async {
+        viewerProfileID = id
     }
 
     // MARK: - Hydration

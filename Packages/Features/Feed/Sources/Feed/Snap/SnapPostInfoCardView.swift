@@ -59,11 +59,12 @@ final class SnapPostInfoCardView: UIView {
 
         captionLabel.font = UIFont.preferredFont(forTextStyle: .subheadline)
         captionLabel.adjustsFontForContentSizeCategory = true
-        // WHITE, not `.label`, and the glass is pinned dark to match (see
-        // `SnapGlassCardView`): the bubble floats over arbitrary post media,
-        // so its contrast must come from the material it sits on rather
-        // than from the device's appearance.
-        captionLabel.textColor = .white
+        // SEMANTIC, resolving against whatever the bubble inherits — which
+        // is dark on a media panel and the device's theme on a text one (see
+        // `SnapGlassCardView`). It was hardcoded white while the glass was
+        // pinned dark; white text under a glass that can now render bright
+        // is the one combination that reliably disappears.
+        captionLabel.textColor = .label
         // Natural alignment — the bubble reads as a message, and a message's
         // text starts at the reading edge in both LTR and RTL.
         captionLabel.textAlignment = .natural
@@ -76,10 +77,11 @@ final class SnapPostInfoCardView: UIView {
 
         timestampLabel.font = .preferredFont(forTextStyle: .footnote)
         timestampLabel.adjustsFontForContentSizeCategory = true
-        // 0.7: the quietest text on the bubble, sitting on a refracting
-        // material rather than a flat tint, so it needs more than the 0.55
-        // a dark blur allowed. Still clearly subordinate to the caption.
-        timestampLabel.textColor = UIColor.white.withAlphaComponent(0.7)
+        // The quietest text on the bubble. `.secondaryLabel` is the semantic
+        // equivalent of the 0.7 white it replaces — subordinate to the
+        // caption, and legible on a refracting material in either theme
+        // (a fixed white alpha could only ever be tuned for one).
+        timestampLabel.textColor = .secondaryLabel
         timestampLabel.textAlignment = .right
         timestampLabel.numberOfLines = 1
         timestampLabel.setContentHuggingPriority(.required, for: .vertical)

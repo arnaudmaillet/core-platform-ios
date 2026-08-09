@@ -180,19 +180,44 @@ enum SnapCommentsLayout {
     // themselves deleted by overreaching at full strength, where they read
     // as heavy overlays on a background whose whole point is the photo.
 
-    /// The bands' material.
-    ///
-    /// `.regular` — the system's standard separator blur, semi-translucent
-    /// and adaptive.
-    ///
-    /// A denser material (`.systemThickMaterial`) was tried for more
-    /// presence, since a `UIBlurEffect` has no intensity property and the
-    /// only way to add weight is to climb the material scale. It reads as
-    /// too solid over the post. The PROTECTION does not depend on it
+    /// The bands' material: the system's standard separator blur, which
+    /// adapts to light and dark on its own. Density was tried and rejected
     /// anyway: what keeps the composer legible is `footerFrostLead` — the
-    /// band reaching full material ABOVE the capsule rather than at it — so
-    /// the material can stay light.
+    /// runway its ramp finishes over — not a thicker material.
     static let frostStyle: UIBlurEffect.Style = .regular
+
+    /// The frost veil's opacity at the band's SOLID end, on pages where the
+    /// blur alone cannot be seen.
+    ///
+    /// High at the SOLID end on purpose — that end sits against the screen's
+    /// edge, under the bars. The ramp is what makes it subtle: the gradient
+    /// takes this to nothing by the band's inner edge, so a comment
+    /// scrolling up recedes gradually rather than meeting a lid. Left short
+    /// of 1 so the blur still contributes at the edge.
+    static let frostVeilOpacity: CGFloat = 0.85
+
+    /// The veil's opacity for a given page format — zero over media, where
+    /// the blur has a photo to refract and a veil would only mute it.
+    static func frostVeilOpacity(hasMedia: Bool) -> CGFloat {
+        hasMedia ? 0 : frostVeilOpacity
+    }
+
+    /// The HEADER band's ramp: opaque at the screen's top edge, fully clear
+    /// at the container's bottom — one gradient across the whole container,
+    /// two stops so there is no knee partway down.
+    static var headerFrostMaskColors: [UIColor] { [.black, .clear] }
+    static var headerFrostMaskLocations: [NSNumber] { [0, 1] }
+
+    /// The FOOTER band's ramp, deliberately ASYMMETRIC: clear at the band's
+    /// top, full material by the composer's top edge, and solid from there
+    /// to the screen's bottom. The composer must sit on the SOLID part of
+    /// its own band, not on the clear end of it.
+    static var footerFrostMaskColors: [UIColor] { [.clear, .black, .black] }
+
+    /// How far ABOVE the composer the footer band starts, so its ramp is
+    /// finished — full material by the composer's top edge — which is
+    /// exactly where the composer needs its background to be solid.
+    static let footerFrostLead: CGFloat = 96
 
     // MARK: The interactive pull-down dismissal
     //
@@ -240,30 +265,6 @@ enum SnapCommentsLayout {
     static func shouldCompletePullDismiss(progress: CGFloat, velocity: CGFloat) -> Bool {
         progress >= pullDismissCommitProgress || velocity >= pullDismissCommitVelocity
     }
-
-
-    /// The HEADER band's ramp: opaque at the screen's top edge, fully clear
-    /// at the container's bottom — one gradient across the whole container,
-    /// two stops so there is no knee partway down.
-    static var headerFrostMaskColors: [UIColor] { [.black, .clear] }
-    static let headerFrostMaskLocations: [NSNumber] = [0, 1]
-
-    /// The FOOTER band's ramp: clear at the band's top edge, reaching FULL
-    /// material by `footerFrostLead` — which is exactly where the composer
-    /// begins — and holding it to the screen's bottom.
-    ///
-    /// The band starts above the composer on purpose. Ramping across the
-    /// whole footer container put the ramp's 0% end exactly where the
-    /// composer sits, so the capsule floated over the least-blurred part of
-    /// its own band and rows read straight through it (measured: local
-    /// contrast under the composer rose 14 → 70). The lead moves the fade
-    /// entirely ABOVE the composer, so content is already fully separated
-    /// by the time it reaches the capsule's top edge.
-    static var footerFrostMaskColors: [UIColor] { [.clear, .black, .black] }
-    /// How far above the composer's top the band begins — and therefore the
-    /// ramp's whole length, since it must be finished by the time it gets
-    /// there.
-    static let footerFrostLead: CGFloat = 96
 }
 
 /// The engaged screen's READABILITY LAYER: the one surface between the
@@ -290,6 +291,30 @@ enum SnapCommentsLayout {
 ///
 /// HIT-INERT: the media behind it keeps whatever hit-testing it had, and
 /// the stream in front keeps every touch. This layer owns none.
+/// THE PAGE'S THEME, and the only place it is decided.
+///
+/// A snap page is one visual object made of surfaces that live in three
+/// different view trees — the cell (its frost band and the hosted comment
+/// panel), the navigation bar, and the toolbar. Nothing inherits across
+/// those boundaries, so before this existed each tree answered "am I light
+/// or dark?" on its own and they disagreed: in light mode a media page drew
+/// white-on-light nav platters above a dark caption bubble and a dark
+/// composer.
+///
+/// Two rules, and they follow from what is BEHIND the chrome:
+///
+///   • MEDIA — pinned dark. The chrome floats over an arbitrary photo or
+///     video, so its contrast can only come from the material it is made
+///     of; the device's appearance has no opinion worth taking here.
+///   • TEXT — inherited. The page's own ground follows the system (see
+///     `SnapFeedCell.configure`), so the chrome over it must too, or light
+///     mode puts white glass and white text on a white page.
+enum SnapChromeTheme {
+    static func style(hasMedia: Bool) -> UIUserInterfaceStyle {
+        hasMedia ? .dark : .unspecified
+    }
+}
+
 final class SnapMediaBackdropView: UIView {
     init() {
         super.init(frame: .zero)
@@ -317,6 +342,7 @@ final class SnapMediaBackdropView: UIView {
     var dimOpacity: CGFloat { alpha }
 }
 
+
 /// A blur band that DISSOLVES along its length instead of ending on a hard
 /// geometric edge: a `UIVisualEffectView` alpha-masked by a vertical
 /// `CAGradientLayer`.
@@ -331,12 +357,26 @@ final class SnapMediaBackdropView: UIView {
 /// `mask` (UIKit propagates it through the effect's internal backdrop
 /// layers; masking `layer` directly breaks effect rendering), and its frame
 /// is re-bound to the bounds every layout pass — the footer band resizes
-/// when the keyboard lifts the composer, and a stale mask shears the ramp.
-///
-/// Hit-inert by construction: the band frames the stream, it never owns a
-/// touch.
+/// when the keyboard lifts the composer, and a stale mask frame shears the
+/// ramp.
 final class ProgressiveFrostView: UIVisualEffectView {
     private let fadeMask: GradientView
+    /// A veil of the PAGE's own colour, under the same ramp as the blur.
+    ///
+    /// Blur is a refraction, so it can only show you what it has to work
+    /// with: over a photo it is obvious, and over a text page's flat ground
+    /// it is arithmetically almost a no-op. Measured on a white page, the
+    /// band rendered #F9F9F9–#FCFCFC against #FFFFFF — a difference you can
+    /// measure and cannot see, which is why the bands read as "missing"
+    /// there. The veil is what gives the ramp something to say on a flat
+    /// ground: content sliding under it recedes toward the page colour
+    /// instead of staying perfectly crisp until it hits the bar.
+    ///
+    /// It lives in `contentView` (the supported place to put content over an
+    /// effect) and is therefore masked by the SAME gradient — one ramp
+    /// governs both layers, so they can never disagree about where the band
+    /// ends.
+    private let veil = UIView()
     /// When set, the ramp occupies exactly this many points from the band's
     /// TOP edge and the rest holds full material — resolved against the
     /// live height every layout pass, so a band that grows (the footer's
@@ -353,11 +393,32 @@ final class ProgressiveFrostView: UIVisualEffectView {
         super.init(effect: nil)
         isUserInteractionEnabled = false
         mask = fadeMask
+        // `secondarySystemBackground` — the system's "one step recessed from
+        // the page" surface — and NOT `systemBackground`.
+        //
+        // The page's own colour was the first attempt and it is invisible by
+        // construction: a white veil over a white page changes nothing
+        // (measured — the band still read #F9F9F9 against #FFFFFF). It would
+        // still mute content passing under, but the band itself would have
+        // no presence, which is half the job. One step recessed gives both:
+        // content recedes toward it, and the strip reads as a distinct
+        // surface even with nothing behind it. Semantic, so it resolves for
+        // whichever theme the page is wearing (`SnapChromeTheme`).
+        veil.backgroundColor = .secondarySystemBackground
+        veil.alpha = 0
+        veil.isUserInteractionEnabled = false
+        veil.pin(to: contentView)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// Raises (or clears) the veil. Media pages leave it at zero — a blur
+    /// over a photo is already doing the work, and a veil there would only
+    /// mute the media the layout exists to show.
+    func setVeilOpacity(_ opacity: CGFloat) {
+        veil.alpha = min(max(0, opacity), 1)
+    }
 
     override func layoutSubviews() {
         super.layoutSubviews()

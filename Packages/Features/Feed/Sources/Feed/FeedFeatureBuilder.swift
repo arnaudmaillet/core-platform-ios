@@ -1,5 +1,6 @@
 import MediaCore
 import CoreModels
+import ProfileInterface
 import CoreNavigation
 import FeedInterface
 import MediaPlayback
@@ -18,6 +19,13 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     private let router: (any Router)?
     private let imagePipeline: ImagePipeline
     private let videoPlayback: VideoPlaybackController?
+    /// Vends the profile switcher for the comments composer's avatar menu.
+    ///
+    /// A FACTORY, not an instance: `ProfileSwitcherPresenting` caches its
+    /// pre-formatted rows from the last `reload()`, so each surface that
+    /// offers switching holds its own — sharing one would make two screens
+    /// race over the same row cache. Nil leaves the composer's face inert.
+    private let makeProfileSwitcher: (@MainActor () -> (any ProfileSwitcherPresenting)?)?
 
     public init(
         repository: any FeedProviding,
@@ -27,8 +35,10 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         composedPosts: ComposedPostChannel? = nil,
         router: (any Router)? = nil,
         imagePipeline: ImagePipeline,
-        videoPlayback: VideoPlaybackController? = nil
+        videoPlayback: VideoPlaybackController? = nil,
+        makeProfileSwitcher: (@MainActor () -> (any ProfileSwitcherPresenting)?)? = nil
     ) {
+        self.makeProfileSwitcher = makeProfileSwitcher
         self.repository = repository
         self.engagementProvider = engagementProvider
         self.commentsProvider = commentsProvider
@@ -110,6 +120,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         let commentsProvider = commentsProvider
         let router = router
         let imagePipeline = imagePipeline
+        // Hoisted like the rest: the panel factory escapes, and reaching for
+        // a stored property inside it would capture the whole builder.
+        let makeProfileSwitcher = makeProfileSwitcher
         return SnapFeedViewController(
             viewModel: viewModel,
             imagePipeline: imagePipeline,
@@ -128,7 +141,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                         router: router
                     ),
                     imagePipeline: imagePipeline,
-                    mode: .commentsOnly
+                    mode: .commentsOnly,
+                    profileSwitcher: makeProfileSwitcher?()
                 )
             }
         )

@@ -53,7 +53,11 @@ final class ProfileSwitcherMenuFactory: ProfileSwitcherPresenting {
     /// the active profile and "Add Profile". Just avatar + display name, all in
     /// standard `.label` — the section split marks the active one, no checkmark
     /// or accent color.
-    func makeMenu(onSwitch: @escaping () -> Void, onAddProfile: @escaping () -> Void) -> UIMenu {
+    func makeMenu(
+        includesAddProfile: Bool,
+        onSwitch: @escaping () -> Void,
+        onAddProfile: @escaping () -> Void
+    ) -> UIMenu {
         func action(for row: Row) -> UIAction {
             UIAction(title: row.title, image: row.image) { [weak self] _ in
                 self?.commitSwitch(to: row.id, then: onSwitch)
@@ -64,12 +68,15 @@ final class ProfileSwitcherMenuFactory: ProfileSwitcherPresenting {
         let inactive = rows.filter { !$0.isActive }.map(action(for:))
         let inactiveSection = UIMenu(title: "", options: .displayInline, children: inactive)
 
-        // Section 2: the active profile, then Add Profile.
+        // Section 2: the active profile, then Add Profile — unless the caller
+        // is a switch-only surface with nowhere to send that row.
         var activeAndActions: [UIMenuElement] = rows.filter(\.isActive).map(action(for:))
-        activeAndActions.append(UIAction(
-            title: "Add Profile",
-            image: UIImage(systemName: "person.badge.plus")
-        ) { _ in onAddProfile() })
+        if includesAddProfile {
+            activeAndActions.append(UIAction(
+                title: "Add Profile",
+                image: UIImage(systemName: "person.badge.plus")
+            ) { _ in onAddProfile() })
+        }
         let activeSection = UIMenu(title: "", options: .displayInline, children: activeAndActions)
 
         return UIMenu(title: "", children: [inactiveSection, activeSection])

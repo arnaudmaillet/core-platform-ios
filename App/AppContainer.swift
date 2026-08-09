@@ -199,7 +199,13 @@ final class AppContainer {
         composedPosts: composedPostChannel,
         router: routeResolver,
         imagePipeline: imagePipeline,
-        videoPlayback: videoPlayback
+        videoPlayback: videoPlayback,
+        // The comments composer's avatar opens the same switcher the profile
+        // header offers. Lazily, and one instance per composer: the factory
+        // caches its pre-formatted rows, so two surfaces sharing one would
+        // race over that cache. `unowned self` matches `profileFeature`'s
+        // own accessor below — the container outlives every screen.
+        makeProfileSwitcher: { [unowned self] in self.profileFeature.makeProfileSwitcher() }
     )
 
     // MARK: - Maps

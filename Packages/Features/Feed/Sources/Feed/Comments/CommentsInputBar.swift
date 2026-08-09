@@ -1,4 +1,5 @@
 import DesignSystem
+import MediaCore
 import UIKit
 
 /// The comments composer, in the app's native Liquid Glass grammar —
@@ -53,7 +54,34 @@ final class CommentsInputBar: UIView {
     private enum Metrics {
         static let maxLines: CGFloat = 4
         static let controlSize: CGFloat = 38
+        /// The face inside the 38pt bubble. Inset so the glass reads as a
+        /// container around it rather than a rim the disc has covered —
+        /// the same relationship the mic and "+" glyphs have with theirs.
+        static let avatarDiameter: CGFloat = 30
     }
+
+    /// The viewer's face, leading the bar — the composer's answer to the
+    /// question every comment row already answers. Same contract as those
+    /// rows: the monogram is the RENDERED identity, drawn immediately; the
+    /// picture layers over it and never replaces it, so there is no empty
+    /// disc and no third loading state.
+    private let avatarView = MonogramAvatarView(diameter: Metrics.avatarDiameter)
+    private let avatarImageView = AvatarImageView()
+    /// The glass bubble the avatar sits in, and the button that owns its
+    /// touches. The bubble matches the mic and "+" beside it — the composer
+    /// reads as one row of glass controls with a face at its head — and the
+    /// button carries the profile switcher menu.
+    ///
+    /// Effect deferred to window attach, like every other glass surface
+    /// here: materializing one in `init` contacts the render server and
+    /// stalls headless CI simulators.
+    private let avatarBubble = UIVisualEffectView(effect: nil)
+    private let avatarButton = UIButton(type: .system)
+    private var avatarTask: Task<Void, Never>?
+    /// The identity the in-flight fetch belongs to. The bar is not a
+    /// recycled cell, but it IS re-identified per engagement, and a slow
+    /// fetch from the previous one must not land on the next viewer.
+    private var representedAvatarURL: URL?
 
     // Effect set on window attach: materializing one in init contacts the
     // render server and stalls headless CI simulators (see ci memory).
@@ -152,29 +180,65 @@ final class CommentsInputBar: UIView {
             },
         ]
 
-        addSubview(mediaButton)
+        // The avatar stack, outside in: glass bubble → face (monogram with
+        // the picture layered over it) → a transparent button spanning the
+        // whole bubble, which owns the touches and carries the menu.
+        //
+        // The button is LAST and full-bleed rather than wrapping the disc,
+        // so the whole 38pt bubble is the tap target — a 30pt disc alone is
+        // under the 44pt guidance already, and the glass rim would be dead.
+        avatarImageView.pin(to: avatarView)
+        avatarBubble.cornerConfiguration = .capsule(maximumRadius: Metrics.controlSize / 2)
+        avatarBubble.clipsToBounds = true
+        avatarView.translatesAutoresizingMaskIntoConstraints = false
+        avatarBubble.contentView.addSubview(avatarView)
+        NSLayoutConstraint.activate([
+            avatarView.centerXAnchor.constraint(equalTo: avatarBubble.contentView.centerXAnchor),
+            avatarView.centerYAnchor.constraint(equalTo: avatarBubble.contentView.centerYAnchor),
+        ])
+        // Into the CONTENT VIEW, never the effect view itself — UIKit raises
+        // on a direct subview. Added after the face, so it lies over it.
+        avatarButton.pin(to: avatarBubble.contentView)
+        avatarButton.accessibilityLabel = "Switch profile"
+        // A menu, not an action: tap opens it (`showsMenuAsPrimaryAction`),
+        // and long press opens the same one — the idiom the toolbar's ⋯
+        // already uses on this screen.
+        avatarButton.showsMenuAsPrimaryAction = true
+        // Nothing to show until a switcher hands one over; without this the
+        // button would swallow taps and present an empty menu.
+        avatarButton.isEnabled = false
+
+        addSubview(avatarBubble)
         addSubview(field)
         addSubview(sendButton)
         addSubview(utilityButton)
+        addSubview(mediaButton)
+        avatarBubble.translatesAutoresizingMaskIntoConstraints = false
         mediaButton.translatesAutoresizingMaskIntoConstraints = false
         field.translatesAutoresizingMaskIntoConstraints = false
         sendButton.translatesAutoresizingMaskIntoConstraints = false
         utilityButton.translatesAutoresizingMaskIntoConstraints = false
         fieldHeight = field.heightAnchor.constraint(equalToConstant: Metrics.controlSize)
-        // Bottom-baseline anchoring: the field grows upward, the round
-        // controls hold their stations; the field owns all flexible width.
-        // Send and close OVERLAY the same trailing slot (they crossfade).
+        // Four slots, leading to trailing: the viewer's AVATAR, the field,
+        // the mic/send toggle, and "+". Bottom-baseline anchoring — the
+        // field grows upward while the round controls hold their stations,
+        // and the field owns all the flexible width.
+        //
+        // The "+" moved from the leading edge to the trailing one so the
+        // avatar could open the bar (a composer says who is speaking before
+        // it offers what to attach), which also puts both action controls in
+        // one thumb-reachable cluster. Mic and send OVERLAY a single slot
+        // and crossfade; the avatar is silent and never moves.
         NSLayoutConstraint.activate([
             fieldHeight,
-            mediaButton.leadingAnchor.constraint(equalTo: leadingAnchor),
-            mediaButton.bottomAnchor.constraint(equalTo: bottomAnchor),
-            mediaButton.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
-            mediaButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
-            field.leadingAnchor.constraint(equalTo: mediaButton.trailingAnchor, constant: Spacing.sm),
+            avatarBubble.leadingAnchor.constraint(equalTo: leadingAnchor),
+            avatarBubble.bottomAnchor.constraint(equalTo: bottomAnchor),
+            avatarBubble.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
+            avatarBubble.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
+            field.leadingAnchor.constraint(equalTo: avatarBubble.trailingAnchor, constant: Spacing.sm),
             field.topAnchor.constraint(equalTo: topAnchor),
             field.bottomAnchor.constraint(equalTo: bottomAnchor),
             sendButton.leadingAnchor.constraint(equalTo: field.trailingAnchor, constant: Spacing.sm),
-            sendButton.trailingAnchor.constraint(equalTo: trailingAnchor),
             sendButton.bottomAnchor.constraint(equalTo: bottomAnchor),
             sendButton.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
             sendButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
@@ -182,8 +246,18 @@ final class CommentsInputBar: UIView {
             utilityButton.centerYAnchor.constraint(equalTo: sendButton.centerYAnchor),
             utilityButton.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
             utilityButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
+            mediaButton.leadingAnchor.constraint(equalTo: sendButton.trailingAnchor, constant: Spacing.sm),
+            mediaButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+            mediaButton.bottomAnchor.constraint(equalTo: bottomAnchor),
+            mediaButton.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
+            mediaButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
         ])
 
+        // The disc is NEVER empty. Before an identity resolves the bar shows
+        // the unknown-viewer placeholder, not a blank circle — the same
+        // "monogram is the rendered state" rule the comment rows follow,
+        // applied to the frame before anyone has told us who you are.
+        avatarView.setMonogram(Self.monogram(nil))
         updateTrailingButtons(animated: false)
         updateFieldHeight()
 
@@ -257,8 +331,17 @@ final class CommentsInputBar: UIView {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window != nil, field.effect == nil {
+        guard window != nil else { return }
+        if field.effect == nil {
             field.effect = UIGlassEffect()
+        }
+        if avatarBubble.effect == nil {
+            let glass = UIGlassEffect(style: .regular)
+            // INTERACTIVE, unlike the caption card's glass: this one is a
+            // control, and the system's press response (the lensing dip
+            // under a finger) is the affordance that says so.
+            glass.isInteractive = true
+            avatarBubble.effect = glass
         }
     }
 
@@ -317,11 +400,79 @@ final class CommentsInputBar: UIView {
     /// state's natural exit (a draft in progress keeps its target).
     var onIdleDismiss: (() -> Void)?
 
+    /// Renders the viewer into the leading avatar: the monogram lands on
+    /// this frame, the picture arrives behind it whenever the fetch
+    /// resolves. A nil identity (nobody signed in, no profile) leaves the
+    /// neutral placeholder disc — never someone else's face.
+    func setViewerIdentity(_ identity: ViewerIdentity?, imagePipeline: ImagePipeline?) {
+        avatarTask?.cancel()
+        avatarTask = nil
+        avatarImageView.image = nil
+        representedAvatarURL = identity?.avatarURL
+        avatarView.setMonogram(Self.monogram(identity?.name))
+        // The placeholder names the viewer, so a profile switch rewrites it
+        // on the same beat as the face — one setter, both surfaces.
+        viewerName = identity?.name
+        applyPlaceholder()
+        guard let url = identity?.avatarURL, let imagePipeline else { return }
+        avatarTask = Task { [weak self] in
+            let image = try? await imagePipeline.image(for: url)
+            guard let self, let image, !Task.isCancelled,
+                  self.representedAvatarURL == url else { return }
+            self.avatarImageView.image = image
+        }
+    }
+
+    /// Installs the profile switcher on the avatar bubble. Nil disables it —
+    /// an account with nothing to switch to must not offer a menu, and a
+    /// host that wires no switcher at all (the pushed comments screen) gets
+    /// a plain, inert face.
+    func setProfileMenu(_ menu: UIMenu?) {
+        avatarButton.menu = menu
+        avatarButton.isEnabled = menu != nil
+    }
+
+    /// The composer's initials, by the comment stream's rule (first letters
+    /// of the first two words). The placeholder for an unknown viewer is
+    /// the same "?" a nameless comment author gets.
+    static func monogram(_ name: String?) -> String {
+        let initials = (name ?? "").split(separator: " ").prefix(2)
+            .compactMap { $0.first.map { String($0).uppercased() } }
+        return initials.isEmpty ? "?" : initials.joined()
+    }
+
     /// The reply state's face: a non-nil name switches the placeholder to
     /// "Reply to NAME…"; nil restores the default prompt. Pure placeholder
     /// — the reply payload (the thread parent's id) is the HOST's state.
     func setReplyPlaceholder(name: String?) {
-        placeholderLabel.text = name.map { "Reply to \($0)…" } ?? "Add a comment…"
+        replyName = name
+        applyPlaceholder()
+    }
+
+    /// The armed reply target's name, and the viewer's — the two inputs the
+    /// placeholder is a function of.
+    private var replyName: String?
+    private var viewerName: String?
+
+    /// The placeholder, resolved from BOTH axes in one place.
+    ///
+    ///   replying          → "Reply to Kenji…"
+    ///   viewer known      → "Comment as Ava Moreau"
+    ///   viewer unknown    → "Add a comment…"
+    ///
+    /// Naming the viewer matters most exactly where this bar lives: the
+    /// avatar beside it can switch WHICH of your profiles is speaking, and
+    /// a picture alone is a weak answer to "who am I posting as". Replying
+    /// still wins the slot — the target of a reply is the more urgent fact,
+    /// and the avatar keeps answering the other question.
+    private func applyPlaceholder() {
+        if let replyName {
+            placeholderLabel.text = "Reply to \(replyName)…"
+        } else if let viewerName, !viewerName.isEmpty {
+            placeholderLabel.text = "Comment as \(viewerName)"
+        } else {
+            placeholderLabel.text = "Add a comment…"
+        }
     }
 
     /// Raises the keyboard into the composer — the row-tap reply trigger.
@@ -413,10 +564,15 @@ extension CommentsInputBar: UITextViewDelegate {
 }
 
 /// Holds notification tokens and unregisters them on its own deallocation
-/// (when the owning bar is released). `@unchecked Sendable` so its `deinit`
-/// may run off the main actor; `removeObserver` is itself thread-safe, and
-/// the tokens are only mutated on the main actor at setup time.
-private final class NotificationObserverTokenBag: @unchecked Sendable {
+/// (when the owning object is released). `@unchecked Sendable` so its
+/// `deinit` may run off the main actor; `removeObserver` is itself
+/// thread-safe, and the tokens are only mutated on the main actor at setup
+/// time.
+///
+/// Internal rather than file-private: the comments view controller needs the
+/// same escape hatch for its active-profile observer, and a nonisolated
+/// `deinit` cannot touch main-actor state to unregister by hand.
+final class NotificationObserverTokenBag: @unchecked Sendable {
     var tokens: [NSObjectProtocol] = []
     deinit {
         for token in tokens { NotificationCenter.default.removeObserver(token) }
