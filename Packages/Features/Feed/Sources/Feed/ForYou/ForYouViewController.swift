@@ -832,6 +832,25 @@ final class ForYouViewController: UIViewController {
                 // where its `topViewController` guard declined.
                 self?.revealTabBar(animated: true)
                 self?.restoreChromeAfterTransition()
+                // Close the playback handoff opened before the push.
+                //
+                // On the hero path the transition closes it (`onSourceReturned`
+                // / `onPresentationCancelled`), but a plain push has no
+                // transition and so had nobody to close it: `handoffID` stayed
+                // set for the life of the page, permanently exempting that post
+                // from both starting and stopping. Reproduced with
+                // `-grid-playback-log` — `handoff=post-new-02` still on the
+                // pool three samples after the grid was back.
+                //
+                // The handoff is still OPENED on this path, deliberately: it is
+                // what stops the grid's players while the post covers them
+                // (`viewWillDisappear` declines to, since a push must not stop
+                // a flight's video). It just has to be closed at the other end.
+                //
+                // Completed pops only, which is what this callback is: a
+                // cancelled swipe leaves the post on screen, where the grid
+                // underneath should stay stopped.
+                self?.pager.endPlaybackHandoff()
             }
             textSlideDismissal.install(on: navigationController)
             navigationController.pushViewController(feed, animated: true)

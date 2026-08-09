@@ -156,7 +156,23 @@ final class ForYouPagerView: UIView {
     func setActivePage(_ format: GalleryFilter.Format, animated: Bool) {
         guard let index = Self.pageOrder.firstIndex(of: format), index != activeIndex else { return }
         activeIndex = index
-        guard bounds.width > 0 else { return }
+        guard bounds.width > 0 else {
+            // No layout yet, so there is no offset to move and nothing to
+            // report — but the two indices must not be left disagreeing.
+            //
+            // `viewDidLoad` restores the persisted format through here, before
+            // first layout. Landing on Activity used to move `activeIndex` to 1
+            // and leave `reportedIndex` at 0, and from then on a swipe BACK to
+            // Gallery settled on 0, matched `reportedIndex`, and was dismissed
+            // as "no change": `activeIndex` stayed 1, so `syncAutoplay` kept
+            // the page the viewer was looking at switched off and it never
+            // autoplayed, and `onPageSettled` never corrected the view model's
+            // format. It healed only on a tab tap or a round trip. Restoring
+            // Gallery — the default — could not reproduce it, because there
+            // the guard above returns first and neither index moves.
+            reportedIndex = index
+            return
+        }
         scrollView.setContentOffset(CGPoint(x: offsetX(for: index), y: 0), animated: animated)
         syncAutoplay()
         if !animated {
