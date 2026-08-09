@@ -2,7 +2,7 @@ import CoreNavigation
 import UIKit
 
 /// Keeps the native edge-swipe-to-pop alive on a stack whose delegate slot is
-/// sometimes occupied by a custom transition owner (`TimelineSlideDismissal`,
+/// sometimes occupied by a custom transition owner (`InteractiveSlideDismissal`,
 /// `ZoomTransitionController` — the map's pin flight and the For You grid's).
 ///
 /// UIKit's built-in gesture delegate quietly refuses to *begin* the native

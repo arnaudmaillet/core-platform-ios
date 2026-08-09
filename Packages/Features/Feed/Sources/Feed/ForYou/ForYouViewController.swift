@@ -686,6 +686,16 @@ final class ForYouViewController: UIViewController {
     /// — the Maps pin path pushes onto its own navigation stack and can be on
     /// screen while this one is — so the cache belongs to the call site, and
     /// every other entry point keeps building its own.
+    /// The interactive swipe-to-pop for TEXT posts, which push natively.
+    ///
+    /// The same object the menu-pushed timeline uses, for the same reason: a
+    /// page with no hero still needs a way back by hand, and the system's own
+    /// gesture is edge-only and disabled by the feed's custom back item. It
+    /// scrubs the pop 1:1 and releases on the shared contract, so a text post
+    /// and a media post feel the same in the hand even though only one of them
+    /// flies.
+    private let textSlideDismissal = InteractiveSlideDismissal()
+
     /// STRONG, and that is the whole mechanism: the reference has to outlive
     /// the pop. Held weakly it would be released the moment the navigation
     /// controller let go, and the next tap would rebuild exactly what this
@@ -790,11 +800,36 @@ final class ForYouViewController: UIViewController {
             // destination without the seam can't be flown to. A plain push is
             // the honest fallback; it is still the same feed.
             //
-            // And nothing attaches a grab on this path, so the screen does NOT
-            // own its dismissal: the native edge swipe is the only way back and
-            // must be allowed to begin (see `NativePopGestureEnabler`).
-            (feed as? SnapFeedViewController)?.zoomOwnsInteractiveDismissal = false
+            // A full-surface interactive swipe stands in for the flight's
+            // grab. It owns the dismissal from here, so the native edge
+            // gesture stays out of its way (see `NativePopGestureEnabler`) —
+            // the two would otherwise both try to drive one pop.
+            (feed as? SnapFeedViewController)?.zoomOwnsInteractiveDismissal = true
+            textSlideDismissal.attach(to: feed)
+            textSlideDismissal.onFeedPopped = { [weak self] _ in
+                // The bar was hidden for the push and nothing else restores it
+                // on this path — there is no transition controller to report a
+                // return.
+                self?.showTabBar(alpha: 1)
+                self?.restoreChromeAfterTransition()
+            }
+            textSlideDismissal.install(on: navigationController)
             navigationController.pushViewController(feed, animated: true)
+            #if DEBUG
+            // `-text-swipe-demo <peak>`: walks the exact begin/update/release
+            // path a finger drives. The simulator injects no touches, so this
+            // is the only way the scrub itself gets exercised — a peak below
+            // the release threshold must spring back, above it must pop.
+            let arguments = ProcessInfo.processInfo.arguments
+            if let position = arguments.firstIndex(of: "-text-swipe-demo"),
+               position + 1 < arguments.count,
+               let peak = Double(arguments[position + 1]) {
+                Task { @MainActor [textSlideDismissal] in
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    await textSlideDismissal.debugPerformSwipe(peakProgress: CGFloat(peak))
+                }
+            }
+            #endif
             return
         }
         let source = ForYouGridZoomSource(

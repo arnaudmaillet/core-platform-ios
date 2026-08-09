@@ -1,8 +1,12 @@
-import CoreNavigation
 import UIKit
 
-/// Interactive rightward swipe-to-pop for the menu-pushed timeline feed —
+/// Interactive rightward swipe-to-pop for a screen pushed WITHOUT a hero —
 /// gesture parity with the pin feed's grab, minus the pin.
+///
+/// Shared by the menu-pushed timeline and by For You's TEXT posts, which push
+/// natively because a text page has no media to fly. Both want the same thing
+/// and it is worth having once: a full-surface pan that scrubs the pop 1:1,
+/// releasing on the same contract every other dismissal in the app uses.
 ///
 /// Deliberately NOT the native `interactivePopGestureRecognizer`: that is
 /// edge-only (this pan covers the whole surface, like the grab), it is
@@ -22,7 +26,7 @@ import UIKit
 /// each push and self-uninstalled (restoring any prior delegate) when the
 /// feed leaves the stack.
 @MainActor
-final class TimelineSlideDismissal: NSObject {
+public final class InteractiveSlideDismissal: NSObject {
     private weak var feedViewController: UIViewController?
     private weak var navigationController: UINavigationController?
     /// Whatever delegate the stack had when the feed was pushed (e.g. a
@@ -38,11 +42,11 @@ final class TimelineSlideDismissal: NSObject {
     /// Fired when the feed has left the stack (completed pops only — swipe
     /// or back button; a cancelled swipe reports nothing). The owner restores
     /// the manually hidden tab bar here.
-    var onFeedPopped: ((UINavigationController) -> Void)?
+    public var onFeedPopped: ((UINavigationController) -> Void)?
 
     /// Installs the pan on the feed's view. Called once; the retained feed
     /// keeps its recognizer across pushes.
-    func attach(to feedViewController: UIViewController) {
+    public func attach(to feedViewController: UIViewController) {
         guard self.feedViewController == nil else { return }
         self.feedViewController = feedViewController
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
@@ -54,7 +58,7 @@ final class TimelineSlideDismissal: NSObject {
     /// Takes the stack's delegate slot for the feed's time on `nav`. The
     /// previous delegate is saved, not clobbered: `navigationController(_:didShow:)`
     /// hands the slot back the moment the feed is off the stack.
-    func install(on nav: UINavigationController) {
+    public func install(on nav: UINavigationController) {
         guard nav.delegate !== self else { return }
         savedDelegate = nav.delegate
         nav.delegate = self
@@ -130,7 +134,7 @@ final class TimelineSlideDismissal: NSObject {
     /// is impossible in the simulator, so this walks the exact
     /// begin/update/release path a finger drives. Whether it completes or
     /// springs back is decided by the same threshold logic as a real release.
-    func debugPerformSwipe(peakProgress: CGFloat) async {
+    public func debugPerformSwipe(peakProgress: CGFloat) async {
         guard let view = feedViewController?.viewIfLoaded else { return }
         beginSwipe()
         let peak = peakProgress * view.bounds.width
@@ -152,8 +156,8 @@ final class TimelineSlideDismissal: NSObject {
 
 // MARK: - UINavigationControllerDelegate
 
-extension TimelineSlideDismissal: UINavigationControllerDelegate {
-    func navigationController(
+extension InteractiveSlideDismissal: UINavigationControllerDelegate {
+    public func navigationController(
         _ navigationController: UINavigationController,
         animationControllerFor operation: UINavigationController.Operation,
         from fromVC: UIViewController,
@@ -170,14 +174,14 @@ extension TimelineSlideDismissal: UINavigationControllerDelegate {
         return TimelineSlidePopAnimator()
     }
 
-    func navigationController(
+    public func navigationController(
         _ navigationController: UINavigationController,
         interactionControllerFor animationController: any UIViewControllerAnimatedTransitioning
     ) -> (any UIViewControllerInteractiveTransitioning)? {
         interaction
     }
 
-    func navigationController(
+    public func navigationController(
         _ navigationController: UINavigationController,
         didShow viewController: UIViewController,
         animated: Bool
@@ -196,11 +200,11 @@ extension TimelineSlideDismissal: UINavigationControllerDelegate {
 
 // MARK: - Direction and coexistence
 
-extension TimelineSlideDismissal: UIGestureRecognizerDelegate {
+extension InteractiveSlideDismissal: UIGestureRecognizerDelegate {
     /// Mirrors the pin grab's conflict story: begin only for a rightward,
     /// predominantly horizontal movement, so the feed's vertical paging and
     /// pull-to-refresh never see a competitor.
-    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+    public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         guard interaction == nil,
               let pan = gestureRecognizer as? UIPanGestureRecognizer,
               let feed = feedViewController, let view = feed.viewIfLoaded,
@@ -218,7 +222,7 @@ extension TimelineSlideDismissal: UIGestureRecognizerDelegate {
         return velocity.x > 0 && abs(velocity.x) > abs(velocity.y)
     }
 
-    func gestureRecognizer(
+    public func gestureRecognizer(
         _ gestureRecognizer: UIGestureRecognizer,
         shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
     ) -> Bool {
