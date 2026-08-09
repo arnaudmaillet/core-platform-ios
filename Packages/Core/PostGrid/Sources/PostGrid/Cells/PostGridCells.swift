@@ -32,6 +32,11 @@ public final class PostGridListRowCell: UICollectionViewCell {
     /// cache lookup that could miss.
     public var renderedCover: UIImage? { mediaView.image }
 
+    /// The preview box — a row's media is one part of its card, so this is the
+    /// part visibility is measured against. Falls back to the whole cell only
+    /// for a text row, which has no video to measure anyway.
+    public var videoMediaRect: CGRect { mediaHeroRect ?? bounds }
+
     // MARK: - Autoplay surface
 
     /// The surface an autoplaying row renders into, built on first use so a
@@ -325,6 +330,10 @@ public final class PostGridTileCell: UICollectionViewCell {
     /// The image the brick is currently showing — see `PostGridListRowCell`'s
     /// note for why a hero reads this rather than the image pipeline.
     public var renderedCover: UIImage? { imageView.image }
+
+    /// A tile IS its media, edge to edge, so the whole cell is the rect
+    /// visibility is measured against.
+    public var videoMediaRect: CGRect { bounds }
 
     /// The surface an autoplaying tile renders into, built on first use so a
     /// grid of stills never allocates a player layer it will not use.

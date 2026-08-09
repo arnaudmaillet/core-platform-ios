@@ -18,6 +18,21 @@ import UIKit
 /// here knows where the media is.
 @MainActor
 public protocol GridPlaybackCell: UIView {
+    /// Where the video lives inside this cell, in the cell's own coordinates.
+    ///
+    /// The one question whose ANSWER differs by shape while the question does
+    /// not, so the cell answers it and no caller switches on a type. A tile IS
+    /// its media, so this is its bounds; a row is a card of which the media is
+    /// one part, so this is the preview box.
+    ///
+    /// It is what visibility is measured against, and measuring the CARD
+    /// instead is wrong in both directions: a row leaving the top keeps half
+    /// its area on screen long after the video has gone, and one arriving from
+    /// the bottom passes on caption alone with the preview still below the
+    /// fold. Both are the wrong answer to "is the viewer looking at this
+    /// video".
+    var videoMediaRect: CGRect { get }
+
     /// The image the cell is currently showing. Autoplay is gated on this: a
     /// surface with no cover behind it draws black until the first frame
     /// decodes.

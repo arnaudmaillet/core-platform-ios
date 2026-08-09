@@ -441,15 +441,10 @@ final class ForYouGridPage: UIView {
                   hasCover(for: post, in: cell)
             else { return nil }
 
-            // A ROW is measured by its PREVIEW, not by the card. The card is
-            // mostly caption and metadata, so a row scrolling off the top keeps
-            // 50% of its area on screen long after the video has gone — and one
-            // arriving from the bottom passes the gate on caption alone, with
-            // the preview still below the fold. Both are the wrong answer to
-            // "is the viewer looking at this video".
-            let mediaFrame = (cell as? PostGridListRowCell)?.mediaHeroRect
-                .map { cell.convert($0, to: collectionView) }
-            let frame = mediaFrame ?? cell.convert(cell.bounds, to: collectionView)
+            // Measured against the cell's MEDIA, which each shape locates for
+            // itself (`videoMediaRect`) — a tile's is its bounds, a row's is
+            // the preview box inside its card.
+            let frame = cell.convert(cell.videoMediaRect, to: collectionView)
             let visible = frame.intersection(viewport)
             guard !visible.isNull, frame.height > 0,
                   (visible.height * visible.width) / (frame.height * frame.width)
@@ -619,14 +614,15 @@ final class ForYouGridPage: UIView {
     var debugVisibleVideoRanking: [(id: String, distance: Int)] {
         let viewport = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
         let centreY = viewport.midY
-        return collectionView.indexPathsForVisibleItems.compactMap { indexPath in
+        return collectionView.indexPathsForVisibleItems.compactMap {
+            indexPath -> (id: String, distance: Int)? in
             let index = flatIndex(for: indexPath)
             guard posts.indices.contains(index) else { return nil }
             let post = posts[index]
-            guard autoplays(post), let cell = collectionView.cellForItem(at: indexPath) else { return nil }
-            let box = (cell as? PostGridListRowCell)?.mediaHeroRect
-                .map { cell.convert($0, to: collectionView) }
-                ?? cell.convert(cell.bounds, to: collectionView)
+            guard autoplays(post),
+                  let cell = collectionView.cellForItem(at: indexPath) as? any GridPlaybackCell
+            else { return nil }
+            let box = cell.convert(cell.videoMediaRect, to: collectionView)
             return (post.id.rawValue, Int(abs(box.midY - centreY)))
         }
         .sorted { $0.distance < $1.distance }
