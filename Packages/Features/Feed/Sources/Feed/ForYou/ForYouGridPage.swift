@@ -993,26 +993,54 @@ final class ForYouGridPage: UIView {
     /// content that was already there. A presentation still conceals: there the
     /// card is flying AWAY from the tile, and two copies of the same post would
     /// be on screen at once.
+    /// CONCEAL EXACTLY WHAT THE FLIGHT REPRODUCES.
+    ///
+    /// A tile IS its media edge to edge, so the whole cell goes. A row is a
+    /// card of which the media is one part, and `hero(for:in:)` flies that
+    /// part — so hiding the whole row removed the caption, author line and
+    /// metrics that nothing in the air was standing in for. They were absent
+    /// for the length of the flight and snapped back on its last frame, which
+    /// is the reported "the rest of the post pops in at the end".
+    ///
+    /// One function so the two paths that conceal — this and `cellForItemAt`,
+    /// which re-applies on every dequeue — cannot drift apart. They already
+    /// had to agree; now they agree by construction.
+    /// Internal, not private, so the routing itself is testable: the defect
+    /// was not in either cell, it was in one call site treating a row like a
+    /// tile.
+    static func applyHeroConcealment(_ concealed: Bool, to cell: UICollectionViewCell?) {
+        switch cell {
+        case let row as PostGridListRowCell:
+            row.isHidden = false
+            row.setHeroMediaConcealed(concealed)
+        case let other?:
+            other.isHidden = concealed
+        case nil:
+            break
+        }
+    }
+
     func setHeroHidden(_ hidden: Bool, for postID: PostID, conceals: Bool = true) {
         heroFlyingPostID = hidden ? postID : nil
         heroHiddenPostID = (hidden && conceals) ? postID : nil
         // Apply to whatever is on screen right now; `cellForItemAt` covers
         // everything realized from here on.
         let resolved = cell(for: postID)
-        resolved?.isHidden = hidden
+        Self.applyHeroConcealment(hidden, to: resolved)
         if hidden {
             heroHiddenCell = resolved
         } else {
             // The instance that was actually hidden, which a lookup may no
             // longer reach.
-            heroHiddenCell?.isHidden = false
+            Self.applyHeroConcealment(false, to: heroHiddenCell)
             heroHiddenCell = nil
             // And a sweep, because a flight can end without either reference
             // naming the hidden cell — an interrupted transition, or a swap
             // that moved the post twice. No flight is in the air once the flag
             // is nil, so nothing on screen may legitimately be invisible.
-            for visible in collectionView.visibleCells where visible.isHidden {
-                visible.isHidden = false
+            for visible in collectionView.visibleCells {
+                if visible.isHidden { visible.isHidden = false }
+                (visible as? PostGridListRowCell)?.setHeroMediaConcealed(false)
             }
         }
         // Unhiding is the end of a flight. The tile is excluded from
@@ -1254,7 +1282,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
                 withReuseIdentifier: PostGridListRowCell.reuseID, for: indexPath
             ) as! PostGridListRowCell
             cell.configure(with: post, imagePipeline: imagePipeline)
-            cell.isHidden = isFlying
+            Self.applyHeroConcealment(isFlying, to: cell)
             return cell
         case .grid:
             let cell = collectionView.dequeueReusableCell(

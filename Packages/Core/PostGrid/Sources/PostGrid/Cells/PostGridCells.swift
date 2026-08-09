@@ -32,6 +32,27 @@ public final class PostGridListRowCell: UICollectionViewCell {
     /// cache lookup that could miss.
     public var renderedCover: UIImage? { mediaView.image }
 
+    /// Hides ONLY the preview while its twin is in the air.
+    ///
+    /// A row is a card of which the media is one part, and the flight carries
+    /// that part (`mediaHeroRect`) — so that part is exactly what must
+    /// disappear. Hiding the whole cell instead, which is what a tile needs,
+    /// took the caption, the author line and the metrics with it: they were
+    /// missing for the length of the flight and snapped back at its last
+    /// frame, because nothing in the air was standing in for them.
+    ///
+    /// The invariant, in one line: CONCEAL EXACTLY WHAT THE FLIGHT
+    /// REPRODUCES. A tile is its media, so the tile hides whole; a row is not,
+    /// so it does not.
+    /// Alpha, not `isHidden`, and that is load-bearing: `mediaHeroRect`
+    /// reports nil for a hidden preview, so hiding it would make the row
+    /// unable to answer where its own media is — which is the rect the
+    /// DISMISSAL flies home to.
+    public func setHeroMediaConcealed(_ concealed: Bool) {
+        mediaView.alpha = concealed ? 0 : 1
+        playBadge.alpha = concealed ? 0 : 1
+    }
+
     private let card = UIView()
     private let captionLabel = UILabel()
     private let mediaView = UIImageView()
