@@ -605,6 +605,36 @@ final class PostDetailViewController: UIViewController {
     /// Extra bottom room so resting content clears the composer band.
     private static let engagedFooterClearance: CGFloat = 62
 
+    /// Freezes the comment stream for the length of a gesture that owns the
+    /// screen — a dismissal swipe.
+    ///
+    /// The stream is a `UIScrollView`, and a full-surface pan lives on the
+    /// feed's view ABOVE it, so the two recognise simultaneously: a swipe with
+    /// any vertical component scrolled the comments while the page slid away
+    /// under the finger. Freezing here rather than vetoing in the pan's
+    /// delegate because the stream's own pan may already have begun — a
+    /// begin-time veto cannot stop a recognizer that is already running, but a
+    /// disabled scroll view stops dead.
+    ///
+    /// Restores the value that was there rather than assuming `true`: the
+    /// stream is also frozen by the resting engagement's settle lock, and a
+    /// gesture that ended inside that window must not thaw it early.
+    func setStreamScrollEnabled(_ enabled: Bool) {
+        if enabled {
+            guard let wasEnabled = streamScrollEnabledBeforeLock else { return }
+            collectionView.isScrollEnabled = wasEnabled
+            streamScrollEnabledBeforeLock = nil
+        } else {
+            guard streamScrollEnabledBeforeLock == nil else { return }
+            streamScrollEnabledBeforeLock = collectionView.isScrollEnabled
+            collectionView.isScrollEnabled = false
+        }
+    }
+
+    /// Non-nil exactly while a gesture holds the stream frozen; the value is
+    /// what to put back.
+    private var streamScrollEnabledBeforeLock: Bool?
+
     func setEngagedInsets(top: CGFloat, bottomInset: CGFloat) {
         // The strip inset is the ONLY top authority in the engaged context:
         // the full-cell scroll view would otherwise also inherit the safe

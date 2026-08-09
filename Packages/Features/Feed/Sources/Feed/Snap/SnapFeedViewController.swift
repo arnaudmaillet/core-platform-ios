@@ -2336,6 +2336,33 @@ extension SnapFeedViewController: ZoomTransitionDestination {
 
     public func setContentScrollEnabled(_ enabled: Bool) {
         collectionView.isScrollEnabled = enabled
+        // The COMMENT STREAM too, and it is the one that was missed.
+        //
+        // This freezes "the content" for a dismissal swipe, and the pager was
+        // all it froze — which is right for a media post, where the pager is
+        // the only thing under the finger. A TEXT post opens straight into its
+        // comments, so the surface being swiped is a scroll view hosted in the
+        // cell, below the pan and recognising alongside it: a swipe with any
+        // vertical component scrolled the comments while the page slid away.
+        //
+        // Reached through the engaged child rather than by walking subviews:
+        // the stream is one specific scroll view, and a descendant sweep would
+        // also catch the composer's text view and whatever a cell hosts next.
+        let stream = commentsContentVC as? PostDetailViewController
+        stream?.setStreamScrollEnabled(enabled)
+        #if DEBUG
+        // `-dismiss-lock-log`: whether the freeze actually REACHED a stream.
+        //
+        // The conflict this fixes needs a diagonal drag, and the scripted
+        // swipe is purely horizontal, so no harness can reproduce it — the
+        // one thing a scripted run CAN still establish is that a text post has
+        // an engaged panel at swipe time, which is the assumption the forward
+        // above rests on. A `stream=nil` here would mean the lock is a no-op.
+        if ProcessInfo.processInfo.arguments.contains("-dismiss-lock-log") {
+            print("[dismiss-lock] contentScroll=\(enabled ? "on" : "OFF") "
+                  + "stream=\(stream == nil ? "nil" : "engaged")")
+        }
+        #endif
     }
 }
 
