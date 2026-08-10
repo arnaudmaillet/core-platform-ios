@@ -324,6 +324,9 @@ final class AppContainer {
         // this is injected rather than reached for: Profile describes where a
         // tapped post is, Feed owns the card and the flight, and neither
         // imports the other.
+        // The same pool every other surface draws on, so a profile's video
+        // competes for the same slots rather than opening a second one.
+        builder.videoPlayback = videoPlayback
         builder.openFeedHero = { [weak self] postIDs, presenter, origin in
             self?.feedFeature.presentSnapFeedHero(
                 postIDs: postIDs, from: presenter, origin: origin

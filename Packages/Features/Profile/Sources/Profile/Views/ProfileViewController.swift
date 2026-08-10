@@ -3,6 +3,7 @@ import CoreModels
 import ProfileInterface
 import CoreNavigation
 import FeedInterface
+import MediaPlayback
 import DesignSystem
 import PostGrid
 import UIKit
@@ -271,6 +272,7 @@ final class ProfileViewController: UIViewController {
     init(
         viewModel: ProfileViewModel,
         imagePipeline: ImagePipeline,
+        videoPlayback: VideoPlaybackController? = nil,
         shareTargeting: (any ProfileShareTargeting)? = nil,
         onLogout: (() -> Void)?,
         makeEditViewController: ((@escaping () -> Void) -> UIViewController)? = nil,
@@ -294,7 +296,9 @@ final class ProfileViewController: UIViewController {
         headerView = ProfileHeaderView(imagePipeline: imagePipeline)
         let tabs = viewModel.isOwnProfile ? ProfileTab.ownTabs : ProfileTab.publicTabs
         self.tabs = tabs
-        galleryPager = ProfileGalleryPagerView(imagePipeline: imagePipeline, tabs: tabs)
+        galleryPager = ProfileGalleryPagerView(
+            imagePipeline: imagePipeline, tabs: tabs, videoPlayback: videoPlayback
+        )
         inlineBar = PagedTabBar(titles: tabs.map(\.title), style: .navigationTitle)
         dockedBar = PagedTabBar(titles: tabs.map(\.title), style: .navigationTitle)
         super.init(nibName: nil, bundle: nil)
@@ -465,6 +469,9 @@ final class ProfileViewController: UIViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        // Stops as this screen is covered — including by the post it just
+        // opened, whose own player is what should be heard.
+        galleryPager.setAutoplayActive(false)
         concealFilterToolbar()
     }
 
@@ -479,6 +486,9 @@ final class ProfileViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // Both facts are true only here: the screen owns the display AND its
+        // cells are realized. Reconciling any earlier finds no candidates.
+        galleryPager.setAutoplayActive(true)
         // The pager's horizontal pan yields to the stack's edge-swipe pop:
         // without this, an edge-start drag over the grid PAGES instead of
         // popping (verified in-sim) — the platform contract loses. Mid-surface
@@ -581,6 +591,22 @@ final class ProfileViewController: UIViewController {
                 }
             }
             attempt(30)
+        }
+        // `-profile-tab <activity|gallery|short|saved|liked>` selects a tab.
+        // The choice PERSISTS across launches, so without this a scripted run
+        // inherits whatever the last one left — which is how a video-autoplay
+        // check ended up on the text-only page.
+        if let position = arguments.firstIndex(of: "-profile-tab"),
+           position + 1 < arguments.count {
+            let wanted = arguments[position + 1]
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                guard let self,
+                      let index = tabs.firstIndex(where: { $0.title.lowercased() == wanted })
+                else { return }
+                mirrorSelection(to: index)
+                adoptTab(tabs[index])
+                galleryPager.setActivePage(tabs[index], animated: false)
+            }
         }
         // `-profile-open-post <index>` taps a gallery tile once the gallery has
         // content. The sim injects no touches, and a tile tap is the only way

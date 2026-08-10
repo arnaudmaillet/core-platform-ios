@@ -1,6 +1,7 @@
 import CoreModels
 import DesignSystem
 import MediaCore
+import MediaPlayback
 import PostGrid
 import UIKit
 
@@ -55,6 +56,12 @@ final class ProfileGalleryGridView: UIView {
     private let imagePipeline: ImagePipeline
     private let style: Style
     private var posts: [GalleryPost] = []
+    /// Autoplay for this page's video media. Absent only where the host
+    /// supplied no player pool.
+    private let playback: GridVideoPlaybackCoordinator?
+    /// The post whose twin is in the air: it must not claim a player while the
+    /// flight is carrying that same media.
+    private var heroFlyingPostID: PostID?
     /// While a fetch is in flight the page renders shimmering placeholder
     /// cells through its own (real) layout, so the loading state already has
     /// the shape the content will hydrate into. Read by the pager to keep its
@@ -87,10 +94,22 @@ final class ProfileGalleryGridView: UIView {
     private let emptyStateView = EmptyStateView()
     private let tab: ProfileTab
 
-    init(imagePipeline: ImagePipeline, style: Style, tab: ProfileTab) {
+    init(
+        imagePipeline: ImagePipeline,
+        style: Style,
+        tab: ProfileTab,
+        videoPlayback: VideoPlaybackController? = nil
+    ) {
         self.imagePipeline = imagePipeline
         self.style = style
         self.tab = tab
+        // The SAME coordinator the For You surfaces use, on the same terms:
+        // candidates ranked by distance from the viewport centre, the nearest
+        // N kept. Six for a mosaic, five for a timeline — a column fits fewer
+        // previews on screen, so the sixth slot would go to a row outside it.
+        playback = videoPlayback.map {
+            GridVideoPlaybackCoordinator(pool: $0, maxConcurrent: style == .grid ? 6 : 5)
+        }
         collectionView = UICollectionView(
             frame: .zero,
             collectionViewLayout: style == .grid ? PostGridMosaic.layout() : PostGridListLayout.layout()
@@ -229,6 +248,12 @@ final class ProfileGalleryGridView: UIView {
         let reload = {
             self.collectionView.reloadData()
             self.collectionView.invalidateIntrinsicContentSize()
+            // Content landing is a reconcile trigger, and on a page nobody
+            // scrolls it is the ONLY one: the surface goes active before the
+            // first post arrives, so without this the gate is evaluated
+            // against an empty list once and never asked again. Next
+            // main-queue turn, so the cells the reconcile inspects exist.
+            DispatchQueue.main.async { [weak self] in self?.reconcileAutoplay() }
         }
         if dissolving {
             // The block runs with implicit animations disabled (stock
@@ -275,14 +300,84 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
                 withReuseIdentifier: PostGridListRowCell.reuseID, for: indexPath
             ) as! PostGridListRowCell
             cell.configure(with: post, imagePipeline: imagePipeline)
+            // Autoplay is gated on the cover, so a cover arriving is the only
+            // event that can re-open the gate for an item that came up
+            // faceless while the page sat still.
+            cell.onCoverLoaded = { [weak self] in self?.reconcileAutoplay() }
             return cell
         case .grid:
             let cell = collectionView.dequeueReusableCell(
                 withReuseIdentifier: PostGridTileCell.reuseID, for: indexPath
             ) as! PostGridTileCell
             cell.configure(with: post, imagePipeline: imagePipeline)
+            cell.onCoverLoaded = { [weak self] in self?.reconcileAutoplay() }
             return cell
         }
+    }
+
+    // MARK: - Autoplay
+
+    /// Minimum fraction of an item's MEDIA that must be inside the visible
+    /// band before it may play. An item creeping in at the edge is not
+    /// something the viewer is looking at.
+    private static let minimumVisibleFraction: CGFloat = 0.5
+
+    /// Reconciles playback against what is on screen now. Cheap and
+    /// idempotent; call it whenever the visible set can have changed.
+    ///
+    /// The same rules the For You pages apply, because it is the same
+    /// coordinator: measured against the MEDIA rather than the cell (a row is
+    /// mostly caption, so a card half on screen can have no preview showing),
+    /// gated on the item having a cover to sit behind the surface, and never
+    /// starting the post a flight is currently carrying.
+    func reconcileAutoplay(allowingStarts: Bool = true) {
+        guard let playback else { return }
+        let viewport = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
+        let centreY = viewport.midY
+        let candidates = collectionView.indexPathsForVisibleItems.compactMap {
+            indexPath -> GridVideoPlaybackCoordinator.Candidate? in
+            guard !showsSkeleton, posts.indices.contains(indexPath.item) else { return nil }
+            let post = posts[indexPath.item]
+            // Square video stays still in a MOSAIC and plays in a timeline row,
+            // for the reason `hasPlayableVideo` records — the same split the
+            // For You pages make.
+            let playsHere = style == .grid ? post.autoplaysInGrid : post.hasPlayableVideo
+            guard playsHere, let url = post.videoURL,
+                  post.id != heroFlyingPostID,
+                  let cell = collectionView.cellForItem(at: indexPath) as? any GridPlaybackCell,
+                  hasCover(for: post, in: cell)
+            else { return nil }
+
+            let frame = cell.convert(cell.videoMediaRect, to: collectionView)
+            let visible = frame.intersection(viewport)
+            guard !visible.isNull, frame.height > 0,
+                  (visible.height * visible.width) / (frame.height * frame.width)
+                      >= Self.minimumVisibleFraction
+            else { return nil }
+
+            return .init(
+                id: post.id, url: url, cell: cell,
+                distanceFromCentre: abs(frame.midY - centreY)
+            )
+        }
+        playback.update(candidates: candidates, allowingStarts: allowingStarts)
+    }
+
+    /// Whether an item has something to show behind its video surface. A
+    /// surface with no cover draws black until the first frame decodes.
+    private func hasCover(for post: GalleryPost, in cell: any GridPlaybackCell) -> Bool {
+        guard let thumbnail = post.thumbnailURL else { return true }
+        if cell.renderedCover != nil { return true }
+        guard let cached = imagePipeline.cachedImage(for: thumbnail) else { return false }
+        cell.applyCover(cached)
+        return true
+    }
+
+    /// Tab frontmost and this page active, or not. Mirrors the pager's gate on
+    /// For You: only the page being read may hold pool slots.
+    func setAutoplayActive(_ active: Bool) {
+        playback?.setSurfaceVisible(active)
+        if active { reconcileAutoplay() }
     }
 
     /// Where a post's media sits on screen, and what it is showing — the two
@@ -293,13 +388,25 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     func heroGeometry(for postID: PostID) -> (rect: CGRect, cover: UIImage?, isTile: Bool)? {
         guard let index = posts.firstIndex(where: { $0.id == postID }),
               let cell = collectionView.cellForItem(at: IndexPath(item: index, section: 0))
-                as? any GridPlaybackCell
         else { return nil }
-        let rect = cell.videoMediaRect
-        guard rect != .zero else { return nil }
+        // The MEDIA's rect, which a text row does not have — and that absence
+        // is the whole of its transition policy, exactly as on For You. A row
+        // is a card of which the media is one part, so `mediaHeroRect` answers
+        // nil when there is no part to fly; a tile IS its media.
+        //
+        // Deliberately not `videoMediaRect`: that falls back to the cell's
+        // bounds so the autoplay gate always has something to measure, which
+        // would fly a text row's whole card. Different question, different
+        // rect.
+        let rect: CGRect? = switch cell {
+        case let tile as PostGridTileCell: tile.bounds
+        case let row as PostGridListRowCell: row.mediaHeroRect
+        default: nil
+        }
+        guard let rect, rect != .zero else { return nil }
         return (
             rect: cell.convert(rect, to: collectionView),
-            cover: cell.renderedCover,
+            cover: (cell as? any GridPlaybackCell)?.renderedCover,
             isTile: cell is PostGridTileCell
         )
     }
@@ -307,6 +414,8 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     /// Hides just what the flight is carrying: a tile goes whole, a row loses
     /// only its preview. Same invariant the For You grid keeps.
     func setHeroConcealed(_ concealed: Bool, for postID: PostID) {
+        heroFlyingPostID = concealed ? postID : nil
+        if !concealed { reconcileAutoplay() }
         guard let index = posts.firstIndex(where: { $0.id == postID }),
               let cell = collectionView.cellForItem(at: IndexPath(item: index, section: 0))
         else { return }
@@ -344,6 +453,17 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
             collectionView.layoutAttributesForItem(at: IndexPath(item: index, section: 0))?.frame,
             in: collectionView
         )
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        didEndDisplaying cell: UICollectionViewCell,
+        forItemAt indexPath: IndexPath
+    ) {
+        // A cell that left must hand its player back whatever the scroll is
+        // doing, or the pool starves.
+        guard let playable = cell as? any GridPlaybackCell else { return }
+        playback?.stop(cell: playable)
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
@@ -484,12 +604,30 @@ extension ProfileGalleryGridView: UIScrollViewDelegate {
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         positionStatusLabel()
         onVerticalScroll?(verticalOffset)
+        // Reconciles DURING the scroll, so an item starts as it slides into
+        // view rather than after the scroll has stopped. Stops always run;
+        // starts are held off above the fling speed, where anything started is
+        // gone before its first frame.
+        reconcileAutoplay(allowingStarts: abs(scrollView.panGestureRecognizer
+            .velocity(in: scrollView).y) <= Self.maximumStartVelocity)
+    }
+
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        reconcileAutoplay()
+    }
+
+    func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        reconcileAutoplay()
     }
 
     /// The finger left the glass. Reports how far past the top the page was
     /// when it did, which is what decides whether a refresh was asked for —
     /// the threshold belongs to the indicator, not to this page.
+    /// Above this, a scroll is a fling and nothing new should start.
+    private static let maximumStartVelocity: CGFloat = 2200
+
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        if !decelerate { reconcileAutoplay() }
         onPullReleased?(max(0, -verticalOffset))
     }
 }

@@ -1,5 +1,6 @@
 import CoreModels
 import MediaCore
+import MediaPlayback
 import PostGrid
 import UIKit
 
@@ -52,9 +53,18 @@ final class ProfileGalleryPagerView: UIView {
 
     private let scrollView = PagerScrollView()
     private let pages: [ProfileGalleryGridView]
-    private var activeIndex = 0
+    private var activeIndex = 0 {
+        didSet { syncAutoplay() }
+    }
+    /// Whether this screen may autoplay at all — set by the owner's appearance
+    /// callbacks and ANDed with per-page activity below.
+    private var isSurfaceActive = false
 
-    init(imagePipeline: ImagePipeline, tabs: [ProfileTab] = ProfileTab.publicTabs) {
+    init(
+        imagePipeline: ImagePipeline,
+        tabs: [ProfileTab] = ProfileTab.publicTabs,
+        videoPlayback: VideoPlaybackController? = nil
+    ) {
         pageOrder = tabs
         pages = tabs.map { tab in
             ProfileGalleryGridView(
@@ -62,7 +72,8 @@ final class ProfileGalleryPagerView: UIView {
                 // The mosaic is for pages that are mostly pictures. Saved and
                 // Liked are whatever the viewer kept, which is mostly not.
                 style: tab == .format(.media) ? .grid : .list,
-                tab: tab
+                tab: tab,
+                videoPlayback: videoPlayback
             )
         }
         super.init(frame: .zero)
@@ -125,6 +136,26 @@ final class ProfileGalleryPagerView: UIView {
         return pages[activeIndex].debugSelectItem(at: index)
     }
     #endif
+
+    /// Only the page being read may hold pool slots — the other tabs are laid
+    /// out and would otherwise play video nobody can see.
+    func setAutoplayActive(_ active: Bool) {
+        isSurfaceActive = active
+        syncAutoplay()
+    }
+
+    /// Only the page being read may hold pool slots. Re-run whenever EITHER
+    /// fact changes — the screen's visibility or which page is active.
+    ///
+    /// The second half is easy to forget and silent when missed: a page that
+    /// was switched off because another tab was active never gets switched
+    /// back on, so the tab the viewer is actually looking at sits with a
+    /// coordinator that refuses to start anything.
+    private func syncAutoplay() {
+        for (index, page) in pages.enumerated() {
+            page.setAutoplayActive(isSurfaceActive && index == activeIndex)
+        }
+    }
 
     /// The active page's hero facts for a post — geometry, cover, shape.
     func heroGeometry(for postID: PostID) -> (rect: CGRect, cover: UIImage?, isTile: Bool)? {
