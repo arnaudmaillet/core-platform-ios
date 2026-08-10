@@ -281,7 +281,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
                 // run past the deadline. Two conclusions were drawn from that
                 // before the harness was suspected. Waits for a selector, then
                 // audits; if none ever arrives, audits anyway and says so.
-                for _ in 0..<40 {
+                for _ in 0..<80 {
                     try? await Task.sleep(nanoseconds: 500_000_000)
                     if audit.hasSelectorOnScreen { break }
                 }

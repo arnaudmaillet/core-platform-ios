@@ -721,6 +721,39 @@ final class ProfileViewController: UIViewController {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: attempt)
         }
+        // `-profile-dock`: drives the header all the way to DOCKED, and says so.
+        //
+        // ⚠️ **A scroll that lands is not a dock.** `-profile-scroll <points>`
+        // stops when the offset applies — which happens while a page is still
+        // loading and clamps short of the dock line — so runs meant to exercise
+        // the docked selector quietly never docked, the bar had nothing to host,
+        // and the audit reported "no selector on this bar". That was read as a
+        // hosting failure twice, and two fixes were judged against it.
+        //
+        // This polls on the STATE the test is about, retries the scroll each
+        // time, and prints either SETTLED or GAVE UP — so a run can never be
+        // silently meaningless.
+        if arguments.contains("-profile-dock") {
+            var attempts = 0
+            func attempt() {
+                attempts += 1
+                // Far past any dock line; the page clamps to whatever it has.
+                _ = galleryPager.debugSetVerticalOffset(3_000)
+                if isBarDocked {
+                    print("[dock] SETTLED docked=true attempts=\(attempts) "
+                        + "selectorHosted=\(dockedBar.window != nil)")
+                    return
+                }
+                if attempts < 160 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: attempt)
+                } else {
+                    print("[dock] GAVE UP docked=false attempts=\(attempts) "
+                        + "offsets=\(galleryPager.debugVerticalOffsets) "
+                        + "hasGallery=\(viewModel.hasGallery)")
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: attempt)
+        }
         // `-profile-open-post <index>` taps a gallery tile once the gallery has
         // content. The sim injects no touches, and a tile tap is the only way
         // to reach either the open destination or the background reveal.
