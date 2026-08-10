@@ -309,7 +309,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
             self.searchBar.becomeFirstResponder()
             self.dockSearch()
             self.searchBar.text = text
-            self.searchResults?.updateSearchResults(for: self.searchController)
+            self.updateResults()
             print("[inbox-search] query applied text=\(self.searchBar.text ?? "-")")
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 guard let self, let results = self.searchResults else { return }
@@ -440,7 +440,18 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     // MARK: - Search: in the list, and docked while typing
 
     /// The one search bar every tab shares, so a query survives a swipe.
-    private var searchBar: UISearchBar { searchController.searchBar }
+    ///
+    /// ⚠️ **OURS, not `searchController.searchBar`.** Taking that bar meant taking
+    /// its delegate, which `UISearchController` owns and uses to drive its own
+    /// results-controller lifecycle — so it went on managing a presentation this
+    /// screen no longer performs, and pulled the results view back out of the
+    /// hierarchy moments after it was mounted. Measured: the child was in the
+    /// window and correctly sized at dock time, and painting it bright red showed
+    /// nothing on screen a few seconds later.
+    ///
+    /// The controller survives as the carrier `updateSearchResults(for:)` needs;
+    /// its bar's text is mirrored from ours before each update.
+    private let searchBar = UISearchBar()
 
     /// Carries the bar at the top of whichever list is in front. Sized in points
     /// rather than by constraints: `tableHeaderView` is laid out from its FRAME,
@@ -453,6 +464,11 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
     private func configureSharedSearchBar() {
         searchBar.delegate = self
+        searchBar.placeholder = searchController.searchBar.placeholder
+        searchBar.autocapitalizationType = .none
+        searchBar.autocorrectionType = .no
+        searchBar.returnKeyType = .search
+        searchBar.searchBarStyle = .minimal
         searchBar.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         searchBar.frame = listHeader.bounds
         listHeader.addSubview(searchBar)
@@ -510,7 +526,9 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // ⚠️ OPAQUE. As a presented controller it had a backdrop of its own; as a
         // child it is just a view, and a clear one lets the inbox list show
         // through — which reads as the query having matched everything.
-        results.view.backgroundColor = .systemBackground
+        results.view.backgroundColor =
+            ProcessInfo.processInfo.arguments.contains("-inbox-paint-results")
+            ? .systemRed : .systemBackground
         // ⚠️ Un-hidden explicitly. This controller spent its previous life being
         // PRESENTED by a `UISearchController`, and that lifecycle leaves the view
         // hidden on dismissal. Re-used as a child it was mounted, in the window,
@@ -528,7 +546,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         ])
         results.didMove(toParent: self)
         view.bringSubviewToFront(dockedHeader)
-        results.updateSearchResults(for: searchController)
+        updateResults()
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-inbox-search-query") {
             view.layoutIfNeeded()
@@ -543,6 +561,12 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
                 searchBar.text ?? "-"))
         }
         #endif
+    }
+
+    /// Mirrors our text into the controller the results updater reads from.
+    private func updateResults() {
+        searchController.searchBar.text = searchBar.text
+        searchResults?.updateSearchResults(for: searchController)
     }
 
     private func undockSearch() {
@@ -645,7 +669,7 @@ extension MessagesInboxViewController: UISearchBarDelegate {
 
     func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
         guard isSearchDocked else { return }
-        searchResults?.updateSearchResults(for: searchController)
+        updateResults()
     }
 
     func searchBarCancelButtonClicked(_ searchBar: UISearchBar) {
