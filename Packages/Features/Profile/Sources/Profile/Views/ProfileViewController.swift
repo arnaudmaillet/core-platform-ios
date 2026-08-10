@@ -1592,18 +1592,17 @@ final class ProfileViewController: UIViewController {
 
     /// What content actually passes under at the top.
     ///
-    /// The navigation bar hosts the docked selector, so `safeAreaInsets.top`
-    /// already reaches that bar's bottom edge; `selectorSlotHeight` on top is the
-    /// clearance that lands a revealed tile clearly below the selector instead of
-    /// flush against it. Measured: a revealed tile's top sits 72pt below the
-    /// selector's bottom edge.
+    /// `safeAreaInsets.top` and nothing else. It already reaches the bottom of
+    /// the navigation bar, and the docked selector rides INSIDE that bar — so
+    /// adding `selectorSlotHeight` counted the selector a second time and parked
+    /// every revealed card 60pt further down, leaving a blank band between the
+    /// header and the card. The reveal's own 12pt padding is the only gap.
     ///
-    /// Assembled rather than measured from the selector's own frame. Reading
-    /// `dockedBar` looked more honest and was worse: the bar is transiently
-    /// out of any window during a push, so the value flipped between 116 and
-    /// 176 between reveals and the occlusion stopped being deterministic.
+    /// Assembled rather than read off `dockedBar`'s frame: that bar is
+    /// transiently out of any window during a push, so measuring it made the
+    /// occlusion flip between values between reveals.
     private var stickyTopOcclusion: CGFloat {
-        view.safeAreaInsets.top + Metrics.selectorSlotHeight
+        view.safeAreaInsets.top
     }
 
     #if DEBUG
