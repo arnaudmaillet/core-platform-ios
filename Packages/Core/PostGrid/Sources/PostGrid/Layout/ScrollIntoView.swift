@@ -28,16 +28,32 @@ public enum ScrollIntoView {
     /// use it to decide whether to wait for a scroll before acting, and an
     /// offset that happens to equal the current one would have them waiting for
     /// an animation that never runs.
+    /// `occlusion` is what COVERS content — floating chrome — and decides the
+    /// visible band. `contentInset` is the scrollable RANGE and decides the
+    /// clamp. They are the same rectangle on a surface whose insets exist
+    /// because of chrome, and they are not on one whose insets are layout:
+    /// a profile reserves ~556pt at the top for a header that scrolls away and
+    /// inflates the bottom so a short page can still travel.
+    ///
+    /// Conflating them is what sent a tile tucked under the top header DOWN to
+    /// the footer instead: with the band mis-computed as a sliver near the top
+    /// of the viewport, a tile that was merely high on screen read as being
+    /// below the band and took the align-to-bottom branch.
+    ///
+    /// Defaults to `contentInset`, which is right wherever the insets are
+    /// chrome — the For You grids — so only surfaces that differ must say so.
     public static func offset(
         toReveal rect: CGRect,
         bounds: CGRect,
         contentInset: UIEdgeInsets,
+        occlusion: UIEdgeInsets? = nil,
         contentSize: CGSize,
         padding: CGFloat = defaultPadding
     ) -> CGPoint? {
         guard bounds.height > 0 else { return nil }
-        let visibleTop = bounds.minY + contentInset.top
-        let visibleBottom = bounds.maxY - contentInset.bottom
+        let cover = occlusion ?? contentInset
+        let visibleTop = bounds.minY + cover.top
+        let visibleBottom = bounds.maxY - cover.bottom
         guard visibleBottom > visibleTop else { return nil }
 
         // The furthest the content can legitimately be scrolled. Beyond this is
@@ -52,11 +68,13 @@ public enum ScrollIntoView {
             // Taller than the gap between the bars: both edges cannot clear, so
             // show the TOP of it. Aligning the bottom instead would open an
             // item by showing the viewer its last few points.
-            targetY = rect.minY - contentInset.top - padding
+            targetY = rect.minY - cover.top - padding
         } else if rect.minY < visibleTop + padding {
-            targetY = rect.minY - contentInset.top - padding
+            // Tucked under the TOP chrome: bring it down to just below it.
+            targetY = rect.minY - cover.top - padding
         } else if rect.maxY > visibleBottom - padding {
-            targetY = rect.maxY + contentInset.bottom + padding - bounds.height
+            // Tucked under the BOTTOM chrome: bring it up to just above it.
+            targetY = rect.maxY + cover.bottom + padding - bounds.height
         } else {
             return nil
         }
@@ -87,12 +105,14 @@ public enum ScrollIntoView {
     public static func revealImmediately(
         _ rect: CGRect?,
         in scrollView: UIScrollView,
+        occlusion: UIEdgeInsets? = nil,
         padding: CGFloat = defaultPadding
     ) -> Bool {
         guard let rect, let offset = offset(
             toReveal: rect,
             bounds: scrollView.bounds,
             contentInset: scrollView.adjustedContentInset,
+            occlusion: occlusion,
             contentSize: scrollView.contentSize,
             padding: padding
         ) else { return false }

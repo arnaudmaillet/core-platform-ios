@@ -630,6 +630,16 @@ final class ProfileViewController: UIViewController {
                 }
             }
         }
+        // `-profile-scroll <points>` scrolls the active page before anything
+        // else, so a tile can be driven while it is tucked UNDER the header —
+        // at rest nothing is, since the content starts below it, and that is
+        // the only state the header-alignment bug appears in.
+        if let position = arguments.firstIndex(of: "-profile-scroll"),
+           position + 1 < arguments.count, let points = Double(arguments[position + 1]) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                self?.galleryPager.setVerticalOffset(CGFloat(points))
+            }
+        }
         // `-profile-open-post <index>` taps a gallery tile once the gallery has
         // content. The sim injects no touches, and a tile tap is the only way
         // to reach either the open destination or the background reveal.

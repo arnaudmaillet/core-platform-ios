@@ -274,3 +274,89 @@ struct ScrollIntoViewMosaicTests {
         }
     }
 }
+
+/// OCCLUSION IS NOT THE CONTENT INSET, ON EVERY SURFACE.
+///
+/// A profile reserves ~556pt of TOP inset for a header that scrolls away with
+/// the content, and inflates the bottom so a short page can still travel.
+/// Neither number is chrome covering anything. Handing them over as the visible
+/// band put it in the wrong place entirely, so a tile tucked under the header
+/// was aligned against the wrong edge — the reported bug: open a post under the
+/// header, dismiss it, and the grid pushes it down toward the footer.
+///
+/// These use the profile's real geometry, because the arithmetic only goes
+/// wrong when the two insets disagree. Scrolled to mid-content, so both
+/// directions are actually reachable — at the very top of the content a tile
+/// cannot be brought down any further, and `nil` is the honest answer there.
+struct ScrollIntoViewOcclusionTests {
+    private let bounds = CGRect(x: 0, y: 400, width: 440, height: 956)
+    /// Layout, not chrome: header space plus scroll padding.
+    private let contentInset = UIEdgeInsets(top: 556, left: 0, bottom: 290, right: 0)
+    /// What actually covers content.
+    private let occlusion = UIEdgeInsets(top: 100, left: 0, bottom: 90, right: 0)
+    private let contentSize = CGSize(width: 440, height: 4000)
+    private let padding = ScrollIntoView.defaultPadding
+
+    private func offset(for rect: CGRect, occluding: UIEdgeInsets?) -> CGPoint? {
+        ScrollIntoView.offset(
+            toReveal: rect, bounds: bounds, contentInset: contentInset,
+            occlusion: occluding, contentSize: contentSize
+        )
+    }
+
+    /// The regression, stated as the outcome that matters: the tile ends up
+    /// exactly one padding below the real top chrome.
+    @Test func aTileUnderTheHeaderLandsJustBelowIt() throws {
+        // Visible band with real chrome: 500 … 1266. This tile straddles the
+        // top edge at 460 … 640.
+        let tucked = CGRect(x: 0, y: 460, width: 440, height: 180)
+
+        let result = try #require(offset(for: tucked, occluding: occlusion))
+
+        // In the new scroll position, the tile's top sits at the band's top
+        // plus the padding — below the header, which is the whole ask.
+        #expect(tucked.minY - result.y == occlusion.top + padding)
+    }
+
+    /// The same tile with occlusion defaulted to the content inset — what
+    /// shipped — lands somewhere else entirely.
+    @Test func theContentInsetAloneMisplacesIt() throws {
+        let tucked = CGRect(x: 0, y: 460, width: 440, height: 180)
+
+        let wrong = try #require(offset(for: tucked, occluding: nil))
+        let right = try #require(offset(for: tucked, occluding: occlusion))
+
+        #expect(wrong.y != right.y)
+        #expect(tucked.minY - wrong.y != occlusion.top + padding,
+                "the content inset happened to land it correctly, so this proves nothing")
+    }
+
+    /// The bottom direction still works: a tile behind the footer comes up to
+    /// exactly one padding above it.
+    @Test func aTileUnderTheFooterLandsJustAboveIt() throws {
+        // Band ends at 1266; this tile spans 1200 … 1380.
+        let low = CGRect(x: 0, y: 1200, width: 440, height: 180)
+
+        let result = try #require(offset(for: low, occluding: occlusion))
+
+        // Its bottom sits one padding above the bottom chrome.
+        let bandBottomInNewOffset = result.y + bounds.height - occlusion.bottom
+        #expect(low.maxY == bandBottomInNewOffset - padding)
+    }
+
+    /// A tile comfortably inside the real band is left alone, even though the
+    /// content insets would call it hidden.
+    @Test func aTileInsideTheRealBandIsNotMoved() {
+        let middle = CGRect(x: 0, y: 700, width: 440, height: 180)
+        #expect(offset(for: middle, occluding: occlusion) == nil)
+    }
+
+    /// The clamp still follows the scrollable RANGE, which is the content
+    /// inset's job and not the occlusion's.
+    @Test func theClampStillFollowsTheScrollableRange() {
+        let firstRow = CGRect(x: 0, y: -556, width: 440, height: 180)
+        if let result = offset(for: firstRow, occluding: occlusion) {
+            #expect(result.y >= -contentInset.top, "scrolled past the top of the content")
+        }
+    }
+}

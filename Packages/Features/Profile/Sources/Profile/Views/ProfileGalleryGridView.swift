@@ -343,6 +343,16 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     ///
     /// The bottom inset IS chrome — the filter tray and the tab bar float over
     /// the last rows — so that half is still removed.
+    /// What actually covers this page's content, top and bottom — see
+    /// `visibleBand`. Shared with the scroll-into-view reveal so the two agree
+    /// about where the viewer can see.
+    private var chromeOcclusion: UIEdgeInsets {
+        var occlusion = collectionView.verticalScrollIndicatorInsets
+        occlusion.left = 0
+        occlusion.right = 0
+        return occlusion
+    }
+
     private var visibleBand: CGRect {
         // The SCROLL INDICATOR insets, which is the one number on this page
         // that means "where the visible area ends". The content insets do not:
@@ -350,10 +360,7 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         // hides nothing) and the bottom one is inflated by `applyBottomInset`
         // so a short page can still travel. Between them they described a band
         // 108pt tall on a 956pt page, and every item's media fell outside it.
-        var occlusion = collectionView.verticalScrollIndicatorInsets
-        occlusion.left = 0
-        occlusion.right = 0
-        return collectionView.bounds.inset(by: occlusion)
+        collectionView.bounds.inset(by: chromeOcclusion)
     }
 
     /// Minimum fraction of an item's MEDIA that must be inside the visible
@@ -522,10 +529,36 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         guard let id = pendingRevealPostID else { return }
         pendingRevealPostID = nil
         guard let index = posts.firstIndex(where: { $0.id == id }) else { return }
+        let rect = collectionView.layoutAttributesForItem(at: IndexPath(item: index, section: 0))?.frame
+        #if DEBUG
+        let offsetBefore = collectionView.contentOffset.y
+        #endif
         ScrollIntoView.revealImmediately(
-            collectionView.layoutAttributesForItem(at: IndexPath(item: index, section: 0))?.frame,
-            in: collectionView
+            rect,
+            in: collectionView,
+            // The SAME occlusion the autoplay gate uses, and for the same
+            // reason: this page's content insets are layout, not chrome. Handing
+            // over `adjustedContentInset` put a tile tucked under the header
+            // down at the footer instead of just below the header.
+            occlusion: chromeOcclusion
         )
+        #if DEBUG
+        // `-profile-reveal-log`: which edge the tile was aligned against, and
+        // where it ended up. The bug this proves absent aligned a tile tucked
+        // under the TOP header against the BOTTOM one, and a screenshot after
+        // the fact cannot say which edge the arithmetic chose.
+        if ProcessInfo.processInfo.arguments.contains("-profile-reveal-log"), let rect {
+            let after = collectionView.contentOffset.y
+            let cover = chromeOcclusion
+            let topGap = rect.minY - after - cover.top
+            let bottomGap = (after + collectionView.bounds.height - cover.bottom) - rect.maxY
+            print(String(format:
+                "[profile-reveal] tile=%.0f…%.0f offset %.0f→%.0f cover=%.0f/%.0f "
+                + "gapBelowHeader=%.0f gapAboveFooter=%.0f",
+                rect.minY, rect.maxY, offsetBefore, after,
+                cover.top, cover.bottom, topGap, bottomGap))
+        }
+        #endif
     }
 
     func collectionView(
