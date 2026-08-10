@@ -299,6 +299,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
                     }
                     previous = frame
                 }
+                if arguments.contains("-header-bar-tree") { audit.dumpBarTree() }
                 let finding = audit.audit(surface: "on-screen")
                 for problem in finding.problems { print("[header-audit] on-screen: PROBLEM \(problem)") }
                 if finding.isClean { print("[header-audit] on-screen: clean") }

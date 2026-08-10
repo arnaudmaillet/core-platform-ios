@@ -162,7 +162,7 @@ final class HeaderSelectorAudit {
         // a class-name check catches the private container too.
         let overflow = overflowControls(in: bar)
         if !overflow.isEmpty {
-            finding.problems.append("OVERFLOW present: \(overflow.joined(separator: ", "))")
+            finding.problems.append("COLLAPSED items — \(overflow.joined(separator: ", "))")
         }
 
         // 5. On a pushed surface, is the back button still there and reachable?
@@ -197,9 +197,9 @@ final class HeaderSelectorAudit {
                      selector.superview?.frame.width ?? -1,
                      selector.superview?.frame.height ?? -1,
                      chain.joined(separator: "←")))
-        print(String(format: "[header-audit] %@: screenW=%.0f firstSeg=%.0f overflow=%@",
+        print(String(format: "[header-audit] %@: screenW=%.0f firstSeg=%.0f platters=%@",
                      surface, window.bounds.width, selector.firstSegmentWidth,
-                     overflow.isEmpty ? "NONE" : "PRESENT"))
+                     overflow.isEmpty ? "no-collapse" : "COLLAPSED"))
         print(String(format: "[header-audit] %@: selector %.0f,%.0f %.0fx%.0f segments=%d "
                      + "leading=%d pushed=%@ placement=%@",
                      surface, frame.minX, frame.minY, frame.width, frame.height,
@@ -220,15 +220,38 @@ final class HeaderSelectorAudit {
         return candidate?.navigationController
     }
 
-    /// Anything on this bar that is an overflow affordance.
+    /// `-header-bar-tree`: the bar's real subview tree. The overflow detector
+    /// returned NONE for a bar that was visibly showing a `•••`, so its heuristics
+    /// were guesses; this is how the control gets named instead of guessed at.
+    func dumpBarTree() {
+        guard let bar = topNavigationController?.navigationBar else { return }
+        func walk(_ view: UIView, _ depth: Int) {
+            let pad = String(repeating: "  ", count: depth)
+            print(String(format: "[bar-tree] %@%@ %.0f,%.0f %.0fx%.0f label=%@",
+                         pad, String(describing: type(of: view)),
+                         view.frame.minX, view.frame.minY,
+                         view.frame.width, view.frame.height,
+                         view.accessibilityLabel ?? "-"))
+            guard depth < 6 else { return }
+            view.subviews.forEach { walk($0, depth + 1) }
+        }
+        walk(bar, 0)
+    }
+
+    /// Bar items UIKit has COLLAPSED, reported as zero-width platters.
+    ///
+    /// ⚠️ This replaced a hunt for the overflow control itself, by class name or an
+    /// accessibility label of "More". That found nothing on a bar that was visibly
+    /// showing a `•••` — the overflow button is a plain `PlatterView` with no label
+    /// — and reported `overflow=NONE` while the whole leading group was collapsed.
+    /// A zero-width platter is the symptom that is actually visible in the tree,
+    /// and it is what an overflow leaves behind.
     private func overflowControls(in root: UIView) -> [String] {
         var found: [String] = []
         func walk(_ view: UIView) {
-            let name = String(describing: type(of: view))
-            let label = view.accessibilityLabel?.lowercased() ?? ""
-            if name.contains("Overflow") || name.contains("Ellipsis")
-                || (label == "more" && view is UIControl) {
-                found.append("\(name)/label=\(view.accessibilityLabel ?? "-")")
+            if String(describing: type(of: view)).contains("PlatterView"),
+               view.bounds.width < 1 {
+                found.append(String(format: "collapsed platter at %.0f", view.frame.minX))
             }
             view.subviews.forEach(walk)
         }

@@ -188,9 +188,15 @@ public extension UINavigationItem {
         // a plain `UIView` was not enough is written down.
         let host = LeadingSelectorHost(bar: bar, roomForOtherItems: roomForOtherItems)
 
-        // The centre is left EMPTY, so the space between the groups stays
-        // flexible for whatever a host wants to put there later.
-        titleView = nil
+        // ⚠️ An EMPTY VIEW, not `nil`. Left nil, UIKit keeps a central title
+        // reservation and the leading group cannot grow into it — on every width
+        // below 440pt the inbox's capsule crossed that invisible threshold and
+        // UIKit collapsed the whole leading group into a `•••`, leaving the middle
+        // of the bar blank. A zero-sized title view claims the slot and asks for
+        // nothing, which releases the space.
+        let emptyTitle = UIView()
+        emptyTitle.frame = .zero
+        titleView = emptyTitle
 
         // ⚠️ SUPPLEMENTS. A leading item that replaces the back button silently
         // disables the navigation controller's interactive pop gesture — the

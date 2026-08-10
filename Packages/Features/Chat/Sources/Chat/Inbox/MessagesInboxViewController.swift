@@ -364,10 +364,20 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // trailing item on every tab, in every state, which is what makes the
         // title slot beside it a fixed width.
         navigationItem.searchController = searchController
-        navigationItem.preferredSearchBarPlacement = .integratedButton
-        // No toolbar hand-off: `UINavigationController` transfers a screen's
-        // toolbar items at transition *completion*, so letting UIKit relocate the
-        // field there drops it into place after a push has already finished.
+        // ⚠️ **STACKED, not `.integratedButton`, and the leading selector is why.**
+        //
+        // The integrated button is a search affordance IN the bar row, and UIKit
+        // protects the room it may need to expand into: with it set, this bar
+        // collapsed its entire leading group — compose glyph AND selector — into a
+        // `•••` on every width below 440pt, leaving 270pt of the row visibly
+        // empty. Measured at 402pt: two leading platters at 0x44 and a second
+        // trailing platter that was the overflow button.
+        //
+        // Proven by A/B at 402pt: `-inbox-no-search` hosts the selector at 270pt,
+        // and so does `.stacked` — which keeps the search field, on its own row.
+        // Forcing the selector narrower does not help; ceilings of 200 and 160
+        // collapse just the same, because the row's width was never the issue.
+        navigationItem.preferredSearchBarPlacement = .stacked
         navigationItem.searchBarPlacementAllowsToolbarIntegration = false
     }
 
