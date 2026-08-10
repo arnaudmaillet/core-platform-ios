@@ -87,9 +87,19 @@ final class LeadingSelectorHost: UIView {
     /// measure and Auto Layout a preference to honour.
     override var intrinsicContentSize: CGSize {
         let wanted = bar.intrinsicContentSize
-        let width = wanted.width > 1 ? min(wanted.width, ceiling) : UIView.noIntrinsicMetric
+        guard wanted.width > 1 else {
+            return CGSize(width: UIView.noIntrinsicMetric, height: wanted.height)
+        }
+        // floor ≤ width ≤ ceiling. The floor is one whole tab: below that the
+        // capsule reads as a stub rather than a selector, and the scroller can
+        // still reach the rest. Expressed HERE and not as constraints on the bar —
+        // required `>=`/`<=` constraints there fight the bar's own.
+        let width = max(floorWidth, min(wanted.width, ceiling))
         return CGSize(width: width, height: wanted.height)
     }
+
+    /// One whole tab — never wider than the ceiling, or the clamp inverts.
+    private var floorWidth: CGFloat { min(bar.firstSegmentWidth, ceiling) }
 
     /// The widest the bar may be here — what the rest of the bar needs, taken off
     /// the width available to it.

@@ -401,6 +401,14 @@ public final class PagedTabBar: UIControl {
     /// glass lens inside a glass capsule, the arrangement that cost the lens its
     /// edge entirely (see the type comment). The title slot is the opposite case
     /// and must keep its backdrop.
+    /// The width of the FIRST segment, plus the capsule's own padding — the
+    /// least width at which this bar still says something: one whole tab,
+    /// legible, with every other reachable by scrolling.
+    public var firstSegmentWidth: CGFloat {
+        guard let first = segments.first else { return Metrics.capsulePadding * 2 }
+        return ceil(first.pinnedWidth) + Metrics.capsulePadding * 2
+    }
+
     #if DEBUG
     /// How many segments the bar carries, so an audit can hit-test each one
     /// without reaching into the private row.

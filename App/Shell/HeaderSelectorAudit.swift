@@ -57,6 +57,15 @@ final class HeaderSelectorAudit {
         print("[header-audit] done: \(findings.count - failed.count)/\(findings.count) clean")
     }
 
+    /// Whether a selector is on the visible bar yet — what the current-surface
+    /// mode waits for, so a slow load is not read as a missing capsule.
+    var hasSelectorOnScreen: Bool {
+        guard let nav = topNavigationController,
+              let selector = firstPagedTabBar(in: nav.navigationBar)
+        else { return false }
+        return selector.window != nil && selector.bounds.width > 1
+    }
+
     /// Audits whichever navigation bar is currently on screen.
     func audit(surface: String) -> Finding {
         var finding = Finding(surface: surface)

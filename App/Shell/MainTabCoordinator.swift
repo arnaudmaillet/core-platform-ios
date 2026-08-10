@@ -275,7 +275,16 @@ final class MainTabCoordinator: NSObject, Coordinator {
                 selectTab: { [weak self] tab in self?.selectTab(tab) }
             )
             Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                // POLLS. A single fixed delay reported "no selector on this bar"
+                // for surfaces that were hosting it perfectly — the screen simply
+                // had not finished loading yet, and a slower boot moved the whole
+                // run past the deadline. Two conclusions were drawn from that
+                // before the harness was suspected. Waits for a selector, then
+                // audits; if none ever arrives, audits anyway and says so.
+                for _ in 0..<40 {
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    if audit.hasSelectorOnScreen { break }
+                }
                 let finding = audit.audit(surface: "on-screen")
                 for problem in finding.problems { print("[header-audit] on-screen: PROBLEM \(problem)") }
                 if finding.isClean { print("[header-audit] on-screen: clean") }
