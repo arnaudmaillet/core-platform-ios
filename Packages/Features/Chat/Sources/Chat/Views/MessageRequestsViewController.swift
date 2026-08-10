@@ -303,6 +303,8 @@ extension MessageRequestsViewController: UITableViewDelegate {
 // MARK: - InboxSurface
 
 extension MessageRequestsViewController: InboxSurface {
+    var listScrollView: UIScrollView { tableView }
+
     var category: MessagesCategory { .requests }
 
     /// The catalog is already loaded by the time this surface is reachable

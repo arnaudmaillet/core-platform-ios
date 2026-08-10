@@ -197,6 +197,8 @@ extension SuggestionsViewController: UITableViewDelegate {
 // MARK: - InboxSurface
 
 extension SuggestionsViewController: InboxSurface {
+    var listScrollView: UIScrollView { tableView }
+
     var category: MessagesCategory { .suggestions }
 
     func surfaceDidBecomeActive() {

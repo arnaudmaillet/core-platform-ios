@@ -39,9 +39,24 @@ final class HeaderSelectorAudit {
         var findings: [Finding] = []
         for tab in tabs {
             selectTab(tab)
-            // The bar lays out on the next pass, and a selector measured mid
-            // crossfade reports a width it is on its way out of.
-            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            // ⚠️ Waits for a SETTLED frame, exactly as the current-surface mode
+            // does. A fixed 1.2s wait reported "NO SELECTOR on a surface that must
+            // have one" for a bar that a screenshot showed hosting it perfectly —
+            // the page simply had not laid out yet. Only one of the two modes was
+            // fixed the first time, and the other went on lying.
+            var previous = CGRect.null
+            var stable = 0
+            for _ in 0..<24 {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                let frame = selectorFrameOnScreen
+                if frame != .null, frame == previous {
+                    stable += 1
+                    if stable >= 2 { break }
+                } else {
+                    stable = 0
+                }
+                previous = frame
+            }
             findings.append(audit(surface: tab.rawValue))
         }
         for finding in findings {

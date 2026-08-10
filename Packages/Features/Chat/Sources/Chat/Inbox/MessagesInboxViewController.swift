@@ -142,6 +142,10 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         pendingCategory = nil
         pagerView = HorizontalPagerView(pages: surfaces.map(\.view), initialIndex: startIndex)
         pagerView.pin(to: view)
+        // ⚠️ AFTER the pager, every time. `configureSearch` runs first and adds the
+        // search host, so the pager lands on top of it — the bar was mounted,
+        // inset for, and completely invisible behind an opaque page.
+        view.bringSubviewToFront(searchHost)
         for surface in surfaces { surface.didMove(toParent: self) }
 
         // The bar's contents, stated once. Nothing else writes them.
@@ -215,8 +219,20 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         }
         // The initial page still needs waking (a deep link can land straight
         // on a lazy surface); later pages wake on settle.
+        #if DEBUG
+        if let position = ProcessInfo.processInfo.arguments.firstIndex(of: "-inbox-scroll"),
+           position + 1 < ProcessInfo.processInfo.arguments.count,
+           let points = Double(ProcessInfo.processInfo.arguments[position + 1]),
+           !hasActivatedInitialSurface {
+            runSearchCollapseDemo(points: CGFloat(points))
+        }
+        #endif
         if !hasActivatedInitialSurface {
             hasActivatedInitialSurface = true
+            if let surface = activeSurface {
+                applySearchInset(to: surface)
+                followScroll(of: surface)
+            }
             activeSurface?.surfaceDidBecomeActive()
         }
         #if DEBUG
@@ -360,26 +376,131 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // query has a tab-shaped scope.
         definesPresentationContext = true
 
-        // Mounted once. Nothing withdraws it any more: the magnifier is the
-        // trailing item on every tab, in every state, which is what makes the
-        // title slot beside it a fixed width.
-        navigationItem.searchController = searchController
-        // ⚠️ **STACKED, not `.integratedButton`, and the leading selector is why.**
-        //
-        // The integrated button is a search affordance IN the bar row, and UIKit
-        // protects the room it may need to expand into: with it set, this bar
-        // collapsed its entire leading group — compose glyph AND selector — into a
-        // `•••` on every width below 440pt, leaving 270pt of the row visibly
-        // empty. Measured at 402pt: two leading platters at 0x44 and a second
-        // trailing platter that was the overflow button.
-        //
-        // Proven by A/B at 402pt: `-inbox-no-search` hosts the selector at 270pt,
-        // and so does `.stacked` — which keeps the search field, on its own row.
-        // Forcing the selector narrower does not help; ceilings of 200 and 160
-        // collapse just the same, because the row's width was never the issue.
-        navigationItem.preferredSearchBarPlacement = .stacked
-        navigationItem.searchBarPlacementAllowsToolbarIntegration = false
+        // ⚠️ **NOT `navigationItem.searchController`.** Any bar-hosted search on
+        // this screen costs the leading group: `.integratedButton` collapsed the
+        // compose glyph AND the selector into a `•••` on every width below 440pt,
+        // and `.stacked` only moved the problem to 375pt. The field belongs to the
+        // LIST now — mounted at the top of the pages and scrolling away with them,
+        // the way Messages and Telegram do it — which leaves the navigation bar
+        // carrying nothing but the glyph and the selector.
+        installCollapsibleSearchBar()
     }
+
+    // MARK: - Collapsible search
+
+    /// The shared search bar, mounted above the pages and scrolling with them.
+    ///
+    /// ONE instance for every tab, which is what makes the query survive a swipe:
+    /// a per-page field would reset each time the category changed, and two of
+    /// them would disagree about what was typed.
+    private let searchHost = UIView()
+
+    /// How far the bar has travelled out of sight, in points.
+    private var searchCollapse: CGFloat = 0
+    /// The page whose offset the bar is currently following.
+    private var observedScrollView: UIScrollView?
+    private var scrollObservation: NSKeyValueObservation?
+
+    private var searchBarHeight: CGFloat {
+        max(52, searchController.searchBar.intrinsicContentSize.height)
+    }
+
+    private func installCollapsibleSearchBar() {
+        let bar = searchController.searchBar
+        bar.searchBarStyle = .minimal
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        searchHost.translatesAutoresizingMaskIntoConstraints = false
+        searchHost.addSubview(bar)
+        view.addSubview(searchHost)
+        NSLayoutConstraint.activate([
+            searchHost.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            searchHost.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            searchHost.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            searchHost.heightAnchor.constraint(equalToConstant: searchBarHeight),
+            bar.leadingAnchor.constraint(equalTo: searchHost.leadingAnchor, constant: 8),
+            bar.trailingAnchor.constraint(equalTo: searchHost.trailingAnchor, constant: -8),
+            bar.centerYAnchor.constraint(equalTo: searchHost.centerYAnchor)
+        ])
+        // ⚠️ BEHIND the pages, not over them. The bar sits in the space the pages'
+        // top inset opens up, so a list scrolled to the top reveals it and a list
+        // scrolled down covers it — which is the whole effect. Over the pages it
+        // would float above the rows instead.
+        // Ordering is re-asserted once the pager exists; see `viewDidLoad`.
+    }
+
+    /// Insets a page so its first row starts below the search bar, and gives the
+    /// scroll indicator the same clearance.
+    private func applySearchInset(to surface: any InboxSurface) {
+        let scrollView = surface.listScrollView
+        guard abs(scrollView.contentInset.top - searchBarHeight) > 0.5 else { return }
+        let wasAtTop = scrollView.contentOffset.y
+            <= -scrollView.adjustedContentInset.top + 0.5
+        let adjustment = searchBarHeight - scrollView.contentInset.top
+        scrollView.contentInset.top = searchBarHeight
+        scrollView.verticalScrollIndicatorInsets.top = searchBarHeight
+        // A list already at rest must STAY at rest: growing the inset without
+        // moving the offset leaves the first row pushed down by exactly the bar's
+        // height, which reads as the list having scrolled itself.
+        if wasAtTop { scrollView.contentOffset.y -= adjustment }
+    }
+
+    /// Follows the ACTIVE page's offset — never the pager's, which never moves.
+    private func followScroll(of surface: any InboxSurface) {
+        let scrollView = surface.listScrollView
+        guard scrollView !== observedScrollView else { return }
+        observedScrollView = scrollView
+        scrollObservation = scrollView.observe(\.contentOffset, options: [.new]) {
+            [weak self] scrollView, _ in
+            MainActor.assumeIsolated { self?.updateSearchCollapse(for: scrollView) }
+        }
+        updateSearchCollapse(for: scrollView)
+    }
+
+    private func updateSearchCollapse(for scrollView: UIScrollView) {
+        // ⚠️ `adjustedContentInset`, not `contentInset`. The tables adjust for the
+        // safe area on top of what is set here, so measuring against the raw inset
+        // read a resting list as already scrolled by exactly the bar's height —
+        // and the bar arrived fully collapsed and invisible.
+        let travelled = scrollView.contentOffset.y + scrollView.adjustedContentInset.top
+        let collapse = min(max(0, travelled), searchBarHeight)
+        guard abs(collapse - searchCollapse) > 0.5 else { return }
+        searchCollapse = collapse
+        searchHost.transform = CGAffineTransform(translationX: 0, y: -collapse)
+        // Fades as it goes, so the last few points read as leaving rather than
+        // as a bar clipped by the navigation bar's edge.
+        searchHost.alpha = 1 - (collapse / searchBarHeight)
+    }
+
+    #if DEBUG
+    /// `-inbox-scroll <points>`: scrolls the ACTIVE page, so the search bar's
+    /// collapse can be seen without a finger. Polls until the list has content —
+    /// a fixed delay scrolls an empty table and proves nothing.
+    private func runSearchCollapseDemo(points: CGFloat) {
+        var attempts = 0
+        func attempt() {
+            attempts += 1
+            guard let scrollView = activeSurface?.listScrollView else { return }
+            let reachable = scrollView.contentSize.height
+                - scrollView.bounds.height + scrollView.adjustedContentInset.bottom
+            if reachable > 1 {
+                let target = min(points, reachable)
+                scrollView.setContentOffset(
+                    CGPoint(x: 0, y: target - scrollView.adjustedContentInset.top),
+                    animated: false
+                )
+                print(String(format: "[inbox-scroll] to %.0f collapse=%.0f of %.0f",
+                             target, searchCollapse, searchBarHeight))
+                return
+            }
+            if attempts < 60 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: attempt)
+            } else {
+                print("[inbox-scroll] gave up: no scrollable content")
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: attempt)
+    }
+    #endif
 
     // MARK: - Category selection
 
@@ -416,6 +537,11 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // and finding All's count gone is losing the comparison you switched
         // for. Only leaving the screen retires them; see `viewWillDisappear`.
         apply(surface.chrome, from: surface)
+        // The shared bar follows whichever page is now in front, and the new page
+        // gets the same clearance. Re-syncing here is what keeps a bar collapsed
+        // on one tab from sitting half-open over another.
+        applySearchInset(to: surface)
+        followScroll(of: surface)
         surface.surfaceDidBecomeActive()
     }
 

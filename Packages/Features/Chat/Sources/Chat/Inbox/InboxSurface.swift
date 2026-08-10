@@ -27,6 +27,15 @@ struct InboxSurfaceChrome {
 protocol InboxSurface: UIViewController {
     var category: MessagesCategory { get }
 
+    /// The list this surface scrolls.
+    ///
+    /// The container needs it for two things it cannot do from the outside:
+    /// inset the list under the shared search bar, and follow THIS page's
+    /// offset to collapse that bar. Following the pager's offset instead is the
+    /// mistake a scroll-tracked search placement made here — the pager never
+    /// scrolls vertically, so a collapsed field had nothing that could reopen it.
+    var listScrollView: UIScrollView { get }
+
     /// The current chrome. Read when the surface becomes active, and again on
     /// every `onChromeChange`.
     var chrome: InboxSurfaceChrome { get }
