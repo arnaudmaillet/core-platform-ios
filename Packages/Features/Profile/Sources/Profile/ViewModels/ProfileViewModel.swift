@@ -431,8 +431,16 @@ public final class ProfileViewModel {
     // MARK: - Gallery
 
     /// A grid tile tapped — open the post. Route-only, like Message.
-    public func galleryItemTapped(_ postID: PostID) {
-        router?.route(to: .post(postID))
+    /// Opens the unified feed on this post, carrying the gallery's order with
+    /// it.
+    ///
+    /// Was `.post`, which is the single-post DETAIL screen — a dead end that
+    /// cannot be swiped out of, and not the surface the rest of the app opens
+    /// a tapped tile into. `stream` is the run of posts from the tapped one;
+    /// empty only where a caller has no ordering to offer, and then this still
+    /// opens the feed rather than falling back to the old screen.
+    public func galleryItemTapped(_ postID: PostID, stream: [PostID] = []) {
+        router?.route(to: .postStream(stream.isEmpty ? [postID] : stream))
     }
 
     /// Where the user is — set by a tab tap or a settled swipe. Pure state

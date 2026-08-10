@@ -389,8 +389,8 @@ final class ProfileViewController: UIViewController {
         viewModel.onGalleryChange = { [weak self] snapshot in
             self?.galleryPager.render(snapshot)
         }
-        galleryPager.onItemTapped = { [weak self] post in
-            self?.viewModel.galleryItemTapped(post.id)
+        galleryPager.onItemTapped = { [weak self] post, stream in
+            self?.viewModel.galleryItemTapped(post.id, stream: stream)
         }
         // Swipe ↔ tabs: a settled swipe adopts the tab and mirrors the
         // selectors; a tab tap records it and pages.
@@ -543,6 +543,25 @@ final class ProfileViewController: UIViewController {
                 }
             }
             attempt(30)
+        }
+        // `-profile-open-post <index>` taps a gallery tile once the gallery has
+        // content. The sim injects no touches, and a tile tap is the only way
+        // to reach either the open destination or the background reveal.
+        if let position = arguments.firstIndex(of: "-profile-open-post"),
+           position + 1 < arguments.count,
+           let index = Int(arguments[position + 1]) {
+            var attempts = 0
+            func attempt() {
+                attempts += 1
+                // Polls rather than firing on a fixed delay: the gallery's
+                // first page has to land, and a fixed delay silently no-ops
+                // under `-mock-latency`.
+                if galleryPager.debugSelectItem(at: index) { return }
+                if attempts < 60 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: attempt)
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: attempt)
         }
         // Dev convenience: `-profile-share-demo [activity]` opens the QR share sheet once
         // the profile has loaded — the sheet is behind a tap on the header's

@@ -135,6 +135,14 @@ final class RouteResolver: Router {
             let detail = feedFeature().makePostDetailViewController(for: postID, mode: .full)
             push(detail, using: navigator)
 
+        case .postStream(let postIDs):
+            // The unified feed, not the single-post detail screen. Same
+            // destination a Maps pin expands into — one repository and one post
+            // cache behind it, so a tile the origin was showing is already warm.
+            guard !postIDs.isEmpty else { return }
+            let feed = feedFeature().makeSnapFeedViewController(postIDs: postIDs)
+            push(feed, using: navigator)
+
         case .comments(let postID):
             let comments = feedFeature().makePostDetailViewController(for: postID, mode: .commentsOnly)
             push(comments, using: navigator)

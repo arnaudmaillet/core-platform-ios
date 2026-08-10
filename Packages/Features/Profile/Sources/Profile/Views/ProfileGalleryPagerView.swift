@@ -1,3 +1,4 @@
+import CoreModels
 import MediaCore
 import PostGrid
 import UIKit
@@ -27,7 +28,7 @@ final class ProfileGalleryPagerView: UIView {
     /// Saved and Liked, everyone else's does not.
     let pageOrder: [ProfileTab]
 
-    var onItemTapped: ((GalleryPost) -> Void)?
+    var onItemTapped: ((GalleryPost, _ stream: [PostID]) -> Void)?
     /// Fired when a swipe settles on a page (not for programmatic paging) —
     /// the selector mirrors it.
     var onPageSettled: ((ProfileTab) -> Void)?
@@ -91,7 +92,7 @@ final class ProfileGalleryPagerView: UIView {
                 page.heightAnchor.constraint(equalTo: frame.heightAnchor)
             ])
             leading = page.trailingAnchor
-            page.onItemTapped = { [weak self] post in self?.onItemTapped?(post) }
+            page.onItemTapped = { [weak self] post, stream in self?.onItemTapped?(post, stream) }
             page.onVerticalScroll = { [weak self] offset in
                 guard let self, page === pages[activeIndex] else { return }
                 onVerticalScroll?(offset)
@@ -116,6 +117,14 @@ final class ProfileGalleryPagerView: UIView {
             pages[index].render(snapshot.state(for: tab))
         }
     }
+
+    #if DEBUG
+    /// Taps a tile on whichever page is active.
+    func debugSelectItem(at index: Int) -> Bool {
+        guard pages.indices.contains(activeIndex) else { return false }
+        return pages[activeIndex].debugSelectItem(at: index)
+    }
+    #endif
 
     /// Settles a tapped tile clear of the chrome while the post covers this
     /// screen. Asked of every page; only the one holding a pending reveal acts.

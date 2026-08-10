@@ -28,7 +28,13 @@ final class ProfileGalleryGridView: UIView {
         case list
     }
 
-    var onItemTapped: ((GalleryPost) -> Void)?
+    /// The tapped post, plus the ordered run of posts FROM it — what the
+    /// full-screen feed is seeded with, so the viewer can keep swiping through
+    /// the gallery they were looking at instead of landing on one post alone.
+    var onItemTapped: ((GalleryPost, _ stream: [PostID]) -> Void)?
+    /// How many posts to hand the feed. Enough to swipe through without
+    /// serialising an entire gallery into a route.
+    private static let streamWindow = 30
     /// This page's vertical offset, every tick — the header rides the active
     /// page's.
     var onVerticalScroll: ((CGFloat) -> Void)?
@@ -279,6 +285,19 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         }
     }
 
+    #if DEBUG
+    /// Drives the page's real selection path, the one a finger reaches.
+    ///
+    /// Without it nothing scripted can tap a tile — and the profile's open
+    /// destination and its background reveal are both things only a tap
+    /// exercises. Same reason `ForYouGridPage` grew one.
+    func debugSelectItem(at index: Int) -> Bool {
+        guard posts.indices.contains(index) else { return false }
+        collectionView(collectionView, didSelectItemAt: IndexPath(item: index, section: 0))
+        return true
+    }
+    #endif
+
     /// Brings the last-tapped tile clear of the chrome, now that the post is
     /// covering this page. Unanimated: nobody is watching, and the dismissal
     /// reads the tile's rect when it starts.
@@ -299,7 +318,10 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         // page (`applyPendingReveal`). Moving the grid under the thumb at tap
         // time is a jump the viewer is looking straight at.
         pendingRevealPostID = posts[indexPath.item].id
-        onItemTapped?(posts[indexPath.item])
+        onItemTapped?(
+            posts[indexPath.item],
+            posts[indexPath.item...].prefix(Self.streamWindow).map(\.id)
+        )
     }
 }
 
