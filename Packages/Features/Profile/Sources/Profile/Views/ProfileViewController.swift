@@ -721,6 +721,25 @@ final class ProfileViewController: UIViewController {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: attempt)
         }
+        // `-profile-bar-tree`: the navigation bar's real subview tree. The own
+        // profile reports a bar that is in a window, not hidden, at alpha 1, with
+        // items in its arrays — and renders none of them. Only the tree can say
+        // whether UIKit built wrappers for them at all.
+        if arguments.contains("-profile-bar-tree") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) { [weak self] in
+                guard let bar = self?.navigationController?.navigationBar else { return }
+                func walk(_ view: UIView, depth: Int) {
+                    let pad = String(repeating: "  ", count: depth)
+                    print(String(format: "[bar-tree] %@%@ frame=%.0f,%.0f %.0fx%.0f alpha=%.2f hidden=%@ subs=%d",
+                                 pad, String(describing: type(of: view)),
+                                 view.frame.minX, view.frame.minY, view.frame.width, view.frame.height,
+                                 view.alpha, view.isHidden ? "Y" : "N", view.subviews.count))
+                    guard depth < 6 else { return }
+                    for sub in view.subviews { walk(sub, depth: depth + 1) }
+                }
+                walk(bar, depth: 0)
+            }
+        }
         // `-profile-dock`: drives the header all the way to DOCKED, and says so.
         //
         // ⚠️ **A scroll that lands is not a dock.** `-profile-scroll <points>`
@@ -1345,14 +1364,23 @@ final class ProfileViewController: UIViewController {
         // Written through the same "say nothing unless it changed" guard as the
         // trailing items: handing UIKit the identical item mid-transition is
         // what tears a capsule down and rebuilds it empty.
-        // ⚠️ Written as a GROUP, not through `leftBarButtonItem`. The singular
-        // property replaces the whole leading group, which now also carries the
-        // selector — assigning it here dropped the selector off the bar the
-        // first time this ran.
-        let leading = [switcherItem, isBarDocked ? selectorBarItem : nil].compactMap { $0 }
-        if navigationItem.leftBarButtonItems.map({ $0.map(ObjectIdentifier.init) })
-            != leading.map(ObjectIdentifier.init) {
-            navigationItem.leftBarButtonItems = leading
+        // ⚠️ **The switcher rides TRAILING, beside the gear, and the leading
+        // group belongs to the docked selector alone.**
+        //
+        // Measured, docked own profile: with the switcher in the leading group
+        // BOTH leading platters came out 0x44 at the same x while the trailing
+        // gear sat at 46x44 — and with the switcher absent, the selector hosted
+        // correctly. Neither its empty menu (seeded with a placeholder child) nor
+        // the group being rewritten (single write, `isHidden` for visibility)
+        // accounted for it; two leading items are fine elsewhere, since For You
+        // carries a compose glyph beside its selector.
+        //
+        // So the chrome moved rather than the selector: this screen's actions all
+        // live at the trailing end now, which is also the layout every other
+        // surface wears — leading is the selector, trailing is what you can do.
+        if navigationItem.leftBarButtonItems?.isEmpty == false,
+           navigationItem.leftBarButtonItems?.allSatisfy({ $0 !== selectorBarItem }) == true {
+            navigationItem.leftBarButtonItems = [selectorBarItem].compactMap { $0 }
         }
 
         // Relationship action for other users; the gear for own profile (where
@@ -1360,6 +1388,9 @@ final class ProfileViewController: UIViewController {
         var items: [UIBarButtonItem] = []
         if let action { items.append(action) }
         if let settingsItem { items.append(settingsItem) }
+        // The switcher, on the own profile only — see the note above for why it
+        // is not in the leading group.
+        if let switcherItem { items.append(switcherItem) }
         // The load-bearing guard. A pop's `viewWillAppear` resolves to exactly
         // the item set already on the bar, and handing that same set back is
         // what used to tear the capsule down and rebuild it mid-transition.
@@ -1673,16 +1704,14 @@ final class ProfileViewController: UIViewController {
     #endif
 
     private func setSelectorItemPresent(_ present: Bool) {
-        guard let item = selectorBarItem else { return }
-        var leading = navigationItem.leftBarButtonItems ?? []
-        let isPresent = leading.contains { $0 === item }
-        guard present != isPresent else { return }
-        if present {
-            leading.append(item)
-        } else {
-            leading.removeAll { $0 === item }
-        }
-        navigationItem.leftBarButtonItems = leading
+        // ⚠️ `isHidden`, NOT membership. Rewriting `leftBarButtonItems` is what
+        // this screen's own trailing-item guard warns about — handing UIKit a
+        // group again tears the platters down and rebuilds them EMPTY — and the
+        // leading group here is written twice, once per appearance and once per
+        // dock. Measured with both platters at 0x44 while the trailing gear sat
+        // at 46x44, and with the group's other item absent the selector hosted.
+        // Hiding an item leaves the group alone.
+        selectorBarItem?.isHidden = !present
     }
 
     private func placeSelectors() {
