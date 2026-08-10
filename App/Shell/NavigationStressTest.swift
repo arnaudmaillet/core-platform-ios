@@ -32,7 +32,10 @@ final class NavigationStressTest {
     /// Posts to open. Real mock ids, so the destination genuinely loads rather
     /// than short-circuiting on an empty feed.
     private let postIDs = [PostID("post-0000"), PostID("post-0003"), PostID("post-0006")]
-    private let profileID = ProfileID("prof-3")
+    /// How deep each cycle climbs before unwinding. Seven levels of
+    /// feed/profile alternation — enough that a delegate handed back wrong at
+    /// any one of them strands every grab beneath it.
+    private let targetDepth = 7
 
     init(
         tabBarController: UITabBarController,
@@ -92,46 +95,40 @@ final class NavigationStressTest {
     /// the stack holds two different feed presentations with two different
     /// transition owners before it unwinds.
     private func performCycle(_ cycle: Int, tab: AppTab) async {
-        // A real tap first, when the surface offers one: a router push is a
-        // PLAIN push, so a harness built only on routes would never run the
-        // hero — the transition most likely to leave something behind, and the
-        // whole reason this test exists.
         var trail: [String] = ["root"]
-        if let selectable = activeStack()?.topViewController as? any DebugItemSelectable,
-           selectable.debugSelectFirstItem() {
-            await settle(1.6)
-            trail.append("tap→\(depth())")
-        } else {
-            router.route(to: .postStream(postIDs))
-            await settle(1.4)
-            trail.append("route→\(depth())")
+        // Build DEEP, alternating feed and profile, because the failure this
+        // hunts is recursive: each level's dismissal hands the stack's delegate
+        // to the level below, and a chain is only as sound as its worst link.
+        // Two levels proved nothing — the bug that froze the third grab was
+        // invisible at two.
+        let profiles = [ProfileID("prof-3"), ProfileID("prof-5"), ProfileID("prof-7")]
+        var profileIndex = 0
+        while depth() < targetDepth {
+            let before = depth()
+            if let selectable = activeStack()?.topViewController as? any DebugItemSelectable,
+               selectable.debugSelectFirstItem() {
+                await settle(1.6)
+                trail.append("tap→\(depth())")
+            } else {
+                // A feed has no tappable list of its own here, so the next
+                // level is a profile — which is also what a viewer does:
+                // tap the author.
+                router.route(to: .profile(profiles[profileIndex % profiles.count], stub: nil))
+                profileIndex += 1
+                await settle(1.6)
+                trail.append("profile→\(depth())")
+            }
+            // A level that refuses to open ends the climb rather than
+            // spinning: the audit should judge the depth actually reached.
+            if depth() == before {
+                trail.append("STALLED")
+                break
+            }
         }
-        router.route(to: .profile(profileID, stub: nil))
-        await settle(1.6)
-        trail.append("profile→\(depth())")
-        // …and a tap on the PROFILE, which flies through `presentSnapFeedHero`
-        // — a different transition owner from the one above.
-        if let profile = activeStack()?.topViewController as? any DebugItemSelectable,
-           profile.debugSelectFirstItem() {
-            await settle(1.6)
-            trail.append("profileTap→\(depth())")
-        } else {
-            router.route(to: .postStream(Array(postIDs.reversed())))
-            await settle(1.4)
-            trail.append("route2→\(depth())")
-        }
-        print("[nav-stress] \(tab.rawValue) cycle \(cycle) path: \(trail.joined(separator: " "))")
-        // CONSECUTIVE GRABS on every third cycle — the case a programmatic pop
-        // cannot reach. A pop never asks for an interaction controller, so it
-        // cannot notice that the screen beneath was left unable to be grabbed;
-        // only grabbing twice in a row does.
+        print("[nav-stress] \(tab.rawValue) cycle \(cycle) descend: \(trail.joined(separator: " "))")
+        trail = []
         await unwindByGrabbing(tab: tab, trail: &trail)
-        return
     }
-
-    /// The current stack depth, so a cycle can show it actually went somewhere
-    /// — a harness that quietly did nothing reports "clean" just as loudly.
-    private func depth() -> Int { activeStack()?.viewControllers.count ?? 0 }
 
     /// Unwinds the WHOLE stack by grabbing, one level at a time.
     ///
@@ -143,7 +140,7 @@ final class NavigationStressTest {
     /// silently falling back to a pop.
     private func unwindByGrabbing(tab: AppTab, trail: inout [String]) async {
         var step = 0
-        while let stack = activeStack(), stack.viewControllers.count > 1, step < 5 {
+        while let stack = activeStack(), stack.viewControllers.count > 1, step < targetDepth + 2 {
             step += 1
             let before = stack.viewControllers.count
             var owner = stack.delegate.map { String(describing: type(of: $0)) } ?? "nil"
@@ -190,6 +187,10 @@ final class NavigationStressTest {
         guard driven else { return "NOT-DRIVEN(owner=\(owner))→\(after)" }
         return "grab→\(after)"
     }
+
+    /// The current stack depth, so a cycle can show it actually went somewhere
+    /// — a harness that quietly did nothing reports "clean" just as loudly.
+    private func depth() -> Int { activeStack()?.viewControllers.count ?? 0 }
 
     private func activeStack() -> UINavigationController? {
         tabBarController.selectedViewController as? UINavigationController
