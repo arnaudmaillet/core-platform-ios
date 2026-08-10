@@ -169,4 +169,47 @@ struct ProfileSelectorHandoverTests {
         screen.debugSelect(0, onDocked: false)
         #expect(screen.debugSelectedIndices == [0, 0])
     }
+
+    // MARK: - The toolbar button survives a tab change
+
+    /// Under the toolbar placement the source menu button IS the bar item's
+    /// `customView`. The INLINE tray — the other placement's home for that same
+    /// button — wraps it in a glass capsule and adopts it as a subview, so
+    /// merely BUILDING the tray takes it off the toolbar. It is a `lazy var`,
+    /// so touching it is building it, and `adoptTab` touched it on every tab
+    /// change whatever the placement.
+    ///
+    /// What the viewer saw: a full-width blank capsule at the bottom of the
+    /// screen, and only after changing tab — which is why the first tab always
+    /// looked right and the second did not.
+    @Test func theSourceButtonKeepsItsPlaceAfterChangingTab() async {
+        guard let screen = await loadedScreen() else { return }
+        guard let button = screen.toolbarItems?.compactMap(\.customView).last else {
+            Issue.record("the toolbar had no item to lose")
+            return
+        }
+        // Headless, a bar item's custom view has NO superview — nothing has
+        // displayed the toolbar. That is what makes this observable: if the
+        // inline tray gets built it adopts the button into a glass capsule,
+        // and the superview becomes non-nil. Nil here means nobody took it.
+        #expect(button.superview == nil, "something already owns the button")
+
+        screen.selectTab(at: 1)
+
+        #expect(button.superview == nil,
+                "the tab change built the inline tray, which adopted the button off the toolbar")
+        #expect(screen.toolbarItems?.compactMap(\.customView).last === button,
+                "the bar item lost its custom view")
+    }
+
+    /// …and through several changes: the theft happens once, and everything
+    /// after it looks stable while staying broken.
+    @Test func theSourceButtonSurvivesRepeatedTabChanges() async {
+        guard let screen = await loadedScreen() else { return }
+        guard let button = screen.toolbarItems?.compactMap(\.customView).last else { return }
+
+        for index in [1, 2, 0, 1] { screen.selectTab(at: index) }
+
+        #expect(button.superview == nil)
+    }
 }

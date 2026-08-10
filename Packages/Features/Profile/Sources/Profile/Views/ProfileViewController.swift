@@ -609,9 +609,7 @@ final class ProfileViewController: UIViewController {
                 guard let self,
                       let index = tabs.firstIndex(where: { $0.title.lowercased() == wanted })
                 else { return }
-                mirrorSelection(to: index)
-                adoptTab(tabs[index])
-                galleryPager.setActivePage(tabs[index], animated: false)
+                selectTab(at: index)
             }
         }
         // `-profile-swipe-demo <peak>` drives the full-width dismissal the way
@@ -1452,7 +1450,33 @@ final class ProfileViewController: UIViewController {
         if let format = tab.format {
             viewModel.setGalleryFormat(format)
         }
+        // ⚠️ Only the INLINE placement has a tray to hide, and this must not
+        // ask under the toolbar placement — not because the answer is wrong,
+        // but because the question builds it.
+        //
+        // `inlineTrayView` is lazy, and its initialiser wraps
+        // `sourceMenuButton` in a glass capsule and adopts it as a subview.
+        // The button is the toolbar item's `customView`, so building the tray
+        // takes it OFF the toolbar — and under this placement the tray is
+        // never added to the hierarchy, so the button does not reappear
+        // anywhere. What is left is a bar item with an empty custom view: a
+        // full-width blank capsule at the bottom of the screen.
+        //
+        // It only showed after a TAB CHANGE, because that is the only thing
+        // that reaches this line — which is why the first tab looked fine and
+        // the second did not.
+        guard trayPlacement != .navigationToolbar else { return }
         inlineTrayView.isHidden = tab.format == nil
+    }
+
+    /// Selects a tab the way a selector tap does — the shared path behind the
+    /// debug hook and the tests, so neither exercises a shortcut around the
+    /// real one.
+    func selectTab(at index: Int) {
+        guard tabs.indices.contains(index) else { return }
+        mirrorSelection(to: index)
+        adoptTab(tabs[index])
+        galleryPager.setActivePage(tabs[index], animated: false)
     }
 
     /// Puts both selectors on the same segment.
