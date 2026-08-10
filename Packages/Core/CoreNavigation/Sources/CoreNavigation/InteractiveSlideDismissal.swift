@@ -33,6 +33,9 @@ public final class InteractiveSlideDismissal: NSObject {
     /// dormant `ZoomTransitionController`, when a deep link pushes the timeline
     /// above a pin-opened feed) — restored on teardown.
     private weak var savedDelegate: (any UINavigationControllerDelegate)?
+    /// Whether `savedDelegate` holds the delegate from BEFORE this screen —
+    /// as opposed to whatever happened to be installed during a re-assert.
+    private var hasCapturedSavedDelegate = false
 
     /// Non-nil exactly while a swipe drives a pop; the delegate vends the
     /// slide animator (and this driver) only then, so back-button pops and
@@ -76,7 +79,24 @@ public final class InteractiveSlideDismissal: NSObject {
     /// hands the slot back the moment the feed is off the stack.
     public func install(on nav: UINavigationController) {
         guard nav.delegate !== self else { return }
-        savedDelegate = nav.delegate
+        // CAPTURED ONCE, and that distinction is the whole of a three-level
+        // unwind working.
+        //
+        // Owners re-assert this on every appearance, because a child pushed
+        // above them can take the delegate. But a re-assert happens while some
+        // OTHER transition is still holding it — the one that presented the
+        // child, moments from finishing — and capturing that as the delegate
+        // to restore means handing back a controller whose screen is already
+        // gone. Two levels hid it; on the third the restored controller drove
+        // nothing and the grab froze, with the stack's delegate reading as a
+        // perfectly healthy `ZoomTransitionController`.
+        //
+        // The first capture is the one that matters: whoever owned the stack
+        // before this screen existed is who should own it again afterwards.
+        if !hasCapturedSavedDelegate {
+            savedDelegate = nav.delegate
+            hasCapturedSavedDelegate = true
+        }
         nav.delegate = self
         navigationController = nav
     }
@@ -86,6 +106,7 @@ public final class InteractiveSlideDismissal: NSObject {
             nav.delegate = savedDelegate
         }
         savedDelegate = nil
+        hasCapturedSavedDelegate = false
         navigationController = nil
     }
 
