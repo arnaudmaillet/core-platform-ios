@@ -26,14 +26,22 @@ final class NavigationStressTest {
 
     private let tabBarController: UITabBarController
     private let router: any Router
+    /// Selects a tab, so the harness can start a cycle from each of them
+    /// rather than only from whichever one happened to be showing.
+    private let selectTab: @MainActor (AppTab) -> Void
     /// Posts to open. Real mock ids, so the destination genuinely loads rather
     /// than short-circuiting on an empty feed.
     private let postIDs = [PostID("post-0000"), PostID("post-0003"), PostID("post-0006")]
     private let profileID = ProfileID("prof-3")
 
-    init(tabBarController: UITabBarController, router: any Router) {
+    init(
+        tabBarController: UITabBarController,
+        router: any Router,
+        selectTab: @escaping @MainActor (AppTab) -> Void
+    ) {
         self.tabBarController = tabBarController
         self.router = router
+        self.selectTab = selectTab
     }
 
     /// Runs `cycles` round trips and prints an audit after each.
@@ -41,22 +49,38 @@ final class NavigationStressTest {
     /// Sequential and awaited rather than scheduled: the whole point is the
     /// state a COMPLETED trip leaves for the next one, and overlapping trips
     /// would blur which one left what.
-    func run(cycles: Int) async {
-        print("[nav-stress] begin: \(cycles) cycles")
+    /// Every tab gets the same treatment.
+    ///
+    /// Each root reaches the feed by a different route and hides the bottom bar
+    /// on its own terms, so a leak that only one of them produces is invisible
+    /// from any other. The Profile tab in particular is a ROOT profile — the
+    /// case whose dismissal rules differ from a pushed one.
+    func run(cycles: Int, tabs: [AppTab] = AppTab.allCases) async {
+        print("[nav-stress] begin: \(cycles) cycles × \(tabs.count) tabs")
         var failures = 0
-        for cycle in 1...cycles {
-            await performCycle(cycle)
-            let report = audit(cycle: cycle)
-            if report.isClean {
-                print("[nav-stress] cycle \(cycle): clean")
-            } else {
-                failures += 1
-                for problem in report.problems {
-                    print("[nav-stress] cycle \(cycle): PROBLEM \(problem)")
+        var attempted = 0
+        for tab in tabs {
+            selectTab(tab)
+            await settle(1.2)
+            guard activeStack() != nil else {
+                print("[nav-stress] \(tab.rawValue): no stack, skipped")
+                continue
+            }
+            for cycle in 1...cycles {
+                attempted += 1
+                await performCycle(cycle, tab: tab)
+                let report = audit(cycle: cycle)
+                if report.isClean {
+                    print("[nav-stress] \(tab.rawValue) cycle \(cycle): clean")
+                } else {
+                    failures += 1
+                    for problem in report.problems {
+                        print("[nav-stress] \(tab.rawValue) cycle \(cycle): PROBLEM \(problem)")
+                    }
                 }
             }
         }
-        print("[nav-stress] done: \(cycles - failures)/\(cycles) clean")
+        print("[nav-stress] done: \(attempted - failures)/\(attempted) clean")
     }
 
     // MARK: - Driving
@@ -66,7 +90,7 @@ final class NavigationStressTest {
     /// The profile in the middle is the point: it pushes a feed of its own, so
     /// the stack holds two different feed presentations with two different
     /// transition owners before it unwinds.
-    private func performCycle(_ cycle: Int) async {
+    private func performCycle(_ cycle: Int, tab: AppTab) async {
         // A real tap first, when the surface offers one: a router push is a
         // PLAIN push, so a harness built only on routes would never run the
         // hero — the transition most likely to leave something behind, and the
@@ -95,7 +119,7 @@ final class NavigationStressTest {
             await settle(1.4)
             trail.append("route2→\(depth())")
         }
-        print("[nav-stress] cycle \(cycle) path: \(trail.joined(separator: " "))")
+        print("[nav-stress] \(tab.rawValue) cycle \(cycle) path: \(trail.joined(separator: " "))")
         // Home in one move on odd cycles, one pop at a time on even ones: a
         // multi-pop skips every intermediate `viewWillAppear`, which is exactly
         // where bar restoration tends to live.
@@ -182,7 +206,8 @@ final class NavigationStressTest {
         let barPoint = CGPoint(x: tabBarController.tabBar.frame.midX,
                                y: tabBarController.tabBar.frame.midY)
         if let hit = window.hitTest(barPoint, with: nil),
-           !hit.isDescendant(of: tabBarController.tabBar) {
+           !hit.isDescendant(of: tabBarController.tabBar),
+           !isSearchFieldChrome(hit) {
             report.problems.append("tab bar not reachable: \(type(of: hit)) is over it")
         }
 
@@ -208,6 +233,29 @@ final class NavigationStressTest {
         // The bar and the tab bar are legitimate answers too.
         return view.isDescendant(of: stack.navigationBar)
             || view.isDescendant(of: tabBarController.tabBar)
+    }
+
+    /// Whether a view at the bar's centre is the SEARCH TAB's own field.
+    ///
+    /// On the search tab the bottom bar is a search field — `UISearchTab`
+    /// mirrors it there, which is the whole reason a pushed profile hides the
+    /// bar on this app. So a `UISearchBarTextField` answering at the bar's
+    /// midpoint is the bar's content, not something covering it, and flagging
+    /// it made the search tab fail every cycle for being itself.
+    private func isSearchFieldChrome(_ view: UIView) -> Bool {
+        // A TEXT FIELD, not a `UISearchBar` ancestor — iOS 26 puts the tab
+        // bar's search field somewhere that is not inside a `UISearchBar`, so
+        // walking up for one found nothing and the search tab failed every
+        // cycle for being itself. `UISearchBarTextField` is a `UITextField`,
+        // and a text field answering at the bottom bar's centre is only ever
+        // this design.
+        if view is UITextField { return true }
+        var current: UIView? = view
+        while let candidate = current {
+            if candidate is UISearchBar || candidate is UITextField { return true }
+            current = candidate.superview
+        }
+        return false
     }
 
     private func disabledAncestor(of view: UIView) -> UIView? {
