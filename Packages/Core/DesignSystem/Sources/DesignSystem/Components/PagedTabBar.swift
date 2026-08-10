@@ -393,6 +393,25 @@ public final class PagedTabBar: UIControl {
     /// both ends, or the slack lands as margin either side and the segments
     /// never see it. And the bar stops STATING a width, or its intrinsic size
     /// argues with the host's constraint over a number the host owns.
+    /// Renders the bar BARE, for a host that already composites what it holds.
+    ///
+    /// ⚠️ Exists for one host: a `UIBarButtonItem(customView:)`. UIKit gives bar
+    /// items the system's own glass capsule — "bar items get a capsule, the
+    /// title slot gets nothing" — so a bar carrying its own backdrop there is a
+    /// glass lens inside a glass capsule, the arrangement that cost the lens its
+    /// edge entirely (see the type comment). The title slot is the opposite case
+    /// and must keep its backdrop.
+    public var suppressesBackdrop: Bool = false {
+        didSet {
+            guard suppressesBackdrop != oldValue else { return }
+            if suppressesBackdrop {
+                capsule.effect = nil
+            } else {
+                materializeEffects()
+            }
+        }
+    }
+
     public var fillsWidth: Bool = false {
         didSet {
             guard fillsWidth != oldValue, style.hugsContent else { return }
@@ -693,7 +712,7 @@ public final class PagedTabBar: UIControl {
     /// screen stalls the render server on headless CI simulators (the same
     /// rule `ChatInputBar` and `SnapGlassCardView` follow).
     private func materializeEffects() {
-        guard window != nil, style.carriesBackdrop else { return }
+        guard window != nil, style.carriesBackdrop, !suppressesBackdrop else { return }
         if capsule.effect == nil {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-tabbar-shape-trace") {
