@@ -1100,6 +1100,7 @@ final class ForYouViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        sweepAbandonedTransition()
         pager.setAutoplayActive(true)
         #if DEBUG
         scheduleTabAwayIfNeeded()
@@ -1112,6 +1113,17 @@ final class ForYouViewController: UIViewController {
     /// stopping it is precisely the restart the whole handoff exists to
     /// prevent. The stack's top separates the two: on a push it is already the
     /// pushed screen, on a tab switch it is still this one.
+    /// The post has finished covering this screen, so anything that would
+    /// have been a visible jump can happen now.
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        // Deliberately here rather than at `viewWillDisappear`: that fires as
+        // the transition BEGINS, and the grid is visible behind an expanding
+        // hero card for the whole flight. Moving it then is the jump this
+        // avoids — just later in the animation.
+        pager.applyPendingReveal()
+    }
+
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         guard navigationController?.topViewController === self else { return }
@@ -1225,6 +1237,37 @@ final class ForYouViewController: UIViewController {
         tabBarController.tabBar.alpha = 1
         guard tabBarController.isTabBarHidden else { return }
         tabBarController.setTabBarHidden(false, animated: animated)
+    }
+
+    /// Releases a flight that ended by a route it never heard about.
+    ///
+    /// `activeTransition` is the "one flight at a time" latch `openFeed` checks,
+    /// and it is cleared by the flight's own callbacks — `onSourceReturned` and
+    /// `onPresentationCancelled`. Neither fires when the feed leaves the stack
+    /// some other way: a screen pushed ABOVE it that pops to root, or a
+    /// multi-pop that unwinds past it. The latch then stays set forever and
+    /// `openFeed` returns early on every future tap.
+    ///
+    /// What that looks like is not a stuck transition — nothing is animating —
+    /// but a grid that scrolls perfectly and opens nothing, which is why it
+    /// reads as broken selection rather than as navigation state. Found by the
+    /// stress harness: after one round trip through a profile, every later
+    /// cycle's tap left the stack depth unchanged.
+    ///
+    /// Safe in `viewDidAppear` specifically: a flight still in progress has not
+    /// finished appearing, so reaching here with the latch set and this screen
+    /// on top means there is nothing left to finish.
+    private func sweepAbandonedTransition() {
+        guard activeTransition != nil, navigationController?.topViewController === self else {
+            return
+        }
+        navigationController?.delegate = nil
+        activeTransition = nil
+        // The same close-out the callbacks do, for the same reason: whatever
+        // the flight was holding down has to come back up.
+        showTabBar(alpha: 1)
+        restoreChromeAfterTransition()
+        pager.endPlaybackHandoff()
     }
 
     /// Puts the tab bar back, at a given opacity, and settles the layout it
@@ -1669,7 +1712,12 @@ final class ForYouViewController: UIViewController {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: attempt)
                 return
             }
-            openFeed(from: format, at: index)
+            // Through the page's own selection path, so a scripted open runs
+            // the same code a tap does — including the scroll-into-view
+            // bookkeeping that `openFeed` alone would skip.
+            if pager.page(for: format)?.debugSelectItem(at: index) != true {
+                openFeed(from: format, at: index)
+            }
             // `-zoom-repeat`: open, pop, open again (twice over). The hero's
             // stall has only ever been measured on the FIRST push of a
             // process, which cannot distinguish per-push cost from one-time
@@ -1712,3 +1760,13 @@ extension ForYouViewController: ForYouModeMenuProviding {
         makeContextMenu()
     }
 }
+
+#if DEBUG
+extension ForYouViewController: DebugItemSelectable {
+    /// Taps the active page's first item through its own delegate method, so
+    /// the stress harness exercises the hero rather than a router push.
+    func debugSelectFirstItem() -> Bool {
+        pager.page(for: viewModel.format)?.debugSelectItem(at: 0) ?? false
+    }
+}
+#endif

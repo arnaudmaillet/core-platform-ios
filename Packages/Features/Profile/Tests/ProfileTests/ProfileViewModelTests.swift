@@ -519,3 +519,53 @@ private final class Box<T> {
     private(set) var items: [T] = []
     func append(_ item: T) { items.append(item) }
 }
+
+/// A TAPPED TILE OPENS THE FEED, NOT A DEAD END.
+///
+/// The gallery routed `.post`, which is the single-post DETAIL screen: one
+/// post, no neighbours, nothing to swipe to. Everywhere else a tapped tile
+/// expands into the full-screen feed — Maps pins already did — and the profile
+/// was the odd one out.
+///
+/// The surrounding stream is the whole difference, so these check that the
+/// gallery's ORDER travels with the tap and not just the id.
+@MainActor
+struct ProfileGalleryOpensUnifiedFeedTests {
+    private func viewModel(router: SpyRouter) -> ProfileViewModel {
+        ProfileViewModel(
+            repository: StubProfileProvider(.success(sampleProfile())),
+            source: .profile(ProfileID("prof-1")),
+            router: router
+        )
+    }
+
+    @Test func tappingOpensTheFeedSeededFromThatPostOnward() {
+        let router = SpyRouter()
+        let stream = [PostID("p3"), PostID("p4"), PostID("p5")]
+
+        viewModel(router: router).galleryItemTapped(PostID("p3"), stream: stream)
+
+        #expect(router.routes == [.postStream(stream)],
+                "the gallery's order did not travel with the tap")
+    }
+
+    /// The old destination must not come back: `.post` is a detail screen, and
+    /// a tapped tile is not asking for one.
+    @Test func theSinglePostDetailRouteIsNoLongerUsed() {
+        let router = SpyRouter()
+
+        viewModel(router: router).galleryItemTapped(PostID("p1"), stream: [PostID("p1")])
+
+        #expect(router.routes.contains(.post(PostID("p1"))) == false)
+    }
+
+    /// A caller with no ordering still reaches the feed, on that one post —
+    /// degraded, but the same surface rather than the old one.
+    @Test func anOrderlessTapStillOpensTheFeed() {
+        let router = SpyRouter()
+
+        viewModel(router: router).galleryItemTapped(PostID("solo"))
+
+        #expect(router.routes == [.postStream([PostID("solo")])])
+    }
+}

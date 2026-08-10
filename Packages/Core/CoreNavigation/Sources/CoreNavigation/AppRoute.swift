@@ -18,6 +18,16 @@ public enum AppRoute: Equatable, Sendable {
     /// origin knows nothing beyond the id (deep links, debug args).
     case profile(ProfileID, stub: ProfileIdentityStub?)
     case post(PostID)
+    /// A full-screen feed seeded with an ordered run of posts, opened on the
+    /// FIRST of them.
+    ///
+    /// The difference from `.post` is the surrounding stream, and it is the
+    /// whole point: `.post` opens one post's detail screen and stops there,
+    /// while a viewer who taps a tile in a gallery expects to keep swiping
+    /// through what they were looking at. Maps already opened the snap feed
+    /// this way for a pin tap; this gives the same destination a name any
+    /// origin can use.
+    case postStream([PostID])
     /// The post's comments only (no post header/media) — the snap feed already
     /// shows the post full-screen, so its comment button routes here.
     case comments(PostID)

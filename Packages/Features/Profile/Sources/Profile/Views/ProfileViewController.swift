@@ -2,6 +2,8 @@ import MediaCore
 import CoreModels
 import ProfileInterface
 import CoreNavigation
+import FeedInterface
+import MediaPlayback
 import DesignSystem
 import PostGrid
 import UIKit
@@ -52,6 +54,11 @@ final class ProfileViewController: UIViewController {
     private let shareTargeting: (any ProfileShareTargeting)?
     private let headerView: ProfileHeaderView
     private let galleryPager: ProfileGalleryPagerView
+    /// Flies a tapped post into the unified feed. Injected rather than built
+    /// here: the card and the transition belong to the feed feature, and this
+    /// screen only describes where the post is (see `SnapFeedHeroOrigin`).
+    /// Nil leaves every tap on the plain route, which still opens the feed.
+    var feedHero: (([PostID], UIViewController, SnapFeedHeroOrigin) -> Void)?
     /// Which pages this profile has. The viewer's own carries Saved and Liked;
     /// everyone else's does not, because neither pile is anybody else's to see.
     private let tabs: [ProfileTab]
@@ -134,6 +141,15 @@ final class ProfileViewController: UIViewController {
     /// real-width pass), cropping the skeleton to a row and a half.
     private var skeletonViewportFill: NSLayoutConstraint?
     private var didSubordinatePagerToPop = false
+    #if DEBUG
+    /// Launch-argument hooks are one-shot; see `viewDidAppear`.
+    private var hasArmedDebugHooks = false
+    #endif
+    /// Full-width swipe-to-dismiss, live only on the first tab — see
+    /// `ProfileDismissalPolicy`. Held for the screen's lifetime; the gate is
+    /// what changes, not the wiring.
+    private let slideDismissal = InteractiveSlideDismissal()
+    private var didInstallSlideDismissal = false
     #if DEBUG
     /// Latches the `-profile-relationships` QA push to a single firing.
     private var didPushRelationshipsForQA = false
@@ -265,6 +281,7 @@ final class ProfileViewController: UIViewController {
     init(
         viewModel: ProfileViewModel,
         imagePipeline: ImagePipeline,
+        videoPlayback: VideoPlaybackController? = nil,
         shareTargeting: (any ProfileShareTargeting)? = nil,
         onLogout: (() -> Void)?,
         makeEditViewController: ((@escaping () -> Void) -> UIViewController)? = nil,
@@ -288,7 +305,9 @@ final class ProfileViewController: UIViewController {
         headerView = ProfileHeaderView(imagePipeline: imagePipeline)
         let tabs = viewModel.isOwnProfile ? ProfileTab.ownTabs : ProfileTab.publicTabs
         self.tabs = tabs
-        galleryPager = ProfileGalleryPagerView(imagePipeline: imagePipeline, tabs: tabs)
+        galleryPager = ProfileGalleryPagerView(
+            imagePipeline: imagePipeline, tabs: tabs, videoPlayback: videoPlayback
+        )
         inlineBar = PagedTabBar(titles: tabs.map(\.title), style: .navigationTitle)
         dockedBar = PagedTabBar(titles: tabs.map(\.title), style: .navigationTitle)
         super.init(nibName: nil, bundle: nil)
@@ -389,8 +408,40 @@ final class ProfileViewController: UIViewController {
         viewModel.onGalleryChange = { [weak self] snapshot in
             self?.galleryPager.render(snapshot)
         }
-        galleryPager.onItemTapped = { [weak self] post in
-            self?.viewModel.galleryItemTapped(post.id)
+        galleryPager.onItemTapped = { [weak self] post, stream in
+            guard let self else { return }
+            // A hero when this page can say where the post is; the plain route
+            // otherwise (a text row with no media, or a cell scrolled away
+            // between the tap and this call). Both land on the same feed —
+            // only the animation differs, which is the right thing to degrade.
+            guard let feedHero, let space = galleryPager.heroCoordinateSpace,
+                  let geometry = galleryPager.heroGeometry(for: post.id)
+            else {
+                viewModel.galleryItemTapped(post.id, stream: stream)
+                return
+            }
+            let origin = SnapFeedHeroOrigin(
+                post: post,
+                cover: geometry.cover,
+                style: geometry.isTile ? .tile : .listMedia,
+                frame: { [weak self] container in
+                    // Re-measured, not captured: the grid scrolls itself clear
+                    // of the chrome while the post is open, so the rect the
+                    // dismissal flies home to is not the one it left from.
+                    guard let self,
+                          let current = self.galleryPager.heroGeometry(for: post.id)
+                    else { return nil }
+                    return space.convert(current.rect, to: container)
+                },
+                isOnScreen: { [weak self] in
+                    self?.galleryPager.heroGeometry(for: post.id) != nil
+                },
+                setConcealed: { [weak self] concealed in
+                    self?.galleryPager.setHeroConcealed(concealed, for: post.id)
+                },
+                depthView: { [weak self] in self?.galleryPager }
+            )
+            feedHero(stream.isEmpty ? [post.id] : stream, self, origin)
         }
         // Swipe ↔ tabs: a settled swipe adopts the tab and mirrors the
         // selectors; a tab tap records it and pages.
@@ -427,11 +478,29 @@ final class ProfileViewController: UIViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        // Stops as this screen is covered — including by the post it just
+        // opened, whose own player is what should be heard.
+        galleryPager.setAutoplayActive(false)
         concealFilterToolbar()
+    }
+
+    /// The post has finished covering this screen, so the tapped tile can be
+    /// brought clear of the chrome without anyone seeing it move.
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        // Not `viewWillDisappear`: that fires as the transition begins, while
+        // the grid is still visible behind an expanding hero card.
+        galleryPager.applyPendingReveal()
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        #if DEBUG
+        verifyRevealClearsSelector()
+        #endif
+        // Both facts are true only here: the screen owns the display AND its
+        // cells are realized. Reconciling any earlier finds no candidates.
+        galleryPager.setAutoplayActive(true)
         // The pager's horizontal pan yields to the stack's edge-swipe pop:
         // without this, an edge-start drag over the grid PAGES instead of
         // popping (verified in-sim) — the platform contract loses. Mid-surface
@@ -442,7 +511,14 @@ final class ProfileViewController: UIViewController {
             didSubordinatePagerToPop = true
             galleryPager.horizontalPan.require(toFail: pop)
         }
+        installSlideDismissalIfNeeded()
         #if DEBUG
+        // ARMED ONCE. `viewDidAppear` runs again when a pushed post is dismissed,
+        // and re-running these drove a second scroll on top of the background
+        // reveal, undoing it moments before any check could look. Every "the
+        // reveal was reverted" reading traced back to here, not to the product.
+        defer { hasArmedDebugHooks = true }
+        if hasArmedDebugHooks { return }
         // Dev convenience: `-profile-overscroll` parks the scroll view in the
         // pulled-down region (no touch injection in the sim), so the banner's
         // stretch-over-overscroll behavior can be screenshotted.
@@ -534,6 +610,76 @@ final class ProfileViewController: UIViewController {
                 }
             }
             attempt(30)
+        }
+        // `-profile-tab <activity|gallery|short|saved|liked>` selects a tab.
+        // The choice PERSISTS across launches, so without this a scripted run
+        // inherits whatever the last one left — which is how a video-autoplay
+        // check ended up on the text-only page.
+        if let position = arguments.firstIndex(of: "-profile-tab"),
+           position + 1 < arguments.count {
+            let wanted = arguments[position + 1]
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                guard let self,
+                      let index = tabs.firstIndex(where: { $0.title.lowercased() == wanted })
+                else { return }
+                selectTab(at: index)
+            }
+        }
+        // `-profile-swipe-demo <peak>` drives the full-width dismissal the way
+        // a finger would. The simulator injects no touches, and the gate this
+        // exercises — whole surface on the first tab, edge only after it — is
+        // otherwise only observable with a thumb.
+        if let position = arguments.firstIndex(of: "-profile-swipe-demo"),
+           position + 1 < arguments.count, let peak = Double(arguments[position + 1]) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                guard let self else { return }
+                let allowed = ProfileDismissalPolicy.allowsFullWidthDismissal(
+                    activeIndex: galleryPager.activePageIndex,
+                    isPushed: navigationController?.viewControllers.first !== self
+                )
+                print("[profile-swipe] tab=\(galleryPager.activePageIndex) fullWidthAllowed=\(allowed)")
+                Task { @MainActor [slideDismissal] in
+                    await slideDismissal.debugPerformSwipe(peakProgress: CGFloat(peak))
+                }
+            }
+        }
+        // `-profile-scroll <points>` scrolls the active page before anything
+        // else, so a tile can be driven while it is tucked UNDER the header —
+        // at rest nothing is, since the content starts below it, and that is
+        // the only state the header-alignment bug appears in.
+        if let position = arguments.firstIndex(of: "-profile-scroll"),
+           position + 1 < arguments.count, let points = Double(arguments[position + 1]) {
+            var attempts = 0
+            func attempt() {
+                attempts += 1
+                // Polls: a fixed delay clamps to the top while the page is still
+                // loading and the run then tests a tile at rest, which is the
+                // one state the alignment bug cannot appear in.
+                if galleryPager.debugSetVerticalOffset(CGFloat(points)) { return }
+                if attempts < 60 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: attempt)
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: attempt)
+        }
+        // `-profile-open-post <index>` taps a gallery tile once the gallery has
+        // content. The sim injects no touches, and a tile tap is the only way
+        // to reach either the open destination or the background reveal.
+        if let position = arguments.firstIndex(of: "-profile-open-post"),
+           position + 1 < arguments.count,
+           let index = Int(arguments[position + 1]) {
+            var attempts = 0
+            func attempt() {
+                attempts += 1
+                // Polls rather than firing on a fixed delay: the gallery's
+                // first page has to land, and a fixed delay silently no-ops
+                // under `-mock-latency`.
+                if galleryPager.debugSelectItem(at: index) { return }
+                if attempts < 60 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: attempt)
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: attempt)
         }
         // Dev convenience: `-profile-share-demo [activity]` opens the QR share sheet once
         // the profile has loaded — the sheet is behind a tap on the header's
@@ -638,6 +784,7 @@ final class ProfileViewController: UIViewController {
         // starts below it rather than behind it. Applied here because the
         // header's height is only known once it has laid out.
         galleryPager.setContentTopInset(headerHeight)
+        galleryPager.setStickyTopOcclusion(stickyTopOcclusion)
         // Every tab must be able to absorb the header's whole travel, or a
         // short one cannot hold the position a long one was left at and the
         // header follows the clamp back up. See `setMinimumScrollTravel`.
@@ -1296,6 +1443,46 @@ final class ProfileViewController: UIViewController {
         galleryPager.setActivePage(tab, animated: true)
     }
 
+    /// Arms the full-width dismissal, once, and only for a PUSHED profile.
+    ///
+    /// The gate is asked per gesture rather than re-installed per tab: a
+    /// recognizer added and removed as the viewer pages is one that will
+    /// eventually be missing when a thumb arrives.
+    ///
+    /// Ordering the pager behind it is safe on every tab precisely because
+    /// the gate decides. Past the first tab the dismissal pan never begins,
+    /// fails immediately, and the pager pages exactly as it always did.
+    private func installSlideDismissalIfNeeded() {
+        guard let nav = navigationController, nav.viewControllers.first !== self else { return }
+        // RE-ASSERTED on every appearance, not installed once.
+        //
+        // A child pushed above this screen may take the stack's delegate for
+        // its own transition and hand back something else — nil, historically
+        // — which leaves this object installed in its own view but no longer
+        // consulted. The pan still begins and still pops; UIKit just never
+        // asks for the interaction controller, so the page jumps instead of
+        // following the finger, and nothing ever repairs it.
+        //
+        // Re-installing costs nothing when it is already the delegate
+        // (`install` returns early) and is the difference between a screen
+        // that recovers by itself and one that stays broken for its lifetime.
+        if !didInstallSlideDismissal {
+            didInstallSlideDismissal = true
+            slideDismissal.canBeginDismissal = { [weak self] in
+                guard let self, let nav = navigationController else { return false }
+                return ProfileDismissalPolicy.allowsFullWidthDismissal(
+                    activeIndex: galleryPager.activePageIndex,
+                    isPushed: nav.viewControllers.first !== self
+                )
+            }
+            slideDismissal.attach(to: self)
+            if let pan = slideDismissal.dismissalPan {
+                galleryPager.horizontalPan.require(toFail: pan)
+            }
+        }
+        slideDismissal.install(on: nav)
+    }
+
     /// Records the choice and re-dresses the screen around it.
     ///
     /// ⚠️ Only a FORMAT page is a filter preference. Saved and Liked are
@@ -1308,7 +1495,33 @@ final class ProfileViewController: UIViewController {
         if let format = tab.format {
             viewModel.setGalleryFormat(format)
         }
+        // ⚠️ Only the INLINE placement has a tray to hide, and this must not
+        // ask under the toolbar placement — not because the answer is wrong,
+        // but because the question builds it.
+        //
+        // `inlineTrayView` is lazy, and its initialiser wraps
+        // `sourceMenuButton` in a glass capsule and adopts it as a subview.
+        // The button is the toolbar item's `customView`, so building the tray
+        // takes it OFF the toolbar — and under this placement the tray is
+        // never added to the hierarchy, so the button does not reappear
+        // anywhere. What is left is a bar item with an empty custom view: a
+        // full-width blank capsule at the bottom of the screen.
+        //
+        // It only showed after a TAB CHANGE, because that is the only thing
+        // that reaches this line — which is why the first tab looked fine and
+        // the second did not.
+        guard trayPlacement != .navigationToolbar else { return }
         inlineTrayView.isHidden = tab.format == nil
+    }
+
+    /// Selects a tab the way a selector tap does — the shared path behind the
+    /// debug hook and the tests, so neither exercises a shortcut around the
+    /// real one.
+    func selectTab(at index: Int) {
+        guard tabs.indices.contains(index) else { return }
+        mirrorSelection(to: index)
+        adoptTab(tabs[index])
+        galleryPager.setActivePage(tabs[index], animated: false)
     }
 
     /// Puts both selectors on the same segment.
@@ -1376,6 +1589,52 @@ final class ProfileViewController: UIViewController {
         // viewWillDisappear.
         toolbarItems = [.flexibleSpace(), UIBarButtonItem(customView: sourceMenuButton)]
     }
+
+    /// What content actually passes under at the top.
+    ///
+    /// `safeAreaInsets.top` and nothing else. It already reaches the bottom of
+    /// the navigation bar, and the docked selector rides INSIDE that bar — so
+    /// adding `selectorSlotHeight` counted the selector a second time and parked
+    /// every revealed card 60pt further down, leaving a blank band between the
+    /// header and the card. The reveal's own 12pt padding is the only gap.
+    ///
+    /// Assembled rather than read off `dockedBar`'s frame: that bar is
+    /// transiently out of any window during a push, so measuring it made the
+    /// occlusion flip between values between reveals.
+    private var stickyTopOcclusion: CGFloat {
+        view.safeAreaInsets.top
+    }
+
+    #if DEBUG
+    /// `-profile-verify-reveal`: does the revealed tile clear the selector, in
+    /// the settled state, measured against the selector's own frame?
+    ///
+    /// Independent of `chromeOcclusion` on purpose. The reveal log derived its
+    /// "gap" from the very inset the reveal had just applied, so it read clean
+    /// whatever the tile did — including while the tile sat under the selector.
+    private func verifyRevealClearsSelector() {
+        guard ProcessInfo.processInfo.arguments.contains("-profile-verify-reveal") else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self, let window = view.window else { return }
+            guard let tile = galleryPager.debugRevealedTileInWindow() else {
+                print("[verify-reveal] no revealed tile"); return
+            }
+            let bar = isBarDocked ? dockedBar : inlineBar
+            let selector = bar.window == nil ? .zero : bar.convert(bar.bounds, to: window)
+            let navBar = navigationController?.navigationBar
+            let nav = navBar?.window == nil ? CGRect.zero
+                : navBar!.convert(navBar!.bounds, to: window)
+            let chromeBottom = max(selector.maxY, nav.maxY)
+            print(String(format:
+                "[verify-reveal] tileTop=%.0f selector=%.0f…%.0f navBottom=%.0f "
+                + "chromeBottom=%.0f clearance=%.0f docked=%@ %@",
+                tile.minY, selector.minY, selector.maxY, nav.maxY,
+                chromeBottom, tile.minY - chromeBottom,
+                isBarDocked ? "Y" : "N",
+                tile.minY >= chromeBottom ? "CLEAR" : "COVERED"))
+        }
+    }
+    #endif
 
     /// The height the header takes when nothing is scrolled — what the pages
     /// are inset by so their content starts below it rather than behind it.
@@ -1768,3 +2027,26 @@ final class ProfileViewController: UIViewController {
         }
     }
 }
+
+#if DEBUG
+extension ProfileViewController: DebugItemSelectable {
+    /// Taps the active gallery page's first tile through its own delegate
+    /// method — the path that builds a hero origin and flies.
+    func debugSelectFirstItem() -> Bool {
+        galleryPager.debugSelectItem(at: 0)
+    }
+}
+#endif
+
+#if DEBUG
+extension ProfileViewController: DebugInteractivelyDismissible {
+    /// Grabs this screen the way a finger would, through the same recogniser
+    /// path — including its own tab gate, so a refusal here is a real refusal.
+    func debugDismissInteractively() async -> Bool {
+        guard slideDismissal.canBeginDismissal?() != false else { return false }
+        // The RETURN VALUE matters: it reports whether the pop was driven by
+        // the gesture, not merely that it happened.
+        return await slideDismissal.debugPerformSwipe(peakProgress: 0.7)
+    }
+}
+#endif

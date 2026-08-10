@@ -1,5 +1,7 @@
+import CoreModels
 import DesignSystem
 import MediaCore
+import MediaPlayback
 import PostGrid
 import UIKit
 
@@ -27,11 +29,20 @@ final class ProfileGalleryGridView: UIView {
         case list
     }
 
-    var onItemTapped: ((GalleryPost) -> Void)?
+    /// The tapped post, plus the ordered run of posts FROM it — what the
+    /// full-screen feed is seeded with, so the viewer can keep swiping through
+    /// the gallery they were looking at instead of landing on one post alone.
+    var onItemTapped: ((GalleryPost, _ stream: [PostID]) -> Void)?
+    /// How many posts to hand the feed. Enough to swipe through without
+    /// serialising an entire gallery into a route.
+    private static let streamWindow = 30
     /// This page's vertical offset, every tick — the header rides the active
     /// page's.
     var onVerticalScroll: ((CGFloat) -> Void)?
     var onPullToRefresh: (() -> Void)?
+    /// The post to bring clear of the chrome once this page is out of sight.
+    /// An ID, not an index: the corpus can change while the post is open.
+    private var pendingRevealPostID: PostID?
     /// Fired when a drag ends, with how far the page was pulled past its top.
     var onPullReleased: ((CGFloat) -> Void)?
 
@@ -45,6 +56,41 @@ final class ProfileGalleryGridView: UIView {
     private let imagePipeline: ImagePipeline
     private let style: Style
     private var posts: [GalleryPost] = []
+    /// Autoplay for this page's video media. Absent only where the host
+    /// supplied no player pool.
+    private let playback: GridVideoPlaybackCoordinator?
+    /// The post whose twin is in the air: it must not claim a player while the
+    /// flight is carrying that same media.
+    private var heroFlyingPostID: PostID?
+    /// The chrome that remains over this page's content once the header has
+    /// travelled — told by the owner, which is the only thing that knows.
+    private var stickyTopOcclusion: CGFloat = 0
+
+    /// The page's live vertical offset, for harness polling.
+    var currentVerticalOffset: CGFloat { collectionView.contentOffset.y }
+
+    #if DEBUG
+    /// The post the last reveal aligned, for the settled-state check.
+    private(set) var debugLastRevealedPostID: PostID?
+
+    /// Where that post's cell actually is on screen, once everything has settled.
+    ///
+    /// The reveal's own log runs from `viewDidDisappear`, where this view has no
+    /// window and no conversion is possible — it reported `nan` and confirmed
+    /// nothing. Asked again after the profile is back, this is the number the
+    /// user is looking at.
+    func debugRevealedTileInWindow() -> CGRect? {
+        guard let id = debugLastRevealedPostID,
+              let index = posts.firstIndex(where: { $0.id == id }),
+              let window,
+              let attributes = collectionView.layoutAttributesForItem(
+                  at: IndexPath(item: index, section: 0)
+              )
+        else { return nil }
+        return collectionView.convert(attributes.frame, to: window)
+    }
+
+    #endif
     /// While a fetch is in flight the page renders shimmering placeholder
     /// cells through its own (real) layout, so the loading state already has
     /// the shape the content will hydrate into. Read by the pager to keep its
@@ -77,10 +123,22 @@ final class ProfileGalleryGridView: UIView {
     private let emptyStateView = EmptyStateView()
     private let tab: ProfileTab
 
-    init(imagePipeline: ImagePipeline, style: Style, tab: ProfileTab) {
+    init(
+        imagePipeline: ImagePipeline,
+        style: Style,
+        tab: ProfileTab,
+        videoPlayback: VideoPlaybackController? = nil
+    ) {
         self.imagePipeline = imagePipeline
         self.style = style
         self.tab = tab
+        // The SAME coordinator the For You surfaces use, on the same terms:
+        // candidates ranked by distance from the viewport centre, the nearest
+        // N kept. Six for a mosaic, five for a timeline — a column fits fewer
+        // previews on screen, so the sixth slot would go to a row outside it.
+        playback = videoPlayback.map {
+            GridVideoPlaybackCoordinator(pool: $0, maxConcurrent: style == .grid ? 6 : 5)
+        }
         collectionView = UICollectionView(
             frame: .zero,
             collectionViewLayout: style == .grid ? PostGridMosaic.layout() : PostGridListLayout.layout()
@@ -219,6 +277,22 @@ final class ProfileGalleryGridView: UIView {
         let reload = {
             self.collectionView.reloadData()
             self.collectionView.invalidateIntrinsicContentSize()
+            // Content landing is a reconcile trigger, and on a page nobody
+            // scrolls it is very nearly the only one.
+            //
+            // The layout pass is the load-bearing half. `reloadData` only
+            // marks the items dirty — the cells are built on the next layout —
+            // and the reconcile asks `cellForItem(at:)`, which answers nil
+            // until then. So a plain hop found no candidates, and nothing came
+            // back to ask again: the surface had already gone active before
+            // the posts arrived, a page nobody scrolls emits no scroll, and
+            // `onCoverLoaded` never fires on a warm cache because `configure`
+            // takes the cached image and returns. Zero starts, no error.
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                collectionView.layoutIfNeeded()
+                reconcileAutoplay()
+            }
         }
         if dissolving {
             // The block runs with implicit animations disabled (stock
@@ -265,19 +339,298 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
                 withReuseIdentifier: PostGridListRowCell.reuseID, for: indexPath
             ) as! PostGridListRowCell
             cell.configure(with: post, imagePipeline: imagePipeline)
+            // Autoplay is gated on the cover, so a cover arriving is the only
+            // event that can re-open the gate for an item that came up
+            // faceless while the page sat still.
+            cell.onCoverLoaded = { [weak self] in self?.reconcileAutoplay() }
             return cell
         case .grid:
             let cell = collectionView.dequeueReusableCell(
                 withReuseIdentifier: PostGridTileCell.reuseID, for: indexPath
             ) as! PostGridTileCell
             cell.configure(with: post, imagePipeline: imagePipeline)
+            cell.onCoverLoaded = { [weak self] in self?.reconcileAutoplay() }
             return cell
         }
     }
 
+    // MARK: - Autoplay
+
+    /// The part of this page a viewer can actually see.
+    ///
+    /// NOT `bounds.inset(by: adjustedContentInset)`, which is what the For You
+    /// pages use and what this used at first. There both insets are floating
+    /// chrome — a nav bar and a tab bar that sit OVER the content — so
+    /// removing them leaves what is visible. Here the top inset is the profile
+    /// HEADER's reserved space: the header is above the content and scrolls
+    /// away with it, so nothing is hidden behind it and subtracting it removes
+    /// the page.
+    ///
+    /// Measured: a 556pt top inset on a 956pt page left a band 108pt tall, and
+    /// every item's media fell outside it. Nothing ever played, and the gate
+    /// reported no candidates rather than an error.
+    ///
+    /// The bottom inset IS chrome — the filter tray and the tab bar float over
+    /// the last rows — so that half is still removed.
+    /// What actually covers this page's content, top and bottom — see
+    /// `visibleBand`. Shared with the scroll-into-view reveal so the two agree
+    /// about where the viewer can see.
+    private var chromeOcclusion: UIEdgeInsets {
+        var occlusion = collectionView.verticalScrollIndicatorInsets
+        occlusion.left = 0
+        occlusion.right = 0
+        // ⚠️ The TOP indicator inset is not occlusion on this page either.
+        // `setContentTopInset` sets it to the header's full reserved height,
+        // and that space is where content BEGINS, not where it hides: the
+        // header floats above the content and scrolls away with it, so the only
+        // thing content ever passes under is the part that STAYS — the docked
+        // selector and the status bar.
+        //
+        // Using the reserved height judged every item in the first ~557pt as
+        // hidden, so revealing one scrolled the page to the very top. Measured:
+        // offset -116 → -557 for a tile that was plainly on screen, which is
+        // the whole of the "dismissing resets my scroll position" report.
+        occlusion.top = stickyTopOcclusion
+        return occlusion
+    }
+
+    func setStickyTopOcclusion(_ height: CGFloat) {
+        stickyTopOcclusion = height
+    }
+
+    private var visibleBand: CGRect {
+        // The SCROLL INDICATOR insets, which is the one number on this page
+        // that means "where the visible area ends". The content insets do not:
+        // the top one is the header's reserved space (it scrolls away, it
+        // hides nothing) and the bottom one is inflated by `applyBottomInset`
+        // so a short page can still travel. Between them they described a band
+        // 108pt tall on a 956pt page, and every item's media fell outside it.
+        collectionView.bounds.inset(by: chromeOcclusion)
+    }
+
+    /// Minimum fraction of an item's MEDIA that must be inside the visible
+    /// band before it may play. An item creeping in at the edge is not
+    /// something the viewer is looking at.
+    private static let minimumVisibleFraction: CGFloat = 0.5
+
+    /// Reconciles playback against what is on screen now. Cheap and
+    /// idempotent; call it whenever the visible set can have changed.
+    ///
+    /// The same rules the For You pages apply, because it is the same
+    /// coordinator: measured against the MEDIA rather than the cell (a row is
+    /// mostly caption, so a card half on screen can have no preview showing),
+    /// gated on the item having a cover to sit behind the surface, and never
+    /// starting the post a flight is currently carrying.
+    func reconcileAutoplay(allowingStarts: Bool = true) {
+        guard let playback else { return }
+        let viewport = visibleBand
+        let centreY = viewport.midY
+        let candidates = collectionView.indexPathsForVisibleItems.compactMap {
+            indexPath -> GridVideoPlaybackCoordinator.Candidate? in
+            guard !showsSkeleton, posts.indices.contains(indexPath.item) else { return nil }
+            let post = posts[indexPath.item]
+            // Square video stays still in a MOSAIC and plays in a timeline row,
+            // for the reason `hasPlayableVideo` records — the same split the
+            // For You pages make.
+            let playsHere = style == .grid ? post.autoplaysInGrid : post.hasPlayableVideo
+            guard playsHere, let url = post.videoURL,
+                  post.id != heroFlyingPostID,
+                  let cell = collectionView.cellForItem(at: indexPath) as? any GridPlaybackCell,
+                  hasCover(for: post, in: cell)
+            else { return nil }
+
+            let frame = cell.convert(cell.videoMediaRect, to: collectionView)
+            let visible = frame.intersection(viewport)
+            guard !visible.isNull, frame.height > 0,
+                  (visible.height * visible.width) / (frame.height * frame.width)
+                      >= Self.minimumVisibleFraction
+            else { return nil }
+
+            return .init(
+                id: post.id, url: url, cell: cell,
+                distanceFromCentre: abs(frame.midY - centreY)
+            )
+        }
+        playback.update(candidates: candidates, allowingStarts: allowingStarts)
+        #if DEBUG
+        // `-grid-playback-log`: why the gate answered what it did. An empty
+        // candidate list has half a dozen possible causes and they all look
+        // identical from outside.
+        if ProcessInfo.processInfo.arguments.contains("-grid-playback-log"), candidates.isEmpty {
+            let visible = collectionView.indexPathsForVisibleItems
+            let videos = posts.filter(\.hasPlayableVideo).count
+            let realized = visible.filter { collectionView.cellForItem(at: $0) != nil }.count
+            print("[profile-autoplay] none: posts=\(posts.count) videos=\(videos) "
+                  + "skeleton=\(showsSkeleton) visible=\(visible.count) realized=\(realized) "
+                  + "style=\(style == .grid ? "grid" : "list") "
+                  + "viewport=\(Int(viewport.minY))…\(Int(viewport.maxY)) "
+                  + "inset=\(Int(collectionView.adjustedContentInset.top))/"
+                  + "\(Int(collectionView.adjustedContentInset.bottom))")
+            for indexPath in visible where posts.indices.contains(indexPath.item) {
+                let post = posts[indexPath.item]
+                guard post.hasPlayableVideo else { continue }
+                let cell = collectionView.cellForItem(at: indexPath) as? any GridPlaybackCell
+                let frame = cell.map { $0.convert($0.videoMediaRect, to: collectionView) } ?? .zero
+                let overlap = frame.intersection(viewport)
+                let fraction = frame.height > 0 && !overlap.isNull
+                    ? (overlap.height * overlap.width) / (frame.height * frame.width) : 0
+                print("[profile-autoplay]   \(post.id.rawValue) shape=\(post.shape) "
+                      + "playsHere=\(style == .grid ? post.autoplaysInGrid : post.hasPlayableVideo) "
+                      + "cover=\(cell?.renderedCover == nil ? "NIL" : "set") "
+                      + "media=\(Int(frame.minY))…\(Int(frame.maxY)) frac=\(String(format: "%.2f", fraction))")
+            }
+        }
+        #endif
+    }
+
+    /// Whether an item has something to show behind its video surface. A
+    /// surface with no cover draws black until the first frame decodes.
+    private func hasCover(for post: GalleryPost, in cell: any GridPlaybackCell) -> Bool {
+        guard let thumbnail = post.thumbnailURL else { return true }
+        if cell.renderedCover != nil { return true }
+        guard let cached = imagePipeline.cachedImage(for: thumbnail) else { return false }
+        cell.applyCover(cached)
+        return true
+    }
+
+    /// Tab frontmost and this page active, or not. Mirrors the pager's gate on
+    /// For You: only the page being read may hold pool slots.
+    func setAutoplayActive(_ active: Bool) {
+        playback?.setSurfaceVisible(active)
+        guard active else { return }
+        // Same reason as the reload above: this can arrive with content
+        // already applied but not yet laid out — a tab becoming active, or a
+        // profile re-appearing — and an unrealised cell is not a candidate.
+        collectionView.layoutIfNeeded()
+        reconcileAutoplay()
+    }
+
+    /// Where a post's media sits on screen, and what it is showing — the two
+    /// facts a hero flight needs from this page.
+    ///
+    /// Returns nil when the post has no realized cell (scrolled away) or no
+    /// media to fly, which is the same rule the For You grid applies.
+    func heroGeometry(for postID: PostID) -> (rect: CGRect, cover: UIImage?, isTile: Bool)? {
+        guard let index = posts.firstIndex(where: { $0.id == postID }),
+              let cell = collectionView.cellForItem(at: IndexPath(item: index, section: 0))
+        else { return nil }
+        // The MEDIA's rect, which a text row does not have — and that absence
+        // is the whole of its transition policy, exactly as on For You. A row
+        // is a card of which the media is one part, so `mediaHeroRect` answers
+        // nil when there is no part to fly; a tile IS its media.
+        //
+        // Deliberately not `videoMediaRect`: that falls back to the cell's
+        // bounds so the autoplay gate always has something to measure, which
+        // would fly a text row's whole card. Different question, different
+        // rect.
+        let rect: CGRect? = switch cell {
+        case let tile as PostGridTileCell: tile.bounds
+        case let row as PostGridListRowCell: row.mediaHeroRect
+        default: nil
+        }
+        guard let rect, rect != .zero else { return nil }
+        return (
+            rect: cell.convert(rect, to: collectionView),
+            cover: (cell as? any GridPlaybackCell)?.renderedCover,
+            isTile: cell is PostGridTileCell
+        )
+    }
+
+    /// Hides just what the flight is carrying: a tile goes whole, a row loses
+    /// only its preview. Same invariant the For You grid keeps.
+    func setHeroConcealed(_ concealed: Bool, for postID: PostID) {
+        heroFlyingPostID = concealed ? postID : nil
+        if !concealed { reconcileAutoplay() }
+        guard let index = posts.firstIndex(where: { $0.id == postID }),
+              let cell = collectionView.cellForItem(at: IndexPath(item: index, section: 0))
+        else { return }
+        if let row = cell as? PostGridListRowCell {
+            row.setHeroMediaConcealed(concealed)
+        } else {
+            cell.isHidden = concealed
+        }
+    }
+
+    /// The scroll view the hero measures against, so the caller can convert.
+    var heroCoordinateSpace: UICoordinateSpace { collectionView }
+
+    #if DEBUG
+    /// Drives the page's real selection path, the one a finger reaches.
+    ///
+    /// Without it nothing scripted can tap a tile — and the profile's open
+    /// destination and its background reveal are both things only a tap
+    /// exercises. Same reason `ForYouGridPage` grew one.
+    func debugSelectItem(at index: Int) -> Bool {
+        guard posts.indices.contains(index) else { return false }
+        collectionView(collectionView, didSelectItemAt: IndexPath(item: index, section: 0))
+        return true
+    }
+    #endif
+
+    /// Brings the last-tapped tile clear of the chrome, now that the post is
+    /// covering this page. Unanimated: nobody is watching, and the dismissal
+    /// reads the tile's rect when it starts.
+    func applyPendingReveal() {
+        guard let id = pendingRevealPostID else { return }
+        pendingRevealPostID = nil
+        #if DEBUG
+        debugLastRevealedPostID = id
+        #endif
+        guard let index = posts.firstIndex(where: { $0.id == id }) else { return }
+        let rect = collectionView.layoutAttributesForItem(at: IndexPath(item: index, section: 0))?.frame
+        #if DEBUG
+        let offsetBefore = collectionView.contentOffset.y
+        #endif
+        ScrollIntoView.revealImmediately(
+            rect,
+            in: collectionView,
+            // The SAME occlusion the autoplay gate uses, and for the same
+            // reason: this page's content insets are layout, not chrome. Handing
+            // over `adjustedContentInset` put a tile tucked under the header
+            // down at the footer instead of just below the header.
+            occlusion: chromeOcclusion
+        )
+        #if DEBUG
+        // `-profile-reveal-log`: which edge the tile was aligned against, and
+        // where it ended up. The bug this proves absent aligned a tile tucked
+        // under the TOP header against the BOTTOM one, and a screenshot after
+        // the fact cannot say which edge the arithmetic chose.
+        if ProcessInfo.processInfo.arguments.contains("-profile-reveal-log"), let rect {
+            let after = collectionView.contentOffset.y
+            let cover = chromeOcclusion
+            let topGap = rect.minY - after - cover.top
+            let bottomGap = (after + collectionView.bounds.height - cover.bottom) - rect.maxY
+            print(String(format:
+                "[profile-reveal] tile=%.0f…%.0f offset %.0f→%.0f cover=%.0f/%.0f "
+                + "gapBelowSelector=%.0f gapAboveFooter=%.0f",
+                rect.minY, rect.maxY, offsetBefore, after,
+                cover.top, cover.bottom, topGap, bottomGap))
+        }
+        #endif
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        didEndDisplaying cell: UICollectionViewCell,
+        forItemAt indexPath: IndexPath
+    ) {
+        // A cell that left must hand its player back whatever the scroll is
+        // doing, or the pool starves.
+        guard let playable = cell as? any GridPlaybackCell else { return }
+        playback?.stop(cell: playable)
+    }
+
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        guard !showsSkeleton else { return }
-        onItemTapped?(posts[indexPath.item])
+        guard !showsSkeleton, posts.indices.contains(indexPath.item) else { return }
+        // Same contract as the For You grids: the flight leaves from where
+        // the tile IS, and the reveal waits until the post has covered this
+        // page (`applyPendingReveal`). Moving the grid under the thumb at tap
+        // time is a jump the viewer is looking straight at.
+        pendingRevealPostID = posts[indexPath.item].id
+        onItemTapped?(
+            posts[indexPath.item],
+            posts[indexPath.item...].prefix(Self.streamWindow).map(\.id)
+        )
     }
 }
 
@@ -308,6 +661,18 @@ extension ProfileGalleryGridView {
     /// they are keeping a page in step with something else and an animation
     /// there is a page arriving late.
     func setVerticalOffset(_ offset: CGFloat, animated: Bool) {
+        #if DEBUG
+        // `-profile-offset-trace`: names whoever moves a page. The reveal writes
+        // an offset while this screen is covered and something puts it back
+        // before the viewer sees it; the reveal's own log reports what it SET,
+        // never what survived, so only the caller list can say who.
+        if ProcessInfo.processInfo.arguments.contains("-profile-offset-trace") {
+            let callers = Thread.callStackSymbols.dropFirst().prefix(7)
+                .filter { $0.contains("Profile") }
+                .map { $0.split(separator: " ").dropFirst(3).prefix(6).joined(separator: " ") }
+            print("[offset-trace] → \(Int(offset)) via \(callers.joined(separator: " ← "))")
+        }
+        #endif
         // ⚠️ **Make room BEFORE asking the page to travel.** The room a page
         // needs is computed from its content size, and on a tab switch the page
         // being handed the offset may not have laid out since its content
@@ -405,12 +770,30 @@ extension ProfileGalleryGridView: UIScrollViewDelegate {
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         positionStatusLabel()
         onVerticalScroll?(verticalOffset)
+        // Reconciles DURING the scroll, so an item starts as it slides into
+        // view rather than after the scroll has stopped. Stops always run;
+        // starts are held off above the fling speed, where anything started is
+        // gone before its first frame.
+        reconcileAutoplay(allowingStarts: abs(scrollView.panGestureRecognizer
+            .velocity(in: scrollView).y) <= Self.maximumStartVelocity)
+    }
+
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        reconcileAutoplay()
+    }
+
+    func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        reconcileAutoplay()
     }
 
     /// The finger left the glass. Reports how far past the top the page was
     /// when it did, which is what decides whether a refresh was asked for —
     /// the threshold belongs to the indicator, not to this page.
+    /// Above this, a scroll is a fling and nothing new should start.
+    private static let maximumStartVelocity: CGFloat = 2200
+
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        if !decelerate { reconcileAutoplay() }
         onPullReleased?(max(0, -verticalOffset))
     }
 }

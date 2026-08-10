@@ -96,6 +96,20 @@ public protocol FeedFeatureBuilding {
     /// cell lifecycle); only the data source differs. The returned VC conforms
     /// to `ZoomTransitionDestination` so a hero transition can drive it.
     func makeSnapFeedViewController(postIDs: [PostID]) -> UIViewController
+    /// Pushes that same feed onto `presenter`'s stack with a HERO flight from
+    /// `origin`, instead of a standard slide.
+    ///
+    /// Here rather than in each feature because the flying card is the feed's
+    /// own view and the transition is wired to it. A caller describes where the
+    /// post is on screen (`SnapFeedHeroOrigin`) and gets the same flight the
+    /// For You grid has; it never sees a card, a source, or a transition
+    /// controller. The returned value is nothing — the transition owns its own
+    /// lifetime and releases when the viewer comes back.
+    func presentSnapFeedHero(
+        postIDs: [PostID],
+        from presenter: UIViewController,
+        origin: SnapFeedHeroOrigin
+    )
     /// Best-effort, cancellable warming of these posts into the shared cache, so
     /// a subsequent `makeSnapFeedViewController` hydrates from memory rather than
     /// the network — used by Maps to prefetch the visible pins on viewport

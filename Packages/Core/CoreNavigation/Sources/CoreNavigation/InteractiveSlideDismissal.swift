@@ -33,6 +33,9 @@ public final class InteractiveSlideDismissal: NSObject {
     /// dormant `ZoomTransitionController`, when a deep link pushes the timeline
     /// above a pin-opened feed) — restored on teardown.
     private weak var savedDelegate: (any UINavigationControllerDelegate)?
+    /// Whether `savedDelegate` holds the delegate from BEFORE this screen —
+    /// as opposed to whatever happened to be installed during a re-assert.
+    private var hasCapturedSavedDelegate = false
 
     /// Non-nil exactly while a swipe drives a pop; the delegate vends the
     /// slide animator (and this driver) only then, so back-button pops and
@@ -44,6 +47,21 @@ public final class InteractiveSlideDismissal: NSObject {
     /// the manually hidden tab bar here.
     public var onFeedPopped: ((UINavigationController) -> Void)?
 
+    /// An extra veto the owner can impose, asked at begin-time.
+    ///
+    /// Exists for surfaces where a full-width swipe means something else some
+    /// of the time. A profile pages between tabs on a horizontal drag, so the
+    /// drag may only dismiss when there is no tab to the left of the current
+    /// one; everywhere else the whole surface is always the gesture's.
+    ///
+    /// Nil means no veto, which is the behaviour every existing caller had.
+    public var canBeginDismissal: (() -> Bool)?
+
+    /// The recognizer, so an owner can order a competing one behind it —
+    /// `require(toFail:)` needs the object, and a caller that cannot see it
+    /// has to duplicate the pan to get one.
+    public private(set) weak var dismissalPan: UIPanGestureRecognizer?
+
     /// Installs the pan on the feed's view. Called once; the retained feed
     /// keeps its recognizer across pushes.
     public func attach(to feedViewController: UIViewController) {
@@ -53,6 +71,7 @@ public final class InteractiveSlideDismissal: NSObject {
         pan.maximumNumberOfTouches = 1
         pan.delegate = self
         feedViewController.view.addGestureRecognizer(pan)
+        dismissalPan = pan
     }
 
     /// Takes the stack's delegate slot for the feed's time on `nav`. The
@@ -60,7 +79,24 @@ public final class InteractiveSlideDismissal: NSObject {
     /// hands the slot back the moment the feed is off the stack.
     public func install(on nav: UINavigationController) {
         guard nav.delegate !== self else { return }
-        savedDelegate = nav.delegate
+        // CAPTURED ONCE, and that distinction is the whole of a three-level
+        // unwind working.
+        //
+        // Owners re-assert this on every appearance, because a child pushed
+        // above them can take the delegate. But a re-assert happens while some
+        // OTHER transition is still holding it — the one that presented the
+        // child, moments from finishing — and capturing that as the delegate
+        // to restore means handing back a controller whose screen is already
+        // gone. Two levels hid it; on the third the restored controller drove
+        // nothing and the grab froze, with the stack's delegate reading as a
+        // perfectly healthy `ZoomTransitionController`.
+        //
+        // The first capture is the one that matters: whoever owned the stack
+        // before this screen existed is who should own it again afterwards.
+        if !hasCapturedSavedDelegate {
+            savedDelegate = nav.delegate
+            hasCapturedSavedDelegate = true
+        }
         nav.delegate = self
         navigationController = nav
     }
@@ -70,6 +106,7 @@ public final class InteractiveSlideDismissal: NSObject {
             nav.delegate = savedDelegate
         }
         savedDelegate = nil
+        hasCapturedSavedDelegate = false
         navigationController = nil
     }
 
@@ -134,9 +171,25 @@ public final class InteractiveSlideDismissal: NSObject {
     /// is impossible in the simulator, so this walks the exact
     /// begin/update/release path a finger drives. Whether it completes or
     /// springs back is decided by the same threshold logic as a real release.
-    public func debugPerformSwipe(peakProgress: CGFloat) async {
-        guard let view = feedViewController?.viewIfLoaded else { return }
+    /// Returns whether the pop it started is actually being DRIVEN by the
+    /// gesture, which is a different question from whether the screen went
+    /// away.
+    ///
+    /// With no navigation delegate — or one that does not vend this driver —
+    /// `popViewController` still pops, on UIKit's own animation. Depth changes,
+    /// the screen leaves, and the harness sees success while a real finger
+    /// would have watched the page jump instead of following. Checking
+    /// `transitionCoordinator?.isInteractive` is what tells the two apart.
+    @discardableResult
+    public func debugPerformSwipe(peakProgress: CGFloat) async -> Bool {
+        guard let view = feedViewController?.viewIfLoaded else { return false }
+        // Honour the owner's veto, exactly as a real touch would. Calling
+        // `beginSwipe` straight through made this harness answer a different
+        // question from the one a thumb asks: it dismissed a profile from a
+        // tab whose drag belongs to the pager, and reported success.
+        guard canBeginDismissal?() != false else { return false }
         beginSwipe()
+        let isDriven = feedViewController?.transitionCoordinator?.isInteractive == true
         let peak = peakProgress * view.bounds.width
         let steps = 30
         for step in 1...steps {
@@ -150,6 +203,7 @@ public final class InteractiveSlideDismissal: NSObject {
         releaseSwipe(
             translation: CGPoint(x: peak, y: 0), velocity: .zero, ended: true, in: view
         )
+        return isDriven
     }
     #endif
 }
@@ -218,6 +272,7 @@ extension InteractiveSlideDismissal: UIGestureRecognizerDelegate {
         else { return false }
         if let destination = feed as? any ZoomTransitionDestination,
            !destination.isReadyForInteractiveDismissal { return false }
+        if let canBeginDismissal, !canBeginDismissal() { return false }
         let velocity = pan.velocity(in: view)
         return velocity.x > 0 && abs(velocity.x) > abs(velocity.y)
     }

@@ -232,6 +232,25 @@ final class MainTabCoordinator: NSObject, Coordinator {
         // injects no taps. What it watches for is the bar reappearing over a
         // screen that had hidden it. NOTE the frame right after each switch is
         // mid-crossfade — content lags the bar — so judge the settled state.
+        // `-nav-stress <cycles>` drives deep cyclical navigation and audits
+        // what each round trip leaves behind — see `NavigationStressTest`. The
+        // failure it hunts is a screen that looks correct and no longer answers
+        // touches, which no screenshot can tell from a working one.
+        if let position = arguments.firstIndex(of: "-nav-stress"),
+           position + 1 < arguments.count, let cycles = Int(arguments[position + 1]) {
+            let harness = NavigationStressTest(
+                tabBarController: tabBarController,
+                router: container.router,
+                selectTab: { [weak self] tab in self?.selectTab(tab) }
+            )
+            // `-nav-stress <cycles> [tab]` — one tab by name, or every tab.
+            let only = position + 2 < arguments.count
+                ? AppTab(rawValue: arguments[position + 2]) : nil
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                await harness.run(cycles: cycles, tabs: only.map { [$0] } ?? AppTab.allCases)
+            }
+        }
         if arguments.contains("-tab-round-trip") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                 self?.selectTab(.messages)

@@ -103,6 +103,80 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         return forYou
     }
 
+    public func presentSnapFeedHero(
+        postIDs: [PostID],
+        from presenter: UIViewController,
+        origin: SnapFeedHeroOrigin
+    ) {
+        guard !postIDs.isEmpty, let nav = presenter.navigationController else { return }
+        let destination = makeSnapFeedViewController(postIDs: postIDs)
+        // The snap feed is the only thing this builds, and it conforms — but
+        // the factory is typed `UIViewController` for callers who do not care.
+        guard let flyable = destination as? any ZoomTransitionDestination else { return }
+        let source = ExternalHeroZoomSource(origin: origin)
+        let transition = ZoomTransitionController(source: source, destination: flyable)
+        // The pushed feed owns its dismissal grab, exactly as it does when the
+        // For You grid opens it — otherwise the stack's edge gesture and the
+        // flight's own grab both try to drive one pop.
+        (destination as? SnapFeedViewController)?.zoomOwnsInteractiveDismissal = true
+
+        // This builder is a struct, so it cannot hold the transition alive.
+        // The retainer does, and the transition retains the closure that holds
+        // the retainer — a cycle that lasts exactly as long as the flight and
+        // is broken by the return leg. The alternative was an associated object
+        // on the presenter, which hides the lifetime rather than stating it.
+        let retainer = HeroTransitionRetainer()
+        retainer.transition = transition
+        // SAVED, not assumed nil. The presenter may already own the stack's
+        // delegate — a profile installs an `InteractiveSlideDismissal` as one
+        // before it pushes anything — and restoring nil orphaned it: the
+        // object still believed it was installed, its pan still began and
+        // called `popViewController`, but with no delegate UIKit never asked
+        // for the interaction controller. The pop ran instantly instead of
+        // following the finger, and every grab above it stayed broken because
+        // nothing ever put the delegate back.
+        let previousDelegate = nav.delegate
+        transition.onSourceReturned = { [weak nav, weak previousDelegate] in
+            nav?.delegate = previousDelegate
+            origin.setConcealed(false)
+            retainer.transition = nil
+        }
+        // THE GRAB. Without it this push had no dismissal gesture at all:
+        // claiming `zoomOwnsInteractiveDismissal` above tells the stack's
+        // native edge-swipe to stay out of the way, which is correct only
+        // because the flight attaches its own — and a claim with nothing
+        // behind it leaves the screen unswipeable. Accessing `view` loads it
+        // so the pan has something to attach to.
+        transition.attachInteractiveDismissal(to: destination.view) { [weak nav] in
+            nav?.popViewController(animated: true)
+        }
+        #if DEBUG
+        // `-zoom-live-log`: the grab is invisible until a finger arrives, and
+        // the simulator has none — so this is the only way a scripted run can
+        // tell "attached" from "claimed ownership and attached nothing", which
+        // is what left profile-opened posts unswipeable.
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            let pans = destination.view.gestureRecognizers?
+                .filter { $0 is UIPanGestureRecognizer }.count ?? 0
+            print("[hero] pushed with dismissal grab: pans=\(pans)")
+        }
+        #endif
+        #if DEBUG
+        // `-hero-demo-grab`: dismiss the pushed post by grab once it lands, so a
+        // scripted run can see the surface UNDERNEATH in its returned state.
+        // The reveal that runs while the post covers it is only observable there.
+        if ProcessInfo.processInfo.arguments.contains("-hero-demo-grab") {
+            transition.onDestinationShown = { [weak transition] in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    transition?.debugScriptedGrab()
+                }
+            }
+        }
+        #endif
+        nav.delegate = transition
+        nav.pushViewController(destination, animated: true)
+    }
+
     public func makeSnapFeedViewController(postIDs: [PostID]) -> UIViewController {
         makeSnapFeed(
             viewModel: FeedViewModel(
@@ -167,4 +241,14 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             mode: mode
         )
     }
+}
+
+/// Keeps a hero transition alive for the length of its flight.
+///
+/// `FeedFeatureBuilder` is a value type and a navigation controller's delegate
+/// is weak, so without this the transition would be released before the card
+/// left the ground.
+@MainActor
+final class HeroTransitionRetainer {
+    var transition: ZoomTransitionController?
 }

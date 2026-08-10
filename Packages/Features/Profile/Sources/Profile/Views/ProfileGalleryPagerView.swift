@@ -1,4 +1,6 @@
+import CoreModels
 import MediaCore
+import MediaPlayback
 import PostGrid
 import UIKit
 
@@ -27,7 +29,7 @@ final class ProfileGalleryPagerView: UIView {
     /// Saved and Liked, everyone else's does not.
     let pageOrder: [ProfileTab]
 
-    var onItemTapped: ((GalleryPost) -> Void)?
+    var onItemTapped: ((GalleryPost, _ stream: [PostID]) -> Void)?
     /// Fired when a swipe settles on a page (not for programmatic paging) —
     /// the selector mirrors it.
     var onPageSettled: ((ProfileTab) -> Void)?
@@ -48,12 +50,24 @@ final class ProfileGalleryPagerView: UIView {
     /// The pan that pages; exposed so the owner can subordinate it to the
     /// navigation stack's edge-swipe pop.
     var horizontalPan: UIPanGestureRecognizer { scrollView.panGestureRecognizer }
+    /// Which page is live — read by the dismissal gate, which may only claim
+    /// the whole surface when there is no page to the left.
+    var activePageIndex: Int { activeIndex }
 
     private let scrollView = PagerScrollView()
     private let pages: [ProfileGalleryGridView]
-    private var activeIndex = 0
+    private var activeIndex = 0 {
+        didSet { syncAutoplay() }
+    }
+    /// Whether this screen may autoplay at all — set by the owner's appearance
+    /// callbacks and ANDed with per-page activity below.
+    private var isSurfaceActive = false
 
-    init(imagePipeline: ImagePipeline, tabs: [ProfileTab] = ProfileTab.publicTabs) {
+    init(
+        imagePipeline: ImagePipeline,
+        tabs: [ProfileTab] = ProfileTab.publicTabs,
+        videoPlayback: VideoPlaybackController? = nil
+    ) {
         pageOrder = tabs
         pages = tabs.map { tab in
             ProfileGalleryGridView(
@@ -61,7 +75,8 @@ final class ProfileGalleryPagerView: UIView {
                 // The mosaic is for pages that are mostly pictures. Saved and
                 // Liked are whatever the viewer kept, which is mostly not.
                 style: tab == .format(.media) ? .grid : .list,
-                tab: tab
+                tab: tab,
+                videoPlayback: videoPlayback
             )
         }
         super.init(frame: .zero)
@@ -91,7 +106,7 @@ final class ProfileGalleryPagerView: UIView {
                 page.heightAnchor.constraint(equalTo: frame.heightAnchor)
             ])
             leading = page.trailingAnchor
-            page.onItemTapped = { [weak self] post in self?.onItemTapped?(post) }
+            page.onItemTapped = { [weak self] post, stream in self?.onItemTapped?(post, stream) }
             page.onVerticalScroll = { [weak self] offset in
                 guard let self, page === pages[activeIndex] else { return }
                 onVerticalScroll?(offset)
@@ -115,6 +130,68 @@ final class ProfileGalleryPagerView: UIView {
         for (index, tab) in pageOrder.enumerated() {
             pages[index].render(snapshot.state(for: tab))
         }
+    }
+
+    #if DEBUG
+    /// Taps a tile on whichever page is active.
+    func debugSelectItem(at index: Int) -> Bool {
+        guard pages.indices.contains(activeIndex) else { return false }
+        return pages[activeIndex].debugSelectItem(at: index)
+    }
+    #endif
+
+    /// Only the page being read may hold pool slots — the other tabs are laid
+    /// out and would otherwise play video nobody can see.
+    func setAutoplayActive(_ active: Bool) {
+        isSurfaceActive = active
+        syncAutoplay()
+    }
+
+    /// Only the page being read may hold pool slots. Re-run whenever EITHER
+    /// fact changes — the screen's visibility or which page is active.
+    ///
+    /// The second half is easy to forget and silent when missed: a page that
+    /// was switched off because another tab was active never gets switched
+    /// back on, so the tab the viewer is actually looking at sits with a
+    /// coordinator that refuses to start anything.
+    private func syncAutoplay() {
+        for (index, page) in pages.enumerated() {
+            page.setAutoplayActive(isSurfaceActive && index == activeIndex)
+        }
+    }
+
+    /// The chrome that stays over the pages when the header has scrolled away.
+    func setStickyTopOcclusion(_ height: CGFloat) {
+        pages.forEach { $0.setStickyTopOcclusion(height) }
+    }
+
+    #if DEBUG
+    /// The active page's revealed tile, in window space, once settled.
+    func debugRevealedTileInWindow() -> CGRect? {
+        guard pages.indices.contains(activeIndex) else { return nil }
+        return pages[activeIndex].debugRevealedTileInWindow()
+    }
+    #endif
+
+    /// The active page's hero facts for a post — geometry, cover, shape.
+    func heroGeometry(for postID: PostID) -> (rect: CGRect, cover: UIImage?, isTile: Bool)? {
+        guard pages.indices.contains(activeIndex) else { return nil }
+        return pages[activeIndex].heroGeometry(for: postID)
+    }
+
+    func setHeroConcealed(_ concealed: Bool, for postID: PostID) {
+        guard pages.indices.contains(activeIndex) else { return }
+        pages[activeIndex].setHeroConcealed(concealed, for: postID)
+    }
+
+    var heroCoordinateSpace: UICoordinateSpace? {
+        pages.indices.contains(activeIndex) ? pages[activeIndex].heroCoordinateSpace : nil
+    }
+
+    /// Settles a tapped tile clear of the chrome while the post covers this
+    /// screen. Asked of every page; only the one holding a pending reveal acts.
+    func applyPendingReveal() {
+        pages.forEach { $0.applyPendingReveal() }
     }
 
     func endRefreshing() {
@@ -159,6 +236,29 @@ final class ProfileGalleryPagerView: UIView {
             page.setVerticalOffset(offset)
         }
     }
+
+    #if DEBUG
+    /// Scrolls the active page and reports whether the offset actually took.
+    ///
+    /// `-profile-scroll` used to fire on a fixed delay and silently clamp to the
+    /// top while a page's content was still loading, so a run meant to drive a
+    /// tile tucked under the chrome quietly tested one at rest instead. The
+    /// caller polls on this instead of trusting a delay.
+    /// Returns false ONLY while the page is still gaining ground.
+    ///
+    /// A page shorter than the request clamps, and "did it reach the target"
+    /// then never becomes true — the caller polled forever and kept re-applying
+    /// the offset long after the run had moved on, overwriting the reveal it was
+    /// there to observe. Clamped is a finished answer, not a failed one.
+    func debugSetVerticalOffset(_ offset: CGFloat) -> Bool {
+        guard pages.indices.contains(activeIndex) else { return false }
+        let page = pages[activeIndex]
+        let before = page.currentVerticalOffset
+        page.setVerticalOffset(offset)
+        let after = page.currentVerticalOffset
+        return abs(after - offset) < 1 || abs(after - before) < 1
+    }
+    #endif
 
     /// How far the screen scrolls before the header has finished travelling —
     /// the line either side of which the offset means a different thing.
