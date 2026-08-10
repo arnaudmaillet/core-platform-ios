@@ -132,6 +132,26 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             origin.setConcealed(false)
             retainer.transition = nil
         }
+        // THE GRAB. Without it this push had no dismissal gesture at all:
+        // claiming `zoomOwnsInteractiveDismissal` above tells the stack's
+        // native edge-swipe to stay out of the way, which is correct only
+        // because the flight attaches its own — and a claim with nothing
+        // behind it leaves the screen unswipeable. Accessing `view` loads it
+        // so the pan has something to attach to.
+        transition.attachInteractiveDismissal(to: destination.view) { [weak nav] in
+            nav?.popViewController(animated: true)
+        }
+        #if DEBUG
+        // `-zoom-live-log`: the grab is invisible until a finger arrives, and
+        // the simulator has none — so this is the only way a scripted run can
+        // tell "attached" from "claimed ownership and attached nothing", which
+        // is what left profile-opened posts unswipeable.
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            let pans = destination.view.gestureRecognizers?
+                .filter { $0 is UIPanGestureRecognizer }.count ?? 0
+            print("[hero] pushed with dismissal grab: pans=\(pans)")
+        }
+        #endif
         nav.delegate = transition
         nav.pushViewController(destination, animated: true)
     }

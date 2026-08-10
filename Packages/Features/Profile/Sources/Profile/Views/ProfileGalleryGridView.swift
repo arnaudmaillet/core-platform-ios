@@ -249,11 +249,21 @@ final class ProfileGalleryGridView: UIView {
             self.collectionView.reloadData()
             self.collectionView.invalidateIntrinsicContentSize()
             // Content landing is a reconcile trigger, and on a page nobody
-            // scrolls it is the ONLY one: the surface goes active before the
-            // first post arrives, so without this the gate is evaluated
-            // against an empty list once and never asked again. Next
-            // main-queue turn, so the cells the reconcile inspects exist.
-            DispatchQueue.main.async { [weak self] in self?.reconcileAutoplay() }
+            // scrolls it is very nearly the only one.
+            //
+            // The layout pass is the load-bearing half. `reloadData` only
+            // marks the items dirty — the cells are built on the next layout —
+            // and the reconcile asks `cellForItem(at:)`, which answers nil
+            // until then. So a plain hop found no candidates, and nothing came
+            // back to ask again: the surface had already gone active before
+            // the posts arrived, a page nobody scrolls emits no scroll, and
+            // `onCoverLoaded` never fires on a warm cache because `configure`
+            // takes the cached image and returns. Zero starts, no error.
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                collectionView.layoutIfNeeded()
+                reconcileAutoplay()
+            }
         }
         if dissolving {
             // The block runs with implicit animations disabled (stock
@@ -317,6 +327,35 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
 
     // MARK: - Autoplay
 
+    /// The part of this page a viewer can actually see.
+    ///
+    /// NOT `bounds.inset(by: adjustedContentInset)`, which is what the For You
+    /// pages use and what this used at first. There both insets are floating
+    /// chrome — a nav bar and a tab bar that sit OVER the content — so
+    /// removing them leaves what is visible. Here the top inset is the profile
+    /// HEADER's reserved space: the header is above the content and scrolls
+    /// away with it, so nothing is hidden behind it and subtracting it removes
+    /// the page.
+    ///
+    /// Measured: a 556pt top inset on a 956pt page left a band 108pt tall, and
+    /// every item's media fell outside it. Nothing ever played, and the gate
+    /// reported no candidates rather than an error.
+    ///
+    /// The bottom inset IS chrome — the filter tray and the tab bar float over
+    /// the last rows — so that half is still removed.
+    private var visibleBand: CGRect {
+        // The SCROLL INDICATOR insets, which is the one number on this page
+        // that means "where the visible area ends". The content insets do not:
+        // the top one is the header's reserved space (it scrolls away, it
+        // hides nothing) and the bottom one is inflated by `applyBottomInset`
+        // so a short page can still travel. Between them they described a band
+        // 108pt tall on a 956pt page, and every item's media fell outside it.
+        var occlusion = collectionView.verticalScrollIndicatorInsets
+        occlusion.left = 0
+        occlusion.right = 0
+        return collectionView.bounds.inset(by: occlusion)
+    }
+
     /// Minimum fraction of an item's MEDIA that must be inside the visible
     /// band before it may play. An item creeping in at the edge is not
     /// something the viewer is looking at.
@@ -332,7 +371,7 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     /// starting the post a flight is currently carrying.
     func reconcileAutoplay(allowingStarts: Bool = true) {
         guard let playback else { return }
-        let viewport = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
+        let viewport = visibleBand
         let centreY = viewport.midY
         let candidates = collectionView.indexPathsForVisibleItems.compactMap {
             indexPath -> GridVideoPlaybackCoordinator.Candidate? in
@@ -361,6 +400,35 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
             )
         }
         playback.update(candidates: candidates, allowingStarts: allowingStarts)
+        #if DEBUG
+        // `-grid-playback-log`: why the gate answered what it did. An empty
+        // candidate list has half a dozen possible causes and they all look
+        // identical from outside.
+        if ProcessInfo.processInfo.arguments.contains("-grid-playback-log"), candidates.isEmpty {
+            let visible = collectionView.indexPathsForVisibleItems
+            let videos = posts.filter(\.hasPlayableVideo).count
+            let realized = visible.filter { collectionView.cellForItem(at: $0) != nil }.count
+            print("[profile-autoplay] none: posts=\(posts.count) videos=\(videos) "
+                  + "skeleton=\(showsSkeleton) visible=\(visible.count) realized=\(realized) "
+                  + "style=\(style == .grid ? "grid" : "list") "
+                  + "viewport=\(Int(viewport.minY))…\(Int(viewport.maxY)) "
+                  + "inset=\(Int(collectionView.adjustedContentInset.top))/"
+                  + "\(Int(collectionView.adjustedContentInset.bottom))")
+            for indexPath in visible where posts.indices.contains(indexPath.item) {
+                let post = posts[indexPath.item]
+                guard post.hasPlayableVideo else { continue }
+                let cell = collectionView.cellForItem(at: indexPath) as? any GridPlaybackCell
+                let frame = cell.map { $0.convert($0.videoMediaRect, to: collectionView) } ?? .zero
+                let overlap = frame.intersection(viewport)
+                let fraction = frame.height > 0 && !overlap.isNull
+                    ? (overlap.height * overlap.width) / (frame.height * frame.width) : 0
+                print("[profile-autoplay]   \(post.id.rawValue) shape=\(post.shape) "
+                      + "playsHere=\(style == .grid ? post.autoplaysInGrid : post.hasPlayableVideo) "
+                      + "cover=\(cell?.renderedCover == nil ? "NIL" : "set") "
+                      + "media=\(Int(frame.minY))…\(Int(frame.maxY)) frac=\(String(format: "%.2f", fraction))")
+            }
+        }
+        #endif
     }
 
     /// Whether an item has something to show behind its video surface. A
@@ -377,7 +445,12 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     /// For You: only the page being read may hold pool slots.
     func setAutoplayActive(_ active: Bool) {
         playback?.setSurfaceVisible(active)
-        if active { reconcileAutoplay() }
+        guard active else { return }
+        // Same reason as the reload above: this can arrive with content
+        // already applied but not yet laid out — a tab becoming active, or a
+        // profile re-appearing — and an unrealised cell is not a candidate.
+        collectionView.layoutIfNeeded()
+        reconcileAutoplay()
     }
 
     /// Where a post's media sits on screen, and what it is showing — the two
