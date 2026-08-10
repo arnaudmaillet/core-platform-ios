@@ -401,6 +401,12 @@ public final class PagedTabBar: UIControl {
     /// glass lens inside a glass capsule, the arrangement that cost the lens its
     /// edge entirely (see the type comment). The title slot is the opposite case
     /// and must keep its backdrop.
+    #if DEBUG
+    /// How many segments the bar carries, so an audit can hit-test each one
+    /// without reaching into the private row.
+    public var debugSegmentCount: Int { segments.count }
+    #endif
+
     public var suppressesBackdrop: Bool = false {
         didSet {
             guard suppressesBackdrop != oldValue else { return }

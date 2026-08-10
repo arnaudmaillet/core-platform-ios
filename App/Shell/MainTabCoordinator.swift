@@ -251,6 +251,36 @@ final class MainTabCoordinator: NSObject, Coordinator {
                 await harness.run(cycles: cycles, tabs: only.map { [$0] } ?? AppTab.allCases)
             }
         }
+        // `-header-audit` visits every tab and checks the leading-group selector
+        // layout on each: in the leading group, sized, hit-testable at every
+        // segment, and — on a pushed surface — with the back button and the
+        // interactive pop still intact. See `HeaderSelectorAudit`.
+        if arguments.contains("-header-audit") {
+            let audit = HeaderSelectorAudit(
+                tabBarController: tabBarController,
+                selectTab: { [weak self] tab in self?.selectTab(tab) }
+            )
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 3_500_000_000)
+                await audit.run(tabs: AppTab.allCases)
+            }
+        }
+        // `-header-audit-current` audits only what is on screen. The tab sweep
+        // cannot reach a PUSHED host — a profile, or the relationships screen —
+        // and those are the only ones where the back button and the interactive
+        // pop are at stake. Pair it with `-open-profile` / `-profile-relationships`.
+        if arguments.contains("-header-audit-current") {
+            let audit = HeaderSelectorAudit(
+                tabBarController: tabBarController,
+                selectTab: { [weak self] tab in self?.selectTab(tab) }
+            )
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                let finding = audit.audit(surface: "on-screen")
+                for problem in finding.problems { print("[header-audit] on-screen: PROBLEM \(problem)") }
+                if finding.isClean { print("[header-audit] on-screen: clean") }
+            }
+        }
         if arguments.contains("-tab-round-trip") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                 self?.selectTab(.messages)

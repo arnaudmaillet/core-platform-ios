@@ -104,7 +104,16 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         precondition(!surfaces.isEmpty, "The inbox needs at least one surface")
         self.surfaces = surfaces
         self.searchResults = searchResults
-        categoryBar = PagedTabBar(titles: surfaces.map(\.category.title), style: .navigationTitle)
+        // `-inbox-short-tabs`: shrinks the capsule to ~half its width, to tell a
+        // WIDTH failure from a categorical one when the search controller is also
+        // in the bar. Test-only; the titles are the product's.
+        var titles = surfaces.map(\.category.title)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-inbox-short-tabs") {
+            titles = titles.map { String($0.prefix(3)) }
+        }
+        #endif
+        categoryBar = PagedTabBar(titles: titles, style: .navigationTitle)
         initialIndex = surfaces.firstIndex { $0.category == initialCategory } ?? 0
         super.init(nibName: nil, bundle: nil)
     }
@@ -124,9 +133,18 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // not here.
         navigationItem.title = nil
         navigationItem.largeTitleDisplayMode = .never
-        navigationItem.titleView = categoryBar
         view.backgroundColor = .systemBackground
+        #if DEBUG
+        // `-inbox-no-search`: A/B for the leading-group selector experiment. The
+        // inbox is the one surface whose capsule never appeared there, and the
+        // integrated search controller is the only thing it has that the other
+        // three do not.
+        if !ProcessInfo.processInfo.arguments.contains("-inbox-no-search") {
+            configureSearch()
+        }
+        #else
         configureSearch()
+        #endif
 
         // Loaded up front, not lazily: a surface has to be able to publish its
         // chrome — the All tab's unread count, the Requests badge — before it
@@ -144,7 +162,23 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         for surface in surfaces { surface.didMove(toParent: self) }
 
         // The bar's contents, stated once. Nothing else writes them.
+        //
         navigationItem.leftBarButtonItem = composeItem
+
+        // ⚠️ **This surface KEEPS its selector in the title slot**, alone among
+        // the four that wear one. The leading-group layout was tried here and
+        // measured: at the real titles the capsule is 280pt, and beside the
+        // compose glyph and the integrated search button there is only ~282pt of
+        // leading room on a 402pt bar. UIKit does not compress it and does not
+        // overflow it into a `•••` menu — it silently declines to HOST the custom
+        // view, so the capsule is simply absent and nothing reports why.
+        //
+        // Proven both ways, and both are still runnable: `-inbox-no-search`
+        // (280pt, hosted, clean) and `-inbox-short-tabs` (179pt with the search
+        // still there, hosted, clean). So it is a width failure, not an
+        // incompatibility — shortening these titles would fit, at the cost of
+        // naming the categories worse.
+        navigationItem.titleView = categoryBar
 
         // NO `additionalSafeAreaInsets.top`, and no constraints for the capsule:
         // it lives INSIDE the navigation bar, whose height already covers it.

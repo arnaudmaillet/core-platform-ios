@@ -290,7 +290,7 @@ final class ProfileRelationshipsViewController: UIViewController {
         // The selector IS the title. It sits where the @handle used to, between
         // the back button and the search glyph, and the bar sizes the slot from
         // the bar's intrinsic width — see `PagedTabBar`'s `intrinsicContentSize`.
-        navigationItem.titleView = tabBar
+        navigationItem.installLeadingSelector(tabBar)
         navigationItem.largeTitleDisplayMode = .never
         // The @handle is gone from the bar, so it survives as the screen's
         // accessibility label rather than being lost with the title.
