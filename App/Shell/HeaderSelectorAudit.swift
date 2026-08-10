@@ -57,6 +57,17 @@ final class HeaderSelectorAudit {
         print("[header-audit] done: \(findings.count - failed.count)/\(findings.count) clean")
     }
 
+    /// The visible selector's frame in its window, or `.null` if there is none —
+    /// the value the current-surface mode watches until it stops changing.
+    var selectorFrameOnScreen: CGRect {
+        guard let nav = topNavigationController,
+              let selector = firstPagedTabBar(in: nav.navigationBar),
+              let window = selector.window,
+              selector.bounds.width > 1
+        else { return .null }
+        return selector.convert(selector.bounds, to: window)
+    }
+
     /// Whether a selector is on the visible bar yet — what the current-surface
     /// mode waits for, so a slow load is not read as a missing capsule.
     var hasSelectorOnScreen: Bool {
@@ -159,6 +170,25 @@ final class HeaderSelectorAudit {
             }
         }
 
+        // HOW it is hosted, not just where. A surface whose selector escapes the
+        // clamp is a surface that is not in the host the clamp lives in, and the
+        // ancestor chain is the only thing that says so.
+        var chain: [String] = []
+        var node: UIView? = selector.superview
+        var depth = 0
+        while let current = node, depth < 4 {
+            chain.append(String(describing: type(of: current)))
+            node = current.superview
+            depth += 1
+        }
+        let inHost = chain.contains { $0.contains("LeadingSelectorHost") }
+        print(String(format: "[header-audit] %@: HOSTING inHost=%@ intrinsic=%.0f "
+                     + "hostFrame=%.0fx%.0f chain=%@",
+                     surface, inHost ? "YES" : "NO",
+                     selector.intrinsicContentSize.width,
+                     selector.superview?.frame.width ?? -1,
+                     selector.superview?.frame.height ?? -1,
+                     chain.joined(separator: "←")))
         print(String(format: "[header-audit] %@: selector %.0f,%.0f %.0fx%.0f segments=%d "
                      + "leading=%d pushed=%@ placement=%@",
                      surface, frame.minX, frame.minY, frame.width, frame.height,

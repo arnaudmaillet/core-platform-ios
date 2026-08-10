@@ -22,7 +22,15 @@ final class LeadingSelectorHost: UIView {
     /// Deliberately generous. Being 20pt narrower than necessary costs a little
     /// scrolling in a bar that scrolls anyway; being 1pt too wide costs the whole
     /// selector, with nothing said about why.
-    private static let roomForOtherItems: CGFloat = 170
+    /// Room to leave for everything else in the bar, stated by the HOST.
+    ///
+    /// ⚠️ Not one number for every surface. A fixed 170 cost the inbox the last
+    /// letter of "Suggestions" — its capsule wants 280pt and the ceiling put it at
+    /// 258 — while protecting nothing there: that bar hosts its selector at ANY
+    /// ceiling, measured up to 2000pt. Meanwhile the own profile genuinely needs a
+    /// narrow one, or its two trailing actions collapse into a `•••`. The bar that
+    /// knows what else it carries is the bar that should say.
+    private let roomForOtherItems: CGFloat
 
     /// Held back from the ceiling on top of `roomForOtherItems`.
     ///
@@ -36,8 +44,9 @@ final class LeadingSelectorHost: UIView {
     private let bar: PagedTabBar
     private var maximumWidth: NSLayoutConstraint!
 
-    init(bar: PagedTabBar) {
+    init(bar: PagedTabBar, roomForOtherItems: CGFloat) {
         self.bar = bar
+        self.roomForOtherItems = roomForOtherItems
         super.init(frame: .zero)
         bar.translatesAutoresizingMaskIntoConstraints = false
         addSubview(bar)
@@ -123,7 +132,7 @@ final class LeadingSelectorHost: UIView {
         }
         #endif
         let width = window?.bounds.width ?? UIScreen.main.bounds.width
-        return max(80, width - Self.roomForOtherItems - Self.safetyBuffer)
+        return max(80, width - roomForOtherItems - Self.safetyBuffer)
     }
 
     private func updateCeiling() {
@@ -152,8 +161,14 @@ public extension UINavigationItem {
     /// whose header owns the un-scrolled state) needs it: hiding the BAR leaves
     /// UIKit's capsule behind as an empty pill, and only
     /// `UIBarButtonItem.isHidden` takes the capsule with it.
+    /// - Parameter roomForOtherItems: what else this bar carries — leading glyph,
+    ///   trailing actions, and their margins. Too small and a trailing pair
+    ///   collapses into a `•••`; too large and the selector clips a title it had
+    ///   room for. 170 suits a bar with a leading glyph and two trailing items.
     @discardableResult
-    func installLeadingSelector(_ bar: PagedTabBar) -> UIBarButtonItem {
+    func installLeadingSelector(
+        _ bar: PagedTabBar, roomForOtherItems: CGFloat = 170
+    ) -> UIBarButtonItem {
         // ⚠️ BARE. UIKit wraps a bar item's custom view in the system's glass
         // capsule — "bar items get a capsule, the title slot gets nothing" — so a
         // bar carrying its own backdrop here is a glass lens inside a glass
@@ -163,7 +178,7 @@ public extension UINavigationItem {
 
         // Sized AND capped; see `LeadingSelectorHost`, which is where the reason
         // a plain `UIView` was not enough is written down.
-        let host = LeadingSelectorHost(bar: bar)
+        let host = LeadingSelectorHost(bar: bar, roomForOtherItems: roomForOtherItems)
 
         // The centre is left EMPTY, so the space between the groups stays
         // flexible for whatever a host wants to put there later.

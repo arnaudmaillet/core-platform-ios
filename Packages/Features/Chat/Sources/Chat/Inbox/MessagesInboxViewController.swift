@@ -156,7 +156,10 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // not that much room. `LeadingSelectorHost` caps the width and the bar
         // scrolls the remainder, so no title is shortened. Before the cap existed
         // UIKit silently declined to host it and the capsule was simply absent.
-        navigationItem.installLeadingSelector(categoryBar)
+        // 120, not the default 170: this bar carries a compose glyph and the
+        // integrated search button and nothing else, and at 170 the ceiling clipped
+        // the final letter of "Suggestions" off a capsule that fits at 280pt.
+        navigationItem.installLeadingSelector(categoryBar, roomForOtherItems: 120)
 
         // NO `additionalSafeAreaInsets.top`, and no constraints for the capsule:
         // it lives INSIDE the navigation bar, whose height already covers it.

@@ -281,9 +281,23 @@ final class MainTabCoordinator: NSObject, Coordinator {
                 // run past the deadline. Two conclusions were drawn from that
                 // before the harness was suspected. Waits for a selector, then
                 // audits; if none ever arrives, audits anyway and says so.
+                // Waits for a STABLE frame, not merely a present one. Measuring
+                // the first non-zero frame caught selectors mid-push and reported
+                // 334x43 and 28x7 for the same screen whose settled host is
+                // 278x36 — an "escapes the clamp" anomaly that was the harness
+                // reading an animation.
+                var previous = CGRect.null
+                var stableFrames = 0
                 for _ in 0..<80 {
                     try? await Task.sleep(nanoseconds: 500_000_000)
-                    if audit.hasSelectorOnScreen { break }
+                    let frame = audit.selectorFrameOnScreen
+                    if frame != .null, frame == previous {
+                        stableFrames += 1
+                        if stableFrames >= 2 { break }
+                    } else {
+                        stableFrames = 0
+                    }
+                    previous = frame
                 }
                 let finding = audit.audit(surface: "on-screen")
                 for problem in finding.problems { print("[header-audit] on-screen: PROBLEM \(problem)") }
