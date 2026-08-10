@@ -10,6 +10,7 @@ let package = Package(
     dependencies: [
         .package(path: "../../FeatureInterfaces/ProfileInterface"),
         .package(path: "../../FeatureInterfaces/AuthInterface"),
+        .package(path: "../../FeatureInterfaces/FeedInterface"),
         .package(path: "../../Kit/CoreContracts"),
         .package(path: "../../Kit/CoreModels"),
         .package(path: "../../Core/MediaCore"),
@@ -25,6 +26,7 @@ let package = Package(
             dependencies: [
                 "ProfileInterface",
                 "AuthInterface",
+                "FeedInterface",
                 "CoreContracts",
                 "CoreModels",
                 "MediaCore",

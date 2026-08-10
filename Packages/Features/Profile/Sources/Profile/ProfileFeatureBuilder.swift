@@ -1,6 +1,7 @@
 import MediaCore
 import CoreModels
 import CoreNavigation
+import FeedInterface
 import CoreStorage
 import PostGrid
 import ProfileInterface
@@ -94,7 +95,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         trayPlacement: ProfileTrayPlacement
     ) -> UIViewController {
         let repository = repository
-        return ProfileViewController(
+        let controller = ProfileViewController(
             viewModel: ProfileViewModel(
                 repository: repository,
                 reporting: reporting,
@@ -137,10 +138,17 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             identityStub: identityStub,
             trayPlacement: trayPlacement
         )
+        controller.feedHero = openFeedHero
+        return controller
     }
 
+    /// Flies a tapped gallery post into the unified feed. Set by the
+    /// composition root, which is the only place that can see both features.
+    /// Nil leaves taps on the plain route — the same feed, without the flight.
+    public var openFeedHero: (([PostID], UIViewController, SnapFeedHeroOrigin) -> Void)?
+
     public func makeProfileViewController(for profileID: ProfileID, identityStub: ProfileIdentityStub?) -> UIViewController {
-        ProfileViewController(
+        let controller = ProfileViewController(
             viewModel: ProfileViewModel(
                 repository: repository,
                 reporting: reporting,
@@ -156,6 +164,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             makeRelationshipsViewController: makeRelationshipsFactory(),
             identityStub: identityStub
         )
+        controller.feedHero = openFeedHero
+        return controller
     }
 
     public func viewerAvatarImage() async -> UIImage? {

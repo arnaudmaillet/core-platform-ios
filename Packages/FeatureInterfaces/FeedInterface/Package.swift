@@ -8,12 +8,13 @@ let package = Package(
         .library(name: "FeedInterface", targets: ["FeedInterface"])
     ],
     dependencies: [
-        .package(path: "../../Kit/CoreModels")
+        .package(path: "../../Kit/CoreModels"),
+        .package(path: "../../Core/PostGrid")
     ],
     targets: [
         .target(
             name: "FeedInterface",
-            dependencies: ["CoreModels"]
+            dependencies: ["CoreModels", "PostGrid"]
         )
     ]
 )

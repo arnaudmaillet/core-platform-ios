@@ -285,6 +285,41 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         }
     }
 
+    /// Where a post's media sits on screen, and what it is showing — the two
+    /// facts a hero flight needs from this page.
+    ///
+    /// Returns nil when the post has no realized cell (scrolled away) or no
+    /// media to fly, which is the same rule the For You grid applies.
+    func heroGeometry(for postID: PostID) -> (rect: CGRect, cover: UIImage?, isTile: Bool)? {
+        guard let index = posts.firstIndex(where: { $0.id == postID }),
+              let cell = collectionView.cellForItem(at: IndexPath(item: index, section: 0))
+                as? any GridPlaybackCell
+        else { return nil }
+        let rect = cell.videoMediaRect
+        guard rect != .zero else { return nil }
+        return (
+            rect: cell.convert(rect, to: collectionView),
+            cover: cell.renderedCover,
+            isTile: cell is PostGridTileCell
+        )
+    }
+
+    /// Hides just what the flight is carrying: a tile goes whole, a row loses
+    /// only its preview. Same invariant the For You grid keeps.
+    func setHeroConcealed(_ concealed: Bool, for postID: PostID) {
+        guard let index = posts.firstIndex(where: { $0.id == postID }),
+              let cell = collectionView.cellForItem(at: IndexPath(item: index, section: 0))
+        else { return }
+        if let row = cell as? PostGridListRowCell {
+            row.setHeroMediaConcealed(concealed)
+        } else {
+            cell.isHidden = concealed
+        }
+    }
+
+    /// The scroll view the hero measures against, so the caller can convert.
+    var heroCoordinateSpace: UICoordinateSpace { collectionView }
+
     #if DEBUG
     /// Drives the page's real selection path, the one a finger reaches.
     ///

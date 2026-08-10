@@ -103,6 +103,39 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         return forYou
     }
 
+    public func presentSnapFeedHero(
+        postIDs: [PostID],
+        from presenter: UIViewController,
+        origin: SnapFeedHeroOrigin
+    ) {
+        guard !postIDs.isEmpty, let nav = presenter.navigationController else { return }
+        let destination = makeSnapFeedViewController(postIDs: postIDs)
+        // The snap feed is the only thing this builds, and it conforms — but
+        // the factory is typed `UIViewController` for callers who do not care.
+        guard let flyable = destination as? any ZoomTransitionDestination else { return }
+        let source = ExternalHeroZoomSource(origin: origin)
+        let transition = ZoomTransitionController(source: source, destination: flyable)
+        // The pushed feed owns its dismissal grab, exactly as it does when the
+        // For You grid opens it — otherwise the stack's edge gesture and the
+        // flight's own grab both try to drive one pop.
+        (destination as? SnapFeedViewController)?.zoomOwnsInteractiveDismissal = true
+
+        // This builder is a struct, so it cannot hold the transition alive.
+        // The retainer does, and the transition retains the closure that holds
+        // the retainer — a cycle that lasts exactly as long as the flight and
+        // is broken by the return leg. The alternative was an associated object
+        // on the presenter, which hides the lifetime rather than stating it.
+        let retainer = HeroTransitionRetainer()
+        retainer.transition = transition
+        transition.onSourceReturned = { [weak nav] in
+            nav?.delegate = nil
+            origin.setConcealed(false)
+            retainer.transition = nil
+        }
+        nav.delegate = transition
+        nav.pushViewController(destination, animated: true)
+    }
+
     public func makeSnapFeedViewController(postIDs: [PostID]) -> UIViewController {
         makeSnapFeed(
             viewModel: FeedViewModel(
@@ -167,4 +200,14 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             mode: mode
         )
     }
+}
+
+/// Keeps a hero transition alive for the length of its flight.
+///
+/// `FeedFeatureBuilder` is a value type and a navigation controller's delegate
+/// is weak, so without this the transition would be released before the card
+/// left the ground.
+@MainActor
+final class HeroTransitionRetainer {
+    var transition: ZoomTransitionController?
 }

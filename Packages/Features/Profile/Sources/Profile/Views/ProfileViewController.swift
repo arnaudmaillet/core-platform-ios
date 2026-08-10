@@ -2,6 +2,7 @@ import MediaCore
 import CoreModels
 import ProfileInterface
 import CoreNavigation
+import FeedInterface
 import DesignSystem
 import PostGrid
 import UIKit
@@ -52,6 +53,11 @@ final class ProfileViewController: UIViewController {
     private let shareTargeting: (any ProfileShareTargeting)?
     private let headerView: ProfileHeaderView
     private let galleryPager: ProfileGalleryPagerView
+    /// Flies a tapped post into the unified feed. Injected rather than built
+    /// here: the card and the transition belong to the feed feature, and this
+    /// screen only describes where the post is (see `SnapFeedHeroOrigin`).
+    /// Nil leaves every tap on the plain route, which still opens the feed.
+    var feedHero: (([PostID], UIViewController, SnapFeedHeroOrigin) -> Void)?
     /// Which pages this profile has. The viewer's own carries Saved and Liked;
     /// everyone else's does not, because neither pile is anybody else's to see.
     private let tabs: [ProfileTab]
@@ -390,7 +396,39 @@ final class ProfileViewController: UIViewController {
             self?.galleryPager.render(snapshot)
         }
         galleryPager.onItemTapped = { [weak self] post, stream in
-            self?.viewModel.galleryItemTapped(post.id, stream: stream)
+            guard let self else { return }
+            // A hero when this page can say where the post is; the plain route
+            // otherwise (a text row with no media, or a cell scrolled away
+            // between the tap and this call). Both land on the same feed —
+            // only the animation differs, which is the right thing to degrade.
+            guard let feedHero, let space = galleryPager.heroCoordinateSpace,
+                  let geometry = galleryPager.heroGeometry(for: post.id)
+            else {
+                viewModel.galleryItemTapped(post.id, stream: stream)
+                return
+            }
+            let origin = SnapFeedHeroOrigin(
+                post: post,
+                cover: geometry.cover,
+                style: geometry.isTile ? .tile : .listMedia,
+                frame: { [weak self] container in
+                    // Re-measured, not captured: the grid scrolls itself clear
+                    // of the chrome while the post is open, so the rect the
+                    // dismissal flies home to is not the one it left from.
+                    guard let self,
+                          let current = self.galleryPager.heroGeometry(for: post.id)
+                    else { return nil }
+                    return space.convert(current.rect, to: container)
+                },
+                isOnScreen: { [weak self] in
+                    self?.galleryPager.heroGeometry(for: post.id) != nil
+                },
+                setConcealed: { [weak self] concealed in
+                    self?.galleryPager.setHeroConcealed(concealed, for: post.id)
+                },
+                depthView: { [weak self] in self?.galleryPager }
+            )
+            feedHero(stream.isEmpty ? [post.id] : stream, self, origin)
         }
         // Swipe ↔ tabs: a settled swipe adopts the tab and mirrors the
         // selectors; a tab tap records it and pages.

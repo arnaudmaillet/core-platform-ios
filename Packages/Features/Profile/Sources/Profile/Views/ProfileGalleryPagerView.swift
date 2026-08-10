@@ -126,6 +126,21 @@ final class ProfileGalleryPagerView: UIView {
     }
     #endif
 
+    /// The active page's hero facts for a post — geometry, cover, shape.
+    func heroGeometry(for postID: PostID) -> (rect: CGRect, cover: UIImage?, isTile: Bool)? {
+        guard pages.indices.contains(activeIndex) else { return nil }
+        return pages[activeIndex].heroGeometry(for: postID)
+    }
+
+    func setHeroConcealed(_ concealed: Bool, for postID: PostID) {
+        guard pages.indices.contains(activeIndex) else { return }
+        pages[activeIndex].setHeroConcealed(concealed, for: postID)
+    }
+
+    var heroCoordinateSpace: UICoordinateSpace? {
+        pages.indices.contains(activeIndex) ? pages[activeIndex].heroCoordinateSpace : nil
+    }
+
     /// Settles a tapped tile clear of the chrome while the post covers this
     /// screen. Asked of every page; only the one holding a pending reveal acts.
     func applyPendingReveal() {
