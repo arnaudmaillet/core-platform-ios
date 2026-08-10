@@ -62,6 +62,9 @@ final class ProfileGalleryGridView: UIView {
     /// The post whose twin is in the air: it must not claim a player while the
     /// flight is carrying that same media.
     private var heroFlyingPostID: PostID?
+    /// The chrome that remains over this page's content once the header has
+    /// travelled — told by the owner, which is the only thing that knows.
+    private var stickyTopOcclusion: CGFloat = 0
     /// While a fetch is in flight the page renders shimmering placeholder
     /// cells through its own (real) layout, so the loading state already has
     /// the shape the content will hydrate into. Read by the pager to keep its
@@ -350,7 +353,23 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         var occlusion = collectionView.verticalScrollIndicatorInsets
         occlusion.left = 0
         occlusion.right = 0
+        // ⚠️ The TOP indicator inset is not occlusion on this page either.
+        // `setContentTopInset` sets it to the header's full reserved height,
+        // and that space is where content BEGINS, not where it hides: the
+        // header floats above the content and scrolls away with it, so the only
+        // thing content ever passes under is the part that STAYS — the docked
+        // selector and the status bar.
+        //
+        // Using the reserved height judged every item in the first ~557pt as
+        // hidden, so revealing one scrolled the page to the very top. Measured:
+        // offset -116 → -557 for a tile that was plainly on screen, which is
+        // the whole of the "dismissing resets my scroll position" report.
+        occlusion.top = stickyTopOcclusion
         return occlusion
+    }
+
+    func setStickyTopOcclusion(_ height: CGFloat) {
+        stickyTopOcclusion = height
     }
 
     private var visibleBand: CGRect {

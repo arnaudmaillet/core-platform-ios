@@ -160,6 +160,11 @@ final class ProfileGalleryPagerView: UIView {
         }
     }
 
+    /// The chrome that stays over the pages when the header has scrolled away.
+    func setStickyTopOcclusion(_ height: CGFloat) {
+        pages.forEach { $0.setStickyTopOcclusion(height) }
+    }
+
     /// The active page's hero facts for a post — geometry, cover, shape.
     func heroGeometry(for postID: PostID) -> (rect: CGRect, cover: UIImage?, isTile: Bool)? {
         guard pages.indices.contains(activeIndex) else { return nil }

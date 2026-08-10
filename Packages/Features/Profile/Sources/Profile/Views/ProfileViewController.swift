@@ -762,6 +762,11 @@ final class ProfileViewController: UIViewController {
         // starts below it rather than behind it. Applied here because the
         // header's height is only known once it has laid out.
         galleryPager.setContentTopInset(headerHeight)
+        // What content actually passes under, as opposed to what it starts
+        // below: the docked selector and the status bar. See `chromeOcclusion`.
+        galleryPager.setStickyTopOcclusion(
+            Metrics.selectorSlotHeight + view.safeAreaInsets.top
+        )
         // Every tab must be able to absorb the header's whole travel, or a
         // short one cannot hold the position a long one was left at and the
         // header follows the clamp back up. See `setMinimumScrollTravel`.
