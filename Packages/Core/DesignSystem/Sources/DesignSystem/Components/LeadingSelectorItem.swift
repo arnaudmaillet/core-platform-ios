@@ -24,6 +24,15 @@ final class LeadingSelectorHost: UIView {
     /// selector, with nothing said about why.
     private static let roomForOtherItems: CGFloat = 170
 
+    /// Held back from the ceiling on top of `roomForOtherItems`.
+    ///
+    /// UIKit adds its own layout margins inside a bar item and rounds to the
+    /// device scale, so a selector sized to exactly the room available is a
+    /// selector measured at the edge of it. The bar scrolls, so the cost of
+    /// being 12pt short is 12pt of scrolling; the cost of being a fraction over
+    /// is decided by UIKit, not us.
+    private static let safetyBuffer: CGFloat = 12
+
     private let bar: PagedTabBar
     private var maximumWidth: NSLayoutConstraint!
 
@@ -114,7 +123,7 @@ final class LeadingSelectorHost: UIView {
         }
         #endif
         let width = window?.bounds.width ?? UIScreen.main.bounds.width
-        return max(80, width - Self.roomForOtherItems)
+        return max(80, width - Self.roomForOtherItems - Self.safetyBuffer)
     }
 
     private func updateCeiling() {
