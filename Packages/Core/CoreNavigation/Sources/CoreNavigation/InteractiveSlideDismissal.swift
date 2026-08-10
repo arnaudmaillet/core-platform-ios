@@ -44,6 +44,21 @@ public final class InteractiveSlideDismissal: NSObject {
     /// the manually hidden tab bar here.
     public var onFeedPopped: ((UINavigationController) -> Void)?
 
+    /// An extra veto the owner can impose, asked at begin-time.
+    ///
+    /// Exists for surfaces where a full-width swipe means something else some
+    /// of the time. A profile pages between tabs on a horizontal drag, so the
+    /// drag may only dismiss when there is no tab to the left of the current
+    /// one; everywhere else the whole surface is always the gesture's.
+    ///
+    /// Nil means no veto, which is the behaviour every existing caller had.
+    public var canBeginDismissal: (() -> Bool)?
+
+    /// The recognizer, so an owner can order a competing one behind it —
+    /// `require(toFail:)` needs the object, and a caller that cannot see it
+    /// has to duplicate the pan to get one.
+    public private(set) weak var dismissalPan: UIPanGestureRecognizer?
+
     /// Installs the pan on the feed's view. Called once; the retained feed
     /// keeps its recognizer across pushes.
     public func attach(to feedViewController: UIViewController) {
@@ -53,6 +68,7 @@ public final class InteractiveSlideDismissal: NSObject {
         pan.maximumNumberOfTouches = 1
         pan.delegate = self
         feedViewController.view.addGestureRecognizer(pan)
+        dismissalPan = pan
     }
 
     /// Takes the stack's delegate slot for the feed's time on `nav`. The
@@ -136,6 +152,11 @@ public final class InteractiveSlideDismissal: NSObject {
     /// springs back is decided by the same threshold logic as a real release.
     public func debugPerformSwipe(peakProgress: CGFloat) async {
         guard let view = feedViewController?.viewIfLoaded else { return }
+        // Honour the owner's veto, exactly as a real touch would. Calling
+        // `beginSwipe` straight through made this harness answer a different
+        // question from the one a thumb asks: it dismissed a profile from a
+        // tab whose drag belongs to the pager, and reported success.
+        guard canBeginDismissal?() != false else { return }
         beginSwipe()
         let peak = peakProgress * view.bounds.width
         let steps = 30
@@ -218,6 +239,7 @@ extension InteractiveSlideDismissal: UIGestureRecognizerDelegate {
         else { return false }
         if let destination = feed as? any ZoomTransitionDestination,
            !destination.isReadyForInteractiveDismissal { return false }
+        if let canBeginDismissal, !canBeginDismissal() { return false }
         let velocity = pan.velocity(in: view)
         return velocity.x > 0 && abs(velocity.x) > abs(velocity.y)
     }

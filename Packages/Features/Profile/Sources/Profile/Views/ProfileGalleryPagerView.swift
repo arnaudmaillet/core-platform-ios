@@ -50,6 +50,9 @@ final class ProfileGalleryPagerView: UIView {
     /// The pan that pages; exposed so the owner can subordinate it to the
     /// navigation stack's edge-swipe pop.
     var horizontalPan: UIPanGestureRecognizer { scrollView.panGestureRecognizer }
+    /// Which page is live — read by the dismissal gate, which may only claim
+    /// the whole surface when there is no page to the left.
+    var activePageIndex: Int { activeIndex }
 
     private let scrollView = PagerScrollView()
     private let pages: [ProfileGalleryGridView]

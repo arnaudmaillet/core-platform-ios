@@ -141,6 +141,11 @@ final class ProfileViewController: UIViewController {
     /// real-width pass), cropping the skeleton to a row and a half.
     private var skeletonViewportFill: NSLayoutConstraint?
     private var didSubordinatePagerToPop = false
+    /// Full-width swipe-to-dismiss, live only on the first tab — see
+    /// `ProfileDismissalPolicy`. Held for the screen's lifetime; the gate is
+    /// what changes, not the wiring.
+    private let slideDismissal = InteractiveSlideDismissal()
+    private var didInstallSlideDismissal = false
     #if DEBUG
     /// Latches the `-profile-relationships` QA push to a single firing.
     private var didPushRelationshipsForQA = false
@@ -499,6 +504,7 @@ final class ProfileViewController: UIViewController {
             didSubordinatePagerToPop = true
             galleryPager.horizontalPan.require(toFail: pop)
         }
+        installSlideDismissalIfNeeded()
         #if DEBUG
         // Dev convenience: `-profile-overscroll` parks the scroll view in the
         // pulled-down region (no touch injection in the sim), so the banner's
@@ -606,6 +612,24 @@ final class ProfileViewController: UIViewController {
                 mirrorSelection(to: index)
                 adoptTab(tabs[index])
                 galleryPager.setActivePage(tabs[index], animated: false)
+            }
+        }
+        // `-profile-swipe-demo <peak>` drives the full-width dismissal the way
+        // a finger would. The simulator injects no touches, and the gate this
+        // exercises — whole surface on the first tab, edge only after it — is
+        // otherwise only observable with a thumb.
+        if let position = arguments.firstIndex(of: "-profile-swipe-demo"),
+           position + 1 < arguments.count, let peak = Double(arguments[position + 1]) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                guard let self else { return }
+                let allowed = ProfileDismissalPolicy.allowsFullWidthDismissal(
+                    activeIndex: galleryPager.activePageIndex,
+                    isPushed: navigationController?.viewControllers.first !== self
+                )
+                print("[profile-swipe] tab=\(galleryPager.activePageIndex) fullWidthAllowed=\(allowed)")
+                Task { @MainActor [slideDismissal] in
+                    await slideDismissal.debugPerformSwipe(peakProgress: CGFloat(peak))
+                }
             }
         }
         // `-profile-open-post <index>` taps a gallery tile once the gallery has
@@ -1386,6 +1410,34 @@ final class ProfileViewController: UIViewController {
         let tab = tabs[index]
         adoptTab(tab)
         galleryPager.setActivePage(tab, animated: true)
+    }
+
+    /// Arms the full-width dismissal, once, and only for a PUSHED profile.
+    ///
+    /// The gate is asked per gesture rather than re-installed per tab: a
+    /// recognizer added and removed as the viewer pages is one that will
+    /// eventually be missing when a thumb arrives.
+    ///
+    /// Ordering the pager behind it is safe on every tab precisely because
+    /// the gate decides. Past the first tab the dismissal pan never begins,
+    /// fails immediately, and the pager pages exactly as it always did.
+    private func installSlideDismissalIfNeeded() {
+        guard !didInstallSlideDismissal, let nav = navigationController,
+              nav.viewControllers.first !== self
+        else { return }
+        didInstallSlideDismissal = true
+        slideDismissal.canBeginDismissal = { [weak self] in
+            guard let self, let nav = navigationController else { return false }
+            return ProfileDismissalPolicy.allowsFullWidthDismissal(
+                activeIndex: galleryPager.activePageIndex,
+                isPushed: nav.viewControllers.first !== self
+            )
+        }
+        slideDismissal.attach(to: self)
+        slideDismissal.install(on: nav)
+        if let pan = slideDismissal.dismissalPan {
+            galleryPager.horizontalPan.require(toFail: pan)
+        }
     }
 
     /// Records the choice and re-dresses the screen around it.
