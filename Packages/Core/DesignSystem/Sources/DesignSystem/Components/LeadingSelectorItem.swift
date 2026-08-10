@@ -108,16 +108,24 @@ final class LeadingSelectorHost: UIView {
         guard wanted.width > 1 else {
             return CGSize(width: UIView.noIntrinsicMetric, height: wanted.height)
         }
-        // floor ≤ width ≤ ceiling. The floor is one whole tab: below that the
-        // capsule reads as a stub rather than a selector, and the scroller can
-        // still reach the rest. Expressed HERE and not as constraints on the bar —
+        // floor ≤ width ≤ ceiling, and the FLOOR WINS a contradiction: a ceiling
+        // narrower than one tab is a screen too small for this bar, not a reason
+        // to draw a stub. Expressed here and not as constraints on the bar —
         // required `>=`/`<=` constraints there fight the bar's own.
         let width = max(floorWidth, min(wanted.width, ceiling))
         return CGSize(width: width, height: wanted.height)
     }
 
-    /// One whole tab — never wider than the ceiling, or the clamp inverts.
-    private var floorWidth: CGFloat { min(bar.firstSegmentWidth, ceiling) }
+    /// One whole tab, and the ceiling does NOT get to cut into it.
+    ///
+    /// ⚠️ This used to be `min(firstSegmentWidth, ceiling)`, which quietly gave up
+    /// the guarantee on exactly the screens that need it: on a narrow device the
+    /// ceiling can fall below one tab, and clamping to it produces a stub that
+    /// says nothing. The rule is that the selector is always at least one whole
+    /// tab wide and scrolls for the rest — and if a viewport cannot even hold
+    /// that, then it is the viewport that is too narrow, which is the one case
+    /// where UIKit is welcome to do whatever it likes.
+    private var floorWidth: CGFloat { bar.firstSegmentWidth }
 
     /// The widest the bar may be here — what the rest of the bar needs, taken off
     /// the width available to it.

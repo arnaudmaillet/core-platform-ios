@@ -157,7 +157,15 @@ final class HeaderSelectorAudit {
             }
         }
 
-        // 4. On a pushed surface, is the back button still there and reachable?
+        // 4. THE ABSOLUTE RULE: no overflow control anywhere on this bar. UIKit
+        // labels its own "More", so the label is the signal rather than the glyph;
+        // a class-name check catches the private container too.
+        let overflow = overflowControls(in: bar)
+        if !overflow.isEmpty {
+            finding.problems.append("OVERFLOW present: \(overflow.joined(separator: ", "))")
+        }
+
+        // 5. On a pushed surface, is the back button still there and reachable?
         if nav.viewControllers.count > 1 {
             let backPoint = CGPoint(x: 28, y: frame.midY)
             let hit = window.hitTest(backPoint, with: nil)
@@ -189,6 +197,9 @@ final class HeaderSelectorAudit {
                      selector.superview?.frame.width ?? -1,
                      selector.superview?.frame.height ?? -1,
                      chain.joined(separator: "←")))
+        print(String(format: "[header-audit] %@: screenW=%.0f firstSeg=%.0f overflow=%@",
+                     surface, window.bounds.width, selector.firstSegmentWidth,
+                     overflow.isEmpty ? "NONE" : "PRESENT"))
         print(String(format: "[header-audit] %@: selector %.0f,%.0f %.0fx%.0f segments=%d "
                      + "leading=%d pushed=%@ placement=%@",
                      surface, frame.minX, frame.minY, frame.width, frame.height,
@@ -207,6 +218,22 @@ final class HeaderSelectorAudit {
         }
         if let nav = candidate as? UINavigationController { return nav }
         return candidate?.navigationController
+    }
+
+    /// Anything on this bar that is an overflow affordance.
+    private func overflowControls(in root: UIView) -> [String] {
+        var found: [String] = []
+        func walk(_ view: UIView) {
+            let name = String(describing: type(of: view))
+            let label = view.accessibilityLabel?.lowercased() ?? ""
+            if name.contains("Overflow") || name.contains("Ellipsis")
+                || (label == "more" && view is UIControl) {
+                found.append("\(name)/label=\(view.accessibilityLabel ?? "-")")
+            }
+            view.subviews.forEach(walk)
+        }
+        walk(root)
+        return found
     }
 
     private func firstPagedTabBar(in root: UIView) -> PagedTabBar? {
