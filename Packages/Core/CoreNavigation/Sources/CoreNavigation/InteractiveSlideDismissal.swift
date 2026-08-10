@@ -150,14 +150,25 @@ public final class InteractiveSlideDismissal: NSObject {
     /// is impossible in the simulator, so this walks the exact
     /// begin/update/release path a finger drives. Whether it completes or
     /// springs back is decided by the same threshold logic as a real release.
-    public func debugPerformSwipe(peakProgress: CGFloat) async {
-        guard let view = feedViewController?.viewIfLoaded else { return }
+    /// Returns whether the pop it started is actually being DRIVEN by the
+    /// gesture, which is a different question from whether the screen went
+    /// away.
+    ///
+    /// With no navigation delegate — or one that does not vend this driver —
+    /// `popViewController` still pops, on UIKit's own animation. Depth changes,
+    /// the screen leaves, and the harness sees success while a real finger
+    /// would have watched the page jump instead of following. Checking
+    /// `transitionCoordinator?.isInteractive` is what tells the two apart.
+    @discardableResult
+    public func debugPerformSwipe(peakProgress: CGFloat) async -> Bool {
+        guard let view = feedViewController?.viewIfLoaded else { return false }
         // Honour the owner's veto, exactly as a real touch would. Calling
         // `beginSwipe` straight through made this harness answer a different
         // question from the one a thumb asks: it dismissed a profile from a
         // tab whose drag belongs to the pager, and reported success.
-        guard canBeginDismissal?() != false else { return }
+        guard canBeginDismissal?() != false else { return false }
         beginSwipe()
+        let isDriven = feedViewController?.transitionCoordinator?.isInteractive == true
         let peak = peakProgress * view.bounds.width
         let steps = 30
         for step in 1...steps {
@@ -171,6 +182,7 @@ public final class InteractiveSlideDismissal: NSObject {
         releaseSwipe(
             translation: CGPoint(x: peak, y: 0), velocity: .zero, ended: true, in: view
         )
+        return isDriven
     }
     #endif
 }

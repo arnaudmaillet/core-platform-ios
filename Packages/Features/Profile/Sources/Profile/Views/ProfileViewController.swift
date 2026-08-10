@@ -1420,22 +1420,34 @@ final class ProfileViewController: UIViewController {
     /// the gate decides. Past the first tab the dismissal pan never begins,
     /// fails immediately, and the pager pages exactly as it always did.
     private func installSlideDismissalIfNeeded() {
-        guard !didInstallSlideDismissal, let nav = navigationController,
-              nav.viewControllers.first !== self
-        else { return }
-        didInstallSlideDismissal = true
-        slideDismissal.canBeginDismissal = { [weak self] in
-            guard let self, let nav = navigationController else { return false }
-            return ProfileDismissalPolicy.allowsFullWidthDismissal(
-                activeIndex: galleryPager.activePageIndex,
-                isPushed: nav.viewControllers.first !== self
-            )
+        guard let nav = navigationController, nav.viewControllers.first !== self else { return }
+        // RE-ASSERTED on every appearance, not installed once.
+        //
+        // A child pushed above this screen may take the stack's delegate for
+        // its own transition and hand back something else — nil, historically
+        // — which leaves this object installed in its own view but no longer
+        // consulted. The pan still begins and still pops; UIKit just never
+        // asks for the interaction controller, so the page jumps instead of
+        // following the finger, and nothing ever repairs it.
+        //
+        // Re-installing costs nothing when it is already the delegate
+        // (`install` returns early) and is the difference between a screen
+        // that recovers by itself and one that stays broken for its lifetime.
+        if !didInstallSlideDismissal {
+            didInstallSlideDismissal = true
+            slideDismissal.canBeginDismissal = { [weak self] in
+                guard let self, let nav = navigationController else { return false }
+                return ProfileDismissalPolicy.allowsFullWidthDismissal(
+                    activeIndex: galleryPager.activePageIndex,
+                    isPushed: nav.viewControllers.first !== self
+                )
+            }
+            slideDismissal.attach(to: self)
+            if let pan = slideDismissal.dismissalPan {
+                galleryPager.horizontalPan.require(toFail: pan)
+            }
         }
-        slideDismissal.attach(to: self)
         slideDismissal.install(on: nav)
-        if let pan = slideDismissal.dismissalPan {
-            galleryPager.horizontalPan.require(toFail: pan)
-        }
     }
 
     /// Records the choice and re-dresses the screen around it.
@@ -1943,6 +1955,19 @@ extension ProfileViewController: DebugItemSelectable {
     /// method — the path that builds a hero origin and flies.
     func debugSelectFirstItem() -> Bool {
         galleryPager.debugSelectItem(at: 0)
+    }
+}
+#endif
+
+#if DEBUG
+extension ProfileViewController: DebugInteractivelyDismissible {
+    /// Grabs this screen the way a finger would, through the same recogniser
+    /// path — including its own tab gate, so a refusal here is a real refusal.
+    func debugDismissInteractively() async -> Bool {
+        guard slideDismissal.canBeginDismissal?() != false else { return false }
+        // The RETURN VALUE matters: it reports whether the pop was driven by
+        // the gesture, not merely that it happened.
+        return await slideDismissal.debugPerformSwipe(peakProgress: 0.7)
     }
 }
 #endif

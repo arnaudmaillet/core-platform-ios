@@ -127,8 +127,17 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // on the presenter, which hides the lifetime rather than stating it.
         let retainer = HeroTransitionRetainer()
         retainer.transition = transition
-        transition.onSourceReturned = { [weak nav] in
-            nav?.delegate = nil
+        // SAVED, not assumed nil. The presenter may already own the stack's
+        // delegate — a profile installs an `InteractiveSlideDismissal` as one
+        // before it pushes anything — and restoring nil orphaned it: the
+        // object still believed it was installed, its pan still began and
+        // called `popViewController`, but with no delegate UIKit never asked
+        // for the interaction controller. The pop ran instantly instead of
+        // following the finger, and every grab above it stayed broken because
+        // nothing ever put the delegate back.
+        let previousDelegate = nav.delegate
+        transition.onSourceReturned = { [weak nav, weak previousDelegate] in
+            nav?.delegate = previousDelegate
             origin.setConcealed(false)
             retainer.transition = nil
         }

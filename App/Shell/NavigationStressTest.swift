@@ -120,6 +120,14 @@ final class NavigationStressTest {
             trail.append("route2→\(depth())")
         }
         print("[nav-stress] \(tab.rawValue) cycle \(cycle) path: \(trail.joined(separator: " "))")
+        // CONSECUTIVE GRABS on every third cycle — the case a programmatic pop
+        // cannot reach. A pop never asks for an interaction controller, so it
+        // cannot notice that the screen beneath was left unable to be grabbed;
+        // only grabbing twice in a row does.
+        if cycle.isMultiple(of: 3) {
+            await unwindByGrabbing(tab: tab, trail: &trail)
+            return
+        }
         // Home in one move on odd cycles, one pop at a time on even ones: a
         // multi-pop skips every intermediate `viewWillAppear`, which is exactly
         // where bar restoration tends to live.
@@ -137,6 +145,50 @@ final class NavigationStressTest {
     /// The current stack depth, so a cycle can show it actually went somewhere
     /// — a harness that quietly did nothing reports "clean" just as loudly.
     private func depth() -> Int { activeStack()?.viewControllers.count ?? 0 }
+
+    /// Unwinds the stack one interactive grab at a time, reporting each.
+    ///
+    /// The top screen is a hero-pushed feed, grabbed through the transition
+    /// that presented it; the one beneath is the profile, grabbed through its
+    /// own slide dismissal. That second grab is the whole point — it is the one
+    /// that stopped working once the first completed, because the first handed
+    /// the stack's delegate back as nil and orphaned the second.
+    private func unwindByGrabbing(tab: AppTab, trail: inout [String]) async {
+        if let zoom = ZoomTransitionController.debugMostRecent {
+            zoom.debugScriptedGrab()
+            await settle(2.6)
+            trail.append("grab→\(depth())")
+        }
+        // What actually owns the stack's transitions at this moment. The
+        // whole theory of the bug is that the grab above handed this back
+        // wrong, so it is worth reading rather than assuming.
+        let delegateNow = activeStack()?.delegate
+        print("[nav-stress] \(tab.rawValue): delegate after first grab = "
+              + "\(delegateNow.map { String(describing: type(of: $0)) } ?? "nil")")
+        var guardrail = 0
+        while let top = activeStack()?.topViewController as? any DebugInteractivelyDismissible,
+              (activeStack()?.viewControllers.count ?? 0) > 1, guardrail < 4 {
+            guardrail += 1
+            let began = await top.debugDismissInteractively()
+            await settle(1.4)
+            if !began {
+                // The screen may still have gone away — a pop with no driver
+                // does that. The finger just was not steering it.
+                print("[nav-stress] \(tab.rawValue): grab not interactive, "
+                      + "the stack's delegate is not vending a driver")
+            }
+            trail.append(began ? "grab→\(depth())" : "GRAB-NOT-DRIVEN→\(depth())")
+            if !began { break }
+        }
+        // Anything the grabs could not reach still has to come home, or the
+        // audit would blame the next cycle for this one's leftovers.
+        if let stack = activeStack(), stack.viewControllers.count > 1 {
+            stack.popToRootViewController(animated: true)
+            await settle(1.2)
+            trail.append("pop→\(depth())")
+        }
+        print("[nav-stress] \(tab.rawValue) unwind: \(trail.joined(separator: " "))")
+    }
 
     private func activeStack() -> UINavigationController? {
         tabBarController.selectedViewController as? UINavigationController

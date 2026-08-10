@@ -64,6 +64,9 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         self.destination = destination
         self.feedViewController = destination as? UIViewController
         super.init()
+        #if DEBUG
+        Self.debugMostRecent = self
+        #endif
         // Before the destination is pushed, and so before it lays out and
         // activates its first page — the only point early enough for it to
         // suppress its own playback for the duration of the flight.
@@ -78,6 +81,14 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
     }
 
     #if DEBUG
+    /// The controller most recently created, so a harness can grab the screen
+    /// it just presented without every presenter having to publish its own.
+    ///
+    /// Weak and last-wins, which is exactly the harness's usage: it presents
+    /// one screen and immediately dismisses that one. Nothing in shipping code
+    /// reads this.
+    public private(set) static weak var debugMostRecent: ZoomTransitionController?
+
     /// `-maps-demo-grab`: drives the interactive dismissal without touches
     /// (the sim can't inject pans) — one diagonal grab below the completion
     /// threshold (floats down-right, then springs back to full screen from
