@@ -165,6 +165,14 @@ final class ProfileGalleryPagerView: UIView {
         pages.forEach { $0.setStickyTopOcclusion(height) }
     }
 
+    #if DEBUG
+    /// The active page's revealed tile, in window space, once settled.
+    func debugRevealedTileInWindow() -> CGRect? {
+        guard pages.indices.contains(activeIndex) else { return nil }
+        return pages[activeIndex].debugRevealedTileInWindow()
+    }
+    #endif
+
     /// The active page's hero facts for a post — geometry, cover, shape.
     func heroGeometry(for postID: PostID) -> (rect: CGRect, cover: UIImage?, isTile: Bool)? {
         guard pages.indices.contains(activeIndex) else { return nil }
@@ -228,6 +236,29 @@ final class ProfileGalleryPagerView: UIView {
             page.setVerticalOffset(offset)
         }
     }
+
+    #if DEBUG
+    /// Scrolls the active page and reports whether the offset actually took.
+    ///
+    /// `-profile-scroll` used to fire on a fixed delay and silently clamp to the
+    /// top while a page's content was still loading, so a run meant to drive a
+    /// tile tucked under the chrome quietly tested one at rest instead. The
+    /// caller polls on this instead of trusting a delay.
+    /// Returns false ONLY while the page is still gaining ground.
+    ///
+    /// A page shorter than the request clamps, and "did it reach the target"
+    /// then never becomes true — the caller polled forever and kept re-applying
+    /// the offset long after the run had moved on, overwriting the reveal it was
+    /// there to observe. Clamped is a finished answer, not a failed one.
+    func debugSetVerticalOffset(_ offset: CGFloat) -> Bool {
+        guard pages.indices.contains(activeIndex) else { return false }
+        let page = pages[activeIndex]
+        let before = page.currentVerticalOffset
+        page.setVerticalOffset(offset)
+        let after = page.currentVerticalOffset
+        return abs(after - offset) < 1 || abs(after - before) < 1
+    }
+    #endif
 
     /// How far the screen scrolls before the header has finished travelling —
     /// the line either side of which the offset means a different thing.

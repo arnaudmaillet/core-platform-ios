@@ -65,6 +65,32 @@ final class ProfileGalleryGridView: UIView {
     /// The chrome that remains over this page's content once the header has
     /// travelled — told by the owner, which is the only thing that knows.
     private var stickyTopOcclusion: CGFloat = 0
+
+    /// The page's live vertical offset, for harness polling.
+    var currentVerticalOffset: CGFloat { collectionView.contentOffset.y }
+
+    #if DEBUG
+    /// The post the last reveal aligned, for the settled-state check.
+    private(set) var debugLastRevealedPostID: PostID?
+
+    /// Where that post's cell actually is on screen, once everything has settled.
+    ///
+    /// The reveal's own log runs from `viewDidDisappear`, where this view has no
+    /// window and no conversion is possible — it reported `nan` and confirmed
+    /// nothing. Asked again after the profile is back, this is the number the
+    /// user is looking at.
+    func debugRevealedTileInWindow() -> CGRect? {
+        guard let id = debugLastRevealedPostID,
+              let index = posts.firstIndex(where: { $0.id == id }),
+              let window,
+              let attributes = collectionView.layoutAttributesForItem(
+                  at: IndexPath(item: index, section: 0)
+              )
+        else { return nil }
+        return collectionView.convert(attributes.frame, to: window)
+    }
+
+    #endif
     /// While a fetch is in flight the page renders shimmering placeholder
     /// cells through its own (real) layout, so the loading state already has
     /// the shape the content will hydrate into. Read by the pager to keep its
@@ -547,6 +573,9 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     func applyPendingReveal() {
         guard let id = pendingRevealPostID else { return }
         pendingRevealPostID = nil
+        #if DEBUG
+        debugLastRevealedPostID = id
+        #endif
         guard let index = posts.firstIndex(where: { $0.id == id }) else { return }
         let rect = collectionView.layoutAttributesForItem(at: IndexPath(item: index, section: 0))?.frame
         #if DEBUG
@@ -573,7 +602,7 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
             let bottomGap = (after + collectionView.bounds.height - cover.bottom) - rect.maxY
             print(String(format:
                 "[profile-reveal] tile=%.0f…%.0f offset %.0f→%.0f cover=%.0f/%.0f "
-                + "gapBelowHeader=%.0f gapAboveFooter=%.0f",
+                + "gapBelowSelector=%.0f gapAboveFooter=%.0f",
                 rect.minY, rect.maxY, offsetBefore, after,
                 cover.top, cover.bottom, topGap, bottomGap))
         }
@@ -632,6 +661,18 @@ extension ProfileGalleryGridView {
     /// they are keeping a page in step with something else and an animation
     /// there is a page arriving late.
     func setVerticalOffset(_ offset: CGFloat, animated: Bool) {
+        #if DEBUG
+        // `-profile-offset-trace`: names whoever moves a page. The reveal writes
+        // an offset while this screen is covered and something puts it back
+        // before the viewer sees it; the reveal's own log reports what it SET,
+        // never what survived, so only the caller list can say who.
+        if ProcessInfo.processInfo.arguments.contains("-profile-offset-trace") {
+            let callers = Thread.callStackSymbols.dropFirst().prefix(7)
+                .filter { $0.contains("Profile") }
+                .map { $0.split(separator: " ").dropFirst(3).prefix(6).joined(separator: " ") }
+            print("[offset-trace] → \(Int(offset)) via \(callers.joined(separator: " ← "))")
+        }
+        #endif
         // ⚠️ **Make room BEFORE asking the page to travel.** The room a page
         // needs is computed from its content size, and on a tab switch the page
         // being handed the offset may not have laid out since its content

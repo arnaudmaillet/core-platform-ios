@@ -141,6 +141,10 @@ final class ProfileViewController: UIViewController {
     /// real-width pass), cropping the skeleton to a row and a half.
     private var skeletonViewportFill: NSLayoutConstraint?
     private var didSubordinatePagerToPop = false
+    #if DEBUG
+    /// Launch-argument hooks are one-shot; see `viewDidAppear`.
+    private var hasArmedDebugHooks = false
+    #endif
     /// Full-width swipe-to-dismiss, live only on the first tab — see
     /// `ProfileDismissalPolicy`. Held for the screen's lifetime; the gate is
     /// what changes, not the wiring.
@@ -491,6 +495,9 @@ final class ProfileViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        #if DEBUG
+        verifyRevealClearsSelector()
+        #endif
         // Both facts are true only here: the screen owns the display AND its
         // cells are realized. Reconciling any earlier finds no candidates.
         galleryPager.setAutoplayActive(true)
@@ -506,6 +513,12 @@ final class ProfileViewController: UIViewController {
         }
         installSlideDismissalIfNeeded()
         #if DEBUG
+        // ARMED ONCE. `viewDidAppear` runs again when a pushed post is dismissed,
+        // and re-running these drove a second scroll on top of the background
+        // reveal, undoing it moments before any check could look. Every "the
+        // reveal was reverted" reading traced back to here, not to the product.
+        defer { hasArmedDebugHooks = true }
+        if hasArmedDebugHooks { return }
         // Dev convenience: `-profile-overscroll` parks the scroll view in the
         // pulled-down region (no touch injection in the sim), so the banner's
         // stretch-over-overscroll behavior can be screenshotted.
@@ -636,9 +649,18 @@ final class ProfileViewController: UIViewController {
         // the only state the header-alignment bug appears in.
         if let position = arguments.firstIndex(of: "-profile-scroll"),
            position + 1 < arguments.count, let points = Double(arguments[position + 1]) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
-                self?.galleryPager.setVerticalOffset(CGFloat(points))
+            var attempts = 0
+            func attempt() {
+                attempts += 1
+                // Polls: a fixed delay clamps to the top while the page is still
+                // loading and the run then tests a tile at rest, which is the
+                // one state the alignment bug cannot appear in.
+                if galleryPager.debugSetVerticalOffset(CGFloat(points)) { return }
+                if attempts < 60 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: attempt)
+                }
             }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: attempt)
         }
         // `-profile-open-post <index>` taps a gallery tile once the gallery has
         // content. The sim injects no touches, and a tile tap is the only way
@@ -762,11 +784,7 @@ final class ProfileViewController: UIViewController {
         // starts below it rather than behind it. Applied here because the
         // header's height is only known once it has laid out.
         galleryPager.setContentTopInset(headerHeight)
-        // What content actually passes under, as opposed to what it starts
-        // below: the docked selector and the status bar. See `chromeOcclusion`.
-        galleryPager.setStickyTopOcclusion(
-            Metrics.selectorSlotHeight + view.safeAreaInsets.top
-        )
+        galleryPager.setStickyTopOcclusion(stickyTopOcclusion)
         // Every tab must be able to absorb the header's whole travel, or a
         // short one cannot hold the position a long one was left at and the
         // header follows the clamp back up. See `setMinimumScrollTravel`.
@@ -1571,6 +1589,53 @@ final class ProfileViewController: UIViewController {
         // viewWillDisappear.
         toolbarItems = [.flexibleSpace(), UIBarButtonItem(customView: sourceMenuButton)]
     }
+
+    /// What content actually passes under at the top.
+    ///
+    /// The navigation bar hosts the docked selector, so `safeAreaInsets.top`
+    /// already reaches that bar's bottom edge; `selectorSlotHeight` on top is the
+    /// clearance that lands a revealed tile clearly below the selector instead of
+    /// flush against it. Measured: a revealed tile's top sits 72pt below the
+    /// selector's bottom edge.
+    ///
+    /// Assembled rather than measured from the selector's own frame. Reading
+    /// `dockedBar` looked more honest and was worse: the bar is transiently
+    /// out of any window during a push, so the value flipped between 116 and
+    /// 176 between reveals and the occlusion stopped being deterministic.
+    private var stickyTopOcclusion: CGFloat {
+        view.safeAreaInsets.top + Metrics.selectorSlotHeight
+    }
+
+    #if DEBUG
+    /// `-profile-verify-reveal`: does the revealed tile clear the selector, in
+    /// the settled state, measured against the selector's own frame?
+    ///
+    /// Independent of `chromeOcclusion` on purpose. The reveal log derived its
+    /// "gap" from the very inset the reveal had just applied, so it read clean
+    /// whatever the tile did — including while the tile sat under the selector.
+    private func verifyRevealClearsSelector() {
+        guard ProcessInfo.processInfo.arguments.contains("-profile-verify-reveal") else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self, let window = view.window else { return }
+            guard let tile = galleryPager.debugRevealedTileInWindow() else {
+                print("[verify-reveal] no revealed tile"); return
+            }
+            let bar = isBarDocked ? dockedBar : inlineBar
+            let selector = bar.window == nil ? .zero : bar.convert(bar.bounds, to: window)
+            let navBar = navigationController?.navigationBar
+            let nav = navBar?.window == nil ? CGRect.zero
+                : navBar!.convert(navBar!.bounds, to: window)
+            let chromeBottom = max(selector.maxY, nav.maxY)
+            print(String(format:
+                "[verify-reveal] tileTop=%.0f selector=%.0f…%.0f navBottom=%.0f "
+                + "chromeBottom=%.0f clearance=%.0f docked=%@ %@",
+                tile.minY, selector.minY, selector.maxY, nav.maxY,
+                chromeBottom, tile.minY - chromeBottom,
+                isBarDocked ? "Y" : "N",
+                tile.minY >= chromeBottom ? "CLEAR" : "COVERED"))
+        }
+    }
+    #endif
 
     /// The height the header takes when nothing is scrolled — what the pages
     /// are inset by so their content starts below it rather than behind it.

@@ -161,6 +161,18 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             print("[hero] pushed with dismissal grab: pans=\(pans)")
         }
         #endif
+        #if DEBUG
+        // `-hero-demo-grab`: dismiss the pushed post by grab once it lands, so a
+        // scripted run can see the surface UNDERNEATH in its returned state.
+        // The reveal that runs while the post covers it is only observable there.
+        if ProcessInfo.processInfo.arguments.contains("-hero-demo-grab") {
+            transition.onDestinationShown = { [weak transition] in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    transition?.debugScriptedGrab()
+                }
+            }
+        }
+        #endif
         nav.delegate = transition
         nav.pushViewController(destination, animated: true)
     }
