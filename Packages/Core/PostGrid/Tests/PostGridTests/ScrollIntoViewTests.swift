@@ -209,3 +209,68 @@ struct ScrollIntoViewImmediateTests {
         #expect(view.contentOffset.y == maximum)
     }
 }
+
+/// THE MOSAIC ASKS THE SAME QUESTION, IN A DIFFERENT SHAPE.
+///
+/// Discover is a multi-column mosaic of mixed-height bricks, Following is a
+/// column of full-width cards, and the profile gallery is a third arrangement
+/// again. None of that reaches the geometry: a tile is revealed on the VERTICAL
+/// axis against the same two insets, and its column is irrelevant because
+/// nothing here scrolls sideways.
+///
+/// Worth stating as tests rather than assumed, because the mosaic is the case
+/// where "the item's frame" is least like the viewport: a brick can be a third
+/// of the width and a fraction of the height of a row card.
+struct ScrollIntoViewMosaicTests {
+    /// 100pt nav bar, 90pt tab bar, 800pt viewport — the For You chrome.
+    private func offset(for rect: CGRect, offsetY: CGFloat = 0) -> CGPoint? {
+        ScrollIntoView.offset(
+            toReveal: rect,
+            bounds: CGRect(x: 0, y: offsetY, width: 390, height: 800),
+            contentInset: UIEdgeInsets(top: 100, left: 0, bottom: 90, right: 0),
+            contentSize: CGSize(width: 390, height: 5000)
+        )
+    }
+
+    /// A small brick in the trailing column, tucked under the tab bar. Its
+    /// column plays no part: only its top and bottom edges matter.
+    @Test func aNarrowBrickUnderTheTabBarIsRevealedByItsVerticalEdgesAlone() throws {
+        let trailingColumn = CGRect(x: 262, y: 660, width: 128, height: 128)
+        let leadingColumn = CGRect(x: 0, y: 660, width: 128, height: 128)
+
+        let trailing = try #require(offset(for: trailingColumn))
+        let leading = try #require(offset(for: leadingColumn))
+
+        #expect(trailing.y == leading.y, "the column changed the answer")
+        let expected: CGFloat = 660 + 128 + 90 + 12 - 800
+        #expect(trailing.y == expected)
+    }
+
+    /// Bricks of different heights in the same mosaic row settle differently,
+    /// and each by its own lower edge — a tall brick has further to travel.
+    @Test func aTallerBrickInTheSameRowTravelsFurther() throws {
+        let short = try #require(offset(for: CGRect(x: 0, y: 660, width: 128, height: 128)))
+        let tall = try #require(offset(for: CGRect(x: 0, y: 660, width: 128, height: 260)))
+
+        #expect(tall.y > short.y)
+    }
+
+    /// A brick under the NAV BAR at the top of the mosaic comes down clear of
+    /// it — the header case, which the tab bar tests do not cover.
+    @Test func aBrickUnderTheNavigationBarComesClearOfIt() throws {
+        // Scrolled to 500, so the visible band is 600…1210. This brick spans
+        // 560…688: its top is 40pt under the bar.
+        let result = try #require(offset(for: CGRect(x: 131, y: 560, width: 128, height: 128),
+                                         offsetY: 500))
+        let expected: CGFloat = 560 - 100 - 12
+        #expect(result.y == expected)
+    }
+
+    /// And a brick sitting comfortably between the bars is left alone, whatever
+    /// column it is in — the tap must not jolt the mosaic.
+    @Test func aBrickInTheClearIsNeverMoved() {
+        for x in [CGFloat(0), 131, 262] {
+            #expect(offset(for: CGRect(x: x, y: 300, width: 128, height: 128)) == nil)
+        }
+    }
+}
