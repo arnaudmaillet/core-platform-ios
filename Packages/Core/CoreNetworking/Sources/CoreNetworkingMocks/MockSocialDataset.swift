@@ -78,6 +78,64 @@ public struct MockSocialDataset: Sendable {
     /// opens on, so the one group that ignored the flag was the group most
     /// likely to be looked at. Reported as "some posts render as a plain solid
     /// colour with `-rich-media`".
+    /// Posts authored by the VIEWER, so their own profile is not empty.
+    ///
+    /// It was, and that is a hole in the fixtures rather than a product
+    /// decision: every profile the mock can show has a gallery except the one
+    /// the app opens by default. Two things could not be exercised because of
+    /// it — a hero flight departing from the Profile TAB's root, and autoplay
+    /// on the viewer's own gallery — and both looked like feature bugs.
+    ///
+    /// Nine posts on the same three-kind cycle the main corpus uses (video,
+    /// image, text), so all three profile tabs have something: the mosaic, the
+    /// timeline, and Short.
+    static func viewerRecords(mediaCatalog: MediaCatalog, after count: Int) -> [PostRecord] {
+        let captions = [
+            "Testing in production is fine if production is your simulator.",
+            "Shipping the new build tonight.",
+            "Refactor landed and the office survived it.",
+            "Weekend build log: the queue was never the problem, the clock was.",
+            "No caption needed.",
+            "Three days offline and the feed can wait.",
+            "Golden hour over the harbour.",
+            "Quiet morning, notes and a long walk before anything else.",
+            "New city, same habits."
+        ]
+        let shapes: [(Int, Int)] = [(1080, 1350), (1600, 900), (1080, 1080)]
+        let newestMS: Int64 = 1_780_000_000_000
+        return (0..<captions.count).map { index in
+            let hasMedia = index % 3 != 2
+            let isVideo = index % 3 == 0
+            let shape = shapes[index % shapes.count]
+            let media: (url: String, width: Int, height: Int)? = switch (hasMedia, mediaCatalog) {
+            case (false, _):
+                nil
+            case (true, .synthetic):
+                ("mock://\(isVideo ? "video" : "media")/me\(index)?w=\(shape.0)&h=\(shape.1)",
+                 shape.0, shape.1)
+            case (true, .realAssets):
+                if isVideo {
+                    { let fixture = MockMediaFixtures.videos[index % MockMediaFixtures.videos.count]
+                      return (fixture.url, fixture.width, fixture.height) }()
+                } else {
+                    (MockMediaFixtures.imageURL(index: 900 + index, width: shape.0, height: shape.1),
+                     shape.0, shape.1)
+                }
+            }
+            return PostRecord(
+                postID: String(format: "post-me-%02d", index),
+                authorProfileID: Self.viewerProfileID,
+                caption: captions[index],
+                media: media,
+                // Older than the seeded corpus, so the shared timeline keeps
+                // the order it had and these sit at its tail rather than
+                // pushing everyone else down.
+                publishedAtMS: newestMS - Int64(count + index) * 180_000,
+                parentID: ""
+            )
+        }
+    }
+
     static func justArrivedRecords(
         authors: [Author],
         mediaCatalog: MediaCatalog
@@ -316,7 +374,9 @@ public struct MockSocialDataset: Sendable {
         }
         // Five posts that arrived AFTER the viewer last looked, at the head of
         // the timeline. See `justArrivedRecords`.
-        posts = Self.justArrivedRecords(authors: authors, mediaCatalog: mediaCatalog) + records
+        posts = Self.justArrivedRecords(authors: authors, mediaCatalog: mediaCatalog)
+            + records
+            + Self.viewerRecords(mediaCatalog: mediaCatalog, after: postCount)
 
         // Twelve follows, not four: the compose picker expands the viewer's
         // first eight follows into friend-of-friend candidates

@@ -102,9 +102,16 @@ struct ProfileRepositoryTests {
 
     @Test func readsProfileReactionsFromCounterAggregate() async throws {
         // Profile-scoped LIKE is the one metric the mock projects: the sum of
-        // like counts across the author's posts. An author with posts reads a
-        // real total; the demo viewer owns no posts, so their total is a
-        // truthful zero (served exact — distinct from `.unavailable`).
+        // like counts across the author's posts, served `.exact` — the
+        // distinction this covers is exact-versus-`.unavailable`, not the
+        // particular number.
+        //
+        // The viewer used to assert `.exact(0)`, which was true only because
+        // the fixtures gave them no posts. They have a gallery now, so the
+        // zero is gone and with it the one case that showed a truthful zero
+        // reaching the UI as `.exact` rather than `.unavailable`. No seeded
+        // profile has zero posts any more, so that case is not reachable here;
+        // it is worth a fixture of its own if it ever matters.
         let repository = makeRepository()
 
         let author = try await repository.profile(id: ProfileID("prof-3"))
@@ -115,7 +122,11 @@ struct ProfileRepositoryTests {
         #expect(total > 0)
 
         let viewer = try await repository.currentUserProfile()
-        #expect(viewer.reactionCount == .exact(0))
+        guard case .exact(let viewerTotal) = viewer.reactionCount else {
+            Issue.record("the viewer's own total stopped being exact: \(viewer.reactionCount)")
+            return
+        }
+        #expect(viewerTotal > 0, "the viewer owns posts now, so their aggregate is not zero")
     }
 
     @Test func throwsWhenNotAuthenticated() async {
