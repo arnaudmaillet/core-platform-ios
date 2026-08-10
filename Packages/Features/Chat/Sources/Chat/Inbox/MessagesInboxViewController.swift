@@ -145,7 +145,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // ⚠️ AFTER the pager, every time. `configureSearch` runs first and adds the
         // search host, so the pager lands on top of it — the bar was mounted,
         // inset for, and completely invisible behind an opaque page.
-        view.bringSubviewToFront(searchHost)
+        view.bringSubviewToFront(dockedHeader)
         for surface in surfaces { surface.didMove(toParent: self) }
 
         // The bar's contents, stated once. Nothing else writes them.
@@ -229,10 +229,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         #endif
         if !hasActivatedInitialSurface {
             hasActivatedInitialSurface = true
-            if let surface = activeSurface {
-                applySearchInset(to: surface)
-                followScroll(of: surface)
-            }
+            if let surface = activeSurface { mountSearchBar(in: surface) }
             activeSurface?.surfaceDidBecomeActive()
         }
         #if DEBUG
@@ -304,14 +301,28 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // Anchored a beat after appearance: activating a search controller while
         // the tab's own first layout is still settling fights the presentation.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            guard let self, let results = self.searchResults else { return }
-            self.searchController.isActive = true
-            self.searchController.searchBar.text = text
-            results.updateSearchResults(for: self.searchController)
+            guard let self else { return }
+            // Drives the SAME path a tap takes now: focusing the field docks it and
+            // mounts the results as a child. `isActive` belonged to the controller's
+            // own presentation, which this architecture no longer uses — setting it
+            // here would present results over the very bar it docked.
+            self.searchBar.becomeFirstResponder()
+            self.dockSearch()
+            self.searchBar.text = text
+            self.searchResults?.updateSearchResults(for: self.searchController)
+            print("[inbox-search] query applied text=\(self.searchBar.text ?? "-")")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                guard let self, let results = self.searchResults else { return }
+                let lists = results.view.subviews.compactMap { $0 as? UICollectionView }
+                let rows = lists.first.map { list in
+                    (0..<list.numberOfSections).map { list.numberOfItems(inSection: $0) }
+                } ?? []
+                print("[inbox-search] results sections=\(rows) text=\(self.searchBar.text ?? "-")")
+            }
 
             guard arguments.contains("-inbox-search-cancel") else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                self?.searchController.isActive = false
+                self?.undockSearch()
             }
         }
     }
@@ -368,7 +379,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // The results controller is *presented* over this one, so a push landing
         // while it is still up would arrive underneath it — the thread would be
         // on the stack and invisible.
-        searchResults.onWillOpenResult = { [weak self] in self?.searchController.isActive = false }
+        searchResults.onWillOpenResult = { [weak self] in self?.undockSearch() }
 
         // Presented in THIS view controller's context, which is what puts the
         // results over the pager rather than over the window. Nothing has to hide
@@ -383,113 +394,37 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // LIST now — mounted at the top of the pages and scrolling away with them,
         // the way Messages and Telegram do it — which leaves the navigation bar
         // carrying nothing but the glyph and the selector.
-        installCollapsibleSearchBar()
-    }
-
-    // MARK: - Collapsible search
-
-    /// The shared search bar, mounted above the pages and scrolling with them.
-    ///
-    /// ONE instance for every tab, which is what makes the query survive a swipe:
-    /// a per-page field would reset each time the category changed, and two of
-    /// them would disagree about what was typed.
-    private let searchHost = UIView()
-
-    /// How far the bar has travelled out of sight, in points.
-    private var searchCollapse: CGFloat = 0
-    /// The page whose offset the bar is currently following.
-    private var observedScrollView: UIScrollView?
-    private var scrollObservation: NSKeyValueObservation?
-
-    private var searchBarHeight: CGFloat {
-        max(52, searchController.searchBar.intrinsicContentSize.height)
-    }
-
-    private func installCollapsibleSearchBar() {
-        let bar = searchController.searchBar
-        bar.searchBarStyle = .minimal
-        bar.translatesAutoresizingMaskIntoConstraints = false
-        searchHost.translatesAutoresizingMaskIntoConstraints = false
-        searchHost.addSubview(bar)
-        view.addSubview(searchHost)
-        NSLayoutConstraint.activate([
-            searchHost.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            searchHost.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            searchHost.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            searchHost.heightAnchor.constraint(equalToConstant: searchBarHeight),
-            bar.leadingAnchor.constraint(equalTo: searchHost.leadingAnchor, constant: 8),
-            bar.trailingAnchor.constraint(equalTo: searchHost.trailingAnchor, constant: -8),
-            bar.centerYAnchor.constraint(equalTo: searchHost.centerYAnchor)
-        ])
-        // ⚠️ BEHIND the pages, not over them. The bar sits in the space the pages'
-        // top inset opens up, so a list scrolled to the top reveals it and a list
-        // scrolled down covers it — which is the whole effect. Over the pages it
-        // would float above the rows instead.
-        // Ordering is re-asserted once the pager exists; see `viewDidLoad`.
-    }
-
-    /// Insets a page so its first row starts below the search bar, and gives the
-    /// scroll indicator the same clearance.
-    private func applySearchInset(to surface: any InboxSurface) {
-        let scrollView = surface.listScrollView
-        guard abs(scrollView.contentInset.top - searchBarHeight) > 0.5 else { return }
-        let wasAtTop = scrollView.contentOffset.y
-            <= -scrollView.adjustedContentInset.top + 0.5
-        let adjustment = searchBarHeight - scrollView.contentInset.top
-        scrollView.contentInset.top = searchBarHeight
-        scrollView.verticalScrollIndicatorInsets.top = searchBarHeight
-        // A list already at rest must STAY at rest: growing the inset without
-        // moving the offset leaves the first row pushed down by exactly the bar's
-        // height, which reads as the list having scrolled itself.
-        if wasAtTop { scrollView.contentOffset.y -= adjustment }
-    }
-
-    /// Follows the ACTIVE page's offset — never the pager's, which never moves.
-    private func followScroll(of surface: any InboxSurface) {
-        let scrollView = surface.listScrollView
-        guard scrollView !== observedScrollView else { return }
-        observedScrollView = scrollView
-        scrollObservation = scrollView.observe(\.contentOffset, options: [.new]) {
-            [weak self] scrollView, _ in
-            MainActor.assumeIsolated { self?.updateSearchCollapse(for: scrollView) }
-        }
-        updateSearchCollapse(for: scrollView)
-    }
-
-    private func updateSearchCollapse(for scrollView: UIScrollView) {
-        // ⚠️ `adjustedContentInset`, not `contentInset`. The tables adjust for the
-        // safe area on top of what is set here, so measuring against the raw inset
-        // read a resting list as already scrolled by exactly the bar's height —
-        // and the bar arrived fully collapsed and invisible.
-        let travelled = scrollView.contentOffset.y + scrollView.adjustedContentInset.top
-        let collapse = min(max(0, travelled), searchBarHeight)
-        guard abs(collapse - searchCollapse) > 0.5 else { return }
-        searchCollapse = collapse
-        searchHost.transform = CGAffineTransform(translationX: 0, y: -collapse)
-        // Fades as it goes, so the last few points read as leaving rather than
-        // as a bar clipped by the navigation bar's edge.
-        searchHost.alpha = 1 - (collapse / searchBarHeight)
+        configureSharedSearchBar()
     }
 
     #if DEBUG
-    /// `-inbox-scroll <points>`: scrolls the ACTIVE page, so the search bar's
-    /// collapse can be seen without a finger. Polls until the list has content —
-    /// a fixed delay scrolls an empty table and proves nothing.
+    /// `-inbox-scroll <points>`: scrolls the ACTIVE page and reports where the
+    /// first sticky section header lands relative to the top of the visible area.
+    ///
+    /// That gap is the bug this architecture replaced: with the bar as an overlay
+    /// plus a matching `contentInset`, these `.plain` lists pinned their sticky
+    /// headers at the INSET and left a band of dead space above them. Flush is 0.
     private func runSearchCollapseDemo(points: CGFloat) {
         var attempts = 0
         func attempt() {
             attempts += 1
-            guard let scrollView = activeSurface?.listScrollView else { return }
-            let reachable = scrollView.contentSize.height
-                - scrollView.bounds.height + scrollView.adjustedContentInset.bottom
+            guard let surface = activeSurface else { return }
+            let scrollView = surface.listScrollView
+            let reachable = scrollView.contentSize.height - scrollView.bounds.height
             if reachable > 1 {
                 let target = min(points, reachable)
                 scrollView.setContentOffset(
                     CGPoint(x: 0, y: target - scrollView.adjustedContentInset.top),
                     animated: false
                 )
-                print(String(format: "[inbox-scroll] to %.0f collapse=%.0f of %.0f",
-                             target, searchCollapse, searchBarHeight))
+                scrollView.layoutIfNeeded()
+                let table = scrollView as? UITableView
+                let visibleTop = scrollView.contentOffset.y + scrollView.adjustedContentInset.top
+                let headerTop = table?.rectForHeader(inSection: 0).minY ?? .nan
+                print(String(format:
+                    "[inbox-scroll] to %.0f insetTop=%.0f stickyGap=%.0f listHeader=%@",
+                    target, scrollView.adjustedContentInset.top, headerTop - visibleTop,
+                    table?.tableHeaderView == nil ? "none" : "mounted"))
                 return
             }
             if attempts < 60 {
@@ -501,6 +436,128 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: attempt)
     }
     #endif
+
+    // MARK: - Search: in the list, and docked while typing
+
+    /// The one search bar every tab shares, so a query survives a swipe.
+    private var searchBar: UISearchBar { searchController.searchBar }
+
+    /// Carries the bar at the top of whichever list is in front. Sized in points
+    /// rather than by constraints: `tableHeaderView` is laid out from its FRAME,
+    /// and an auto-layout-only header measures zero and never appears.
+    private let listHeader = UIView(frame: CGRect(x: 0, y: 0, width: 320, height: 56))
+
+    /// Carries the bar while typing, pinned under the navigation bar.
+    private let dockedHeader = UIView()
+    private var isSearchDocked = false
+
+    private func configureSharedSearchBar() {
+        searchBar.delegate = self
+        searchBar.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        searchBar.frame = listHeader.bounds
+        listHeader.addSubview(searchBar)
+
+        dockedHeader.translatesAutoresizingMaskIntoConstraints = false
+        dockedHeader.backgroundColor = .systemBackground
+        dockedHeader.isHidden = true
+        view.addSubview(dockedHeader)
+        NSLayoutConstraint.activate([
+            dockedHeader.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            dockedHeader.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            dockedHeader.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            dockedHeader.heightAnchor.constraint(equalToConstant: listHeader.bounds.height)
+        ])
+    }
+
+    /// Moves the shared bar into the page that is now in front.
+    ///
+    /// One instance, re-parented — not one per page. Two bars would disagree
+    /// about what was typed the moment a swipe landed.
+    private func mountSearchBar(in surface: any InboxSurface) {
+        guard !isSearchDocked else { return }
+        for other in surfaces where other !== surface {
+            other.setListHeaderView(nil)
+        }
+        listHeader.frame.size.width = view.bounds.width
+        searchBar.frame = listHeader.bounds
+        surface.setListHeaderView(listHeader)
+    }
+
+    /// Lifts the bar out of the list and pins it under the navigation bar, with
+    /// the results below it.
+    ///
+    /// ⚠️ This replaced `UISearchController`'s own presentation, which covered
+    /// the very view the bar had moved into — the field was invisible while its
+    /// results were up, so you could not see what you were typing. Presented over
+    /// a bar that lives in the navigation item this never happens; the moment the
+    /// bar lives in the content, the presentation has to go.
+    private func dockSearch() {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-inbox-search-query") {
+            print("[inbox-search] dockSearch docked=\(isSearchDocked) results=\(searchResults != nil)")
+        }
+        #endif
+        guard !isSearchDocked, let results = searchResults else { return }
+        isSearchDocked = true
+        activeSurface?.setListHeaderView(nil)
+
+        dockedHeader.isHidden = false
+        searchBar.frame = dockedHeader.bounds
+        dockedHeader.addSubview(searchBar)
+        searchBar.setShowsCancelButton(true, animated: true)
+
+        addChild(results)
+        // ⚠️ OPAQUE. As a presented controller it had a backdrop of its own; as a
+        // child it is just a view, and a clear one lets the inbox list show
+        // through — which reads as the query having matched everything.
+        results.view.backgroundColor = .systemBackground
+        // ⚠️ Un-hidden explicitly. This controller spent its previous life being
+        // PRESENTED by a `UISearchController`, and that lifecycle leaves the view
+        // hidden on dismissal. Re-used as a child it was mounted, in the window,
+        // correctly sized and filtering — sections=[1] for "lena" — while the
+        // inbox list showed through it, because nothing had ever put it back.
+        results.view.isHidden = false
+        results.view.alpha = 1
+        results.view.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(results.view)
+        NSLayoutConstraint.activate([
+            results.view.topAnchor.constraint(equalTo: dockedHeader.bottomAnchor),
+            results.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            results.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            results.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+        results.didMove(toParent: self)
+        view.bringSubviewToFront(dockedHeader)
+        results.updateSearchResults(for: searchController)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-inbox-search-query") {
+            view.layoutIfNeeded()
+            print("[inbox-search] order=" + view.subviews.map {
+                String(describing: type(of: $0)) + (($0 === results.view) ? "*" : "")
+            }.joined(separator: " > "))
+            print(String(format: "[inbox-search] docked results frame=%.0f,%.0f %.0fx%.0f "
+                + "inWindow=%@ children=%d text=%@",
+                results.view.frame.minX, results.view.frame.minY,
+                results.view.frame.width, results.view.frame.height,
+                results.view.window != nil ? "yes" : "NO", children.count,
+                searchBar.text ?? "-"))
+        }
+        #endif
+    }
+
+    private func undockSearch() {
+        guard isSearchDocked else { return }
+        isSearchDocked = false
+        if let results = searchResults {
+            results.willMove(toParent: nil)
+            results.view.removeFromSuperview()
+            results.removeFromParent()
+        }
+        searchBar.setShowsCancelButton(false, animated: true)
+        searchBar.resignFirstResponder()
+        dockedHeader.isHidden = true
+        if let surface = activeSurface { mountSearchBar(in: surface) }
+    }
 
     // MARK: - Category selection
 
@@ -540,8 +597,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // The shared bar follows whichever page is now in front, and the new page
         // gets the same clearance. Re-syncing here is what keeps a bar collapsed
         // on one tab from sitting half-open over another.
-        applySearchInset(to: surface)
-        followScroll(of: surface)
+        mountSearchBar(in: surface)
         surface.surfaceDidBecomeActive()
     }
 
@@ -578,4 +634,26 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         navigationController?.navigationBar.layoutIfNeeded()
     }
 
+}
+
+// MARK: - UISearchBarDelegate
+
+extension MessagesInboxViewController: UISearchBarDelegate {
+    func searchBarTextDidBeginEditing(_ searchBar: UISearchBar) {
+        dockSearch()
+    }
+
+    func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
+        guard isSearchDocked else { return }
+        searchResults?.updateSearchResults(for: searchController)
+    }
+
+    func searchBarCancelButtonClicked(_ searchBar: UISearchBar) {
+        searchBar.text = nil
+        undockSearch()
+    }
+
+    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
+        searchBar.resignFirstResponder()
+    }
 }

@@ -199,6 +199,10 @@ extension SuggestionsViewController: UITableViewDelegate {
 extension SuggestionsViewController: InboxSurface {
     var listScrollView: UIScrollView { tableView }
 
+    func setListHeaderView(_ view: UIView?) {
+        tableView.tableHeaderView = view
+    }
+
     var category: MessagesCategory { .suggestions }
 
     func surfaceDidBecomeActive() {
