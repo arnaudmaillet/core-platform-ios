@@ -1936,3 +1936,13 @@ final class ProfileViewController: UIViewController {
         }
     }
 }
+
+#if DEBUG
+extension ProfileViewController: DebugItemSelectable {
+    /// Taps the active gallery page's first tile through its own delegate
+    /// method — the path that builds a hero origin and flies.
+    func debugSelectFirstItem() -> Bool {
+        galleryPager.debugSelectItem(at: 0)
+    }
+}
+#endif

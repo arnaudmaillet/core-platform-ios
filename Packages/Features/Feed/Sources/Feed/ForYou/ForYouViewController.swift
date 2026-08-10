@@ -1100,6 +1100,7 @@ final class ForYouViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        sweepAbandonedTransition()
         pager.setAutoplayActive(true)
         #if DEBUG
         scheduleTabAwayIfNeeded()
@@ -1236,6 +1237,37 @@ final class ForYouViewController: UIViewController {
         tabBarController.tabBar.alpha = 1
         guard tabBarController.isTabBarHidden else { return }
         tabBarController.setTabBarHidden(false, animated: animated)
+    }
+
+    /// Releases a flight that ended by a route it never heard about.
+    ///
+    /// `activeTransition` is the "one flight at a time" latch `openFeed` checks,
+    /// and it is cleared by the flight's own callbacks — `onSourceReturned` and
+    /// `onPresentationCancelled`. Neither fires when the feed leaves the stack
+    /// some other way: a screen pushed ABOVE it that pops to root, or a
+    /// multi-pop that unwinds past it. The latch then stays set forever and
+    /// `openFeed` returns early on every future tap.
+    ///
+    /// What that looks like is not a stuck transition — nothing is animating —
+    /// but a grid that scrolls perfectly and opens nothing, which is why it
+    /// reads as broken selection rather than as navigation state. Found by the
+    /// stress harness: after one round trip through a profile, every later
+    /// cycle's tap left the stack depth unchanged.
+    ///
+    /// Safe in `viewDidAppear` specifically: a flight still in progress has not
+    /// finished appearing, so reaching here with the latch set and this screen
+    /// on top means there is nothing left to finish.
+    private func sweepAbandonedTransition() {
+        guard activeTransition != nil, navigationController?.topViewController === self else {
+            return
+        }
+        navigationController?.delegate = nil
+        activeTransition = nil
+        // The same close-out the callbacks do, for the same reason: whatever
+        // the flight was holding down has to come back up.
+        showTabBar(alpha: 1)
+        restoreChromeAfterTransition()
+        pager.endPlaybackHandoff()
     }
 
     /// Puts the tab bar back, at a given opacity, and settles the layout it
@@ -1728,3 +1760,13 @@ extension ForYouViewController: ForYouModeMenuProviding {
         makeContextMenu()
     }
 }
+
+#if DEBUG
+extension ForYouViewController: DebugItemSelectable {
+    /// Taps the active page's first item through its own delegate method, so
+    /// the stress harness exercises the hero rather than a router push.
+    func debugSelectFirstItem() -> Bool {
+        pager.page(for: viewModel.format)?.debugSelectItem(at: 0) ?? false
+    }
+}
+#endif
