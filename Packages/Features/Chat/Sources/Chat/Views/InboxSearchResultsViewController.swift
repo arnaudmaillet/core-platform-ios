@@ -269,17 +269,19 @@ extension InboxSearchResultsViewController: UICollectionViewDelegate {
     }
 }
 
-extension InboxSearchResultsViewController: UISearchResultsUpdating {
-    /// Every keystroke, plus the system's clear glyph and the cancel that
-    /// collapses the field. The view model owns trimming and debouncing, so this
-    /// stays a pass-through.
-    func updateSearchResults(for searchController: UISearchController) {
-        // Re-armed here rather than on appearance: this controller is presented
-        // and dismissed by the search controller without ever being deallocated,
-        // so a row disabled by a previous pick has to come back when the viewer
-        // returns and types again.
+extension InboxSearchResultsViewController {
+    /// The whole input contract: a string.
+    ///
+    /// This replaced a `UISearchResultsUpdating` conformance, which tied the
+    /// results to a `UISearchController` that also insisted on presenting them —
+    /// and, on the inbox, quietly pulled this view back out of a hierarchy it had
+    /// been added to as a child. Nothing about showing results needs that object.
+    func applyQuery(_ text: String) {
+        // Re-armed here rather than on appearance: this controller is shown and
+        // hidden without ever being deallocated, so a row disabled by a previous
+        // pick has to come back when the viewer returns and types again.
         collectionView.allowsSelection = true
-        viewModel.queryChanged(searchController.searchBar.text ?? "")
+        viewModel.queryChanged(text)
     }
 }
 

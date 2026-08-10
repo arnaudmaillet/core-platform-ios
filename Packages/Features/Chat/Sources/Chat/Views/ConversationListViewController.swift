@@ -399,12 +399,6 @@ extension ConversationListViewController: UITableViewDelegate {
 // MARK: - InboxSurface
 
 extension ConversationListViewController: InboxSurface {
-    var listScrollView: UIScrollView { tableView }
-
-    func setListHeaderView(_ view: UIView?) {
-        tableView.tableHeaderView = view
-    }
-
     var category: MessagesCategory { .all }
 
     /// Paging back here re-checks for new messages. `refresh()` no-ops while a

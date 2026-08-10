@@ -27,25 +27,6 @@ struct InboxSurfaceChrome {
 protocol InboxSurface: UIViewController {
     var category: MessagesCategory { get }
 
-    /// The list this surface scrolls.
-    ///
-    /// The container needs it for two things it cannot do from the outside:
-    /// inset the list under the shared search bar, and follow THIS page's
-    /// offset to collapse that bar. Following the pager's offset instead is the
-    /// mistake a scroll-tracked search placement made here — the pager never
-    /// scrolls vertically, so a collapsed field had nothing that could reopen it.
-    var listScrollView: UIScrollView { get }
-
-    /// Mounts a view at the top of this surface's list, inside the scroll view.
-    ///
-    /// ⚠️ Inside, not over. The shared search bar used to be an overlay with a
-    /// matching `contentInset`, and these lists are `.plain` — so their sticky
-    /// section headers pinned at the INSET, leaving a band of dead space between
-    /// the navigation bar and the first header for as long as the list was
-    /// scrolled. A real header view scrolls away with the content and lets the
-    /// section headers pin flush.
-    func setListHeaderView(_ view: UIView?)
-
     /// The current chrome. Read when the surface becomes active, and again on
     /// every `onChromeChange`.
     var chrome: InboxSurfaceChrome { get }
