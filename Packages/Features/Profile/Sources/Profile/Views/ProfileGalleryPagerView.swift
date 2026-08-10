@@ -117,6 +117,12 @@ final class ProfileGalleryPagerView: UIView {
         }
     }
 
+    /// Settles a tapped tile clear of the chrome while the post covers this
+    /// screen. Asked of every page; only the one holding a pending reveal acts.
+    func applyPendingReveal() {
+        pages.forEach { $0.applyPendingReveal() }
+    }
+
     func endRefreshing() {
         pages.forEach { $0.endRefreshing() }
     }

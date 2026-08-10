@@ -249,6 +249,11 @@ final class ForYouGridPage: UIView {
     private var heroFlyingPostID: PostID?
     /// The inset to hand back when a flight ends; non-nil means frozen.
     private var frozenContentInset: UIEdgeInsets?
+    /// The post to bring clear of the chrome once this page is out of sight.
+    /// Held as an ID rather than an index path because the corpus can change
+    /// while the post is open — a page can land, or a lens can re-derive the
+    /// whole list — and an index would then name a different post.
+    private var pendingRevealPostID: PostID?
     /// Throttle state for the during-scroll autoplay reconcile.
     private var lastReconcileTime: CFTimeInterval = 0
     private var lastReconcileOffset: CGFloat = 0
@@ -460,6 +465,23 @@ final class ForYouGridPage: UIView {
         preloadAutoplayCovers(around: collectionView.indexPathsForVisibleItems)
     }
 
+    /// Brings the last-tapped post clear of the chrome, now that nobody is
+    /// looking at this page.
+    ///
+    /// Called when the post has finished covering the grid. Unanimated because
+    /// there is no one to animate for, and because the dismissal that follows
+    /// reads the cell's rect when it starts — this has to be settled by then,
+    /// not still moving.
+    func applyPendingReveal() {
+        guard let id = pendingRevealPostID else { return }
+        pendingRevealPostID = nil
+        guard let index = posts.firstIndex(where: { $0.id == id }) else { return }
+        ScrollIntoView.revealImmediately(
+            collectionView.layoutAttributesForItem(at: indexPath(for: index))?.frame,
+            in: collectionView
+        )
+    }
+
     /// Whether a post autoplays ON THIS PAGE — the one autoplay rule that
     /// differs by shape, so the difference lives in exactly one place.
     ///
@@ -589,6 +611,19 @@ final class ForYouGridPage: UIView {
     }
 
     #if DEBUG
+    /// Drives the page's real selection path, the one a finger reaches.
+    ///
+    /// `-foryou-open` used to call `openFeed` directly, which skipped
+    /// `didSelectItemAt` entirely — so nothing scripted ever exercised what a
+    /// tap actually does, and the scroll-into-view work went three rounds with
+    /// no run able to reach it. Going through the delegate means a scripted
+    /// open and a real one differ only in what produced the touch.
+    func debugSelectItem(at index: Int) -> Bool {
+        guard posts.indices.contains(index) else { return false }
+        collectionView(collectionView, didSelectItemAt: indexPath(for: index))
+        return true
+    }
+
     /// `-foryou-scroll-demo`: scrolls the page the way a finger would, since
     /// the simulator injects no touches.
     ///
@@ -1401,14 +1436,15 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         guard !showsSkeleton, posts.indices.contains(flatIndex(for: indexPath)) else { return }
         collectionView.deselectItem(at: indexPath, animated: false)
-        // Reveal, then open, in this turn. The reveal is unanimated precisely
-        // so nothing gates the open: the hero measures this cell's rect as it
-        // departs, and by then the offset has already landed. See
-        // `ScrollIntoView.revealImmediately`.
-        ScrollIntoView.revealImmediately(
-            collectionView.layoutAttributesForItem(at: indexPath)?.frame,
-            in: collectionView
-        )
+        // The flight leaves from where the cell IS. Nothing moves first:
+        // the grid stays visible behind the expanding card, so any offset
+        // change here — animated or not — is a jump under the viewer's thumb
+        // at the exact moment they are watching that spot.
+        //
+        // The reveal is remembered and applied once the post has covered the
+        // grid (`applyPendingReveal`), where it costs nothing to look at and
+        // is finished long before the dismissal flies home to it.
+        pendingRevealPostID = posts[flatIndex(for: indexPath)].id
         onItemTapped?(flatIndex(for: indexPath))
     }
 

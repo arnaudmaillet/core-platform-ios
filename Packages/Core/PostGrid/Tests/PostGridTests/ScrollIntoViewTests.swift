@@ -138,13 +138,18 @@ struct ScrollIntoViewTests {
     }
 }
 
-/// THE REVEAL MUST NOT COST THE VIEWER A WAIT.
+/// THE REVEAL HAPPENS WHERE NOBODY IS LOOKING.
 ///
-/// An earlier version animated the reveal and held the open until the scroll
-/// settled, so the hero would measure a landed rect. That put a delay in front
-/// of the one thing the tap asked for. Unanimated gets both: the offset is
-/// already correct when the flight measures, and nothing is gated behind an
-/// animation or the timer that would be needed to survive a missing callback.
+/// Two earlier versions moved the grid at TAP time and both were wrong, for
+/// the same reason arrived at twice. Animating and waiting for the scroll put
+/// a delay in front of the one thing the tap asked for. Applying it
+/// synchronously removed the delay but not the movement — and the grid stays
+/// visible behind an expanding hero card, so the viewer watches the spot they
+/// just touched jump.
+///
+/// So the flight leaves from the untouched frame, and the reveal is applied
+/// once the post has covered the grid. These cover the mechanism it uses; the
+/// timing is the pages' (`applyPendingReveal`).
 @MainActor
 struct ScrollIntoViewImmediateTests {
     private func scrollView(offsetY: CGFloat = 0) -> UIScrollView {

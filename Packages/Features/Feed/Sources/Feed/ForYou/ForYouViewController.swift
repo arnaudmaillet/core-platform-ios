@@ -1112,6 +1112,17 @@ final class ForYouViewController: UIViewController {
     /// stopping it is precisely the restart the whole handoff exists to
     /// prevent. The stack's top separates the two: on a push it is already the
     /// pushed screen, on a tab switch it is still this one.
+    /// The post has finished covering this screen, so anything that would
+    /// have been a visible jump can happen now.
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        // Deliberately here rather than at `viewWillDisappear`: that fires as
+        // the transition BEGINS, and the grid is visible behind an expanding
+        // hero card for the whole flight. Moving it then is the jump this
+        // avoids — just later in the animation.
+        pager.applyPendingReveal()
+    }
+
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         guard navigationController?.topViewController === self else { return }
@@ -1669,7 +1680,12 @@ final class ForYouViewController: UIViewController {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: attempt)
                 return
             }
-            openFeed(from: format, at: index)
+            // Through the page's own selection path, so a scripted open runs
+            // the same code a tap does — including the scroll-into-view
+            // bookkeeping that `openFeed` alone would skip.
+            if pager.page(for: format)?.debugSelectItem(at: index) != true {
+                openFeed(from: format, at: index)
+            }
             // `-zoom-repeat`: open, pop, open again (twice over). The hero's
             // stall has only ever been measured on the FIRST push of a
             // process, which cannot distinguish per-push cost from one-time

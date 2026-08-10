@@ -430,6 +430,15 @@ final class ProfileViewController: UIViewController {
         concealFilterToolbar()
     }
 
+    /// The post has finished covering this screen, so the tapped tile can be
+    /// brought clear of the chrome without anyone seeing it move.
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        // Not `viewWillDisappear`: that fires as the transition begins, while
+        // the grid is still visible behind an expanding hero card.
+        galleryPager.applyPendingReveal()
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         // The pager's horizontal pan yields to the stack's edge-swipe pop:

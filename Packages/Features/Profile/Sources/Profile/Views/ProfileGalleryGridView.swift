@@ -1,3 +1,4 @@
+import CoreModels
 import DesignSystem
 import MediaCore
 import PostGrid
@@ -32,6 +33,9 @@ final class ProfileGalleryGridView: UIView {
     /// page's.
     var onVerticalScroll: ((CGFloat) -> Void)?
     var onPullToRefresh: (() -> Void)?
+    /// The post to bring clear of the chrome once this page is out of sight.
+    /// An ID, not an index: the corpus can change while the post is open.
+    private var pendingRevealPostID: PostID?
     /// Fired when a drag ends, with how far the page was pulled past its top.
     var onPullReleased: ((CGFloat) -> Void)?
 
@@ -275,15 +279,26 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         }
     }
 
-    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        guard !showsSkeleton, posts.indices.contains(indexPath.item) else { return }
-        // Same contract as the For You grids: an item the floating header or
-        // the tab bar is covering is brought into sight in this turn, and the
-        // open follows immediately.
+    /// Brings the last-tapped tile clear of the chrome, now that the post is
+    /// covering this page. Unanimated: nobody is watching, and the dismissal
+    /// reads the tile's rect when it starts.
+    func applyPendingReveal() {
+        guard let id = pendingRevealPostID else { return }
+        pendingRevealPostID = nil
+        guard let index = posts.firstIndex(where: { $0.id == id }) else { return }
         ScrollIntoView.revealImmediately(
-            collectionView.layoutAttributesForItem(at: indexPath)?.frame,
+            collectionView.layoutAttributesForItem(at: IndexPath(item: index, section: 0))?.frame,
             in: collectionView
         )
+    }
+
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        guard !showsSkeleton, posts.indices.contains(indexPath.item) else { return }
+        // Same contract as the For You grids: the flight leaves from where
+        // the tile IS, and the reveal waits until the post has covered this
+        // page (`applyPendingReveal`). Moving the grid under the thumb at tap
+        // time is a jump the viewer is looking straight at.
+        pendingRevealPostID = posts[indexPath.item].id
         onItemTapped?(posts[indexPath.item])
     }
 }
