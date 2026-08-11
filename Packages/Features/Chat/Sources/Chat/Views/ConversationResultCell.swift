@@ -5,30 +5,25 @@ import UIKit
 
 /// A conversation row in the inbox's search results.
 ///
-/// Deliberately *not* `ConversationCell`. That row is built for the inbox
-/// proper, where management state is actionable — pin bands, mute glyphs, the
-/// unread dot — and it is a `UITableViewCell` besides, where these results are a
-/// collection-view list so they can carry the same glass section headers and
-/// two-line person rows the compose picker established.
+/// ⚠️ **The same row as the inbox list**, via `ConversationRowView`.
 ///
-/// What survives the move is what a *result* has to say: who it is with, what
-/// was last said, when, and whether it is waiting to be read. Pin and mute are
-/// dropped on purpose — they order and quieten an inbox, and a list the viewer
-/// filtered themselves is already ordered by their query.
+/// It used to be deliberately different — a `UIListContentConfiguration` with the
+/// time as a trailing accessory, its own avatar host, and pin and mute dropped on
+/// the argument that a list the viewer filtered themselves is already ordered by
+/// their query. That reasoning was sound and the result still read as a second
+/// design: different fonts reached by a different route, a different row height,
+/// a different avatar class, and management state that existed on one surface
+/// only. Parity across the screen was chosen over the argument.
+///
+/// The pinned BAND does not come with it: that is the table cell's
+/// `backgroundView`, and a list cell has no equivalent that spans its accessory
+/// strip. The pin glyph does, which is what names the state up close.
 final class ConversationResultCell: UICollectionViewListCell {
-    private let avatarHost = MonogramAccessoryHost()
-    /// Frame-based on purpose: UIKit asserts that custom accessory views keep
-    /// `translatesAutoresizingMaskIntoConstraints` enabled, and a bare label
-    /// sizes itself intrinsically, so it can be the accessory directly.
-    private let timeLabel = UILabel()
-    private var avatarTask: Task<Void, Never>?
-    /// Guards a late fetch against reuse — see `ConversationCell`.
-    private var avatarPeerID: ProfileID?
+    private let rowView = ConversationRowView()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        timeLabel.font = .preferredFont(forTextStyle: .footnote)
-        timeLabel.adjustsFontForContentSizeCategory = true
+        rowView.pin(to: contentView)
     }
 
     @available(*, unavailable)
@@ -36,10 +31,7 @@ final class ConversationResultCell: UICollectionViewListCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
-        avatarTask?.cancel()
-        avatarTask = nil
-        avatarPeerID = nil
-        avatarHost.setImage(nil)
+        rowView.prepareForReuse()
     }
 
     /// Same contract as the inbox rows: initials now, picture when it lands.
@@ -48,89 +40,13 @@ final class ConversationResultCell: UICollectionViewListCell {
         imagePipeline: ImagePipeline? = nil,
         avatars: (any PeerAvatarProviding)? = nil
     ) {
-        avatarHost.setMonogram(model.monogram)
-        loadAvatar(for: model, imagePipeline: imagePipeline, avatars: avatars)
-
-        var content = UIListContentConfiguration.subtitleCell()
-        // Weight is the unread signal here, as it is in the inbox: nothing moves
-        // between states, so a row that arrives read and a row that arrives
-        // unread occupy exactly the same space.
-        content.text = model.title
-        let headline = UIFont.preferredFont(forTextStyle: .headline)
-        content.textProperties.font = model.isUnread ? headline.withWeight(.bold) : headline
-        content.secondaryText = model.preview.isEmpty ? "No messages yet" : model.preview
-        content.secondaryTextProperties.font = .preferredFont(forTextStyle: .subheadline)
-        content.secondaryTextProperties.color = model.isUnread ? .label : .secondaryLabel
-        content.secondaryTextProperties.numberOfLines = 1
-
-        // Sized to land on the same row height as `PersonListCell`, which the
-        // People section of this very list is built from.
-        //
-        // **Derived from that cell's constant, not from a number read off a
-        // screenshot.** Copying its 12pt margin was tried and left this row
-        // 60.3pt against the person rows' 62.7 — the two cells reach their
-        // text height by different routes (a hand-built column with an
-        // explicit 2pt gap there, a content configuration with its own
-        // internal gap here), so matching the INPUT does not match the OUTPUT.
-        // Working back from the shared target does, and keeps tracking it
-        // through Dynamic Type.
-        //
-        // ⚠️ Set, not `max`'d against the default: this row is being made
-        // shorter, and taking the larger of the two would keep the system's
-        // margin and change nothing.
-        var margins = content.directionalLayoutMargins
-        let margin = PersonRowMetrics.verticalInset(
-            forContentHeight: PersonRowMetrics.textHeight([.headline, .subheadline]), minimum: 0
+        accessibilityLabel = rowView.configure(
+            with: model, imagePipeline: imagePipeline, avatars: avatars
         )
-        margins.top = margin
-        margins.bottom = margin
-        content.directionalLayoutMargins = margins
-        contentConfiguration = content
-
-        timeLabel.text = model.timeText
-        timeLabel.textColor = model.isUnread ? .label : .secondaryLabel
-        timeLabel.sizeToFit()
-
-        accessories = [avatarHost.leadingAccessory] + timeAccessory(for: model)
-
-        let states: [String?] = [
-            model.title,
-            model.isUnread ? "Unread" : nil,
-            model.timeText,
-            model.preview
-        ]
-        accessibilityLabel = states.compactMap(\.self).filter { !$0.isEmpty }.joined(separator: ", ")
-    }
-
-    private func loadAvatar(
-        for model: ConversationDisplayModel,
-        imagePipeline: ImagePipeline?,
-        avatars: (any PeerAvatarProviding)?
-    ) {
-        avatarTask?.cancel()
-        avatarTask = nil
-        avatarPeerID = model.peerID
-        avatarHost.setImage(nil)
-
-        guard let peerID = model.peerID, let avatars, let imagePipeline else { return }
-        avatarTask = Task { [weak self] in
-            let urls = await avatars.avatarURLs(for: [peerID])
-            guard !Task.isCancelled, let url = urls[peerID] else { return }
-            guard let image = try? await imagePipeline.image(for: url) else { return }
-            guard let self, !Task.isCancelled, self.avatarPeerID == peerID else { return }
-            self.avatarHost.setImage(image)
-        }
-    }
-
-    /// The timestamp, trailing. Omitted entirely rather than shown empty when a
-    /// conversation has no activity date — an empty accessory still reserves its
-    /// width, and the preview would stop short of the edge for no visible reason.
-    private func timeAccessory(for model: ConversationDisplayModel) -> [UICellAccessory] {
-        guard !model.timeText.isEmpty else { return [] }
-        return [.customView(configuration: .init(
-            customView: timeLabel,
-            placement: .trailing(displayed: .always),
-            reservedLayoutWidth: .actual
-        ))]
+        // ⚠️ No accessories. The row draws its own time and glyphs in its
+        // trailing column now, and a list cell's accessories sit OUTSIDE
+        // `contentView` — leaving one here would put a second time label beside
+        // the row's own and shorten the content by its width.
+        accessories = []
     }
 }
