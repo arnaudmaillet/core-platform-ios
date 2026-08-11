@@ -414,8 +414,11 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         results.view.backgroundColor = .systemBackground
         view.addSubview(results.view)
         NSLayoutConstraint.activate([
-            // Directly under the bar: this screen's safe area already stops there.
-            results.view.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            // ⚠️ To the TOP OF THE WINDOW, not to the safe area. The list runs
+            // BEHIND the header rather than starting under it, so nothing is
+            // clipped at the bar's edge; the collection view's own safe-area
+            // inset still starts the first row below the bar.
+            results.view.topAnchor.constraint(equalTo: view.topAnchor),
             results.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             results.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             results.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
@@ -428,6 +431,9 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
             self.setBarOpaque(true)
             self.applySearchingBar()
         }
+        // Searching is a mode, not a place: the tab bar is a way OUT of it that
+        // would take the query with it, and the results deserve the height.
+        tabBarController?.setTabBarHidden(true, animated: true)
         UIView.animate(withDuration: 0.24) { results.view.alpha = 1 }
         searchField.becomeFirstResponder()
     }
@@ -444,6 +450,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
             self.setBarOpaque(false)
             self.applyRestingBar()
         }
+        tabBarController?.setTabBarHidden(false, animated: true)
         UIView.animate(withDuration: 0.2) {
             results?.view.alpha = 0
         } completion: { _ in

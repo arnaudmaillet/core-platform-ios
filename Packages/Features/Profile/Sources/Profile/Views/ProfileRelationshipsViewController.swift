@@ -49,7 +49,23 @@ final class ProfileRelationshipsViewController: UIViewController {
     /// Search, collapsed to a magnifier in the bar's trailing slot until
     /// tapped — `.integratedButton`, which is UIKit's own name for exactly
     /// that behaviour.
-    private let searchController = UISearchController(searchResultsController: nil)
+    /// This screen's own search, with no `UISearchController` behind it.
+    ///
+    /// The native `.integratedButton` placement collapsed the whole leading group
+    /// — back button, selector and all — into a `•••` on narrow bars, which is
+    /// exactly what the inbox measured before it moved off that placement too.
+    private let searchField = UISearchTextField()
+    private lazy var searchItem = UIBarButtonItem(
+        image: UIImage(systemName: "magnifyingglass"),
+        primaryAction: UIAction { [weak self] _ in self?.presentSearch() }
+    )
+    private lazy var cancelItem = UIBarButtonItem(
+        title: "Cancel",
+        primaryAction: UIAction { [weak self] _ in self?.dismissSearch() }
+    )
+    private var restingRightItems: [UIBarButtonItem] = []
+    private var isSearching = false
+    private static let searchFieldHeight: CGFloat = 36
 
     /// Segment order, so index ↔ direction never drifts.
     ///
@@ -182,23 +198,77 @@ final class ProfileRelationshipsViewController: UIViewController {
     ///
     /// Idempotent; re-run on every phase change.
     private func applySearchAvailability() {
-        guard isRestricted else {
-            guard navigationItem.searchController == nil else { return }
-            navigationItem.searchController = searchController
-            // The proposal's shape, expressed as the one enum value UIKit
-            // provides for it: inactive search is a magnifier button in the
-            // trailing slot, tapping expands it into a field, cancelling
-            // collapses it back — all system-driven.
-            navigationItem.preferredSearchBarPlacement = .integratedButton
-            // No toolbar hand-off: that is what produced the magnifying-glass
-            // FLASH during the push in an earlier iteration. Here the magnifier
-            // is a deliberate, permanent affordance instead.
-            navigationItem.searchBarPlacementAllowsToolbarIntegration = false
+        guard !isRestricted else {
+            if isSearching { dismissSearch() }
+            navigationItem.rightBarButtonItems =
+                restingRightItems.filter { $0 !== searchItem }
             return
         }
-        guard navigationItem.searchController != nil else { return }
-        searchController.isActive = false
-        navigationItem.searchController = nil
+        guard !isSearching else { return }
+        var items = navigationItem.rightBarButtonItems ?? []
+        if !items.contains(where: { $0 === searchItem }) {
+            items.insert(searchItem, at: 0)
+        }
+        restingRightItems = items
+        navigationItem.rightBarButtonItems = items
+    }
+
+    /// Morphs this header into the field, exactly as the inbox does.
+    private func presentSearch() {
+        guard !isSearching else { return }
+        isSearching = true
+        morphBar(duration: 0.3) {
+            self.setBarOpaque(true)
+            // The back button stays: this is a pushed screen, and taking its
+            // leading item away would take the interactive pop with it.
+            self.navigationItem.rightBarButtonItems = [self.cancelItem]
+            self.navigationItem.titleView = self.searchField
+        }
+        tabBarController?.setTabBarHidden(true, animated: true)
+        searchField.becomeFirstResponder()
+    }
+
+    private func dismissSearch() {
+        guard isSearching else { return }
+        isSearching = false
+        searchField.resignFirstResponder()
+        searchField.text = nil
+        applyQuery("")
+        morphBar(duration: 0.26) {
+            self.setBarOpaque(false)
+            self.navigationItem.titleView = self.tabBar
+            self.navigationItem.rightBarButtonItems = self.restingRightItems
+        }
+        tabBarController?.setTabBarHidden(false, animated: true)
+    }
+
+    /// The whole input contract, as on the inbox: a string.
+    private func applyQuery(_ text: String) {
+        viewModel.searchQueryChanged(text)
+    }
+
+    private func morphBar(duration: TimeInterval, _ change: @escaping () -> Void) {
+        guard let bar = navigationController?.navigationBar else { change(); return }
+        UIView.transition(with: bar, duration: duration,
+                          options: [.transitionCrossDissolve, .allowUserInteraction],
+                          animations: change)
+    }
+
+    /// Opaque while searching so the list does not read through the field.
+    private func setBarOpaque(_ opaque: Bool) {
+        guard opaque else {
+            navigationItem.standardAppearance = nil
+            navigationItem.scrollEdgeAppearance = nil
+            navigationItem.compactAppearance = nil
+            return
+        }
+        let appearance = UINavigationBarAppearance()
+        appearance.configureWithOpaqueBackground()
+        appearance.backgroundColor = .systemBackground
+        appearance.shadowColor = nil
+        navigationItem.standardAppearance = appearance
+        navigationItem.scrollEdgeAppearance = appearance
+        navigationItem.compactAppearance = appearance
     }
 
     #if DEBUG
@@ -215,15 +285,15 @@ final class ProfileRelationshipsViewController: UIViewController {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
             guard let self else { return }
             if clears {
-                let field = self.searchController.searchBar.searchTextField
+                let field = self.searchField
                 print("PROFILE-SEARCH-QA clearButtonMode=\(field.clearButtonMode.rawValue) "
-                    + "autoCancel=\(self.searchController.automaticallyShowsCancelButton)")
+                    + "searching=\(self.isSearching)")
                 field.text = ""
                 field.sendActions(for: .editingChanged)
             }
             guard cancels else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                self?.searchController.isActive = false
+                self?.dismissSearch()
             }
         }
     }
@@ -266,9 +336,9 @@ final class ProfileRelationshipsViewController: UIViewController {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 guard let self else { return }
                 // Activate exactly as a tap on the magnifier would, then type.
-                self.searchController.isActive = true
-                self.searchController.searchBar.text = text
-                self.updateSearchResults(for: self.searchController)
+                self.presentSearch()
+                self.searchField.text = text
+                self.applyQuery(text)
                 self.qaContinueSearchSequence(arguments)
             }
         }
@@ -290,7 +360,14 @@ final class ProfileRelationshipsViewController: UIViewController {
         // The selector IS the title. It sits where the @handle used to, between
         // the back button and the search glyph, and the bar sizes the slot from
         // the bar's intrinsic width — see `PagedTabBar`'s `intrinsicContentSize`.
-        navigationItem.installLeadingSelector(tabBar)
+        // ⚠️ **The TITLE slot here, not the leading group** — unlike the inbox.
+        // This screen is PUSHED, so its leading group already holds a back button,
+        // and two leading items collapse into a `•••` on a narrow bar: measured on
+        // the SE, back + selector took the whole group down. The inbox gets away
+        // with the leading group because its selector is alone there. The title
+        // slot hosts what it is given at every width, which is also where the
+        // search field goes when this header morphs.
+        navigationItem.titleView = tabBar
         navigationItem.largeTitleDisplayMode = .never
         // The @handle is gone from the bar, so it survives as the screen's
         // accessibility label rather than being lost with the title.
@@ -298,27 +375,19 @@ final class ProfileRelationshipsViewController: UIViewController {
         navigationItem.accessibilityLabel = viewModel.title
     }
 
-    /// The search controller itself; where its bar goes is `applySearchAvailability`'s job.
+    /// The field itself; where the magnifier goes is `applySearchAvailability`'s job.
     private func configureSearch() {
-        searchController.searchResultsUpdater = self
-        searchController.obscuresBackgroundDuringPresentation = false
-        searchController.searchBar.placeholder = "Search"
-        searchController.searchBar.autocapitalizationType = .none
-        searchController.hidesNavigationBarDuringPresentation = false
-        // Stated rather than inherited. The clear glyph is the system's own —
-        // clearing through it routes back out via `searchBar(_:textDidChange:)`
-        // to `updateSearchResults`, so an emptied field restores the full list
-        // by the same path typing narrows it.
-        searchController.searchBar.searchTextField.clearButtonMode = .whileEditing
-        // Left to UIKit deliberately. `automaticallyShowsCancelButton` defaults
-        // to YES, and touching `searchBar.showsCancelButton` would flip it to
-        // NO and hand us the job of showing and hiding it — which is exactly
-        // the standard behaviour we want to keep. Note the affordance renders
-        // as an ✕ glyph rather than the word "Cancel" under `.integratedButton`
-        // placement; that is the native look for a bar-integrated search, not a
-        // missing button.
-        searchController.automaticallyShowsCancelButton = true
-        definesPresentationContext = true
+        searchField.placeholder = "Search"
+        searchField.autocapitalizationType = .none
+        searchField.autocorrectionType = .no
+        searchField.returnKeyType = .search
+        searchField.clearButtonMode = .whileEditing
+        searchField.delegate = self
+        searchField.addTarget(self, action: #selector(searchTextChanged), for: .editingChanged)
+        searchField.translatesAutoresizingMaskIntoConstraints = false
+        searchField.heightAnchor.constraint(
+            equalToConstant: Self.searchFieldHeight
+        ).isActive = true
     }
 
     /// A failed row mutation. A toast, not an alert: the row has already
@@ -341,8 +410,13 @@ private extension Array {
     }
 }
 
-extension ProfileRelationshipsViewController: UISearchResultsUpdating {
-    func updateSearchResults(for searchController: UISearchController) {
-        viewModel.searchQueryChanged(searchController.searchBar.text ?? "")
+extension ProfileRelationshipsViewController: UITextFieldDelegate {
+    @objc fileprivate func searchTextChanged() {
+        applyQuery(searchField.text ?? "")
+    }
+
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        textField.resignFirstResponder()
+        return true
     }
 }
