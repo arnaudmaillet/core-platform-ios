@@ -140,12 +140,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             nav?.delegate = previousDelegate
             origin.setConcealed(false)
             retainer.transition = nil
-            // The bar comes back with the source, and only if nothing full-bleed
-            // was revealed underneath — a post opened from a profile that itself
-            // sits above another snap surface must not uncover it.
-            if let nav, !(nav.topViewController is any ZoomTransitionDestination) {
-                nav.tabBarController?.setTabBarHidden(false, animated: true)
-            }
+            Self.restoreTabBar(on: nav)
         }
         // THE GRAB. Without it this push had no dismissal gesture at all:
         // claiming `zoomOwnsInteractiveDismissal` above tells the stack's
@@ -192,9 +187,41 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // Nothing else was hiding it here: `syncTabBarVisibility` runs on tab
         // selection, never on a push, and this push replaces the navigation
         // delegate with the flight — so the shell hears nothing either.
+        #if DEBUG
+        // `-tabbar-flag`: the A/B this decision rests on. Swaps the hand-managed
+        // hide for `hidesBottomBarWhenPushed`, so the two can be filmed against
+        // each other on the same grab rather than argued about.
+        if ProcessInfo.processInfo.arguments.contains("-tabbar-flag") {
+            destination.hidesBottomBarWhenPushed = true
+        } else {
+            nav.tabBarController?.setTabBarHidden(true, animated: true)
+        }
+        #else
         nav.tabBarController?.setTabBarHidden(true, animated: true)
+        #endif
+        transition.onPresentationCancelled = { [weak nav] in Self.restoreTabBar(on: nav) }
         nav.delegate = transition
         nav.pushViewController(destination, animated: true)
+    }
+
+    /// Brings the dock back after a flight that hid it.
+    ///
+    /// ⚠️ Called from EVERY close-out, not just the completed return. A flight
+    /// ends three ways and only one is `onSourceReturned`: the push can be caught
+    /// and reversed mid-air (`onPresentationCancelled`, where the destination
+    /// never showed), and the grab can be released short of the threshold
+    /// (`onDismissalCancelled`, where it stays up and the bar must stay down).
+    /// Hanging the restore on one of the three is how a viewer ends up on their
+    /// profile with no dock and no gesture that brings it back.
+    ///
+    /// A local closure was the first shape of this and it CRASHED the Swift
+    /// frontend — captured into the flight's own callbacks, it segfaulted the
+    /// compiler rather than failing to typecheck. A method is not a workaround
+    /// here; it is the thing that compiles.
+    private static func restoreTabBar(on nav: UINavigationController?) {
+        guard let nav, !(nav.topViewController is any ZoomTransitionDestination) else { return }
+        nav.tabBarController?.tabBar.alpha = 1
+        nav.tabBarController?.setTabBarHidden(false, animated: true)
     }
 
     public func makeSnapFeedViewController(postIDs: [PostID]) -> UIViewController {

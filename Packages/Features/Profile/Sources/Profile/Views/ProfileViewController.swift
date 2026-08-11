@@ -464,6 +464,17 @@ final class ProfileViewController: UIViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        // ⚠️ **The dock is not optional on a tab ROOT.** Whatever hid it — a post
+        // that flew out of this grid, a flight caught and reversed, a pop this
+        // screen never heard about — the invariant is that a root profile on
+        // screen has a tab bar under it. Asserted here rather than at each of the
+        // paths that can hide it, because the failure is total: no dock, no way
+        // to leave, and no gesture that brings it back.
+        if navigationController?.viewControllers.first === self,
+           tabBarController?.isTabBarHidden == true {
+            tabBarController?.tabBar.alpha = 1
+            tabBarController?.setTabBarHidden(false, animated: animated)
+        }
         // Re-bind the bar synchronously BEFORE the transition animates: any
         // state that resolved since viewDidLoad (fast mock loads, cached
         // profiles, returning from a pushed child) is fully populated here,
