@@ -439,6 +439,15 @@ public final class ProfileViewModel {
     /// a tapped tile into. `stream` is the run of posts from the tapped one;
     /// empty only where a caller has no ordering to offer, and then this still
     /// opens the feed rather than falling back to the old screen.
+    ///
+    /// ⚠️ **The FALLBACK path, not the ordinary one.** A composition root that
+    /// wired `feedHero` (which the app's does, always) opens every tapped post
+    /// through the feed's own presentation seam instead — hero flight or plain
+    /// push, decided there. This remains for the roots that wire nothing:
+    /// previews, tests, and any future host that wants posts without the feed
+    /// feature. It used to also serve text-only posts on the real app, which is
+    /// how they ended up on a bare push with no dismissal gesture and the tab
+    /// bar over them; see `ProfileViewController.onItemTapped`.
     public func galleryItemTapped(_ postID: PostID, stream: [PostID] = []) {
         router?.route(to: .postStream(stream.isEmpty ? [postID] : stream))
     }

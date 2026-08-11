@@ -102,7 +102,7 @@ struct ProfileFriendsIntersectionTests {
     private func makeRepository(graph: FakeSocialGraphClient) -> ProfileRelationshipsRepository {
         ProfileRelationshipsRepository(
             socialGraphClient: graph,
-            profileClient: FakeProfileClient(),
+            profileClient: StubProfileServiceClient(),
             viewer: FakeViewer(),
             supportsFollowerRemoval: false
         )
@@ -196,93 +196,6 @@ private final class FakeSocialGraphClient: SocialGraph_V1_SocialGraphServiceClie
         request: SocialGraph_V1_ListBlocksRequest, headers: Connect.Headers
     ) async -> ResponseMessage<SocialGraph_V1_ListBlocksResponse> {
         ResponseMessage(result: .success(SocialGraph_V1_ListBlocksResponse()))
-    }
-}
-
-/// Returns a bare view for any id, so hydration succeeds without asserting
-/// anything about display names — these tests are about which ids survive the
-/// intersection, not how they render.
-private final class FakeProfileClient: Profile_V1_ProfileServiceClientInterface, @unchecked Sendable {
-    func getProfileByID(
-        request: Profile_V1_GetProfileByIdRequest, headers: Connect.Headers
-    ) async -> ResponseMessage<Profile_V1_ProfileView> {
-        var view = Profile_V1_ProfileView()
-        view.profileID = request.profileID
-        view.handle = request.profileID
-        view.displayName = request.profileID
-        return ResponseMessage(result: .success(view))
-    }
-
-    func getProfileByHandle(
-        request: Profile_V1_GetProfileByHandleRequest, headers: Connect.Headers
-    ) async -> ResponseMessage<Profile_V1_ProfileView> {
-        ResponseMessage(result: .success(Profile_V1_ProfileView()))
-    }
-
-    func listProfilesByAccount(
-        request: Profile_V1_ListProfilesByAccountRequest, headers: Connect.Headers
-    ) async -> ResponseMessage<Profile_V1_ListProfilesByAccountResponse> {
-        ResponseMessage(result: .success(Profile_V1_ListProfilesByAccountResponse()))
-    }
-
-    func createProfile(
-        request: Profile_V1_CreateProfileRequest, headers: Connect.Headers
-    ) async -> ResponseMessage<Profile_V1_CommandResponse> {
-        ResponseMessage(result: .success(Profile_V1_CommandResponse()))
-    }
-
-    func updateProfile(
-        request: Profile_V1_UpdateProfileRequest, headers: Connect.Headers
-    ) async -> ResponseMessage<Profile_V1_CommandResponse> {
-        ResponseMessage(result: .success(Profile_V1_CommandResponse()))
-    }
-
-    func changeHandle(
-        request: Profile_V1_ChangeHandleRequest, headers: Connect.Headers
-    ) async -> ResponseMessage<Profile_V1_CommandResponse> {
-        ResponseMessage(result: .success(Profile_V1_CommandResponse()))
-    }
-
-    func updateAvatar(
-        request: Profile_V1_UpdateAvatarRequest, headers: Connect.Headers
-    ) async -> ResponseMessage<Profile_V1_CommandResponse> {
-        ResponseMessage(result: .success(Profile_V1_CommandResponse()))
-    }
-
-    func updateBanner(
-        request: Profile_V1_UpdateBannerRequest, headers: Connect.Headers
-    ) async -> ResponseMessage<Profile_V1_CommandResponse> {
-        ResponseMessage(result: .success(Profile_V1_CommandResponse()))
-    }
-
-    func setVisibility(
-        request: Profile_V1_SetVisibilityRequest, headers: Connect.Headers
-    ) async -> ResponseMessage<Profile_V1_CommandResponse> {
-        ResponseMessage(result: .success(Profile_V1_CommandResponse()))
-    }
-
-    func verifyProfile(
-        request: Profile_V1_VerifyProfileRequest, headers: Connect.Headers
-    ) async -> ResponseMessage<Profile_V1_CommandResponse> {
-        ResponseMessage(result: .success(Profile_V1_CommandResponse()))
-    }
-
-    func hideProfile(
-        request: Profile_V1_HideProfileRequest, headers: Connect.Headers
-    ) async -> ResponseMessage<Profile_V1_CommandResponse> {
-        ResponseMessage(result: .success(Profile_V1_CommandResponse()))
-    }
-
-    func restoreProfile(
-        request: Profile_V1_RestoreProfileRequest, headers: Connect.Headers
-    ) async -> ResponseMessage<Profile_V1_CommandResponse> {
-        ResponseMessage(result: .success(Profile_V1_CommandResponse()))
-    }
-
-    func deleteProfile(
-        request: Profile_V1_DeleteProfileRequest, headers: Connect.Headers
-    ) async -> ResponseMessage<Profile_V1_CommandResponse> {
-        ResponseMessage(result: .success(Profile_V1_CommandResponse()))
     }
 }
 

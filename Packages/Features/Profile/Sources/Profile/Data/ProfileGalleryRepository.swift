@@ -33,6 +33,18 @@ public actor ProfileGalleryRepository: ProfileGalleryProviding {
     private let postClient: any Post_V1_PostServiceClientInterface
     private let searchClient: any Search_V1_SearchServiceClientInterface
     private let counterClient: any Counter_V1_CounterServiceClientInterface
+    /// Resolves the people whose posts these are. Optional so a composition
+    /// root without one still gets a working grid — the tiles simply carry no
+    /// author, which is what every tile did before this existed.
+    private let profileClient: (any Profile_V1_ProfileServiceClientInterface)?
+    /// Identities already resolved, for the life of this actor.
+    ///
+    /// Cheap and worth it: the authored pages of a profile are by ONE person,
+    /// so the whole grid costs a single read and every later page — a tab
+    /// switch, a pull to refresh, the saved pile — costs none. A failed read is
+    /// cached as nothing known, deliberately: retrying it per page would turn
+    /// one unreachable person into a request per render.
+    private var authors: [ProfileID: GalleryAuthor?] = [:]
     /// One page today; the grid paginates when profiles outgrow it.
     private let pageLimit: Int32
 
@@ -40,11 +52,13 @@ public actor ProfileGalleryRepository: ProfileGalleryProviding {
         postClient: any Post_V1_PostServiceClientInterface,
         searchClient: any Search_V1_SearchServiceClientInterface,
         counterClient: any Counter_V1_CounterServiceClientInterface,
+        profileClient: (any Profile_V1_ProfileServiceClientInterface)? = nil,
         pageLimit: Int32 = 90
     ) {
         self.postClient = postClient
         self.searchClient = searchClient
         self.counterClient = counterClient
+        self.profileClient = profileClient
         self.pageLimit = pageLimit
     }
 
@@ -55,7 +69,7 @@ public actor ProfileGalleryRepository: ProfileGalleryProviding {
         let response = await postClient.listPostsByProfile(request: request, headers: [:])
         switch response.result {
         case .success(let body):
-            return await withCounters(hydrate(postIDs: body.posts.map(\.postID)).map(\.post))
+            return await withCounters(withAuthors(hydrate(postIDs: body.posts.map(\.postID))))
         case .failure(let error):
             throw ProfileError.transport(message: error.message ?? "code \(error.code)")
         }
@@ -71,9 +85,7 @@ public actor ProfileGalleryRepository: ProfileGalleryProviding {
             let ids = body.hits.filter { $0.entityType == .post }.map(\.id)
             // Self-mentions aren't "tagged by others"; drop own posts.
             return await withCounters(
-                hydrate(postIDs: ids)
-                    .filter { $0.authorProfileID != profileID }
-                    .map(\.post)
+                withAuthors(hydrate(postIDs: ids).filter { $0.authorProfileID != profileID })
             )
         case .failure(let error):
             throw ProfileError.transport(message: error.message ?? "code \(error.code)")
@@ -86,8 +98,63 @@ public actor ProfileGalleryRepository: ProfileGalleryProviding {
     /// failing the grid.
     public func posts(ids: [String]) async throws -> [GalleryPost] {
         guard !ids.isEmpty else { return [] }
-        let hydrated = await hydrate(postIDs: ids)
-        return await withCounters(hydrated.map(\.post))
+        return await withCounters(withAuthors(hydrate(postIDs: ids)))
+    }
+
+    /// Attaches the person each tile belongs to.
+    ///
+    /// ⚠️ **The grid renders none of this**, which is exactly why it was missing
+    /// for so long: a profile page has no need to repeat whose posts you are
+    /// looking at. It is carried for the surface a tile OPENS INTO — the
+    /// full-screen page's author capsule and its attribution pill are seeded
+    /// from the tile's own model, and a tile with no author seeds a page with
+    /// an anonymous one. `ForYouDiscovery` has carried it for the same reason
+    /// since that grid learned to seed; this is the same fact, resolved the only
+    /// way this repository can get it.
+    ///
+    /// One read per DISTINCT author, not per post: the authored pages are a
+    /// single person, so a whole grid is one round trip. `post.v1` carries only
+    /// `profile_id` on a post view, so this cannot be folded into hydration —
+    /// see `dev/BACKEND_GAPS.md`; a `GetPost` that embedded its author would
+    /// remove this hop entirely.
+    private func withAuthors(_ hydrated: [HydratedPost]) async -> [GalleryPost] {
+        guard profileClient != nil else { return hydrated.map(\.post) }
+        let wanted = Set(hydrated.map(\.authorProfileID)).filter { authors[$0] == nil }
+        if !wanted.isEmpty {
+            let resolved = await withTaskGroup(of: (ProfileID, GalleryAuthor?).self) { group in
+                for id in wanted {
+                    group.addTask { [profileClient] in (id, await Self.author(of: id, using: profileClient)) }
+                }
+                var collected: [(ProfileID, GalleryAuthor?)] = []
+                for await pair in group { collected.append(pair) }
+                return collected
+            }
+            for (id, author) in resolved { authors[id] = author }
+        }
+        return hydrated.map { item in
+            guard let author = authors[item.authorProfileID] ?? nil else { return item.post }
+            var decorated = item.post
+            decorated.authorID = item.authorProfileID
+            decorated.authorName = author.displayName
+            decorated.authorHandle = author.handle
+            decorated.authorAvatarURL = author.avatarURL
+            return decorated
+        }
+    }
+
+    private static func author(
+        of id: ProfileID, using client: (any Profile_V1_ProfileServiceClientInterface)?
+    ) async -> GalleryAuthor? {
+        guard let client else { return nil }
+        var request = Profile_V1_GetProfileByIdRequest()
+        request.profileID = id.rawValue
+        let response = await client.getProfileByID(request: request, headers: [:])
+        guard case .success(let view) = response.result else { return nil }
+        return GalleryAuthor(
+            displayName: view.displayName,
+            handle: view.handle,
+            avatarURL: URL(string: view.avatarURL)
+        )
     }
 
     private func withCounters(_ posts: [GalleryPost]) async -> [GalleryPost] {
@@ -135,6 +202,14 @@ public actor ProfileGalleryRepository: ProfileGalleryProviding {
             return slots.compactMap(\.self)
         }
     }
+}
+
+/// The identity slice a full-screen page needs from whoever wrote a tile —
+/// nothing more, since the grid itself draws none of it.
+private struct GalleryAuthor: Sendable {
+    let displayName: String
+    let handle: String
+    let avatarURL: URL?
 }
 
 /// A gallery post plus the author id (needed for the tagged self-mention

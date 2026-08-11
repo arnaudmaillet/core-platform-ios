@@ -34,6 +34,30 @@ public struct SnapFeedHeroOrigin {
     /// from, so the two agree by construction rather than by a list of fields
     /// copied across a boundary.
     public let post: GalleryPost
+    /// The run of posts the destination is being opened on, `post` first —
+    /// the SAME window the caller's `postIDs` names, as models rather than as
+    /// identifiers.
+    ///
+    /// It exists so the destination can render before its own fetch returns.
+    /// A route carries ids, and ids are not a page: pushed cold, the feed has
+    /// nothing to show until it has fetched, which is a black screen for the
+    /// length of the round trip. The origin already drew these posts, so
+    /// handing them over costs nothing and removes the wait. Empty is allowed
+    /// and simply means "no projection" — the destination then hydrates the
+    /// slow way, exactly as before.
+    public let stream: [GalleryPost]
+    /// Whether there is any media to fly AT ALL.
+    ///
+    /// ⚠️ Deliberately NOT the same question as `frame` returning nil, and
+    /// conflating the two is the bug this field exists to end. A nil frame
+    /// means "not on screen right now" — the origin scrolled away mid-flight,
+    /// and the answer is a centred collapse. This means "there was never
+    /// anything to fly": a text-only post is its words, and it has no media
+    /// surface at either end of a flight. One is a transient fact about
+    /// scrolling, the other a permanent fact about the post, and the
+    /// presentation that follows from each is different — a hero flight in the
+    /// first case, a plain push in the second.
+    public let hasHero: Bool
     /// The pixels the origin is showing right now, so the card starts as its
     /// twin rather than as an approximation of it.
     public let cover: UIImage?
@@ -54,6 +78,8 @@ public struct SnapFeedHeroOrigin {
 
     public init(
         post: GalleryPost,
+        stream: [GalleryPost] = [],
+        hasHero: Bool = true,
         cover: UIImage?,
         style: SnapFeedHeroStyle,
         frame: @escaping (UICoordinateSpace) -> CGRect?,
@@ -62,6 +88,8 @@ public struct SnapFeedHeroOrigin {
         depthView: @escaping () -> UIView? = { nil }
     ) {
         self.post = post
+        self.stream = stream
+        self.hasHero = hasHero
         self.cover = cover
         self.style = style
         self.frame = frame

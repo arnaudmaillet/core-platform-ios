@@ -1137,8 +1137,21 @@ final class SnapFeedViewController: UIViewController {
     private func render(_ state: FeedViewModel.RenderState) {
         refreshControl.endRefreshing()
 
+        let previousModels = modelsByID
         orderedIDs = state.items.map(\.id)
         modelsByID = Dictionary(uniqueKeysWithValues: state.items.map { ($0.id, $0) })
+
+        // ⚠️ **A stable id is not an unchanged page** — see
+        // `SeededPageReconciliation` for the whole rule and why it is a value.
+        let changed = SeededPageReconciliation.idsNeedingReconfigure(
+            ordered: orderedIDs,
+            previous: previousModels,
+            current: modelsByID,
+            // A RESTING engagement is a text page's ordinary layout, not an open
+            // panel — passing it here excluded every text page from ever being
+            // repaired. Only the viewer's own mutation is protected.
+            engaged: commentsEngagementIsResting ? nil : commentsEngagedID
+        )
 
         #if DEBUG
         // How many pages this feed has, and when. A feed pushed before its
@@ -1147,15 +1160,39 @@ final class SnapFeedViewController: UIViewController {
         // card showed it holding a poster the whole time. Under injected
         // latency this window is the injected latency long.
         if ProcessInfo.processInfo.arguments.contains("-media-log") {
-            print(String(format: "[media] %.3f feed render items=%d",
-                         CACurrentMediaTime(), orderedIDs.count))
+            // `reconfigured` is the half that is otherwise unobservable: a
+            // second render with the same ids looks identical from outside, and
+            // whether it redrew anything is exactly the question.
+            print(String(format: "[media] %.3f feed render items=%d reconfigured=%d",
+                         CACurrentMediaTime(), orderedIDs.count, changed.count))
         }
         #endif
         var snapshot = NSDiffableDataSourceSnapshot<Section, PostID>()
         snapshot.appendSections([.main])
         snapshot.appendItems(orderedIDs)
+        // Same identity, new content — the one thing appendItems cannot say.
+        if !changed.isEmpty { snapshot.reconfigureItems(changed) }
         dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
-            self?.updateActiveItem()
+            guard let self else { return }
+            updateActiveItem()
+            // ⚠️ **The bars are not in the cell**, and `updateActiveItem` only
+            // speaks when the active INDEX moves.
+            //
+            // The author capsule and the attribution pill are this screen's own
+            // chrome, refreshed from `updateBarChrome` on a page CHANGE — and a
+            // page whose model was just replaced under a stable id is not a page
+            // change. `SnapActiveItemTracker.diff` returns `.none`, nothing
+            // asks, and the two most identity-bearing things on screen keep the
+            // projection while the cell behind them shows the real entry.
+            //
+            // That asymmetry is what survived the cell-level fix and had to be
+            // measured to find: `reconfigured=3` and `page CONFIGURE author=yes`
+            // in the same frame as a capsule still reading nobody.
+            if let active = lifecycle.activeIndex,
+               orderedIDs.indices.contains(active),
+               changed.contains(orderedIDs[active]) {
+                updateBarChrome(at: active)
+            }
         }
 
         // A hero flight in progress whose post hydrated just now (cold tap):

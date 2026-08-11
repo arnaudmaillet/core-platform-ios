@@ -32,7 +32,12 @@ final class SnapMediaAttributionView: UIView {
     private let titleLabel = UILabel()
     private let trackLabel = UILabel()
 
+    /// The post the cover task is loading for — compared on arrival so a fast
+    /// page-past cannot land an image on the wrong pill.
     private var postID: PostID?
+    /// What is actually on screen, so a repeat call can tell "same page again"
+    /// from "same page, better data".
+    private var renderedModel: FeedItemDisplayModel?
     private var coverTask: Task<Void, Never>?
 
     init() {
@@ -97,11 +102,22 @@ final class SnapMediaAttributionView: UIView {
     }
 
     /// Shows `model`'s attribution. A page change cross-fades the labels and
-    /// reloads the cover (guarded against fast page-past); the same post is a
-    /// no-op. Called from the settle-quantized activation seam only — never
+    /// reloads the cover (guarded against fast page-past); the same CONTENT is
+    /// a no-op. Called from the settle-quantized activation seam only — never
     /// mid-scroll.
+    ///
+    /// ⚠️ The guard compares the MODEL, not its id, and that is the whole
+    /// difference between a pill that fills in and one that does not. A page
+    /// opened from a grid is shown twice from one id — the projection the grid
+    /// handed over, then the entry the network returns — so an id-keyed
+    /// early-out reads the second call as "same post, nothing to do" and keeps
+    /// the projection's anonymous author for the life of the screen. The
+    /// purpose of the guard is unharmed: a re-settle on an unchanged page still
+    /// skips the cross-dissolve and the cover refetch, because an unchanged page
+    /// has an unchanged model.
     func setPost(_ model: FeedItemDisplayModel, pipeline: ImagePipeline) {
-        guard model.id != postID else { return }
+        guard model != renderedModel else { return }
+        renderedModel = model
         postID = model.id
         defer { animateBarRemeasure() }
 

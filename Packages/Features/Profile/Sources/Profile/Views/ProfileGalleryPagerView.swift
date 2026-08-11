@@ -29,7 +29,7 @@ final class ProfileGalleryPagerView: UIView {
     /// Saved and Liked, everyone else's does not.
     let pageOrder: [ProfileTab]
 
-    var onItemTapped: ((GalleryPost, _ stream: [PostID]) -> Void)?
+    var onItemTapped: ((GalleryPost, _ stream: [GalleryPost]) -> Void)?
     /// Fired when a swipe settles on a page (not for programmatic paging) —
     /// the selector mirrors it.
     var onPageSettled: ((ProfileTab) -> Void)?
