@@ -61,10 +61,9 @@ final class ForYouViewController: UIViewController {
     /// target — no menu, no state.
     private lazy var composeItem: UIBarButtonItem = {
         let item = UIBarButtonItem(
-            image: UIImage(systemName: "plus"),
-            primaryAction: UIAction { [weak self] _ in self?.openComposer() }
-        )
-        item.accessibilityLabel = "New Post"
+            bouncingImage: UIImage(systemName: "plus"),
+            accessibilityLabel: "New Post"
+        ) { [weak self] in self?.openComposer() }
         return item
     }()
 

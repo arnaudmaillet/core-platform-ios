@@ -1,4 +1,5 @@
 import CoreNavigation
+import DesignSystem
 import NotificationsInterface
 import ProfileInterface
 import UIKit
@@ -40,11 +41,10 @@ final class MainTabCoordinator: NSObject, Coordinator {
     /// dot) — driven by `refreshUnreadBadge`, no custom view needed.
     private lazy var notificationsBarItem: UIBarButtonItem = {
         let item = UIBarButtonItem(
-            image: Self.bellImage(unread: false),
-            primaryAction: UIAction { [weak self] _ in self?.pushNotifications() }
-        )
+            bouncingImage: Self.bellImage(unread: false),
+            accessibilityLabel: "Notifications"
+        ) { [weak self] in self?.pushNotifications() }
         item.tintColor = .label
-        item.accessibilityLabel = "Notifications"
         return item
     }()
 
