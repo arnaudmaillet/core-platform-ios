@@ -242,6 +242,12 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
                 self?.select(index: target, animated: true)
             }
         }
+        // `-inbox-search-open`: the same, on the inbox.
+        if arguments.contains("-inbox-search-open") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.presentSearch()
+            }
+        }
         runSearchDebugSequence(arguments)
 
         // `-tabbar-shape-watch` samples the capsule's shape twice a second and
@@ -450,6 +456,18 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
             // which is the focus arriving late and the placeholder re-laying
             // itself out under the keyboard: the jump.
             self.navigationController?.navigationBar.layoutIfNeeded()
+
+            // ⚠️ **The FIELD's own layout, not just the bar's.** Laying out the
+            // bar installs the title view and gives it a frame; the field then
+            // still has to place its glyph, placeholder and caret inside that
+            // frame, and it was doing so on a later pass — mid-crossfade, at a
+            // width it was about to leave. Measured from a screen recording of
+            // the relationships header: the placeholder's box walked +14 → +23 →
+            // +11 → +7 → +10 horizontally and 0 → 8 → 10 → 4 vertically before it
+            // settled. Forcing the pass here means the first frame the viewer
+            // sees is already the final one.
+            self.searchField.setNeedsLayout()
+            self.searchField.layoutIfNeeded()
             // ⚠️ FOCUSED INSIDE the change block, so the state the crossfade
             // dissolves TO is the focused one. Focusing afterwards meant the
             // field faded in unfocused and then re-laid itself out when the

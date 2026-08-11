@@ -233,6 +233,18 @@ final class ProfileRelationshipsViewController: UIViewController {
             // which is the focus arriving late and the placeholder re-laying
             // itself out under the keyboard: the jump.
             self.navigationController?.navigationBar.layoutIfNeeded()
+
+            // ⚠️ **The FIELD's own layout, not just the bar's.** Laying out the
+            // bar installs the title view and gives it a frame; the field then
+            // still has to place its glyph, placeholder and caret inside that
+            // frame, and it was doing so on a later pass — mid-crossfade, at a
+            // width it was about to leave. Measured from a screen recording of
+            // the relationships header: the placeholder's box walked +14 → +23 →
+            // +11 → +7 → +10 horizontally and 0 → 8 → 10 → 4 vertically before it
+            // settled. Forcing the pass here means the first frame the viewer
+            // sees is already the final one.
+            self.searchField.setNeedsLayout()
+            self.searchField.layoutIfNeeded()
             self.searchField.becomeFirstResponder()
         }
     }
@@ -341,6 +353,14 @@ final class ProfileRelationshipsViewController: UIViewController {
         // the pinned header's field ~1.5s in, through its own `query` setter so
         // the real change path runs — rather than poking the view model, which
         // would prove only that the filter compiles.
+        // `-profile-relationships-search-open`: presents search and types NOTHING,
+        // so the placeholder is on screen for the whole transition and can be
+        // measured frame by frame.
+        if arguments.contains("-profile-relationships-search-open") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.presentSearch()
+            }
+        }
         if let index = arguments.firstIndex(of: "-profile-relationships-search"),
            let text = arguments.dropFirst(index + 1).first, !text.hasPrefix("-") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
