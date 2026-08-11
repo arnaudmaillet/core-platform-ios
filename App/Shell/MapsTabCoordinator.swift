@@ -1,5 +1,4 @@
 import CoreNavigation
-import DesignSystem
 import MapsInterface
 import UIKit
 
@@ -29,11 +28,12 @@ final class MapsTabCoordinator: TabCoordinator {
     /// so no custom chrome is needed to match the header aesthetic.
     private lazy var createPostButtonItem: UIBarButtonItem = {
         let item = UIBarButtonItem(
-            bouncingImage: UIImage(systemName: "plus"),
-            accessibilityLabel: "Create Post"
-        ) { [weak self] in
-            self?.container.router.route(to: .upload)
-        }
+            image: UIImage(systemName: "plus"),
+            primaryAction: UIAction { [weak self] _ in
+                self?.container.router.route(to: .upload)
+            }
+        )
+        item.accessibilityLabel = "Create Post"
         return item
     }()
 
