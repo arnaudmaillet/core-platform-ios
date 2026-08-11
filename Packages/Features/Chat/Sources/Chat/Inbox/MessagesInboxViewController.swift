@@ -370,7 +370,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// whatever it is given at every width — a leading custom view collapses into
     /// a `•••` on narrow bars once anything shares the row with it, which is the
     /// whole reason the selector has that group to itself.
-    private let searchField = UISearchTextField()
+    private let searchField = TracedSearchTextField()
 
     /// The selector's item, kept so the bar can be put back exactly as it was.
     private var selectorItem: UIBarButtonItem?
@@ -425,6 +425,33 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     private func presentSearch() {
         guard !isSearching, let results = searchResults else { return }
         isSearching = true
+        #if DEBUG
+        // Everything below is timed from HERE, including the keyboard's own
+        // notifications, so a late layout pass can be attributed rather than
+        // guessed at.
+        if ProcessInfo.processInfo.arguments.contains("-search-layout-trace") {
+            let start = CACurrentMediaTime()
+            searchField.activatedAt = start
+            for name: Notification.Name in [
+                UIResponder.keyboardWillShowNotification,
+                UIResponder.keyboardDidShowNotification,
+                UIResponder.keyboardWillChangeFrameNotification,
+                UIResponder.keyboardDidChangeFrameNotification
+            ] {
+                NotificationCenter.default.addObserver(
+                    forName: name, object: nil, queue: .main
+                ) { note in
+                    let end = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey]
+                        as? NSValue)?.cgRectValue ?? .null
+                    print(String(format: "[keyboard] t=%4.0fms %@ endY=%.0f",
+                                 (CACurrentMediaTime() - start) * 1000,
+                                 note.name.rawValue
+                                    .replacingOccurrences(of: "UIKeyboard", with: ""),
+                                 end.minY))
+                }
+            }
+        }
+        #endif
 
         addChild(results)
         results.view.translatesAutoresizingMaskIntoConstraints = false

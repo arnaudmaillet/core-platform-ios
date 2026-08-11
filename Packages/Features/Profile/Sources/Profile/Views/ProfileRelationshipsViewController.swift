@@ -54,7 +54,7 @@ final class ProfileRelationshipsViewController: UIViewController {
     /// The native `.integratedButton` placement collapsed the whole leading group
     /// — back button, selector and all — into a `•••` on narrow bars, which is
     /// exactly what the inbox measured before it moved off that placement too.
-    private let searchField = UISearchTextField()
+    private let searchField = TracedRelationshipsSearchField()
     private lazy var searchItem = UIBarButtonItem(
         image: UIImage(systemName: "magnifyingglass"),
         primaryAction: UIAction { [weak self] _ in self?.presentSearch() }
@@ -217,6 +217,18 @@ final class ProfileRelationshipsViewController: UIViewController {
     private func presentSearch() {
         guard !isSearching else { return }
         isSearching = true
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-search-layout-trace") {
+            let start = CACurrentMediaTime()
+            searchField.activatedAt = start
+            NotificationCenter.default.addObserver(
+                forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main
+            ) { _ in
+                print(String(format: "[keyboard] t=%4.0fms WillShow",
+                             (CACurrentMediaTime() - start) * 1000))
+            }
+        }
+        #endif
         tabBarController?.setTabBarHidden(true, animated: true)
         morphBar(duration: 0.3) {
             self.setBarOpaque(true)
