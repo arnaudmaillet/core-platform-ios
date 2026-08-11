@@ -99,7 +99,17 @@ final class ProfileGalleryGridView: UIView {
 
     /// List pages show a column of placeholder cards; the mosaic shows one
     /// full 8-brick pattern.
-    private var skeletonCount: Int { style == .grid ? PostGridMosaic.patternLength : 5 }
+    /// Derived exactly as For You derives it: two slices' worth, so the loading
+    /// state already has the shape content will hydrate into.
+    private var skeletonCount: Int {
+        style == .grid
+            ? (sliceLayout?.cellsPerSlice ?? ChaoticSliceEngine.defaultCellsPerSlice) * 2
+            : 5
+    }
+
+    private var sliceLayout: ChaoticSliceLayout? {
+        collectionView.collectionViewLayout as? ChaoticSliceLayout
+    }
 
     /// The page's own scroll view.
     ///
@@ -141,7 +151,15 @@ final class ProfileGalleryGridView: UIView {
         }
         collectionView = UICollectionView(
             frame: .zero,
-            collectionViewLayout: style == .grid ? PostGridMosaic.layout() : PostGridListLayout.layout()
+            // ⚠️ **The SAME layout For You builds**, not a second grid that
+            // resembles it. This was `PostGridMosaic.layout()` — a 1.5pt hairline
+            // gutter and square corners in a fixed eight-brick pattern — beside a
+            // For You grid running `ChaoticSliceLayout` at an 8pt gutter and a
+            // 16pt radius. They were not two configurations of one grid; they were
+            // two grids, and only one of them was the design system's.
+            collectionViewLayout: style == .grid
+                ? ChaoticSliceLayout()
+                : PostGridListLayout.layout()
         )
         super.init(frame: .zero)
 
@@ -327,9 +345,13 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
                 cell.configure(variant: indexPath.item)
                 return cell
             case .grid:
-                return collectionView.dequeueReusableCell(
+                let cell = collectionView.dequeueReusableCell(
                     withReuseIdentifier: PostGridSkeletonTileCell.reuseID, for: indexPath
-                )
+                ) as! PostGridSkeletonTileCell
+                // The shimmer has to be the shape content will hydrate into, or
+                // the cross-dissolve changes silhouette as it lands.
+                cell.cornerRadius = ChaoticSliceLayout.harmonisedCornerRadius
+                return cell
             }
         }
         let post = posts[indexPath.item]
@@ -348,6 +370,7 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
             let cell = collectionView.dequeueReusableCell(
                 withReuseIdentifier: PostGridTileCell.reuseID, for: indexPath
             ) as! PostGridTileCell
+            cell.cornerRadius = ChaoticSliceLayout.harmonisedCornerRadius
             cell.configure(with: post, imagePipeline: imagePipeline)
             cell.onCoverLoaded = { [weak self] in self?.reconcileAutoplay() }
             return cell

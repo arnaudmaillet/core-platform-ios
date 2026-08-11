@@ -242,16 +242,6 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
                 self?.select(index: target, animated: true)
             }
         }
-        // `-symbol-bounce-demo`: fires the magnifier's own action twice, a beat
-        // apart, so the bounce can be filmed. The simulator injects no taps, and a
-        // symbol effect is a scale animation — it exists only in frames.
-        if arguments.contains("-symbol-bounce-demo") {
-            for delay in [2.0, 3.5] {
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                    self?.searchItem.bounceSymbol()
-                }
-            }
-        }
         // `-inbox-search-open`: the same, on the inbox.
         if arguments.contains("-inbox-search-open") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
@@ -358,9 +348,9 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
     /// The classic magnifier, trailing.
     private lazy var searchItem = UIBarButtonItem(
-        bouncingImage: UIImage(systemName: "magnifyingglass"),
-        accessibilityLabel: "Search"
-    ) { [weak self] in self?.presentSearch() }
+        image: UIImage(systemName: "magnifyingglass"),
+        primaryAction: UIAction { [weak self] _ in self?.presentSearch() }
+    )
 
     private lazy var cancelItem = UIBarButtonItem(
         title: "Cancel",
@@ -384,6 +374,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     private static let fieldHeight: CGFloat = 36
 
     private func configureSearchAffordance() {
+        searchItem.accessibilityLabel = "Search"
         searchField.placeholder = "Search"
         searchField.autocapitalizationType = .none
         searchField.autocorrectionType = .no

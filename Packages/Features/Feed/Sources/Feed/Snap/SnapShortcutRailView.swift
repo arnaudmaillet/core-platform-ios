@@ -395,8 +395,6 @@ final class SnapShortcutRailView: UIScrollView {
         config.baseForegroundColor = .white
         config.contentInsets = .zero
         let button = UIButton(configuration: config)
-        // Every rail bubble, from the one place they are made.
-        button.bouncesSymbolOnTap()
         button.layer.backgroundColor = UIColor.black.withAlphaComponent(0.45).cgColor
         button.layer.cornerRadius = iconDiameter / 2
         button.layer.cornerCurve = .continuous
