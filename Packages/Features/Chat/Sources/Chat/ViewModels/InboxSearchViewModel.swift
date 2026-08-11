@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import Foundation
 
 /// The inbox's global search: one query answered across every category at once,
@@ -32,6 +33,8 @@ final class InboxSearchViewModel {
         case messages
         case requests
         case people
+        /// The device-local search history — queries, not threads.
+        case recents
     }
 
     /// A result row, as the diffable data source's identifier. The two cases
@@ -41,6 +44,9 @@ final class InboxSearchViewModel {
     nonisolated enum Row: Hashable, Sendable {
         case conversation(ConversationID)
         case person(ProfileID)
+        /// A query the viewer has run before, from the device-local history the
+        /// global search screen writes to.
+        case recentQuery(String)
     }
 
     nonisolated struct Section: Equatable, Sendable, Identifiable {
@@ -88,6 +94,8 @@ final class InboxSearchViewModel {
     private var matchedPeerIDs: Set<ProfileID> = []
 
     private let catalog: InboxCatalog
+    /// Shared with the global search screen — the same history, both directions.
+    private let recents: RecentSearchStore?
     private let viewer: any ViewerIdentityProviding
     private let people: (any PeopleDirectoryProviding)?
     private let debounce: Duration
@@ -114,6 +122,7 @@ final class InboxSearchViewModel {
         catalog: InboxCatalog,
         viewer: any ViewerIdentityProviding,
         people: (any PeopleDirectoryProviding)? = nil,
+        recents: RecentSearchStore? = nil,
         debounce: Duration = .milliseconds(300),
         pageSize: Int32 = 25,
         now: @escaping @Sendable () -> Date = { Date() }
@@ -121,6 +130,7 @@ final class InboxSearchViewModel {
         self.catalog = catalog
         self.viewer = viewer
         self.people = people
+        self.recents = recents
         self.debounce = debounce
         self.pageSize = pageSize
         self.now = now
@@ -229,6 +239,9 @@ final class InboxSearchViewModel {
             } else {
                 onOpenConversation?(.draft(peer: id, displayName: person.displayName))
             }
+        case .recentQuery(let text):
+            // A history row is not a destination — it is the query again.
+            replayRecentQuery(text)
         }
     }
 
@@ -363,11 +376,31 @@ final class InboxSearchViewModel {
         peopleModels = [:]
         matchedPeerIDs = []
         let stamp = now()
+        var sections: [Section] = []
+        // ⚠️ Recent QUERIES first, from the shared device-local store. These are
+        // things the viewer typed, which is what "recent searches" means
+        // everywhere else in the app; the threads below are a suggestion, not a
+        // history, and conflating the two was the shortcut this replaces.
+        let queries = (recents?.recents ?? [])
+            .filter { $0.kind == .query }
+            .prefix(Self.idleRowLimit)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-inbox-recents-trace") {
+            print("[recents] store=\(recents == nil ? "nil" : "present") "
+                + "total=\(recents?.recents.count ?? -1) queries=\(queries.count)")
+        }
+        #endif
+        if !queries.isEmpty {
+            sections.append(
+                Section(kind: .recents, title: "Recent Searches",
+                        rows: queries.map { .recentQuery($0.text) })
+            )
+        }
         let sources: [(SectionKind, String, [Conversation])] = [
             (.messages, "Recent", Array(snapshot.active.prefix(Self.idleRowLimit))),
             (.requests, "Suggestions", Array(snapshot.requests.prefix(Self.idleRowLimit)))
         ]
-        return sources.compactMap { kind, title, conversations in
+        sections.append(contentsOf: sources.compactMap { kind, title, conversations in
             guard !conversations.isEmpty else { return nil }
             for conversation in conversations {
                 conversationModels[conversation.id] = ConversationDisplayModel(
@@ -380,8 +413,32 @@ final class InboxSearchViewModel {
                 if let peer = conversation.directPeerID { matchedPeerIDs.insert(peer) }
             }
             return Section(kind: kind, title: title, rows: conversations.map { .conversation($0.id) })
-        }
+        })
+        return sections
     }
+
+    /// Records what the viewer actually searched for, so it is offered next time
+    /// — here and on the global search screen, which reads the same store.
+    func rememberQuery(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 2 else { return }
+        let entry = recents?.recordQuery(trimmed)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-inbox-recents-trace") {
+            print("[recents] recorded=\(entry?.text ?? "nil") "
+                + "storeNow=\(recents?.recents.count ?? -1)")
+        }
+        #endif
+    }
+
+    /// Re-runs a row from the history.
+    func replayRecentQuery(_ text: String) {
+        onReplayQuery?(text)
+        queryChanged(text)
+    }
+
+    /// Lets the screen put the text back in the field when a history row is tapped.
+    var onReplayQuery: ((String) -> Void)?
 
     /// Enough to be useful, few enough that the field still reads as the subject.
     private static let idleRowLimit = 8

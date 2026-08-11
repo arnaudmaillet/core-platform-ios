@@ -131,6 +131,19 @@ final class InboxSearchResultsViewController: UIViewController {
             }
         }
 
+        // A history row is a query, not a person: a magnifier and the text the
+        // viewer typed, in the casing they typed it.
+        let recentRegistration = UICollectionView.CellRegistration<
+            UICollectionViewListCell, String
+        > { cell, _, text in
+            var content = cell.defaultContentConfiguration()
+            content.text = text
+            content.image = UIImage(systemName: "magnifyingglass")
+            content.imageProperties.tintColor = .secondaryLabel
+            cell.contentConfiguration = content
+            cell.accessories = []
+        }
+
         dataSource = UICollectionViewDiffableDataSource<Section, Row>(
             collectionView: collectionView
         ) { collectionView, indexPath, row in
@@ -142,6 +155,10 @@ final class InboxSearchResultsViewController: UIViewController {
             case .person(let id):
                 return collectionView.dequeueConfiguredReusableCell(
                     using: personRegistration, for: indexPath, item: id
+                )
+            case .recentQuery(let text):
+                return collectionView.dequeueConfiguredReusableCell(
+                    using: recentRegistration, for: indexPath, item: text
                 )
             }
         }
@@ -276,6 +293,17 @@ extension InboxSearchResultsViewController {
     /// results to a `UISearchController` that also insisted on presenting them —
     /// and, on the inbox, quietly pulled this view back out of a hierarchy it had
     /// been added to as a child. Nothing about showing results needs that object.
+    /// Records a query in the shared history; see `InboxSearchViewModel`.
+    func rememberQuery(_ text: String) {
+        viewModel.rememberQuery(text)
+    }
+
+    /// Fired when a history row re-runs its query, so the field can follow.
+    var onReplayQuery: ((String) -> Void)? {
+        get { viewModel.onReplayQuery }
+        set { viewModel.onReplayQuery = newValue }
+    }
+
     func applyQuery(_ text: String) {
         // Re-armed here rather than on appearance: this controller is shown and
         // hidden without ever being deallocated, so a row disabled by a previous

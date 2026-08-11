@@ -17,10 +17,10 @@ final class ConversationCell: UITableViewCell {
 
     /// The pinned band, as the cell's `backgroundView`.
     ///
-    /// ⚠️ **Not `contentView.backgroundColor`, and not the cell's own.** The
-    /// disclosure chevron is an `accessoryType`, which UIKit lays out OUTSIDE
-    /// `contentView` — so tinting the content view left an untinted strip down
-    /// the row's trailing edge, exactly the width of the accessory. And the
+    /// ⚠️ **Not `contentView.backgroundColor`, and not the cell's own.** Tinting
+    /// the content view left an untinted strip down the row's trailing edge
+    /// wherever an accessory sat outside it — the disclosure chevron did that
+    /// until it was removed as redundant, and any future accessory would too. The
     /// cell's own `backgroundColor` is re-applied by UIKit during batch layout,
     /// which is what made the band vanish mid-move.
     ///
@@ -175,7 +175,6 @@ final class ConversationCell: UITableViewCell {
     }
 
     private func configure() {
-        accessoryType = .disclosureIndicator
         // Installed once and recoloured thereafter — swapping the view per
         // configure would hand the move animation a different layer halfway
         // through.

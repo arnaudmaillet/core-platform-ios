@@ -230,6 +230,13 @@ final class ProfileRelationshipsViewController: UIViewController {
         }
         #endif
         tabBarController?.setTabBarHidden(true, animated: true)
+        // ⚠️ The caret is HIDDEN for the length of the morph. It is drawn at the
+        // text's insertion point, and that point is only final once the field has
+        // its destination width — so on the way there the caret rendered mid-field
+        // and slid left as the layout resolved. Nothing else in the field moves;
+        // this is the one part that had to wait.
+        let caretTint = searchField.tintColor
+        searchField.tintColor = .clear
         morphBar(duration: 0.3) {
             self.setBarOpaque(true)
             // ⚠️ The back button goes too, so the field has the full width and
@@ -258,6 +265,11 @@ final class ProfileRelationshipsViewController: UIViewController {
             self.searchField.setNeedsLayout()
             self.searchField.layoutIfNeeded()
             self.searchField.becomeFirstResponder()
+        }
+        // Restored a beat after the crossfade ends, so it appears already in
+        // place rather than travelling to it.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) { [weak self] in
+            self?.searchField.tintColor = caretTint
         }
     }
 

@@ -432,7 +432,10 @@ final class AppContainer {
         connections: socialConnectionsRepository,
         people: peopleDirectoryRepository,
         imagePipeline: imagePipeline,
-        router: routeResolver
+        router: routeResolver,
+        // One history for the whole app: a query typed in the inbox is recent on
+        // the search screen, and the other way round.
+        recentSearches: recentSearchStore
     )
 
     // MARK: - Routing

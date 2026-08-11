@@ -124,7 +124,17 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         view.backgroundColor = .systemBackground
         if let searchResults {
             // A picked row takes the search UI down BEFORE the thread goes up.
-            searchResults.onWillOpenResult = { [weak self] in self?.dismissSearch() }
+            searchResults.onWillOpenResult = { [weak self] in
+                // Opening something IS the signal — a query that led somewhere is
+                // worth offering again, and it costs the viewer nothing to say so.
+                self?.searchResults?.rememberQuery(self?.searchField.text ?? "")
+                self?.dismissSearch()
+            }
+            // Tapping a history row re-runs it, so the field has to show what is
+            // now being searched for.
+            searchResults.onReplayQuery = { [weak self] text in
+                self?.searchField.text = text
+            }
         }
         configureSearchAffordance()
         // ⚠️ Loaded NOW, not on the first tap. This controller builds a
@@ -305,6 +315,10 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
             print("[inbox-search] focusedAtMorph=\(self.searchField.isFirstResponder)")
             self.searchField.text = text
             self.searchResults?.applyQuery(text)
+            // Submitting is what a viewer does with a query worth keeping, and it
+            // is the path that writes the history — so the QA sequence takes it,
+            // or the history it exercises is never written.
+            self.searchResults?.rememberQuery(text)
             #if DEBUG
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 guard let self, let results = self.searchResults else { return }
@@ -642,6 +656,8 @@ extension MessagesInboxViewController: UITextFieldDelegate {
     }
 
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        // Submitting is the clearest signal that a query mattered.
+        searchResults?.rememberQuery(textField.text ?? "")
         textField.resignFirstResponder()
         return true
     }
