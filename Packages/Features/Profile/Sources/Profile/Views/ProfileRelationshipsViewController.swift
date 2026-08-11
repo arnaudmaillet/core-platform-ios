@@ -56,9 +56,9 @@ final class ProfileRelationshipsViewController: UIViewController {
     /// exactly what the inbox measured before it moved off that placement too.
     private let searchField = TracedRelationshipsSearchField()
     private lazy var searchItem = UIBarButtonItem(
-        image: UIImage(systemName: "magnifyingglass"),
-        primaryAction: UIAction { [weak self] _ in self?.presentSearch() }
-    )
+        bouncingImage: UIImage(systemName: "magnifyingglass"),
+        accessibilityLabel: "Search"
+    ) { [weak self] in self?.presentSearch() }
     private lazy var cancelItem = UIBarButtonItem(
         title: "Cancel",
         primaryAction: UIAction { [weak self] _ in self?.dismissSearch() }

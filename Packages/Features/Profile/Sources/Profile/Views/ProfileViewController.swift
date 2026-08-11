@@ -1187,11 +1187,10 @@ final class ProfileViewController: UIViewController {
         // item (no leading item, so it never disturbs the edge-swipe pop),
         // tinted `.label` to read as primary dark chrome over the banner.
         let settings = UIBarButtonItem(
-            image: UIImage(systemName: "gearshape"),
-            primaryAction: UIAction { [weak self] _ in self?.pushSettings() }
-        )
+            bouncingImage: UIImage(systemName: "gearshape"),
+            accessibilityLabel: "Settings"
+        ) { [weak self] in self?.pushSettings() }
         settings.tintColor = .label
-        settings.accessibilityLabel = "Settings"
         settingsItem = settings
 
         // Profile switcher — the leading item, opposite the gear (see
