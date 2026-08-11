@@ -140,6 +140,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             nav?.delegate = previousDelegate
             origin.setConcealed(false)
             retainer.transition = nil
+            // The bar comes back with the source, and only if nothing full-bleed
+            // was revealed underneath — a post opened from a profile that itself
+            // sits above another snap surface must not uncover it.
+            if let nav, !(nav.topViewController is any ZoomTransitionDestination) {
+                nav.tabBarController?.setTabBarHidden(false, animated: true)
+            }
         }
         // THE GRAB. Without it this push had no dismissal gesture at all:
         // claiming `zoomOwnsInteractiveDismissal` above tells the stack's
@@ -173,6 +179,20 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             }
         }
         #endif
+        // ⚠️ Hidden BY HAND, not with `hidesBottomBarWhenPushed`.
+        //
+        // The feed reached for that flag twice and measured the same defect both
+        // times — most recently on the plain percent driver this path also uses:
+        // its bottom-bar choreography does not scrub with a custom interactive
+        // pop, so the bar arrives fully rendered at pop-begin and stands over the
+        // post for the whole length of a grab. See `FeedFlowCoordinator.push`,
+        // which hides on the push and restores on the completed pop; this is the
+        // same cure for the same push, arriving from a profile instead of a pin.
+        //
+        // Nothing else was hiding it here: `syncTabBarVisibility` runs on tab
+        // selection, never on a push, and this push replaces the navigation
+        // delegate with the flight — so the shell hears nothing either.
+        nav.tabBarController?.setTabBarHidden(true, animated: true)
         nav.delegate = transition
         nav.pushViewController(destination, animated: true)
     }
