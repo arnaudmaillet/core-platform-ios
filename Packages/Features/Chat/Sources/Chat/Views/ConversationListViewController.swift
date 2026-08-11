@@ -315,6 +315,32 @@ extension ConversationListViewController: UITableViewDelegate {
     // MARK: - Section headers
 
     /// The glass pill, and the tap that scrolls to the section it names.
+    #if DEBUG
+    /// `-inbox-header-audit`: the pill's offset INSIDE each section header.
+    ///
+    /// That offset is what a pinned header carries with it, so it is the number
+    /// that decides whether two stuck headers line up. Measuring the pinned
+    /// position directly would need a scroll per section; this needs none, and it
+    /// is the same quantity.
+    func runHeaderAlignmentAudit() {
+        guard ProcessInfo.processInfo.arguments.contains("-inbox-header-audit") else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            guard let self else { return }
+            tableView.layoutIfNeeded()
+            for section in 0..<tableView.numberOfSections {
+                guard let header = tableView.headerView(forSection: section) else { continue }
+                let pill = header.contentView.subviews.first {
+                    String(describing: type(of: $0)).contains("SectionHeaderPill")
+                }
+                print(String(format: "[header-align] section %d headerH=%.1f pillTop=%.1f pillBottom=%.1f",
+                             section, header.bounds.height,
+                             pill?.frame.minY ?? -1,
+                             (pill.map { header.bounds.height - $0.frame.maxY }) ?? -1))
+            }
+        }
+    }
+    #endif
+
     func tableView(_ tableView: UITableView, viewForHeaderInSection index: Int) -> UIView? {
         guard let section = adapter.headedSection(at: index) else { return nil }
         let header = tableView.dequeueReusableHeaderFooterView(
@@ -405,6 +431,9 @@ extension ConversationListViewController: InboxSurface {
     /// load is already in flight, so this is free on the appear path.
     func surfaceDidBecomeActive() {
         viewModel.refresh()
+        #if DEBUG
+        runHeaderAlignmentAudit()
+        #endif
         #if DEBUG
         runSectionTapDebugSequence()
         #endif

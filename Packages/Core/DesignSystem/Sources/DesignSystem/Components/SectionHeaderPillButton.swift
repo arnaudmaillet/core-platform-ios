@@ -68,6 +68,8 @@ public final class SectionHeaderPillButton: UIButton {
 
     /// Held so the section gap can be applied per header — see `setLeadsList`.
     private var topConstraint: NSLayoutConstraint?
+    /// Carries the section gap now — see `pinAsHeader`.
+    private var bottomConstraint: NSLayoutConstraint?
     /// ⚠️ **The header's height must not depend on which shape it is wearing.**
     /// The two states have different type sizes, so a self-sizing header would
     /// re-measure mid-scroll and shove every row below it — the morph would
@@ -104,15 +106,22 @@ public final class SectionHeaderPillButton: UIButton {
     public func pinAsHeader(in host: UIView) {
         translatesAutoresizingMaskIntoConstraints = false
         host.addSubview(self)
+        // ⚠️ The top margin is the SAME for every header, and the section gap
+        // lives at the bottom. It used to be the other way round, and a pinned
+        // header carries its top margin with it — so a second section's pill hung
+        // lower than the first's for as long as it was stuck to the top of the
+        // list, which is the one place they are compared side by side.
         let top = topAnchor.constraint(equalTo: host.topAnchor, constant: Metrics.float)
+        let bottom = host.bottomAnchor.constraint(equalTo: bottomAnchor, constant: Metrics.float)
         let height = heightAnchor.constraint(equalToConstant: Self.reservedHeight(for: traitCollection))
         topConstraint = top
+        bottomConstraint = bottom
         heightConstraint = height
         NSLayoutConstraint.activate([
             leadingAnchor.constraint(equalTo: host.layoutMarginsGuide.leadingAnchor),
             top,
             height,
-            bottomAnchor.constraint(equalTo: host.bottomAnchor, constant: -Metrics.float),
+            bottom,
             trailingAnchor.constraint(lessThanOrEqualTo: host.layoutMarginsGuide.trailingAnchor)
         ])
     }
@@ -124,9 +133,12 @@ public final class SectionHeaderPillButton: UIButton {
     /// sections, so a view that carried the gap for "Recent" would carry it
     /// into "New" the moment it was reused.
     public func setLeadsList(_ leadsList: Bool) {
+        // The gap separates this section from the rows above it, and it is spent
+        // BELOW the pill so the pill's own offset from the top of the header never
+        // changes. Same total header height either way; same pinned position.
         let constant = Metrics.float + (leadsList ? 0 : Metrics.sectionGap)
-        guard topConstraint?.constant != constant else { return }
-        topConstraint?.constant = constant
+        guard bottomConstraint?.constant != constant else { return }
+        bottomConstraint?.constant = constant
         // The host has to re-measure: this changes the header's HEIGHT, not
         // just the pill's position inside it, and a recycled header that is
         // never asked again keeps whatever height it was dequeued with.

@@ -468,7 +468,10 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         let appearance = UINavigationBarAppearance()
         appearance.configureWithOpaqueBackground()
         appearance.backgroundColor = .systemBackground
-        appearance.shadowColor = .separator
+        // No hairline. The results start immediately under the bar, so a divider
+        // there separates the field from its own results — the two are one surface
+        // while searching, and the line is the only thing saying otherwise.
+        appearance.shadowColor = nil
         navigationItem.standardAppearance = appearance
         navigationItem.scrollEdgeAppearance = appearance
         navigationItem.compactAppearance = appearance
