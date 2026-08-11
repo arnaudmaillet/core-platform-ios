@@ -430,6 +430,36 @@ final class ProfileRelationshipsViewController: UIViewController {
         searchField.heightAnchor.constraint(
             equalToConstant: Self.searchFieldHeight
         ).isActive = true
+        prewarmSearchField()
+    }
+
+    /// ⚠️ **Renders the field once, off screen, before it is ever presented.**
+    ///
+    /// A `UISearchTextField` builds its glyph, placeholder label and clear button
+    /// on its first layout, and until then it has no idea how wide any of them
+    /// are. On the FIRST activation that work landed mid-crossfade — the
+    /// magnifier materialised part-way across the bar and slid to its place —
+    /// while every activation afterwards was clean, because by then the subviews
+    /// existed. Forcing the pass here means the first presentation is the second
+    /// render.
+    ///
+    /// A window is required: a field with no window lays out, but its text
+    /// metrics resolve against nothing and the pass proves less than it looks.
+    private func prewarmSearchField() {
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 320, height: Self.searchFieldHeight))
+        host.isHidden = true
+        view.addSubview(host)
+        searchField.translatesAutoresizingMaskIntoConstraints = true
+        searchField.frame = host.bounds
+        host.addSubview(searchField)
+        host.setNeedsLayout()
+        host.layoutIfNeeded()
+        searchField.setNeedsLayout()
+        searchField.layoutIfNeeded()
+        // Handed back exactly as it was found, so the title slot sizes it.
+        searchField.removeFromSuperview()
+        host.removeFromSuperview()
+        searchField.translatesAutoresizingMaskIntoConstraints = false
     }
 
     /// A failed row mutation. A toast, not an alert: the row has already

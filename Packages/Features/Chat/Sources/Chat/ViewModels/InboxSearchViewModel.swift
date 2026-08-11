@@ -237,6 +237,15 @@ final class InboxSearchViewModel {
     private func emit() {
         switch searchState {
         case .idle:
+            // ⚠️ NOT a placeholder. An open, empty field shows what a viewer is
+            // most likely to be reaching for — recent threads, then the people
+            // waiting in requests — which is what the global search does and what
+            // "Search Messages / find a conversation…" was standing in for.
+            let sections = idleSections()
+            guard sections.isEmpty else {
+                publish(sections)
+                return
+            }
             conversationModels = [:]
             peopleModels = [:]
             phase = .prompt
@@ -341,6 +350,41 @@ final class InboxSearchViewModel {
             query: query
         )
     }
+
+    /// What an empty field offers: recent threads, then requests as suggestions.
+    ///
+    /// Both come from the catalog already in memory, so the list is there the
+    /// instant the field opens — no fetch, no spinner, nothing to wait for.
+    /// Recent *queries* would be a different source: the device-local store the
+    /// global search screen uses lives in `CoreStorage`, which this package does
+    /// not depend on.
+    private func idleSections() -> [Section] {
+        conversationModels = [:]
+        peopleModels = [:]
+        matchedPeerIDs = []
+        let stamp = now()
+        let sources: [(SectionKind, String, [Conversation])] = [
+            (.messages, "Recent", Array(snapshot.active.prefix(Self.idleRowLimit))),
+            (.requests, "Suggestions", Array(snapshot.requests.prefix(Self.idleRowLimit)))
+        ]
+        return sources.compactMap { kind, title, conversations in
+            guard !conversations.isEmpty else { return nil }
+            for conversation in conversations {
+                conversationModels[conversation.id] = ConversationDisplayModel(
+                    conversation: conversation,
+                    now: stamp,
+                    isPinned: snapshot.pinned.contains(conversation.id),
+                    isMuted: snapshot.muted.contains(conversation.id),
+                    isUnread: snapshot.unreadIDs.contains(conversation.id)
+                )
+                if let peer = conversation.directPeerID { matchedPeerIDs.insert(peer) }
+            }
+            return Section(kind: kind, title: title, rows: conversations.map { .conversation($0.id) })
+        }
+    }
+
+    /// Enough to be useful, few enough that the field still reads as the subject.
+    private static let idleRowLimit = 8
 
     private func publish(_ sections: [Section]) {
         phase = .content(sections)

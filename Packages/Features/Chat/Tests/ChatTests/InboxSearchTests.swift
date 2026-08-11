@@ -363,9 +363,10 @@ struct InboxSearchViewModelTests {
         #expect(phase == .failed(message: "Couldn't search for people. Please try again."))
     }
 
-    /// Clearing the field lands back on the prompt, not on "no results" — the
-    /// path the system's clear glyph and the cancel button both take.
-    @Test func clearingTheQueryReturnsToThePrompt() async {
+    /// Clearing the field lands back on the IDLE OFFER — recent threads and the
+    /// people waiting in requests — not on "no results" and not on a placeholder.
+    /// This is the path the clear glyph and the cancel button both take.
+    @Test func clearingTheQueryReturnsToTheIdleOffer() async {
         let repository = StubChatProvider(conversations: [
             conversation("c-1", peer: "p-1", title: "Sofia Klein", answered: true)
         ])
@@ -374,6 +375,26 @@ struct InboxSearchViewModelTests {
 
         viewModel.queryChanged("sofia")
         _ = await settle(box) { if case .content = $0 { true } else { false } }
+        viewModel.queryChanged("")
+
+        guard case .content(let sections) = box.phases.last else {
+            Issue.record("clearing the query should offer recents, got \(String(describing: box.phases.last))")
+            return
+        }
+        #expect(sections.first?.title == "Recent")
+        // The rows are real: an offer nothing can be tapped in is a placeholder
+        // wearing a section header.
+        #expect(!viewModel.conversationModels.isEmpty)
+    }
+
+    /// ⚠️ The placeholder still exists for the one case that has nothing to
+    /// offer. An empty inbox has no recents and no requests, and a section
+    /// header over an empty list would be worse than the prompt it replaced.
+    @Test func anEmptyInboxStillFallsBackToThePrompt() async {
+        let repository = StubChatProvider(conversations: [])
+        let catalog = await makeCatalog(repository)
+        let (viewModel, box) = makeViewModel(repository: repository, catalog: catalog)
+
         viewModel.queryChanged("")
 
         #expect(box.phases.last == .prompt)
