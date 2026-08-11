@@ -295,6 +295,32 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
                 let rows = lists.first.map { list in
                     (0..<list.numberOfSections).map { list.numberOfItems(inSection: $0) }
                 } ?? []
+                // The alignment requirement is an equality, so it is measured as
+                // one: both centres in window space, and the difference between.
+                if let bar = self.navigationController?.navigationBar,
+                   let window = bar.window {
+                    func findLabel(_ view: UIView) -> UILabel? {
+                        if let label = view as? UILabel, label.text == "Cancel" { return label }
+                        for sub in view.subviews {
+                            if let found = findLabel(sub) { return found }
+                        }
+                        return nil
+                    }
+                    let fieldCentre = self.searchField.convert(
+                        CGPoint(x: self.searchField.bounds.midX, y: self.searchField.bounds.midY),
+                        to: window
+                    )
+                    let cancelCentre = findLabel(bar).map { label in
+                        label.convert(
+                            CGPoint(x: label.bounds.midX, y: label.bounds.midY), to: window
+                        )
+                    }
+                    print(String(format: "[inbox-search] fieldCY=%.1f cancelCY=%@ delta=%@ fieldH=%.0f",
+                                 fieldCentre.y,
+                                 cancelCentre.map { String(format: "%.1f", $0.y) } ?? "not-found",
+                                 cancelCentre.map { String(format: "%.1f", fieldCentre.y - $0.y) } ?? "-",
+                                 self.searchField.bounds.height))
+                }
                 print("[inbox-search] searching=\(self.isSearching) "
                     + "resultsOnScreen=\(results.view.window != nil) "
                     + "sections=\(rows) text=\(self.searchField.text ?? "-")")
@@ -327,21 +353,33 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// whatever it is given at every width — a leading custom view collapses into
     /// a `•••` on narrow bars once anything shares the row with it, which is the
     /// whole reason the selector has that group to itself.
-    private let searchField = UISearchBar()
+    private let searchField = UISearchTextField()
 
     /// The selector's item, kept so the bar can be put back exactly as it was.
     private var selectorItem: UIBarButtonItem?
     private var isSearching = false
 
+    /// The field's height, which is also the Cancel item's touch height, so the
+    /// two share a centre line with nothing left over above or below.
+    private static let fieldHeight: CGFloat = 36
+
     private func configureSearchAffordance() {
         searchItem.accessibilityLabel = "Search"
         searchField.placeholder = "Search"
-        searchField.searchBarStyle = .minimal
         searchField.autocapitalizationType = .none
         searchField.autocorrectionType = .no
         searchField.returnKeyType = .search
-        searchField.searchTextField.clearButtonMode = .whileEditing
+        searchField.clearButtonMode = .whileEditing
         searchField.delegate = self
+        searchField.addTarget(self, action: #selector(searchTextChanged), for: .editingChanged)
+        // ⚠️ Zero vertical margins, and stated rather than inherited. A
+        // `UISearchBar` was here first and carries its own chrome — a background,
+        // its own layout margins, and a text field inset within them — which sat
+        // the input a few points off the Cancel item's centre no matter what the
+        // title slot did. A bare `UISearchTextField` IS the input: it centres on
+        // the slot's axis, which is the same axis UIKit centres a bar item on.
+        searchField.translatesAutoresizingMaskIntoConstraints = false
+        searchField.heightAnchor.constraint(equalToConstant: Self.fieldHeight).isActive = true
         applyRestingBar()
     }
 
@@ -386,7 +424,10 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         results.applyQuery("")
         results.view.alpha = 0
 
-        morphBar(duration: 0.3) { self.applySearchingBar() }
+        morphBar(duration: 0.3) {
+            self.setBarOpaque(true)
+            self.applySearchingBar()
+        }
         UIView.animate(withDuration: 0.24) { results.view.alpha = 1 }
         searchField.becomeFirstResponder()
     }
@@ -399,7 +440,10 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         searchField.text = nil
         let results = searchResults
 
-        morphBar(duration: 0.26) { self.applyRestingBar() }
+        morphBar(duration: 0.26) {
+            self.setBarOpaque(false)
+            self.applyRestingBar()
+        }
         UIView.animate(withDuration: 0.2) {
             results?.view.alpha = 0
         } completion: { _ in
@@ -408,6 +452,26 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
             results.view.removeFromSuperview()
             results.removeFromParent()
         }
+    }
+
+    /// The bar is translucent by default and the list runs under it — which is
+    /// right until the bar becomes the search field, at which point the rows
+    /// sliding behind the text are simply noise. Opaque while searching, and back
+    /// to inherited afterwards so the resting bar keeps the system's material.
+    private func setBarOpaque(_ opaque: Bool) {
+        guard opaque else {
+            navigationItem.standardAppearance = nil
+            navigationItem.scrollEdgeAppearance = nil
+            navigationItem.compactAppearance = nil
+            return
+        }
+        let appearance = UINavigationBarAppearance()
+        appearance.configureWithOpaqueBackground()
+        appearance.backgroundColor = .systemBackground
+        appearance.shadowColor = .separator
+        navigationItem.standardAppearance = appearance
+        navigationItem.scrollEdgeAppearance = appearance
+        navigationItem.compactAppearance = appearance
     }
 
     private func morphBar(duration: TimeInterval, _ change: @escaping () -> Void) {
@@ -493,18 +557,15 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
 }
 
-// MARK: - UISearchBarDelegate
+// MARK: - UITextFieldDelegate
 
-extension MessagesInboxViewController: UISearchBarDelegate {
-    func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
-        searchResults?.applyQuery(searchText)
+extension MessagesInboxViewController: UITextFieldDelegate {
+    @objc fileprivate func searchTextChanged() {
+        searchResults?.applyQuery(searchField.text ?? "")
     }
 
-    func searchBarCancelButtonClicked(_ searchBar: UISearchBar) {
-        dismissSearch()
-    }
-
-    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
-        searchBar.resignFirstResponder()
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        textField.resignFirstResponder()
+        return true
     }
 }
