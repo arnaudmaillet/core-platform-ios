@@ -48,7 +48,4 @@ public enum AppRoute: Equatable, Sendable {
     /// ("message them" vs "send them this"). Nothing is sent automatically —
     /// the thread opens with the text typed and waiting.
     case sendLink(String, to: ProfileID, stub: ProfileIdentityStub?)
-    /// Compose a new message: the contact-selection flow. The inbox's compose
-    /// button emits this; the resolver owns what it presents.
-    case newMessage
 }

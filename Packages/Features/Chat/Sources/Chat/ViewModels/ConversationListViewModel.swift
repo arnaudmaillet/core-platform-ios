@@ -99,11 +99,6 @@ public final class ConversationListViewModel {
         router?.route(to: .conversation(id))
     }
 
-    /// The compose (new message) entry point, same seam as `didSelect`: emit
-    /// the route and let the resolver own the contact-selection flow.
-    public func didTapCompose() {
-        router?.route(to: .newMessage)
-    }
 
     // MARK: - Inbox management
 

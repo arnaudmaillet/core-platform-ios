@@ -179,13 +179,6 @@ struct ChatViewModelTests {
         #expect(last == .empty)
     }
 
-    @Test func composeRoutesToNewMessage() {
-        let router = SpyRouter()
-        let viewModel = ConversationListViewModel(repository: StubChatProvider(), router: router)
-
-        viewModel.didTapCompose()
-        #expect(router.routes == [.newMessage])
-    }
 
     @Test func listWarmsTheConversationDirectory() async {
         let directory = ConversationDirectory()

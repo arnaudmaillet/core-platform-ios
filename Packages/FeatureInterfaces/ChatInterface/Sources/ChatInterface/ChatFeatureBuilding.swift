@@ -34,10 +34,6 @@ public protocol ChatFeatureBuilding {
         prefill: String
     ) -> UIViewController
 
-    /// The compose flow — pick someone, land in a thread with them. Pushed
-    /// onto the caller's stack like any other destination; picking a row emits
-    /// a route, so the caller arranges nothing.
-    func makeNewMessageViewController() -> UIViewController
 
     /// Starts the inbox loading without showing it, so the shell's bar-item
     /// badge has something to say before the viewer has opened Messages.

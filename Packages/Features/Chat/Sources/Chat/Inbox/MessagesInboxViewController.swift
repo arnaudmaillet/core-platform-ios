@@ -53,18 +53,8 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// as row selection so the contact-selection flow lands resolver-side.
     ///
     /// It holds the leading slot permanently — no page can displace it.
-    private lazy var composeItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(
-            image: UIImage(systemName: "square.and.pencil"),
-            primaryAction: UIAction { [weak self] _ in self?.onCompose?() }
-        )
-        item.accessibilityLabel = "New Message"
-        return item
-    }()
 
     /// Wired by the feature builder to the router, so this view controller
-    /// never navigates.
-    var onCompose: (() -> Void)?
 
     /// Every tab's badge added together, for the shell's own bar item.
     ///
@@ -276,17 +266,6 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
                 ))
             }
         }
-
-        // `-inbox-compose` fires the leading item's action ~2s in, through the
-        // same closure the button invokes. Compose moved from the trailing slot
-        // to the leading one when the tabs took the title, and a bar item that
-        // renders in its new place but no longer reaches the router looks
-        // identical in a screenshot.
-        if arguments.contains("-inbox-compose") {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                self?.onCompose?()
-            }
-        }
         #endif
     }
 
@@ -416,7 +395,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
     /// `[ selector ] ———— [ compose ][ search ]`
     private func applyRestingBar() {
-        navigationItem.rightBarButtonItems = [searchItem, composeItem]
+        navigationItem.rightBarButtonItems = [searchItem]
         navigationItem.leftBarButtonItems = [selectorItem].compactMap { $0 }
         let emptyTitle = UIView()
         emptyTitle.frame = .zero

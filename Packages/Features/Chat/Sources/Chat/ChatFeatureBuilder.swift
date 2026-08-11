@@ -134,7 +134,6 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             searchResults: searchResults,
             initialCategory: initialCategory
         )
-        inbox.onCompose = { [router] in router?.route(to: .newMessage) }
         inbox.onTotalNewCountChange = onUnreadCountChange
         return inbox
     }
@@ -201,35 +200,6 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         return 20
     }
 
-    /// The compose picker, pushed onto whatever stack it was opened from.
-    public func makeNewMessageViewController() -> UIViewController {
-        let viewModel = NewMessageViewModel(
-            catalog: catalog,
-            viewer: repository,
-            suggestions: connections,
-            people: people,
-            suggestionPageSize: Self.suggestionPageSize
-        )
-        let picker = NewMessageViewController(
-            viewModel: viewModel,
-            imagePipeline: imagePipeline,
-            avatars: connections as? any PeerAvatarProviding
-        )
-        // A target, not a conversation: the pick is resolved and the push
-        // begins in the same runloop turn, and whether the thread has to be
-        // created is the thread's own problem once it is on screen.
-        viewModel.onOpenConversation = { [router] target in
-            switch target {
-            case .existing(let conversationID):
-                router?.route(to: .conversation(conversationID))
-            case .draft(let peer, let displayName):
-                router?.route(to: .messageUser(peer, stub: ProfileIdentityStub(
-                    handle: "", displayName: displayName
-                )))
-            }
-        }
-        return picker
-    }
 }
 
 /// Stands in when the app is composed without a social-graph client: the

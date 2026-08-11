@@ -171,9 +171,6 @@ final class RouteResolver: Router {
             )
             push(thread, using: navigator)
 
-        case .newMessage:
-            let picker = chatFeature().makeNewMessageViewController()
-            push(picker, using: navigator)
         }
     }
 }
