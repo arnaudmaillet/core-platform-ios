@@ -217,15 +217,24 @@ final class ProfileRelationshipsViewController: UIViewController {
     private func presentSearch() {
         guard !isSearching else { return }
         isSearching = true
+        tabBarController?.setTabBarHidden(true, animated: true)
         morphBar(duration: 0.3) {
             self.setBarOpaque(true)
-            // The back button stays: this is a pushed screen, and taking its
-            // leading item away would take the interactive pop with it.
+            // ⚠️ The back button goes too, so the field has the full width and
+            // this header reads exactly like the inbox's. Cancel is the way out
+            // while searching — and it restores the button, which restores the
+            // interactive pop with it.
+            self.navigationItem.setHidesBackButton(true, animated: false)
             self.navigationItem.rightBarButtonItems = [self.cancelItem]
             self.navigationItem.titleView = self.searchField
+            // ⚠️ LAID OUT FIRST. A title view is installed on the bar's next
+            // layout pass, and `becomeFirstResponder` on a view that is not in a
+            // window yet fails silently — measured as `focusedAtMorph=false`,
+            // which is the focus arriving late and the placeholder re-laying
+            // itself out under the keyboard: the jump.
+            self.navigationController?.navigationBar.layoutIfNeeded()
+            self.searchField.becomeFirstResponder()
         }
-        tabBarController?.setTabBarHidden(true, animated: true)
-        searchField.becomeFirstResponder()
     }
 
     private func dismissSearch() {
@@ -236,6 +245,7 @@ final class ProfileRelationshipsViewController: UIViewController {
         applyQuery("")
         morphBar(duration: 0.26) {
             self.setBarOpaque(false)
+            self.navigationItem.setHidesBackButton(false, animated: false)
             self.navigationItem.titleView = self.tabBar
             self.navigationItem.rightBarButtonItems = self.restingRightItems
         }

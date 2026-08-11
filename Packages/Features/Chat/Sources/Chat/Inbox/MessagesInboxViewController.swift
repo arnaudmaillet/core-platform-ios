@@ -127,6 +127,12 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
             searchResults.onWillOpenResult = { [weak self] in self?.dismissSearch() }
         }
         configureSearchAffordance()
+        // ⚠️ Loaded NOW, not on the first tap. This controller builds a
+        // compositional layout, four cell registrations and a diffable source in
+        // `viewDidLoad`, and doing that inside the morph is the pause between the
+        // magnifier and the field. Loading the view is all it takes; it stays out
+        // of the hierarchy until search opens.
+        searchResults?.loadViewIfNeeded()
 
         // Loaded up front, not lazily: a surface has to be able to publish its
         // chrome — the All tab's unread count, the Requests badge — before it
@@ -285,7 +291,12 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // Drives the same path the magnifier does: present, type, filter.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
             guard let self else { return }
+            // Requirement checks, both invisible in a screenshot: the results
+            // must already be built before the first tap, and the field must be
+            // focused as the crossfade lands rather than after it.
+            print("[inbox-search] prewarmed=\(self.searchResults?.isViewLoaded == true)")
             self.presentSearch()
+            print("[inbox-search] focusedAtMorph=\(self.searchField.isFirstResponder)")
             self.searchField.text = text
             self.searchResults?.applyQuery(text)
             #if DEBUG
@@ -427,15 +438,26 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         results.applyQuery("")
         results.view.alpha = 0
 
-        morphBar(duration: 0.3) {
-            self.setBarOpaque(true)
-            self.applySearchingBar()
-        }
         // Searching is a mode, not a place: the tab bar is a way OUT of it that
         // would take the query with it, and the results deserve the height.
         tabBarController?.setTabBarHidden(true, animated: true)
+        morphBar(duration: 0.3) {
+            self.setBarOpaque(true)
+            self.applySearchingBar()
+            // ⚠️ LAID OUT FIRST. A title view is installed on the bar's next
+            // layout pass, and `becomeFirstResponder` on a view that is not in a
+            // window yet fails silently — measured as `focusedAtMorph=false`,
+            // which is the focus arriving late and the placeholder re-laying
+            // itself out under the keyboard: the jump.
+            self.navigationController?.navigationBar.layoutIfNeeded()
+            // ⚠️ FOCUSED INSIDE the change block, so the state the crossfade
+            // dissolves TO is the focused one. Focusing afterwards meant the
+            // field faded in unfocused and then re-laid itself out when the
+            // keyboard arrived — the placeholder shifting under its own glyph,
+            // which is the jump.
+            self.searchField.becomeFirstResponder()
+        }
         UIView.animate(withDuration: 0.24) { results.view.alpha = 1 }
-        searchField.becomeFirstResponder()
     }
 
     /// Puts the selector and the glyphs back.

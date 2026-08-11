@@ -1,3 +1,4 @@
+import DesignSystem
 import CoreModels
 import CoreNavigation
 import MediaCore
@@ -361,6 +362,25 @@ extension ConversationListViewController: UITableViewDelegate {
     /// leave a blank band above a list that has no header at all.
     func tableView(_ tableView: UITableView, heightForHeaderInSection index: Int) -> CGFloat {
         adapter.headedSection(at: index) == nil ? .leastNormalMagnitude : UITableView.automaticDimension
+    }
+
+    /// ⚠️ A FOOTER, not a bigger header margin.
+    ///
+    /// The section gap used to sit above the next header, which put the break in
+    /// the right place visually and the pill in the wrong one: a plain table PINS
+    /// its headers, so that margin travelled with the pill and hung a stuck
+    /// header lower than the first one's. Spending the space at the END of the
+    /// previous section separates the two lists without moving anything that pins.
+    func tableView(_ tableView: UITableView, heightForFooterInSection index: Int) -> CGFloat {
+        index < tableView.numberOfSections - 1
+            ? SectionHeaderPillButton.Metrics.sectionGap
+            : .leastNormalMagnitude
+    }
+
+    func tableView(_ tableView: UITableView, viewForFooterInSection index: Int) -> UIView? {
+        let spacer = UIView()
+        spacer.backgroundColor = .clear
+        return spacer
     }
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
