@@ -12,9 +12,9 @@ import UIKit
 /// screenshot proves one of them; this proves the thing they have in common.
 @MainActor
 struct SectionHeaderPillTests {
-    /// Lays the pill into a host the way a header view does, and reports where
-    /// its top edge lands.
-    private func topOffset(leadsList: Bool) -> CGFloat {
+    /// Lays the pill into a host the way a header view does, and reports both
+    /// the pill's own offset and the height the header ends up with.
+    private func layout(leadsList: Bool) -> (pillTop: CGFloat, headerHeight: CGFloat) {
         let host = UIView(frame: CGRect(x: 0, y: 0, width: 320, height: 200))
         let pill = SectionHeaderPillButton()
         pill.setPillTitle("Recent")
@@ -22,27 +22,30 @@ struct SectionHeaderPillTests {
         pill.setLeadsList(leadsList)
         host.setNeedsLayout()
         host.layoutIfNeeded()
-        return pill.frame.minY
-    }
-
-    /// A header that OPENS a list sits flush: it is directly under the
-    /// navigation bar's tab capsule, with nothing above it to be separated from.
-    @Test func theFirstHeaderIsFlush() {
-        #expect(topOffset(leadsList: true) == SectionHeaderPillButton.Metrics.float)
-    }
-
-    /// A header that FOLLOWS a section carries the gap, or its pill crowds the
-    /// last row above it and reads as part of that section.
-    @Test func aLaterHeaderCarriesTheSectionGap() {
-        #expect(
-            topOffset(leadsList: false)
-                == SectionHeaderPillButton.Metrics.float + SectionHeaderPillButton.Metrics.sectionGap
+        let fitted = host.systemLayoutSizeFitting(
+            CGSize(width: 320, height: UIView.layoutFittingCompressedSize.height)
         )
+        return (pill.frame.minY, fitted.height)
     }
 
-    @Test func theGapIsTheDifferenceBetweenTheTwo() {
+    /// ⚠️ **EVERY header's pill sits at the same offset, first or not.**
+    ///
+    /// A plain table PINS its section headers, and a pinned header carries its
+    /// top margin with it — so a gap spent above the pill hung the second
+    /// section's capsule lower than the first's for exactly as long as both were
+    /// stuck to the top of the list, which is the one place they are compared.
+    /// Measured on the inbox before this changed: `pillTop=8` for section 0 and
+    /// `pillTop=24` for section 1.
+    @Test func everyHeaderPinsItsPillAtTheSameOffset() {
+        #expect(layout(leadsList: true).pillTop == SectionHeaderPillButton.Metrics.float)
+        #expect(layout(leadsList: false).pillTop == SectionHeaderPillButton.Metrics.float)
+    }
+
+    /// The separation is still THERE — it just sits below the pill, so a
+    /// following section is still parted from the rows above it.
+    @Test func aLaterHeaderStillCarriesTheSectionGap() {
         #expect(
-            topOffset(leadsList: false) - topOffset(leadsList: true)
+            layout(leadsList: false).headerHeight - layout(leadsList: true).headerHeight
                 == SectionHeaderPillButton.Metrics.sectionGap
         )
     }
@@ -57,11 +60,17 @@ struct SectionHeaderPillTests {
 
         pill.setLeadsList(false)
         host.layoutIfNeeded()
-        let followed = pill.frame.minY
+        let followedHeight = host.systemLayoutSizeFitting(
+            CGSize(width: 320, height: UIView.layoutFittingCompressedSize.height)
+        ).height
 
         pill.setLeadsList(true)
         host.layoutIfNeeded()
-        #expect(pill.frame.minY < followed)
+        let leadingHeight = host.systemLayoutSizeFitting(
+            CGSize(width: 320, height: UIView.layoutFittingCompressedSize.height)
+        ).height
+        #expect(leadingHeight < followedHeight)
+        // And the pill has not moved, either way.
         #expect(pill.frame.minY == SectionHeaderPillButton.Metrics.float)
     }
 

@@ -61,10 +61,9 @@ final class ForYouViewController: UIViewController {
     /// target — no menu, no state.
     private lazy var composeItem: UIBarButtonItem = {
         let item = UIBarButtonItem(
-            image: UIImage(systemName: "plus"),
-            primaryAction: UIAction { [weak self] _ in self?.openComposer() }
-        )
-        item.accessibilityLabel = "New Post"
+            bouncingImage: UIImage(systemName: "plus"),
+            accessibilityLabel: "New Post"
+        ) { [weak self] in self?.openComposer() }
         return item
     }()
 
@@ -417,12 +416,11 @@ final class ForYouViewController: UIViewController {
         // which is the second reason for it — see below.
         navigationItem.title = nil
         navigationItem.largeTitleDisplayMode = .never
-        navigationItem.titleView = tabBar
-        // Native bar items on both sides. They lay out in the bar itself, which
-        // is also what bounds the title slot the capsule now sits in — UIKit
-        // gives the slot what is left between them, so neither can be covered.
+        // Native bar items on both sides; the selector joins the LEADING group
+        // behind the compose glyph, so the centre stays empty and flexible.
         navigationItem.leftBarButtonItem = composeItem
         navigationItem.rightBarButtonItem = contextItem
+        navigationItem.installLeadingSelector(tabBar)
         contextItem.menu = makeContextMenu()
 
         pager.pin(to: view)

@@ -53,18 +53,8 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// as row selection so the contact-selection flow lands resolver-side.
     ///
     /// It holds the leading slot permanently — no page can displace it.
-    private lazy var composeItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(
-            image: UIImage(systemName: "square.and.pencil"),
-            primaryAction: UIAction { [weak self] _ in self?.onCompose?() }
-        )
-        item.accessibilityLabel = "New Message"
-        return item
-    }()
 
     /// Wired by the feature builder to the router, so this view controller
-    /// never navigates.
-    var onCompose: (() -> Void)?
 
     /// Every tab's badge added together, for the shell's own bar item.
     ///
@@ -90,11 +80,6 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// screen is this one. Scoping the query to a page would be the wrong
     /// answer anyway — see `InboxSearchViewModel`.
     private let searchResults: InboxSearchResultsViewController?
-    private lazy var searchController: UISearchController = {
-        let controller = UISearchController(searchResultsController: searchResults)
-        controller.searchResultsUpdater = searchResults
-        return controller
-    }()
 
     init(
         surfaces: [any InboxSurface],
@@ -104,7 +89,9 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         precondition(!surfaces.isEmpty, "The inbox needs at least one surface")
         self.surfaces = surfaces
         self.searchResults = searchResults
-        categoryBar = PagedTabBar(titles: surfaces.map(\.category.title), style: .navigationTitle)
+        categoryBar = PagedTabBar(
+            titles: surfaces.map(\.category.title), style: .navigationTitle
+        )
         initialIndex = surfaces.firstIndex { $0.category == initialCategory } ?? 0
         super.init(nibName: nil, bundle: nil)
     }
@@ -124,9 +111,28 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // not here.
         navigationItem.title = nil
         navigationItem.largeTitleDisplayMode = .never
-        navigationItem.titleView = categoryBar
         view.backgroundColor = .systemBackground
-        configureSearch()
+        if let searchResults {
+            // A picked row takes the search UI down BEFORE the thread goes up.
+            searchResults.onWillOpenResult = { [weak self] in
+                // Opening something IS the signal — a query that led somewhere is
+                // worth offering again, and it costs the viewer nothing to say so.
+                self?.searchResults?.rememberQuery(self?.searchField.text ?? "")
+                self?.dismissSearch()
+            }
+            // Tapping a history row re-runs it, so the field has to show what is
+            // now being searched for.
+            searchResults.onReplayQuery = { [weak self] text in
+                self?.searchField.text = text
+            }
+        }
+        configureSearchAffordance()
+        // ⚠️ Loaded NOW, not on the first tap. This controller builds a
+        // compositional layout, four cell registrations and a diffable source in
+        // `viewDidLoad`, and doing that inside the morph is the pause between the
+        // magnifier and the field. Loading the view is all it takes; it stays out
+        // of the hierarchy until search opens.
+        searchResults?.loadViewIfNeeded()
 
         // Loaded up front, not lazily: a surface has to be able to publish its
         // chrome — the All tab's unread count, the Requests badge — before it
@@ -141,10 +147,22 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         pendingCategory = nil
         pagerView = HorizontalPagerView(pages: surfaces.map(\.view), initialIndex: startIndex)
         pagerView.pin(to: view)
+        // ⚠️ AFTER the pager, every time. `configureSearch` runs first and adds the
+        // search host, so the pager lands on top of it — the bar was mounted,
+        // inset for, and completely invisible behind an opaque page.
+
         for surface in surfaces { surface.didMove(toParent: self) }
 
-        // The bar's contents, stated once. Nothing else writes them.
-        navigationItem.leftBarButtonItem = composeItem
+        // ⚠️ **The selector has the leading group to ITSELF; compose rides
+        // trailing beside the magnifier.**
+        //
+        // Two leading items collapse on a narrow bar and one survives — the same
+        // rule the profile hit, where moving its switcher trailing is what finally
+        // hosted its selector. Measured here: with compose leading, 402pt hosts and
+        // 375pt collapses the whole group into a `•••`; with compose trailing, both
+        // host. Width is not the trigger, so a narrower selector does not help.
+        navigationItem.leftBarButtonItem = nil
+        selectorItem = navigationItem.installLeadingSelector(categoryBar)
 
         // NO `additionalSafeAreaInsets.top`, and no constraints for the capsule:
         // it lives INSIDE the navigation bar, whose height already covers it.
@@ -224,6 +242,22 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
                 self?.select(index: target, animated: true)
             }
         }
+        // `-symbol-bounce-demo`: fires the magnifier's own action twice, a beat
+        // apart, so the bounce can be filmed. The simulator injects no taps, and a
+        // symbol effect is a scale animation — it exists only in frames.
+        if arguments.contains("-symbol-bounce-demo") {
+            for delay in [2.0, 3.5] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    self?.searchItem.bounceSymbol()
+                }
+            }
+        }
+        // `-inbox-search-open`: the same, on the inbox.
+        if arguments.contains("-inbox-search-open") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.presentSearch()
+            }
+        }
         runSearchDebugSequence(arguments)
 
         // `-tabbar-shape-watch` samples the capsule's shape twice a second and
@@ -240,17 +274,6 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
                     shape.radius, shape.height,
                     shape.hasEffect ? "yes" : "NO", shape.clips ? "yes" : "NO"
                 ))
-            }
-        }
-
-        // `-inbox-compose` fires the leading item's action ~2s in, through the
-        // same closure the button invokes. Compose moved from the trailing slot
-        // to the leading one when the tabs took the title, and a bar item that
-        // renders in its new place but no longer reaches the router looks
-        // identical in a screenshot.
-        if arguments.contains("-inbox-compose") {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                self?.onCompose?()
             }
         }
         #endif
@@ -270,17 +293,62 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         guard let index = arguments.firstIndex(of: "-inbox-search-query"),
               let text = arguments.dropFirst(index + 1).first, !text.hasPrefix("-")
         else { return }
-        // Anchored a beat after appearance: activating a search controller while
-        // the tab's own first layout is still settling fights the presentation.
+        // Drives the same path the magnifier does: present, type, filter.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            guard let self, let results = self.searchResults else { return }
-            self.searchController.isActive = true
-            self.searchController.searchBar.text = text
-            results.updateSearchResults(for: self.searchController)
-
+            guard let self else { return }
+            // Requirement checks, both invisible in a screenshot: the results
+            // must already be built before the first tap, and the field must be
+            // focused as the crossfade lands rather than after it.
+            print("[inbox-search] prewarmed=\(self.searchResults?.isViewLoaded == true)")
+            self.presentSearch()
+            print("[inbox-search] focusedAtMorph=\(self.searchField.isFirstResponder)")
+            self.searchField.text = text
+            self.searchResults?.applyQuery(text)
+            // Submitting is what a viewer does with a query worth keeping, and it
+            // is the path that writes the history — so the QA sequence takes it,
+            // or the history it exercises is never written.
+            self.searchResults?.rememberQuery(text)
+            #if DEBUG
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                guard let self, let results = self.searchResults else { return }
+                let lists = results.view.subviews.compactMap { $0 as? UICollectionView }
+                let rows = lists.first.map { list in
+                    (0..<list.numberOfSections).map { list.numberOfItems(inSection: $0) }
+                } ?? []
+                // The alignment requirement is an equality, so it is measured as
+                // one: both centres in window space, and the difference between.
+                if let bar = self.navigationController?.navigationBar,
+                   let window = bar.window {
+                    func findLabel(_ view: UIView) -> UILabel? {
+                        if let label = view as? UILabel, label.text == "Cancel" { return label }
+                        for sub in view.subviews {
+                            if let found = findLabel(sub) { return found }
+                        }
+                        return nil
+                    }
+                    let fieldCentre = self.searchField.convert(
+                        CGPoint(x: self.searchField.bounds.midX, y: self.searchField.bounds.midY),
+                        to: window
+                    )
+                    let cancelCentre = findLabel(bar).map { label in
+                        label.convert(
+                            CGPoint(x: label.bounds.midX, y: label.bounds.midY), to: window
+                        )
+                    }
+                    print(String(format: "[inbox-search] fieldCY=%.1f cancelCY=%@ delta=%@ fieldH=%.0f",
+                                 fieldCentre.y,
+                                 cancelCentre.map { String(format: "%.1f", $0.y) } ?? "not-found",
+                                 cancelCentre.map { String(format: "%.1f", fieldCentre.y - $0.y) } ?? "-",
+                                 self.searchField.bounds.height))
+                }
+                print("[inbox-search] searching=\(self.isSearching) "
+                    + "resultsOnScreen=\(results.view.window != nil) "
+                    + "sections=\(rows) text=\(self.searchField.text ?? "-")")
+            }
+            #endif
             guard arguments.contains("-inbox-search-cancel") else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                self?.searchController.isActive = false
+                self?.dismissSearch()
             }
         }
     }
@@ -288,72 +356,208 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
     // MARK: - Search
 
-    /// Global search, as a magnifier in the bar's trailing slot that expands in
-    /// place when tapped — `.integratedButton`, UIKit's own name for that.
+    /// The classic magnifier, trailing.
+    private lazy var searchItem = UIBarButtonItem(
+        bouncingImage: UIImage(systemName: "magnifyingglass"),
+        accessibilityLabel: "Search"
+    ) { [weak self] in self?.presentSearch() }
+
+    private lazy var cancelItem = UIBarButtonItem(
+        title: "Cancel",
+        primaryAction: UIAction { [weak self] _ in self?.dismissSearch() }
+    )
+
+    /// The field that takes the bar over while searching.
     ///
-    /// **It is the trailing item, on every tab, and it never changes size.**
-    /// That is the point: a glyph measures the same whatever page is showing,
-    /// so the title slot the tab capsule lives in is one number instead of four
-    /// (252 / 239.7 / 228.7 / ~190pt, depending on which page's word was in the
-    /// slot). The capsule is therefore laid out once and never re-measured by
-    /// paging.
+    /// It goes in the TITLE SLOT, which is the one place on this bar that hosts
+    /// whatever it is given at every width — a leading custom view collapses into
+    /// a `•••` on narrow bars once anything shares the row with it, which is the
+    /// whole reason the selector has that group to itself.
+    private let searchField = TracedSearchTextField()
+
+    /// The selector's item, kept so the bar can be put back exactly as it was.
+    private var selectorItem: UIBarButtonItem?
+    private var isSearching = false
+
+    /// The field's height, which is also the Cancel item's touch height, so the
+    /// two share a centre line with nothing left over above or below.
+    private static let fieldHeight: CGFloat = 36
+
+    private func configureSearchAffordance() {
+        searchField.placeholder = "Search"
+        searchField.autocapitalizationType = .none
+        searchField.autocorrectionType = .no
+        searchField.returnKeyType = .search
+        searchField.clearButtonMode = .whileEditing
+        searchField.delegate = self
+        searchField.addTarget(self, action: #selector(searchTextChanged), for: .editingChanged)
+        // ⚠️ Zero vertical margins, and stated rather than inherited. A
+        // `UISearchBar` was here first and carries its own chrome — a background,
+        // its own layout margins, and a text field inset within them — which sat
+        // the input a few points off the Cancel item's centre no matter what the
+        // title slot did. A bare `UISearchTextField` IS the input: it centres on
+        // the slot's axis, which is the same axis UIKit centres a bar item on.
+        searchField.translatesAutoresizingMaskIntoConstraints = false
+        searchField.heightAnchor.constraint(equalToConstant: Self.fieldHeight).isActive = true
+        applyRestingBar()
+    }
+
+    /// `[ selector ] ———— [ compose ][ search ]`
+    private func applyRestingBar() {
+        navigationItem.rightBarButtonItems = [searchItem]
+        navigationItem.leftBarButtonItems = [selectorItem].compactMap { $0 }
+        let emptyTitle = UIView()
+        emptyTitle.frame = .zero
+        navigationItem.titleView = emptyTitle
+    }
+
+    /// `[ field ————————————————— ][ Cancel ]`
+    private func applySearchingBar() {
+        navigationItem.leftBarButtonItems = []
+        navigationItem.rightBarButtonItems = [cancelItem]
+        navigationItem.titleView = searchField
+    }
+
+    /// Morphs the bar into the field, with the results directly beneath it.
     ///
-    /// A `.stacked` field — a permanent row under the title — was built and
-    /// removed. It cost a whole row of chrome for an affordance that is one tap
-    /// away here, and it brought a defect with it: its collapse is driven by
-    /// the tracked scroll view, which on this screen is the PAGER's, whose
-    /// `contentOffset.y` never moves. So the field could be collapsed by a
-    /// push and had nothing that could ever scroll it back open — it vanished
-    /// for good after backing out of a thread, and only
-    /// `hidesSearchBarWhenScrolling = false` held it in place.
-    /// `.integratedButton` has no scroll-view relationship at all, so that
-    /// whole class of bug is simply absent.
-    private func configureSearch() {
-        guard let searchResults else { return }
-        searchController.searchBar.placeholder = "Search"
-        searchController.searchBar.autocapitalizationType = .none
-        searchController.searchBar.autocorrectionType = .no
-        searchController.searchBar.returnKeyType = .search
-        // Stated rather than inherited: clearing through the system glyph routes
-        // back out via `updateSearchResults`, so an emptied field returns to the
-        // prompt by the same path typing narrowed it.
-        searchController.searchBar.searchTextField.clearButtonMode = .whileEditing
-        // The bar STAYS while the field is active: under `.integratedButton` the
-        // field expands inside the bar itself, so hiding the bar would take the
-        // field being typed into with it. The results are presented over
-        // everything anyway, so the tabs behind them assert nothing.
-        searchController.hidesNavigationBarDuringPresentation = false
-        // Left to UIKit deliberately: touching `showsCancelButton` flips this to
-        // NO and hands us the job of showing and hiding it. Under
-        // `.integratedButton` the affordance renders as an ✕ glyph rather than
-        // the word "Cancel"; that is the native look, not a missing button.
-        searchController.automaticallyShowsCancelButton = true
-        // The empty-query state is the system's dim over the inbox — the native
-        // "search is open, type something" affordance, and a better answer than
-        // any placeholder screen of ours.
-        searchController.obscuresBackgroundDuringPresentation = true
+    /// The swap itself is a CROSSFADE of the navigation bar. Bar items are not
+    /// individually animatable — assigning them is instantaneous — so the honest
+    /// way to make one set become another is to dissolve the bar between the two
+    /// states, which is also what UIKit does for its own title transitions.
+    private func presentSearch() {
+        guard !isSearching, let results = searchResults else { return }
+        isSearching = true
+        #if DEBUG
+        // Everything below is timed from HERE, including the keyboard's own
+        // notifications, so a late layout pass can be attributed rather than
+        // guessed at.
+        if ProcessInfo.processInfo.arguments.contains("-search-layout-trace") {
+            let start = CACurrentMediaTime()
+            searchField.activatedAt = start
+            for name: Notification.Name in [
+                UIResponder.keyboardWillShowNotification,
+                UIResponder.keyboardDidShowNotification,
+                UIResponder.keyboardWillChangeFrameNotification,
+                UIResponder.keyboardDidChangeFrameNotification
+            ] {
+                NotificationCenter.default.addObserver(
+                    forName: name, object: nil, queue: .main
+                ) { note in
+                    let end = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey]
+                        as? NSValue)?.cgRectValue ?? .null
+                    print(String(format: "[keyboard] t=%4.0fms %@ endY=%.0f",
+                                 (CACurrentMediaTime() - start) * 1000,
+                                 note.name.rawValue
+                                    .replacingOccurrences(of: "UIKeyboard", with: ""),
+                                 end.minY))
+                }
+            }
+        }
+        #endif
 
-        // A picked row must bring the search UI down BEFORE the thread goes up.
-        // The results controller is *presented* over this one, so a push landing
-        // while it is still up would arrive underneath it — the thread would be
-        // on the stack and invisible.
-        searchResults.onWillOpenResult = { [weak self] in self?.searchController.isActive = false }
+        addChild(results)
+        results.view.translatesAutoresizingMaskIntoConstraints = false
+        results.view.backgroundColor = .systemBackground
+        view.addSubview(results.view)
+        NSLayoutConstraint.activate([
+            // ⚠️ To the TOP OF THE WINDOW, not to the safe area. The list runs
+            // BEHIND the header rather than starting under it, so nothing is
+            // clipped at the bar's edge; the collection view's own safe-area
+            // inset still starts the first row below the bar.
+            results.view.topAnchor.constraint(equalTo: view.topAnchor),
+            results.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            results.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            results.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+        results.didMove(toParent: self)
+        results.applyQuery("")
+        results.view.alpha = 0
 
-        // Presented in THIS view controller's context, which is what puts the
-        // results over the pager rather than over the window. Nothing has to hide
-        // the header: it is simply covered, and with it every suggestion that the
-        // query has a tab-shaped scope.
-        definesPresentationContext = true
+        // Searching is a mode, not a place: the tab bar is a way OUT of it that
+        // would take the query with it, and the results deserve the height.
+        tabBarController?.setTabBarHidden(true, animated: true)
+        morphBar(duration: 0.3) {
+            self.setBarOpaque(true)
+            self.applySearchingBar()
+            // ⚠️ LAID OUT FIRST. A title view is installed on the bar's next
+            // layout pass, and `becomeFirstResponder` on a view that is not in a
+            // window yet fails silently — measured as `focusedAtMorph=false`,
+            // which is the focus arriving late and the placeholder re-laying
+            // itself out under the keyboard: the jump.
+            self.navigationController?.navigationBar.layoutIfNeeded()
 
-        // Mounted once. Nothing withdraws it any more: the magnifier is the
-        // trailing item on every tab, in every state, which is what makes the
-        // title slot beside it a fixed width.
-        navigationItem.searchController = searchController
-        navigationItem.preferredSearchBarPlacement = .integratedButton
-        // No toolbar hand-off: `UINavigationController` transfers a screen's
-        // toolbar items at transition *completion*, so letting UIKit relocate the
-        // field there drops it into place after a push has already finished.
-        navigationItem.searchBarPlacementAllowsToolbarIntegration = false
+            // ⚠️ **The FIELD's own layout, not just the bar's.** Laying out the
+            // bar installs the title view and gives it a frame; the field then
+            // still has to place its glyph, placeholder and caret inside that
+            // frame, and it was doing so on a later pass — mid-crossfade, at a
+            // width it was about to leave. Measured from a screen recording of
+            // the relationships header: the placeholder's box walked +14 → +23 →
+            // +11 → +7 → +10 horizontally and 0 → 8 → 10 → 4 vertically before it
+            // settled. Forcing the pass here means the first frame the viewer
+            // sees is already the final one.
+            self.searchField.setNeedsLayout()
+            self.searchField.layoutIfNeeded()
+            // ⚠️ FOCUSED INSIDE the change block, so the state the crossfade
+            // dissolves TO is the focused one. Focusing afterwards meant the
+            // field faded in unfocused and then re-laid itself out when the
+            // keyboard arrived — the placeholder shifting under its own glyph,
+            // which is the jump.
+            self.searchField.becomeFirstResponder()
+        }
+        UIView.animate(withDuration: 0.24) { results.view.alpha = 1 }
+    }
+
+    /// Puts the selector and the glyphs back.
+    private func dismissSearch() {
+        guard isSearching else { return }
+        isSearching = false
+        searchField.resignFirstResponder()
+        searchField.text = nil
+        let results = searchResults
+
+        morphBar(duration: 0.26) {
+            self.setBarOpaque(false)
+            self.applyRestingBar()
+        }
+        tabBarController?.setTabBarHidden(false, animated: true)
+        UIView.animate(withDuration: 0.2) {
+            results?.view.alpha = 0
+        } completion: { _ in
+            guard let results else { return }
+            results.willMove(toParent: nil)
+            results.view.removeFromSuperview()
+            results.removeFromParent()
+        }
+    }
+
+    /// The bar is translucent by default and the list runs under it — which is
+    /// right until the bar becomes the search field, at which point the rows
+    /// sliding behind the text are simply noise. Opaque while searching, and back
+    /// to inherited afterwards so the resting bar keeps the system's material.
+    private func setBarOpaque(_ opaque: Bool) {
+        guard opaque else {
+            navigationItem.standardAppearance = nil
+            navigationItem.scrollEdgeAppearance = nil
+            navigationItem.compactAppearance = nil
+            return
+        }
+        let appearance = UINavigationBarAppearance()
+        appearance.configureWithOpaqueBackground()
+        appearance.backgroundColor = .systemBackground
+        // No hairline. The results start immediately under the bar, so a divider
+        // there separates the field from its own results — the two are one surface
+        // while searching, and the line is the only thing saying otherwise.
+        appearance.shadowColor = nil
+        navigationItem.standardAppearance = appearance
+        navigationItem.scrollEdgeAppearance = appearance
+        navigationItem.compactAppearance = appearance
+    }
+
+    private func morphBar(duration: TimeInterval, _ change: @escaping () -> Void) {
+        guard let bar = navigationController?.navigationBar else { change(); return }
+        UIView.transition(with: bar, duration: duration,
+                          options: [.transitionCrossDissolve, .allowUserInteraction],
+                          animations: change)
     }
 
     // MARK: - Category selection
@@ -391,6 +595,9 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // and finding All's count gone is losing the comparison you switched
         // for. Only leaving the screen retires them; see `viewWillDisappear`.
         apply(surface.chrome, from: surface)
+        // The shared bar follows whichever page is now in front, and the new page
+        // gets the same clearance. Re-syncing here is what keeps a bar collapsed
+        // on one tab from sitting half-open over another.
         surface.surfaceDidBecomeActive()
     }
 
@@ -427,4 +634,19 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         navigationController?.navigationBar.layoutIfNeeded()
     }
 
+}
+
+// MARK: - UITextFieldDelegate
+
+extension MessagesInboxViewController: UITextFieldDelegate {
+    @objc fileprivate func searchTextChanged() {
+        searchResults?.applyQuery(searchField.text ?? "")
+    }
+
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        // Submitting is the clearest signal that a query mattered.
+        searchResults?.rememberQuery(textField.text ?? "")
+        textField.resignFirstResponder()
+        return true
+    }
 }

@@ -1,5 +1,6 @@
 import ChatInterface
 import CoreModels
+import CoreStorage
 import CoreNavigation
 import MediaCore
 import UIKit
@@ -16,6 +17,8 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     private let people: (any PeopleDirectoryProviding)?
     private let imagePipeline: ImagePipeline?
     private let router: (any Router)?
+    /// The SAME history the global search screen writes to.
+    private let recentSearches: RecentSearchStore?
     /// Shared list→thread warm-start context (the builder is a long-lived
     /// singleton in the container, so this is one directory app-wide).
     private let directory: ConversationDirectory
@@ -30,7 +33,8 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         connections: (any SuggestionsProviding & PeerRelationProviding)? = nil,
         people: (any PeopleDirectoryProviding)? = nil,
         imagePipeline: ImagePipeline? = nil,
-        router: (any Router)? = nil
+        router: (any Router)? = nil,
+        recentSearches: RecentSearchStore? = nil
     ) {
         let directory = ConversationDirectory()
         self.directory = directory
@@ -40,6 +44,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         self.people = people
         self.imagePipeline = imagePipeline
         self.router = router
+        self.recentSearches = recentSearches
     }
 
     /// Assembles the inbox: one catalog shared by the two conversation-backed
@@ -102,7 +107,8 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         let searchViewModel = InboxSearchViewModel(
             catalog: catalog,
             viewer: repository,
-            people: people
+            people: people,
+            recents: recentSearches
         )
         let searchResults = InboxSearchResultsViewController(
             viewModel: searchViewModel,
@@ -128,7 +134,6 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             searchResults: searchResults,
             initialCategory: initialCategory
         )
-        inbox.onCompose = { [router] in router?.route(to: .newMessage) }
         inbox.onTotalNewCountChange = onUnreadCountChange
         return inbox
     }
@@ -195,35 +200,6 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         return 20
     }
 
-    /// The compose picker, pushed onto whatever stack it was opened from.
-    public func makeNewMessageViewController() -> UIViewController {
-        let viewModel = NewMessageViewModel(
-            catalog: catalog,
-            viewer: repository,
-            suggestions: connections,
-            people: people,
-            suggestionPageSize: Self.suggestionPageSize
-        )
-        let picker = NewMessageViewController(
-            viewModel: viewModel,
-            imagePipeline: imagePipeline,
-            avatars: connections as? any PeerAvatarProviding
-        )
-        // A target, not a conversation: the pick is resolved and the push
-        // begins in the same runloop turn, and whether the thread has to be
-        // created is the thread's own problem once it is on screen.
-        viewModel.onOpenConversation = { [router] target in
-            switch target {
-            case .existing(let conversationID):
-                router?.route(to: .conversation(conversationID))
-            case .draft(let peer, let displayName):
-                router?.route(to: .messageUser(peer, stub: ProfileIdentityStub(
-                    handle: "", displayName: displayName
-                )))
-            }
-        }
-        return picker
-    }
 }
 
 /// Stands in when the app is composed without a social-graph client: the

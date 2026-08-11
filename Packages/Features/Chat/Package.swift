@@ -14,6 +14,10 @@ let package = Package(
         .package(path: "../../Kit/CoreModels"),
         .package(path: "../../Core/CoreNavigation"),
         .package(path: "../../Core/CoreNetworking"),
+        // The device-local search history the global search screen writes to; the
+        // inbox reads and writes the SAME store, so a query typed in one is
+        // recent in the other.
+        .package(path: "../../Core/CoreStorage"),
         .package(path: "../../Core/DesignSystem"),
         .package(path: "../../Core/MediaCore"),
         // Renders the composer's favorite-sticker strip. dotLottie (.lottie)
@@ -30,6 +34,7 @@ let package = Package(
                 "CoreContracts",
                 "CoreModels",
                 "CoreNavigation",
+                "CoreStorage",
                 "DesignSystem",
                 "MediaCore",
                 .product(name: "Lottie", package: "lottie-ios")

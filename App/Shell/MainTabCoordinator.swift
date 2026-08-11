@@ -1,4 +1,5 @@
 import CoreNavigation
+import DesignSystem
 import NotificationsInterface
 import ProfileInterface
 import UIKit
@@ -40,11 +41,10 @@ final class MainTabCoordinator: NSObject, Coordinator {
     /// dot) — driven by `refreshUnreadBadge`, no custom view needed.
     private lazy var notificationsBarItem: UIBarButtonItem = {
         let item = UIBarButtonItem(
-            image: Self.bellImage(unread: false),
-            primaryAction: UIAction { [weak self] _ in self?.pushNotifications() }
-        )
+            bouncingImage: Self.bellImage(unread: false),
+            accessibilityLabel: "Notifications"
+        ) { [weak self] in self?.pushNotifications() }
         item.tintColor = .label
-        item.accessibilityLabel = "Notifications"
         return item
     }()
 
@@ -249,6 +249,60 @@ final class MainTabCoordinator: NSObject, Coordinator {
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
                 await harness.run(cycles: cycles, tabs: only.map { [$0] } ?? AppTab.allCases)
+            }
+        }
+        // `-header-audit` visits every tab and checks the leading-group selector
+        // layout on each: in the leading group, sized, hit-testable at every
+        // segment, and — on a pushed surface — with the back button and the
+        // interactive pop still intact. See `HeaderSelectorAudit`.
+        if arguments.contains("-header-audit") {
+            let audit = HeaderSelectorAudit(
+                tabBarController: tabBarController,
+                selectTab: { [weak self] tab in self?.selectTab(tab) }
+            )
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 3_500_000_000)
+                await audit.run(tabs: AppTab.allCases)
+            }
+        }
+        // `-header-audit-current` audits only what is on screen. The tab sweep
+        // cannot reach a PUSHED host — a profile, or the relationships screen —
+        // and those are the only ones where the back button and the interactive
+        // pop are at stake. Pair it with `-open-profile` / `-profile-relationships`.
+        if arguments.contains("-header-audit-current") {
+            let audit = HeaderSelectorAudit(
+                tabBarController: tabBarController,
+                selectTab: { [weak self] tab in self?.selectTab(tab) }
+            )
+            Task { @MainActor in
+                // POLLS. A single fixed delay reported "no selector on this bar"
+                // for surfaces that were hosting it perfectly — the screen simply
+                // had not finished loading yet, and a slower boot moved the whole
+                // run past the deadline. Two conclusions were drawn from that
+                // before the harness was suspected. Waits for a selector, then
+                // audits; if none ever arrives, audits anyway and says so.
+                // Waits for a STABLE frame, not merely a present one. Measuring
+                // the first non-zero frame caught selectors mid-push and reported
+                // 334x43 and 28x7 for the same screen whose settled host is
+                // 278x36 — an "escapes the clamp" anomaly that was the harness
+                // reading an animation.
+                var previous = CGRect.null
+                var stableFrames = 0
+                for _ in 0..<80 {
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    let frame = audit.selectorFrameOnScreen
+                    if frame != .null, frame == previous {
+                        stableFrames += 1
+                        if stableFrames >= 2 { break }
+                    } else {
+                        stableFrames = 0
+                    }
+                    previous = frame
+                }
+                if arguments.contains("-header-bar-tree") { audit.dumpBarTree() }
+                let finding = audit.audit(surface: "on-screen")
+                for problem in finding.problems { print("[header-audit] on-screen: PROBLEM \(problem)") }
+                if finding.isClean { print("[header-audit] on-screen: clean") }
             }
         }
         if arguments.contains("-tab-round-trip") {

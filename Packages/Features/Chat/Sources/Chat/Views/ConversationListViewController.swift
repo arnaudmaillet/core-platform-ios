@@ -1,3 +1,4 @@
+import DesignSystem
 import CoreModels
 import CoreNavigation
 import MediaCore
@@ -315,12 +316,43 @@ extension ConversationListViewController: UITableViewDelegate {
     // MARK: - Section headers
 
     /// The glass pill, and the tap that scrolls to the section it names.
+    #if DEBUG
+    /// `-inbox-header-audit`: the pill's offset INSIDE each section header.
+    ///
+    /// That offset is what a pinned header carries with it, so it is the number
+    /// that decides whether two stuck headers line up. Measuring the pinned
+    /// position directly would need a scroll per section; this needs none, and it
+    /// is the same quantity.
+    func runHeaderAlignmentAudit() {
+        guard ProcessInfo.processInfo.arguments.contains("-inbox-header-audit") else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            guard let self else { return }
+            tableView.layoutIfNeeded()
+            for section in 0..<tableView.numberOfSections {
+                guard let header = tableView.headerView(forSection: section) else { continue }
+                let pill = header.contentView.subviews.first {
+                    String(describing: type(of: $0)).contains("SectionHeaderPill")
+                }
+                print(String(format: "[header-align] section %d headerH=%.1f pillTop=%.1f pillBottom=%.1f",
+                             section, header.bounds.height,
+                             pill?.frame.minY ?? -1,
+                             (pill.map { header.bounds.height - $0.frame.maxY }) ?? -1))
+            }
+        }
+    }
+    #endif
+
     func tableView(_ tableView: UITableView, viewForHeaderInSection index: Int) -> UIView? {
         guard let section = adapter.headedSection(at: index) else { return nil }
         let header = tableView.dequeueReusableHeaderFooterView(
             withIdentifier: InboxSectionHeaderView.reuseIdentifier
         ) as? InboxSectionHeaderView
-        header?.setTitle(section.title, leadsList: index == 0)
+        header?.setTitle(section.title, // ⚠️ TRUE for every section, not just the first. `leadsList: false` spends
+            // the section gap under the pill, which put a band of space between a
+            // header and its OWN first row from section two down. The separation
+            // between sections is the footer's job — see `heightForFooterInSection`
+            // — so the header has nothing left to pad.
+            leadsList: true)
         // The section's own first row, so tapping "Recent" puts Recent under
         // the header rather than wherever the list happened to be.
         header?.onTap = { [weak self] in
@@ -335,6 +367,25 @@ extension ConversationListViewController: UITableViewDelegate {
     /// leave a blank band above a list that has no header at all.
     func tableView(_ tableView: UITableView, heightForHeaderInSection index: Int) -> CGFloat {
         adapter.headedSection(at: index) == nil ? .leastNormalMagnitude : UITableView.automaticDimension
+    }
+
+    /// ⚠️ A FOOTER, not a bigger header margin.
+    ///
+    /// The section gap used to sit above the next header, which put the break in
+    /// the right place visually and the pill in the wrong one: a plain table PINS
+    /// its headers, so that margin travelled with the pill and hung a stuck
+    /// header lower than the first one's. Spending the space at the END of the
+    /// previous section separates the two lists without moving anything that pins.
+    func tableView(_ tableView: UITableView, heightForFooterInSection index: Int) -> CGFloat {
+        index < tableView.numberOfSections - 1
+            ? SectionHeaderPillButton.Metrics.sectionGap
+            : .leastNormalMagnitude
+    }
+
+    func tableView(_ tableView: UITableView, viewForFooterInSection index: Int) -> UIView? {
+        let spacer = UIView()
+        spacer.backgroundColor = .clear
+        return spacer
     }
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
@@ -405,6 +456,9 @@ extension ConversationListViewController: InboxSurface {
     /// load is already in flight, so this is free on the appear path.
     func surfaceDidBecomeActive() {
         viewModel.refresh()
+        #if DEBUG
+        runHeaderAlignmentAudit()
+        #endif
         #if DEBUG
         runSectionTapDebugSequence()
         #endif

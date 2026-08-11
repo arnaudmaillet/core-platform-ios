@@ -1,3 +1,4 @@
+import DesignSystem
 import CoreModels
 import CoreNavigation
 import MediaCore
@@ -227,7 +228,12 @@ extension MessageRequestsViewController: UITableViewDelegate {
         let header = tableView.dequeueReusableHeaderFooterView(
             withIdentifier: InboxSectionHeaderView.reuseIdentifier
         ) as? InboxSectionHeaderView
-        header?.setTitle(section.title, leadsList: index == 0)
+        header?.setTitle(section.title, // ⚠️ TRUE for every section, not just the first. `leadsList: false` spends
+            // the section gap under the pill, which put a band of space between a
+            // header and its OWN first row from section two down. The separation
+            // between sections is the footer's job — see `heightForFooterInSection`
+            // — so the header has nothing left to pad.
+            leadsList: true)
         // The section's own first row, so tapping "Recent" puts Recent under
         // the header rather than wherever the list happened to be.
         header?.onTap = { [weak self] in
@@ -242,6 +248,25 @@ extension MessageRequestsViewController: UITableViewDelegate {
     /// leave a blank band above a list that has no header at all.
     func tableView(_ tableView: UITableView, heightForHeaderInSection index: Int) -> CGFloat {
         dataSource.headedSection(at: index) == nil ? .leastNormalMagnitude : UITableView.automaticDimension
+    }
+
+    /// ⚠️ A FOOTER, not a bigger header margin.
+    ///
+    /// The section gap used to sit above the next header, which put the break in
+    /// the right place visually and the pill in the wrong one: a plain table PINS
+    /// its headers, so that margin travelled with the pill and hung a stuck
+    /// header lower than the first one's. Spending the space at the END of the
+    /// previous section separates the two lists without moving anything that pins.
+    func tableView(_ tableView: UITableView, heightForFooterInSection index: Int) -> CGFloat {
+        index < tableView.numberOfSections - 1
+            ? SectionHeaderPillButton.Metrics.sectionGap
+            : .leastNormalMagnitude
+    }
+
+    func tableView(_ tableView: UITableView, viewForFooterInSection index: Int) -> UIView? {
+        let spacer = UIView()
+        spacer.backgroundColor = .clear
+        return spacer
     }
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
