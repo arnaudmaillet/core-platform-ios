@@ -14,7 +14,15 @@ extension UIFont {
 
 /// Everything the snap feed cell renders for one post. Full-screen cells are
 /// bounds-sized, so there is no precomputed geometry — just the content.
-public struct FeedItemDisplayModel: Identifiable, Sendable {
+///
+/// `Equatable` is load-bearing, not a convenience. The pager is a diffable data
+/// source keyed by `PostID`, and a snapshot whose identifiers are unchanged
+/// re-renders nothing — so a page that arrives as a projection and is later
+/// replaced by the real entry needs someone to notice the CONTENT changed under
+/// a stable identity. `SnapFeedViewController.render` compares models to decide
+/// what to reconfigure; without this it could only compare ids, and a seeded
+/// page would keep its seed for the rest of its life.
+public struct FeedItemDisplayModel: Identifiable, Sendable, Equatable {
     public let id: PostID
     let authorID: ProfileID
     let authorName: String
@@ -103,7 +111,13 @@ public struct FeedDisplayModelBuilder: Sendable {
     /// The COMPACT relative age ("now"/"3m"/"5h"/"5d") — the nav pill and
     /// the comment rows' register. Kept terse: it rides inside the
     /// "@handle · 3m" meta line where space is scarce.
-    private static func relativeTime(from date: Date, to now: Date) -> String {
+    ///
+    /// ⚠️ Internal rather than private so `GalleryPostProjection` can spell an
+    /// age the same way. A grid tile's own register is a calendar date past a
+    /// week ("28 May", see `PostMetadata.compactAge`) and this one never stops
+    /// counting days — both are right for their surface, and a seed built with
+    /// the wrong one visibly rewrites itself the moment the real entry lands.
+    static func relativeTime(from date: Date, to now: Date) -> String {
         let seconds = max(0, now.timeIntervalSince(date))
         switch seconds {
         case ..<60: return "now"

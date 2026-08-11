@@ -32,7 +32,13 @@ final class ProfileGalleryGridView: UIView {
     /// The tapped post, plus the ordered run of posts FROM it — what the
     /// full-screen feed is seeded with, so the viewer can keep swiping through
     /// the gallery they were looking at instead of landing on one post alone.
-    var onItemTapped: ((GalleryPost, _ stream: [PostID]) -> Void)?
+    ///
+    /// The POSTS, not their ids. Ids are all the destination strictly needs to
+    /// fetch, but they are not enough to draw: handing over the models this
+    /// page is already showing is what lets the opened post render in the tap's
+    /// own frame instead of after its own round trip (`GalleryPostProjection`).
+    /// The ids are one `map` away wherever they are actually wanted.
+    var onItemTapped: ((GalleryPost, _ stream: [GalleryPost]) -> Void)?
     /// How many posts to hand the feed. Enough to swipe through without
     /// serialising an entire gallery into a route.
     private static let streamWindow = 30
@@ -652,7 +658,7 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         pendingRevealPostID = posts[indexPath.item].id
         onItemTapped?(
             posts[indexPath.item],
-            posts[indexPath.item...].prefix(Self.streamWindow).map(\.id)
+            Array(posts[indexPath.item...].prefix(Self.streamWindow))
         )
     }
 }

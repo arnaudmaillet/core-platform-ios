@@ -1,5 +1,5 @@
 import Testing
-@testable import Feed
+@testable import CoreNavigation
 
 /// A CANCELLED DRAG IS NOT A RETURN.
 ///

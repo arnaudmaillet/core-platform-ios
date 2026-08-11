@@ -412,25 +412,51 @@ final class ProfileViewController: UIViewController {
         }
         galleryPager.onItemTapped = { [weak self] post, stream in
             guard let self else { return }
-            // A hero when this page can say where the post is; the plain route
-            // otherwise (a text row with no media, or a cell scrolled away
-            // between the tap and this call). Both land on the same feed —
-            // only the animation differs, which is the right thing to degrade.
-            guard let feedHero, let space = galleryPager.heroCoordinateSpace,
-                  let geometry = galleryPager.heroGeometry(for: post.id)
-            else {
-                viewModel.galleryItemTapped(post.id, stream: stream)
+            let window = stream.isEmpty ? [post] : stream
+            // ⚠️ EVERY tap goes through the hero seam, including the ones with
+            // no hero to fly.
+            //
+            // It used to branch here: no geometry meant no flight, and no
+            // flight meant falling out of the feature entirely onto
+            // `AppRoute.postStream` — a bare push with no dismissal gesture, no
+            // tab-bar hide and no projection. That branch was written as "the
+            // animation degrades", but what actually degraded was the screen:
+            // text-only posts opened under the tab bar, empty, and could not be
+            // swiped away at all.
+            //
+            // The choice of presentation belongs to the feed, which owns both
+            // the card and the dismissal — so this screen says only what it
+            // has, and `hasHero` is the whole of what it knows about flying.
+            guard let feedHero else {
+                // No composition root wired the seam (previews, tests). The
+                // route is still the honest answer there — and it is the only
+                // caller left that has to settle for it.
+                viewModel.galleryItemTapped(post.id, stream: window.map(\.id))
                 return
             }
+            // Asked ONCE, at tap time, where the answer is unambiguous: the
+            // viewer just touched this cell, so it is realized by definition
+            // and a nil geometry can only mean "no media", never "scrolled
+            // away". The closures below re-ask the transient question for as
+            // long as the flight needs it.
+            let geometry = galleryPager.heroGeometry(for: post.id)
             let origin = SnapFeedHeroOrigin(
                 post: post,
-                cover: geometry.cover,
-                style: geometry.isTile ? .tile : .listMedia,
+                stream: window,
+                hasHero: geometry != nil,
+                cover: geometry?.cover,
+                style: geometry?.isTile == true ? .tile : .listMedia,
                 frame: { [weak self] container in
                     // Re-measured, not captured: the grid scrolls itself clear
                     // of the chrome while the post is open, so the rect the
                     // dismissal flies home to is not the one it left from.
+                    //
+                    // The coordinate space is re-resolved with it. It is the
+                    // ACTIVE page's collection view, and the geometry above is
+                    // already read from whichever page is active — capturing one
+                    // and re-asking the other could describe two different pages.
                     guard let self,
+                          let space = self.galleryPager.heroCoordinateSpace,
                           let current = self.galleryPager.heroGeometry(for: post.id)
                     else { return nil }
                     return space.convert(current.rect, to: container)
@@ -443,7 +469,7 @@ final class ProfileViewController: UIViewController {
                 },
                 depthView: { [weak self] in self?.galleryPager }
             )
-            feedHero(stream.isEmpty ? [post.id] : stream, self, origin)
+            feedHero(window.map(\.id), self, origin)
         }
         // Swipe ↔ tabs: a settled swipe adopts the tab and mirrors the
         // selectors; a tab tap records it and pages.
@@ -470,10 +496,32 @@ final class ProfileViewController: UIViewController {
         // screen has a tab bar under it. Asserted here rather than at each of the
         // paths that can hide it, because the failure is total: no dock, no way
         // to leave, and no gesture that brings it back.
+        //
+        // ⚠️ …but "on screen" is a question a scrub has not answered yet.
+        //
+        // UIKit runs this when an interactive pop BEGINS, not when it commits,
+        // so a drag released below the threshold reaches here on a screen that
+        // is about to be covered again. Asserting the dock unconditionally put
+        // the bar back over a post that then sprang back to full screen, with
+        // nothing left to take it away — the completed-pop callbacks correctly
+        // never fire for a cancel. See `TabBarRevealPolicy`, which the For You
+        // grid has consulted for this since it hit the identical failure.
         if navigationController?.viewControllers.first === self,
            tabBarController?.isTabBarHidden == true {
-            tabBarController?.tabBar.alpha = 1
-            tabBarController?.setTabBarHidden(false, animated: animated)
+            switch TabBarRevealPolicy.timing(
+                // This screen owns no flight object — a post opened from here is
+                // presented by the feed feature, which restores the bar on its
+                // own completed return. False makes a non-interactive tap-back
+                // reveal immediately, which is what it did before and is right.
+                hasActiveFlight: false,
+                isTransitioning: transitionCoordinator != nil,
+                isInteractive: transitionCoordinator?.isInteractive == true
+            ) {
+            case .immediately, .drivenByFlight:
+                revealDock(animated: animated)
+            case .whenTransitionCommits:
+                revealDockIfTransitionCommits()
+            }
         }
         // Re-bind the bar synchronously BEFORE the transition animates: any
         // state that resolved since viewDidLoad (fast mock loads, cached
@@ -487,6 +535,40 @@ final class ProfileViewController: UIViewController {
         // store — so a Saved tab bound at load would be stale the first time
         // the viewer saved something and came back to look at it.
         viewModel.loadSavedPosts()
+    }
+
+    /// Puts the dock back, idempotently.
+    ///
+    /// The guard is what makes it safe to call from more than one place: the
+    /// feed's own completed-return restore can arrive before or after this, and
+    /// two animated reveals of an already-visible bar is a flicker.
+    private func revealDock(animated: Bool) {
+        guard let tabBarController, tabBarController.isTabBarHidden else { return }
+        tabBarController.tabBar.alpha = 1
+        tabBarController.setTabBarHidden(false, animated: animated)
+    }
+
+    /// Defers the dock to the far side of a scrub — and only if the finger
+    /// meant it.
+    ///
+    /// Both blocks run for a CANCELLED transition too, which is the entire
+    /// point: that is the case that strands the bar over a post that stayed.
+    /// The release is where the outcome is known and the pop's tail is still
+    /// running, so the bar arrives WITH the screen rather than onto it; the
+    /// second is the backstop for a gesture the system cancels outright, and is
+    /// idempotent against the first.
+    private func revealDockIfTransitionCommits() {
+        guard let coordinator = transitionCoordinator else { return }
+        coordinator.notifyWhenInteractionChanges { [weak self] context in
+            guard TabBarRevealPolicy.shouldReveal(afterTransitionCancelled: context.isCancelled)
+            else { return }
+            self?.revealDock(animated: true)
+        }
+        coordinator.animate(alongsideTransition: nil) { [weak self] context in
+            guard TabBarRevealPolicy.shouldReveal(afterTransitionCancelled: context.isCancelled)
+            else { return }
+            self?.revealDock(animated: true)
+        }
     }
 
     override func viewWillDisappear(_ animated: Bool) {

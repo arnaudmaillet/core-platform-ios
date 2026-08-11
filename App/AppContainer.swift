@@ -280,7 +280,12 @@ final class AppContainer {
     private lazy var profileGalleryRepository = ProfileGalleryRepository(
         postClient: Post_V1_PostServiceClient(client: authenticatedRPCClient),
         searchClient: Search_V1_SearchServiceClient(client: authenticatedRPCClient),
-        counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient)
+        counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient),
+        // Resolves whose posts the tiles are. The grid draws none of it; the
+        // full-screen page a tile opens into is seeded from the tile's model,
+        // and without this that page arrives with an anonymous author capsule
+        // until its own fetch answers.
+        profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient)
     )
 
     /// The share sheet's quick-send row: mutuals first, then the rest of the

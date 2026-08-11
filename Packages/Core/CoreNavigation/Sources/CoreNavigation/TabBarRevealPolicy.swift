@@ -19,8 +19,16 @@ import Foundation
 /// Split out as a value because three appearance paths reach one line of code
 /// and only one of them may act on it immediately — a distinction with no
 /// syntax at the call site, and the reason the bug survived review.
-enum TabBarRevealPolicy {
-    enum Timing: Equatable {
+///
+/// ⚠️ Lives HERE, not beside the grid that first needed it. It was internal to
+/// the Feed package, so the profile — which hides the same one bar for the same
+/// screen and has the same three appearance paths — could not reach it and
+/// asserted its dock unconditionally instead. The consequence was the exact
+/// failure the doc above describes, on the other surface: a swipe released
+/// below the threshold left the bar standing over a post that had sprung back.
+/// A policy two screens must agree on cannot be owned by one of them.
+public enum TabBarRevealPolicy {
+    public enum Timing: Equatable {
         /// Nothing is animating: a tab switch back, or a non-animated pop.
         /// Safe to reveal outright.
         case immediately
@@ -39,7 +47,7 @@ enum TabBarRevealPolicy {
         case drivenByFlight
     }
 
-    static func timing(hasActiveFlight: Bool, isTransitioning: Bool, isInteractive: Bool) -> Timing {
+    public static func timing(hasActiveFlight: Bool, isTransitioning: Bool, isInteractive: Bool) -> Timing {
         if hasActiveFlight { return .drivenByFlight }
         // Only a SCRUB can be taken back. A still screen and a button-driven
         // pop both have a known outcome already, and deferring a certainty is
@@ -50,7 +58,7 @@ enum TabBarRevealPolicy {
     /// The completion half of `.whenTransitionCommits`. Trivial by design: the
     /// value of stating it is that the cancel branch is now a case someone has
     /// to delete on purpose rather than one nobody wrote.
-    static func shouldReveal(afterTransitionCancelled cancelled: Bool) -> Bool {
+    public static func shouldReveal(afterTransitionCancelled cancelled: Bool) -> Bool {
         !cancelled
     }
 }

@@ -92,7 +92,12 @@ final class SnapAuthorIdentityView: UIView {
     private let metaPlaceholder = SnapAuthorIdentityView.makeRedactionBar(width: 64, height: 9)
     private let labelsStack = UIStackView()
 
+    /// Whose face the avatar task is loading — compared on arrival so a fast
+    /// page-past cannot land a picture on the wrong pill.
     private var authorID: ProfileID?
+    /// What is actually on screen, so a repeat call can tell "same page again"
+    /// from "same page, better data".
+    private var renderedModel: FeedItemDisplayModel?
     private var avatarTask: Task<Void, Never>?
     /// Whether the pill is sharing the trailing run with the sort selector.
     private var isCompact = false
@@ -214,9 +219,22 @@ final class SnapAuthorIdentityView: UIView {
     /// fade. The view is content-sized, so a new author re-negotiates the bar
     /// item's width — a settle-time event by construction.
     func setAuthor(_ model: FeedItemDisplayModel, pipeline: ImagePipeline) {
-        let changed = model.authorID != authorID
+        guard model != renderedModel else { return }
+        // The fast path is for PAGING between posts by one person: the face and
+        // the name are already right, so only the time moves and there is no
+        // reason to cross-dissolve or refetch an avatar.
+        //
+        // ⚠️ It has to check what is DRAWN, not just who it belongs to. A page
+        // is configured twice from one id — the grid's projection, then the real
+        // entry — and those can carry the same author with a better name and an
+        // avatar the projection had no URL for. Keyed on `authorID` alone, the
+        // second call took this path and the capsule kept a blank face.
+        let sameFace = model.authorID == authorID
+            && model.authorName == renderedModel?.authorName
+            && model.avatarURL == renderedModel?.avatarURL
+        renderedModel = model
         authorID = model.authorID
-        guard changed else {
+        guard !sameFace else {
             metaLabel.text = model.metaText
             return
         }

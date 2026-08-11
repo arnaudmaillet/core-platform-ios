@@ -140,7 +140,27 @@ final class RouteResolver: Router {
             // destination a Maps pin expands into — one repository and one post
             // cache behind it, so a tile the origin was showing is already warm.
             guard !postIDs.isEmpty else { return }
-            let feed = feedFeature().makeSnapFeedViewController(postIDs: postIDs)
+            // ⚠️ `ownsInteractiveDismissal: false` is load-bearing, not tidying.
+            //
+            // The snap feed defaults to claiming its own dismissal, because
+            // every other way it is reached attaches a flight's grab or a slide
+            // of its own. THIS push attaches neither — a route has no origin to
+            // fly from and no screen-specific object to hang a gesture on — so
+            // inheriting the claim meant `NativePopPolicy` refused the native
+            // edge pop on behalf of a gesture that did not exist. The screen
+            // rendered perfectly and answered no horizontal drag anywhere.
+            //
+            // Disclaiming hands the dismissal back to the platform, which is
+            // exactly what a plain push should have. `hidesBottomBarWhenPushed`
+            // is then the right way to manage the dock too: the objection to
+            // that flag everywhere else in this app is that its choreography
+            // does not scrub with a CUSTOM interactive pop, and there is no
+            // custom pop here — this is UIKit's own, which the flag was written
+            // for. `MainTabCoordinator.syncTabBarVisibility` already honours it.
+            let feed = feedFeature().makeSnapFeedViewController(
+                postIDs: postIDs, ownsInteractiveDismissal: false
+            )
+            feed.hidesBottomBarWhenPushed = true
             push(feed, using: navigator)
 
         case .comments(let postID):

@@ -95,7 +95,25 @@ public protocol FeedFeatureBuilding {
     /// into. Reuses the entire snap feed (video pool, likes, comments, active-
     /// cell lifecycle); only the data source differs. The returned VC conforms
     /// to `ZoomTransitionDestination` so a hero transition can drive it.
-    func makeSnapFeedViewController(postIDs: [PostID]) -> UIViewController
+    ///
+    /// `ownsInteractiveDismissal` answers the one question a caller cannot
+    /// delegate: whether it is going to put a dismissal gesture on this screen
+    /// itself. `true` (the default, via the convenience overload below) means a
+    /// flight or a slide is about to be attached, and the stack's native edge
+    /// pop must stay out of its way. `false` means this is an ordinary push
+    /// with nothing custom behind it, so the platform's own gesture applies.
+    ///
+    /// ⚠️ It is a parameter rather than a property the caller sets afterwards
+    /// because the property lives on a concrete type the interface deliberately
+    /// hides. A caller outside the Feed package could claim ownership only by
+    /// accident — by inheriting the default — and had no way at all to
+    /// disclaim it. That asymmetry is precisely how a pushed feed ended up
+    /// refusing the native pop while attaching nothing of its own: a screen
+    /// with no way back but the chevron.
+    func makeSnapFeedViewController(
+        postIDs: [PostID],
+        ownsInteractiveDismissal: Bool
+    ) -> UIViewController
     /// Pushes that same feed onto `presenter`'s stack with a HERO flight from
     /// `origin`, instead of a standard slide.
     ///
@@ -121,5 +139,12 @@ extension FeedFeatureBuilding {
     /// The ordinary case: a For You tab nobody is listening to.
     public func makeForYouViewController() -> UIViewController {
         makeForYouViewController(onTabPresentationChange: nil)
+    }
+
+    /// The overwhelmingly common case: a feed about to be flown to, or handed
+    /// a slide of its own. Every existing call site means this, so it stays the
+    /// unqualified spelling and only the plain-push caller has to say otherwise.
+    public func makeSnapFeedViewController(postIDs: [PostID]) -> UIViewController {
+        makeSnapFeedViewController(postIDs: postIDs, ownsInteractiveDismissal: true)
     }
 }

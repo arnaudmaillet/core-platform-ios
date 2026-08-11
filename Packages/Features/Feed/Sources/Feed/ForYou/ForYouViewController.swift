@@ -645,39 +645,6 @@ final class ForYouViewController: UIViewController {
     /// mechanism end to end — `makeSnapFeedViewController(postIDs:)` over
     /// `FixedPostsFeedProvider`, pushed under a `ZoomTransitionController` —
     /// with a tile as the source instead of a pin.
-    /// A partial display model from the projection this grid already holds.
-    ///
-    /// Lives here, not on `FeedItemDisplayModel`, so the shared display model
-    /// stays free of `PostGrid` — the grid is one opener among several, and the
-    /// feed is also reached from Maps and from a route.
-    ///
-    /// Complete now that the projection carries author identity — the page
-    /// opens with its capsule populated rather than filling in ~0.69s later.
-    ///
-    /// `metaText` is rebuilt here in the feed's own "@handle · age" form using
-    /// the same `PostMetadata.compactAge` the grid's cells use, so the seeded
-    /// string matches the one the real entry will carry and nothing re-renders
-    /// differently when it lands.
-    private static func seedModel(from post: GalleryPost) -> FeedItemDisplayModel {
-        let handle = post.authorHandle.map { "@\($0)" } ?? ""
-        let age = PostMetadata.compactAge(ofMillis: post.publishedAtMS)
-        return FeedItemDisplayModel(
-            id: post.id,
-            authorID: post.authorID ?? ProfileID(""),
-            authorName: post.authorName ?? "",
-            metaText: handle.isEmpty ? age : "\(handle) · \(age)",
-            avatarURL: post.authorAvatarURL,
-            caption: post.caption.isEmpty ? nil : post.caption,
-            mediaURL: post.videoURL ?? post.thumbnailURL,
-            mediaKind: post.kind == .video ? .video : .image,
-            thumbnailURL: post.thumbnailURL,
-            audioText: post.kind == .video && !handle.isEmpty
-                ? "Original audio · \(handle)" : nil,
-            likeCount: post.reactionCount ?? 0,
-            timestampText: age
-        )
-    }
-
     /// The feed this grid opens, reused across pushes when it can be.
     ///
     /// Held by THIS controller rather than by the builder on purpose. A single
@@ -781,7 +748,9 @@ final class ForYouViewController: UIViewController {
         // page configures at push time rather than when its own fetch returns.
         // Measured at ~0.69s of empty destination without it.
         if let seedable = feed as? SnapFeedViewController {
-            seedable.seedProjection(posts[index...].prefix(Self.seedWindow).map(Self.seedModel))
+            seedable.seedProjection(GalleryPostProjection.seedModels(
+                from: Array(posts[index...].prefix(Self.seedWindow))
+            ))
         }
 
         // The feed owns the whole screen: hide the bar with the push. Managed

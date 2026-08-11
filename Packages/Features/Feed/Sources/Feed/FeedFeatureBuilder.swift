@@ -110,9 +110,30 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     ) {
         guard !postIDs.isEmpty, let nav = presenter.navigationController else { return }
         let destination = makeSnapFeedViewController(postIDs: postIDs)
+        // Hand over the projection the origin is already showing, on BOTH
+        // presentations. The flight used to hide the cost of not doing this —
+        // the card carries the tile's own pixels, so the destination behind it
+        // could be empty for the length of the animation and nobody saw it —
+        // which is why this was only ever noticed on the plain push below.
+        (destination as? SnapFeedViewController)
+            .map { $0.seedProjection(GalleryPostProjection.seedModels(from: origin.stream)) }
         // The snap feed is the only thing this builds, and it conforms — but
         // the factory is typed `UIViewController` for callers who do not care.
-        guard let flyable = destination as? any ZoomTransitionDestination else { return }
+        //
+        // ⚠️ `hasHero` is asked FIRST, and it is not the same question as
+        // whether the cast succeeds. A text-only post has no media surface at
+        // either end of a flight, so there is nothing to fly even though the
+        // destination is perfectly flyable. Both answers land on the same feed;
+        // only the way in differs, which is the right thing to degrade.
+        //
+        // Historically this method had no such branch: an origin with no hero
+        // was flown anyway (from a rect it had to invent), and a destination
+        // that failed the cast was silently dropped on the floor — the tap did
+        // nothing at all. Neither is a presentation.
+        guard origin.hasHero, let flyable = destination as? any ZoomTransitionDestination else {
+            pushWithoutFlight(destination, on: nav)
+            return
+        }
         let source = ExternalHeroZoomSource(origin: origin)
         let transition = ZoomTransitionController(source: source, destination: flyable)
         // The pushed feed owns its dismissal grab, exactly as it does when the
@@ -204,6 +225,88 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         nav.pushViewController(destination, animated: true)
     }
 
+    /// Pushes the feed with no flight, and gives it a way back by hand.
+    ///
+    /// The presentation a post with nothing to fly gets: a native push, plus a
+    /// full-surface rightward swipe that scrubs the pop 1:1 and releases on the
+    /// same contract every other dismissal in this app uses. Deliberately the
+    /// SAME shape as `ForYouViewController`'s text branch, because a viewer
+    /// opening the same text post from a profile and from For You is looking at
+    /// one screen and must get one set of gestures.
+    ///
+    /// ⚠️ Claiming ownership and attaching the swipe are ONE act, never two.
+    /// `zoomOwnsInteractiveDismissal` tells `NativePopPolicy` to refuse the
+    /// stack's native edge pop — correct only because something else is about
+    /// to drive the dismissal. The whole defect this method exists to fix was a
+    /// push that inherited the claim (it is the type's default) and attached
+    /// nothing: a screen that refused every horizontal drag, edge or surface,
+    /// leaving the back chevron as the only way out.
+    private func pushWithoutFlight(_ destination: UIViewController, on nav: UINavigationController) {
+        (destination as? SnapFeedViewController)?.zoomOwnsInteractiveDismissal = true
+
+        // This builder is a struct and `UINavigationController.delegate` is
+        // weak, so nothing here would otherwise keep the dismissal alive to see
+        // the swipe. The retainer does; the dismissal's own completion clears
+        // it, so the cycle lasts exactly as long as the screen does — the same
+        // bargain `HeroTransitionRetainer` strikes for the flight.
+        let retainer = SlideDismissalRetainer()
+        let dismissal = InteractiveSlideDismissal()
+        retainer.dismissal = dismissal
+        // Accessing `view` loads it so the pan has something to attach to.
+        dismissal.attach(to: destination)
+        dismissal.onFeedPopped = { nav in
+            // Completed pops only — swipe or back button. A cancelled swipe
+            // reports nothing here, which is exactly right: the feed is staying
+            // up and the bar must stay down.
+            Self.restoreTabBar(on: nav)
+            retainer.dismissal = nil
+        }
+        // SAVED, not clobbered — `install` captures whatever owned the stack
+        // before this screen and hands it back on teardown. A pushed profile
+        // owns it (its own `InteractiveSlideDismissal` for the profile's
+        // dismissal), and that has to survive this push intact.
+        dismissal.install(on: nav)
+
+        // Hidden BY HAND for the same reason the flight path states at length:
+        // `hidesBottomBarWhenPushed`'s choreography does not scrub with a custom
+        // interactive pop, and this screen now has one.
+        nav.tabBarController?.setTabBarHidden(true, animated: true)
+        nav.pushViewController(destination, animated: true)
+        #if DEBUG
+        // `-zoom-live-log`: the only way a scripted run can tell "attached" from
+        // "claimed ownership and attached nothing", which is what the defect
+        // looked like from the outside — a screen that renders perfectly and
+        // answers no gesture.
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            let pans = destination.view.gestureRecognizers?
+                .filter { $0 is UIPanGestureRecognizer }.count ?? 0
+            print("[hero] pushed WITHOUT flight, dismissal pans=\(pans)")
+        }
+        // `-text-swipe-demo <peak>`: walks the exact begin/update/release path a
+        // finger drives, since the simulator injects none. The SAME argument
+        // For You's own text branch honours, deliberately — a viewer's thumb
+        // does not know which screen opened the post, so neither should the
+        // harness that stands in for it.
+        //
+        // ⚠️ It reports whether the pop is being DRIVEN, not whether the screen
+        // went away. With no delegate — or one that does not vend this driver —
+        // `popViewController` still pops on UIKit's own animation: the depth
+        // changes, the screen leaves, and a harness watching only for that
+        // reports success while a real finger would have watched the page jump
+        // instead of follow. That distinction is the entire defect.
+        let arguments = ProcessInfo.processInfo.arguments
+        if let position = arguments.firstIndex(of: "-text-swipe-demo"),
+           position + 1 < arguments.count,
+           let peak = Double(arguments[position + 1]) {
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                let driven = await dismissal.debugPerformSwipe(peakProgress: CGFloat(peak))
+                print("[text-swipe] peak=\(peak) driven=\(driven)")
+            }
+        }
+        #endif
+    }
+
     /// Brings the dock back after a flight that hid it.
     ///
     /// ⚠️ Called from EVERY close-out, not just the completed return. A flight
@@ -221,11 +324,20 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     private static func restoreTabBar(on nav: UINavigationController?) {
         guard let nav, !(nav.topViewController is any ZoomTransitionDestination) else { return }
         nav.tabBarController?.tabBar.alpha = 1
+        // Idempotent, because the screen underneath may have got there first:
+        // a tab ROOT asserts its own dock on the far side of a committed scrub
+        // (`ProfileViewController.revealDock`), and the two orders are not
+        // guaranteed. Whichever arrives first animates; the second finds the bar
+        // already down and does nothing.
+        guard nav.tabBarController?.isTabBarHidden == true else { return }
         nav.tabBarController?.setTabBarHidden(false, animated: true)
     }
 
-    public func makeSnapFeedViewController(postIDs: [PostID]) -> UIViewController {
-        makeSnapFeed(
+    public func makeSnapFeedViewController(
+        postIDs: [PostID],
+        ownsInteractiveDismissal: Bool
+    ) -> UIViewController {
+        let feed = makeSnapFeed(
             viewModel: FeedViewModel(
                 repository: FixedPostsFeedProvider(base: repository, ids: postIDs),
                 engagementProvider: engagementProvider,
@@ -233,6 +345,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 router: router
             )
         )
+        (feed as? SnapFeedViewController)?.zoomOwnsInteractiveDismissal = ownsInteractiveDismissal
+        return feed
     }
 
     /// The single construction truth for BOTH feed surfaces — the timeline
@@ -298,4 +412,15 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
 @MainActor
 final class HeroTransitionRetainer {
     var transition: ZoomTransitionController?
+}
+
+/// Keeps a plain push's swipe-to-dismiss alive for the length of the screen.
+///
+/// Same reason as above, different object: a navigation controller's delegate
+/// is weak, a gesture recognizer does not retain its target, and the builder
+/// that wires both is a value type. Without this the dismissal would be gone
+/// before the first touch — which looks identical to never having attached one.
+@MainActor
+final class SlideDismissalRetainer {
+    var dismissal: InteractiveSlideDismissal?
 }
