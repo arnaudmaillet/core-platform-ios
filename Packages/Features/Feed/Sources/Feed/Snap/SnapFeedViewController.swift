@@ -1918,9 +1918,24 @@ final class SnapFeedViewController: UIViewController {
         return collectionView.cellForItem(at: IndexPath(item: index, section: 0)) as? SnapCellLifecycle
     }
 
+    /// Everything a page needs in the image cache before it is configured.
+    ///
+    /// ⚠️ `thumbnailURL` is in this list, and its absence was a visible defect
+    /// rather than an omission of degree. A video page shows its poster under
+    /// the player until the first decoded frame arrives, and `loadPoster`
+    /// applies a cache HIT synchronously — but only a hit. Unprefetched, the
+    /// poster was always a miss at configure time, so it arrived on an async
+    /// hop and the page rendered its black floor until it did. Measured in a
+    /// frame-step of an ordinary scroll: ~350ms at luma 1–3, with the outgoing
+    /// video's surface already torn down and nothing bound behind it.
+    ///
+    /// That window exists at both ends — before the first frame, and after the
+    /// surface is released — so the poster is what a media page falls back on
+    /// whenever it is not actively decoding. It has to be there by configure,
+    /// which means it has to be prefetched.
     private func prefetchURLs(for indexPaths: [IndexPath]) -> [URL] {
         indexPaths.compactMap { orderedIDs.indices.contains($0.item) ? modelsByID[orderedIDs[$0.item]] : nil }
-            .flatMap { [$0.avatarURL, $0.mediaURL] }
+            .flatMap { [$0.avatarURL, $0.mediaURL, $0.thumbnailURL] }
             .compactMap(\.self)
     }
 }
