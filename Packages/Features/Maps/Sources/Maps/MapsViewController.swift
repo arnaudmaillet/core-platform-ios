@@ -20,9 +20,10 @@ final class MapsViewController: UIViewController {
     /// empty just hides the section).
     private let favoritesRepository: any MapFavoritesProviding
     private var favoritesTask: Task<Void, Never>?
-    /// The client-persisted pinned set behind the favorites section (nil
-    /// until the viewer first curates → fall back to followed profiles).
-    private let favoritesStore = MapFavoritesStore()
+    /// Reads and writes the pinned set behind the favorites section — the one
+    /// place the never-curated fallback is resolved, shared with the profile
+    /// screen's pin button so the two cannot disagree about what a pin means.
+    private let pinService: MapProfilePinService
     /// What the favorites section currently shows — the seed material when a
     /// first pin/unpin materializes the store from the fallback.
     private var currentFavorites: [MapFavorite] = []
@@ -152,6 +153,7 @@ final class MapsViewController: UIViewController {
     init(
         viewModel: MapsViewModel,
         favoritesRepository: any MapFavoritesProviding,
+        pinService: MapProfilePinService,
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController,
         makeSnapFeed: @escaping ([PostID]) -> UIViewController,
@@ -162,6 +164,7 @@ final class MapsViewController: UIViewController {
     ) {
         self.viewModel = viewModel
         self.favoritesRepository = favoritesRepository
+        self.pinService = pinService
         self.imagePipeline = imagePipeline
         self.videoCoordinator = MapVideoPlaybackCoordinator(pool: videoPlayback)
         self.makeSnapFeed = makeSnapFeed
@@ -181,6 +184,7 @@ final class MapsViewController: UIViewController {
         configureMapView()
         bindViewModel()
         observeAppLifecycle()
+        observeFavoriteChanges()
         loadFavorites()
         prefetchPeople()
         mapView.setRegion(Self.defaultRegion, animated: false)
@@ -329,6 +333,21 @@ final class MapsViewController: UIViewController {
         // presentSnapFeed already covered the surface (keeping the donor).
         guard activeTransition == nil else { return }
         videoCoordinator.setSurfaceVisible(false)
+    }
+
+    /// Re-reads the people rail whenever the pinned set changes — including
+    /// when it changed on ANOTHER screen. A profile's pin button writes the
+    /// same store, and this map may already be loaded behind it: without this
+    /// the rail would keep yesterday's list until the tab was rebuilt, which
+    /// reads as the button having done nothing.
+    private func observeFavoriteChanges() {
+        appObservers.add(NotificationCenter.default.addObserver(
+            forName: MapFavoritesStore.didChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            // Only the favorites carousel: the sub-filter row under Friends /
+            // Following lists the graph, which a pin does not touch.
+            MainActor.assumeIsolated { self?.loadFavorites() }
+        })
     }
 
     private func observeAppLifecycle() {
@@ -675,18 +694,18 @@ final class MapsViewController: UIViewController {
         return known + newcomers
     }
 
-    /// Long-press pin/unpin from a person pill. The first mutation
-    /// materializes the on-screen fallback into the persisted store, so what
-    /// the viewer sees is what stays.
+    /// Pin/unpin a person pill. The rule — including materializing the
+    /// never-curated fallback on the first write — belongs to
+    /// `MapProfilePinService`, which the profile screen's pin button shares;
+    /// the rail then refreshes off the store's change notification rather than
+    /// here, so a pin made anywhere lands the same way.
     private func togglePinnedFavorite(_ favorite: MapFavorite) {
-        var pinned = favoritesStore.pinnedProfileIDs ?? currentFavorites.map(\.profileID)
-        if let index = pinned.firstIndex(of: favorite.profileID) {
-            pinned.remove(at: index)
-        } else {
-            pinned.append(favorite.profileID)
+        let pinService = pinService
+        let id = favorite.profileID
+        Task {
+            let isPinned = await pinService.isPinned(id)
+            await pinService.setPinned(!isPinned, for: id)
         }
-        favoritesStore.setPinned(pinned)
-        loadFavorites()
     }
 
     /// Pure cross-dissolve show/hide. Structure (`isHidden`, stack layout)
@@ -726,7 +745,7 @@ final class MapsViewController: UIViewController {
     private func loadFavorites() {
         favoritesTask?.cancel()
         let repository = favoritesRepository
-        let pinnedIDs = favoritesStore.pinnedProfileIDs
+        let pinnedIDs = pinService.pinnedProfileIDs
         favoritesTask = Task { [weak self] in
             let favorites = if let pinnedIDs {
                 await repository.profiles(for: pinnedIDs)

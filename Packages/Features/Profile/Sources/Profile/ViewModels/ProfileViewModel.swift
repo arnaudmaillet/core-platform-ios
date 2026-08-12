@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import CoreStorage
 import Foundation
+import MapsInterface
 import PostGrid
 
 @MainActor
@@ -25,6 +26,21 @@ public final class ProfileViewModel {
         case edit
         case follow
         case following
+    }
+
+    /// The map-pin bubble beside Message.
+    ///
+    /// Three states rather than a `Bool?`, because "no button" and "an
+    /// unpinned button" are different products: the pin is offered ONLY for a
+    /// profile the viewer follows (the map's people rail is a shortcut through
+    /// the people you already keep up with), and it is offered at all only
+    /// when the app was wired with somewhere to pin.
+    public nonisolated enum MapPinButton: Equatable, Sendable {
+        /// Not offered: own profile, a stranger, an unresolved relationship,
+        /// or no pinning service.
+        case hidden
+        case pinned
+        case unpinned
     }
 
     /// One horizontal page of the gallery pager.
@@ -84,6 +100,7 @@ public final class ProfileViewModel {
 
     public var onPhaseChange: ((Phase) -> Void)?
     public var onFollowButtonChange: ((FollowButton) -> Void)?
+    public var onMapPinButtonChange: ((MapPinButton) -> Void)?
     public var onGalleryChange: ((GallerySnapshot) -> Void)?
     /// Fired when a load finishes, however it finished — new data, identical
     /// data, or a failure. The view uses it to close out a switch, which it
@@ -99,6 +116,10 @@ public final class ProfileViewModel {
     public var onDismissRequested: (() -> Void)?
 
     private let repository: any ProfileProviding
+    /// Curates the map's people rail. Nil in tests and in any app that did not
+    /// wire Maps — the button is then simply not offered, which is the honest
+    /// state rather than a button that cannot do anything.
+    private let mapPinning: (any MapProfilePinning)?
     private let reporting: (any ProfileReporting)?
     private let gallery: (any ProfileGalleryProviding)?
     /// The global gallery-filter preference. nil (tests, minimal setups)
@@ -123,12 +144,49 @@ public final class ProfileViewModel {
         didSet { onPhaseChange?(phase) }
     }
     private var followButton: FollowButton = .hidden {
-        didSet { onFollowButtonChange?(followButton) }
+        didSet {
+            onFollowButtonChange?(followButton)
+            // The pin is offered only while the viewer follows, so the two
+            // move together — including the optimistic flip a follow tap makes
+            // before the server has answered. A newly-followed profile has
+            // never been asked about, so ask now.
+            refreshMapPinButton()
+            loadMapPinState()
+        }
     }
+    public private(set) var mapPinButton: MapPinButton = .hidden {
+        didSet {
+            guard mapPinButton != oldValue else { return }
+            onMapPinButtonChange?(mapPinButton)
+        }
+    }
+    /// What the pin service last said (or what an optimistic tap made true);
+    /// `nil` until it has been asked.
+    ///
+    /// Three states, so the button is not shown wearing a guess: resolving the
+    /// never-curated fallback can take a round trip, and an outline glyph that
+    /// silently becomes filled is a worse first impression than a button that
+    /// arrives a frame late. Kept apart from `mapPinButton` so the answer
+    /// survives the button being hidden and shown again — unfollowing does NOT
+    /// unpin, by product decision, and re-following should not have to ask.
+    private var isPinnedOnMap: Bool?
+    /// Supersedes an in-flight read when the subject changes, so a slow answer
+    /// about the previous profile cannot land on this one.
+    private var mapPinReadTask: Task<Void, Never>?
 
     /// The currently rendered profile — retained so a follow toggle can nudge
     /// its follower count without a full reload.
-    private var profile: UserProfile?
+    private var profile: UserProfile? {
+        didSet {
+            // Only a change of SUBJECT matters here: an optimistic follower
+            // nudge rebuilds this value for the same person, and re-asking
+            // about their pin state on every count change would be noise.
+            guard profile?.id != oldValue?.id else { return }
+            isPinnedOnMap = nil
+            refreshMapPinButton()
+            loadMapPinState()
+        }
+    }
     private var isFollowing = false
     private var followInFlight = false
     /// The viewer's outbound block on this profile, from the relationship read
@@ -155,6 +213,7 @@ public final class ProfileViewModel {
 
     public init(
         repository: any ProfileProviding,
+        mapPinning: (any MapProfilePinning)? = nil,
         reporting: (any ProfileReporting)? = nil,
         gallery: (any ProfileGalleryProviding)? = nil,
         galleryPreferences: GalleryPreferences? = nil,
@@ -164,6 +223,7 @@ public final class ProfileViewModel {
         cache: ProfileCache? = nil
     ) {
         self.repository = repository
+        self.mapPinning = mapPinning
         self.reporting = reporting
         self.gallery = gallery
         self.galleryPreferences = galleryPreferences
@@ -301,6 +361,49 @@ public final class ProfileViewModel {
         }
         reload()
         return seeded
+    }
+
+    // MARK: - Map pin
+
+    /// Pin / unpin this profile on the map's people rail.
+    ///
+    /// Optimistic, and deliberately without a rollback: the destination is a
+    /// local list (`MapFavoritesStore`), so there is no server to disagree —
+    /// the write cannot fail in a way the viewer could act on. What it CAN do
+    /// is take a moment, because the very first write has to materialize the
+    /// never-curated fallback, and the button must not sit inert for it.
+    public func toggleMapPin() {
+        guard mapPinButton != .hidden, let mapPinning, let profile else { return }
+        let pinned = mapPinButton != .pinned
+        isPinnedOnMap = pinned
+        refreshMapPinButton()
+        Task { await mapPinning.setPinned(pinned, for: profile.id) }
+    }
+
+    /// Re-reads pin state for the current subject. Called whenever the subject
+    /// or the relationship changes — a profile the viewer does not follow is
+    /// never asked about, so a stranger's profile costs nothing.
+    private func loadMapPinState() {
+        mapPinReadTask?.cancel()
+        guard let mapPinning, let profile, followButton == .following else { return }
+        let id = profile.id
+        mapPinReadTask = Task { [weak self] in
+            let pinned = await mapPinning.isPinned(id)
+            guard !Task.isCancelled, let self, self.profile?.id == id else { return }
+            self.isPinnedOnMap = pinned
+            self.refreshMapPinButton()
+        }
+    }
+
+    /// The visibility rule, in one place: only a followed profile can be
+    /// pinned, and only when there is somewhere to pin it.
+    private func refreshMapPinButton() {
+        guard mapPinning != nil, profile != nil, followButton == .following,
+              let isPinnedOnMap else {
+            mapPinButton = .hidden
+            return
+        }
+        mapPinButton = isPinnedOnMap ? .pinned : .unpinned
     }
 
     /// Follow-button tapped. No-op for the viewer's own profile ("Edit"); an

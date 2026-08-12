@@ -33,9 +33,28 @@ public final class MapFavoritesStore: @unchecked Sendable {
         }
     }
 
+    /// Posted after every write, so a map already on screen re-reads its rail
+    /// instead of showing yesterday's list.
+    ///
+    /// On the store rather than on `MapProfilePinService` deliberately: what
+    /// changed is the storage, and an observer must not be able to miss a
+    /// write because it arrived through a different door. Today the only other
+    /// door is the profile's pin button; tomorrow it might be a settings
+    /// screen or a restore.
+    public static let didChangeNotification = Notification.Name("maps.favorites.didChange")
+
     /// Replaces the curated list (used to materialize the on-screen fallback
     /// before the first mutation).
     public func setPinned(_ ids: [ProfileID]) {
         lock.withLock { defaults.set(ids.map(\.rawValue), forKey: Self.key) }
+        // Outside the lock: an observer that re-entered this store while it
+        // was held would deadlock on a non-recursive lock, and posting is not
+        // part of the write.
+        //
+        // `object` is the store that changed. The app has one and observes
+        // with `nil` (every change is its change); tests run suites in
+        // PARALLEL against their own stores, and an unscoped post makes each
+        // of them count the others' writes.
+        NotificationCenter.default.post(name: Self.didChangeNotification, object: self)
     }
 }

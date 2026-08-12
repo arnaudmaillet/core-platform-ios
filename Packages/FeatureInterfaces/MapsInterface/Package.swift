@@ -7,7 +7,13 @@ let package = Package(
     products: [
         .library(name: "MapsInterface", targets: ["MapsInterface"])
     ],
+    dependencies: [
+        .package(path: "../../Kit/CoreModels")
+    ],
     targets: [
-        .target(name: "MapsInterface")
+        .target(
+            name: "MapsInterface",
+            dependencies: ["CoreModels"]
+        )
     ]
 )

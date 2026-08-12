@@ -67,6 +67,9 @@ final class ProfileHeaderView: UIView {
     private let viewsStat = ProfileStatView(caption: "Views")
     private let messageButton = UIButton(configuration: .glass())
     private let editButton = UIButton(configuration: .glass())
+    /// Pin-this-profile-on-the-map, immediately right of Message. Hidden
+    /// unless the viewer follows this profile — see `configureAction`.
+    private let mapPinButton = UIButton(configuration: .glass())
     private let qrCodeButton = UIButton(configuration: .glass())
     private let moreButton = UIButton(configuration: .glass())
     private var columnTopConstraint: NSLayoutConstraint?
@@ -92,6 +95,8 @@ final class ProfileHeaderView: UIView {
         didSet { columnTopConstraint?.constant = chromeTopInset + Metrics.bannerClearance }
     }
 
+    /// Invoked when the map-pin bubble is tapped (followed profiles only).
+    var onMapPinTapped: (() -> Void)?
     /// Invoked when the Message button is tapped (other users only).
     var onMessageTapped: (() -> Void)?
     /// Invoked when the Edit Profile capsule is tapped (own profile only).
@@ -259,6 +264,32 @@ final class ProfileHeaderView: UIView {
             messageButton.isHidden = true
             editButton.isHidden = true
         }
+    }
+
+    /// Poses the map-pin bubble beside Message.
+    ///
+    /// Visibility is NOT decided here: `ProfileViewModel.MapPinButton` resolves
+    /// the relationship rule (only a profile the viewer follows can be pinned)
+    /// together with whether the app was even wired for pinning, so the view
+    /// renders one finished answer instead of re-deriving it from a second
+    /// copy of the rule.
+    func configureMapPin(_ state: ProfileViewModel.MapPinButton) {
+        mapPinButton.isHidden = state == .hidden
+        guard state != .hidden else { return }
+        let isPinned = state == .pinned
+        mapPinButton.configuration = Self.glassBubble(
+            systemImage: Self.mapPinSymbol(isPinned: isPinned)
+        )
+        // The label says what a tap DOES, not what the icon depicts — the
+        // glyph pair is a state, and VoiceOver users get no glyph.
+        mapPinButton.accessibilityLabel = isPinned ? "Unpin from map" : "Pin on map"
+    }
+
+    /// Filled when pinned, outlined when not — the same read as a bookmark.
+    /// `mappin` rather than a generic pin because the map's own Places pill
+    /// already speaks that family (`mappin.and.ellipse`).
+    private static func mapPinSymbol(isPinned: Bool) -> String {
+        isPinned ? "mappin.circle.fill" : "mappin.circle"
     }
 
     // MARK: - Redaction
@@ -549,6 +580,16 @@ final class ProfileHeaderView: UIView {
             for: .primaryActionTriggered
         )
 
+        // Same bubble as QR and see-more, but sitting with the LEADING capsule
+        // rather than with the trailing pair: it acts on the person Message
+        // acts on, so it belongs beside it.
+        mapPinButton.configuration = Self.glassBubble(systemImage: Self.mapPinSymbol(isPinned: false))
+        mapPinButton.isHidden = true
+        mapPinButton.addAction(
+            UIAction { [weak self] _ in self?.onMapPinTapped?() },
+            for: .primaryActionTriggered
+        )
+
         qrCodeButton.configuration = Self.glassBubble(systemImage: "qrcode")
         qrCodeButton.addAction(
             UIAction { [weak self] _ in self?.onQRCodeTapped?() },
@@ -570,16 +611,33 @@ final class ProfileHeaderView: UIView {
         let traySpacer = UIView()
         traySpacer.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
         let actionRow = UIStackView(
-            arrangedSubviews: [messageButton, editButton, traySpacer, qrCodeButton, moreButton]
+            arrangedSubviews: [messageButton, editButton, mapPinButton, traySpacer, qrCodeButton, moreButton]
         )
         actionRow.axis = .horizontal
         actionRow.alignment = .fill
         actionRow.distribution = .fill
         actionRow.spacing = Spacing.sm
-        // Whichever leading capsule shows hugs the spacer (the other is hidden).
-        actionRow.setCustomSpacing(0, after: messageButton)
+        // The leading group (capsule + map pin) keeps its own gap; the spacer
+        // IS the gap to the trailing bubbles, so its neighbours take zero.
         actionRow.setCustomSpacing(0, after: editButton)
+        actionRow.setCustomSpacing(0, after: mapPinButton)
         actionRow.setCustomSpacing(0, after: traySpacer)
+        // ⚠️ The map pin is the one bubble that HIDES, and it must not carry
+        // the square tie the other two do. `height == width` is required, the
+        // row is `.fill` (every arranged subview's height equals the row's,
+        // also required), and a hidden arranged subview gets its width forced
+        // to zero by the stack — three required constraints that cannot all
+        // hold. UIKit then broke one of the row's own, and the whole tray
+        // spilled out of the identity column: the Message label landed on the
+        // counters and the QR bubble in the corner, on every profile the
+        // viewer does not follow.
+        //
+        // Width alone is enough: `.fill` supplies the height, and at a 44pt
+        // row that is the same 44x44 circle.
+        let pinWidth = mapPinButton.widthAnchor.constraint(equalToConstant: Metrics.bubbleSize)
+        pinWidth.priority = UILayoutPriority(999)
+        pinWidth.isActive = true
+
         for bubble in [qrCodeButton, moreButton] {
             // The diameter is 999, not required: on the narrowest devices the
             // tray can overrun the column beside the avatar, and the bubbles

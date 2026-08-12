@@ -2,6 +2,7 @@ import MediaCore
 import CoreModels
 import CoreNavigation
 import FeedInterface
+import MapsInterface
 import MediaPlayback
 import CoreStorage
 import PostGrid
@@ -99,6 +100,10 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         let controller = ProfileViewController(
             viewModel: ProfileViewModel(
                 repository: repository,
+                // Harmless here: the pin is never offered on your own profile
+                // (you cannot follow yourself), so this is wired for symmetry
+                // rather than for a button that could appear.
+                mapPinning: mapPinning,
                 reporting: reporting,
                 gallery: gallery,
                 galleryPreferences: galleryPreferences,
@@ -149,6 +154,10 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// Nil leaves taps on the plain route — the same feed, without the flight.
     /// The shared player pool, so profile video autoplays on the same terms
     /// as every other surface. Nil leaves profiles as stills.
+    /// Curates the map's pinned people, for the header's pin button. Set by
+    /// the composition root — the only place that can see both features — and
+    /// nil leaves the button unoffered rather than inert.
+    public var mapPinning: (any MapProfilePinning)?
     public var videoPlayback: VideoPlaybackController?
     public var openFeedHero: (([PostID], UIViewController, SnapFeedHeroOrigin) -> Void)?
 
@@ -156,6 +165,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         let controller = ProfileViewController(
             viewModel: ProfileViewModel(
                 repository: repository,
+                mapPinning: mapPinning,
                 reporting: reporting,
                 gallery: gallery,
                 galleryPreferences: galleryPreferences,
