@@ -29,6 +29,28 @@ public final class VideoPlaybackController {
     /// A player detached from its view but still running, waiting for the next
     /// `play` of the same URL to adopt it. See `parkPlayback(from:)`.
     private var parked: (url: URL, player: AVPlayer)?
+
+    /// Players holding a prepared, ALREADY BUFFERING item for a page the viewer
+    /// has not reached yet — the n±1 the feed prefetches around the active page.
+    ///
+    /// Distinct from `parked`, which is flight-scoped, singular, and carries a
+    /// live playhead from one surface to another. These carry no playhead and
+    /// no surface: they exist only so the next `play` can skip the two things
+    /// that actually cost time — resolving the source, and filling a cold
+    /// buffer — and start rendering on the frame it is asked to.
+    private var warm: [URL: AVPlayer] = [:]
+    /// Insertion order, for eviction. Two is the working set the feed asks for
+    /// (the page ahead and the page behind); a third would hold a pool slot for
+    /// a page two swipes away, which is speculation the pool cannot afford.
+    private var warmOrder: [URL] = []
+    private let warmLimit = 2
+    /// How much to buffer ahead on a warm item, in seconds.
+    ///
+    /// Zero would mean "AVFoundation's choice", which for a paused item it has
+    /// no reason to hurry over. Naming a small figure is what makes the warm
+    /// actually warm; naming a large one would have every prefetched page
+    /// competing for bandwidth with the page being watched.
+    private let warmForwardBuffer: TimeInterval = 2
     /// The frame renderer for each pooled player, under `-avsbdl-render`.
     ///
     /// Keyed by **player**, not by view, and that is the whole idea: the
@@ -83,6 +105,31 @@ public final class VideoPlaybackController {
             activePlayers[key] = parked.player
             playingURL[key] = mediaURL
             parked.player.play()
+            return
+        }
+
+        // A player warmed for this asset is adopted the same way a parked one
+        // is: synchronously, item intact, no resolution and no await. This is
+        // the whole point of the preroll — by here the item exists and has
+        // buffered, so `play` is a state change rather than a load.
+        //
+        // Checked AFTER `parked` deliberately. A parked player carries a live
+        // playhead from a surface the viewer was just watching; a warm one
+        // starts at zero. When both exist for one URL the parked one is the
+        // truthful answer, and the warm one is evicted rather than raced.
+        if let ready = takeWarm(mediaURL) {
+            detach(key: key, view: view)
+            ready.currentItem?.preferredPeakBitRate = peakBitRate
+            bind(ready, to: view)
+            activePlayers[key] = ready
+            playingURL[key] = mediaURL
+            ready.play()
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-video-warm-log") {
+                print(String(format: "[video-warm] %.3f ADOPTED warm player for %@",
+                             CACurrentMediaTime(), mediaURL.lastPathComponent))
+            }
+            #endif
             return
         }
 
@@ -395,11 +442,135 @@ public final class VideoPlaybackController {
         return nil
     }
 
-    /// Warms the source (synthesis/cache) for an upcoming page so its `play` is
-    /// instant. No player is loaned.
+    /// Prepares an upcoming page's video so its `play` is a state change rather
+    /// than a load: resolves the source, mints the item, and lets it BUFFER.
+    ///
+    /// ⚠️ This used to resolve the URL and stop — "no player is loaned" — which
+    /// warmed the cheapest third of the work and left the two expensive parts
+    /// (item creation, and filling a cold forward buffer) to happen at
+    /// activation, where they are the pause the viewer sees on a scroll. An
+    /// `AVPlayerItem` does not buffer on its own; it buffers because a player
+    /// holds it. So a player is loaned now, and that is the change.
+    ///
+    /// **Never at the expense of what is playing.** The pool is app-wide and
+    /// shared with the grids, so a warm is taken only from genuine spare
+    /// capacity: no idle player means no warming, and the page the viewer
+    /// reaches simply pays the old cost. Warming that could starve an active
+    /// surface would trade a visible stall for a worse one.
     public func preroll(_ mediaURL: URL) {
+        // Already answered by something better: the flight's parked player
+        // carries a live playhead, a warm one is already prepared, and a URL
+        // on screen is not "upcoming".
+        guard parked?.url != mediaURL,
+              warm[mediaURL] == nil,
+              !playingURL.values.contains(mediaURL)
+        else { return }
+        // Spare capacity only — and capacity is what the pool is ALLOWED to
+        // hold, not what it happens to have minted.
+        //
+        // ⚠️ This first read `idlePlayers.isEmpty`, which is empty on a fresh
+        // controller because players are minted lazily. That gate meant warming
+        // essentially never ran — the same shape of failure as the preroll it
+        // replaced, and caught only because the test asked whether anything was
+        // actually held rather than whether the call returned.
+        guard activePlayers.count + warm.count < poolSize else {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-video-warm-log") {
+                print(String(format: "[video-warm] %.3f DECLINED %@ — pool has no spare player",
+                             CACurrentMediaTime(), mediaURL.lastPathComponent))
+            }
+            #endif
+            return
+        }
         let source = source
-        Task { _ = try? await source.playableURL(for: mediaURL) }
+        Task { [weak self] in
+            guard let playableURL = try? await source.playableURL(for: mediaURL) else { return }
+            self?.holdWarm(mediaURL, playableURL: playableURL)
+        }
+    }
+
+    /// Mints the warm player once the URL has resolved.
+    ///
+    /// Re-checks everything `preroll` checked: the await is a window in which
+    /// the page can have been reached, the flight can have parked, or the pool
+    /// can have run dry.
+    private func holdWarm(_ mediaURL: URL, playableURL: URL) {
+        guard parked?.url != mediaURL,
+              warm[mediaURL] == nil,
+              !playingURL.values.contains(mediaURL),
+              activePlayers.count + warm.count < poolSize
+        else { return }
+        // Reuse an idle player when there is one; mint otherwise, exactly as
+        // the play path does. The budget above is what bounds this, not the
+        // happenstance of what has been minted so far.
+        let player = idlePlayers.popLast() ?? AVPlayer()
+        let item = AVPlayerItem(url: playableURL)
+        item.preferredForwardBufferDuration = warmForwardBuffer
+        installLoop(for: player, item: item)
+        player.replaceCurrentItem(with: item)
+        renderer(for: player)?.setItem(item)
+        player.isMuted = true
+        player.actionAtItemEnd = .none
+        // Paused, but holding the item: this is what fills the buffer. Nothing
+        // is bound to a surface, so none of it is on screen.
+        player.pause()
+        warm[mediaURL] = player
+        warmOrder.append(mediaURL)
+        evictWarmBeyondLimit()
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-video-warm-log") {
+            print(String(format: "[video-warm] %.3f WARMED %@ (holding %d)",
+                         CACurrentMediaTime(), mediaURL.lastPathComponent, warm.count))
+        }
+        #endif
+    }
+
+    /// Hands out a warm player, removing it from the set.
+    private func takeWarm(_ mediaURL: URL) -> AVPlayer? {
+        guard let player = warm.removeValue(forKey: mediaURL) else { return nil }
+        warmOrder.removeAll { $0 == mediaURL }
+        return player
+    }
+
+    /// Returns the oldest warm players to the pool once the set is over budget.
+    private func evictWarmBeyondLimit() {
+        while warmOrder.count > warmLimit, let oldest = warmOrder.first {
+            warmOrder.removeFirst()
+            guard let player = warm.removeValue(forKey: oldest) else { continue }
+            releaseWarm(player)
+        }
+    }
+
+    /// Gives a warm player back: the item goes, the loop observer goes, the
+    /// renderer stops holding the display link, and the player rejoins the idle
+    /// pool exactly as `detach` leaves one.
+    private func releaseWarm(_ player: AVPlayer) {
+        player.pause()
+        removeLoop(for: player)
+        player.replaceCurrentItem(with: nil)
+        renderers[ObjectIdentifier(player)]?.invalidate()
+        if idlePlayers.count < poolSize { idlePlayers.append(player) }
+    }
+
+    #if DEBUG
+    /// The URLs currently held warm. The warm set is invisible from outside —
+    /// no surface, no playhead — so this is the only way a test can tell a
+    /// preroll that buffered from one that resolved a string and stopped.
+    public var debugWarmedURLs: [URL] { warmOrder }
+    #endif
+
+    /// Drops every warm player — the pool's pressure valve.
+    ///
+    /// Warming is an optimisation and holds real resources (a player, a decode
+    /// pipeline, an open connection). Under memory pressure, or when a surface
+    /// goes away, it is the first thing to give back.
+    public func discardWarmedPlayback() {
+        for url in warmOrder {
+            guard let player = warm[url] else { continue }
+            releaseWarm(player)
+        }
+        warm.removeAll()
+        warmOrder.removeAll()
     }
 
     // MARK: - Internals
