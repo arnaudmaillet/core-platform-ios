@@ -15,29 +15,40 @@ final class MapPinZoomSource: ZoomTransitionSource {
     private weak var mapView: MKMapView?
     private let annotation: any MKAnnotation
     private let thumbnail: UIImage?
+    /// The face the tapped marker was wearing. A text pin has no thumbnail, so
+    /// without this the flight card would take off as an empty square from a
+    /// marker the viewer just saw showing a symbol.
+    private let face: PinCardView.Face
     /// Mirrors the pin's live preview player onto the flight card's render
     /// surface; returns whether the pin was actually live. `nil` when the
     /// source can't be live (a cluster, or no playback coordinator).
     private let mirrorLive: ((VideoRenderView) -> Bool)?
-    /// Matches `MapAnnotationView`'s square so the hero starts pin-sized.
-    private let side: CGFloat = MapAnnotationView.side
+    /// Matches the tapped marker's own geometry so the hero starts pin-sized —
+    /// 56 for a media square, 44 for a text circle. Taking it from the face is
+    /// what keeps the handshake exact for both: a text pin whose flight started
+    /// at 56 would jump a size the instant the card replaced it.
+    private var side: CGFloat { face.side }
 
     /// - Parameters:
     ///   - annotation: the tapped pin *or* cluster; its coordinate anchors the
     ///     hero and lets a dismiss re-find it after the map pans.
     ///   - thumbnail: the pin's cover image to fly (nil for a cluster → a plain
     ///     square).
+    ///   - face: which `PinCardView` face the marker was wearing — `.text`
+    ///     flies the symbol, `.media` flies `thumbnail`.
     ///   - mirrorLive: attaches the pin's live preview player to the flight
     ///     card's surface, so an animating pin flies live instead of freezing.
     init(
         mapView: MKMapView,
         annotation: any MKAnnotation,
         thumbnail: UIImage?,
+        face: PinCardView.Face = .media,
         mirrorLive: ((VideoRenderView) -> Bool)? = nil
     ) {
         self.mapView = mapView
         self.annotation = annotation
         self.thumbnail = thumbnail
+        self.face = face
         self.mirrorLive = mirrorLive
     }
 
@@ -47,6 +58,7 @@ final class MapPinZoomSource: ZoomTransitionSource {
     /// flight carries the live video rather than a frozen copy of it.
     func makeZoomFlightCard() -> any ZoomFlightCard {
         let card = PinCardView()
+        card.setFace(face)
         card.imageView.image = thumbnail
         if let mirrorLive {
             card.adoptZoomLiveMedia { surface in

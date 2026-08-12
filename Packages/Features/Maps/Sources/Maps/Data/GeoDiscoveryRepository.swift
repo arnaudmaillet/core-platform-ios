@@ -1,7 +1,6 @@
 import CoreContracts
 import CoreModels
 import Foundation
-import MediaCore
 
 public enum GeoDiscoveryError: Error, Equatable, Sendable {
     case transport(message: String)
@@ -77,49 +76,58 @@ public actor GeoDiscoveryRepository: GeoDiscoveryProviding {
     }
 
     /// A `RadarPin` becomes a `MapPin` only if it carries a post id. An empty
-    /// `thumbnail_url` (text-only post) maps to a `nil` URL rather than a broken
-    /// marker image.
+    /// `thumbnail_url` maps to a `nil` URL rather than a broken marker image,
+    /// and classifies the pin as `.text` — see `kind(for:)`.
     static func makePin(from pin: GeoDiscovery_V1_RadarPin) -> MapPin? {
         guard !pin.postID.isEmpty else { return nil }
         let thumbnailURL = pin.thumbnailURL.isEmpty ? nil : URL(string: pin.thumbnailURL)
-        let kind = mediaKind(for: pin)
+        let kind = kind(for: pin)
         return MapPin(
             postID: PostID(pin.postID),
             latitude: pin.lat,
             longitude: pin.lng,
             thumbnailURL: thumbnailURL,
-            mediaKind: kind,
+            kind: kind,
             previewVideoURL: previewVideoURL(for: pin, kind: kind, thumbnailURL: thumbnailURL)
         )
     }
 
-    /// Stubbed photo-vs-video discriminator. `RadarPin` has no media kind on the
-    /// wire yet — the additive `media.v1.MediaKind media_kind = 5` field is not
-    /// published to BSR — so in production every pin reads as an image and the
-    /// play badge / live-preview autoplay stay dark.
+    /// What the pin renders as.
     ///
-    /// When the field ships and the contracts are regenerated, replace the
-    /// production branch with `pin.mediaKind == .video ? .video : .image` (and
-    /// add the `.video` case to `media.v1.MediaKind`).
+    /// **An empty `thumbnail_url` is the only "this post is text" signal the
+    /// wire has.** `RadarPin` is `post_id`, `lat`, `lng`, `thumbnail_url` and
+    /// nothing else — the additive `media.v1.MediaKind media_kind = 5` field is
+    /// not published to BSR (`dev/BACKEND_GAPS.md` §15). So a media post whose
+    /// thumbnail the backend never generated also reads as `.text` here. That
+    /// is the safe direction: a symbol marker is a legible pin, where a media
+    /// pin with no cover is the blank grey square this classification exists to
+    /// remove. It resolves exactly when field 5 ships.
+    ///
+    /// Photo-vs-video stays stubbed for the same reason — in production every
+    /// media pin reads as `.photo` and the play badge / live-preview autoplay
+    /// stay dark. When the field ships and the contracts are regenerated,
+    /// replace the media branch with `pin.mediaKind == .video ? .video : .photo`
+    /// (and add the `.video` case to `media.v1.MediaKind`).
     ///
     /// `-maps-force-video` (DEBUG) treats mock `video/*` pins as video so the
     /// badge and autoplay pool can be exercised live in the simulator before the
     /// field lands.
-    static func mediaKind(for pin: GeoDiscovery_V1_RadarPin) -> MediaKind {
+    static func kind(for pin: GeoDiscovery_V1_RadarPin) -> MapPin.Kind {
+        guard !pin.thumbnailURL.isEmpty else { return .text }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-maps-force-video"),
            pin.thumbnailURL.contains("video") {
             return .video
         }
         #endif
-        return .image
+        return .photo
     }
 
     /// The looping preview URL for a video pin. `nil` in production (Radar
     /// carries no video URL). Under `-maps-force-video`, the mock's
     /// `mock://video/*` thumbnail doubles as a synthesizable clip, so the pool
     /// has something real to play.
-    static func previewVideoURL(for pin: GeoDiscovery_V1_RadarPin, kind: MediaKind, thumbnailURL: URL?) -> URL? {
+    static func previewVideoURL(for pin: GeoDiscovery_V1_RadarPin, kind: MapPin.Kind, thumbnailURL: URL?) -> URL? {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-maps-force-video"), kind == .video {
             return thumbnailURL

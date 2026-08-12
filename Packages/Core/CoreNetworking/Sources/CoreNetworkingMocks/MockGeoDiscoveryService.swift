@@ -8,12 +8,22 @@ import Foundation
 ///
 /// The mock dataset has no coordinates, so pins are scattered deterministically
 /// around central Paris (matching the map's default region) from the post's
-/// index. Only posts with media are indexed — text-only posts are never placed
-/// on the map (mirrors the backend's DOMAIN §6: no location → not indexed).
+/// index. **Every** post is indexed, media or not: a text-only post is a pin
+/// with an empty `thumbnail_url`, which is the only way `RadarPin` can say "no
+/// cover" and is what the client classifies as a text marker. The scatter is
+/// keyed on the post's index in the corpus, not on its position among the
+/// mapped subset, so which posts are indexed does not move the others.
 /// The result is filtered to the requested viewport and Top-K capped, so pan/
 /// zoom and clustering behave like the real service without a fleet.
+///
+/// On top of that scatter sit three VENUES — addresses whose posts share one
+/// exact coordinate, mixing kinds on purpose. Without them the fixture had a
+/// property no real corpus has: every post at a distinct point, so nothing ever
+/// clustered until the viewer zoomed out. See `venueAssignments`.
 public final class MockGeoDiscoveryService: @unchecked Sendable {
     private let dataset: MockSocialDataset
+    /// Posts pinned to a shared VENUE coordinate — see `venueAssignments`.
+    private let venues: [String: Venue]
 
     /// Central Paris — the map's default region centers here.
     private static let baseLat = 48.8566
@@ -25,6 +35,62 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
 
     public init(dataset: MockSocialDataset) {
         self.dataset = dataset
+        self.venues = Self.venueAssignments(for: dataset.posts)
+    }
+
+    // MARK: - Venues
+
+    /// A place several posts were published FROM, at one identical coordinate.
+    struct Venue: Sendable {
+        let name: String
+        let lat: Double
+        let lng: Double
+    }
+
+    /// Three addresses inside the map's opening viewport (±0.045° of centre),
+    /// spaced well beyond one collision cell (~0.014° at that zoom) so they
+    /// stay three separate markers rather than merging into one.
+    ///
+    /// The scatter alone gives every post its own coordinate — measured: at the
+    /// default region, 10 pins produce 10 markers and ZERO clusters, and no two
+    /// posts anywhere share a coordinate. Clusters therefore only appeared when
+    /// zoomed out, which made "tap a marker, get one post" look like a rule
+    /// about text posts when it was really a rule about lone pins. Real corpora
+    /// are not like that: a café, a venue, a viewpoint accumulates posts at one
+    /// address, of every kind.
+    ///
+    /// The three exist to make each case reachable at the zoom the app opens at:
+    /// - `mixed` — text AND media at one address. Its face is whichever kind
+    ///   its lowest-id member is (the representative is kind-neutral), and the
+    ///   tap opens all of them, both kinds, in one swipeable feed.
+    /// - `textOnly` — an address with nothing but words, so the all-text case
+    ///   is pinned deterministically rather than left to id arithmetic.
+    /// - `mediaOnly` — the control, so the other two can be read as "same
+    ///   machinery, different contents" rather than as special cases.
+    static let mixedVenue = Venue(name: "mixed", lat: 48.8640, lng: 2.3400)
+    static let textOnlyVenue = Venue(name: "text-only", lat: 48.8480, lng: 2.3660)
+    static let mediaOnlyVenue = Venue(name: "media-only", lat: 48.8500, lng: 2.3380)
+
+    /// Walks the corpus in order and hands the first few posts of each kind to
+    /// a venue, so the assignment is deterministic and survives a reseed.
+    ///
+    /// ⚠️ This is the ONE place in the pipeline that reads a post's kind to
+    /// decide where it goes, and it is a fixture: the point is to co-locate
+    /// kinds deliberately so the client's kind-BLIND clustering has something
+    /// to prove itself on. Nothing downstream — not the tile query, not the
+    /// engine — asks what a post is in order to group it.
+    private static func venueAssignments(for posts: [MockSocialDataset.PostRecord]) -> [String: Venue] {
+        var assignments: [String: Venue] = [:]
+        var text = posts.lazy.filter { $0.media == nil }.map(\.postID).makeIterator()
+        var media = posts.lazy.filter { $0.media != nil }.map(\.postID).makeIterator()
+        func assign(_ venue: Venue, text textCount: Int, media mediaCount: Int) {
+            for _ in 0..<textCount { if let id = text.next() { assignments[id] = venue } }
+            for _ in 0..<mediaCount { if let id = media.next() { assignments[id] = venue } }
+        }
+        assign(mixedVenue, text: 2, media: 3)
+        assign(textOnlyVenue, text: 3, media: 0)
+        assign(mediaOnlyVenue, text: 0, media: 3)
+        return assignments
     }
 
     /// What a pin puts in its single `thumbnail_url` field.
@@ -42,7 +108,7 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     /// - Under `-maps-force-video` — the lightweight **preview loop**, never
     ///   the full stream. A pin must not be able to open an HLS ladder mid-pan,
     ///   which is the whole point of the contract ask. Its `mock-kind=video`
-    ///   marker is what `GeoDiscoveryRepository.mediaKind(for:)` matches on.
+    ///   marker is what `GeoDiscoveryRepository.kind(for:)` matches on.
     static func pinURL(forMediaURL url: String, catalog: MockSocialDataset.MediaCatalog) -> String {
         guard catalog == .realAssets, MockMediaFixtures.isVideoURL(url) else { return url }
         return forcesMapVideo
@@ -75,8 +141,10 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         var response = GeoDiscovery_V1_QueryTileResponse()
 
         let pins = dataset.posts.enumerated().compactMap { index, post -> GeoDiscovery_V1_RadarPin? in
-            guard let media = post.media else { return nil } // text-only posts aren't mapped
-            let (lat, lng) = Self.coordinate(forIndex: index)
+            // A venue's members share ONE coordinate exactly, so they cluster
+            // at every zoom; everything else keeps its own scattered point.
+            let (lat, lng) = venues[post.postID].map { ($0.lat, $0.lng) }
+                ?? Self.coordinate(forIndex: index)
             guard Self.contains(viewport: viewport, lat: lat, lng: lng),
                   matches(filter: filter, post: post, lat: lat, lng: lng, viewport: viewport)
             else { return nil }
@@ -85,7 +153,13 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
             pin.postID = post.postID
             pin.lat = lat
             pin.lng = lng
-            pin.thumbnailURL = Self.pinURL(forMediaURL: media.url, catalog: dataset.mediaCatalog)
+            // A text-only post is indexed like any other, with an EMPTY
+            // thumbnail — the only way the wire can say "no cover" (`RadarPin`
+            // has no media kind). The client reads that as `MapPin.Kind.text`
+            // and gives the marker a symbol face.
+            pin.thumbnailURL = post.media.map {
+                Self.pinURL(forMediaURL: $0.url, catalog: dataset.mediaCatalog)
+            } ?? ""
             return pin
         }
 

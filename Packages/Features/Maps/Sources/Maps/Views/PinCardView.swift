@@ -14,14 +14,29 @@ import UIKit
 /// too. During a flight the animator animates `frame`, `setCornerRadius`, and
 /// `ringView.alpha` — everything else tracks via autoresizing.
 final class PinCardView: UIView {
-    /// The radius the card renders at pin size (and flies from/to).
-    static let cornerRadius: CGFloat = 12
+    /// The radius a MEDIA card renders at pin size (and flies from/to). A text
+    /// card is a circle instead — see `Face.cornerRadius`, which reads this and
+    /// so must be able to from outside the main actor.
+    nonisolated static let cornerRadius: CGFloat = 12
     static let ringWidth: CGFloat = 2
+
+    /// The glyph a text-only post's marker shows in place of a cover. Product
+    /// vocabulary for a text post elsewhere in the app is "Short"
+    /// (`GalleryFilter.short`).
+    static let textSymbolName = "text.alignleft"
+    /// Point size of that glyph inside the 44pt circle — ~40% of the diameter,
+    /// which reads at pin size while leaving a ring of the tinted ground
+    /// visible as its own signal.
+    static let textSymbolPointSize: CGFloat = 18
 
     /// The post's cover image, full-bleed aspect-fill. During a frame-animated
     /// flight the crop *morphs* between the pin's square and the page's
     /// full-bleed rect — CoreAnimation re-applies the fill gravity every frame.
     let imageView = UIImageView()
+    /// The text-only face, above the (empty) cover and below the ring. Hidden
+    /// for every media pin, so a recycled view must be told which face to wear
+    /// on every configure — see `setFace(_:)`.
+    private let textFaceView = PinTextFaceView()
     /// Live-preview surface above the image, hidden until playback attaches.
     let videoRenderView = VideoRenderView()
     /// The pin's border, drawn above the media so it survives live previews.
@@ -49,6 +64,11 @@ final class PinCardView: UIView {
         videoRenderView.isHidden = true
         addSubview(videoRenderView)
 
+        textFaceView.frame = bounds
+        textFaceView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        textFaceView.isHidden = true
+        addSubview(textFaceView)
+
         ringView.isUserInteractionEnabled = false
         ringView.layer.borderWidth = Self.ringWidth
         ringView.layer.borderColor = UIColor.systemBackground.cgColor
@@ -66,6 +86,66 @@ final class PinCardView: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Which face the card wears — and, with it, the marker's whole resting
+    /// geometry.
+    ///
+    /// Defined here, on the ONE component the pin, the cluster marker and the
+    /// hero's flying card all render, so a text post looks the same on all
+    /// three by construction rather than by three surfaces agreeing — the same
+    /// reason the radius, border and crop rules live here. A surface that wants
+    /// a marker's size asks the face; nothing re-derives 56 or 44 locally.
+    enum Face: Equatable {
+        /// The post's cover image, loaded into `imageView`.
+        case media
+        /// A symbol on a tinted ground: a text-only post has no cover to show.
+        case text
+
+        /// The marker's resting side. A text post carries no image worth
+        /// showing at cover size, so its marker is deliberately smaller than a
+        /// media pin — the map stays a field of photographs with text posts
+        /// reading as lighter punctuation between them, rather than two equal
+        /// squares competing for the same attention.
+        var side: CGFloat {
+            switch self {
+            case .media: 56
+            case .text: 44
+            }
+        }
+
+        /// The resting corner radius. Half the side turns the square into a
+        /// circle, which is what separates a text marker from a media one at a
+        /// glance even before the glyph resolves.
+        var cornerRadius: CGFloat {
+            switch self {
+            case .media: PinCardView.cornerRadius
+            case .text: side / 2
+            }
+        }
+    }
+
+    /// The face currently worn. Its `cornerRadius` is the card's RESTING radius
+    /// — read by the hero flight as the endpoint it sweeps to, so it has to be
+    /// a constant of the face and never derived from the card's live bounds
+    /// (mid-flight those are the page's).
+    private(set) var face: Face = .media
+
+    /// Poses the card for `face`, including its resting shape. Sizing the card
+    /// itself stays with the caller — an annotation view owns its own frame,
+    /// and the flight card is posed by the animator.
+    ///
+    /// Idempotence is the CALLER's business (an annotation view re-configures
+    /// every surviving marker on each reconcile), but this is safe to call
+    /// repeatedly — it only sets state.
+    func setFace(_ face: Face) {
+        self.face = face
+        textFaceView.isHidden = face != .text
+        // The media ground is black so a letterboxed cover reads as framed; a
+        // text card's ground is the face's own tint, and the black would show
+        // through its corner curve.
+        backgroundColor = face == .text ? .clear : .black
+        setCornerRadius(face.cornerRadius)
+    }
 
     /// Rounds the card and its ring together. Both properties are
     /// UIView-animatable, so calling this inside an animation block sweeps the
@@ -99,13 +179,60 @@ final class PinCardView: UIView {
 
 }
 
+// MARK: - Text face
+
+/// The face a text-only post's marker wears: a centred SF Symbol on a tinted
+/// ground. First iteration of the custom text marker — deliberately built from
+/// the same 56pt square, ring and shadow as a media pin, so the hero flight's
+/// frame-0 handshake and the cluster grid's collision size stay exactly as they
+/// were and only the *face* differs.
+///
+/// The ground is opaque (an accent wash over the system background) rather than
+/// a translucent tint: a marker sits on map tiles of any colour, and a
+/// see-through card makes the glyph unreadable over a park or a motorway.
+///
+/// Colours are `UIColor`s, not `CGColor`s, so dark/light follows the trait
+/// change on its own — the trap `PinCardView.ringView` needs a registration to
+/// work around.
+private final class PinTextFaceView: UIView {
+    private let wash = UIView()
+    private let glyph = UIImageView()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .systemBackground
+
+        wash.backgroundColor = UIColor.tintColor.withAlphaComponent(0.22)
+        wash.frame = bounds
+        wash.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        wash.isUserInteractionEnabled = false
+        addSubview(wash)
+
+        glyph.image = UIImage(systemName: PinCardView.textSymbolName)?
+            .withConfiguration(UIImage.SymbolConfiguration(
+                pointSize: PinCardView.textSymbolPointSize, weight: .semibold
+            ))
+        glyph.tintColor = .tintColor
+        glyph.contentMode = .center
+        glyph.frame = bounds
+        glyph.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        glyph.isUserInteractionEnabled = false
+        addSubview(glyph)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+}
+
 // MARK: - ZoomFlightCard
 
 /// The pin's face IS the hero's flying card, which is what makes the frame-0
 /// handshake exact rather than agreed. The shared machinery poses it through
 /// this conformance and never names `PinCardView`.
 extension PinCardView: ZoomFlightCard {
-    var zoomRestingCornerRadius: CGFloat { Self.cornerRadius }
+    /// The face's radius, not the card's current one: mid-flight the card is
+    /// page-shaped, and this is the endpoint the sweep runs back to.
+    var zoomRestingCornerRadius: CGFloat { face.cornerRadius }
 
     /// The pin's border, which must not survive into the page pose.
     var zoomRestingChrome: UIView? { ringView }

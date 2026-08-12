@@ -103,7 +103,7 @@ public enum MockMediaFixtures {
     /// the cheap looping clip a **map pin** plays. Nothing else should use it.
     ///
     /// The `mock-kind=video` query item is a marker, not a server parameter —
-    /// it lets `GeoDiscoveryRepository.mediaKind(for:)` keep recognising a
+    /// it lets `GeoDiscoveryRepository.kind(for:)` keep recognising a
     /// video pin by URL shape under `-maps-force-video` now that the URL is no
     /// longer `mock://video/…`. The origin ignores it (verified 206).
     public static let mapPreviewLoop = Video(
