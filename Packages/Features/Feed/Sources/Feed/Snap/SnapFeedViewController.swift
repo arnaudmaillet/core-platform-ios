@@ -1858,11 +1858,35 @@ final class SnapFeedViewController: UIViewController {
     ///
     /// Applied per settled page (`updateBarChrome`) and re-applied on
     /// appearance, since the bars are shared with whatever the feed pushes.
+    ///
+    /// THE BARS ONLY — never this controller's own view tree.
+    ///
+    /// The bars follow the SETTLED page, which is right for them: they are one
+    /// shared pair of surfaces and there is no sensible half-way pose while two
+    /// pages are on screen. A PAGE's theme is a different clock — it arrives on
+    /// the VISIBILITY seam, with the cell, and every cell already declares its
+    /// own in `configure` (`.dark` over media, `.unspecified` over a text
+    /// page's adaptive ground).
+    ///
+    /// Pinning the controller here put those two clocks in conflict, because
+    /// `.unspecified` means INHERIT and this view is every cell's ancestor: a
+    /// text page scrolled to from a media page wore the OUTGOING page's `.dark`
+    /// for the entire scroll, flipping to light in a single frame when the
+    /// settle finally re-themed the controller. Measured at ~870ms of
+    /// dark-themed page (luma 7) ending in a one-frame jump to light (luma 89).
+    ///
+    /// Worth knowing when reading that signature again: a theme flip and a page
+    /// that paints late look IDENTICAL in luma. The two are told apart by
+    /// comparing frames — same layout and content in a different appearance is
+    /// this bug; blank-then-populated is a mount, which the resting pre-render
+    /// in `willDisplay` answers for.
+    ///
+    /// Nothing else lives in this view tree (the collection view is its only
+    /// subview, and its cells self-declare), so the pin bought nothing.
     private func applyChromeTheme(hasMedia: Bool) {
         let style = SnapChromeTheme.style(hasMedia: hasMedia)
         navigationController?.navigationBar.overrideUserInterfaceStyle = style
         navigationController?.toolbar.overrideUserInterfaceStyle = style
-        overrideUserInterfaceStyle = style
     }
 
     /// Hands the shared bars back before anything else uses them.
@@ -1874,7 +1898,6 @@ final class SnapFeedViewController: UIViewController {
     private func releaseChromeTheme() {
         navigationController?.navigationBar.overrideUserInterfaceStyle = .unspecified
         navigationController?.toolbar.overrideUserInterfaceStyle = .unspecified
-        overrideUserInterfaceStyle = .unspecified
     }
 
     /// The settled page's model — what the toolbar's share/more act on.
@@ -1973,6 +1996,28 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         if let snapCell = cell as? SnapFeedCell, orderedIDs.indices.contains(indexPath.item) {
             let id = orderedIDs[indexPath.item]
             if let model = modelsByID[id], model.mediaURL == nil, commentsEngagedID == nil {
+                // A WARM PANEL YIELDS TO A REAL ONE.
+                //
+                // The warm belongs to the page being scrolled AWAY from: it is
+                // speculative, it is invisible (installed at alpha 0), and it
+                // holds `commentsContentVC` — one of the two slots
+                // `presentRestingComments` requires. So a text page scrolled to
+                // from any settled MEDIA page (which warms on its settle seam)
+                // found the slot taken and pre-rendered NOTHING.
+                //
+                // On screen that is a blank page for the whole transition —
+                // a text page's chrome is stripped bare (no scrim, caption,
+                // ticker, subtitle or compose anchor, see
+                // `SnapChromeView.configure`), so the hosted panel IS its
+                // visible content — which then appears in one frame at settle,
+                // where `apply`'s resign leg finally discards the warm and its
+                // activate leg re-runs this mount. That is the whole point of
+                // pre-rendering on visibility, defeated by a cache.
+                //
+                // Discarding here is free: nothing on screen changes (alpha 0),
+                // the resign leg would have dropped it moments later anyway, and
+                // `rewarmActivePageComments` rebuilds it if the page comes back.
+                discardPrewarmedComments()
                 presentRestingComments(for: id, host: snapCell)
             }
             // PHASE 2, when this cell is ALREADY the active page.
