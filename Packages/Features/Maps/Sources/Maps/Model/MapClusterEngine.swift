@@ -22,11 +22,24 @@ import MapKit
 enum MapClusterEngine {
     /// One thing to draw: a lone pin (`memberIDs.count == 1`) or a group.
     struct Item: Equatable {
-        /// The pin whose face the marker shows — the group's stable
-        /// representative (lowest post id), or the lone pin itself.
+        /// The pin whose face the marker shows — the group's lowest-id member,
+        /// of whatever kind (see `representative(of:)`), or the lone pin itself.
         let representative: MapPin
-        /// Every post folded into this marker, representative included,
-        /// ascending by id. A cluster tap opens all of them.
+        /// Every post folded into this marker, representative included — the
+        /// REPRESENTATIVE FIRST, then the rest ascending by id. A cluster tap
+        /// opens all of them, in this order.
+        ///
+        /// The order is load-bearing at exactly one place and it is the one the
+        /// viewer sees: the feed opens on `memberIDs[0]`
+        /// (`FixedPostsFeedProvider` preserves the tapped order), so leading
+        /// with the representative is what makes the page you land on the post
+        /// whose face you just tapped.
+        ///
+        /// Written as an explicit rotation rather than relying on the current
+        /// rule happening to pick `ordered[0]`: it is the invariant "you land on
+        /// what you tapped" that matters, and a future face rule must not be
+        /// able to break it silently. A media-preferring rule DID break it
+        /// once — tapping a photograph opened a text post.
         let memberIDs: [PostID]
         /// Where the marker sits: the pin's own coordinate for a single, the
         /// members' centroid for a group.
@@ -125,14 +138,43 @@ enum MapClusterEngine {
         return nodes.map { node in
             if node.members.count == 1 { return single(node.members[0]) }
             let ordered = node.members.sorted { $0.postID.rawValue < $1.postID.rawValue }
+            let face = representative(of: ordered)
             let center = MKMapPoint(x: node.x, y: node.y).coordinate
             return Item(
-                representative: ordered[0],
-                memberIDs: ordered.map(\.postID),
+                representative: face,
+                // The whole group, the tapped face first — see `memberIDs`.
+                // Every member is still here exactly once: the representative
+                // is one of `ordered`, so removing it and re-prefixing it is a
+                // rotation, not a filter.
+                memberIDs: [face.postID] + ordered.lazy
+                    .map(\.postID)
+                    .filter { $0 != face.postID },
                 latitude: center.latitude,
                 longitude: center.longitude
             )
         }
+    }
+
+    /// The member whose face a group wears: **the lowest id, whatever kind it
+    /// is**. A text post and a photograph have exactly equal claim on the face.
+    ///
+    /// An earlier version preferred the lowest-id member WITH a cover, on the
+    /// grounds that a photograph previews a group better than a symbol. The
+    /// cost was that the symbol face became unreachable for any group
+    /// containing one photo — text markers could only ever mean "all text
+    /// here", which is a category the map does not otherwise have, and it made
+    /// a text tap synonymous with a text-only feed.
+    ///
+    /// Kind-neutral also makes the three things a marker says agree, which the
+    /// preference had split apart: the face, the presentation
+    /// (`MapMarkerPresentation`) and the post the feed opens on
+    /// (`memberIDs.first`) are now all THE SAME POST. A viewer who taps a
+    /// symbol lands on the words they tapped, and swipes on into whatever else
+    /// — photos included — shares that address.
+    ///
+    /// - Parameter ordered: the members, ascending by post id.
+    private static func representative(of ordered: [MapPin]) -> MapPin {
+        ordered[0]
     }
 
     private static func single(_ pin: MapPin) -> Item {

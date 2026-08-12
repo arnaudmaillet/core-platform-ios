@@ -4,9 +4,11 @@ import MediaCore
 import UIKit
 
 /// A cluster of overlapping / co-located pins, rendered to look exactly like a
-/// single post pin: the same rounded, center-anchored square showing the *first*
-/// member post's `thumbnail_url`. MapKit's default count bubble is deliberately
-/// not used. Its tap opens a snap feed seeded with all the cluster's member post
+/// single post pin: the same rounded, center-anchored square showing its
+/// representative's `thumbnail_url` — or the smaller symbol circle, when that
+/// representative is a text post. The representative is kind-neutral (the
+/// lowest id), so a group holding both wears whichever its first post is.
+/// MapKit's default count bubble is deliberately not used. Its tap opens a snap feed seeded with all the cluster's member post
 /// ids — already held client-side, so no extra round-trip.
 ///
 /// The face is a `PinCardView` — the same component the single pin renders and
@@ -23,6 +25,11 @@ final class MapClusterAnnotationView: MKAnnotationView {
     /// Guards a slow load against reuse (clusters have no stable id, so key on
     /// the URL being shown).
     private var representedURL: URL?
+    /// The face currently worn. Tracked separately because `representedURL` is
+    /// `nil` for EVERY text representative: keying idempotence on the URL alone
+    /// would read "already showing that" when the cluster had in fact just
+    /// swapped between a text representative and a cover-less media one.
+    private var representedFace: PinCardView.Face?
 
     /// The loaded cover image, handed to the hero transition to fly.
     var heroImage: UIImage? { card.imageView.image }
@@ -45,6 +52,19 @@ final class MapClusterAnnotationView: MKAnnotationView {
         // the single pin.
         PinCardView.applyPinShadow(to: layer)
         installInstantTap(target: self, action: #selector(handleTap))
+        applyFace(.media)
+    }
+
+    /// Wears `face`: its shape AND its size, exactly as a single pin does — an
+    /// all-text group is a 44pt circle, so a cluster is never a different
+    /// object from the markers it stands for. `bounds`, not `frame`: MapKit
+    /// owns the center.
+    private func applyFace(_ face: PinCardView.Face) {
+        if bounds.width != face.side {
+            bounds = CGRect(x: 0, y: 0, width: face.side, height: face.side)
+        }
+        card.frame = bounds
+        card.setFace(face)
     }
 
     @objc private func handleTap() { onSelect?() }
@@ -57,14 +77,17 @@ final class MapClusterAnnotationView: MKAnnotationView {
     /// owns the image pipeline.
     func configure(with cluster: MapComputedCluster, imagePipeline: ImagePipeline) {
         let url = cluster.representative.thumbnailURL
+        let face: PinCardView.Face = cluster.representative.isText ? .text : .media
         // Idempotent: a tracked cluster is re-configured on every reconcile even
         // when its face is unchanged (same representative thumbnail). Blanking
         // and re-fetching it then would flash the card, so leave it be.
-        guard representedURL != url else { return }
+        guard representedURL != url || representedFace != face else { return }
         imageTask?.cancel()
         representedURL = url
+        representedFace = face
         card.imageView.image = nil
-        guard let url else { return }
+        applyFace(face)
+        guard face == .media, let url else { return }
         imageTask = Task { [weak self] in
             guard let image = try? await imagePipeline.image(for: url) else { return }
             guard let self, self.representedURL == url else { return }
@@ -83,6 +106,8 @@ final class MapClusterAnnotationView: MKAnnotationView {
         imageTask?.cancel()
         imageTask = nil
         representedURL = nil
+        representedFace = nil
         card.imageView.image = nil
+        applyFace(.media)
     }
 }

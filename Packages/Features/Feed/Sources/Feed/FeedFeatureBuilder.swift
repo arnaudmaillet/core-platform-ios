@@ -225,6 +225,25 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         nav.pushViewController(destination, animated: true)
     }
 
+    /// The plain push, for a caller with no origin to describe.
+    ///
+    /// `presentSnapFeedHero` reaches the same place when its origin reports
+    /// `hasHero == false`, and that is the right shape for a surface that HAS
+    /// an origin (a grid tile knows its post, its pixels and its rect). A Maps
+    /// text pin has none of that — a symbol on a circle is not a cover, and the
+    /// pin carries ids rather than models — so it says so directly instead of
+    /// filling a hero origin with fields the plain branch never reads.
+    ///
+    /// One line of body, and it is the point: everything that makes this push
+    /// survivable (the dismissal, its retainer, the tab bar) is in
+    /// `pushWithoutFlight`, and a second surface reaching for a bare
+    /// `pushViewController` is exactly the regression `PlainPushDismissalTests`
+    /// guards.
+    public func pushSnapFeed(postIDs: [PostID], from presenter: UIViewController) {
+        guard !postIDs.isEmpty, let nav = presenter.navigationController else { return }
+        pushWithoutFlight(makeSnapFeedViewController(postIDs: postIDs), on: nav)
+    }
+
     /// Pushes the feed with no flight, and gives it a way back by hand.
     ///
     /// The presentation a post with nothing to fly gets: a native push, plus a

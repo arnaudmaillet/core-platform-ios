@@ -128,6 +128,24 @@ public protocol FeedFeatureBuilding {
         from presenter: UIViewController,
         origin: SnapFeedHeroOrigin
     )
+    /// Pushes that same feed onto `presenter`'s stack with the PLATFORM's own
+    /// slide — no flight, no card, no origin.
+    ///
+    /// The presentation a post with nothing to fly gets. `presentSnapFeedHero`
+    /// already degrades to exactly this when its origin reports `hasHero ==
+    /// false`; this is the same destination for a caller that has no origin to
+    /// describe in the first place — a Maps text pin knows only post ids, and
+    /// inventing a `SnapFeedHeroOrigin` whose every flight-shaped field is
+    /// ignored would be data that isn't.
+    ///
+    /// Not merely `nav.pushViewController`: the pushed feed refuses the stack's
+    /// native edge pop (it carries a custom leading item and claims its own
+    /// dismissal), so the slide gesture has to be attached and retained with
+    /// it. That is the whole reason this lives behind the interface instead of
+    /// at each call site — see `PlainPushDismissalTests` for the screen a
+    /// hand-rolled push leaves behind: perfect pixels, no way back but the
+    /// chevron.
+    func pushSnapFeed(postIDs: [PostID], from presenter: UIViewController)
     /// Best-effort, cancellable warming of these posts into the shared cache, so
     /// a subsequent `makeSnapFeedViewController` hydrates from memory rather than
     /// the network — used by Maps to prefetch the visible pins on viewport

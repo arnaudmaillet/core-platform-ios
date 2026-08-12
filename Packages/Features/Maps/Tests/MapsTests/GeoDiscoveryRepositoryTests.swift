@@ -3,7 +3,6 @@ import CoreModels
 import CoreNetworking
 import CoreNetworkingMocks
 import Foundation
-import MediaCore
 import Testing
 @testable import Maps
 
@@ -48,8 +47,8 @@ struct GeoDiscoveryRepositoryTests {
         #expect(result.tileCount == 3)
         #expect(result.pins.map(\.postID) == [PostID("post-1"), PostID("post-2")])
         #expect(result.pins.first?.thumbnailURL == URL(string: "mock://media/1"))
-        // Media kind is stubbed to `.image` until RadarPin.media_kind ships.
-        #expect(result.pins.allSatisfy { $0.mediaKind == .image })
+        // Photo-vs-video is stubbed to `.photo` until RadarPin.media_kind ships.
+        #expect(result.pins.allSatisfy { $0.kind == .photo })
     }
 
     @Test func forwardsViewportAndZoomToTheService() async throws {
@@ -86,10 +85,17 @@ struct GeoDiscoveryRepositoryTests {
         #expect(result.pins.map(\.postID) == [PostID("post-9")])
     }
 
-    @Test func emptyThumbnailMapsToNilURL() async throws {
+    /// An empty `thumbnail_url` is the ONLY "this post is text" signal the wire
+    /// has (`RadarPin` carries no media kind), so it must both null the URL and
+    /// classify the pin — a `.photo` with no cover is the blank grey square the
+    /// text face exists to remove.
+    @Test func emptyThumbnailMapsToATextPin() async throws {
         let repository = makeRepository { _ in
             var response = GeoDiscovery_V1_QueryTileResponse()
-            response.pins = [self.radarPin("post-text", lat: 1, lng: 1, thumb: "")]
+            response.pins = [
+                self.radarPin("post-text", lat: 1, lng: 1, thumb: ""),
+                self.radarPin("post-media", lat: 1, lng: 1, thumb: "mock://media/7")
+            ]
             return response
         }
 
@@ -97,7 +103,16 @@ struct GeoDiscoveryRepositoryTests {
             centerLat: 0, centerLng: 0, latitudeSpan: 10, longitudeSpan: 10
         ))
 
-        #expect(result.pins.first?.thumbnailURL == nil)
+        let text = result.pins.first { $0.postID == PostID("post-text") }
+        #expect(text?.thumbnailURL == nil)
+        #expect(text?.kind == .text)
+        #expect(text?.isText == true)
+        // A text pin has nothing to autoplay, whatever the DEBUG flags say.
+        #expect(text?.previewVideoURL == nil)
+
+        let media = result.pins.first { $0.postID == PostID("post-media") }
+        #expect(media?.kind == .photo)
+        #expect(media?.isText == false)
     }
 
     @Test func attachesFilterHeaderOnTheWire() async throws {
@@ -209,6 +224,34 @@ struct GeoDiscoveryRepositoryTests {
         #expect(cafes.pins.allSatisfy { pin in
             dataset.pinnedPlaceCategories[pin.postID.rawValue] == "cafes"
         })
+    }
+
+    /// End-to-end over production wire bytes: a text-only post is indexed like
+    /// any other and arrives as a `.text` pin. The mock used to drop them
+    /// before the viewport test, so a third of the corpus was invisible on the
+    /// map with nothing in the client saying so.
+    @Test func mockGeoServiceIndexesTextOnlyPosts() async throws {
+        let dataset = MockSocialDataset()
+        let bff = MockBFF()
+        MockGeoDiscoveryService(dataset: dataset).register(on: bff)
+        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        let repository = GeoDiscoveryRepository(geoClient: GeoDiscovery_V1_GeoDiscoveryServiceClient(client: client))
+
+        let result = try await repository.queryTile(.make(
+            centerLat: 48.8566, centerLng: 2.3522, latitudeSpan: 0.5, longitudeSpan: 0.5
+        ))
+
+        let text = result.pins.filter(\.isText)
+        #expect(!text.isEmpty)
+        // Both kinds are on the map — text posts joined the field, they did not
+        // replace it.
+        #expect(result.pins.contains { !$0.isText })
+        // A text pin's kind agrees with the dataset: no media on the record.
+        #expect(text.allSatisfy { pin in
+            dataset.post(for: pin.postID.rawValue)?.media == nil
+        })
+        // ...and every media post still carries its cover.
+        #expect(result.pins.filter { !$0.isText }.allSatisfy { $0.thumbnailURL != nil })
     }
 
     @Test func surfacesTransportFailuresAsGeoDiscoveryError() async throws {

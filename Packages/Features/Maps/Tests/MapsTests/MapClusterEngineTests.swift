@@ -14,8 +14,16 @@ struct MapClusterEngineTests {
     private static let cell = 64.0
     private static let unitScale = 1.0
 
-    private static func pin(_ id: String, lat: Double, lng: Double) -> MapPin {
-        MapPin(postID: PostID(id), latitude: lat, longitude: lng, thumbnailURL: nil, mediaKind: .image)
+    private static func pin(
+        _ id: String, lat: Double, lng: Double, kind: MapPin.Kind = .photo
+    ) -> MapPin {
+        MapPin(
+            postID: PostID(id),
+            latitude: lat,
+            longitude: lng,
+            thumbnailURL: kind == .text ? nil : URL(string: "mock://media/\(id)"),
+            kind: kind
+        )
     }
 
     /// Screen-space gap between two markers' centers, along whichever axis they
@@ -123,6 +131,64 @@ struct MapClusterEngineTests {
         // Stable key = representative id, so the marker survives small changes.
         #expect(items[0].representative.postID == PostID("p-3"))
         #expect(items[0].key == PostID("p-3"))
+    }
+
+    /// KIND DOES NOT BUY THE FACE. A mixed group is represented by its lowest
+    /// id whichever kind that is — here a text post, ahead of two media
+    /// members. The rule this replaced preferred media, which made the symbol
+    /// face unreachable for any group containing a single photograph.
+    @Test func aMixedClusterIsRepresentedByItsLowestIDWhateverKind() {
+        let pins = [
+            Self.pin("p-1", lat: 48.8566, lng: 2.3522, kind: .text),
+            Self.pin("p-2", lat: 48.8566, lng: 2.3522, kind: .text),
+            Self.pin("p-3", lat: 48.8566, lng: 2.3522, kind: .photo),
+            Self.pin("p-4", lat: 48.8566, lng: 2.3522, kind: .video)
+        ]
+        let items = MapClusterEngine.cluster(pins, zoomScale: Self.unitScale, cellPoints: Self.cell)
+        #expect(items.count == 1)
+        #expect(items[0].representative.postID == PostID("p-1"))
+        #expect(items[0].representative.isText, "a media member outranked a lower-id text one")
+        // Membership is untouched — every post is still in.
+        #expect(items[0].memberIDs.count == 4)
+    }
+
+    /// And symmetrically: a media post with the lowest id keeps the face, so
+    /// the rule is neutral rather than reversed.
+    @Test func aMixedClusterWearsMediaWhenMediaHasTheLowestID() {
+        let pins = [
+            Self.pin("p-1", lat: 48.8566, lng: 2.3522, kind: .photo),
+            Self.pin("p-2", lat: 48.8566, lng: 2.3522, kind: .text),
+            Self.pin("p-3", lat: 48.8566, lng: 2.3522, kind: .text)
+        ]
+        let items = MapClusterEngine.cluster(pins, zoomScale: Self.unitScale, cellPoints: Self.cell)
+        #expect(items[0].representative.postID == PostID("p-1"))
+        #expect(!items[0].representative.isText)
+    }
+
+    /// An all-text group has no media member to prefer, and still has to pick
+    /// deterministically.
+    @Test func anAllTextClusterFallsBackToTheLowestMemberID() {
+        let pins = [
+            Self.pin("p-9", lat: 48.8566, lng: 2.3522, kind: .text),
+            Self.pin("p-3", lat: 48.8566, lng: 2.3522, kind: .text)
+        ]
+        let items = MapClusterEngine.cluster(pins, zoomScale: Self.unitScale, cellPoints: Self.cell)
+        #expect(items.count == 1)
+        #expect(items[0].representative.postID == PostID("p-3"))
+        #expect(items[0].representative.isText)
+    }
+
+    /// A lone text pin is its own representative — the preference must not
+    /// leak into the single-pin path.
+    @Test func aLoneTextPinRepresentsItself() {
+        let items = MapClusterEngine.cluster(
+            [Self.pin("solo", lat: 48.87, lng: 2.30, kind: .text)],
+            zoomScale: Self.unitScale,
+            cellPoints: Self.cell
+        )
+        #expect(items.count == 1)
+        #expect(!items[0].isCluster)
+        #expect(items[0].representative.isText)
     }
 
     @Test func aDegenerateZoomScaleFallsBackToSingles() {

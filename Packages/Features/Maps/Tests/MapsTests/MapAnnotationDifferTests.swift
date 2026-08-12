@@ -1,6 +1,5 @@
 import CoreModels
 import Foundation
-import MediaCore
 import Testing
 @testable import Maps
 
@@ -11,7 +10,7 @@ struct MapAnnotationDifferTests {
             latitude: lat,
             longitude: lng,
             thumbnailURL: URL(string: thumb),
-            mediaKind: .image
+            kind: .photo
         )
     }
 
@@ -49,16 +48,30 @@ struct MapAnnotationDifferTests {
         #expect(diff.updated.map(\.postID) == [PostID("a")])
     }
 
-    @Test func mediaKindChangeCountsAsUpdate() {
+    @Test func kindChangeCountsAsUpdate() {
         let image = pin("a")
         let video = MapPin(
             postID: PostID("a"),
             latitude: 0,
             longitude: 0,
             thumbnailURL: URL(string: "mock://t"),
-            mediaKind: .video
+            kind: .video
         )
         let diff = MapAnnotationDiffer.diff(from: indexed([image]), to: [video])
+        #expect(diff.updated.map(\.postID) == [PostID("a")])
+    }
+
+    /// A post the backend re-indexed without a cover (or a text post replacing
+    /// a media one at the same id) has to re-face its marker in place, not
+    /// churn it through a remove/add.
+    @Test func aMediaPinBecomingTextCountsAsUpdate() {
+        let media = pin("a")
+        let text = MapPin(
+            postID: PostID("a"), latitude: 0, longitude: 0, thumbnailURL: nil, kind: .text
+        )
+        let diff = MapAnnotationDiffer.diff(from: indexed([media]), to: [text])
+        #expect(diff.added.isEmpty)
+        #expect(diff.removed.isEmpty)
         #expect(diff.updated.map(\.postID) == [PostID("a")])
     }
 

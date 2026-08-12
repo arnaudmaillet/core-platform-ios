@@ -170,6 +170,65 @@ struct PlainPushDismissalTests {
         #expect((feed as? any ZoomTransitionDestination)?.zoomOwnsInteractiveDismissal == true)
     }
 
+    // MARK: - The origin-less caller (Maps text pins)
+
+    /// A caller with NO origin to describe reaches the same presentation with
+    /// the same guarantees. This is the seam a Maps text pin uses: it knows post
+    /// ids and nothing else, so it cannot fill in a `SnapFeedHeroOrigin`, and
+    /// the alternative — its own `pushViewController` — is precisely the
+    /// unswipeable screen this suite exists for.
+    @Test func anOriginLessPushGetsTheSameDismissal() {
+        let stack = Stack()
+        stack.builder.pushSnapFeed(postIDs: [PostID("t1")], from: stack.presenter)
+
+        let pushed = try? #require(stack.nav.viewControllers.last)
+        #expect(pushed !== stack.presenter, "nothing was pushed")
+
+        // Both halves, exactly as above: the claim AND the gesture honouring it.
+        #expect((pushed as? any ZoomTransitionDestination)?.zoomOwnsInteractiveDismissal == true)
+        let pans = pushed?.view.gestureRecognizers?.filter { $0 is UIPanGestureRecognizer } ?? []
+        #expect(!pans.isEmpty, "claimed the dismissal and attached no gesture to honour it")
+        #expect(stack.nav.delegate is InteractiveSlideDismissal,
+                "nothing would vend the interaction controller the pan drives")
+    }
+
+    /// And it is a PLAIN push: no flight owns the stack, which is the whole
+    /// point of the caller choosing this method over `presentSnapFeedHero`.
+    @Test func anOriginLessPushDoesNotFly() {
+        let stack = Stack()
+        stack.builder.pushSnapFeed(postIDs: [PostID("t1")], from: stack.presenter)
+        #expect(!(stack.nav.delegate is ZoomTransitionController))
+    }
+
+    @Test func anOriginLessPushHidesTheTabBar() {
+        let stack = Stack()
+        #expect(stack.tabs.isTabBarHidden == false, "precondition")
+
+        stack.builder.pushSnapFeed(postIDs: [PostID("t1")], from: stack.presenter)
+
+        #expect(stack.tabs.isTabBarHidden, "the bar was left standing over the post")
+    }
+
+    /// Nothing to open is not a presentation. Asserted because the map's
+    /// cluster path can produce an empty id list in principle, and a pushed
+    /// feed with no posts is a black screen with a back button.
+    @Test func anEmptyPushOpensNothing() {
+        let stack = Stack()
+        stack.builder.pushSnapFeed(postIDs: [], from: stack.presenter)
+        #expect(stack.nav.viewControllers.count == 1)
+        #expect(stack.tabs.isTabBarHidden == false, "hid the bar for a screen it never pushed")
+    }
+
+    /// A presenter outside any stack cannot be pushed from — and must not take
+    /// the tab bar down on its way to doing nothing.
+    @Test func aPresenterWithNoStackIsANoOp() {
+        let stack = Stack()
+        let orphan = UIViewController()
+        stack.builder.pushSnapFeed(postIDs: [PostID("t1")], from: orphan)
+        #expect(stack.nav.viewControllers.count == 1)
+        #expect(stack.tabs.isTabBarHidden == false)
+    }
+
     // MARK: - Fixtures
 
     /// A navigation stack inside a tab bar controller, inside a window — the

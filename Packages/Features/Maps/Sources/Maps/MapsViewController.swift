@@ -32,6 +32,13 @@ final class MapsViewController: UIViewController {
     /// Builds the snap feed a pin/cluster tap expands into (reuses the Feed
     /// feature via `FeedFeatureBuilding.makeSnapFeedViewController`).
     private let makeSnapFeed: ([PostID]) -> UIViewController
+    /// Pushes that same feed with the platform's own slide, for a marker with
+    /// nothing to fly. Goes through the feed's `pushSnapFeed` seam rather than
+    /// this controller calling `pushViewController` itself: the pushed feed
+    /// refuses the stack's native edge pop, so the swipe-back has to be
+    /// attached and retained with it, and that belongs where the other two
+    /// surfaces already get it.
+    private let pushPlainSnapFeed: ([PostID], UIViewController) -> Void
     /// Warms the given posts into the shared cache so a tap opens instantly.
     private let prewarm: ([PostID]) async -> Void
     /// Opens someone's profile (the sub-filter sheet's Profile swipe). A
@@ -50,6 +57,12 @@ final class MapsViewController: UIViewController {
     private static let prewarmCap = 16
     /// Retains the transitioning delegate for the life of a presentation.
     private var activeTransition: ZoomTransitionController?
+    /// True from the moment a plain push is fired until the map is back on
+    /// screen. It does for that path exactly what `activeTransition` does for
+    /// the flight: the instant-tap recognizer and MapKit's own `didSelect` can
+    /// both fire for ONE tap, and without a guard the second one pushes a
+    /// second copy of the feed.
+    private var isPlainFeedPushed = false
     /// Chooses which ≤3 visible video pins autoplay.
     private let videoCoordinator: MapVideoPlaybackCoordinator
     /// Runs the pins' staggered pop-in/pop-out and owns the in-flight
@@ -142,6 +155,7 @@ final class MapsViewController: UIViewController {
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController,
         makeSnapFeed: @escaping ([PostID]) -> UIViewController,
+        pushPlainSnapFeed: @escaping ([PostID], UIViewController) -> Void,
         prewarm: @escaping ([PostID]) async -> Void,
         openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
         openConversation: @escaping (ProfileID) -> Void
@@ -151,6 +165,7 @@ final class MapsViewController: UIViewController {
         self.imagePipeline = imagePipeline
         self.videoCoordinator = MapVideoPlaybackCoordinator(pool: videoPlayback)
         self.makeSnapFeed = makeSnapFeed
+        self.pushPlainSnapFeed = pushPlainSnapFeed
         self.prewarm = prewarm
         self.openProfile = openProfile
         self.openConversation = openConversation
@@ -255,6 +270,22 @@ final class MapsViewController: UIViewController {
         syncBarsPosition()
     }
 
+    /// The bars' offset is DERIVED from the safe area, so it has to be
+    /// recomputed whenever the safe area moves — not only when something else
+    /// happens to schedule a layout pass.
+    ///
+    /// Measured: a feed pushed plainly hides the tab bar (bottom inset 83 → 34),
+    /// the bars re-pin 49pt lower while the map is off screen, and the bar comes
+    /// back on the completed pop — restoring the inset without invalidating this
+    /// view's layout. Nothing then re-ran `syncBarsPosition`, so the map came
+    /// back with its filter pills sitting exactly behind the restored tab bar:
+    /// present, laid out, and invisible. The flight path never showed it because
+    /// its return drives a layout of its own (`restoreBottomChromeForReturn`).
+    override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        syncBarsPosition()
+    }
+
     /// Re-pins the filter bars to the CURRENT safe area, but only while no hero
     /// flight is in progress — see `barsBottomConstraint` for why that matters.
     private func syncBarsPosition() {
@@ -277,6 +308,9 @@ final class MapsViewController: UIViewController {
         // is alive — under a push, this fires the moment a pop *begins*, and
         // an interactive grab can cancel; the completed return resumes via
         // the transition's onSourceReturned instead.
+        // The map is on its way back (or arriving for the first time), so a
+        // plainly-pushed feed is behind us and the next tap must open again.
+        isPlainFeedPushed = false
         guard activeTransition == nil else {
             // A hero return, though, does need its bottom chrome put back —
             // invisible, so the flight can fade it in. This is the only chance
@@ -939,7 +973,7 @@ final class MapsViewController: UIViewController {
         var scored: [(distance: Double, candidate: MapVideoPlaybackCoordinator.Candidate)] = []
         for annotation in displayed.values {
             guard let single = annotation as? MapAnnotation,
-                  single.pin.mediaKind == .video,
+                  single.pin.kind == .video,
                   let url = single.pin.previewVideoURL,
                   visibleRect.contains(MKMapPoint(single.coordinate)),
                   let view = mapView.view(for: single) as? MapAnnotationView else { continue }
@@ -1015,6 +1049,7 @@ extension MapsViewController: MKMapViewDelegate {
         prewarmVisiblePosts()
         #if DEBUG
         debugOpenFirstPinIfRequested(among: views)
+        debugOpenFirstClusterIfRequested(among: views)
         #endif
     }
 
@@ -1046,15 +1081,56 @@ extension MapsViewController: MKMapViewDelegate {
     /// transition into the snap feed can be driven/screenshotted in the sim.
     /// Prefers a video pin when any exists (with `-maps-force-video`), so
     /// live-media flights are exercised deterministically.
+    ///
+    /// `-maps-open-first-text-pin` picks a TEXT pin instead — the flight whose
+    /// card carries the symbol face rather than a cover, which is otherwise
+    /// only reachable by finding one of them by hand on the map.
     private func debugOpenFirstPinIfRequested(among views: [MKAnnotationView]) {
+        let arguments = ProcessInfo.processInfo.arguments
+        let wantsText = arguments.contains("-maps-open-first-text-pin")
         guard !didDebugOpenPin,
-              ProcessInfo.processInfo.arguments.contains("-maps-open-first-pin") else { return }
+              wantsText || arguments.contains("-maps-open-first-pin") else { return }
         let annotations = views.compactMap { $0.annotation as? MapAnnotation }
-        guard let annotation = annotations.first(where: { $0.pin.mediaKind == .video }) ?? annotations.first
+        let preferred: MapPin.Kind = wantsText ? .text : .video
+        guard let annotation = annotations.first(where: { $0.pin.kind == preferred })
+            ?? (wantsText ? nil : annotations.first)
         else { return }
         didDebugOpenPin = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             self?.mapView.selectAnnotation(annotation, animated: true)
+        }
+    }
+
+    /// `-maps-open-first-cluster`: taps the biggest CLUSTER on screen and
+    /// prints what it hands the feed. `-maps-open-first-text-cluster` picks the
+    /// biggest cluster wearing the TEXT face instead — the case that answers
+    /// "does tapping a text marker open more than one post".
+    ///
+    /// Clusters exist at the opening zoom now that the mock seeds venues
+    /// (`MockGeoDiscoveryService.venueAssignments`); `-maps-wide-region` still
+    /// makes the big ones, since a pinch cannot be injected in the sim.
+    ///
+    /// It prints, because "the whole group opens" is invisible to a screenshot:
+    /// the feed's first page looks the same whether it was handed one post or
+    /// nine, and the difference only shows up when a finger swipes. The line is
+    /// the corpus the tap actually passed on.
+    private func debugOpenFirstClusterIfRequested(among views: [MKAnnotationView]) {
+        let arguments = ProcessInfo.processInfo.arguments
+        let wantsText = arguments.contains("-maps-open-first-text-cluster")
+        guard !didDebugOpenPin,
+              wantsText || arguments.contains("-maps-open-first-cluster") else { return }
+        let clusters = views.compactMap { $0.annotation as? MapComputedCluster }
+            .filter { $0.memberIDs.count > 1 && (!wantsText || $0.representative.isText) }
+        guard let cluster = clusters.max(by: { $0.memberIDs.count < $1.memberIDs.count })
+        else { return }
+        didDebugOpenPin = true
+        let ids = Self.postIDs(of: cluster)
+        let kind = cluster.representative.isText ? "text" : "media"
+        print("[maps] cluster tap → representative=\(cluster.representative.postID.rawValue) "
+            + "(\(kind), \(MapMarkerPresentation(face: Self.face(of: cluster)))) "
+            + "opening \(ids.count) posts: \(ids.map(\.rawValue).joined(separator: ","))")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.mapView.selectAnnotation(cluster, animated: true)
         }
     }
     #endif
@@ -1091,18 +1167,28 @@ extension MapsViewController: MKMapViewDelegate {
     /// `didSelect` (the fallback): whichever lands first wins, the other is a
     /// no-op while the flight is alive.
     private func openAnnotation(_ annotation: any MKAnnotation, thumbnail: UIImage?) {
-        guard activeTransition == nil else { return }
-        let postIDs: [PostID]
-        switch annotation {
-        case let pin as MapAnnotation:
-            postIDs = [pin.pin.postID]
-        case let cluster as MapComputedCluster:
-            postIDs = cluster.memberIDs
-        default:
-            return
-        }
+        guard activeTransition == nil, !isPlainFeedPushed else { return }
+        let postIDs = Self.postIDs(of: annotation)
         guard !postIDs.isEmpty else { return }
-        presentSnapFeed(postIDs: postIDs, from: annotation, thumbnail: thumbnail)
+        let face = Self.face(of: annotation)
+        switch MapMarkerPresentation(face: face) {
+        case .plainPush where navigationController != nil:
+            // Nothing to fly (see `MapMarkerPresentation`): the platform's own
+            // slide, through the feed's shared plain-push seam so this screen
+            // gets the same swipe-back it gets from every other surface.
+            //
+            // The map's own chrome is left alone on purpose: the filter bars
+            // live in this view and slide out WITH it, where the flight has to
+            // hide them because the map stays visible under the card. The tab
+            // bar is hidden and restored by the seam, and previews stop and
+            // resume through the ordinary appearance callbacks — all of which
+            // are keyed on `activeTransition == nil`, which is exactly what
+            // this path is.
+            isPlainFeedPushed = true
+            pushPlainSnapFeed(postIDs, self)
+        case .plainPush, .hero:
+            presentSnapFeed(postIDs: postIDs, from: annotation, thumbnail: thumbnail)
+        }
     }
 
     func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
@@ -1115,6 +1201,36 @@ extension MapsViewController: MKMapViewDelegate {
         let thumbnail = (view as? MapAnnotationView)?.heroImage
             ?? (view as? MapClusterAnnotationView)?.heroImage
         openAnnotation(annotation, thumbnail: thumbnail)
+    }
+
+    /// Everything the tapped marker stands for, in the order the feed should
+    /// page through it: one post for a lone pin, the WHOLE group for a cluster
+    /// with its representative first.
+    ///
+    /// The same answer whatever the posts are. A cluster's members are already
+    /// held client-side (`MapClusterEngine` folded them), so a text post, a
+    /// photo and a video that happen to sit on the same corner all travel
+    /// together into one swipeable feed — the presentation differs (see
+    /// `MapMarkerPresentation`), never the corpus.
+    ///
+    /// Pure and static so the passthrough can be tested without a live
+    /// `MKMapView`: dropping members here would be invisible on screen — the
+    /// feed would simply end early — which is exactly the kind of silent
+    /// truncation a test has to pin.
+    static func postIDs(of annotation: any MKAnnotation) -> [PostID] {
+        switch annotation {
+        case let pin as MapAnnotation: [pin.pin.postID]
+        case let cluster as MapComputedCluster: cluster.memberIDs
+        default: []
+        }
+    }
+
+    /// The face the tapped marker is wearing, so the flight card takes off as
+    /// its twin — a symbol pin must not fly as an empty square.
+    private static func face(of annotation: any MKAnnotation) -> PinCardView.Face {
+        let pin = (annotation as? MapAnnotation)?.pin
+            ?? (annotation as? MapComputedCluster)?.representative
+        return pin?.isText == true ? .text : .media
     }
 
     private func presentSnapFeed(postIDs: [PostID], from annotation: any MKAnnotation, thumbnail: UIImage?) {
@@ -1139,6 +1255,7 @@ extension MapsViewController: MKMapViewDelegate {
             mapView: mapView,
             annotation: annotation,
             thumbnail: thumbnail,
+            face: Self.face(of: annotation),
             mirrorLive: tappedID.map { id in
                 { renderView in coordinator.mirrorLivePreview(of: id, to: renderView) }
             }

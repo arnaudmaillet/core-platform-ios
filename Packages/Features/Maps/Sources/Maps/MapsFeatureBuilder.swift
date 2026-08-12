@@ -56,6 +56,11 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             imagePipeline: imagePipeline,
             videoPlayback: videoPlayback,
             makeSnapFeed: { postIDs in feedFeature().makeSnapFeedViewController(postIDs: postIDs) },
+            // The same feed, arrived at by the platform's own slide — what a
+            // marker with no cover to fly opens with.
+            pushPlainSnapFeed: { postIDs, presenter in
+                feedFeature().pushSnapFeed(postIDs: postIDs, from: presenter)
+            },
             prewarm: { ids in await feedFeature().prewarmPosts(ids) },
             openProfile: openProfile,
             openConversation: openConversation
