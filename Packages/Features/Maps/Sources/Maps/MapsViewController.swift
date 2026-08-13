@@ -258,6 +258,19 @@ final class MapsViewController: UIViewController {
                 }
             }
         }
+        // `-maps-subfilter-remove <profileID>`: fires that pill's context-menu
+        // Remove ~5s in, through the same routing a long press does
+        // (`MapSubFilterBarView.perform`). The menu itself needs a long press
+        // the simulator cannot deliver, and this is the path that flashed:
+        // the removal restacks, then the rail write it commits comes back
+        // round as a refresh.
+        if let id = Self.debugArgumentValue("-maps-subfilter-remove") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+                guard let self else { return }
+                print("[maps] sub-filter menu: Remove \(id)")
+                subFilterBar.perform(.unpin, on: .profile(ProfileID(id)))
+            }
+        }
         // `-maps-open-subfilter-sheet`: presents the sub-filter full-list
         // sheet ~3s in (the header's organize tap). Pair with
         // `-maps-select-filter friends|following|pinned`.
@@ -558,19 +571,14 @@ final class MapsViewController: UIViewController {
     /// `MapSubFilterRowUpdate` for the switch-to-an-empty-primary bug that
     /// distinction exists to prevent.
     private func applyPeopleRow(_ people: [MapFavorite], for primary: MapFilter) {
-        let incoming = MapSubFilterRowState(
-            primary: primary,
-            people: people,
-            hasCatalogue: MapSubFilterOption.rowSurvivesEmpty(
-                catalogue: MapSubFilterOption.people(catalogueCache[primary] ?? [])
-            )
-        )
+        let incoming = makeRowState(primary: primary, people: people)
         let update = MapSubFilterRowUpdate.resolve(rendered: renderedSubFilterRow, incoming: incoming)
         #if DEBUG
         // Which path a row edit took is invisible in a screenshot — a diff and
         // a cross-dissolve land on the same pixels and differ only in how they
         // got there. Printed alongside the toggle hook that provokes it.
-        if ProcessInfo.processInfo.arguments.contains("-maps-toggle-subfilter") {
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-maps-toggle-subfilter") || arguments.contains("-maps-subfilter-remove") {
             let style = switch update {
             case .show(let options, let style): "show(\(options.count) pills, \(style))"
             case .hide: "hide"
@@ -787,10 +795,21 @@ final class MapsViewController: UIViewController {
         // they will want next is a way to put someone back.
         subFilterBar.restack(to: options)
         setSubFilterBar(visible: true)
-        // The sheet edited the row behind the refresh's back, so the yardstick
-        // it compares against is stale — drop it, and let the next refresh
-        // apply whatever it finds.
-        renderedSubFilterRow = nil
+        // ⚠️ RECORD what was just rendered — do not clear it.
+        //
+        // Clearing looked harmless ("let the next refresh apply whatever it
+        // finds") and was the flash: every edit here writes the rail, the
+        // store's change notification re-runs the refresh, and a nil yardstick
+        // makes that refresh a `.swap` — so the pill the viewer removed
+        // animated out politely and the whole row cross-dissolved on top of
+        // it. With the state recorded, the refresh resolves to `.unchanged`
+        // (or at worst a `.diff`), and the removal is the only thing that
+        // moves.
+        renderedSubFilterRow = filterBar.selectedFilter.flatMap { primary in
+            Self.railCategory(for: primary) == nil
+                ? nil // Places: not a people row, so it has no state to compare
+                : makeRowState(primary: primary, people: options.compactMap(\.favorite))
+        }
     }
 
     /// Re-applies the viewer's edits to a freshly built option list: deleted
@@ -887,6 +906,19 @@ final class MapsViewController: UIViewController {
             self.currentFavorites = people
             self.filterBar.setFavorites(people)
         }
+    }
+
+    /// The row's state as the refresh describes it — built in ONE place, so
+    /// what an edit records and what a refresh compares against cannot drift
+    /// into disagreeing.
+    private func makeRowState(primary: MapFilter, people: [MapFavorite]) -> MapSubFilterRowState {
+        MapSubFilterRowState(
+            primary: primary,
+            people: people,
+            hasCatalogue: MapSubFilterOption.rowSurvivesEmpty(
+                catalogue: MapSubFilterOption.people(catalogueCache[primary] ?? [])
+            )
+        )
     }
 
     /// The rail a people primary curates. Places have no rail — their
