@@ -14,4 +14,13 @@ public protocol MapsFeatureBuilding {
     /// The map surface for the Maps tab: an `MKMapView` rendering post pins in
     /// the current viewport, re-queried on pan/zoom settle.
     func makeMapViewController() -> UIViewController
+
+    /// Curating the map's pinned people, for surfaces outside Maps — today the
+    /// profile screen's pin button.
+    ///
+    /// Vended here rather than built by the caller because it is STATE, not a
+    /// factory: the map's own rail writes through this exact instance, and a
+    /// second one made elsewhere would be a second opinion about who is
+    /// pinned. See `MapProfilePinning`.
+    var profilePinning: any MapProfilePinning { get }
 }

@@ -3,6 +3,7 @@ import CoreModels
 import ProfileInterface
 import CoreNavigation
 import FeedInterface
+import MapsInterface
 import MediaPlayback
 import DesignSystem
 import PostGrid
@@ -153,6 +154,8 @@ final class ProfileViewController: UIViewController {
     private let slideDismissal = InteractiveSlideDismissal()
     private var didInstallSlideDismissal = false
     #if DEBUG
+    /// Latches the `-profile-map-pin-demo` tap to a single firing.
+    private var didTapMapPinForQA = false
     /// Latches the `-profile-relationships` QA push to a single firing.
     private var didPushRelationshipsForQA = false
     #endif
@@ -384,6 +387,15 @@ final class ProfileViewController: UIViewController {
             // toolbar composes during the animation, not after it.
             self.alongsideTransition { $0.applyNavigationState() }
         }
+        viewModel.onMapPinButtonChange = { [weak self] state in
+            self?.headerView.configureMapPin(state)
+        }
+        headerView.onMapPinTapped = { [weak self] in
+            self?.viewModel.toggleMapPin()
+        }
+        headerView.makeMapPinMenu = { [weak self] in
+            self?.makeMapFavoriteMenu() ?? UIMenu()
+        }
         headerView.onMessageTapped = { [weak self] in
             self?.viewModel.messageTapped()
         }
@@ -484,6 +496,10 @@ final class ProfileViewController: UIViewController {
         // Mirror the (possibly stub-seeded) relationship into the header's
         // tray, so Message visibility agrees with the toolbar from the start.
         headerView.configureAction(followButtonState)
+        // The pin, by contrast, is NOT seeded from the stub: a stub says who
+        // this is and whether the viewer follows them, never whether they are
+        // pinned. It arrives when the view model has actually asked.
+        headerView.configureMapPin(viewModel.mapPinButton)
         render(.loading)
         viewModel.viewDidLoad()
     }
@@ -680,6 +696,15 @@ final class ProfileViewController: UIViewController {
         // Once per screen, not once per appearance: `viewDidAppear` fires again
         // when the relationships screen pops back, and re-pushing there made
         // the QA run loop between the two forever.
+        // `-profile-map-pin-demo`: taps the map-pin bubble once the button has
+        // actually appeared, which needs BOTH the relationship read and the
+        // pin read to land — the simulator delivers no taps, and a fixed delay
+        // here would fire into a hidden button on a slow run. Pair with
+        // `-open-profile <id>` for a profile the viewer follows.
+        if arguments.contains("-profile-map-pin-demo"), !didTapMapPinForQA {
+            didTapMapPinForQA = true
+            pollForMapPinButton()
+        }
         if let index = arguments.firstIndex(of: "-profile-relationships"), !didPushRelationshipsForQA {
             didPushRelationshipsForQA = true
             let direction: RelationshipDirection =
@@ -1016,6 +1041,50 @@ final class ProfileViewController: UIViewController {
     }
 
     #if DEBUG
+    /// Waits for the map-pin bubble to be OFFERED, then taps it — through the
+    /// same callback a finger fires, so what QA exercises is the real path.
+    ///
+    /// Polled rather than delayed for the reason the relationships push
+    /// documents: two reads have to land first (the relationship, then the pin
+    /// state), and under `-mock-latency` a fixed delay fires into a button
+    /// that is not there yet — reporting a working feature by pressing
+    /// nothing.
+    private func pollForMapPinButton(attempt: Int = 0) {
+        guard attempt < 40 else {
+            print("[profile] map-pin demo: the button never appeared")
+            return
+        }
+        guard viewModel.mapPinButton != .hidden else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                self?.pollForMapPinButton(attempt: attempt + 1)
+            }
+            return
+        }
+        print("[profile] map-pin demo: state was \(viewModel.mapPinButton)")
+        // A value after the flag drives the MUTUAL's path — the menu rows,
+        // which a simulator cannot open (no taps, and `UIMenu` needs one).
+        // Bare, it is the plain follower's tap.
+        let arguments = ProcessInfo.processInfo.arguments
+        let choice = arguments.firstIndex(of: "-profile-map-pin-demo")
+            .map { $0 + 1 }
+            .flatMap { $0 < arguments.count ? arguments[$0] : nil }
+            .flatMap { value -> Set<MapFavoriteCategory>? in
+                switch value {
+                case "friends": [.friends]
+                case "following": [.following]
+                case "both": [.friends, .following]
+                case "none": []
+                default: nil // the next launch flag, not a value
+                }
+            }
+        if let choice {
+            viewModel.setMapCategories(choice)
+        } else {
+            viewModel.toggleMapPin()
+        }
+        print("[profile] map-pin demo: state now \(viewModel.mapPinButton)")
+    }
+
     /// Opens the editor's Privacy row from QA. Reaches through the pushed
     /// editor rather than building the screen here, so what is verified is the
     /// real wiring and not a second path to the same class.
@@ -1024,6 +1093,49 @@ final class ProfileViewController: UIViewController {
         (editor as? EditProfileViewController)?.qaOpenPrivacy()
     }
     #endif
+
+    /// The mutual's rail menu: Friends, Following, Both — each row saying what
+    /// choosing it WILL do, with the current membership shown as its state.
+    ///
+    /// Deferred, so the rows are resolved when the menu opens rather than when
+    /// the button was configured: the star is reconfigured on every state
+    /// change, and a menu captured then would be one edit out of date the
+    /// moment the viewer changed something.
+    ///
+    /// "Both" is a shortcut, not a third state: it adds both rails, or clears
+    /// them when the profile is already on both, which is what a viewer who
+    /// opens this menu twice expects.
+    private func makeMapFavoriteMenu() -> UIMenu {
+        UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] completion in
+            guard let self else { return completion([]) }
+            let current = viewModel.mapPinButton.categories
+            let rows = [
+                UIAction(
+                    title: "Friends on Map",
+                    image: UIImage(systemName: "person.2"),
+                    state: current.contains(.friends) ? .on : .off
+                ) { [weak self] _ in
+                    self?.viewModel.setMapCategories(current.symmetricDifference([.friends]))
+                },
+                UIAction(
+                    title: "Following on Map",
+                    image: UIImage(systemName: "person.badge.plus"),
+                    state: current.contains(.following) ? .on : .off
+                ) { [weak self] _ in
+                    self?.viewModel.setMapCategories(current.symmetricDifference([.following]))
+                },
+                UIAction(
+                    title: "Both",
+                    image: UIImage(systemName: "star.circle"),
+                    state: current == [.friends, .following] ? .on : .off
+                ) { [weak self] _ in
+                    let both: Set<MapFavoriteCategory> = [.friends, .following]
+                    self?.viewModel.setMapCategories(current == both ? [] : both)
+                }
+            ]
+            completion(rows)
+        }])
+    }
 
     private func pushEditProfile() {
         guard let makeEditViewController else { return }

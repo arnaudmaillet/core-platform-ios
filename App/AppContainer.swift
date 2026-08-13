@@ -337,6 +337,10 @@ final class AppContainer {
                 postIDs: postIDs, from: presenter, origin: origin
             )
         }
+        // Pinning a profile onto the map's people rail, from the profile
+        // screen. The SAME service the map itself writes through, so the rail
+        // and the button cannot hold different opinions about who is pinned.
+        builder.mapPinning = mapsFeature.profilePinning
         return builder
     }()
 

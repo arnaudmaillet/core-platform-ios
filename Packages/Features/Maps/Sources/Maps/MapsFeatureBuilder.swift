@@ -16,6 +16,16 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
     private let feedFeature: () -> any FeedFeatureBuilding
     private let openProfile: (ProfileID, ProfileIdentityStub?) -> Void
     private let openConversation: (ProfileID) -> Void
+    /// Curating the people rail, shared with whatever else pins a profile —
+    /// today the profile screen's pin button. Built here (not injected)
+    /// because the state it owns is the map's own: no service vends a
+    /// favorites list, so the device is the only place it has ever lived.
+    /// Handed OUT through `profilePinning` so the composition root can give
+    /// the same instance to another feature.
+    private let pinService: MapProfilePinService
+
+    /// The interface-typed seam the composition root hands to other features.
+    public var profilePinning: any MapProfilePinning { pinService }
 
     /// - Parameters:
     ///   - videoPlayback: a Maps-dedicated player pool (separate from the feed's)
@@ -46,6 +56,9 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         self.feedFeature = feedFeature
         self.openProfile = openProfile
         self.openConversation = openConversation
+        self.pinService = MapProfilePinService(
+            store: MapFavoritesStore(), favorites: favoritesRepository
+        )
     }
 
     public func makeMapViewController() -> UIViewController {
@@ -53,6 +66,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         return MapsViewController(
             viewModel: MapsViewModel(repository: repository),
             favoritesRepository: favoritesRepository,
+            pinService: pinService,
             imagePipeline: imagePipeline,
             videoPlayback: videoPlayback,
             makeSnapFeed: { postIDs in feedFeature().makeSnapFeedViewController(postIDs: postIDs) },

@@ -67,6 +67,10 @@ final class ProfileHeaderView: UIView {
     private let viewsStat = ProfileStatView(caption: "Views")
     private let messageButton = UIButton(configuration: .glass())
     private let editButton = UIButton(configuration: .glass())
+    /// Keep-this-profile-on-the-map's-people-rails, immediately right of
+    /// Message. Hidden unless the viewer follows this profile — see
+    /// `configureMapPin`.
+    private let mapPinButton = UIButton(configuration: .glass())
     private let qrCodeButton = UIButton(configuration: .glass())
     private let moreButton = UIButton(configuration: .glass())
     private var columnTopConstraint: NSLayoutConstraint?
@@ -92,6 +96,13 @@ final class ProfileHeaderView: UIView {
         didSet { columnTopConstraint?.constant = chromeTopInset + Metrics.bannerClearance }
     }
 
+    /// Builds the mutual's rail menu, resolved at PRESENTATION so the rows
+    /// reflect live membership rather than whatever was true when the button
+    /// was configured — the same bargain `setMoreMenu` strikes.
+    var makeMapPinMenu: (() -> UIMenu)?
+    /// Invoked when the map-favorite star is tapped, for the plain-toggle case
+    /// (a mutual gets the menu instead).
+    var onMapPinTapped: (() -> Void)?
     /// Invoked when the Message button is tapped (other users only).
     var onMessageTapped: (() -> Void)?
     /// Invoked when the Edit Profile capsule is tapped (own profile only).
@@ -259,6 +270,47 @@ final class ProfileHeaderView: UIView {
             messageButton.isHidden = true
             editButton.isHidden = true
         }
+    }
+
+    /// Poses the map-favorite star beside Message.
+    ///
+    /// Visibility is NOT decided here: `ProfileViewModel.MapPinButton` resolves
+    /// the relationship rule (only a profile the viewer follows can be kept on
+    /// a rail) together with whether the app was wired for it at all, so the
+    /// view renders one finished answer instead of re-deriving it from a
+    /// second copy of the rule.
+    ///
+    /// Two interactions behind one button, chosen by `offersChoice`:
+    /// - a plain follower can only ever be on the Following rail, so the tap
+    ///   IS the toggle (`onMapPinTapped`);
+    /// - a mutual can be on either rail, so the tap opens a menu instead
+    ///   (`makeMapPinMenu`). `showsMenuAsPrimaryAction` means one tap, no long
+    ///   press — and it is cleared again for the toggle case, or a profile
+    ///   that stops being a mutual would keep opening a menu.
+    func configureMapPin(_ state: ProfileViewModel.MapPinButton) {
+        mapPinButton.isHidden = state == .hidden
+        guard state != .hidden else {
+            mapPinButton.menu = nil
+            mapPinButton.showsMenuAsPrimaryAction = false
+            return
+        }
+        mapPinButton.configuration = Self.glassBubble(
+            systemImage: Self.mapFavoriteSymbol(isFavorited: state.isFavorited)
+        )
+        mapPinButton.showsMenuAsPrimaryAction = state.offersChoice
+        mapPinButton.menu = state.offersChoice ? makeMapPinMenu?() : nil
+        // The label says what the button DOES, not what the icon depicts — the
+        // glyph pair is a state, and VoiceOver users get no glyph.
+        mapPinButton.accessibilityLabel = if state.offersChoice {
+            "Map favorites"
+        } else {
+            state.isFavorited ? "Remove from map favorites" : "Add to map favorites"
+        }
+    }
+
+    /// Filled on ANY rail, outlined on none — the same read as a bookmark.
+    private static func mapFavoriteSymbol(isFavorited: Bool) -> String {
+        isFavorited ? "star.circle.fill" : "star.circle"
     }
 
     // MARK: - Redaction
@@ -549,6 +601,18 @@ final class ProfileHeaderView: UIView {
             for: .primaryActionTriggered
         )
 
+        // Same bubble as QR and see-more, but sitting with the LEADING capsule
+        // rather than with the trailing pair: it acts on the person Message
+        // acts on, so it belongs beside it.
+        mapPinButton.configuration = Self.glassBubble(
+            systemImage: Self.mapFavoriteSymbol(isFavorited: false)
+        )
+        mapPinButton.isHidden = true
+        mapPinButton.addAction(
+            UIAction { [weak self] _ in self?.onMapPinTapped?() },
+            for: .primaryActionTriggered
+        )
+
         qrCodeButton.configuration = Self.glassBubble(systemImage: "qrcode")
         qrCodeButton.addAction(
             UIAction { [weak self] _ in self?.onQRCodeTapped?() },
@@ -570,16 +634,33 @@ final class ProfileHeaderView: UIView {
         let traySpacer = UIView()
         traySpacer.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
         let actionRow = UIStackView(
-            arrangedSubviews: [messageButton, editButton, traySpacer, qrCodeButton, moreButton]
+            arrangedSubviews: [messageButton, editButton, mapPinButton, traySpacer, qrCodeButton, moreButton]
         )
         actionRow.axis = .horizontal
         actionRow.alignment = .fill
         actionRow.distribution = .fill
         actionRow.spacing = Spacing.sm
-        // Whichever leading capsule shows hugs the spacer (the other is hidden).
-        actionRow.setCustomSpacing(0, after: messageButton)
+        // The leading group (capsule + map pin) keeps its own gap; the spacer
+        // IS the gap to the trailing bubbles, so its neighbours take zero.
         actionRow.setCustomSpacing(0, after: editButton)
+        actionRow.setCustomSpacing(0, after: mapPinButton)
         actionRow.setCustomSpacing(0, after: traySpacer)
+        // ⚠️ The map pin is the one bubble that HIDES, and it must not carry
+        // the square tie the other two do. `height == width` is required, the
+        // row is `.fill` (every arranged subview's height equals the row's,
+        // also required), and a hidden arranged subview gets its width forced
+        // to zero by the stack — three required constraints that cannot all
+        // hold. UIKit then broke one of the row's own, and the whole tray
+        // spilled out of the identity column: the Message label landed on the
+        // counters and the QR bubble in the corner, on every profile the
+        // viewer does not follow.
+        //
+        // Width alone is enough: `.fill` supplies the height, and at a 44pt
+        // row that is the same 44x44 circle.
+        let pinWidth = mapPinButton.widthAnchor.constraint(equalToConstant: Metrics.bubbleSize)
+        pinWidth.priority = UILayoutPriority(999)
+        pinWidth.isActive = true
+
         for bubble in [qrCodeButton, moreButton] {
             // The diameter is 999, not required: on the narrowest devices the
             // tray can overrun the column beside the avatar, and the bubbles

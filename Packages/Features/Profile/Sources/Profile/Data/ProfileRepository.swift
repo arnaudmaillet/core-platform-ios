@@ -71,7 +71,14 @@ public enum ProfileRelationship: Equatable, Sendable {
     /// viewer's *outbound* block (`RelationStatus.blocking`), which the "..."
     /// menu reads to offer Block or Unblock. Being blocked BY the target
     /// (`blockedBy`) is deliberately not surfaced — platforms don't tell you.
-    case other(isFollowing: Bool, isBlocked: Bool)
+    ///
+    /// `isMutual` means they follow back (`RelationStatus.mutual`) — a FRIEND
+    /// in the map's vocabulary. It implies `isFollowing`, and the two are kept
+    /// apart rather than collapsed: the follow button only ever needed "does
+    /// the viewer follow them", and squeezing mutual into that bool is why the
+    /// distinction had to be recovered here before the map could offer a
+    /// friends-or-following choice.
+    case other(isFollowing: Bool, isMutual: Bool = false, isBlocked: Bool)
 }
 
 /// How widely a profile is exposed, mirroring `profile.v1.ProfileVisibility`.
@@ -299,7 +306,11 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileViewe
             // the edges down), so a blocked profile reports isFollowing false —
             // which is also what the UI wants: Unblock, not Unfollow.
             let isFollowing = view.status == .following || view.status == .mutual
-            return .other(isFollowing: isFollowing, isBlocked: view.status == .blocking)
+            return .other(
+                isFollowing: isFollowing,
+                isMutual: view.status == .mutual,
+                isBlocked: view.status == .blocking
+            )
         case .failure(let error):
             throw ProfileError.transport(message: error.message ?? "code \(error.code)")
         }

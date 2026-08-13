@@ -96,10 +96,17 @@ struct MapVenueClusteringTests {
     /// mean "all text here" and a text tap could only ever open a text feed.
     @Test func aTextFacedMixedClusterOpensBothKinds() async throws {
         let (pins, items) = try await markersAtOpeningZoom()
-        let textFacedClusters = items.filter { $0.representative.isText && $0.isCluster }
+        // Searched, never indexed: the engine builds its markers from a
+        // Dictionary's values, so their ORDER is unspecified and varies with
+        // Swift's per-process hash seed. Taking `.first` here passed for two
+        // runs and then picked the all-text venue instead — a test that fails
+        // on a Tuesday for no reason anyone can see.
         let cluster = try #require(
-            textFacedClusters.first,
-            "no multi-post text marker exists, so a text tap can only ever open one post"
+            items.first { item in
+                item.representative.isText && item.isCluster
+                    && kinds(of: item, among: pins).contains { $0 != .text }
+            },
+            "no text-faced marker carries media, so a text tap can only open text"
         )
 
         // Everything under it travels, in the tapped order, with nothing lost.

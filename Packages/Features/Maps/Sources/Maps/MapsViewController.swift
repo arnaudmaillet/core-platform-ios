@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import DesignSystem
 import MapKit
+import MapsInterface
 import MediaCore
 import MediaPlayback
 import UIKit
@@ -20,9 +21,10 @@ final class MapsViewController: UIViewController {
     /// empty just hides the section).
     private let favoritesRepository: any MapFavoritesProviding
     private var favoritesTask: Task<Void, Never>?
-    /// The client-persisted pinned set behind the favorites section (nil
-    /// until the viewer first curates → fall back to followed profiles).
-    private let favoritesStore = MapFavoritesStore()
+    /// Reads and writes the pinned set behind the favorites section — the one
+    /// place the never-curated fallback is resolved, shared with the profile
+    /// screen's pin button so the two cannot disagree about what a pin means.
+    private let pinService: MapProfilePinService
     /// What the favorites section currently shows — the seed material when a
     /// first pin/unpin materializes the store from the fallback.
     private var currentFavorites: [MapFavorite] = []
@@ -152,6 +154,7 @@ final class MapsViewController: UIViewController {
     init(
         viewModel: MapsViewModel,
         favoritesRepository: any MapFavoritesProviding,
+        pinService: MapProfilePinService,
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController,
         makeSnapFeed: @escaping ([PostID]) -> UIViewController,
@@ -162,6 +165,7 @@ final class MapsViewController: UIViewController {
     ) {
         self.viewModel = viewModel
         self.favoritesRepository = favoritesRepository
+        self.pinService = pinService
         self.imagePipeline = imagePipeline
         self.videoCoordinator = MapVideoPlaybackCoordinator(pool: videoPlayback)
         self.makeSnapFeed = makeSnapFeed
@@ -181,6 +185,7 @@ final class MapsViewController: UIViewController {
         configureMapView()
         bindViewModel()
         observeAppLifecycle()
+        observeFavoriteChanges()
         loadFavorites()
         prefetchPeople()
         mapView.setRegion(Self.defaultRegion, animated: false)
@@ -331,6 +336,21 @@ final class MapsViewController: UIViewController {
         videoCoordinator.setSurfaceVisible(false)
     }
 
+    /// Re-reads the people rail whenever the pinned set changes — including
+    /// when it changed on ANOTHER screen. A profile's pin button writes the
+    /// same store, and this map may already be loaded behind it: without this
+    /// the rail would keep yesterday's list until the tab was rebuilt, which
+    /// reads as the button having done nothing.
+    private func observeFavoriteChanges() {
+        appObservers.add(NotificationCenter.default.addObserver(
+            forName: MapFavoritesStore.didChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            // Only the favorites carousel: the sub-filter row under Friends /
+            // Following lists the graph, which a pin does not touch.
+            MainActor.assumeIsolated { self?.loadFavorites() }
+        })
+    }
+
     private func observeAppLifecycle() {
         let center = NotificationCenter.default
         appObservers.add(center.addObserver(
@@ -458,6 +478,9 @@ final class MapsViewController: UIViewController {
     /// the selection hasn't moved on.
     private func updateSubFilterBar(for filter: MapFilter?) {
         subFilterLoadTask?.cancel()
+        // The favorites carousel is scoped to the primary now, so it reloads
+        // with the row beneath it — see `loadFavorites`.
+        loadFavorites()
         switch filter {
         case .friends, .following:
             guard let primary = filter else { return } // matched .some above
@@ -675,18 +698,27 @@ final class MapsViewController: UIViewController {
         return known + newcomers
     }
 
-    /// Long-press pin/unpin from a person pill. The first mutation
-    /// materializes the on-screen fallback into the persisted store, so what
-    /// the viewer sees is what stays.
+    /// Pin/unpin a person pill. The rule — including materializing the
+    /// never-curated fallback on the first write — belongs to
+    /// `MapProfilePinService`, which the profile screen's pin button shares;
+    /// the rail then refreshes off the store's change notification rather than
+    /// here, so a pin made anywhere lands the same way.
     private func togglePinnedFavorite(_ favorite: MapFavorite) {
-        var pinned = favoritesStore.pinnedProfileIDs ?? currentFavorites.map(\.profileID)
-        if let index = pinned.firstIndex(of: favorite.profileID) {
-            pinned.remove(at: index)
-        } else {
-            pinned.append(favorite.profileID)
+        let pinService = pinService
+        let id = favorite.profileID
+        // The rail the viewer is looking at is the one they mean. Under a
+        // primary that shows both, Following is the broader of the two and the
+        // one a plain follower can be on at all.
+        let category = Self.railCategories(for: filterBar.selectedFilter).last ?? .following
+        Task {
+            var categories = await pinService.categories(for: id)
+            if categories.contains(category) {
+                categories.remove(category)
+            } else {
+                categories.insert(category)
+            }
+            await pinService.setCategories(categories, for: id)
         }
-        favoritesStore.setPinned(pinned)
-        loadFavorites()
     }
 
     /// Pure cross-dissolve show/hide. Structure (`isHidden`, stack layout)
@@ -720,22 +752,50 @@ final class MapsViewController: UIViewController {
         }
     }
 
-    /// Loads the favorites section: the persisted pinned set when curated,
-    /// else the followed profiles (Phase-1 fallback). Fail-open: an empty
+    /// Loads the favorites section for the rail the viewer is currently
+    /// looking at: the curated list when there is one, else the graph behind
+    /// it (mutuals for Friends, follows for Following). Fail-open — an empty
     /// result leaves the bar with just its primaries.
+    ///
+    /// SCOPED to the active primary, which is what makes the two categories
+    /// visible at all: selecting Friends shows the people kept on the Friends
+    /// rail, Following shows the Following rail, and at rest ("All", Places,
+    /// Nearby) the carousel shows both rails merged — the viewer's whole set
+    /// of favorites, which is what it meant before the split.
     private func loadFavorites() {
         favoritesTask?.cancel()
         let repository = favoritesRepository
-        let pinnedIDs = favoritesStore.pinnedProfileIDs
+        let categories = Self.railCategories(for: filterBar.selectedFilter)
+        let curated = categories.map { ($0, pinService.curatedProfileIDs(in: $0)) }
         favoritesTask = Task { [weak self] in
-            let favorites = if let pinnedIDs {
-                await repository.profiles(for: pinnedIDs)
-            } else {
-                await repository.following()
+            var merged: [MapFavorite] = []
+            var seen = Set<ProfileID>()
+            for (category, ids) in curated {
+                let people = if let ids {
+                    await repository.profiles(for: ids)
+                } else {
+                    // Never curated: the rail IS the graph behind it.
+                    category == .friends ? await repository.friends() : await repository.following()
+                }
+                // Merged in rail order, first mention wins: a mutual kept on
+                // both rails is one pill, where the carousel shows both.
+                for person in people where seen.insert(person.profileID).inserted {
+                    merged.append(person)
+                }
             }
             guard let self, !Task.isCancelled else { return }
-            self.currentFavorites = favorites
-            self.filterBar.setFavorites(favorites)
+            self.currentFavorites = merged
+            self.filterBar.setFavorites(merged)
+        }
+    }
+
+    /// Which rails the carousel shows under a given primary. Friends and
+    /// Following each show their own; everything else shows both.
+    private static func railCategories(for filter: MapFilter?) -> [MapFavoriteCategory] {
+        switch filter {
+        case .friends: [.friends]
+        case .following: [.following]
+        default: [.friends, .following]
         }
     }
 
