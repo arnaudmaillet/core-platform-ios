@@ -237,6 +237,27 @@ final class MapsViewController: UIViewController {
                 }
             }
         }
+        // `-maps-toggle-subfilter <profileID>`: adds or removes that profile
+        // from the ACTIVE primary's rail ~5s in, while the map is on screen —
+        // the edit the profile's star makes from another screen, which is the
+        // one path that has to animate rather than flash. Pair with
+        // `-maps-select-filter friends|following`.
+        if let id = Self.debugArgumentValue("-maps-toggle-subfilter") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+                guard let self,
+                      let primary = filterBar.selectedFilter,
+                      let category = Self.railCategory(for: primary) else { return }
+                let profile = ProfileID(id)
+                let pinService = pinService
+                Task {
+                    var categories = await pinService.categories(for: profile)
+                    let wasOn = categories.contains(category)
+                    categories.formSymmetricDifference([category])
+                    print("[maps] sub-filter toggle: \(id) \(wasOn ? "leaves" : "joins") \(category)")
+                    await pinService.setCategories(categories, for: profile)
+                }
+            }
+        }
         // `-maps-open-subfilter-sheet`: presents the sub-filter full-list
         // sheet ~3s in (the header's organize tap). Pair with
         // `-maps-select-filter friends|following|pinned`.
@@ -544,16 +565,30 @@ final class MapsViewController: UIViewController {
                 catalogue: MapSubFilterOption.people(catalogueCache[primary] ?? [])
             )
         )
-        switch MapSubFilterRowUpdate.resolve(rendered: renderedSubFilterRow, incoming: incoming) {
+        let update = MapSubFilterRowUpdate.resolve(rendered: renderedSubFilterRow, incoming: incoming)
+        #if DEBUG
+        // Which path a row edit took is invisible in a screenshot — a diff and
+        // a cross-dissolve land on the same pixels and differ only in how they
+        // got there. Printed alongside the toggle hook that provokes it.
+        if ProcessInfo.processInfo.arguments.contains("-maps-toggle-subfilter") {
+            let style = switch update {
+            case .show(let options, let style): "show(\(options.count) pills, \(style))"
+            case .hide: "hide"
+            case .unchanged: "unchanged"
+            }
+            print("[maps] sub-filter row update: \(style)")
+        }
+        #endif
+        switch update {
         case .unchanged:
             return
         case .hide:
             renderedSubFilterRow = incoming
             currentSubFilterOptions = []
             setSubFilterBar(visible: false)
-        case .show(let options):
+        case .show(let options, let style):
             renderedSubFilterRow = incoming
-            showSubFilterRow(options)
+            showSubFilterRow(options, style: style)
         }
     }
 
@@ -561,15 +596,44 @@ final class MapsViewController: UIViewController {
     /// transition: hidden → set content and fade the bar in; already
     /// visible → cross-dissolve the pills in place (a hard swap while
     /// on-screen reads as a snap).
-    private func showSubFilterRow(_ options: [MapSubFilterOption]) {
+    private func showSubFilterRow(
+        _ options: [MapSubFilterOption], style: MapSubFilterRowUpdate.Style = .swap
+    ) {
         let options = orderedByPreference(options)
         currentSubFilterOptions = options
-        if isSubFilterBarVisible {
-            subFilterBar.transition(to: options)
-        } else {
+        guard isSubFilterBarVisible else {
             subFilterBar.setOptions(options)
             setSubFilterBar(visible: true)
+            return
         }
+        switch style {
+        case .swap:
+            // A different primary's list: one surface out, one in.
+            subFilterBar.transition(to: options)
+        case .diff:
+            // The SAME list, edited — someone was added or removed from this
+            // rail while the viewer was looking at it. Only the pills that
+            // changed may move: cross-dissolving the row for a one-pill edit
+            // is a flash, and it takes the scroll position and the selection
+            // with it. `restack` is the animated diffable apply the organize
+            // sheet already commits through.
+            subFilterBar.restack(to: options)
+            pruneSubFilterSelection(to: options)
+        }
+    }
+
+    /// Drops any applied refinement whose pill just left the row. A selection
+    /// can't outlive its pill: the map would stay filtered by someone the
+    /// viewer can no longer see or unselect.
+    ///
+    /// Only the diff path needs this — a swap resets the selection with the
+    /// content, and the organize sheet prunes as it commits.
+    private func pruneSubFilterSelection(to options: [MapSubFilterOption]) {
+        let surviving = Set(options.map(\.subFilter))
+        let stillApplied = subFilterBar.selectedSubFilters.intersection(surviving)
+        guard stillApplied != subFilterBar.selectedSubFilters else { return }
+        subFilterBar.setSelectedSubFilters(stillApplied)
+        viewModel.subFiltersChanged(stillApplied)
     }
 
     /// The header's organize button: the row's full contents as a searchable

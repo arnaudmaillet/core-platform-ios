@@ -421,6 +421,11 @@ final class MapSubFilterBarView: UIView {
     func restack(to options: [MapSubFilterOption]) {
         orderedSubFilters = options.map(\.subFilter)
         optionsBySubFilter = Dictionary(uniqueKeysWithValues: options.map { ($0.subFilter, $0) })
+        // A restack can now ADD people (someone favorited from their profile
+        // while this row was on screen), and an added pill has never had its
+        // avatar resolved. Cache-guarded, so the ones already here cost
+        // nothing and do not re-fetch.
+        loadAvatars(for: options)
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         snapshot.appendSections([.main])
         snapshot.appendItems(Self.items(for: orderedSubFilters))

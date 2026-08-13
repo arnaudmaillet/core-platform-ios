@@ -23,12 +23,26 @@ struct MapSubFilterRowState: Equatable {
 /// to the primary they had just left. Comparing against what is RENDERED makes
 /// that impossible to express.
 enum MapSubFilterRowUpdate: Equatable {
+    /// How the row should get from what it shows to what it should show.
+    enum Style: Equatable {
+        /// A different list entirely — the viewer switched primaries. The row
+        /// cross-dissolves as one surface, because every pill is being
+        /// replaced and animating them individually would read as a shuffle
+        /// between two unrelated sets.
+        case swap
+        /// The SAME list, edited — someone was added or removed. Only the
+        /// pills that changed may move: a whole-row dissolve for a
+        /// one-pill edit is the flash this distinction exists to remove, and
+        /// it drops the viewer's scroll position and selection with it.
+        case diff
+    }
+
     /// The row already shows exactly this. Re-applying would churn the pills
     /// (and the selection) for nothing.
     case unchanged
     /// Render these options — an EMPTY array is the add-affordance state, not
     /// a reason to hide.
-    case show([MapSubFilterOption])
+    case show([MapSubFilterOption], style: Style)
     /// Retire the row: nothing to show and nobody to add.
     case hide
 
@@ -39,6 +53,8 @@ enum MapSubFilterRowUpdate: Equatable {
         guard rendered != incoming else { return .unchanged }
         let options = MapSubFilterOption.people(incoming.people)
         if options.isEmpty && !incoming.hasCatalogue { return .hide }
-        return .show(options)
+        // Same primary → an edit of the list the viewer is already reading.
+        let style: Style = rendered?.primary == incoming.primary ? .diff : .swap
+        return .show(options, style: style)
     }
 }

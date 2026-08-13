@@ -36,7 +36,7 @@ struct MapSubFilterRowUpdateTests {
             incoming: Self.state(.friends, [])
         )
 
-        #expect(update == .show([]), "the previous primary's row was left standing")
+        #expect(update == .show([], style: .swap), "the previous primary's row was left standing")
     }
 
     /// And the same switch the other way: an empty row replaced by a populated
@@ -48,7 +48,7 @@ struct MapSubFilterRowUpdateTests {
             incoming: Self.state(.following, ["ada"])
         )
 
-        #expect(update == .show(MapSubFilterOption.people([Self.person("ada")])))
+        #expect(update == .show(MapSubFilterOption.people([Self.person("ada")]), style: .swap))
     }
 
     /// Two primaries can hold the SAME people (friends ⊆ following) — and it
@@ -96,7 +96,7 @@ struct MapSubFilterRowUpdateTests {
             rendered: nil, incoming: Self.state(.friends, [], hasCatalogue: true)
         )
 
-        #expect(update == .show([]))
+        #expect(update == .show([], style: .swap))
     }
 
     /// An empty rail with nobody to add retires: the "+" opens a sheet, and a
@@ -120,7 +120,7 @@ struct MapSubFilterRowUpdateTests {
             incoming: Self.state(.friends, [], hasCatalogue: true)
         )
 
-        #expect(update == .show([]))
+        #expect(update == .show([], style: .diff))
     }
 
     /// Nothing rendered yet — the first paint always applies.
@@ -131,5 +131,51 @@ struct MapSubFilterRowUpdateTests {
         )
 
         #expect(update != .unchanged)
+    }
+
+    // MARK: - How it gets there
+
+    /// THE FLICKER. Adding or removing one person from the rail the viewer is
+    /// reading is an EDIT of that row — only the pill that changed may move.
+    /// Cross-dissolving the whole surface for it is the flash, and it takes
+    /// the scroll position and the selection with it.
+    @Test("Editing the visible rail diffs rather than swapping")
+    func anEditOfTheSameRailDiffs() {
+        let added = MapSubFilterRowUpdate.resolve(
+            rendered: Self.state(.friends, ["ada"]),
+            incoming: Self.state(.friends, ["ada", "lena"])
+        )
+        let removed = MapSubFilterRowUpdate.resolve(
+            rendered: Self.state(.friends, ["ada", "lena"]),
+            incoming: Self.state(.friends, ["ada"])
+        )
+
+        #expect(added == .show(MapSubFilterOption.people(["ada", "lena"].map(Self.person)), style: .diff))
+        #expect(removed == .show(MapSubFilterOption.people([Self.person("ada")]), style: .diff))
+    }
+
+    /// A different primary is a different list, and animating pill-by-pill
+    /// between two unrelated sets reads as a shuffle. That one keeps the
+    /// cross-dissolve.
+    @Test("Switching primaries swaps rather than diffing")
+    func aPrimarySwitchSwaps() {
+        let update = MapSubFilterRowUpdate.resolve(
+            rendered: Self.state(.following, ["ada"]),
+            incoming: Self.state(.friends, ["ada"])
+        )
+
+        #expect(update == .show(MapSubFilterOption.people([Self.person("ada")]), style: .swap))
+    }
+
+    /// Curating the last person off the rail the viewer is reading is still an
+    /// edit of it — the pills collapse out, they do not flash away.
+    @Test("Emptying the visible rail diffs too")
+    func emptyingTheVisibleRailDiffs() {
+        let update = MapSubFilterRowUpdate.resolve(
+            rendered: Self.state(.friends, ["ada"]),
+            incoming: Self.state(.friends, [])
+        )
+
+        #expect(update == .show([], style: .diff))
     }
 }
