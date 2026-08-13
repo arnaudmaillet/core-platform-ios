@@ -63,22 +63,20 @@ struct ProfileMapPinTests {
     /// Records what it was asked and what it was told, so a test can assert on
     /// the WRITE rather than only on the button that caused it.
     private actor StubPinning: MapProfilePinning {
-        private var pinned: Set<ProfileID>
-        private(set) var writes: [(pinned: Bool, id: ProfileID)] = []
-        private(set) var reads: [ProfileID] = []
+        private var rails: [ProfileID: Set<MapFavoriteCategory>]
+        private(set) var writes: [(categories: Set<MapFavoriteCategory>, id: ProfileID)] = []
 
-        init(pinned: Set<ProfileID> = []) {
-            self.pinned = pinned
+        init(rails: [ProfileID: Set<MapFavoriteCategory>] = [:]) {
+            self.rails = rails
         }
 
-        func isPinned(_ id: ProfileID) async -> Bool {
-            reads.append(id)
-            return pinned.contains(id)
+        func categories(for id: ProfileID) async -> Set<MapFavoriteCategory> {
+            rails[id] ?? []
         }
 
-        func setPinned(_ pinned: Bool, for id: ProfileID) async {
-            writes.append((pinned, id))
-            if pinned { self.pinned.insert(id) } else { self.pinned.remove(id) }
+        func setCategories(_ categories: Set<MapFavoriteCategory>, for id: ProfileID) async {
+            writes.append((categories, id))
+            rails[id] = categories
         }
     }
 
@@ -111,22 +109,23 @@ struct ProfileMapPinTests {
 
     // MARK: - Who gets the button
 
-    @Test("A followed profile can be pinned")
-    func followedProfileOffersThePin() async {
+    @Test("A followed profile can be favorited")
+    func followedProfileOffersTheStar() async {
         let viewModel = makeViewModel(
             relationship: .other(isFollowing: true, isBlocked: false), pinning: StubPinning()
         )
         viewModel.viewDidLoad()
         await settle { viewModel.mapPinButton != .hidden }
 
-        #expect(viewModel.mapPinButton == .unpinned)
+        #expect(viewModel.mapPinButton == .shown(categories: [], offersChoice: false))
+        #expect(viewModel.mapPinButton.isFavorited == false)
     }
 
-    /// The rule the feature exists to enforce: the map's people rail is a
+    /// The rule the feature exists to enforce: the map's people rails are a
     /// shortcut through the people you keep up with, so a stranger's profile
-    /// offers no pin at all.
+    /// offers no star at all.
     @Test("A profile the viewer does not follow offers nothing")
-    func unfollowedProfileHidesThePin() async {
+    func unfollowedProfileHidesTheStar() async {
         let viewModel = makeViewModel(
             relationship: .other(isFollowing: false, isBlocked: false), pinning: StubPinning()
         )
@@ -137,7 +136,7 @@ struct ProfileMapPinTests {
     }
 
     @Test("Your own profile offers nothing — you cannot follow yourself")
-    func ownProfileHidesThePin() async {
+    func ownProfileHidesTheStar() async {
         let viewModel = makeViewModel(relationship: .me, pinning: StubPinning())
         viewModel.viewDidLoad()
         await settle()
@@ -158,7 +157,7 @@ struct ProfileMapPinTests {
     }
 
     /// The button must not arrive wearing a guess: resolving the map's
-    /// never-curated fallback can take a round trip, and an outline glyph that
+    /// never-curated fallbacks can take a round trip, and an outline star that
     /// silently fills in is a worse first frame than one that appears late.
     @Test("Nothing is shown before the answer is known")
     func theButtonWaitsForItsState() {
@@ -168,22 +167,35 @@ struct ProfileMapPinTests {
         #expect(viewModel.mapPinButton == .hidden)
     }
 
-    // MARK: - What it shows and does
+    // MARK: - A plain follower: one rail, one tap
 
-    @Test("An already-pinned profile shows the pinned state")
-    func pinnedStateIsRead() async {
-        let pinning = StubPinning(pinned: [subject.id])
+    /// Someone the viewer merely follows can only ever be on Following, so
+    /// they get a toggle and NO menu.
+    @Test("A follower is toggled, not asked")
+    func aFollowerGetsAToggle() async {
+        let pinning = StubPinning()
         let viewModel = makeViewModel(
             relationship: .other(isFollowing: true, isBlocked: false), pinning: pinning
         )
         viewModel.viewDidLoad()
         await settle { viewModel.mapPinButton != .hidden }
+        #expect(viewModel.mapPinButton.offersChoice == false)
 
-        #expect(viewModel.mapPinButton == .pinned)
+        viewModel.toggleMapPin()
+        #expect(viewModel.mapPinButton.categories == [.following], "optimistic state did not flip")
+        await settle(untilAsync: { await pinning.writes.count == 1 })
+        #expect(await pinning.writes.first?.categories == [.following])
+
+        viewModel.toggleMapPin()
+        #expect(viewModel.mapPinButton.categories.isEmpty)
+        await settle(untilAsync: { await pinning.writes.count == 2 })
+        #expect(await pinning.writes.last?.categories.isEmpty == true)
     }
 
-    @Test("Tapping pins, and tapping again unpins")
-    func tappingTogglesBothWays() async {
+    /// A follower is not a friend, and asking for the Friends rail must not
+    /// put them on it — whatever a caller (or a stale menu) says.
+    @Test("A follower cannot be put on the Friends rail")
+    func aFollowerCannotBeAFriend() async {
         let pinning = StubPinning()
         let viewModel = makeViewModel(
             relationship: .other(isFollowing: true, isBlocked: false), pinning: pinning
@@ -191,17 +203,87 @@ struct ProfileMapPinTests {
         viewModel.viewDidLoad()
         await settle { viewModel.mapPinButton != .hidden }
 
-        viewModel.toggleMapPin()
-        // Optimistic: the button says so before the write has landed.
-        #expect(viewModel.mapPinButton == .pinned)
+        viewModel.setMapCategories([.friends, .following])
         await settle(untilAsync: { await pinning.writes.count == 1 })
-        #expect(await pinning.writes.map(\.pinned) == [true])
-        #expect(await pinning.writes.map(\.id) == [subject.id])
+
+        #expect(viewModel.mapPinButton.categories == [.following])
+        #expect(await pinning.writes.first?.categories == [.following])
+    }
+
+    // MARK: - A mutual: two rails, a choice
+
+    @Test("A mutual is offered the choice")
+    func aMutualGetsTheMenu() async {
+        let viewModel = makeViewModel(
+            relationship: .other(isFollowing: true, isMutual: true, isBlocked: false),
+            pinning: StubPinning()
+        )
+        viewModel.viewDidLoad()
+        await settle { viewModel.mapPinButton != .hidden }
+
+        #expect(viewModel.mapPinButton.offersChoice)
+    }
+
+    /// The menu's rows write exactly what they say — one rail, the other, or
+    /// both — and each write replaces the whole membership.
+    @Test("Each menu row writes exactly its rails")
+    func theMenuWritesWhatItSays() async {
+        let pinning = StubPinning()
+        let viewModel = makeViewModel(
+            relationship: .other(isFollowing: true, isMutual: true, isBlocked: false),
+            pinning: pinning
+        )
+        viewModel.viewDidLoad()
+        await settle { viewModel.mapPinButton != .hidden }
+
+        viewModel.setMapCategories([.friends])
+        #expect(viewModel.mapPinButton.categories == [.friends])
+        await settle(untilAsync: { await pinning.writes.count == 1 })
+
+        viewModel.setMapCategories([.friends, .following])
+        #expect(viewModel.mapPinButton.categories == [.friends, .following])
+        await settle(untilAsync: { await pinning.writes.count == 2 })
+
+        viewModel.setMapCategories([])
+        #expect(viewModel.mapPinButton.categories.isEmpty)
+        await settle(untilAsync: { await pinning.writes.count == 3 })
+
+        #expect(await pinning.writes.map(\.categories) == [[.friends], [.friends, .following], []])
+    }
+
+    /// A mutual already on a rail reads as favorited, and the star fills for
+    /// ANY rail rather than only for both.
+    @Test("The star fills for any rail")
+    func theStarFillsForAnyRail() async {
+        let pinning = StubPinning(rails: [subject.id: [.friends]])
+        let viewModel = makeViewModel(
+            relationship: .other(isFollowing: true, isMutual: true, isBlocked: false),
+            pinning: pinning
+        )
+        viewModel.viewDidLoad()
+        await settle { viewModel.mapPinButton != .hidden }
+
+        #expect(viewModel.mapPinButton.isFavorited)
+        #expect(viewModel.mapPinButton.categories == [.friends])
+    }
+
+    /// The mutual's tap opens a menu, so the plain toggle must do nothing —
+    /// otherwise a stray call would silently rewrite a two-rail membership.
+    @Test("The plain toggle is inert for a mutual")
+    func theToggleIsInertForAMutual() async {
+        let pinning = StubPinning(rails: [subject.id: [.friends, .following]])
+        let viewModel = makeViewModel(
+            relationship: .other(isFollowing: true, isMutual: true, isBlocked: false),
+            pinning: pinning
+        )
+        viewModel.viewDidLoad()
+        await settle { viewModel.mapPinButton != .hidden }
 
         viewModel.toggleMapPin()
-        #expect(viewModel.mapPinButton == .unpinned)
-        await settle(untilAsync: { await pinning.writes.count == 2 })
-        #expect(await pinning.writes.map(\.pinned) == [true, false])
+        await settle()
+
+        #expect(await pinning.writes.isEmpty)
+        #expect(viewModel.mapPinButton.categories == [.friends, .following])
     }
 
     /// A hidden button is not a silent one waiting to be pressed.
@@ -215,6 +297,7 @@ struct ProfileMapPinTests {
         await settle()
 
         viewModel.toggleMapPin()
+        viewModel.setMapCategories([.following])
         await settle()
 
         #expect(await pinning.writes.isEmpty)
@@ -223,9 +306,9 @@ struct ProfileMapPinTests {
 
     // MARK: - Following and unfollowing
 
-    /// Following someone reveals the pin without a reload — the relationship
+    /// Following someone reveals the star without a reload — the relationship
     /// and the button move together, including through the optimistic flip.
-    @Test("Following reveals the pin; unfollowing hides it again")
+    @Test("Following reveals the star; unfollowing hides it again")
     func theButtonFollowsTheRelationship() async {
         let pinning = StubPinning()
         let viewModel = makeViewModel(
@@ -237,29 +320,29 @@ struct ProfileMapPinTests {
 
         viewModel.toggleFollow()
         await settle { viewModel.mapPinButton != .hidden }
-        #expect(viewModel.mapPinButton == .unpinned)
+        #expect(viewModel.mapPinButton.categories.isEmpty)
 
         viewModel.toggleFollow()
         await settle { viewModel.mapPinButton == .hidden }
         #expect(viewModel.mapPinButton == .hidden)
     }
 
-    /// ⚠️ Unfollowing hides the button; it must NOT unpin. The curated list is
-    /// the viewer's, and quietly editing it because a relationship changed is
-    /// the kind of loss nobody can explain afterwards.
-    @Test("Unfollowing does not unpin")
-    func unfollowingLeavesTheStoredPinAlone() async {
-        let pinning = StubPinning(pinned: [subject.id])
+    /// ⚠️ Unfollowing hides the button; it must NOT clear the rails. The
+    /// curated lists are the viewer's, and quietly editing them because a
+    /// relationship changed is the kind of loss nobody can explain afterwards.
+    @Test("Unfollowing does not unfavorite")
+    func unfollowingLeavesTheRailsAlone() async {
+        let pinning = StubPinning(rails: [subject.id: [.following]])
         let viewModel = makeViewModel(
             relationship: .other(isFollowing: true, isBlocked: false), pinning: pinning
         )
         viewModel.viewDidLoad()
-        await settle { viewModel.mapPinButton == .pinned }
+        await settle { viewModel.mapPinButton.isFavorited }
 
         viewModel.toggleFollow()
         await settle { viewModel.mapPinButton == .hidden }
 
-        #expect(await pinning.writes.isEmpty, "an unfollow wrote to the pinned list")
-        #expect(await pinning.isPinned(subject.id), "the pin was silently dropped")
+        #expect(await pinning.writes.isEmpty, "an unfollow wrote to the rails")
+        #expect(await pinning.categories(for: subject.id) == [.following], "a rail was cleared")
     }
 }

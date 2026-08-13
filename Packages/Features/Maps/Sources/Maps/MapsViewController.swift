@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import DesignSystem
 import MapKit
+import MapsInterface
 import MediaCore
 import MediaPlayback
 import UIKit
@@ -477,6 +478,9 @@ final class MapsViewController: UIViewController {
     /// the selection hasn't moved on.
     private func updateSubFilterBar(for filter: MapFilter?) {
         subFilterLoadTask?.cancel()
+        // The favorites carousel is scoped to the primary now, so it reloads
+        // with the row beneath it — see `loadFavorites`.
+        loadFavorites()
         switch filter {
         case .friends, .following:
             guard let primary = filter else { return } // matched .some above
@@ -702,9 +706,18 @@ final class MapsViewController: UIViewController {
     private func togglePinnedFavorite(_ favorite: MapFavorite) {
         let pinService = pinService
         let id = favorite.profileID
+        // The rail the viewer is looking at is the one they mean. Under a
+        // primary that shows both, Following is the broader of the two and the
+        // one a plain follower can be on at all.
+        let category = Self.railCategories(for: filterBar.selectedFilter).last ?? .following
         Task {
-            let isPinned = await pinService.isPinned(id)
-            await pinService.setPinned(!isPinned, for: id)
+            var categories = await pinService.categories(for: id)
+            if categories.contains(category) {
+                categories.remove(category)
+            } else {
+                categories.insert(category)
+            }
+            await pinService.setCategories(categories, for: id)
         }
     }
 
@@ -739,22 +752,50 @@ final class MapsViewController: UIViewController {
         }
     }
 
-    /// Loads the favorites section: the persisted pinned set when curated,
-    /// else the followed profiles (Phase-1 fallback). Fail-open: an empty
+    /// Loads the favorites section for the rail the viewer is currently
+    /// looking at: the curated list when there is one, else the graph behind
+    /// it (mutuals for Friends, follows for Following). Fail-open — an empty
     /// result leaves the bar with just its primaries.
+    ///
+    /// SCOPED to the active primary, which is what makes the two categories
+    /// visible at all: selecting Friends shows the people kept on the Friends
+    /// rail, Following shows the Following rail, and at rest ("All", Places,
+    /// Nearby) the carousel shows both rails merged — the viewer's whole set
+    /// of favorites, which is what it meant before the split.
     private func loadFavorites() {
         favoritesTask?.cancel()
         let repository = favoritesRepository
-        let pinnedIDs = pinService.pinnedProfileIDs
+        let categories = Self.railCategories(for: filterBar.selectedFilter)
+        let curated = categories.map { ($0, pinService.curatedProfileIDs(in: $0)) }
         favoritesTask = Task { [weak self] in
-            let favorites = if let pinnedIDs {
-                await repository.profiles(for: pinnedIDs)
-            } else {
-                await repository.following()
+            var merged: [MapFavorite] = []
+            var seen = Set<ProfileID>()
+            for (category, ids) in curated {
+                let people = if let ids {
+                    await repository.profiles(for: ids)
+                } else {
+                    // Never curated: the rail IS the graph behind it.
+                    category == .friends ? await repository.friends() : await repository.following()
+                }
+                // Merged in rail order, first mention wins: a mutual kept on
+                // both rails is one pill, where the carousel shows both.
+                for person in people where seen.insert(person.profileID).inserted {
+                    merged.append(person)
+                }
             }
             guard let self, !Task.isCancelled else { return }
-            self.currentFavorites = favorites
-            self.filterBar.setFavorites(favorites)
+            self.currentFavorites = merged
+            self.filterBar.setFavorites(merged)
+        }
+    }
+
+    /// Which rails the carousel shows under a given primary. Friends and
+    /// Following each show their own; everything else shows both.
+    private static func railCategories(for filter: MapFilter?) -> [MapFavoriteCategory] {
+        switch filter {
+        case .friends: [.friends]
+        case .following: [.following]
+        default: [.friends, .following]
         }
     }
 

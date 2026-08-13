@@ -1,133 +1,179 @@
 import CoreModels
 import Foundation
+import MapsInterface
 import Testing
 @testable import Maps
 
-/// THE PINNED LIST'S ONE TRICKY RULE.
+/// THE FAVORITE RAILS' ONE TRICKY RULE, NOW TWICE OVER.
 ///
-/// `MapFavoritesStore` is tri-state, and the third state does the damage:
-/// `nil` means "never curated", and the map then shows the people the viewer
-/// FOLLOWS. So a followed profile is already pinned as far as the viewer can
-/// see, and the first write has to materialize that list before editing it —
-/// write a bare `[id]` instead and every other person silently leaves the rail.
+/// Each rail in `MapFavoritesStore` is tri-state, and the third state does the
+/// damage: `nil` means "never curated", and the map then shows the graph
+/// behind that rail — mutuals for Friends, follows for Following. So a person
+/// is already on a rail as far as the viewer can see, and the first write has
+/// to materialize that list before editing it; write a bare `[id]` instead and
+/// everyone else silently leaves the rail.
 ///
 /// It matters more now than when the map was the only caller: the profile
-/// screen's pin button writes through this same service, so the rule has to
-/// live in one place and be pinned by tests rather than re-derived per screen.
+/// screen's star writes through this same service, and it can write ONE rail
+/// without disturbing the other.
 struct MapProfilePinServiceTests {
-    /// A `following()` list, and nothing else the service asks for.
+    /// The two graph lists the fallbacks resolve to, and nothing else the
+    /// service asks for.
     private struct StubFavorites: MapFavoritesProviding {
+        let mutuals: [ProfileID]
         let followed: [ProfileID]
 
         func profiles(for ids: [ProfileID]) async -> [MapFavorite] { [] }
-        func friends() async -> [MapFavorite] { [] }
-        func following() async -> [MapFavorite] {
-            followed.map { MapFavorite(profileID: $0, title: $0.rawValue) }
+        func friends() async -> [MapFavorite] { mutuals.map(Self.favorite) }
+        func following() async -> [MapFavorite] { followed.map(Self.favorite) }
+
+        private static func favorite(_ id: ProfileID) -> MapFavorite {
+            MapFavorite(profileID: id, title: id.rawValue)
         }
     }
 
     /// A store on its own `UserDefaults` suite, so suites running in parallel
-    /// cannot read each other's list — `.standard` is one shared mutable
+    /// cannot read each other's lists — `.standard` is one shared mutable
     /// object and these tests write to it.
     private func makeStore(_ name: String = UUID().uuidString) -> MapFavoritesStore {
         MapFavoritesStore(defaults: UserDefaults(suiteName: name)!)
     }
 
     private func makeService(
-        store: MapFavoritesStore, following: [ProfileID]
+        store: MapFavoritesStore, mutuals: [ProfileID] = [], followed: [ProfileID] = []
     ) -> MapProfilePinService {
-        MapProfilePinService(store: store, favorites: StubFavorites(followed: following))
+        MapProfilePinService(
+            store: store, favorites: StubFavorites(mutuals: mutuals, followed: followed)
+        )
     }
 
     // MARK: - Reading
 
-    /// Never curated: what the rail SHOWS is the following list, so that is
-    /// what "pinned" has to mean. Reporting false here would put an unpinned
-    /// button on a profile the map is already showing.
-    @Test func aFollowedProfileReadsAsPinnedBeforeAnyCuration() async {
-        let service = makeService(store: makeStore(), following: [ProfileID("a"), ProfileID("b")])
+    /// Never curated: what a rail SHOWS is the graph behind it, so that is
+    /// what membership has to mean. Reporting empty here would put an unfilled
+    /// star on a profile the map is already showing.
+    @Test func theGraphIsTheAnswerBeforeAnyCuration() async {
+        let mutual = ProfileID("a")
+        let follower = ProfileID("b")
+        let service = makeService(
+            store: makeStore(), mutuals: [mutual], followed: [mutual, follower]
+        )
 
-        #expect(await service.isPinned(ProfileID("a")))
-        #expect(await service.isPinned(ProfileID("zzz")) == false)
+        // A mutual is on BOTH rails by default — they are in both graphs.
+        #expect(await service.categories(for: mutual) == [.friends, .following])
+        // Someone merely followed is only ever on Following.
+        #expect(await service.categories(for: follower) == [.following])
+        #expect(await service.categories(for: ProfileID("zzz")).isEmpty)
     }
 
-    @Test func aCuratedListIsAuthoritative() async {
+    @Test func aCuratedRailIsAuthoritative() async {
         let store = makeStore()
-        store.setPinned([ProfileID("a")])
+        store.setPinned([ProfileID("a")], in: .following)
         // `b` is followed but NOT curated — once the viewer has a list, the
-        // graph stops deciding what the rail holds.
-        let service = makeService(store: store, following: [ProfileID("a"), ProfileID("b")])
+        // graph stops deciding what that rail holds.
+        let service = makeService(store: store, followed: [ProfileID("a"), ProfileID("b")])
 
-        #expect(await service.isPinned(ProfileID("a")))
-        #expect(await service.isPinned(ProfileID("b")) == false)
+        #expect(await service.categories(for: ProfileID("a")) == [.following])
+        #expect(await service.categories(for: ProfileID("b")).isEmpty)
+    }
+
+    /// Curating one rail must not disturb the other: Friends still answers
+    /// from the graph while Following answers from storage.
+    @Test func railsAreIndependent() async {
+        let store = makeStore()
+        let mutual = ProfileID("a")
+        store.setPinned([], in: .following)
+        let service = makeService(store: store, mutuals: [mutual], followed: [mutual])
+
+        #expect(await service.categories(for: mutual) == [.friends])
     }
 
     // MARK: - Writing
 
-    /// The defect this rule exists to prevent: unpinning one person out of an
+    /// The defect this rule exists to prevent: taking one person off an
     /// uncurated rail must keep everyone else on it.
-    @Test func theFirstUnpinMaterializesTheRestOfTheRail() async {
+    @Test func theFirstRemovalMaterializesTheRestOfTheRail() async {
         let store = makeStore()
-        let following = [ProfileID("a"), ProfileID("b"), ProfileID("c")]
-        let service = makeService(store: store, following: following)
+        let followed = [ProfileID("a"), ProfileID("b"), ProfileID("c")]
+        let service = makeService(store: store, followed: followed)
 
-        await service.setPinned(false, for: ProfileID("b"))
+        await service.setCategories([], for: ProfileID("b"))
 
-        #expect(store.pinnedProfileIDs == [ProfileID("a"), ProfileID("c")])
-        #expect(await service.isPinned(ProfileID("a")), "an unrelated person fell off the rail")
+        #expect(store.pinnedProfileIDs(in: .following) == [ProfileID("a"), ProfileID("c")])
+        #expect(await service.categories(for: ProfileID("a")) == [.following])
     }
 
-    @Test func pinningSomeoneNewKeepsThePeopleAlreadyThere() async {
+    @Test func addingSomeoneKeepsThePeopleAlreadyThere() async {
         let store = makeStore()
-        let service = makeService(store: store, following: [ProfileID("a")])
+        let service = makeService(store: store, followed: [ProfileID("a")])
 
-        await service.setPinned(true, for: ProfileID("z"))
+        await service.setCategories([.following], for: ProfileID("z"))
 
-        #expect(store.pinnedProfileIDs == [ProfileID("a"), ProfileID("z")])
+        #expect(store.pinnedProfileIDs(in: .following) == [ProfileID("a"), ProfileID("z")])
     }
 
-    /// A viewer who pins someone already effectively pinned has still MADE a
-    /// choice, and the list must stop tracking the graph from then on —
-    /// otherwise a later unfollow would quietly rewrite their rail.
-    @Test func aNoOpPinStillCommitsTheChoice() async {
+    /// "Exactly these rails" has to mean removal too, or the mutual's menu
+    /// could add but never take away.
+    @Test func settingOneRailRemovesTheOther() async {
         let store = makeStore()
-        let service = makeService(store: store, following: [ProfileID("a")])
+        let mutual = ProfileID("a")
+        let service = makeService(store: store, mutuals: [mutual], followed: [mutual])
+        #expect(await service.categories(for: mutual) == [.friends, .following], "precondition")
 
-        await service.setPinned(true, for: ProfileID("a"))
+        await service.setCategories([.friends], for: mutual)
 
-        #expect(store.pinnedProfileIDs == [ProfileID("a")], "the fallback was left uncommitted")
+        #expect(await service.categories(for: mutual) == [.friends])
+        #expect(store.pinnedProfileIDs(in: .following) == [])
+        #expect(store.pinnedProfileIDs(in: .friends) == [mutual])
+    }
+
+    /// A viewer who re-affirms what is already true has still MADE a choice,
+    /// and the rail must stop tracking the graph from then on — otherwise a
+    /// later unfollow would quietly rewrite it.
+    @Test func aNoOpWriteStillCommitsTheChoice() async {
+        let store = makeStore()
+        let service = makeService(store: store, followed: [ProfileID("a")])
+
+        await service.setCategories([.following], for: ProfileID("a"))
+
+        #expect(store.pinnedProfileIDs(in: .following) == [ProfileID("a")],
+                "the fallback was left uncommitted")
+        // And the rail the profile is NOT on is committed too, so it stops
+        // tracking the graph as well.
+        #expect(store.pinnedProfileIDs(in: .friends) == [])
     }
 
     @Test func writingIsIdempotent() async {
         let store = makeStore()
-        let service = makeService(store: store, following: [])
+        let service = makeService(store: store)
 
-        await service.setPinned(true, for: ProfileID("a"))
-        await service.setPinned(true, for: ProfileID("a"))
-        await service.setPinned(false, for: ProfileID("ghost"))
+        await service.setCategories([.following], for: ProfileID("a"))
+        await service.setCategories([.following], for: ProfileID("a"))
+        await service.setCategories([], for: ProfileID("ghost"))
 
-        #expect(store.pinnedProfileIDs == [ProfileID("a")], "a repeat pin duplicated the entry")
+        #expect(store.pinnedProfileIDs(in: .following) == [ProfileID("a")],
+                "a repeat write duplicated the entry")
     }
 
     @Test func aRoundTripReturnsToTheStartingPoint() async {
         let store = makeStore()
-        let service = makeService(store: store, following: [ProfileID("a")])
+        let service = makeService(store: store, followed: [ProfileID("a")])
 
-        await service.setPinned(true, for: ProfileID("z"))
-        await service.setPinned(false, for: ProfileID("z"))
+        await service.setCategories([.following], for: ProfileID("z"))
+        await service.setCategories([], for: ProfileID("z"))
 
-        #expect(await service.isPinned(ProfileID("z")) == false)
-        #expect(await service.isPinned(ProfileID("a")))
+        #expect(await service.categories(for: ProfileID("z")).isEmpty)
+        #expect(await service.categories(for: ProfileID("a")) == [.following])
     }
 
     // MARK: - Telling the map
 
     /// The map may already be on screen behind the profile that wrote. Without
-    /// this notification its rail keeps yesterday's list, which reads as the
-    /// pin button having done nothing at all.
+    /// this notification its rails keep yesterday's lists, which reads as the
+    /// star having done nothing at all.
     @Test func everyWriteAnnouncesItself() async {
         let store = makeStore()
-        let service = makeService(store: store, following: [])
+        let service = makeService(store: store)
         let box = Box()
         // Scoped to THIS store: suites run in parallel and every one of them
         // writes to a store of its own.
@@ -136,9 +182,10 @@ struct MapProfilePinServiceTests {
         ) { _ in box.bump() }
         defer { NotificationCenter.default.removeObserver(token) }
 
-        await service.setPinned(true, for: ProfileID("a"))
+        await service.setCategories([.following], for: ProfileID("a"))
 
-        #expect(box.count == 1)
+        // One per rail written: both are committed, so both announce.
+        #expect(box.count == MapFavoriteCategory.allCases.count)
     }
 
     private final class Box: @unchecked Sendable {

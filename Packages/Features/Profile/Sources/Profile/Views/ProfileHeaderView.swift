@@ -67,8 +67,9 @@ final class ProfileHeaderView: UIView {
     private let viewsStat = ProfileStatView(caption: "Views")
     private let messageButton = UIButton(configuration: .glass())
     private let editButton = UIButton(configuration: .glass())
-    /// Pin-this-profile-on-the-map, immediately right of Message. Hidden
-    /// unless the viewer follows this profile — see `configureAction`.
+    /// Keep-this-profile-on-the-map's-people-rails, immediately right of
+    /// Message. Hidden unless the viewer follows this profile — see
+    /// `configureMapPin`.
     private let mapPinButton = UIButton(configuration: .glass())
     private let qrCodeButton = UIButton(configuration: .glass())
     private let moreButton = UIButton(configuration: .glass())
@@ -95,7 +96,12 @@ final class ProfileHeaderView: UIView {
         didSet { columnTopConstraint?.constant = chromeTopInset + Metrics.bannerClearance }
     }
 
-    /// Invoked when the map-pin bubble is tapped (followed profiles only).
+    /// Builds the mutual's rail menu, resolved at PRESENTATION so the rows
+    /// reflect live membership rather than whatever was true when the button
+    /// was configured — the same bargain `setMoreMenu` strikes.
+    var makeMapPinMenu: (() -> UIMenu)?
+    /// Invoked when the map-favorite star is tapped, for the plain-toggle case
+    /// (a mutual gets the menu instead).
     var onMapPinTapped: (() -> Void)?
     /// Invoked when the Message button is tapped (other users only).
     var onMessageTapped: (() -> Void)?
@@ -266,30 +272,45 @@ final class ProfileHeaderView: UIView {
         }
     }
 
-    /// Poses the map-pin bubble beside Message.
+    /// Poses the map-favorite star beside Message.
     ///
     /// Visibility is NOT decided here: `ProfileViewModel.MapPinButton` resolves
-    /// the relationship rule (only a profile the viewer follows can be pinned)
-    /// together with whether the app was even wired for pinning, so the view
-    /// renders one finished answer instead of re-deriving it from a second
-    /// copy of the rule.
+    /// the relationship rule (only a profile the viewer follows can be kept on
+    /// a rail) together with whether the app was wired for it at all, so the
+    /// view renders one finished answer instead of re-deriving it from a
+    /// second copy of the rule.
+    ///
+    /// Two interactions behind one button, chosen by `offersChoice`:
+    /// - a plain follower can only ever be on the Following rail, so the tap
+    ///   IS the toggle (`onMapPinTapped`);
+    /// - a mutual can be on either rail, so the tap opens a menu instead
+    ///   (`makeMapPinMenu`). `showsMenuAsPrimaryAction` means one tap, no long
+    ///   press — and it is cleared again for the toggle case, or a profile
+    ///   that stops being a mutual would keep opening a menu.
     func configureMapPin(_ state: ProfileViewModel.MapPinButton) {
         mapPinButton.isHidden = state == .hidden
-        guard state != .hidden else { return }
-        let isPinned = state == .pinned
+        guard state != .hidden else {
+            mapPinButton.menu = nil
+            mapPinButton.showsMenuAsPrimaryAction = false
+            return
+        }
         mapPinButton.configuration = Self.glassBubble(
-            systemImage: Self.mapPinSymbol(isPinned: isPinned)
+            systemImage: Self.mapFavoriteSymbol(isFavorited: state.isFavorited)
         )
-        // The label says what a tap DOES, not what the icon depicts — the
+        mapPinButton.showsMenuAsPrimaryAction = state.offersChoice
+        mapPinButton.menu = state.offersChoice ? makeMapPinMenu?() : nil
+        // The label says what the button DOES, not what the icon depicts — the
         // glyph pair is a state, and VoiceOver users get no glyph.
-        mapPinButton.accessibilityLabel = isPinned ? "Unpin from map" : "Pin on map"
+        mapPinButton.accessibilityLabel = if state.offersChoice {
+            "Map favorites"
+        } else {
+            state.isFavorited ? "Remove from map favorites" : "Add to map favorites"
+        }
     }
 
-    /// Filled when pinned, outlined when not — the same read as a bookmark.
-    /// `mappin` rather than a generic pin because the map's own Places pill
-    /// already speaks that family (`mappin.and.ellipse`).
-    private static func mapPinSymbol(isPinned: Bool) -> String {
-        isPinned ? "mappin.circle.fill" : "mappin.circle"
+    /// Filled on ANY rail, outlined on none — the same read as a bookmark.
+    private static func mapFavoriteSymbol(isFavorited: Bool) -> String {
+        isFavorited ? "star.circle.fill" : "star.circle"
     }
 
     // MARK: - Redaction
@@ -583,7 +604,9 @@ final class ProfileHeaderView: UIView {
         // Same bubble as QR and see-more, but sitting with the LEADING capsule
         // rather than with the trailing pair: it acts on the person Message
         // acts on, so it belongs beside it.
-        mapPinButton.configuration = Self.glassBubble(systemImage: Self.mapPinSymbol(isPinned: false))
+        mapPinButton.configuration = Self.glassBubble(
+            systemImage: Self.mapFavoriteSymbol(isFavorited: false)
+        )
         mapPinButton.isHidden = true
         mapPinButton.addAction(
             UIAction { [weak self] _ in self?.onMapPinTapped?() },

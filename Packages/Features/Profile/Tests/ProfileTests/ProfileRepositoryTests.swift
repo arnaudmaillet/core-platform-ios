@@ -206,9 +206,19 @@ struct ProfileRepositoryTests {
         let (following, _) = makeRepositoryWithGraph(status: .following)
         #expect(try await following.relationship(for: ProfileID("prof-3")) == .other(isFollowing: true, isBlocked: false))
 
-        // `.mutual` also counts as "the viewer follows them".
+        // `.mutual` also counts as "the viewer follows them" — AND is
+        // reported as mutual, which is what lets the map offer a friend the
+        // choice of rail. Collapsing the two is what had to be undone.
         let (mutual, _) = makeRepositoryWithGraph(status: .mutual)
-        #expect(try await mutual.relationship(for: ProfileID("prof-3")) == .other(isFollowing: true, isBlocked: false))
+        #expect(
+            try await mutual.relationship(for: ProfileID("prof-3"))
+                == .other(isFollowing: true, isMutual: true, isBlocked: false)
+        )
+        // ...and a one-way follow is NOT mutual.
+        #expect(
+            try await following.relationship(for: ProfileID("prof-3"))
+                != .other(isFollowing: true, isMutual: true, isBlocked: false)
+        )
 
         // `.followedBy` means they follow the viewer, not the other way around.
         let (followedBy, _) = makeRepositoryWithGraph(status: .followedBy)

@@ -3,6 +3,7 @@ import CoreModels
 import ProfileInterface
 import CoreNavigation
 import FeedInterface
+import MapsInterface
 import MediaPlayback
 import DesignSystem
 import PostGrid
@@ -391,6 +392,9 @@ final class ProfileViewController: UIViewController {
         }
         headerView.onMapPinTapped = { [weak self] in
             self?.viewModel.toggleMapPin()
+        }
+        headerView.makeMapPinMenu = { [weak self] in
+            self?.makeMapFavoriteMenu() ?? UIMenu()
         }
         headerView.onMessageTapped = { [weak self] in
             self?.viewModel.messageTapped()
@@ -1056,8 +1060,28 @@ final class ProfileViewController: UIViewController {
             }
             return
         }
-        print("[profile] map-pin demo: tapping, state was \(viewModel.mapPinButton)")
-        viewModel.toggleMapPin()
+        print("[profile] map-pin demo: state was \(viewModel.mapPinButton)")
+        // A value after the flag drives the MUTUAL's path — the menu rows,
+        // which a simulator cannot open (no taps, and `UIMenu` needs one).
+        // Bare, it is the plain follower's tap.
+        let arguments = ProcessInfo.processInfo.arguments
+        let choice = arguments.firstIndex(of: "-profile-map-pin-demo")
+            .map { $0 + 1 }
+            .flatMap { $0 < arguments.count ? arguments[$0] : nil }
+            .flatMap { value -> Set<MapFavoriteCategory>? in
+                switch value {
+                case "friends": [.friends]
+                case "following": [.following]
+                case "both": [.friends, .following]
+                case "none": []
+                default: nil // the next launch flag, not a value
+                }
+            }
+        if let choice {
+            viewModel.setMapCategories(choice)
+        } else {
+            viewModel.toggleMapPin()
+        }
         print("[profile] map-pin demo: state now \(viewModel.mapPinButton)")
     }
 
@@ -1069,6 +1093,49 @@ final class ProfileViewController: UIViewController {
         (editor as? EditProfileViewController)?.qaOpenPrivacy()
     }
     #endif
+
+    /// The mutual's rail menu: Friends, Following, Both — each row saying what
+    /// choosing it WILL do, with the current membership shown as its state.
+    ///
+    /// Deferred, so the rows are resolved when the menu opens rather than when
+    /// the button was configured: the star is reconfigured on every state
+    /// change, and a menu captured then would be one edit out of date the
+    /// moment the viewer changed something.
+    ///
+    /// "Both" is a shortcut, not a third state: it adds both rails, or clears
+    /// them when the profile is already on both, which is what a viewer who
+    /// opens this menu twice expects.
+    private func makeMapFavoriteMenu() -> UIMenu {
+        UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] completion in
+            guard let self else { return completion([]) }
+            let current = viewModel.mapPinButton.categories
+            let rows = [
+                UIAction(
+                    title: "Friends on Map",
+                    image: UIImage(systemName: "person.2"),
+                    state: current.contains(.friends) ? .on : .off
+                ) { [weak self] _ in
+                    self?.viewModel.setMapCategories(current.symmetricDifference([.friends]))
+                },
+                UIAction(
+                    title: "Following on Map",
+                    image: UIImage(systemName: "person.badge.plus"),
+                    state: current.contains(.following) ? .on : .off
+                ) { [weak self] _ in
+                    self?.viewModel.setMapCategories(current.symmetricDifference([.following]))
+                },
+                UIAction(
+                    title: "Both",
+                    image: UIImage(systemName: "star.circle"),
+                    state: current == [.friends, .following] ? .on : .off
+                ) { [weak self] _ in
+                    let both: Set<MapFavoriteCategory> = [.friends, .following]
+                    self?.viewModel.setMapCategories(current == both ? [] : both)
+                }
+            ]
+            completion(rows)
+        }])
+    }
 
     private func pushEditProfile() {
         guard let makeEditViewController else { return }
