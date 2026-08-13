@@ -405,7 +405,21 @@ public final class ProfileViewModel {
         setMapCategories(categories.contains(.following) ? [] : [.following])
     }
 
-    /// Puts this profile on exactly these rails — what the mutual's menu
+    /// Flips ONE rail, leaving the other exactly as it was — what each row of
+    /// the mutual's checklist does.
+    ///
+    /// Independent toggles rather than presets: two rails have four states,
+    /// and a viewer reading two checkmarks can see all four and reach any of
+    /// them in one tap. The menu used to carry a third "Both" row for the
+    /// state the other two already spell — a shortcut the checkmarks make
+    /// redundant, and an item whose meaning (add both? clear both?) depended
+    /// on state the row itself could not show.
+    public func toggleMapCategory(_ category: MapFavoriteCategory) {
+        guard case .shown(let categories, _) = mapPinButton else { return }
+        setMapCategories(categories.symmetricDifference([category]))
+    }
+
+    /// Puts this profile on exactly these rails — what a checklist row
     /// commits, and what the plain toggle funnels through, so there is one
     /// write path and one optimistic update.
     public func setMapCategories(_ categories: Set<MapFavoriteCategory>) {

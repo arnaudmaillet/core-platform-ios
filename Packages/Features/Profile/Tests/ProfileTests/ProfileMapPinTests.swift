@@ -224,10 +224,11 @@ struct ProfileMapPinTests {
         #expect(viewModel.mapPinButton.offersChoice)
     }
 
-    /// The menu's rows write exactly what they say — one rail, the other, or
-    /// both — and each write replaces the whole membership.
-    @Test("Each menu row writes exactly its rails")
-    func theMenuWritesWhatItSays() async {
+    /// THE CHECKLIST. Each row is an independent toggle, so ticking both is
+    /// how "both" is reached and unticking both is how the profile leaves the
+    /// map entirely — no third row spelling either of those a second time.
+    @Test("Ticking both rows reaches both rails; unticking both clears them")
+    func theChecklistReachesEveryState() async {
         let pinning = StubPinning()
         let viewModel = makeViewModel(
             relationship: .other(isFollowing: true, isMutual: true, isBlocked: false),
@@ -235,20 +236,81 @@ struct ProfileMapPinTests {
         )
         viewModel.viewDidLoad()
         await settle { viewModel.mapPinButton != .hidden }
+        #expect(viewModel.mapPinButton.categories.isEmpty, "precondition: on neither rail")
 
-        viewModel.setMapCategories([.friends])
+        viewModel.toggleMapCategory(.friends)
+        #expect(viewModel.mapPinButton.categories == [.friends])
+
+        viewModel.toggleMapCategory(.following)
+        #expect(viewModel.mapPinButton.categories == [.friends, .following], "both, by ticking both")
+
+        viewModel.toggleMapCategory(.friends)
+        viewModel.toggleMapCategory(.following)
+        #expect(viewModel.mapPinButton.categories.isEmpty, "unticking both left the map")
+
+        await settle(untilAsync: { await pinning.writes.count == 4 })
+        #expect(
+            await pinning.writes.map(\.categories)
+                == [[.friends], [.friends, .following], [.following], []]
+        )
+    }
+
+    /// The rows must not disturb each other — the whole point of a checklist
+    /// over presets. Ticking Friends on a profile already on Following leaves
+    /// Following exactly where it was.
+    @Test("Each row moves its own rail and no other")
+    func theRowsAreIndependent() async {
+        let pinning = StubPinning(rails: [subject.id: [.following]])
+        let viewModel = makeViewModel(
+            relationship: .other(isFollowing: true, isMutual: true, isBlocked: false),
+            pinning: pinning
+        )
+        viewModel.viewDidLoad()
+        await settle { viewModel.mapPinButton.isFavorited }
+
+        viewModel.toggleMapCategory(.friends)
+
+        #expect(viewModel.mapPinButton.categories == [.friends, .following])
+        await settle(untilAsync: { await pinning.writes.count == 1 })
+        #expect(await pinning.categories(for: subject.id) == [.friends, .following])
+    }
+
+    /// Toggling a rail off is the same act as toggling it on — the row is one
+    /// control, not an "add" that needs a different gesture to undo.
+    @Test("A row toggles off as readily as on")
+    func aRowTogglesOff() async {
+        let pinning = StubPinning(rails: [subject.id: [.friends, .following]])
+        let viewModel = makeViewModel(
+            relationship: .other(isFollowing: true, isMutual: true, isBlocked: false),
+            pinning: pinning
+        )
+        viewModel.viewDidLoad()
+        await settle { viewModel.mapPinButton.isFavorited }
+
+        viewModel.toggleMapCategory(.following)
+
         #expect(viewModel.mapPinButton.categories == [.friends])
         await settle(untilAsync: { await pinning.writes.count == 1 })
+        #expect(await pinning.categories(for: subject.id) == [.friends])
+    }
 
-        viewModel.setMapCategories([.friends, .following])
-        #expect(viewModel.mapPinButton.categories == [.friends, .following])
-        await settle(untilAsync: { await pinning.writes.count == 2 })
+    /// A row tapped on a profile that offers no choice — a plain follower's
+    /// Friends, say — must not write. The rule lives in the view model, so a
+    /// stale menu cannot smuggle a friendship in.
+    @Test("A follower's Friends row writes nothing")
+    func aFollowerCannotTickFriends() async {
+        let pinning = StubPinning()
+        let viewModel = makeViewModel(
+            relationship: .other(isFollowing: true, isBlocked: false), pinning: pinning
+        )
+        viewModel.viewDidLoad()
+        await settle { viewModel.mapPinButton != .hidden }
 
-        viewModel.setMapCategories([])
+        viewModel.toggleMapCategory(.friends)
+        await settle(untilAsync: { await pinning.writes.count == 1 })
+
         #expect(viewModel.mapPinButton.categories.isEmpty)
-        await settle(untilAsync: { await pinning.writes.count == 3 })
-
-        #expect(await pinning.writes.map(\.categories) == [[.friends], [.friends, .following], []])
+        #expect(await pinning.writes.first?.categories.isEmpty == true)
     }
 
     /// A mutual already on a rail reads as favorited, and the star fills for

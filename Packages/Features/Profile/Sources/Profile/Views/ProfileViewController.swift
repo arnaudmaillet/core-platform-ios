@@ -1061,6 +1061,7 @@ final class ProfileViewController: UIViewController {
             return
         }
         print("[profile] map-pin demo: state was \(viewModel.mapPinButton)")
+        printMapFavoriteMenu(stage: "before")
         // A value after the flag drives the MUTUAL's path — the menu rows,
         // which a simulator cannot open (no taps, and `UIMenu` needs one).
         // Bare, it is the plain follower's tap.
@@ -1083,6 +1084,22 @@ final class ProfileViewController: UIViewController {
             viewModel.toggleMapPin()
         }
         print("[profile] map-pin demo: state now \(viewModel.mapPinButton)")
+        printMapFavoriteMenu(stage: "after")
+    }
+
+    /// Prints the checklist the CURRENT state resolves to — the rows and their
+    /// checkmarks. The menu opens on a tap and the simulator has none, so this
+    /// is the only way a scripted run can tell a ticked row from an unticked
+    /// one; the alternative is asserting the rows exist and hoping the marks
+    /// followed. Same instrument as `-profile-menu-audit` for the "..." menu.
+    private func printMapFavoriteMenu(stage: String) {
+        guard viewModel.mapPinButton.offersChoice else {
+            print("[profile] map-pin menu (\(stage)): none — this profile gets a plain toggle")
+            return
+        }
+        let rows = mapFavoriteMenuActions()
+            .map { "\($0.title)=\($0.state == .on ? "on" : "off")" }
+        print("[profile] map-pin menu (\(stage)): \(rows.joined(separator: " "))")
     }
 
     /// Opens the editor's Privacy row from QA. Reaches through the pushed
@@ -1094,47 +1111,51 @@ final class ProfileViewController: UIViewController {
     }
     #endif
 
-    /// The mutual's rail menu: Friends, Following, Both — each row saying what
-    /// choosing it WILL do, with the current membership shown as its state.
+    /// The mutual's rail menu: a two-row CHECKLIST, Friends and Following,
+    /// each an independent toggle showing whether the profile is on that rail.
     ///
-    /// Deferred, so the rows are resolved when the menu opens rather than when
-    /// the button was configured: the star is reconfigured on every state
-    /// change, and a menu captured then would be one edit out of date the
-    /// moment the viewer changed something.
+    /// Two rows, not three. Two rails have four states, and two checkmarks
+    /// show all four and reach any of them in a tap — including "both", which
+    /// an explicit Both row used to spell a second time. That row also had to
+    /// mean two different things depending on state it could not itself show
+    /// (add both, or clear both), which is exactly the ambiguity a checkmark
+    /// does not have.
     ///
-    /// "Both" is a shortcut, not a third state: it adds both rails, or clears
-    /// them when the profile is already on both, which is what a viewer who
-    /// opens this menu twice expects.
+    /// `.keepsMenuPresented` because a checklist that closes after one tick
+    /// makes setting both rails a two-open chore. The rows are rebuilt as the
+    /// state changes — `configureMapPin` reassigns the menu on every
+    /// publication — so the marks track what was just chosen.
+    ///
+    /// Deferred, so the rows resolve when the menu OPENS rather than when the
+    /// button was configured: the star is reconfigured on every state change,
+    /// and a menu captured then would be one edit out of date the moment the
+    /// viewer changed something.
     private func makeMapFavoriteMenu() -> UIMenu {
         UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] completion in
-            guard let self else { return completion([]) }
-            let current = viewModel.mapPinButton.categories
-            let rows = [
-                UIAction(
-                    title: "Friends on Map",
-                    image: UIImage(systemName: "person.2"),
-                    state: current.contains(.friends) ? .on : .off
-                ) { [weak self] _ in
-                    self?.viewModel.setMapCategories(current.symmetricDifference([.friends]))
-                },
-                UIAction(
-                    title: "Following on Map",
-                    image: UIImage(systemName: "person.badge.plus"),
-                    state: current.contains(.following) ? .on : .off
-                ) { [weak self] _ in
-                    self?.viewModel.setMapCategories(current.symmetricDifference([.following]))
-                },
-                UIAction(
-                    title: "Both",
-                    image: UIImage(systemName: "star.circle"),
-                    state: current == [.friends, .following] ? .on : .off
-                ) { [weak self] _ in
-                    let both: Set<MapFavoriteCategory> = [.friends, .following]
-                    self?.viewModel.setMapCategories(current == both ? [] : both)
-                }
-            ]
-            completion(rows)
+            completion(self?.mapFavoriteMenuActions() ?? [])
         }])
+    }
+
+    /// The checklist's rows for the CURRENT state, apart from the menu that
+    /// hosts them — the same split `moreMenuElements` uses, and for the same
+    /// reason: a `UIMenu` opens on a tap, the simulator has none, and this is
+    /// what `-profile-map-pin-audit` prints instead of guessing.
+    private func mapFavoriteMenuActions() -> [UIAction] {
+        let current = viewModel.mapPinButton.categories
+        return [
+            (MapFavoriteCategory.friends, "Friends on Map", "person.2"),
+            (MapFavoriteCategory.following, "Following on Map", "person.badge.plus")
+        ].map { category, title, symbol in
+            let action = UIAction(
+                title: title,
+                image: UIImage(systemName: symbol),
+                state: current.contains(category) ? .on : .off
+            ) { [weak self] _ in
+                self?.viewModel.toggleMapCategory(category)
+            }
+            action.attributes = .keepsMenuPresented
+            return action
+        }
     }
 
     private func pushEditProfile() {
