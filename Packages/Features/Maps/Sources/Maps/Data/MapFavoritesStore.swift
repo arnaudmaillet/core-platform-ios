@@ -58,6 +58,18 @@ public final class MapFavoritesStore: @unchecked Sendable {
     /// is the profile's star button; tomorrow it might be a settings screen or
     /// a restore.
     public static let didChangeNotification = Notification.Name("maps.favorites.didChange")
+    /// `userInfo` key naming the rail that changed, so an observer can refresh
+    /// the ONE surface that shows it. Without it every write woke every
+    /// surface: editing a sub-filter row rebuilt the dock's carousel, which is
+    /// a different list that had not moved.
+    public static let changedCategoryKey = "category"
+
+    /// The rail a change notification is about, or nil if it is not one of
+    /// ours. Read through this rather than by reaching into `userInfo`, so the
+    /// key and its encoding stay in one place.
+    public static func changedCategory(in notification: Notification) -> MapFavoriteCategory? {
+        (notification.userInfo?[changedCategoryKey] as? String).flatMap(MapFavoriteCategory.init)
+    }
 
     /// The curated list for one rail, in pin order; `nil` when never curated.
     public func pinnedProfileIDs(in category: MapFavoriteCategory) -> [ProfileID]? {
@@ -79,6 +91,10 @@ public final class MapFavoritesStore: @unchecked Sendable {
         // with `nil` (every change is its change); tests run suites in
         // PARALLEL against their own stores, and an unscoped post makes each
         // of them count the others' writes.
-        NotificationCenter.default.post(name: Self.didChangeNotification, object: self)
+        NotificationCenter.default.post(
+            name: Self.didChangeNotification,
+            object: self,
+            userInfo: [Self.changedCategoryKey: category.rawValue]
+        )
     }
 }

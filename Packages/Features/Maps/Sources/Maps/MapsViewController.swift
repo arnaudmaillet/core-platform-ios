@@ -388,13 +388,35 @@ final class MapsViewController: UIViewController {
     private func observeFavoriteChanges() {
         appObservers.add(NotificationCenter.default.addObserver(
             forName: MapFavoritesStore.didChangeNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            // Both surfaces now: the dock's carousel AND the sub-filter row,
-            // which is a curated list of its own since the rails split.
+        ) { [weak self] notification in
+            // Read the category HERE, off the notification, rather than
+            // carrying the notification across the isolation hop: a
+            // `Notification` is not `Sendable`, its category is.
+            let changed = MapFavoritesStore.changedCategory(in: notification)
+            // ⚠️ ONLY the surface that shows the rail that changed.
+            //
+            // The dock's carousel and the sub-filter row are different lists
+            // in different bars, and waking both on every write meant editing
+            // one rebuilt the other — a carousel that flashed because someone
+            // was removed from a row it does not show.
             MainActor.assumeIsolated {
-                self?.loadFavorites()
-                guard let filter = self?.filterBar.selectedFilter else { return }
-                self?.updateSubFilterBar(for: filter)
+                guard let self else { return }
+                switch changed {
+                case .dock:
+                    self.loadFavorites()
+                case .friends, .following:
+                    // ...and only when that rail is the one on screen.
+                    guard let primary = self.filterBar.selectedFilter,
+                          Self.railCategory(for: primary) == changed else { return }
+                    self.updateSubFilterBar(for: primary)
+                case nil:
+                    // Not one of ours (or a post carrying no category):
+                    // refresh both rather than guess wrong. Both surfaces
+                    // refuse an update that would not change them, so the
+                    // cost of being cautious here is a comparison.
+                    self.loadFavorites()
+                    self.filterBar.selectedFilter.map { self.updateSubFilterBar(for: $0) }
+                }
             }
         })
     }
@@ -893,6 +915,15 @@ final class MapsViewController: UIViewController {
     /// sub-filter ROWS are where a primary's own people live — see
     /// `people(for:)`.
     private func loadFavorites() {
+        #if DEBUG
+        // Which surface a write woke is the whole question when the complaint
+        // is "the other bar flashed", and it is invisible in a screenshot.
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-maps-toggle-subfilter") || arguments.contains("-maps-subfilter-remove")
+            || arguments.contains("-maps-pin-favorite") {
+            print("[maps] dock reload requested")
+        }
+        #endif
         favoritesTask?.cancel()
         let repository = favoritesRepository
         let curated = pinService.curatedProfileIDs(in: .dock)
