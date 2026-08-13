@@ -31,16 +31,23 @@ enum MapSubFilterHeaderRole: Equatable {
     /// without a window or a live collection view.
     ///
     /// - Parameters:
+    ///   - rowIsEmpty: whether the row carries no refinements at all. Asked
+    ///     SEPARATELY from the All cell's position, because a missing All cell
+    ///     no longer means an empty row: a one- or two-pill row drops All as
+    ///     clutter (`MapSubFilterBarView.allPillMinimumCount`) while being
+    ///     perfectly populated, and that row wants its organize button, not an
+    ///     add button.
     ///   - allLeadingEdgeX: the All cell's leading edge in BAR coordinates
     ///     (`frame.minX - contentOffset.x`), or nil when the row carries no
-    ///     All cell at all. That is now exactly the EMPTY row — an empty rail
-    ///     drops its All pill too, since "all" of nothing is not a filter —
-    ///     so the button becomes the add affordance rather than keeping a
-    ///     resting job it has nothing to do.
+    ///     All cell — nothing to rewind to, so the button keeps its resting
+    ///     job.
     ///   - headerTrailingX: the fixed button's trailing edge, also in bar
     ///     coordinates.
-    static func resolve(allLeadingEdgeX: CGFloat?, headerTrailingX: CGFloat) -> Self {
-        guard let allLeadingEdgeX else { return .add }
+    static func resolve(
+        rowIsEmpty: Bool, allLeadingEdgeX: CGFloat?, headerTrailingX: CGFloat
+    ) -> Self {
+        guard !rowIsEmpty else { return .add }
+        guard let allLeadingEdgeX else { return .organize }
         // The same penetration the duck-fade measures: how far All's leading
         // edge has advanced past the fade line trailing the header.
         let penetration = headerTrailingX + MapBarDuckFade.approach - allLeadingEdgeX

@@ -20,6 +20,10 @@ struct MapSubFilterHeaderRoleTests {
     /// (title-less pills are circles pinned to their height).
     private static let headerX = MapSubFilterBarView.headerTrailingX
 
+    private static func profiles(_ count: Int) -> [MapSubFilter] {
+        (0..<count).map { .profile(ProfileID("prof-\($0)")) }
+    }
+
     /// All's leading edge for a row scrolled `points` past its resting seat.
     private static func allEdge(scrolledBy points: CGFloat) -> CGFloat {
         MapSubFilterBarView.rowInsetLeft - points
@@ -27,7 +31,9 @@ struct MapSubFilterHeaderRoleTests {
 
     private static func role(scrolledBy points: CGFloat) -> MapSubFilterHeaderRole {
         MapSubFilterHeaderRole.resolve(
-            allLeadingEdgeX: allEdge(scrolledBy: points), headerTrailingX: headerX
+            rowIsEmpty: false,
+            allLeadingEdgeX: allEdge(scrolledBy: points),
+            headerTrailingX: headerX
         )
     }
 
@@ -73,28 +79,61 @@ struct MapSubFilterHeaderRoleTests {
     /// There is nothing to organize and nothing to rewind to, so the one
     /// button becomes the way back in.
     @Test("An empty row offers the add button")
-    func absentAllCellOffersAdd() {
+    func anEmptyRowOffersAdd() {
         #expect(
-            MapSubFilterHeaderRole.resolve(allLeadingEdgeX: nil, headerTrailingX: Self.headerX)
-                == .add
+            MapSubFilterHeaderRole.resolve(
+                rowIsEmpty: true, allLeadingEdgeX: nil, headerTrailingX: Self.headerX
+            ) == .add
         )
     }
 
-    /// An empty rail drops its All pill: "all" of nothing selects nothing, and
-    /// a row showing All beside an organize button looks populated and does
-    /// nothing.
-    @Test("An empty rail carries no cells at all")
-    func anEmptyRailHasNoAllCell() {
+    /// ⚠️ A missing All cell no longer means an empty row — a one- or two-pill
+    /// row drops All as clutter while being perfectly populated. That row
+    /// wants its organize button; offering "+" there would tell the viewer
+    /// their people are gone.
+    @Test("A populated row without an All pill still organizes")
+    func aShortRowStillOrganizes() {
+        #expect(
+            MapSubFilterHeaderRole.resolve(
+                rowIsEmpty: false, allLeadingEdgeX: nil, headerTrailingX: Self.headerX
+            ) == .organize
+        )
+    }
+
+    // MARK: - When All earns its seat
+
+    /// An empty rail carries nothing at all — All included.
+    @Test("An empty rail carries no cells")
+    func anEmptyRailHasNoCells() {
         #expect(MapSubFilterBarView.items(for: []).isEmpty)
     }
 
-    /// ...while a populated one keeps its head, so the "+" is strictly the
-    /// empty state and not a new resting look.
-    @Test("A populated rail still leads with All")
-    func aPopulatedRailKeepsItsAllCell() {
-        let items = MapSubFilterBarView.items(for: [.profile(ProfileID("prof-1"))])
-        #expect(items.count == 2)
+    /// Below the threshold the row is just its people: All means "none of
+    /// these selected", which a one- or two-pill row already shows.
+    @Test(arguments: 1...2)
+    func aShortRailShowsOnlyItsPeople(count: Int) {
+        let items = MapSubFilterBarView.items(for: Self.profiles(count))
+
+        #expect(items.count == count, "an All pill crept into a \(count)-pill row")
+        #expect(!items.contains(.all))
+    }
+
+    /// At the threshold it earns its seat, and leads.
+    @Test(arguments: 3...5)
+    func aLongerRailLeadsWithAll(count: Int) {
+        let items = MapSubFilterBarView.items(for: Self.profiles(count))
+
+        #expect(items.count == count + 1)
         #expect(items.first == .all)
+    }
+
+    /// The boundary, stated once rather than left to two argument ranges that
+    /// could drift apart from the constant.
+    @Test("The threshold is where the constant says it is")
+    func theThresholdMatchesTheConstant() {
+        let minimum = MapSubFilterBarView.allPillMinimumCount
+        #expect(!MapSubFilterBarView.items(for: Self.profiles(minimum - 1)).contains(.all))
+        #expect(MapSubFilterBarView.items(for: Self.profiles(minimum)).contains(.all))
     }
 
     @Test("Each role wears its own glyph, and all are circles")

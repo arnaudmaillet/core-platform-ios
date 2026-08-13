@@ -386,16 +386,28 @@ final class MapSubFilterBarView: UIView {
     }
 
     /// The row's items: All at the head, then the refinements in order.
-    /// The row's cells: All at the head, then the refinements in order — and
-    /// NOTHING at all when there are no refinements.
+    /// How many refinements a row needs before it is worth heading with All.
     ///
-    /// An empty rail drops its All pill: "all" of nothing selects nothing, and
-    /// a lone All pill beside a lone organize button is a row that looks
-    /// populated and does nothing. The fixed button takes over as the add
-    /// affordance instead (`MapSubFilterHeaderRole.add`), which is the only
-    /// thing an empty rail has to offer.
+    /// Below this the pill earns nothing. All means "none of these selected",
+    /// which a one- or two-pill row already SHOWS — every pill unselected —
+    /// and every tap toggles its own pill, so nothing is trapped in a
+    /// filtered state without it. What it costs is a fifth of a phone-width
+    /// row spent restating the resting state next to two people.
+    static let allPillMinimumCount = 3
+
+    /// The row's cells: the refinements in order, headed by All only once
+    /// there are enough of them to be worth resetting — and NOTHING at all
+    /// when there are none.
+    ///
+    /// An empty rail drops All for a different reason: "all" of nothing
+    /// selects nothing, and a lone All pill beside a lone organize button is a
+    /// row that looks populated and does nothing. The fixed button becomes the
+    /// add affordance there instead (`MapSubFilterHeaderRole.add`).
     static func items(for subFilters: [MapSubFilter]) -> [Item] {
-        subFilters.isEmpty ? [] : [.all] + subFilters.map(Item.subFilter)
+        guard subFilters.count >= allPillMinimumCount else {
+            return subFilters.map(Item.subFilter)
+        }
+        return [.all] + subFilters.map(Item.subFilter)
     }
 
     /// The organize sheet's committed arrangement: the same options
@@ -620,7 +632,9 @@ final class MapSubFilterBarView: UIView {
     /// piece of chrome twitch every time the row crosses the threshold.
     private func updateHeaderRole(animated: Bool) {
         let role = MapSubFilterHeaderRole.resolve(
-            allLeadingEdgeX: allCellLeadingEdgeX(), headerTrailingX: Self.headerTrailingX
+            rowIsEmpty: orderedSubFilters.isEmpty,
+            allLeadingEdgeX: allCellLeadingEdgeX(),
+            headerTrailingX: Self.headerTrailingX
         )
         guard role != headerRole else { return }
         headerRole = role
