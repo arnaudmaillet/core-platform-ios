@@ -1,3 +1,4 @@
+import CoreModels
 import Testing
 import UIKit
 @testable import Maps
@@ -66,24 +67,70 @@ struct MapSubFilterHeaderRoleTests {
         }
     }
 
-    @Test("A row with no All cell keeps organizing — there is nothing to rewind to")
-    func absentAllCellOrganizes() {
+    // MARK: - The empty rail
+
+    /// No All cell means an EMPTY rail — the viewer curated everyone off it.
+    /// There is nothing to organize and nothing to rewind to, so the one
+    /// button becomes the way back in.
+    @Test("An empty row offers the add button")
+    func absentAllCellOffersAdd() {
         #expect(
             MapSubFilterHeaderRole.resolve(allLeadingEdgeX: nil, headerTrailingX: Self.headerX)
-                == .organize
+                == .add
         )
     }
 
-    @Test("Each role wears its own glyph, and both are circles")
+    /// An empty rail drops its All pill: "all" of nothing selects nothing, and
+    /// a row showing All beside an organize button looks populated and does
+    /// nothing.
+    @Test("An empty rail carries no cells at all")
+    func anEmptyRailHasNoAllCell() {
+        #expect(MapSubFilterBarView.items(for: []).isEmpty)
+    }
+
+    /// ...while a populated one keeps its head, so the "+" is strictly the
+    /// empty state and not a new resting look.
+    @Test("A populated rail still leads with All")
+    func aPopulatedRailKeepsItsAllCell() {
+        let items = MapSubFilterBarView.items(for: [.profile(ProfileID("prof-1"))])
+        #expect(items.count == 2)
+        #expect(items.first == .all)
+    }
+
+    @Test("Each role wears its own glyph, and all are circles")
     func rolesCarryDistinctIconOnlyContent() {
-        let organize = MapSubFilterHeaderRole.organize.content
-        let rewind = MapSubFilterHeaderRole.rewind.content
-        #expect(organize.symbolName != rewind.symbolName)
-        #expect(organize.accessibilityLabel != rewind.accessibilityLabel)
-        // Title-less on both sides: the cross-dissolve may not resize the
+        let contents = [
+            MapSubFilterHeaderRole.organize.content,
+            MapSubFilterHeaderRole.rewind.content,
+            MapSubFilterHeaderRole.add.content
+        ]
+        #expect(Set(contents.map(\.symbolName)).count == contents.count)
+        #expect(Set(contents.map(\.accessibilityLabel)).count == contents.count)
+        // Title-less on every side: the cross-dissolve may not resize the
         // button, or a fixed piece of chrome twitches on every flip.
-        #expect(organize.title == nil)
-        #expect(rewind.title == nil)
+        #expect(contents.allSatisfy { $0.title == nil })
+    }
+
+    /// The "+" is only offered when it leads somewhere. It opens the
+    /// full-list sheet, and a sheet with an empty catalogue answers the tap
+    /// with nothing — worse than the row simply not being there.
+    @Test("An empty rail keeps its row only while someone can be added")
+    func anEmptyRailSurvivesOnlyWithACatalogue() {
+        let catalogue = MapSubFilterOption.people([
+            MapFavorite(profileID: ProfileID("prof-1"), title: "Ada")
+        ])
+        #expect(MapSubFilterOption.rowSurvivesEmpty(catalogue: catalogue))
+        #expect(MapSubFilterOption.rowSurvivesEmpty(catalogue: []) == false)
+    }
+
+    /// The add button says what it is FOR. An empty row is the one state where
+    /// the button is the entire interface, so a bare "list" label there would
+    /// leave a VoiceOver user with a row that announces nothing about what it
+    /// offers.
+    @Test("The add button names the thing it adds to")
+    func theAddButtonIsLabelled() {
+        let label = MapSubFilterHeaderRole.add.content.accessibilityLabel
+        #expect(label.localizedCaseInsensitiveContains("add"))
     }
 
     @Test("The row rests exactly one approach-margin past the button")

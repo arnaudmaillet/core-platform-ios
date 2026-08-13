@@ -390,9 +390,6 @@ final class ProfileViewController: UIViewController {
         viewModel.onMapPinButtonChange = { [weak self] state in
             self?.headerView.configureMapPin(state)
         }
-        headerView.onMapPinTapped = { [weak self] in
-            self?.viewModel.toggleMapPin()
-        }
         headerView.makeMapPinMenu = { [weak self] in
             self?.makeMapFavoriteMenu() ?? UIMenu()
         }
@@ -1071,9 +1068,10 @@ final class ProfileViewController: UIViewController {
             .flatMap { $0 < arguments.count ? arguments[$0] : nil }
             .flatMap { value -> Set<MapFavoriteCategory>? in
                 switch value {
-                case "friends": [.friends]
+                case "dock": [.dock]
                 case "following": [.following]
-                case "both": [.friends, .following]
+                case "friends": [.friends]
+                case "all": [.dock, .following, .friends]
                 case "none": []
                 default: nil // the next launch flag, not a value
                 }
@@ -1081,7 +1079,9 @@ final class ProfileViewController: UIViewController {
         if let choice {
             viewModel.setMapCategories(choice)
         } else {
-            viewModel.toggleMapPin()
+            // Bare: the dock is the rail every followed profile has and the
+            // one visible without selecting a primary.
+            viewModel.toggleMapCategory(.dock)
         }
         print("[profile] map-pin demo: state now \(viewModel.mapPinButton)")
         printMapFavoriteMenu(stage: "after")
@@ -1093,8 +1093,8 @@ final class ProfileViewController: UIViewController {
     /// one; the alternative is asserting the rows exist and hoping the marks
     /// followed. Same instrument as `-profile-menu-audit` for the "..." menu.
     private func printMapFavoriteMenu(stage: String) {
-        guard viewModel.mapPinButton.offersChoice else {
-            print("[profile] map-pin menu (\(stage)): none — this profile gets a plain toggle")
+        guard viewModel.mapPinButton != .hidden else {
+            print("[profile] map-pin menu (\(stage)): none — no star on this profile")
             return
         }
         let rows = mapFavoriteMenuActions()
@@ -1142,10 +1142,18 @@ final class ProfileViewController: UIViewController {
     /// what `-profile-map-pin-audit` prints instead of guessing.
     private func mapFavoriteMenuActions() -> [UIAction] {
         let current = viewModel.mapPinButton.categories
-        return [
-            (MapFavoriteCategory.friends, "Friends on Map", "person.2"),
-            (MapFavoriteCategory.following, "Following on Map", "person.badge.plus")
-        ].map { category, title, symbol in
+        var rows: [(MapFavoriteCategory, String, String)] = [
+            (.dock, "Map Dock", "pin"),
+            (.following, "Following Filter", "person.badge.plus")
+        ]
+        // Friends is OMITTED for someone who is not a mutual, not shown
+        // disabled: a greyed row invites a tap that can never work and
+        // explains nothing about why. The view model refuses the write anyway
+        // — this is the same rule, said in the place the viewer reads.
+        if viewModel.mapPinButton.includesFriends {
+            rows.append((.friends, "Friends Filter", "person.2"))
+        }
+        return rows.map { category, title, symbol in
             let action = UIAction(
                 title: title,
                 image: UIImage(systemName: symbol),

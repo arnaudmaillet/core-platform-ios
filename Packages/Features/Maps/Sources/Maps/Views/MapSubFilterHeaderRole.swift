@@ -20,6 +20,12 @@ enum MapSubFilterHeaderRole: Equatable {
     case organize
     /// All has dissolved under the header: the button rewinds the row to it.
     case rewind
+    /// The row is EMPTY — the viewer has curated everyone off this rail. There
+    /// is no All pill to reset to and nothing to organize, so the one button
+    /// becomes the only thing worth offering: a way to put someone back. It
+    /// opens the same sheet `organize` does; what changes is the glyph and the
+    /// promise it makes.
+    case add
 
     /// Resolves the role from geometry alone — pure, so the rule is testable
     /// without a window or a live collection view.
@@ -27,12 +33,14 @@ enum MapSubFilterHeaderRole: Equatable {
     /// - Parameters:
     ///   - allLeadingEdgeX: the All cell's leading edge in BAR coordinates
     ///     (`frame.minX - contentOffset.x`), or nil when the row carries no
-    ///     All cell at all (an empty row) — nothing to rewind to, so the
-    ///     button keeps its resting job.
+    ///     All cell at all. That is now exactly the EMPTY row — an empty rail
+    ///     drops its All pill too, since "all" of nothing is not a filter —
+    ///     so the button becomes the add affordance rather than keeping a
+    ///     resting job it has nothing to do.
     ///   - headerTrailingX: the fixed button's trailing edge, also in bar
     ///     coordinates.
     static func resolve(allLeadingEdgeX: CGFloat?, headerTrailingX: CGFloat) -> Self {
-        guard let allLeadingEdgeX else { return .organize }
+        guard let allLeadingEdgeX else { return .add }
         // The same penetration the duck-fade measures: how far All's leading
         // edge has advanced past the fade line trailing the header.
         let penetration = headerTrailingX + MapBarDuckFade.approach - allLeadingEdgeX
@@ -53,6 +61,12 @@ enum MapSubFilterHeaderRole: Equatable {
                 title: nil,
                 symbolName: "chevron.left", selectedSymbolName: "chevron.left",
                 accessibilityLabel: "Back to all"
+            )
+        case .add:
+            MapPillButton.Content(
+                title: nil,
+                symbolName: "plus", selectedSymbolName: "plus",
+                accessibilityLabel: "Add people to this filter"
             )
         }
     }

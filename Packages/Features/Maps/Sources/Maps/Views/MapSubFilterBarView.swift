@@ -70,6 +70,19 @@ struct MapSubFilterOption: Equatable {
         )
     ]
 
+    /// Whether a rail with NOTHING in it should stay on screen as its add
+    /// affordance, or retire the way it always did.
+    ///
+    /// The "+" is only worth showing when it leads somewhere: it opens the
+    /// full-list sheet, and a sheet with an empty catalogue is a dead end —
+    /// a button that answers a tap with nothing at all. So an empty rail with
+    /// people still available keeps the row (curated everyone off; here is the
+    /// way back), and an empty rail with an empty catalogue hides it (this
+    /// viewer has no friends to show; the row has nothing to say).
+    static func rowSurvivesEmpty(catalogue: [MapSubFilterOption]) -> Bool {
+        !catalogue.isEmpty
+    }
+
     /// Person refinements (Friends/Following rows): avatar + first name.
     static func people(_ people: [MapFavorite]) -> [MapSubFilterOption] {
         people.map { person in
@@ -185,7 +198,7 @@ final class MapSubFilterBarView: UIView {
     /// The row's cells. "All" is a first-class item rather than a special
     /// index, so the diffable snapshot, the snap candidates, and the
     /// duck-fade all treat it as the ordinary pill it looks like.
-    private enum Item: Hashable {
+    enum Item: Hashable {
         case all
         case subFilter(MapSubFilter)
     }
@@ -373,8 +386,16 @@ final class MapSubFilterBarView: UIView {
     }
 
     /// The row's items: All at the head, then the refinements in order.
-    private static func items(for subFilters: [MapSubFilter]) -> [Item] {
-        [.all] + subFilters.map(Item.subFilter)
+    /// The row's cells: All at the head, then the refinements in order — and
+    /// NOTHING at all when there are no refinements.
+    ///
+    /// An empty rail drops its All pill: "all" of nothing selects nothing, and
+    /// a lone All pill beside a lone organize button is a row that looks
+    /// populated and does nothing. The fixed button takes over as the add
+    /// affordance instead (`MapSubFilterHeaderRole.add`), which is the only
+    /// thing an empty rail has to offer.
+    static func items(for subFilters: [MapSubFilter]) -> [Item] {
+        subFilters.isEmpty ? [] : [.all] + subFilters.map(Item.subFilter)
     }
 
     /// The organize sheet's committed arrangement: the same options
@@ -629,7 +650,11 @@ final class MapSubFilterBarView: UIView {
 
     private func didTapHeader() {
         switch headerRole {
-        case .organize: onExpandTapped?()
+        // Same destination for both: the full-list sheet IS the place people
+        // are chosen from, so an empty rail's "+" opens exactly what organize
+        // opens. The glyph differs because the promise does — organize edits a
+        // row that exists, add offers to start one.
+        case .organize, .add: onExpandTapped?()
         case .rewind: rewindToAll()
         }
     }
