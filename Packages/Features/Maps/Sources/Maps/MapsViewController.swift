@@ -106,6 +106,10 @@ final class MapsViewController: UIViewController {
     /// sheet offers them to add back, and an empty row must still be able to
     /// present a full sheet.
     private var catalogueCache: [MapFilter: [MapFavorite]] = [:]
+    /// What the people row is currently SHOWING — the yardstick a refresh
+    /// measures itself against. Nil whenever the row holds something else
+    /// (place categories) or nothing at all.
+    private var renderedSubFilterRow: MapSubFilterRowState?
     /// The viewer's manual sub-filter order per primary, set by dragging rows
     /// in the full-list sheet. Session-scoped: it outlives primary switches
     /// and background refreshes, not the process.
@@ -495,13 +499,14 @@ final class MapsViewController: UIViewController {
         switch filter {
         case .friends, .following:
             guard let primary = filter else { return } // matched .some above
-            // 1) Instant: whatever the cache holds right now.
-            let cached = peopleCache[primary] ?? []
-            if !cached.isEmpty {
-                showSubFilterRow(MapSubFilterOption.people(cached))
-            }
+            // 1) Instant, and ALWAYS applied — not only when the cache has
+            // something. Whatever is on screen belongs to the primary the
+            // viewer just LEFT, so an empty target has to clear it rather than
+            // inherit it. (It did inherit it: switching to an empty rail left
+            // the previous primary's pills up.)
+            applyPeopleRow(peopleCache[primary] ?? [], for: primary)
             // 2) Refresh behind it (also the cold path pre-prefetch, where
-            // the row appears when data lands — nothing to render sooner).
+            // the row fills in when data lands).
             let repository = favoritesRepository
             subFilterLoadTask = Task { [weak self] in
                 guard let people = await self?.people(for: primary) else { return }
@@ -512,37 +517,43 @@ final class MapsViewController: UIViewController {
                 self.catalogueCache[primary] = catalogue
                 self.peopleCache[primary] = people
                 guard self.filterBar.selectedFilter == primary else { return }
-                // Don't churn the row (and its selection) for identical data —
-                // unless it is not on screen yet, where "identical" only means
-                // the instant path had nothing to render either. That caught
-                // exactly the empty rail: cached empty, resolved empty, so the
-                // row returned early and its "+" never appeared.
-                guard people != cached || !self.isSubFilterBarVisible else { return }
-                // An empty rail STAYS on screen, showing its add affordance —
-                // as long as there is anyone to add. It was hidden entirely
-                // before the rails became curated lists, when empty could only
-                // mean "your graph is empty" and there was nothing to be done
-                // about it from here. Now empty usually means the viewer
-                // curated everyone off, and a row that vanishes leaves no way
-                // to put anyone back.
-                let options = MapSubFilterOption.people(people)
-                guard !options.isEmpty
-                    || MapSubFilterOption.rowSurvivesEmpty(
-                        catalogue: MapSubFilterOption.people(catalogue)
-                    )
-                else {
-                    self.currentSubFilterOptions = []
-                    self.setSubFilterBar(visible: false)
-                    return
-                }
-                self.showSubFilterRow(options)
+                self.applyPeopleRow(people, for: primary)
             }
         case .pinned:
+            renderedSubFilterRow = nil
             showSubFilterRow(MapSubFilterOption.placeCategories)
         default:
             // All / a favorite: no refinement dimension.
+            renderedSubFilterRow = nil
             currentSubFilterOptions = []
             setSubFilterBar(visible: false)
+        }
+    }
+
+    /// Renders a people row for `primary`, or retires it — skipping only when
+    /// the row is ALREADY showing exactly this.
+    ///
+    /// The comparison is against what is rendered, never against a cache: see
+    /// `MapSubFilterRowUpdate` for the switch-to-an-empty-primary bug that
+    /// distinction exists to prevent.
+    private func applyPeopleRow(_ people: [MapFavorite], for primary: MapFilter) {
+        let incoming = MapSubFilterRowState(
+            primary: primary,
+            people: people,
+            hasCatalogue: MapSubFilterOption.rowSurvivesEmpty(
+                catalogue: MapSubFilterOption.people(catalogueCache[primary] ?? [])
+            )
+        )
+        switch MapSubFilterRowUpdate.resolve(rendered: renderedSubFilterRow, incoming: incoming) {
+        case .unchanged:
+            return
+        case .hide:
+            renderedSubFilterRow = incoming
+            currentSubFilterOptions = []
+            setSubFilterBar(visible: false)
+        case .show(let options):
+            renderedSubFilterRow = incoming
+            showSubFilterRow(options)
         }
     }
 
@@ -712,6 +723,10 @@ final class MapsViewController: UIViewController {
         // they will want next is a way to put someone back.
         subFilterBar.restack(to: options)
         setSubFilterBar(visible: true)
+        // The sheet edited the row behind the refresh's back, so the yardstick
+        // it compares against is stale — drop it, and let the next refresh
+        // apply whatever it finds.
+        renderedSubFilterRow = nil
     }
 
     /// Re-applies the viewer's edits to a freshly built option list: deleted
