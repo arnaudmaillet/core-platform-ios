@@ -291,13 +291,19 @@ final class MapsViewController: UIViewController {
                 let verbs = sections.last?.children
                     .compactMap { ($0 as? UIAction)?.title } ?? []
                 let separated = sections.count > 1 || !menu.title.isEmpty
+                // `installed*` is read off the pill WITHOUT opening anything:
+                // the header is installed when the cell is configured, so the
+                // name and handle are already on it before any thumb lands.
                 let installed = self?.subFilterBar
                     .debugInstalledMenuTitle(for: .profile(ProfileID(id))) ?? "<none>"
+                let installedSubtitle = self?.subFilterBar
+                    .debugInstalledMenuSubtitle(for: .profile(ProfileID(id))) ?? "<none>"
                 print("[maps] pill menu: header=\"\(header?.title ?? menu.title)\" "
                     + "subtitle=\"\(header?.subtitle ?? "")\" "
                     + "headerTappable=\(header != nil) headerImage=\(header?.image != nil) "
                     + "separator=\(separated) verbs=\(verbs) "
-                    + "installedRoot=\"\(installed)\"")
+                    + "installedHeader=\"\(installed)\" "
+                    + "installedSubtitle=\"\(installedSubtitle)\"")
             }
         }
         // `-maps-subfilter-menu-open <profileID>`: presents that pill's
