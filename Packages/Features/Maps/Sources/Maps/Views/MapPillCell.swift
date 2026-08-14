@@ -1,3 +1,4 @@
+import QuartzCore
 import UIKit
 
 /// One filter pill inside a bar's collection view: a FULLY INTERACTIVE
@@ -16,25 +17,42 @@ import UIKit
 final class MapPillCell: UICollectionViewCell {
     /// The pill's own `.touchUpInside` — the bar maps it to its selection.
     var onTap: (() -> Void)?
-    /// Non-nil arms the pill's native long-press menu (person pills'
-    /// Pin/Unpin); nil renders the pill menu-less. Resolved lazily at
-    /// presentation time, so the Pin/Unpin title reflects live state.
-    var menuProvider: (() -> UIMenu?)? {
+    /// Non-nil arms the pill's native long-press menu; nil renders the pill
+    /// menu-less. What the provider returns is SPLIT — see `MapPillMenu` —
+    /// because the two halves of a pill menu have opposite needs: the header
+    /// must be on screen in the menu's first frame, the verbs must be current
+    /// at the moment it opens.
+    var menuProvider: (() -> MapPillMenu?)? {
         didSet { updateMenu() }
     }
 
     private var pill: MapPillButton?
 
     #if DEBUG
-    /// The title of the menu UIKit would actually PRESENT, which is not the
-    /// same thing as the title the bar builds — the gap between those two is
-    /// exactly where the header went missing.
-    var debugInstalledMenuTitle: String? { pill?.menu?.title }
+    /// What UIKit would actually PRESENT as the menu's header, which is not
+    /// the same thing as what the bar builds — the gap between those two is
+    /// exactly where the header went missing once. Readable without opening
+    /// anything now that the header is installed eagerly.
+    var debugInstalledMenuTitle: String? {
+        guard let menu = pill?.menu else { return nil }
+        let header = (menu.children.first as? UIMenu)?.children
+            .compactMap { $0 as? UIAction }.first
+        return header?.title ?? menu.title
+    }
+
+    /// The header's second line, as installed.
+    var debugInstalledMenuSubtitle: String? {
+        (pill?.menu?.children.first as? UIMenu)?.children
+            .compactMap { $0 as? UIAction }.first?.subtitle
+    }
 
     /// Presents the pill's menu without a finger — see
     /// `MapSubFilterBarView.debugPresentMenu(for:)`.
     func debugPresentMenu() {
         guard let pill else { return }
+        if ProcessInfo.processInfo.arguments.contains("-maps-trace-menu") {
+            print("[maps] menu presentation requested at \(CACurrentMediaTime())")
+        }
         pill.showsMenuAsPrimaryAction = true
         pill.performPrimaryAction()
     }
@@ -66,6 +84,11 @@ final class MapPillCell: UICollectionViewCell {
         pill.setContent(content)
         pill.setSelectedAppearance(selected)
     }
+
+    /// Rebuilds the installed menu. The header is drawn from state the cell
+    /// captured when it was configured, so whatever changes that state — an
+    /// avatar finishing its download — has to say so.
+    func refreshMenu() { updateMenu() }
 
     /// Routes a resolved avatar to the pill (owner calls after async load).
     func setAvatar(_ image: UIImage?) {
@@ -118,26 +141,38 @@ final class MapPillCell: UICollectionViewCell {
             pill.menu = nil
             return
         }
-        // ⚠️ The TITLE is taken from the provided menu and put on the root —
-        // this used to keep only `.children`, which silently threw the header
-        // away. Nobody noticed while the pills carried names; now that they
-        // are bare avatars, that header is the only place the menu says whose
-        // face this is.
+        let built = menuProvider()
+        // ⚠️ The HEADER is installed here, not resolved at presentation.
         //
-        // The title is resolved eagerly (it is the pill's identity, and that
-        // does not change under the viewer's thumb) while the CHILDREN stay
-        // deferred, because they do change: the mute verb reads live state.
-        // The guard is on the provider's PRESENCE, not on its result: a pill
-        // configured before the bar has stored its options resolves nil for a
-        // moment, and dropping the menu there would cost it the whole ladder
-        // rather than just the header.
+        // It used to sit inside the deferred element with the verbs, and a
+        // deferred element by definition resolves AFTER UIKit has begun
+        // presenting — measured at ~19ms, one frame, which is enough for the
+        // menu to draw a placeholder first and swap the real rows in. The
+        // name and the handle arrived in that swap rather than in the first
+        // frame, which is what read as the handle loading late.
+        //
+        // Nothing in the header can change under a thumb: the person's name,
+        // handle and face are the pill's identity, and all three are already
+        // in memory — `MapFavorite` hydrates them in ONE profile fetch, so
+        // there is no state in which the name is known and the handle is not.
+        // It is built once, up front, and drawn in the first frame.
+        //
+        // The VERBS stay deferred, because they genuinely are live: the mute
+        // entry reads a flag anything else in the app may have flipped since
+        // this cell was configured.
         pill.menu = UIMenu(
-            title: menuProvider()?.title ?? "",
+            title: built?.title ?? "",
             children: [
+                built?.header,
                 UIDeferredMenuElement.uncached { [weak self] completion in
-                    completion(self?.menuProvider?()?.children ?? [])
-                }
-            ]
+                    #if DEBUG
+                    if ProcessInfo.processInfo.arguments.contains("-maps-trace-menu") {
+                        print("[maps] menu verbs resolved at \(CACurrentMediaTime())")
+                    }
+                    #endif
+                    completion(self?.menuProvider?()?.liveSection() ?? [])
+                },
+            ].compactMap { $0 }
         )
     }
 }

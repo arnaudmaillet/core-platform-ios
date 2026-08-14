@@ -232,6 +232,8 @@ final class MapSubFilterBarView: UIView {
     /// Resolved avatars, keyed by profile — survives cell reuse and option
     /// refreshes (the pipeline's cache makes re-resolution cheap anyway).
     private var avatarCache: [ProfileID: UIImage] = [:]
+    /// Menu-header faces, circle-cropped from `avatarCache`.
+    private var headerImageCache: [ProfileID: UIImage] = [:]
     private var avatarTasks: [Task<Void, Never>] = []
     /// Monotonic token superseding in-flight cross-dissolves: a stale
     /// fade-out completion must never swap content selected later (rapid
@@ -321,7 +323,7 @@ final class MapSubFilterBarView: UIView {
                 cell.onTap = { [weak self] in self?.didTap(subFilter) }
                 cell.setAvatar(self.optionsBySubFilter[subFilter]?.favorite
                     .flatMap { self.avatarCache[$0.profileID] })
-                cell.menuProvider = { [weak self] in self?.menu(for: subFilter) }
+                cell.menuProvider = { [weak self] in self?.pillMenu(for: subFilter) }
             }
         }
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) {
@@ -417,6 +419,14 @@ final class MapSubFilterBarView: UIView {
               let cell = collectionView.cellForItem(at: indexPath) as? MapPillCell
         else { return nil }
         return cell.debugInstalledMenuTitle
+    }
+
+    /// The header's second line as INSTALLED on the pill.
+    func debugInstalledMenuSubtitle(for subFilter: MapSubFilter) -> String? {
+        guard let indexPath = dataSource.indexPath(for: .subFilter(subFilter)),
+              let cell = collectionView.cellForItem(at: indexPath) as? MapPillCell
+        else { return nil }
+        return cell.debugInstalledMenuSubtitle
     }
 
     func debugPresentMenu(for subFilter: MapSubFilter) {
@@ -528,10 +538,16 @@ final class MapSubFilterBarView: UIView {
                 guard let image = try? await imagePipeline.image(for: url),
                       let self, !Task.isCancelled else { return }
                 self.avatarCache[favorite.profileID] = image
+                self.headerImageCache[favorite.profileID] = nil
                 // Atomic content refresh — no width animation on arrival.
                 UIView.performWithoutAnimation {
                     if let indexPath = self.dataSource.indexPath(for: .subFilter(subFilter)) {
-                        (self.collectionView.cellForItem(at: indexPath) as? MapPillCell)?.setAvatar(image)
+                        let cell = self.collectionView.cellForItem(at: indexPath) as? MapPillCell
+                        cell?.setAvatar(image)
+                        // The menu was built while this face was still a
+                        // placeholder glyph — rebuild it, or the header keeps
+                        // the glyph until the next restack.
+                        cell?.refreshMenu()
                         self.collectionView.collectionViewLayout.invalidateLayout()
                         self.collectionView.layoutIfNeeded()
                     }
@@ -568,8 +584,65 @@ final class MapSubFilterBarView: UIView {
     /// Remove nearest the thumb. `.priority` pins the first action closest to
     /// the touch and leaves Remove farthest from it.
     func menu(for subFilter: MapSubFilter) -> UIMenu? {
+        guard let built = pillMenu(for: subFilter) else { return nil }
+        return UIMenu(
+            title: built.title,
+            children: [built.header].compactMap { $0 } + built.liveSection()
+        )
+    }
+
+    /// The same menu, split into what the pill can draw immediately and what
+    /// it must ask for when the menu opens — see `MapPillMenu`. This is what
+    /// the cell installs; `menu(for:)` is the assembled view of it, and both
+    /// come from the same two builders so they cannot drift.
+    func pillMenu(for subFilter: MapSubFilter) -> MapPillMenu? {
         guard let option = optionsBySubFilter[subFilter] else { return nil }
         let entity = MapSubFilterEntity(option: option)
+        let label = option.content.accessibilityLabel
+        let header = headerSection(for: option, entity: entity, fallback: label)
+        return MapPillMenu(
+            // A headed menu has no caption: the header IS the name, and UIKit
+            // would otherwise draw it twice.
+            title: header == nil ? entity.menuTitle(fallback: label) : "",
+            header: header,
+            liveSection: { [weak self] in
+                [self?.verbsSection(for: subFilter, entity: entity)].compactMap { $0 }
+            }
+        )
+    }
+
+    /// A PERSON is headed by a tappable row — their face, their name, and
+    /// their handle under it — which opens the profile. It sits in its own
+    /// inline section, and that is what draws the separator between the
+    /// subject of the menu and the verbs acting on it.
+    ///
+    /// Everything else keeps the plain caption: a place category has no
+    /// profile behind it, so a header that navigates nowhere would only look
+    /// like a dead row.
+    ///
+    /// Every field here is read straight off the in-memory `MapFavorite` —
+    /// nothing is fetched, awaited or resolved, which is what lets the cell
+    /// install this eagerly.
+    private func headerSection(
+        for option: MapSubFilterOption,
+        entity: MapSubFilterEntity,
+        fallback: String
+    ) -> UIMenu? {
+        guard let header = entity.menuHeader(fallback: fallback) else { return nil }
+        let subFilter = option.subFilter
+        return UIMenu(options: .displayInline, children: [
+            UIAction(
+                title: header.title,
+                subtitle: header.subtitle,
+                image: headerImage(for: option),
+                handler: { [weak self] _ in self?.perform(header.action, on: subFilter) }
+            )
+        ])
+    }
+
+    /// The verbs, read at the moment the menu opens: the mute entry reflects
+    /// live state rather than whatever was true when the cell was configured.
+    private func verbsSection(for subFilter: MapSubFilter, entity: MapSubFilterEntity) -> UIMenu {
         let muted = if case .person(let favorite) = entity {
             isMuted?(favorite.profileID) ?? false
         } else {
@@ -583,31 +656,7 @@ final class MapSubFilterBarView: UIView {
                 handler: { [weak self] _ in self?.perform(action, on: subFilter) }
             )
         }
-        let label = option.content.accessibilityLabel
-        // A PERSON is headed by a tappable row — their face, their name, and
-        // their handle under it — which opens the profile. It sits in its own
-        // inline section, and that is what draws the separator between the
-        // subject of the menu and the verbs acting on it.
-        //
-        // Everything else keeps the plain caption: a place category has no
-        // profile behind it, so a header that navigates nowhere would only
-        // look like a dead row.
-        guard let header = entity.menuHeader(fallback: label) else {
-            return UIMenu(
-                title: entity.menuTitle(fallback: label),
-                children: [UIMenu(options: .displayInline, children: children)]
-            )
-        }
-        let headerAction = UIAction(
-            title: header.title,
-            subtitle: header.subtitle,
-            image: headerImage(for: option),
-            handler: { [weak self] _ in self?.perform(header.action, on: subFilter) }
-        )
-        return UIMenu(children: [
-            UIMenu(options: .displayInline, children: [headerAction]),
-            UIMenu(options: .displayInline, children: children),
-        ])
+        return UIMenu(options: .displayInline, children: children)
     }
 
     /// The header's face: the resolved avatar, circle-cropped, or the generic
@@ -618,7 +667,15 @@ final class MapSubFilterBarView: UIView {
         guard let profileID = option.favorite?.profileID,
               let avatar = avatarCache[profileID]
         else { return UIImage(systemName: "person.crop.circle") }
-        return avatar.mapMenuHeaderAvatar()
+        if let cropped = headerImageCache[profileID] { return cropped }
+        // Cropping is a render pass, and the menu is now built whenever a
+        // cell is configured rather than when one is opened — so this runs
+        // for every visible pill on every restack. Cached against the avatar
+        // that produced it (`loadAvatars` drops the entry when a new one
+        // resolves).
+        let cropped = avatar.mapMenuHeaderAvatar()
+        headerImageCache[profileID] = cropped
+        return cropped
     }
 
     /// Routes one chosen verb to its callback. Split out from menu building so
