@@ -99,13 +99,21 @@ final class MapPillCell: UICollectionViewCell {
     /// why this stays on the button even though the menu is now a full
     /// entity-aware ladder rather than one action.
     ///
-    /// `.priority` keeps the authored order thumb-first. These bars sit
-    /// directly above the tab bar, so their menus always open UPWARD, and
-    /// `.automatic` reverses the ladder in that direction — which would put a
-    /// destructive Remove under the thumb and the common verb farthest away.
+    /// `.fixed`: the menu reads top-down exactly as it was authored.
+    ///
+    /// It was `.priority` — thumb-first, which these bars need because they
+    /// sit directly above the tab bar and their menus always open UPWARD, so
+    /// UIKit reverses the ladder to keep the first element nearest the touch.
+    /// That is the right rule for a list of verbs and the wrong one once the
+    /// first element is a HEADER: reversed, the person's name sank to the
+    /// bottom of the menu, under the verbs acting on them. A header that is
+    /// not at the top is not a header.
+    ///
+    /// ⚠️ The cost is the ladder's own order: Share now sits nearest the
+    /// thumb and Message farthest from it.
     private func updateMenu() {
         guard let pill else { return }
-        pill.preferredMenuElementOrder = .priority
+        pill.preferredMenuElementOrder = .fixed
         guard let menuProvider else {
             pill.menu = nil
             return

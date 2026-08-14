@@ -282,14 +282,22 @@ final class MapsViewController: UIViewController {
                     print("[maps] pill menu: no pill for \(id)")
                     return
                 }
-                let verbs = (menu.children.first as? UIMenu)?.children
+                // A person's name is the FIRST section's action now, not the
+                // root title: it is the header the viewer taps. Print both,
+                // plus what the pill actually carries — the header used to be
+                // built correctly and never reach the screen.
+                let sections = menu.children.compactMap { $0 as? UIMenu }
+                let header = sections.first?.children.compactMap { $0 as? UIAction }.first
+                let verbs = sections.last?.children
                     .compactMap { ($0 as? UIAction)?.title } ?? []
-                let separated = (menu.children.first as? UIMenu)?.options.contains(.displayInline)
+                let separated = sections.count > 1 || !menu.title.isEmpty
                 let installed = self?.subFilterBar
                     .debugInstalledMenuTitle(for: .profile(ProfileID(id))) ?? "<none>"
-                print("[maps] pill menu: title=\"\(menu.title)\" "
-                    + "installed=\"\(installed)\" "
-                    + "separator=\(separated == true) verbs=\(verbs)")
+                print("[maps] pill menu: header=\"\(header?.title ?? menu.title)\" "
+                    + "subtitle=\"\(header?.subtitle ?? "")\" "
+                    + "headerTappable=\(header != nil) headerImage=\(header?.image != nil) "
+                    + "separator=\(separated) verbs=\(verbs) "
+                    + "installedRoot=\"\(installed)\"")
             }
         }
         // `-maps-subfilter-menu-open <profileID>`: presents that pill's
