@@ -29,6 +29,28 @@ enum MapSubFilterEntity: Equatable {
     }
 }
 
+extension MapSubFilterEntity {
+    /// The name the menu is headed by.
+    ///
+    /// Taken from the PROFILE for a person — display name, falling back to the
+    /// `@handle` — rather than from the pill's presentation. The pill has no
+    /// text at all since it became a bare avatar circle, and this menu is the
+    /// only place the viewer is told whose face they are holding; sourcing it
+    /// from anything the pill draws would make that dependent on how the pill
+    /// happens to be styled today.
+    ///
+    /// `fallback` is the pill's own accessibility label, which is the right
+    /// answer for the cases with no profile behind them: a place category is
+    /// named by its label ("Cafés"), and a pill the bar cannot identify has
+    /// nothing better to offer.
+    func menuTitle(fallback: String) -> String {
+        guard case .person(let favorite) = self else { return fallback }
+        if !favorite.title.isEmpty { return favorite.title }
+        if let handle = favorite.handle, !handle.isEmpty { return "@\(handle)" }
+        return fallback
+    }
+}
+
 /// One entry in a pill's long-press menu.
 ///
 /// A descriptor rather than a built `UIMenu`: `UIAction` closures cannot be

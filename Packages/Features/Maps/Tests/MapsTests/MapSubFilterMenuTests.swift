@@ -252,8 +252,47 @@ struct MapSubFilterMenuTests {
         let person = Self.person("ava")
         let (bar, _) = Self.makeBar([person])
 
-        #expect(bar.menu(for: person.subFilter)?.title == person.content.accessibilityLabel)
         #expect(bar.menu(for: person.subFilter)?.title.isEmpty == false)
+    }
+
+    // MARK: - Where the title comes from
+
+    /// From the PROFILE, not from anything the pill draws — the pill draws no
+    /// text at all.
+    @Test("A person's menu is titled from their display name")
+    func theTitleComesFromTheProfile() {
+        let entity = MapSubFilterEntity.person(
+            MapFavorite(profileID: ProfileID("a"), title: "Ava Moreau", handle: "ava.moreau")
+        )
+
+        #expect(entity.menuTitle(fallback: "something else") == "Ava Moreau")
+    }
+
+    /// A profile whose display name never hydrated still names itself.
+    @Test("A nameless profile falls back to its handle")
+    func aNamelessProfileUsesItsHandle() {
+        let entity = MapSubFilterEntity.person(
+            MapFavorite(profileID: ProfileID("a"), title: "", handle: "ava.moreau")
+        )
+
+        #expect(entity.menuTitle(fallback: "unused") == "@ava.moreau")
+    }
+
+    /// And one with neither takes what the pill can offer rather than opening
+    /// a menu headed by an empty line.
+    @Test("A profile with no name at all takes the pill's label")
+    func anAnonymousProfileTakesTheFallback() {
+        let entity = MapSubFilterEntity.person(
+            MapFavorite(profileID: ProfileID("a"), title: "", handle: nil)
+        )
+
+        #expect(entity.menuTitle(fallback: "Person") == "Person")
+    }
+
+    /// A place has no profile behind it: its own label IS its name.
+    @Test(arguments: [MapSubFilterEntity.place("cafes"), .generic])
+    func nonPeopleKeepTheirLabel(entity: MapSubFilterEntity) {
+        #expect(entity.menuTitle(fallback: "Cafés") == "Cafés")
     }
 
     @Test("The menu reads mute state when it is BUILT, not when the pill was configured")

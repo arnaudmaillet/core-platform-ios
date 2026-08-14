@@ -566,7 +566,7 @@ final class MapSubFilterBarView: UIView {
         // under that header — a titled menu alone renders the name as a
         // caption with nothing between it and the first verb.
         return UIMenu(
-            title: option.content.accessibilityLabel,
+            title: entity.menuTitle(fallback: option.content.accessibilityLabel),
             children: [UIMenu(options: .displayInline, children: children)]
         )
     }
