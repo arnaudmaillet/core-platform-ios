@@ -74,12 +74,18 @@ enum MapSubFilterMenuAction: String, CaseIterable {
 
     /// The menu for an entity, in thumb order — see the ordering note in
     /// `MapSubFilterBarView.menu(for:)`. Navigation first, then the toggles,
-    /// then Share, and the destructive removal last and farthest.
+    /// then the removal, with Share last.
+    ///
+    /// ⚠️ Remove is no longer the farthest entry from the thumb; Share is.
+    /// The ladder used to end on the destructive verb deliberately, so a
+    /// mis-aimed press near the finger could not delete a pill. It reads
+    /// better grouped with the other verbs that act on the ROW — and it is
+    /// still four entries away, with an undo one tap away in the sheet.
     static func actions(for entity: MapSubFilterEntity) -> [MapSubFilterMenuAction] {
         switch entity {
-        case .person: [.viewProfile, .sendMessage, .toggleMute, .share, .unpin]
-        case .place: [.viewDetails, .share, .unpin]
-        case .generic: [.share, .unpin]
+        case .person: [.viewProfile, .sendMessage, .toggleMute, .unpin, .share]
+        case .place: [.viewDetails, .unpin, .share]
+        case .generic: [.unpin, .share]
         }
     }
 }

@@ -35,7 +35,7 @@ struct MapSubFilterOption: Equatable {
         MapSubFilterOption(
             subFilter: .placeCategory("cafes"),
             content: MapPillButton.Content(
-                title: "Cafes",
+                title: nil,
                 symbolName: "cup.and.saucer", selectedSymbolName: "cup.and.saucer.fill",
                 accessibilityLabel: "Cafes"
             ),
@@ -44,7 +44,7 @@ struct MapSubFilterOption: Equatable {
         MapSubFilterOption(
             subFilter: .placeCategory("restaurants"),
             content: MapPillButton.Content(
-                title: "Restaurants",
+                title: nil,
                 symbolName: "fork.knife", selectedSymbolName: "fork.knife",
                 accessibilityLabel: "Restaurants"
             ),
@@ -53,7 +53,7 @@ struct MapSubFilterOption: Equatable {
         MapSubFilterOption(
             subFilter: .placeCategory("parks"),
             content: MapPillButton.Content(
-                title: "Parks",
+                title: nil,
                 symbolName: "tree", selectedSymbolName: "tree.fill",
                 accessibilityLabel: "Parks"
             ),
@@ -62,7 +62,7 @@ struct MapSubFilterOption: Equatable {
         MapSubFilterOption(
             subFilter: .placeCategory("nightlife"),
             content: MapPillButton.Content(
-                title: "Nightlife",
+                title: nil,
                 symbolName: "moon.stars", selectedSymbolName: "moon.stars.fill",
                 accessibilityLabel: "Nightlife"
             ),
@@ -83,13 +83,21 @@ struct MapSubFilterOption: Equatable {
         !catalogue.isEmpty
     }
 
-    /// Person refinements (Friends/Following rows): avatar + first name.
+    /// Person refinements (Friends/Following rows): the AVATAR, and nothing
+    /// else. `MapPillButton` pins width to height for a title-less pill, so
+    /// dropping the name is what makes the pill a circle.
+    ///
+    /// A face identifies someone faster than a first name does, and a row of
+    /// circles fits roughly twice as many people on a phone — the row exists
+    /// to be scanned. The name has not disappeared: it is the long-press
+    /// menu's title (`menu(for:)`), and it is what VoiceOver reads, since the
+    /// label is the only name a screen reader ever had.
     static func people(_ people: [MapFavorite]) -> [MapSubFilterOption] {
         people.map { person in
             MapSubFilterOption(
                 subFilter: .profile(person.profileID),
                 content: MapPillButton.Content(
-                    title: firstName(of: person.title),
+                    title: nil,
                     symbolName: "person.crop.circle", selectedSymbolName: "person.crop.circle.fill",
                     accessibilityLabel: person.title
                 ),
@@ -174,7 +182,10 @@ final class MapSubFilterBarView: UIView {
     private(set) var selectedSubFilters: Set<MapSubFilter> = []
 
     /// One size below the main bar's 36pt family, per the type ladder.
-    static let pillHeight: CGFloat = 32
+    /// The pill's diameter — every pill in this row is a circle now, so this
+    /// is both. Up from 32: a bare avatar has to carry the identity a name
+    /// used to, and it is the whole tap target.
+    static let pillHeight: CGFloat = 40
     /// Same halo headroom rationale as the main bar.
     static let verticalPadding: CGFloat = 6
     static var barHeight: CGFloat { pillHeight + verticalPadding * 2 }
@@ -204,7 +215,7 @@ final class MapSubFilterBarView: UIView {
     }
 
     private static let allContent = MapPillButton.Content(
-        title: "All",
+        title: nil,
         symbolName: "sparkles", selectedSymbolName: "sparkles",
         accessibilityLabel: "All"
     )
@@ -248,7 +259,10 @@ final class MapSubFilterBarView: UIView {
         configuration.scrollDirection = .horizontal
 
         let itemSize = NSCollectionLayoutSize(
-            widthDimension: .estimated(80), heightDimension: .absolute(Self.pillHeight)
+            // Absolute, not estimated: every pill is a circle, so its width IS
+            // its height and there is nothing left to measure.
+            widthDimension: .absolute(Self.pillHeight),
+            heightDimension: .absolute(Self.pillHeight)
         )
         let group = NSCollectionLayoutGroup.horizontal(
             layoutSize: itemSize, subitems: [NSCollectionLayoutItem(layoutSize: itemSize)]
@@ -541,7 +555,15 @@ final class MapSubFilterBarView: UIView {
                 handler: { [weak self] _ in self?.perform(action, on: subFilter) }
             )
         }
-        return UIMenu(children: children)
+        // TITLED, and the title is load-bearing now: the pills are bare
+        // avatars, so this menu is where the person's name is written. The
+        // actions sit in an inline section, which is what draws the separator
+        // under that header — a titled menu alone renders the name as a
+        // caption with nothing between it and the first verb.
+        return UIMenu(
+            title: option.content.accessibilityLabel,
+            children: [UIMenu(options: .displayInline, children: children)]
+        )
     }
 
     /// Routes one chosen verb to its callback. Split out from menu building so
