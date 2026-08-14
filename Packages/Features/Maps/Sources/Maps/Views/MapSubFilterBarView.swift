@@ -583,15 +583,42 @@ final class MapSubFilterBarView: UIView {
                 handler: { [weak self] _ in self?.perform(action, on: subFilter) }
             )
         }
-        // TITLED, and the title is load-bearing now: the pills are bare
-        // avatars, so this menu is where the person's name is written. The
-        // actions sit in an inline section, which is what draws the separator
-        // under that header — a titled menu alone renders the name as a
-        // caption with nothing between it and the first verb.
-        return UIMenu(
-            title: entity.menuTitle(fallback: option.content.accessibilityLabel),
-            children: [UIMenu(options: .displayInline, children: children)]
+        let label = option.content.accessibilityLabel
+        // A PERSON is headed by a tappable row — their face, their name, and
+        // their handle under it — which opens the profile. It sits in its own
+        // inline section, and that is what draws the separator between the
+        // subject of the menu and the verbs acting on it.
+        //
+        // Everything else keeps the plain caption: a place category has no
+        // profile behind it, so a header that navigates nowhere would only
+        // look like a dead row.
+        guard let header = entity.menuHeader(fallback: label) else {
+            return UIMenu(
+                title: entity.menuTitle(fallback: label),
+                children: [UIMenu(options: .displayInline, children: children)]
+            )
+        }
+        let headerAction = UIAction(
+            title: header.title,
+            subtitle: header.subtitle,
+            image: headerImage(for: option),
+            handler: { [weak self] _ in self?.perform(header.action, on: subFilter) }
         )
+        return UIMenu(children: [
+            UIMenu(options: .displayInline, children: [headerAction]),
+            UIMenu(options: .displayInline, children: children),
+        ])
+    }
+
+    /// The header's face: the resolved avatar, circle-cropped, or the generic
+    /// person glyph while it is still loading. Cropped rather than handed over
+    /// square because every other place this photo appears is a circle, and a
+    /// menu row is the one place UIKit will not round it for us.
+    private func headerImage(for option: MapSubFilterOption) -> UIImage? {
+        guard let profileID = option.favorite?.profileID,
+              let avatar = avatarCache[profileID]
+        else { return UIImage(systemName: "person.crop.circle") }
+        return avatar.mapMenuHeaderAvatar()
     }
 
     /// Routes one chosen verb to its callback. Split out from menu building so

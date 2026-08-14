@@ -51,6 +51,40 @@ extension MapSubFilterEntity {
     }
 }
 
+/// The person at the top of a pill's menu, as a tappable entry rather than a
+/// caption.
+///
+/// UIKit gives a menu title no weight and no touch: it is small grey text,
+/// and there is no attributed-title API to make it otherwise (checked against
+/// the SDK — `UIMenuElement` exposes `subtitle` and `image`, nothing about
+/// font). So the header is a real ACTION in its own section, which is how it
+/// gets both: a two-line row with a face reads as the subject of the menu
+/// rather than one more verb in the ladder, and it can open the profile.
+///
+/// Only a person has one. A place category has no profile to open, so it
+/// keeps the plain caption — see `MapSubFilterEntity.menuTitle(fallback:)`.
+struct MapSubFilterMenuHeader: Equatable {
+    let title: String
+    /// The `@handle`, and nil when the title IS the handle — a row reading
+    /// "@kenji" over "@kenji" says nothing twice.
+    let subtitle: String?
+    /// What tapping the header does. Named so the routing is assertable
+    /// without reaching into a `UIAction`'s handler.
+    let action: MapSubFilterMenuAction = .viewProfile
+}
+
+extension MapSubFilterEntity {
+    func menuHeader(fallback: String) -> MapSubFilterMenuHeader? {
+        guard case .person(let favorite) = self else { return nil }
+        let title = menuTitle(fallback: fallback)
+        let handle = favorite.handle.flatMap { $0.isEmpty ? nil : "@\($0)" }
+        return MapSubFilterMenuHeader(
+            title: title,
+            subtitle: handle == title ? nil : handle
+        )
+    }
+}
+
 /// One entry in a pill's long-press menu.
 ///
 /// A descriptor rather than a built `UIMenu`: `UIAction` closures cannot be
@@ -95,17 +129,24 @@ enum MapSubFilterMenuAction: String, CaseIterable {
     }
 
     /// The menu for an entity, in thumb order — see the ordering note in
-    /// `MapSubFilterBarView.menu(for:)`. Navigation first, then the toggles,
-    /// then the removal, with Share last.
+    /// `MapSubFilterBarView.menu(for:)`. The toggles, then the removal, with
+    /// Share last.
+    ///
+    /// A person's ladder has no View Profile: their name is the header, and
+    /// the header opens the profile (`MapSubFilterMenuHeader`). Keeping both
+    /// would offer the same destination twice in one menu. A GENERIC pill —
+    /// a profile refinement the bar could not name — has no header to tap, so
+    /// nothing is lost there either: it never offered View Profile, because
+    /// it has no identity to open.
     ///
     /// ⚠️ Remove is no longer the farthest entry from the thumb; Share is.
     /// The ladder used to end on the destructive verb deliberately, so a
     /// mis-aimed press near the finger could not delete a pill. It reads
-    /// better grouped with the other verbs that act on the ROW — and it is
-    /// still four entries away, with an undo one tap away in the sheet.
+    /// better grouped with the other verbs that act on the ROW — and the
+    /// removal is undone in one tap from the same sheet.
     static func actions(for entity: MapSubFilterEntity) -> [MapSubFilterMenuAction] {
         switch entity {
-        case .person: [.viewProfile, .sendMessage, .toggleMute, .unpin, .share]
+        case .person: [.sendMessage, .toggleMute, .unpin, .share]
         case .place: [.viewDetails, .unpin, .share]
         case .generic: [.unpin, .share]
         }
