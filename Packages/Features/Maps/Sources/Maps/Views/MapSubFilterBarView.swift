@@ -1,6 +1,7 @@
 import CoreModels
 import DesignSystem
 import MediaCore
+import QuartzCore
 import UIKit
 
 /// One entry in the sub-filter bar: the refinement it applies plus its pill
@@ -232,6 +233,10 @@ final class MapSubFilterBarView: UIView {
     /// Resolved avatars, keyed by profile — survives cell reuse and option
     /// refreshes (the pipeline's cache makes re-resolution cheap anyway).
     private var avatarCache: [ProfileID: UIImage] = [:]
+    /// Handles already seen for a profile, so an option set that arrives
+    /// without one cannot un-name someone the bar has already identified.
+    /// See `carryingKnownHandles(_:)`.
+    private var handleCache: [ProfileID: String] = [:]
     /// Menu-header faces, circle-cropped from `avatarCache`.
     private var headerImageCache: [ProfileID: UIImage] = [:]
     private var avatarTasks: [Task<Void, Never>] = []
@@ -370,6 +375,7 @@ final class MapSubFilterBarView: UIView {
         for task in avatarTasks { task.cancel() }
         avatarTasks.removeAll()
         selectedSubFilters = []
+        let options = carryingKnownHandles(options)
         orderedSubFilters = options.map(\.subFilter)
         optionsBySubFilter = Dictionary(uniqueKeysWithValues: options.map { ($0.subFilter, $0) })
 
@@ -437,6 +443,45 @@ final class MapSubFilterBarView: UIView {
     }
     #endif
 
+    /// Fills in handles the bar already knows.
+    ///
+    /// ⚠️ The menu header is drawn from whatever `MapFavorite` the row is
+    /// holding, and a person whose handle is momentarily absent renders a
+    /// one-line header that grows a second line when a fuller favorite
+    /// arrives — the menu changing shape under a thumb that is already on it.
+    /// A screen recording caught exactly that: the handle appearing ~1.8s
+    /// after the menu opened, in place.
+    ///
+    /// Every path in this feature hydrates title, avatar and handle from ONE
+    /// profile response, so a handle-less favorite should not exist — and on
+    /// the current code none is reachable (traced at every timing, both the
+    /// curated and the graph-fallback paths). This does not trust that. Once
+    /// a handle is known for a profile it is kept and reapplied, so identity
+    /// only ever gains detail, never loses it, whichever path fills the row.
+    private func carryingKnownHandles(_ options: [MapSubFilterOption]) -> [MapSubFilterOption] {
+        for option in options {
+            guard let favorite = option.favorite,
+                  let handle = favorite.handle, !handle.isEmpty else { continue }
+            handleCache[favorite.profileID] = handle
+        }
+        return options.map { option in
+            guard let favorite = option.favorite,
+                  favorite.handle?.isEmpty ?? true,
+                  let known = handleCache[favorite.profileID]
+            else { return option }
+            return MapSubFilterOption(
+                subFilter: option.subFilter,
+                content: option.content,
+                favorite: MapFavorite(
+                    profileID: favorite.profileID,
+                    title: favorite.title,
+                    avatarURL: favorite.avatarURL,
+                    handle: known
+                )
+            )
+        }
+    }
+
     /// The row's items: All at the head, then the refinements in order.
     /// How many refinements a row needs before it is worth heading with All.
     ///
@@ -471,6 +516,7 @@ final class MapSubFilterBarView: UIView {
     /// laid out for). Lands as the sheet begins dismissing, so the row is
     /// already right by the time it is uncovered.
     func restack(to options: [MapSubFilterOption]) {
+        let options = carryingKnownHandles(options)
         orderedSubFilters = options.map(\.subFilter)
         optionsBySubFilter = Dictionary(uniqueKeysWithValues: options.map { ($0.subFilter, $0) })
         // A restack can now ADD people (someone favorited from their profile
@@ -599,6 +645,13 @@ final class MapSubFilterBarView: UIView {
         guard let option = optionsBySubFilter[subFilter] else { return nil }
         let entity = MapSubFilterEntity(option: option)
         let label = option.content.accessibilityLabel
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-maps-trace-menu") {
+            print("[maps] pill menu built at \(CACurrentMediaTime()) for \(subFilter) "
+                + "title=\"\(option.favorite?.title ?? "-")\" "
+                + "handle=\(option.favorite?.handle.map { "\"\($0)\"" } ?? "nil")")
+        }
+        #endif
         let header = headerSection(for: option, entity: entity, fallback: label)
         return MapPillMenu(
             // A headed menu has no caption: the header IS the name, and UIKit
