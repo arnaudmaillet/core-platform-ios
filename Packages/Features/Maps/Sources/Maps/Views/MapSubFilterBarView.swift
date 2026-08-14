@@ -183,11 +183,16 @@ final class MapSubFilterBarView: UIView {
 
     /// One size below the main bar's 36pt family, per the type ladder.
     /// The pill's diameter — every pill in this row is a circle now, so this
-    /// is both. Up from 32: a bare avatar has to carry the identity a name
-    /// used to, and it is the whole tap target.
-    static let pillHeight: CGFloat = 40
+    /// is both. 32 → 40 → 48: a bare avatar has to carry the identity a name
+    /// used to, and it is the whole tap target. At 48 the photo inside it
+    /// (`MapPillButton.avatarInset` off the diameter, so 44pt of face) is
+    /// legible at a glance rather than a coloured dot.
+    static let pillHeight: CGFloat = 48
     /// Same halo headroom rationale as the main bar.
-    static let verticalPadding: CGFloat = 6
+    /// Breathing room above and below the pills, so the glass highlights and
+    /// the selection glow render fully. Grown with the pills — the same 6pt
+    /// that framed a 32pt pill reads as a crowded band around a 48pt one.
+    static let verticalPadding: CGFloat = 8
     static var barHeight: CGFloat { pillHeight + verticalPadding * 2 }
 
     /// The fixed button's trailing edge in bar coordinates. A CONSTANT, not a
