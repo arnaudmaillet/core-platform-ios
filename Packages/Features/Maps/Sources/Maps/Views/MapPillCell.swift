@@ -25,6 +25,21 @@ final class MapPillCell: UICollectionViewCell {
 
     private var pill: MapPillButton?
 
+    #if DEBUG
+    /// The title of the menu UIKit would actually PRESENT, which is not the
+    /// same thing as the title the bar builds — the gap between those two is
+    /// exactly where the header went missing.
+    var debugInstalledMenuTitle: String? { pill?.menu?.title }
+
+    /// Presents the pill's menu without a finger — see
+    /// `MapSubFilterBarView.debugPresentMenu(for:)`.
+    func debugPresentMenu() {
+        guard let pill else { return }
+        pill.showsMenuAsPrimaryAction = true
+        pill.performPrimaryAction()
+    }
+    #endif
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         // Glass halos bleed past the pill's bounds — nothing may clip.
@@ -91,15 +106,31 @@ final class MapPillCell: UICollectionViewCell {
     private func updateMenu() {
         guard let pill else { return }
         pill.preferredMenuElementOrder = .priority
-        guard menuProvider != nil else {
+        guard let menuProvider else {
             pill.menu = nil
             return
         }
-        pill.menu = UIMenu(children: [
-            UIDeferredMenuElement.uncached { [weak self] completion in
-                completion(self?.menuProvider?()?.children ?? [])
-            }
-        ])
+        // ⚠️ The TITLE is taken from the provided menu and put on the root —
+        // this used to keep only `.children`, which silently threw the header
+        // away. Nobody noticed while the pills carried names; now that they
+        // are bare avatars, that header is the only place the menu says whose
+        // face this is.
+        //
+        // The title is resolved eagerly (it is the pill's identity, and that
+        // does not change under the viewer's thumb) while the CHILDREN stay
+        // deferred, because they do change: the mute verb reads live state.
+        // The guard is on the provider's PRESENCE, not on its result: a pill
+        // configured before the bar has stored its options resolves nil for a
+        // moment, and dropping the menu there would cost it the whole ladder
+        // rather than just the header.
+        pill.menu = UIMenu(
+            title: menuProvider()?.title ?? "",
+            children: [
+                UIDeferredMenuElement.uncached { [weak self] completion in
+                    completion(self?.menuProvider?()?.children ?? [])
+                }
+            ]
+        )
     }
 }
 
