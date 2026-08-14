@@ -271,6 +271,24 @@ final class MapsViewController: UIViewController {
                 subFilterBar.perform(.unpin, on: .profile(ProfileID(id)))
             }
         }
+        // `-maps-subfilter-menu-audit <profileID>`: prints the pill's
+        // long-press menu ~5s in — its title and its verbs, in order. The menu
+        // needs a long press the simulator cannot deliver, so this is how a
+        // scripted run sees what it would contain (the same instrument
+        // `-profile-menu-audit` is for the profile's overflow menu).
+        if let id = Self.debugArgumentValue("-maps-subfilter-menu-audit") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+                guard let menu = self?.subFilterBar.menu(for: .profile(ProfileID(id))) else {
+                    print("[maps] pill menu: no pill for \(id)")
+                    return
+                }
+                let verbs = (menu.children.first as? UIMenu)?.children
+                    .compactMap { ($0 as? UIAction)?.title } ?? []
+                let separated = (menu.children.first as? UIMenu)?.options.contains(.displayInline)
+                print("[maps] pill menu: title=\"\(menu.title)\" "
+                    + "separator=\(separated == true) verbs=\(verbs)")
+            }
+        }
         // `-maps-open-subfilter-sheet`: presents the sub-filter full-list
         // sheet ~3s in (the header's organize tap). Pair with
         // `-maps-select-filter friends|following|pinned`.

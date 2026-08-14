@@ -86,32 +86,44 @@ struct MapSubFilterMenuTests {
 
     // MARK: - The ladders
 
-    @Test("A person offers the full ladder, destructive last")
+    @Test("A person offers the full ladder: profile, message, mute, remove, share")
     func personLadder() {
         #expect(MapSubFilterMenuAction.actions(for: .person(
             MapFavorite(profileID: ProfileID("a"), title: "A")
-        )) == [.viewProfile, .sendMessage, .toggleMute, .share, .unpin])
+        )) == [.viewProfile, .sendMessage, .toggleMute, .unpin, .share])
     }
 
-    @Test("A place offers details, share, remove — nothing account-shaped")
+    @Test("A place offers details, remove, share — nothing account-shaped")
     func placeLadder() {
         #expect(MapSubFilterMenuAction.actions(for: .place("cafes"))
-            == [.viewDetails, .share, .unpin])
+            == [.viewDetails, .unpin, .share])
     }
 
     @Test("Generic offers only the verbs that need no identity")
     func genericLadder() {
-        #expect(MapSubFilterMenuAction.actions(for: .generic) == [.share, .unpin])
+        #expect(MapSubFilterMenuAction.actions(for: .generic) == [.unpin, .share])
     }
 
-    @Test("Every ladder ends in the destructive removal, and only that is destructive")
+    /// Share closes every ladder, so the ordering rule reads the same wherever
+    /// the viewer long-presses.
+    @Test("Share is the last entry everywhere")
+    func shareClosesEveryLadder() {
+        let entities: [MapSubFilterEntity] = [
+            .person(MapFavorite(profileID: ProfileID("a"), title: "A")), .place("cafes"), .generic
+        ]
+        for entity in entities {
+            #expect(MapSubFilterMenuAction.actions(for: entity).last == .share)
+        }
+    }
+
+    @Test("Every ladder carries exactly one destructive entry, and it is Remove")
     func onlyRemovalIsDestructive() {
         let entities: [MapSubFilterEntity] = [
             .person(MapFavorite(profileID: ProfileID("a"), title: "A")), .place("cafes"), .generic
         ]
         for entity in entities {
             let ladder = MapSubFilterMenuAction.actions(for: entity)
-            #expect(ladder.last == .unpin)
+            #expect(ladder.contains(.unpin))
             #expect(ladder.filter(\.isDestructive) == [.unpin])
         }
     }
@@ -207,22 +219,41 @@ struct MapSubFilterMenuTests {
 
     // MARK: - Assembled menu
 
+    /// The verbs sit one level down, inside an inline section — that section
+    /// is what draws the separator under the title header.
+    private static func verbs(of menu: UIMenu?) -> [String] {
+        guard let group = menu?.children.first as? UIMenu else { return [] }
+        #expect(group.options.contains(.displayInline), "no inline section, so no separator")
+        return group.children.compactMap { ($0 as? UIAction)?.title }
+    }
+
     @Test("The built menu matches the ladder, one child per action")
     func menuMirrorsTheLadder() {
         let person = Self.person("ava")
         let place = Self.place
         let (bar, _) = Self.makeBar([person, place])
 
-        let personMenu = bar.menu(for: person.subFilter)
-        #expect(personMenu?.children.count == 5)
-        #expect(personMenu?.children.compactMap { ($0 as? UIAction)?.title }
-            == ["View Profile", "Message", "Mute", "Share", "Remove"])
+        #expect(Self.verbs(of: bar.menu(for: person.subFilter))
+            == ["View Profile", "Message", "Mute", "Remove", "Share"])
 
         let placeMenu = bar.menu(for: place.subFilter)
-        #expect(placeMenu?.children.compactMap { ($0 as? UIAction)?.title }
-            == ["View Details", "Share", "Remove"])
+        #expect(Self.verbs(of: placeMenu) == ["View Details", "Remove", "Share"])
         // The removal is marked destructive so UIKit tints it red.
-        #expect((placeMenu?.children.last as? UIAction)?.attributes.contains(.destructive) == true)
+        let group = placeMenu?.children.first as? UIMenu
+        let remove = group?.children.first { ($0 as? UIAction)?.title == "Remove" } as? UIAction
+        #expect(remove?.attributes.contains(.destructive) == true)
+    }
+
+    /// ⚠️ The pills are bare avatars now, so this title is the only place the
+    /// person's name appears while the menu is open. A menu that lost it would
+    /// leave the viewer holding a face and no name.
+    @Test("The menu is headed by the name the pill no longer shows")
+    func theMenuIsTitledWithTheIdentity() {
+        let person = Self.person("ava")
+        let (bar, _) = Self.makeBar([person])
+
+        #expect(bar.menu(for: person.subFilter)?.title == person.content.accessibilityLabel)
+        #expect(bar.menu(for: person.subFilter)?.title.isEmpty == false)
     }
 
     @Test("The menu reads mute state when it is BUILT, not when the pill was configured")
@@ -231,9 +262,9 @@ struct MapSubFilterMenuTests {
         let (bar, _) = Self.makeBar([option])
         var muted = false
         bar.isMuted = { _ in muted }
-        #expect((bar.menu(for: option.subFilter)?.children[2] as? UIAction)?.title == "Mute")
+        #expect(Self.verbs(of: bar.menu(for: option.subFilter))[2] == "Mute")
         muted = true
-        #expect((bar.menu(for: option.subFilter)?.children[2] as? UIAction)?.title == "Unmute")
+        #expect(Self.verbs(of: bar.menu(for: option.subFilter))[2] == "Unmute")
     }
 
     @Test("A refinement the row doesn't carry has no menu at all")
