@@ -43,9 +43,13 @@ public final class ProfileViewModel {
         /// or no pinning service.
         case hidden
         /// Offered. `categories` is what the map currently shows (empty = on
-        /// neither rail); `offersChoice` is true for a MUTUAL, who can be on
-        /// either rail and therefore gets a menu instead of a plain toggle.
-        case shown(categories: Set<MapFavoriteCategory>, offersChoice: Bool)
+        /// no rail); `includesFriends` is true for a MUTUAL, the only viewer
+        /// for whom the Friends row exists at all.
+        ///
+        /// The star always opens the checklist now: with three rails, even
+        /// someone merely followed has two of them (the dock and the Following
+        /// row), and a single toggle could not say which.
+        case shown(categories: Set<MapFavoriteCategory>, includesFriends: Bool)
 
         /// Whether the star reads as filled — on ANY rail counts.
         public var isFavorited: Bool {
@@ -58,8 +62,9 @@ public final class ProfileViewModel {
             return []
         }
 
-        public var offersChoice: Bool {
-            if case .shown(_, let offersChoice) = self { return offersChoice }
+        /// Whether the Friends row belongs in this profile's checklist.
+        public var includesFriends: Bool {
+            if case .shown(_, let includesFriends) = self { return includesFriends }
             return false
         }
     }
@@ -390,29 +395,36 @@ public final class ProfileViewModel {
 
     // MARK: - Map pin
 
-    /// The plain tap, for someone the viewer merely FOLLOWS: on or off the
-    /// Following rail. A mutual never reaches this — they are offered the
-    /// menu instead (`setMapCategories`), because they can be on either rail
-    /// and a single toggle could not say which.
+    /// Flips ONE rail, leaving the others exactly as they were — what each row
+    /// of the checklist does.
     ///
     /// Optimistic, and deliberately without a rollback: the destination is a
     /// local list (`MapFavoritesStore`), so there is no server to disagree —
     /// the write cannot fail in a way the viewer could act on. What it CAN do
-    /// is take a moment, because the very first write has to materialize the
-    /// never-curated fallback, and the button must not sit inert for it.
-    public func toggleMapPin() {
-        guard case .shown(let categories, let offersChoice) = mapPinButton, !offersChoice else { return }
-        setMapCategories(categories.contains(.following) ? [] : [.following])
+    /// is take a moment, because the very first write to a rail has to
+    /// materialize its never-curated fallback, and the row must not sit inert
+    /// for it.
+    ///
+    /// Independent toggles rather than presets: three rails have eight states,
+    /// and a viewer reading three checkmarks can see all of them and reach any
+    /// in one tap. An earlier menu carried a "Both" row for a state the other
+    /// rows already spelled — a shortcut the checkmarks make redundant, and an
+    /// item whose meaning (add both? clear both?) depended on state the row
+    /// itself could not show.
+    public func toggleMapCategory(_ category: MapFavoriteCategory) {
+        guard case .shown(let categories, _) = mapPinButton else { return }
+        setMapCategories(categories.symmetricDifference([category]))
     }
 
-    /// Puts this profile on exactly these rails — what the mutual's menu
+    /// Puts this profile on exactly these rails — what a checklist row
     /// commits, and what the plain toggle funnels through, so there is one
     /// write path and one optimistic update.
     public func setMapCategories(_ categories: Set<MapFavoriteCategory>) {
         guard mapPinButton != .hidden, let mapPinning, let profile else { return }
         // A non-mutual cannot be a friend, whatever a caller asks for; the
-        // Friends rail is the map's mutuals rail.
-        let allowed = isMutual ? categories : categories.intersection([.following])
+        // Friends row is the map's mutuals row. The dock and the Following row
+        // are open to anyone the viewer follows.
+        let allowed = isMutual ? categories : categories.subtracting([.friends])
         mapCategories = allowed
         refreshMapPinButton()
         Task { await mapPinning.setCategories(allowed, for: profile.id) }
@@ -441,9 +453,9 @@ public final class ProfileViewModel {
             mapPinButton = .hidden
             return
         }
-        // A mutual is on the Friends rail's ballot, so they get the choice;
-        // everyone else has exactly one rail available and gets a toggle.
-        mapPinButton = .shown(categories: mapCategories, offersChoice: isMutual)
+        // A mutual gets the Friends row too; everyone else gets the dock and
+        // the Following row.
+        mapPinButton = .shown(categories: mapCategories, includesFriends: isMutual)
     }
 
     /// Follow-button tapped. No-op for the viewer's own profile ("Edit"); an

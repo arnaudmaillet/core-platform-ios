@@ -70,6 +70,19 @@ struct MapSubFilterOption: Equatable {
         )
     ]
 
+    /// Whether a rail with NOTHING in it should stay on screen as its add
+    /// affordance, or retire the way it always did.
+    ///
+    /// The "+" is only worth showing when it leads somewhere: it opens the
+    /// full-list sheet, and a sheet with an empty catalogue is a dead end —
+    /// a button that answers a tap with nothing at all. So an empty rail with
+    /// people still available keeps the row (curated everyone off; here is the
+    /// way back), and an empty rail with an empty catalogue hides it (this
+    /// viewer has no friends to show; the row has nothing to say).
+    static func rowSurvivesEmpty(catalogue: [MapSubFilterOption]) -> Bool {
+        !catalogue.isEmpty
+    }
+
     /// Person refinements (Friends/Following rows): avatar + first name.
     static func people(_ people: [MapFavorite]) -> [MapSubFilterOption] {
         people.map { person in
@@ -185,7 +198,7 @@ final class MapSubFilterBarView: UIView {
     /// The row's cells. "All" is a first-class item rather than a special
     /// index, so the diffable snapshot, the snap candidates, and the
     /// duck-fade all treat it as the ordinary pill it looks like.
-    private enum Item: Hashable {
+    enum Item: Hashable {
         case all
         case subFilter(MapSubFilter)
     }
@@ -373,8 +386,28 @@ final class MapSubFilterBarView: UIView {
     }
 
     /// The row's items: All at the head, then the refinements in order.
-    private static func items(for subFilters: [MapSubFilter]) -> [Item] {
-        [.all] + subFilters.map(Item.subFilter)
+    /// How many refinements a row needs before it is worth heading with All.
+    ///
+    /// Below this the pill earns nothing. All means "none of these selected",
+    /// which a one- or two-pill row already SHOWS — every pill unselected —
+    /// and every tap toggles its own pill, so nothing is trapped in a
+    /// filtered state without it. What it costs is a fifth of a phone-width
+    /// row spent restating the resting state next to two people.
+    static let allPillMinimumCount = 3
+
+    /// The row's cells: the refinements in order, headed by All only once
+    /// there are enough of them to be worth resetting — and NOTHING at all
+    /// when there are none.
+    ///
+    /// An empty rail drops All for a different reason: "all" of nothing
+    /// selects nothing, and a lone All pill beside a lone organize button is a
+    /// row that looks populated and does nothing. The fixed button becomes the
+    /// add affordance there instead (`MapSubFilterHeaderRole.add`).
+    static func items(for subFilters: [MapSubFilter]) -> [Item] {
+        guard subFilters.count >= allPillMinimumCount else {
+            return subFilters.map(Item.subFilter)
+        }
+        return [.all] + subFilters.map(Item.subFilter)
     }
 
     /// The organize sheet's committed arrangement: the same options
@@ -388,6 +421,11 @@ final class MapSubFilterBarView: UIView {
     func restack(to options: [MapSubFilterOption]) {
         orderedSubFilters = options.map(\.subFilter)
         optionsBySubFilter = Dictionary(uniqueKeysWithValues: options.map { ($0.subFilter, $0) })
+        // A restack can now ADD people (someone favorited from their profile
+        // while this row was on screen), and an added pill has never had its
+        // avatar resolved. Cache-guarded, so the ones already here cost
+        // nothing and do not re-fetch.
+        loadAvatars(for: options)
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         snapshot.appendSections([.main])
         snapshot.appendItems(Self.items(for: orderedSubFilters))
@@ -599,7 +637,9 @@ final class MapSubFilterBarView: UIView {
     /// piece of chrome twitch every time the row crosses the threshold.
     private func updateHeaderRole(animated: Bool) {
         let role = MapSubFilterHeaderRole.resolve(
-            allLeadingEdgeX: allCellLeadingEdgeX(), headerTrailingX: Self.headerTrailingX
+            rowIsEmpty: orderedSubFilters.isEmpty,
+            allLeadingEdgeX: allCellLeadingEdgeX(),
+            headerTrailingX: Self.headerTrailingX
         )
         guard role != headerRole else { return }
         headerRole = role
@@ -629,7 +669,11 @@ final class MapSubFilterBarView: UIView {
 
     private func didTapHeader() {
         switch headerRole {
-        case .organize: onExpandTapped?()
+        // Same destination for both: the full-list sheet IS the place people
+        // are chosen from, so an empty rail's "+" opens exactly what organize
+        // opens. The glyph differs because the promise does — organize edits a
+        // row that exists, add offers to start one.
+        case .organize, .add: onExpandTapped?()
         case .rewind: rewindToAll()
         }
     }

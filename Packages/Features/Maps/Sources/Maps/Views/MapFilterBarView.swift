@@ -187,30 +187,89 @@ final class MapFilterBarView: UIView {
 
     // MARK: - Favorites
 
-    /// Populates (or refreshes) the favorites section. Structure lands
-    /// synchronously at final widths, arrival is a pure cross-dissolve. If the
-    /// active filter's favorite disappeared in the refresh, selection falls
-    /// back to All.
+    /// How the carousel should get from what it shows to what it should show.
+    ///
+    /// Pure, so the rule is testable without a window or the Liquid Glass
+    /// material, and so the DOCK answers it the same way the sub-filter row
+    /// does (`MapSubFilterRowUpdate`) — one idea, stated twice because the two
+    /// bars are separate views, never two different ideas.
+    enum FavoritesUpdate: Equatable {
+        /// Already showing exactly this. The carousel is refreshed on every
+        /// change to ANY rail and on every appearance, so this is the common
+        /// case — and re-applying it is what flashed.
+        case unchanged
+        /// Nothing has been shown yet: land the pills at final widths and
+        /// cross-dissolve them in, which is an ARRIVAL, not a rebuild.
+        case populate
+        /// An edit of a list already on screen: only the pills that changed
+        /// may move.
+        case diff
+
+        static func resolve(
+            rendered: [MapFavorite]?, incoming: [MapFavorite]
+        ) -> Self {
+            guard let rendered else { return .populate }
+            return rendered == incoming ? .unchanged : .diff
+        }
+    }
+
+    /// What the carousel is currently showing; nil until the first population.
+    private var renderedFavorites: [MapFavorite]?
+
+    /// Populates (or refreshes) the favorites section. If the active filter's
+    /// favorite disappeared in the refresh, selection falls back to All.
+    ///
+    /// ⚠️ An identical list is a NO-OP, and an edit is a diff. This used to
+    /// zero every visible pill's alpha and fade the lot back in on every call
+    /// — an arrival animation replayed as a refresh. Since the carousel is
+    /// reloaded whenever anything about the viewer's favorites changes, that
+    /// meant editing a SUB-FILTER row (a different list, in a different bar)
+    /// flashed the dock.
     func setFavorites(_ favorites: [MapFavorite]) {
-        UIView.performWithoutAnimation {
-            applySnapshot(favorites: favorites, animatingDifferences: false)
-            collectionView.layoutIfNeeded()
+        let update = FavoritesUpdate.resolve(rendered: renderedFavorites, incoming: favorites)
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-maps-toggle-subfilter") || arguments.contains("-maps-subfilter-remove")
+            || arguments.contains("-maps-pin-favorite") {
+            print("[maps] dock update: \(update) (\(favorites.count) pills)")
         }
+        #endif
+        guard update != .unchanged else { return }
+        renderedFavorites = favorites
 
-        if case .profile(let id) = selectedFilter, favoritesByID[id] == nil {
-            selectedFilter = nil
-            onFilterChanged?(nil)
-            reconfigureVisiblePresentation()
-        }
-
-        for indexPath in collectionView.indexPathsForVisibleItems {
-            if case .favorite = dataSource.itemIdentifier(for: indexPath) {
-                collectionView.cellForItem(at: indexPath)?.alpha = 0
+        switch update {
+        case .populate:
+            UIView.performWithoutAnimation {
+                applySnapshot(favorites: favorites, animatingDifferences: false)
+                collectionView.layoutIfNeeded()
             }
+            fallBackToAllIfSelectedFavoriteLeft()
+            // The arrival cross-dissolve, for the one call that is an arrival.
+            for indexPath in collectionView.indexPathsForVisibleItems {
+                if case .favorite = dataSource.itemIdentifier(for: indexPath) {
+                    collectionView.cellForItem(at: indexPath)?.alpha = 0
+                }
+            }
+            UIView.mapBarFade {
+                for cell in self.collectionView.visibleCells { cell.alpha = 1 }
+            }
+        case .diff:
+            // The diffable apply animates the inserted / removed pills and
+            // leaves every other cell exactly where it is.
+            applySnapshot(favorites: favorites, animatingDifferences: true)
+            fallBackToAllIfSelectedFavoriteLeft()
+        case .unchanged:
+            break // guarded above
         }
-        UIView.mapBarFade {
-            for cell in self.collectionView.visibleCells { cell.alpha = 1 }
-        }
+    }
+
+    /// A selection can't outlive its pill: if the favorite the map is filtered
+    /// by just left the carousel, fall back to All.
+    private func fallBackToAllIfSelectedFavoriteLeft() {
+        guard case .profile(let id) = selectedFilter, favoritesByID[id] == nil else { return }
+        selectedFilter = nil
+        onFilterChanged?(nil)
+        reconfigureVisiblePresentation()
     }
 
     // MARK: - Selection

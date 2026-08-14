@@ -1,3 +1,4 @@
+import MapsInterface
 import MediaCore
 import DesignSystem
 import UIKit
@@ -100,9 +101,6 @@ final class ProfileHeaderView: UIView {
     /// reflect live membership rather than whatever was true when the button
     /// was configured — the same bargain `setMoreMenu` strikes.
     var makeMapPinMenu: (() -> UIMenu)?
-    /// Invoked when the map-favorite star is tapped, for the plain-toggle case
-    /// (a mutual gets the menu instead).
-    var onMapPinTapped: (() -> Void)?
     /// Invoked when the Message button is tapped (other users only).
     var onMessageTapped: (() -> Void)?
     /// Invoked when the Edit Profile capsule is tapped (own profile only).
@@ -280,13 +278,14 @@ final class ProfileHeaderView: UIView {
     /// view renders one finished answer instead of re-deriving it from a
     /// second copy of the rule.
     ///
-    /// Two interactions behind one button, chosen by `offersChoice`:
-    /// - a plain follower can only ever be on the Following rail, so the tap
-    ///   IS the toggle (`onMapPinTapped`);
-    /// - a mutual can be on either rail, so the tap opens a menu instead
-    ///   (`makeMapPinMenu`). `showsMenuAsPrimaryAction` means one tap, no long
-    ///   press — and it is cleared again for the toggle case, or a profile
-    ///   that stops being a mutual would keep opening a menu.
+    /// One tap opens the checklist — `showsMenuAsPrimaryAction`, so no long
+    /// press. There is no single-toggle case left: with three rails, even
+    /// someone merely followed has two of them (the dock and the Following
+    /// row), and a tap that picked one for them would be guessing.
+    ///
+    /// The menu is REBUILT on every publication rather than set once: the rows
+    /// carry the checkmarks, and the state they mark is exactly what this call
+    /// is delivering.
     func configureMapPin(_ state: ProfileViewModel.MapPinButton) {
         mapPinButton.isHidden = state == .hidden
         guard state != .hidden else {
@@ -297,15 +296,22 @@ final class ProfileHeaderView: UIView {
         mapPinButton.configuration = Self.glassBubble(
             systemImage: Self.mapFavoriteSymbol(isFavorited: state.isFavorited)
         )
-        mapPinButton.showsMenuAsPrimaryAction = state.offersChoice
-        mapPinButton.menu = state.offersChoice ? makeMapPinMenu?() : nil
-        // The label says what the button DOES, not what the icon depicts — the
-        // glyph pair is a state, and VoiceOver users get no glyph.
-        mapPinButton.accessibilityLabel = if state.offersChoice {
-            "Map favorites"
-        } else {
-            state.isFavorited ? "Remove from map favorites" : "Add to map favorites"
-        }
+        mapPinButton.showsMenuAsPrimaryAction = true
+        mapPinButton.menu = makeMapPinMenu?()
+        mapPinButton.accessibilityLabel = "Map favorites"
+        // What the star SAYS, since its glyph is a state and VoiceOver users
+        // get no glyph: which rails this profile is on, or that it is on none.
+        mapPinButton.accessibilityValue = Self.mapFavoriteValue(for: state.categories)
+    }
+
+    /// The star's spoken state — the rails, in the order the checklist lists
+    /// them, so what is read matches what opening it would show.
+    private static func mapFavoriteValue(for categories: Set<MapFavoriteCategory>) -> String {
+        let names: [(MapFavoriteCategory, String)] = [
+            (.dock, "Map dock"), (.following, "Following filter"), (.friends, "Friends filter")
+        ]
+        let on = names.filter { categories.contains($0.0) }.map(\.1)
+        return on.isEmpty ? "Not on the map" : on.joined(separator: ", ")
     }
 
     /// Filled on ANY rail, outlined on none — the same read as a bookmark.
@@ -608,10 +614,6 @@ final class ProfileHeaderView: UIView {
             systemImage: Self.mapFavoriteSymbol(isFavorited: false)
         )
         mapPinButton.isHidden = true
-        mapPinButton.addAction(
-            UIAction { [weak self] _ in self?.onMapPinTapped?() },
-            for: .primaryActionTriggered
-        )
 
         qrCodeButton.configuration = Self.glassBubble(systemImage: "qrcode")
         qrCodeButton.addAction(

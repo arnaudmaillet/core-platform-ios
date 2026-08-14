@@ -36,21 +36,22 @@ struct MapFavoritesStoreTests {
     }
 
     /// The rails are separate storage, not one list with a tag: writing one
-    /// must leave the other exactly as it was — including still uncurated,
-    /// which is a state an accidental shared key would destroy.
+    /// must leave the others exactly as they were — including still
+    /// uncurated, a state an accidental shared key would destroy.
     @Test func theRailsDoNotShareStorage() {
         let store = makeStore()
         store.setPinned([ProfileID("prof-1")], in: .friends)
 
         #expect(store.pinnedProfileIDs(in: .friends) == [ProfileID("prof-1")])
         #expect(store.pinnedProfileIDs(in: .following) == nil, "writing Friends curated Following")
+        #expect(store.pinnedProfileIDs(in: .dock) == nil, "writing Friends curated the dock")
     }
 
-    /// ⚠️ The Following rail keeps the ORIGINAL key. Every install that
-    /// curated favorites before the split wrote there, and renaming it would
-    /// silently empty their rail — the migration nobody would notice until
-    /// their people were gone.
-    @Test func theFollowingRailKeepsTheLegacyKey() {
+    /// ⚠️ The DOCK keeps the ORIGINAL key. Every install that curated
+    /// favorites before the rails existed wrote there, and that list has
+    /// always been the carousel's — renaming it would silently empty their
+    /// dock, the migration nobody would notice until their people were gone.
+    @Test func theDockKeepsTheLegacyKey() {
         let suite = "maps-favorites-legacy-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
@@ -58,6 +59,10 @@ struct MapFavoritesStoreTests {
 
         let store = MapFavoritesStore(defaults: defaults)
 
-        #expect(store.pinnedProfileIDs(in: .following) == [ProfileID("prof-7")])
+        #expect(store.pinnedProfileIDs(in: .dock) == [ProfileID("prof-7")])
+        // The two rows are new lists: an old install has never curated them,
+        // so they must still read as uncurated and fall back to the graph.
+        #expect(store.pinnedProfileIDs(in: .following) == nil)
+        #expect(store.pinnedProfileIDs(in: .friends) == nil)
     }
 }

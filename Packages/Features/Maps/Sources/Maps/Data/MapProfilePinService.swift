@@ -14,7 +14,7 @@ import MapsInterface
 /// **The fallback rule.** Each rail in `MapFavoritesStore` is tri-state, and
 /// the third state is the interesting one: `nil` means the viewer has never
 /// curated that rail, and the map then shows the graph behind it — mutuals for
-/// Friends, follows for Following. So a followed profile reads as favorited
+/// Friends, follows for Following and for the dock. So a followed profile reads as favorited
 /// before anyone has favorited anything, which is exactly what the map is
 /// showing, and the first write has to materialize that list before it can add
 /// to or remove from it. Writing a bare `[id]` instead would silently delete
@@ -39,6 +39,17 @@ public final class MapProfilePinService: MapProfilePinning, @unchecked Sendable 
         store.pinnedProfileIDs(in: category)
     }
 
+    /// Replaces one rail's list wholesale — what the full-list sheet commits
+    /// when the viewer finishes arranging a row.
+    ///
+    /// No materialization needed and none wanted: the sheet hands back the
+    /// complete row, so this IS the curated list. Going through the per-person
+    /// path instead would re-resolve a fallback the sheet has already
+    /// superseded.
+    public func setCuratedList(_ ids: [ProfileID], in category: MapFavoriteCategory) {
+        store.setPinned(ids, in: category)
+    }
+
     public func categories(for id: ProfileID) async -> Set<MapFavoriteCategory> {
         var result: Set<MapFavoriteCategory> = []
         for category in MapFavoriteCategory.allCases where await contains(id, in: category) {
@@ -49,6 +60,11 @@ public final class MapProfilePinService: MapProfilePinning, @unchecked Sendable 
 
     public func setCategories(_ categories: Set<MapFavoriteCategory>, for id: ProfileID) async {
         for category in MapFavoriteCategory.allCases {
+            // A non-mutual cannot be written onto the Friends row at all —
+            // the rule is enforced on the way in as well as on the way out, so
+            // a stale caller cannot leave an entry that only becomes visible
+            // if the two of them later become friends.
+            if category == .friends, categories.contains(.friends), await !isMutual(id) { continue }
             await setPinned(categories.contains(category), for: id, in: category)
         }
     }
@@ -56,6 +72,12 @@ public final class MapProfilePinService: MapProfilePinning, @unchecked Sendable 
     // MARK: - One rail at a time
 
     private func contains(_ id: ProfileID, in category: MapFavoriteCategory) async -> Bool {
+        // The Friends row is the map's MUTUALS row, and it enforces that on
+        // the way out rather than by editing the stored list: someone who
+        // stops following back drops off the row, and returns to it if they
+        // follow back again. Deleting them instead would quietly destroy a
+        // choice the viewer made, and could not be undone by the graph.
+        if category == .friends, await !isMutual(id) { return false }
         if let curated = store.pinnedProfileIDs(in: category) { return curated.contains(id) }
         return await fallback(for: category).contains(id)
     }
@@ -84,11 +106,20 @@ public final class MapProfilePinService: MapProfilePinning, @unchecked Sendable 
     }
 
     /// Who a rail shows before any curation: the graph behind it, in the
-    /// repository's order and under its own cap.
+    /// repository's order and under its own cap. The dock's fallback is the
+    /// following list — what the carousel has always shown, so an install that
+    /// never curates sees exactly what it saw before the rails existed.
     private func fallback(for category: MapFavoriteCategory) async -> [ProfileID] {
         switch category {
         case .friends: await favorites.friends().map(\.profileID)
-        case .following: await favorites.following().map(\.profileID)
+        case .following, .dock: await favorites.following().map(\.profileID)
         }
+    }
+
+    /// Whether they follow back right now, per the graph — the Friends row's
+    /// precondition. Read at the moment it is needed rather than remembered,
+    /// because the whole point is that it changes underneath a curated list.
+    private func isMutual(_ id: ProfileID) async -> Bool {
+        await favorites.friends().contains { $0.profileID == id }
     }
 }

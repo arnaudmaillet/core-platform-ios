@@ -20,18 +20,33 @@ enum MapSubFilterHeaderRole: Equatable {
     case organize
     /// All has dissolved under the header: the button rewinds the row to it.
     case rewind
+    /// The row is EMPTY — the viewer has curated everyone off this rail. There
+    /// is no All pill to reset to and nothing to organize, so the one button
+    /// becomes the only thing worth offering: a way to put someone back. It
+    /// opens the same sheet `organize` does; what changes is the glyph and the
+    /// promise it makes.
+    case add
 
     /// Resolves the role from geometry alone — pure, so the rule is testable
     /// without a window or a live collection view.
     ///
     /// - Parameters:
+    ///   - rowIsEmpty: whether the row carries no refinements at all. Asked
+    ///     SEPARATELY from the All cell's position, because a missing All cell
+    ///     no longer means an empty row: a one- or two-pill row drops All as
+    ///     clutter (`MapSubFilterBarView.allPillMinimumCount`) while being
+    ///     perfectly populated, and that row wants its organize button, not an
+    ///     add button.
     ///   - allLeadingEdgeX: the All cell's leading edge in BAR coordinates
     ///     (`frame.minX - contentOffset.x`), or nil when the row carries no
-    ///     All cell at all (an empty row) — nothing to rewind to, so the
-    ///     button keeps its resting job.
+    ///     All cell — nothing to rewind to, so the button keeps its resting
+    ///     job.
     ///   - headerTrailingX: the fixed button's trailing edge, also in bar
     ///     coordinates.
-    static func resolve(allLeadingEdgeX: CGFloat?, headerTrailingX: CGFloat) -> Self {
+    static func resolve(
+        rowIsEmpty: Bool, allLeadingEdgeX: CGFloat?, headerTrailingX: CGFloat
+    ) -> Self {
+        guard !rowIsEmpty else { return .add }
         guard let allLeadingEdgeX else { return .organize }
         // The same penetration the duck-fade measures: how far All's leading
         // edge has advanced past the fade line trailing the header.
@@ -53,6 +68,12 @@ enum MapSubFilterHeaderRole: Equatable {
                 title: nil,
                 symbolName: "chevron.left", selectedSymbolName: "chevron.left",
                 accessibilityLabel: "Back to all"
+            )
+        case .add:
+            MapPillButton.Content(
+                title: nil,
+                symbolName: "plus", selectedSymbolName: "plus",
+                accessibilityLabel: "Add people to this filter"
             )
         }
     }

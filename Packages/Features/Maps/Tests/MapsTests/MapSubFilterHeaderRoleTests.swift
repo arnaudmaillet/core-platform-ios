@@ -1,3 +1,4 @@
+import CoreModels
 import Testing
 import UIKit
 @testable import Maps
@@ -19,6 +20,10 @@ struct MapSubFilterHeaderRoleTests {
     /// (title-less pills are circles pinned to their height).
     private static let headerX = MapSubFilterBarView.headerTrailingX
 
+    private static func profiles(_ count: Int) -> [MapSubFilter] {
+        (0..<count).map { .profile(ProfileID("prof-\($0)")) }
+    }
+
     /// All's leading edge for a row scrolled `points` past its resting seat.
     private static func allEdge(scrolledBy points: CGFloat) -> CGFloat {
         MapSubFilterBarView.rowInsetLeft - points
@@ -26,7 +31,9 @@ struct MapSubFilterHeaderRoleTests {
 
     private static func role(scrolledBy points: CGFloat) -> MapSubFilterHeaderRole {
         MapSubFilterHeaderRole.resolve(
-            allLeadingEdgeX: allEdge(scrolledBy: points), headerTrailingX: headerX
+            rowIsEmpty: false,
+            allLeadingEdgeX: allEdge(scrolledBy: points),
+            headerTrailingX: headerX
         )
     }
 
@@ -66,24 +73,103 @@ struct MapSubFilterHeaderRoleTests {
         }
     }
 
-    @Test("A row with no All cell keeps organizing — there is nothing to rewind to")
-    func absentAllCellOrganizes() {
+    // MARK: - The empty rail
+
+    /// No All cell means an EMPTY rail — the viewer curated everyone off it.
+    /// There is nothing to organize and nothing to rewind to, so the one
+    /// button becomes the way back in.
+    @Test("An empty row offers the add button")
+    func anEmptyRowOffersAdd() {
         #expect(
-            MapSubFilterHeaderRole.resolve(allLeadingEdgeX: nil, headerTrailingX: Self.headerX)
-                == .organize
+            MapSubFilterHeaderRole.resolve(
+                rowIsEmpty: true, allLeadingEdgeX: nil, headerTrailingX: Self.headerX
+            ) == .add
         )
     }
 
-    @Test("Each role wears its own glyph, and both are circles")
+    /// ⚠️ A missing All cell no longer means an empty row — a one- or two-pill
+    /// row drops All as clutter while being perfectly populated. That row
+    /// wants its organize button; offering "+" there would tell the viewer
+    /// their people are gone.
+    @Test("A populated row without an All pill still organizes")
+    func aShortRowStillOrganizes() {
+        #expect(
+            MapSubFilterHeaderRole.resolve(
+                rowIsEmpty: false, allLeadingEdgeX: nil, headerTrailingX: Self.headerX
+            ) == .organize
+        )
+    }
+
+    // MARK: - When All earns its seat
+
+    /// An empty rail carries nothing at all — All included.
+    @Test("An empty rail carries no cells")
+    func anEmptyRailHasNoCells() {
+        #expect(MapSubFilterBarView.items(for: []).isEmpty)
+    }
+
+    /// Below the threshold the row is just its people: All means "none of
+    /// these selected", which a one- or two-pill row already shows.
+    @Test(arguments: 1...2)
+    func aShortRailShowsOnlyItsPeople(count: Int) {
+        let items = MapSubFilterBarView.items(for: Self.profiles(count))
+
+        #expect(items.count == count, "an All pill crept into a \(count)-pill row")
+        #expect(!items.contains(.all))
+    }
+
+    /// At the threshold it earns its seat, and leads.
+    @Test(arguments: 3...5)
+    func aLongerRailLeadsWithAll(count: Int) {
+        let items = MapSubFilterBarView.items(for: Self.profiles(count))
+
+        #expect(items.count == count + 1)
+        #expect(items.first == .all)
+    }
+
+    /// The boundary, stated once rather than left to two argument ranges that
+    /// could drift apart from the constant.
+    @Test("The threshold is where the constant says it is")
+    func theThresholdMatchesTheConstant() {
+        let minimum = MapSubFilterBarView.allPillMinimumCount
+        #expect(!MapSubFilterBarView.items(for: Self.profiles(minimum - 1)).contains(.all))
+        #expect(MapSubFilterBarView.items(for: Self.profiles(minimum)).contains(.all))
+    }
+
+    @Test("Each role wears its own glyph, and all are circles")
     func rolesCarryDistinctIconOnlyContent() {
-        let organize = MapSubFilterHeaderRole.organize.content
-        let rewind = MapSubFilterHeaderRole.rewind.content
-        #expect(organize.symbolName != rewind.symbolName)
-        #expect(organize.accessibilityLabel != rewind.accessibilityLabel)
-        // Title-less on both sides: the cross-dissolve may not resize the
+        let contents = [
+            MapSubFilterHeaderRole.organize.content,
+            MapSubFilterHeaderRole.rewind.content,
+            MapSubFilterHeaderRole.add.content
+        ]
+        #expect(Set(contents.map(\.symbolName)).count == contents.count)
+        #expect(Set(contents.map(\.accessibilityLabel)).count == contents.count)
+        // Title-less on every side: the cross-dissolve may not resize the
         // button, or a fixed piece of chrome twitches on every flip.
-        #expect(organize.title == nil)
-        #expect(rewind.title == nil)
+        #expect(contents.allSatisfy { $0.title == nil })
+    }
+
+    /// The "+" is only offered when it leads somewhere. It opens the
+    /// full-list sheet, and a sheet with an empty catalogue answers the tap
+    /// with nothing — worse than the row simply not being there.
+    @Test("An empty rail keeps its row only while someone can be added")
+    func anEmptyRailSurvivesOnlyWithACatalogue() {
+        let catalogue = MapSubFilterOption.people([
+            MapFavorite(profileID: ProfileID("prof-1"), title: "Ada")
+        ])
+        #expect(MapSubFilterOption.rowSurvivesEmpty(catalogue: catalogue))
+        #expect(MapSubFilterOption.rowSurvivesEmpty(catalogue: []) == false)
+    }
+
+    /// The add button says what it is FOR. An empty row is the one state where
+    /// the button is the entire interface, so a bare "list" label there would
+    /// leave a VoiceOver user with a row that announces nothing about what it
+    /// offers.
+    @Test("The add button names the thing it adds to")
+    func theAddButtonIsLabelled() {
+        let label = MapSubFilterHeaderRole.add.content.accessibilityLabel
+        #expect(label.localizedCaseInsensitiveContains("add"))
     }
 
     @Test("The row rests exactly one approach-margin past the button")

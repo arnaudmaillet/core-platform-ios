@@ -100,6 +100,16 @@ final class MapsViewController: UIViewController {
     /// primary tap renders its sub-filter row SYNCHRONOUSLY — the row must
     /// never wait on the social graph. Keyed by `.friends` / `.following`.
     private var peopleCache: [MapFilter: [MapFavorite]] = [:]
+    /// Everyone a primary COULD offer — the social graph behind it, ignoring
+    /// curation. Kept apart from `peopleCache` since the rails became curated
+    /// lists: the row is what the viewer kept, the catalogue is what the
+    /// sheet offers them to add back, and an empty row must still be able to
+    /// present a full sheet.
+    private var catalogueCache: [MapFilter: [MapFavorite]] = [:]
+    /// What the people row is currently SHOWING — the yardstick a refresh
+    /// measures itself against. Nil whenever the row holds something else
+    /// (place categories) or nothing at all.
+    private var renderedSubFilterRow: MapSubFilterRowState?
     /// The viewer's manual sub-filter order per primary, set by dragging rows
     /// in the full-list sheet. Session-scoped: it outlives primary switches
     /// and background refreshes, not the process.
@@ -227,6 +237,40 @@ final class MapsViewController: UIViewController {
                 }
             }
         }
+        // `-maps-toggle-subfilter <profileID>`: adds or removes that profile
+        // from the ACTIVE primary's rail ~5s in, while the map is on screen —
+        // the edit the profile's star makes from another screen, which is the
+        // one path that has to animate rather than flash. Pair with
+        // `-maps-select-filter friends|following`.
+        if let id = Self.debugArgumentValue("-maps-toggle-subfilter") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+                guard let self,
+                      let primary = filterBar.selectedFilter,
+                      let category = Self.railCategory(for: primary) else { return }
+                let profile = ProfileID(id)
+                let pinService = pinService
+                Task {
+                    var categories = await pinService.categories(for: profile)
+                    let wasOn = categories.contains(category)
+                    categories.formSymmetricDifference([category])
+                    print("[maps] sub-filter toggle: \(id) \(wasOn ? "leaves" : "joins") \(category)")
+                    await pinService.setCategories(categories, for: profile)
+                }
+            }
+        }
+        // `-maps-subfilter-remove <profileID>`: fires that pill's context-menu
+        // Remove ~5s in, through the same routing a long press does
+        // (`MapSubFilterBarView.perform`). The menu itself needs a long press
+        // the simulator cannot deliver, and this is the path that flashed:
+        // the removal restacks, then the rail write it commits comes back
+        // round as a refresh.
+        if let id = Self.debugArgumentValue("-maps-subfilter-remove") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+                guard let self else { return }
+                print("[maps] sub-filter menu: Remove \(id)")
+                subFilterBar.perform(.unpin, on: .profile(ProfileID(id)))
+            }
+        }
         // `-maps-open-subfilter-sheet`: presents the sub-filter full-list
         // sheet ~3s in (the header's organize tap). Pair with
         // `-maps-select-filter friends|following|pinned`.
@@ -344,10 +388,36 @@ final class MapsViewController: UIViewController {
     private func observeFavoriteChanges() {
         appObservers.add(NotificationCenter.default.addObserver(
             forName: MapFavoritesStore.didChangeNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            // Only the favorites carousel: the sub-filter row under Friends /
-            // Following lists the graph, which a pin does not touch.
-            MainActor.assumeIsolated { self?.loadFavorites() }
+        ) { [weak self] notification in
+            // Read the category HERE, off the notification, rather than
+            // carrying the notification across the isolation hop: a
+            // `Notification` is not `Sendable`, its category is.
+            let changed = MapFavoritesStore.changedCategory(in: notification)
+            // ⚠️ ONLY the surface that shows the rail that changed.
+            //
+            // The dock's carousel and the sub-filter row are different lists
+            // in different bars, and waking both on every write meant editing
+            // one rebuilt the other — a carousel that flashed because someone
+            // was removed from a row it does not show.
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                switch changed {
+                case .dock:
+                    self.loadFavorites()
+                case .friends, .following:
+                    // ...and only when that rail is the one on screen.
+                    guard let primary = self.filterBar.selectedFilter,
+                          Self.railCategory(for: primary) == changed else { return }
+                    self.updateSubFilterBar(for: primary)
+                case nil:
+                    // Not one of ours (or a post carrying no category):
+                    // refresh both rather than guess wrong. Both surfaces
+                    // refuse an update that would not change them, so the
+                    // cost of being cautious here is a comparison.
+                    self.loadFavorites()
+                    self.filterBar.selectedFilter.map { self.updateSubFilterBar(for: $0) }
+                }
+            }
         })
     }
 
@@ -466,8 +536,12 @@ final class MapsViewController: UIViewController {
             async let following = repository.following()
             let (friendsList, followingList) = await (friends, following)
             guard let self else { return }
-            self.peopleCache[.friends] = friendsList
-            self.peopleCache[.following] = followingList
+            self.catalogueCache[.friends] = friendsList
+            self.catalogueCache[.following] = followingList
+            // The rows themselves may be curated subsets; resolve them from
+            // the same lists rather than assuming the graph IS the row.
+            self.peopleCache[.friends] = await self.people(for: .friends)
+            self.peopleCache[.following] = await self.people(for: .following)
         }
     }
 
@@ -478,42 +552,73 @@ final class MapsViewController: UIViewController {
     /// the selection hasn't moved on.
     private func updateSubFilterBar(for filter: MapFilter?) {
         subFilterLoadTask?.cancel()
-        // The favorites carousel is scoped to the primary now, so it reloads
-        // with the row beneath it — see `loadFavorites`.
-        loadFavorites()
         switch filter {
         case .friends, .following:
             guard let primary = filter else { return } // matched .some above
-            // 1) Instant: whatever the cache holds right now.
-            let cached = peopleCache[primary] ?? []
-            if !cached.isEmpty {
-                showSubFilterRow(MapSubFilterOption.people(cached))
-            }
+            // 1) Instant, and ALWAYS applied — not only when the cache has
+            // something. Whatever is on screen belongs to the primary the
+            // viewer just LEFT, so an empty target has to clear it rather than
+            // inherit it. (It did inherit it: switching to an empty rail left
+            // the previous primary's pills up.)
+            applyPeopleRow(peopleCache[primary] ?? [], for: primary)
             // 2) Refresh behind it (also the cold path pre-prefetch, where
-            // the row appears when data lands — nothing to render sooner).
+            // the row fills in when data lands).
             let repository = favoritesRepository
             subFilterLoadTask = Task { [weak self] in
-                let people = primary == .friends
+                guard let people = await self?.people(for: primary) else { return }
+                let catalogue = primary == .friends
                     ? await repository.friends()
                     : await repository.following()
                 guard let self, !Task.isCancelled else { return }
+                self.catalogueCache[primary] = catalogue
                 self.peopleCache[primary] = people
                 guard self.filterBar.selectedFilter == primary else { return }
-                // Don't churn the row (and its selection) for identical data.
-                guard people != cached else { return }
-                if people.isEmpty {
-                    self.currentSubFilterOptions = []
-                    self.setSubFilterBar(visible: false)
-                } else {
-                    self.showSubFilterRow(MapSubFilterOption.people(people))
-                }
+                self.applyPeopleRow(people, for: primary)
             }
         case .pinned:
+            renderedSubFilterRow = nil
             showSubFilterRow(MapSubFilterOption.placeCategories)
         default:
             // All / a favorite: no refinement dimension.
+            renderedSubFilterRow = nil
             currentSubFilterOptions = []
             setSubFilterBar(visible: false)
+        }
+    }
+
+    /// Renders a people row for `primary`, or retires it — skipping only when
+    /// the row is ALREADY showing exactly this.
+    ///
+    /// The comparison is against what is rendered, never against a cache: see
+    /// `MapSubFilterRowUpdate` for the switch-to-an-empty-primary bug that
+    /// distinction exists to prevent.
+    private func applyPeopleRow(_ people: [MapFavorite], for primary: MapFilter) {
+        let incoming = makeRowState(primary: primary, people: people)
+        let update = MapSubFilterRowUpdate.resolve(rendered: renderedSubFilterRow, incoming: incoming)
+        #if DEBUG
+        // Which path a row edit took is invisible in a screenshot — a diff and
+        // a cross-dissolve land on the same pixels and differ only in how they
+        // got there. Printed alongside the toggle hook that provokes it.
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-maps-toggle-subfilter") || arguments.contains("-maps-subfilter-remove") {
+            let style = switch update {
+            case .show(let options, let style): "show(\(options.count) pills, \(style))"
+            case .hide: "hide"
+            case .unchanged: "unchanged"
+            }
+            print("[maps] sub-filter row update: \(style)")
+        }
+        #endif
+        switch update {
+        case .unchanged:
+            return
+        case .hide:
+            renderedSubFilterRow = incoming
+            currentSubFilterOptions = []
+            setSubFilterBar(visible: false)
+        case .show(let options, let style):
+            renderedSubFilterRow = incoming
+            showSubFilterRow(options, style: style)
         }
     }
 
@@ -521,15 +626,44 @@ final class MapsViewController: UIViewController {
     /// transition: hidden → set content and fade the bar in; already
     /// visible → cross-dissolve the pills in place (a hard swap while
     /// on-screen reads as a snap).
-    private func showSubFilterRow(_ options: [MapSubFilterOption]) {
+    private func showSubFilterRow(
+        _ options: [MapSubFilterOption], style: MapSubFilterRowUpdate.Style = .swap
+    ) {
         let options = orderedByPreference(options)
         currentSubFilterOptions = options
-        if isSubFilterBarVisible {
-            subFilterBar.transition(to: options)
-        } else {
+        guard isSubFilterBarVisible else {
             subFilterBar.setOptions(options)
             setSubFilterBar(visible: true)
+            return
         }
+        switch style {
+        case .swap:
+            // A different primary's list: one surface out, one in.
+            subFilterBar.transition(to: options)
+        case .diff:
+            // The SAME list, edited — someone was added or removed from this
+            // rail while the viewer was looking at it. Only the pills that
+            // changed may move: cross-dissolving the row for a one-pill edit
+            // is a flash, and it takes the scroll position and the selection
+            // with it. `restack` is the animated diffable apply the organize
+            // sheet already commits through.
+            subFilterBar.restack(to: options)
+            pruneSubFilterSelection(to: options)
+        }
+    }
+
+    /// Drops any applied refinement whose pill just left the row. A selection
+    /// can't outlive its pill: the map would stay filtered by someone the
+    /// viewer can no longer see or unselect.
+    ///
+    /// Only the diff path needs this — a swap resets the selection with the
+    /// content, and the organize sheet prunes as it commits.
+    private func pruneSubFilterSelection(to options: [MapSubFilterOption]) {
+        let surviving = Set(options.map(\.subFilter))
+        let stillApplied = subFilterBar.selectedSubFilters.intersection(surviving)
+        guard stillApplied != subFilterBar.selectedSubFilters else { return }
+        subFilterBar.setSelectedSubFilters(stillApplied)
+        viewModel.subFiltersChanged(stillApplied)
     }
 
     /// The header's organize button: the row's full contents as a searchable
@@ -537,7 +671,10 @@ final class MapsViewController: UIViewController {
     /// applies nothing — the sheet edits a buffer and hands back a list on
     /// Done, or hands back nothing at all on Cancel.
     private func presentSubFilterSheet() {
-        guard !currentSubFilterOptions.isEmpty else { return }
+        // Gated on the CATALOGUE, not on the row: an empty row is exactly when
+        // the sheet matters most (the "+" is the only way back), and the only
+        // sheet worth refusing is one with nothing in either section.
+        guard !allSubFilterOptions().isEmpty else { return }
         // Only the primaries that HAVE a refinement dimension get a sheet —
         // and the primary's own name is the sheet's title.
         guard let title = subFilterTitle(for: filterBar.selectedFilter) else { return }
@@ -580,7 +717,7 @@ final class MapsViewController: UIViewController {
         switch filterBar.selectedFilter {
         case .friends, .following:
             guard let primary = filterBar.selectedFilter else { return [] }
-            return MapSubFilterOption.people(peopleCache[primary] ?? [])
+            return MapSubFilterOption.people(catalogueCache[primary] ?? [])
         case .pinned:
             return MapSubFilterOption.placeCategories
         default:
@@ -659,6 +796,14 @@ final class MapsViewController: UIViewController {
             // removed row: they are still in the social graph.
             subFilterHidden[primary] = Set(allSubFilterOptions().map(\.subFilter))
                 .subtracting(surviving)
+            // ...and for a PEOPLE row the arrangement is now curation, not a
+            // session preference: the same list the profile's star writes.
+            // Persisting it here is what makes "+ → add → Done" survive the
+            // next launch, and what keeps the two editors from disagreeing.
+            if let category = Self.railCategory(for: primary) {
+                let ids = options.compactMap(\.favorite?.profileID)
+                pinService.setCuratedList(ids, in: category)
+            }
         }
         // A refinement can't outlive its pill: any applied refinement whose
         // row left the bar is dropped from the selection.
@@ -667,17 +812,25 @@ final class MapsViewController: UIViewController {
             subFilterBar.setSelectedSubFilters(stillApplied)
             viewModel.subFiltersChanged(stillApplied)
         }
-        // Delete the last row and the refinement dimension is empty — there is
-        // nothing left to show, so the row retires rather than sitting there
-        // as a lone header.
-        if options.isEmpty {
-            setSubFilterBar(visible: false)
-        } else {
-            subFilterBar.restack(to: options)
-            // …and back again: emptying the row retires it, so refilling it
-            // from the sheet has to un-retire it, or the pills the viewer just
-            // restored have nowhere to land (a no-op while already visible).
-            setSubFilterBar(visible: true)
+        // Emptying the row leaves the "+" standing rather than retiring the
+        // bar: the viewer has just curated everyone off, and the one thing
+        // they will want next is a way to put someone back.
+        subFilterBar.restack(to: options)
+        setSubFilterBar(visible: true)
+        // ⚠️ RECORD what was just rendered — do not clear it.
+        //
+        // Clearing looked harmless ("let the next refresh apply whatever it
+        // finds") and was the flash: every edit here writes the rail, the
+        // store's change notification re-runs the refresh, and a nil yardstick
+        // makes that refresh a `.swap` — so the pill the viewer removed
+        // animated out politely and the whole row cross-dissolved on top of
+        // it. With the state recorded, the refresh resolves to `.unchanged`
+        // (or at worst a `.diff`), and the removal is the only thing that
+        // moves.
+        renderedSubFilterRow = filterBar.selectedFilter.flatMap { primary in
+            Self.railCategory(for: primary) == nil
+                ? nil // Places: not a people row, so it has no state to compare
+                : makeRowState(primary: primary, people: options.compactMap(\.favorite))
         }
     }
 
@@ -706,16 +859,15 @@ final class MapsViewController: UIViewController {
     private func togglePinnedFavorite(_ favorite: MapFavorite) {
         let pinService = pinService
         let id = favorite.profileID
-        // The rail the viewer is looking at is the one they mean. Under a
-        // primary that shows both, Following is the broader of the two and the
-        // one a plain follower can be on at all.
-        let category = Self.railCategories(for: filterBar.selectedFilter).last ?? .following
+        // These pills ARE the dock, so that is the rail this toggles — the
+        // sub-filter rows are edited from the row itself (and from a profile's
+        // star), not from here.
         Task {
             var categories = await pinService.categories(for: id)
-            if categories.contains(category) {
-                categories.remove(category)
+            if categories.contains(.dock) {
+                categories.remove(.dock)
             } else {
-                categories.insert(category)
+                categories.insert(.dock)
             }
             await pinService.setCategories(categories, for: id)
         }
@@ -752,51 +904,83 @@ final class MapsViewController: UIViewController {
         }
     }
 
-    /// Loads the favorites section for the rail the viewer is currently
-    /// looking at: the curated list when there is one, else the graph behind
-    /// it (mutuals for Friends, follows for Following). Fail-open — an empty
-    /// result leaves the bar with just its primaries.
+    /// Loads the DOCK: the carousel of people pills in the main bar, visible
+    /// whatever primary is selected. The curated `.dock` list when there is
+    /// one, else the followed profiles — what this carousel has always shown.
+    /// Fail-open: an empty result leaves the bar with just its primaries.
     ///
-    /// SCOPED to the active primary, which is what makes the two categories
-    /// visible at all: selecting Friends shows the people kept on the Friends
-    /// rail, Following shows the Following rail, and at rest ("All", Places,
-    /// Nearby) the carousel shows both rails merged — the viewer's whole set
-    /// of favorites, which is what it meant before the split.
+    /// Deliberately NOT scoped to the active primary. The dock is the
+    /// top-level filter, and a top-level filter that changes contents when you
+    /// pick a primary is a different control wearing the same pills. The two
+    /// sub-filter ROWS are where a primary's own people live — see
+    /// `people(for:)`.
     private func loadFavorites() {
+        #if DEBUG
+        // Which surface a write woke is the whole question when the complaint
+        // is "the other bar flashed", and it is invisible in a screenshot.
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-maps-toggle-subfilter") || arguments.contains("-maps-subfilter-remove")
+            || arguments.contains("-maps-pin-favorite") {
+            print("[maps] dock reload requested")
+        }
+        #endif
         favoritesTask?.cancel()
         let repository = favoritesRepository
-        let categories = Self.railCategories(for: filterBar.selectedFilter)
-        let curated = categories.map { ($0, pinService.curatedProfileIDs(in: $0)) }
+        let curated = pinService.curatedProfileIDs(in: .dock)
         favoritesTask = Task { [weak self] in
-            var merged: [MapFavorite] = []
-            var seen = Set<ProfileID>()
-            for (category, ids) in curated {
-                let people = if let ids {
-                    await repository.profiles(for: ids)
-                } else {
-                    // Never curated: the rail IS the graph behind it.
-                    category == .friends ? await repository.friends() : await repository.following()
-                }
-                // Merged in rail order, first mention wins: a mutual kept on
-                // both rails is one pill, where the carousel shows both.
-                for person in people where seen.insert(person.profileID).inserted {
-                    merged.append(person)
-                }
+            let people = if let curated {
+                await repository.profiles(for: curated)
+            } else {
+                await repository.following()
             }
             guard let self, !Task.isCancelled else { return }
-            self.currentFavorites = merged
-            self.filterBar.setFavorites(merged)
+            self.currentFavorites = people
+            self.filterBar.setFavorites(people)
         }
     }
 
-    /// Which rails the carousel shows under a given primary. Friends and
-    /// Following each show their own; everything else shows both.
-    private static func railCategories(for filter: MapFilter?) -> [MapFavoriteCategory] {
-        switch filter {
-        case .friends: [.friends]
-        case .following: [.following]
-        default: [.friends, .following]
+    /// The row's state as the refresh describes it — built in ONE place, so
+    /// what an edit records and what a refresh compares against cannot drift
+    /// into disagreeing.
+    private func makeRowState(primary: MapFilter, people: [MapFavorite]) -> MapSubFilterRowState {
+        MapSubFilterRowState(
+            primary: primary,
+            people: people,
+            hasCatalogue: MapSubFilterOption.rowSurvivesEmpty(
+                catalogue: MapSubFilterOption.people(catalogueCache[primary] ?? [])
+            )
+        )
+    }
+
+    /// The rail a people primary curates. Places have no rail — their
+    /// refinements are a fixed client-side vocabulary, not a list of accounts.
+    private static func railCategory(for primary: MapFilter) -> MapFavoriteCategory? {
+        switch primary {
+        case .friends: .friends
+        case .following: .following
+        default: nil
         }
+    }
+
+    /// The people a primary's sub-filter row shows: the viewer's curated list
+    /// for that row when they have one, else the graph behind it.
+    ///
+    /// The Friends row additionally INTERSECTS with the live mutual set, so
+    /// someone who stops following back leaves the row even though the viewer
+    /// once put them there — the row means "friends", and it keeps meaning
+    /// that. Their dock pill and their Following row entry are untouched, and
+    /// they come back here if they follow back again (the stored list is never
+    /// edited for this — see `MapProfilePinService`).
+    private func people(for primary: MapFilter) async -> [MapFavorite] {
+        let repository = favoritesRepository
+        guard let curated = pinService.curatedProfileIDs(in: primary == .friends ? .friends : .following)
+        else {
+            return primary == .friends ? await repository.friends() : await repository.following()
+        }
+        let people = await repository.profiles(for: curated)
+        guard primary == .friends else { return people }
+        let mutuals = Set(await repository.friends().map(\.profileID))
+        return people.filter { mutuals.contains($0.profileID) }
     }
 
     /// Fades both filter bars with the tab bar around the snap-feed flight:

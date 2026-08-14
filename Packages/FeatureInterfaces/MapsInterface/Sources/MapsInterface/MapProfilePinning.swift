@@ -2,16 +2,29 @@ import CoreModels
 
 /// Which of the map's people rails a favorite belongs to.
 ///
-/// The map's primaries already split people this way — Friends narrows to
-/// mutuals, Following to everyone the viewer follows — so a favorite has to
-/// say which of those two rails it wants to appear in. A mutual can be in
-/// both, in one, or in neither; someone the viewer merely follows can only
-/// ever be in `following`, because they are not a friend to begin with.
+/// The map shows people in three places, and they are genuinely different
+/// products rather than three views of one list:
+///
+/// - the **dock** — the carousel in the main filter bar, visible whatever
+///   primary is selected. A pill there is a top-level filter: one tap and the
+///   map is that person's posts.
+/// - the **sub-filter rows** under the Friends and Following primaries, which
+///   refine a primary the viewer has already chosen.
+///
+/// So a favorite says which of the three it wants. They are independent: the
+/// same person can be docked and in neither row, in both rows and undocked,
+/// or any other combination.
+///
+/// `friends` is the only one with a precondition — it is the map's MUTUALS
+/// row, so someone the viewer merely follows can never be on it, and someone
+/// who stops following back drops off it (see `MapProfilePinService`).
 public enum MapFavoriteCategory: String, Sendable, CaseIterable, Hashable {
-    /// Mutual follows — the Friends primary.
-    case friends
-    /// Everyone the viewer follows, mutual or not — the Following primary.
+    /// The main filter bar's favorites carousel — the top-level pill.
+    case dock
+    /// The Following primary's sub-filter row.
     case following
+    /// The Friends primary's sub-filter row. Mutuals only.
+    case friends
 }
 
 /// Curating the map's pinned people — the profiles that appear as one-tap
@@ -34,9 +47,9 @@ public enum MapFavoriteCategory: String, Sendable, CaseIterable, Hashable {
 /// rail has to materialize it before it can add to or remove from it.
 public protocol MapProfilePinning: Sendable {
     /// Which rails this profile currently appears in — resolving the
-    /// never-curated fallbacks, so the answer is what the map would actually
-    /// show rather than what happens to be in storage. Empty means "on no
-    /// rail".
+    /// never-curated fallbacks AND the Friends row's mutuality rule, so the
+    /// answer is what the map would actually show rather than what happens to
+    /// be in storage. Empty means "on no rail".
     func categories(for id: ProfileID) async -> Set<MapFavoriteCategory>
 
     /// Puts the profile on exactly these rails and no others. Idempotent, and
