@@ -309,7 +309,12 @@ final class MapsViewController: UIViewController {
         // `-maps-subfilter-menu-open <profileID>`: presents that pill's
         // long-press menu ~5s in, so the header can be screenshotted.
         if let id = Self.debugArgumentValue("-maps-subfilter-menu-open") {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+            // The delay is a knob because WHEN the menu opens is the whole
+            // question: opened late everything has settled, opened while the
+            // row is still hydrating it shows what a fast thumb would see.
+            let delay = Self.debugArgumentValue("-maps-subfilter-menu-open-after")
+                .flatMap(Double.init) ?? 5.0
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 self?.subFilterBar.debugPresentMenu(for: .profile(ProfileID(id)))
             }
         }
@@ -648,7 +653,7 @@ final class MapsViewController: UIViewController {
             case .hide: "hide"
             case .unchanged: "unchanged"
             }
-            print("[maps] sub-filter row update: \(style)")
+            print("[maps] sub-filter row update: \(style) at \(CACurrentMediaTime())")
         }
         #endif
         switch update {
