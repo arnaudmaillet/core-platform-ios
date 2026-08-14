@@ -404,6 +404,29 @@ final class MapSubFilterBarView: UIView {
         loadAvatars(for: options)
     }
 
+    #if DEBUG
+    /// `-maps-subfilter-menu-open`: presents a pill's long-press menu so it
+    /// can be SEEN. The audit print proves the menu is built and titled; only
+    /// a screenshot proves iOS renders that title, and a long press cannot be
+    /// injected. Flipping the pill to menu-as-primary for the one demo tap is
+    /// the only way to make UIKit present it.
+    /// The header of the menu INSTALLED on that pill — see
+    /// `MapPillCell.debugInstalledMenuTitle`.
+    func debugInstalledMenuTitle(for subFilter: MapSubFilter) -> String? {
+        guard let indexPath = dataSource.indexPath(for: .subFilter(subFilter)),
+              let cell = collectionView.cellForItem(at: indexPath) as? MapPillCell
+        else { return nil }
+        return cell.debugInstalledMenuTitle
+    }
+
+    func debugPresentMenu(for subFilter: MapSubFilter) {
+        guard let indexPath = dataSource.indexPath(for: .subFilter(subFilter)),
+              let cell = collectionView.cellForItem(at: indexPath) as? MapPillCell
+        else { return }
+        cell.debugPresentMenu()
+    }
+    #endif
+
     /// The row's items: All at the head, then the refinements in order.
     /// How many refinements a row needs before it is worth heading with All.
     ///

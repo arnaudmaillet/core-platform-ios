@@ -285,8 +285,18 @@ final class MapsViewController: UIViewController {
                 let verbs = (menu.children.first as? UIMenu)?.children
                     .compactMap { ($0 as? UIAction)?.title } ?? []
                 let separated = (menu.children.first as? UIMenu)?.options.contains(.displayInline)
+                let installed = self?.subFilterBar
+                    .debugInstalledMenuTitle(for: .profile(ProfileID(id))) ?? "<none>"
                 print("[maps] pill menu: title=\"\(menu.title)\" "
+                    + "installed=\"\(installed)\" "
                     + "separator=\(separated == true) verbs=\(verbs)")
+            }
+        }
+        // `-maps-subfilter-menu-open <profileID>`: presents that pill's
+        // long-press menu ~5s in, so the header can be screenshotted.
+        if let id = Self.debugArgumentValue("-maps-subfilter-menu-open") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+                self?.subFilterBar.debugPresentMenu(for: .profile(ProfileID(id)))
             }
         }
         // `-maps-open-subfilter-sheet`: presents the sub-filter full-list
