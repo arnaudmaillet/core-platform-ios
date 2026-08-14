@@ -84,4 +84,42 @@ struct MapPillButtonTests {
         #expect(expanded > 36)
         #expect(expanded <= MapPillButton.widthCeiling)
     }
+
+    // MARK: - The avatar inside a circle
+
+    /// THE MARGIN. The avatar used to be a 20pt thumbnail whatever the pill
+    /// was, so growing the pill grew the glass around a photo that stayed put
+    /// — a face floating in a ring. It fills the circle now, less a hairline.
+    @Test("A circular pill's avatar fills it, less a hairline")
+    func aCircularAvatarFillsThePill() {
+        for diameter in [40.0, 48.0, 52.0] as [CGFloat] {
+            let avatar = MapPillButton.avatarDiameter(forPillHeight: diameter, isCircular: true)
+            let expected: CGFloat = diameter - MapPillButton.avatarInset * 2
+            #expect(abs(avatar - expected) < 0.001, "at \(diameter)pt")
+            // ...which is to say: nearly all of it, and never the old constant.
+            #expect(avatar / diameter >= 0.9, "the photo is swimming in glass at \(diameter)pt")
+            #expect(avatar > MapPillButton.capsuleAvatarDiameter)
+        }
+    }
+
+    /// A titled capsule keeps the small leading thumbnail: there the avatar
+    /// sits beside text and must not crowd it.
+    @Test("A capsule keeps its small thumbnail")
+    func aCapsuleKeepsTheSmallThumbnail() {
+        #expect(
+            MapPillButton.avatarDiameter(forPillHeight: 48, isCircular: false)
+                == MapPillButton.capsuleAvatarDiameter
+        )
+    }
+
+    /// The bar has to be taller than the pills it holds, or the glass
+    /// highlights and the selection glow clip at the edges.
+    @Test("The bar clears its pills top and bottom")
+    func theBarClearsItsPills() {
+        #expect(
+            MapSubFilterBarView.barHeight
+                == MapSubFilterBarView.pillHeight + MapSubFilterBarView.verticalPadding * 2
+        )
+        #expect(MapSubFilterBarView.barHeight > MapSubFilterBarView.pillHeight)
+    }
 }
