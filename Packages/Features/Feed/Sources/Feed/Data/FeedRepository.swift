@@ -27,6 +27,19 @@ public protocol FeedProviding: Sendable {
     /// resolves from memory instead of the network. Safe to call for ids that
     /// may never be opened.
     func prewarm(_ ids: [PostID]) async
+    /// A SYNCHRONOUS peek at the warmed post cache — nil on a miss, never a
+    /// fetch. Exists for exactly one caller: seeding a pin-opened snap feed
+    /// BEFORE its push begins, the way For You seeds from its grid. An async
+    /// read cannot serve that moment — the push starts in the same runloop
+    /// turn the feed is built in, so anything awaited lands mid-flight and
+    /// rebuilds the nav chrome inside the animation (the measured "flash").
+    nonisolated func peekPost(_ id: PostID) -> FeedEntry?
+}
+
+public extension FeedProviding {
+    /// Most providers have no synchronous cache; a miss just means the
+    /// caller falls back to the async path it already has.
+    nonisolated func peekPost(_ id: PostID) -> FeedEntry? { nil }
 }
 
 public extension FeedProviding {
@@ -169,6 +182,17 @@ public actor FeedRepository: FeedProviding {
 
     // MARK: - Post cache (LRU)
 
+    /// The post cache's SYNCHRONOUS mirror — same entries, same evictions,
+    /// readable without an actor hop. It exists because `peekPost` (the
+    /// pre-push seed's read) must answer in the caller's own runloop turn;
+    /// the actor-isolated `postCache` stays the authority and this shadow
+    /// is written only where it is.
+    private nonisolated let peekablePostCache = LockedPostCacheMirror()
+
+    public nonisolated func peekPost(_ id: PostID) -> FeedEntry? {
+        peekablePostCache.entry(for: id)
+    }
+
     private func cachedPost(_ id: PostID) -> FeedEntry? {
         guard let entry = postCache[id] else { return nil }
         touchLRU(id)
@@ -178,9 +202,12 @@ public actor FeedRepository: FeedProviding {
     private func storeInCache(_ entry: FeedEntry) {
         let id = entry.post.id
         postCache[id] = entry
+        peekablePostCache.store(entry, for: id)
         touchLRU(id)
         while postCacheOrder.count > postCacheLimit {
-            postCache[postCacheOrder.removeFirst()] = nil
+            let evicted = postCacheOrder.removeFirst()
+            postCache[evicted] = nil
+            peekablePostCache.remove(evicted)
         }
     }
 
@@ -403,5 +430,27 @@ extension FeedRepository: EngagementProviding {
         case .failure(let error):
             throw FeedError.transport(message: error.message ?? "code \(error.code)")
         }
+    }
+}
+
+/// The lock-guarded shadow behind `FeedRepository.peekPost` — a plain
+/// dictionary under an `NSLock` (the store idiom), because the actor's own
+/// cache cannot be read without a hop and the peek's whole reason to exist
+/// is answering synchronously. `@unchecked Sendable`: every access goes
+/// through the lock.
+private final class LockedPostCacheMirror: @unchecked Sendable {
+    private let lock = NSLock()
+    private var entries: [PostID: FeedEntry] = [:]
+
+    func entry(for id: PostID) -> FeedEntry? {
+        lock.withLock { entries[id] }
+    }
+
+    func store(_ entry: FeedEntry, for id: PostID) {
+        lock.withLock { entries[id] = entry }
+    }
+
+    func remove(_ id: PostID) {
+        lock.withLock { entries[id] = nil }
     }
 }

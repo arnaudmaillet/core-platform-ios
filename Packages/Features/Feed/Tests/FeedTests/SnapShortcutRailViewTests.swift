@@ -187,7 +187,7 @@ struct SnapShortcutRailViewTests {
         #expect(SnapFeedCollectionView.claimsTouches(bubble) == true)
         // The fixed compose "+" is rail territory too (chrome sibling, so
         // the walk-up can't find the rail — its class is the marker).
-        #expect(SnapFeedCollectionView.claimsTouches(SnapRailComposeButton()) == true)
+        #expect(SnapFeedCollectionView.claimsTouches(SnapRailBoostButton()) == true)
         // The comments container is the engagement's scroll territory: the
         // list's drags stay inner (edge bounces rubber-band, never page) —
         // EXCEPT the composer band, which forwards its drags to the pager
@@ -262,7 +262,7 @@ struct SnapShortcutRailViewTests {
         // frosted chip is gone): a Liquid Glass circle whose box fills
         // 100% of the square — width == height == the band's height —
         // sitting ABOVE the rail (a chrome sibling; it never scrolls).
-        let compose = try #require(chrome.subviews.compactMap { $0 as? SnapRailComposeButton }.first)
+        let compose = try #require(chrome.subviews.compactMap { $0 as? SnapRailBoostButton }.first)
         #expect(chrome.subviews.compactMap { $0 as? UIVisualEffectView }.isEmpty)
         #expect(compose.frame.minY == ticker.frame.minY)
         #expect(abs(compose.frame.maxY - ticker.frame.maxY) < 0.01)
@@ -317,7 +317,7 @@ struct SnapShortcutRailViewTests {
             ))
             chrome.layoutIfNeeded()
             let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
-            let compose = try #require(chrome.subviews.compactMap { $0 as? SnapRailComposeButton }.first)
+            let compose = try #require(chrome.subviews.compactMap { $0 as? SnapRailBoostButton }.first)
             return (rail.frame, compose.frame)
         }
         let media = try corner(mediaURL: URL(string: "mock://media/1"))
@@ -416,7 +416,7 @@ struct SnapShortcutRailViewTests {
         ))
         chrome.layoutIfNeeded()
         let ticker = try #require(chrome.subviews.compactMap { $0 as? SnapCommentTickerView }.first)
-        let compose = try #require(chrome.subviews.compactMap { $0 as? SnapRailComposeButton }.first)
+        let compose = try #require(chrome.subviews.compactMap { $0 as? SnapRailBoostButton }.first)
 
         // One-directional height authority: the band resolves to exactly
         // its intrinsic (type-metric) height — the anchor pinned to its
@@ -456,8 +456,8 @@ struct SnapShortcutRailViewTests {
             ))
             return chrome
         }
-        func anchor(in chrome: SnapChromeView) throws -> SnapRailComposeButton {
-            try #require(chrome.subviews.compactMap { $0 as? SnapRailComposeButton }.first)
+        func anchor(in chrome: SnapChromeView) throws -> SnapRailBoostButton {
+            try #require(chrome.subviews.compactMap { $0 as? SnapRailBoostButton }.first)
         }
 
         // Configured, nothing loaded: the anchor is already there.
@@ -572,7 +572,7 @@ struct SnapShortcutRailViewTests {
         ))
         chrome.layoutIfNeeded()
         let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
-        let anchor = try #require(chrome.subviews.compactMap { $0 as? SnapRailComposeButton }.first)
+        let anchor = try #require(chrome.subviews.compactMap { $0 as? SnapRailBoostButton }.first)
 
         // ONE FADED LAYER: the chrome's own alpha carries every surface it
         // owns, so the rail and its anchor keep alpha 1 and inherit.

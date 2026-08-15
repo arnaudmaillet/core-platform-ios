@@ -173,6 +173,16 @@ final class AppContainer {
     }
     #endif
 
+    // MARK: - Wallet
+
+    /// The viewer's point wallet — the client-side mock behind the currency
+    /// badge, the claim sheet, and every boost button
+    /// (`BACKEND_VIRTUAL_CURRENCY.md` is the ask for the real service).
+    /// ONE instance, deliberately: `WalletStore`'s change notification is
+    /// scoped to the instance that changed, so the map badge only hears
+    /// about a feed spend because both surfaces hold this same object.
+    private(set) lazy var walletStore = WalletStore()
+
     // MARK: - Feed
 
     private lazy var feedRepository = FeedRepository(
@@ -205,7 +215,11 @@ final class AppContainer {
         // caches its pre-formatted rows, so two surfaces sharing one would
         // race over that cache. `unowned self` matches `profileFeature`'s
         // own accessor below — the container outlives every screen.
-        makeProfileSwitcher: { [unowned self] in self.profileFeature.makeProfileSwitcher() }
+        makeProfileSwitcher: { [unowned self] in self.profileFeature.makeProfileSwitcher() },
+        wallet: walletStore,
+        // The SAME sheet the map's badge presents — one claim surface,
+        // reachable from wherever the balance is showing.
+        makeWalletSheet: { [unowned self] in WalletClaimViewController(wallet: self.walletStore) }
     )
 
     // MARK: - Maps

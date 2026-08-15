@@ -37,7 +37,9 @@ public final class PostDetailViewModel {
     /// emits, leaving the composer's placeholder disc alone.
     public var onViewerIdentityChange: ((ViewerIdentity) -> Void)?
 
-    private let postID: PostID
+    /// Internal, not private: the compose bar's boost button spends against
+    /// this identity, and the view controller is the one holding the wallet.
+    let postID: PostID
     private let repository: any FeedProviding
     private let engagementProvider: (any EngagementProviding)?
     private let commentsProvider: (any CommentsProviding)?

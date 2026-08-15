@@ -1,5 +1,6 @@
 import MediaCore
 import CoreModels
+import CoreStorage
 import ProfileInterface
 import CoreNavigation
 import FeedInterface
@@ -26,6 +27,16 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// offers switching holds its own — sharing one would make two screens
     /// race over the same row cache. Nil leaves the composer's face inert.
     private let makeProfileSwitcher: (@MainActor () -> (any ProfileSwitcherPresenting)?)?
+    /// The viewer's point balance, shared with every surface that shows or
+    /// spends it (the map toolbar's badge, the rail's boost anchor, the
+    /// comments bar). One instance app-wide — `WalletStore`'s change post is
+    /// scoped to the instance. Nil leaves the boost buttons inert.
+    private let wallet: WalletStore?
+    /// Vends the wallet/claim sheet for the feed header's balance badge —
+    /// injected because the sheet is shell-owned (it is the same one the
+    /// map's badge presents, and the two must never diverge). Nil leaves
+    /// the feed's badge display-only, the pre-sheet behaviour.
+    private let makeWalletSheet: (@MainActor () -> UIViewController)?
 
     public init(
         repository: any FeedProviding,
@@ -36,7 +47,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         router: (any Router)? = nil,
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController? = nil,
-        makeProfileSwitcher: (@MainActor () -> (any ProfileSwitcherPresenting)?)? = nil
+        makeProfileSwitcher: (@MainActor () -> (any ProfileSwitcherPresenting)?)? = nil,
+        wallet: WalletStore? = nil,
+        makeWalletSheet: (@MainActor () -> UIViewController)? = nil
     ) {
         self.makeProfileSwitcher = makeProfileSwitcher
         self.repository = repository
@@ -47,6 +60,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         self.router = router
         self.imagePipeline = imagePipeline
         self.videoPlayback = videoPlayback
+        self.wallet = wallet
+        self.makeWalletSheet = makeWalletSheet
     }
 
     /// The timeline is the full-screen snap feed — the app's sole Timeline.
@@ -365,6 +380,44 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             )
         )
         (feed as? SnapFeedViewController)?.zoomOwnsInteractiveDismissal = ownsInteractiveDismissal
+        // Seed the projection the way For You's hero push does — and for
+        // the same measured symptom: the push begins in the SAME runloop
+        // turn this factory returns in, and the nav bar lays its incoming
+        // chrome out at that instant. For You's bar arrives fully formed
+        // because its grid seeds synchronously; a pin-opened feed used to
+        // fill in from a fetch (then from an awaited cache read — still one
+        // hop too late), so its header visibly re-laid itself INSIDE the
+        // animation. `peekPost` is the synchronous read of the same warmed
+        // cache: everything it can answer is seeded before the push exists.
+        // Additive like every seed: a real render replaces it, a seed
+        // landing after one is ignored.
+        if let snapFeed = feed as? SnapFeedViewController {
+            let cached = postIDs.compactMap { repository.peekPost($0) }
+            if cached.count == postIDs.count, !cached.isEmpty {
+                // ALL answered — the normal pin case, since pins prewarm on
+                // viewport settle.
+                snapFeed.seedProjection(
+                    FeedDisplayModelBuilder().build(cached, relativeTo: Date())
+                )
+            } else {
+                // A partial synchronous seed would TRUNCATE the corpus (a
+                // second seed is ignored by contract), so a cold or
+                // half-warm set takes the whole async path — late, but no
+                // later than the old behaviour.
+                let repository = repository
+                Task { @MainActor [weak snapFeed] in
+                    var entries: [FeedEntry] = []
+                    for id in postIDs {
+                        guard let entry = try? await repository.loadPost(id) else { continue }
+                        entries.append(entry)
+                    }
+                    guard !entries.isEmpty else { return }
+                    snapFeed?.seedProjection(
+                        FeedDisplayModelBuilder().build(entries, relativeTo: Date())
+                    )
+                }
+            }
+        }
         return feed
     }
 
@@ -383,6 +436,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // Hoisted like the rest: the panel factory escapes, and reaching for
         // a stored property inside it would capture the whole builder.
         let makeProfileSwitcher = makeProfileSwitcher
+        let wallet = wallet
+        let makeWalletSheet = makeWalletSheet
         return SnapFeedViewController(
             viewModel: viewModel,
             imagePipeline: imagePipeline,
@@ -402,9 +457,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                     ),
                     imagePipeline: imagePipeline,
                     mode: .commentsOnly,
-                    profileSwitcher: makeProfileSwitcher?()
+                    profileSwitcher: makeProfileSwitcher?(),
+                    wallet: wallet
                 )
-            }
+            },
+            wallet: wallet,
+            makeWalletSheet: makeWalletSheet
         )
     }
 
@@ -418,7 +476,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 router: router
             ),
             imagePipeline: imagePipeline,
-            mode: mode
+            mode: mode,
+            wallet: wallet
         )
     }
 }

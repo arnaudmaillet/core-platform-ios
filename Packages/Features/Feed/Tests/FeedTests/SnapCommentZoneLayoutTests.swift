@@ -115,7 +115,7 @@ struct SnapCommentZoneLayoutTests {
     @Test func theBandKeepsItsFrameSoTheCornerHoldsStill() throws {
         let chrome = Self.chrome()
         let ticker = try Self.part(chrome, SnapCommentTickerView.self)
-        let compose = try Self.part(chrome, SnapRailComposeButton.self)
+        let compose = try Self.part(chrome, SnapRailBoostButton.self)
         let rail = try Self.part(chrome, SnapShortcutRailView.self)
 
         chrome.updateCommentStreams(FeedViewModel.CommentStreams(
