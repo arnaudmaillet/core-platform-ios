@@ -1593,6 +1593,9 @@ extension MapsViewController: MKMapViewDelegate {
             annotation: annotation,
             thumbnail: thumbnail,
             face: Self.face(of: annotation),
+            // The marker's hierarchy ring rides the flight, so the card is
+            // the tapped marker's twin down to its border color.
+            ringKind: (annotation as? MapComputedCluster)?.place?.kind,
             mirrorLive: tappedID.map { id in
                 { renderView in coordinator.mirrorLivePreview(of: id, to: renderView) }
             }

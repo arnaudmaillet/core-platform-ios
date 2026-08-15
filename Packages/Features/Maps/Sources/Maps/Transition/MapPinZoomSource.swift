@@ -23,6 +23,10 @@ final class MapPinZoomSource: ZoomTransitionSource {
     /// surface; returns whether the pin was actually live. `nil` when the
     /// source can't be live (a cluster, or no playback coordinator).
     private let mirrorLive: ((VideoRenderView) -> Bool)?
+    /// The hierarchy level the tapped marker's ring announced (a semantic
+    /// cluster's city/region/country color), so the flying card takes off as
+    /// the marker's exact twin — ring included. `nil` flies the neutral ring.
+    private let ringKind: MapPlace.Kind?
     /// Matches the tapped marker's own geometry so the hero starts pin-sized —
     /// 56 for a media square, 44 for a text circle. Taking it from the face is
     /// what keeps the handshake exact for both: a text pin whose flight started
@@ -43,12 +47,14 @@ final class MapPinZoomSource: ZoomTransitionSource {
         annotation: any MKAnnotation,
         thumbnail: UIImage?,
         face: PinCardView.Face = .media,
+        ringKind: MapPlace.Kind? = nil,
         mirrorLive: ((VideoRenderView) -> Bool)? = nil
     ) {
         self.mapView = mapView
         self.annotation = annotation
         self.thumbnail = thumbnail
         self.face = face
+        self.ringKind = ringKind
         self.mirrorLive = mirrorLive
     }
 
@@ -59,6 +65,9 @@ final class MapPinZoomSource: ZoomTransitionSource {
     func makeZoomFlightCard() -> any ZoomFlightCard {
         let card = PinCardView()
         card.setFace(face)
+        card.setRing(
+            color: MapMarkerRing.color(for: ringKind), width: MapMarkerRing.width(for: ringKind)
+        )
         card.imageView.image = thumbnail
         if let mirrorLive {
             card.adoptZoomLiveMedia { surface in
