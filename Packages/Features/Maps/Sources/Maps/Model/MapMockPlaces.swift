@@ -64,8 +64,12 @@ enum MapMockPlaces {
     ///   viewport's lower half, which is what makes the city mask legible
     ///   at launch.
     ///
-    /// South of 48.780 stays UNTAGGED, so generic pins and proximity
-    /// clusters (Case A) remain reachable with the flag on.
+    /// South of 48.780 stays UNTAGGED — which, under exclusive banding,
+    /// means those pins never render while the flag is ON (a hierarchical
+    /// corpus shows one level per band, nothing else). They exist to pin
+    /// that exclusivity in tests; generic pins and proximity clusters
+    /// (Case A) are exercised with the flag OFF, where no pin carries a
+    /// ladder and the map is the ordinary proximity playground.
     static func ladder(for pin: MapPin) -> [MapPlace] {
         guard pin.latitude >= 48.780 else { return [] }
         guard pin.latitude >= 48.800, pin.longitude < 2.360 else { return [france] }

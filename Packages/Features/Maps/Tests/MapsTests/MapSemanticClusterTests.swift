@@ -109,9 +109,11 @@ struct MapSemanticClusterTests {
         #expect(items[0].memberIDs.count == 4, "both cities AND the region's own posts fold in")
     }
 
-    /// COUNTRY band: regions collapse into the country's ONE marker; a
-    /// country-only pin (no region) joins it too.
-    @Test func theCountryBandCollapsesEverythingTagged() {
+    /// COUNTRY band: regions collapse into the country's ONE marker, a
+    /// country-only pin (no region) joins it — and an untagged bystander is
+    /// HIDDEN, because a hierarchical corpus shows exactly one kind of
+    /// marker per band.
+    @Test func theCountryBandShowsTheCountryAndNothingElse() {
         let items = MapClusterEngine.cluster(
             [
                 pin("post-1", lat: 48.80, lng: 2.30, places: parisLadder),
@@ -121,11 +123,30 @@ struct MapSemanticClusterTests {
             ],
             zoomScale: 1, cellPoints: 64, zoomLevel: 8
         )
-        let franceItem = items.first { $0.place == france }
-        #expect(items.count == 2)
-        #expect(franceItem?.memberIDs.count == 3)
-        #expect(items.contains { $0.place == nil && $0.memberIDs == [PostID("post-4")] },
-                "the bystander must not be dragged into the country's marker")
+        #expect(items.count == 1, "one band, one kind of marker")
+        #expect(items[0].place == france)
+        #expect(items[0].memberIDs.count == 3)
+        #expect(!items[0].memberIDs.contains(PostID("post-4")),
+                "the bystander must not be dragged into the country's marker either")
+    }
+
+    /// The exclusivity switch: the SAME untagged pins render through
+    /// proximity when the corpus carries no hierarchy at all — production's
+    /// permanent shape (the wire has no place identity), which exclusive
+    /// banding must never blank.
+    @Test func anUnladderedCorpusKeepsProximityAtEveryBand() {
+        let scatter = [
+            pin("post-1", lat: 48.80, lng: 2.30),
+            pin("post-2", lat: 48.80, lng: 2.30), // co-located pair
+            pin("post-3", lat: 48.95, lng: 2.45),
+        ]
+        for level in [Int32(8), 9, 12, 15] {
+            let items = MapClusterEngine.cluster(
+                scatter, zoomScale: 1, cellPoints: 64, zoomLevel: level
+            )
+            #expect(items.count == 2, "proximity layout must be untouched at level \(level)")
+            #expect(items.contains { $0.isCluster && $0.place == nil })
+        }
     }
 
     /// STRICT banding has no dissolve: the city band runs to the top of the
@@ -179,10 +200,10 @@ struct MapSemanticClusterTests {
     }
 
     /// A place with ONE member at the active depth renders as a lone pin —
-    /// its level's only content is still that level's content — but as a
-    /// STANDALONE item: dropped into the proximity pool it could merge with
-    /// an unladdered neighbour's generic cluster and escape its band.
-    @Test func aGroupOfOneRendersAloneAndNeverMergesAcrossTheBand() {
+    /// its level's only content is still that level's content — while a
+    /// co-located unladdered pin is hidden with the rest of the
+    /// non-hierarchy: nothing exists for the lone member to merge into.
+    @Test func aGroupOfOneRendersAloneAtItsBand() {
         let items = MapClusterEngine.cluster(
             [
                 pin("post-1", lat: 48.80, lng: 2.30, places: parisLadder),
@@ -190,8 +211,9 @@ struct MapSemanticClusterTests {
             ],
             zoomScale: 1, cellPoints: 64, zoomLevel: 12
         )
-        #expect(items.count == 2, "the city's lone post must not fold into the generic cluster")
-        #expect(items.allSatisfy { !$0.isCluster })
+        #expect(items.count == 1, "the city's lone post, and nothing else")
+        #expect(!items[0].isCluster)
+        #expect(items[0].memberIDs == [PostID("post-1")])
     }
 
     /// No zoom level (geometry-only callers, older tests) means no semantic

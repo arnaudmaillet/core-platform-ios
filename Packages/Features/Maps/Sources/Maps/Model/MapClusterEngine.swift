@@ -100,31 +100,32 @@ enum MapClusterEngine {
         // marker and whole regions into their country's — the roll-up is a
         // consequence of the ladder, not a second mechanism.
         //
-        // Pins with an EMPTY ladder are outside the hierarchy and keep
-        // rendering through proximity at every band — deliberately, and not
-        // only for the mock's Case-A reachability: in production NO pin
-        // carries places (the wire has none, BACKEND_GAPS §18), so a strict
-        // filter that also dropped unladdered pins would blank the entire
-        // real map at every zoom the moment this shipped.
+        // The band is exclusive exactly WHEN THE CORPUS IS HIERARCHICAL: if
+        // any pin carries a ladder, everything without a rung at the active
+        // depth is hidden — laddered at another level or not laddered at
+        // all — so one zoom band never shows two kinds of marker. When NO
+        // pin carries a ladder, the whole pass stands down and proximity
+        // clustering runs untouched; that is production's permanent reality
+        // today (the wire carries no place identity, BACKEND_GAPS §18), so
+        // exclusivity can never blank the real map.
         //
         // Extracted BEFORE the proximity passes so a masked pin can neither
         // appear alone nor drag an unrelated pin into the place's group (a
         // gallery titled "Paris" must never open posts that did not claim
         // Paris). A group of ONE renders as a lone pin — its level's only
         // content is still that level's content — but as a standalone item,
-        // never through the proximity pool, where it could merge into an
-        // unladdered neighbour's generic cluster and escape its band.
+        // never through the proximity pool.
         var maskedByPlace: [String: (place: MapPlace, members: [MapPin])] = [:]
         var unmasked: [MapPin] = []
         let activeKind = zoomLevel.map(MapPlace.Kind.activeKind(atZoomLevel:))
-        if let activeKind {
+        let corpusIsHierarchical = pins.contains { !$0.places.isEmpty }
+        if let activeKind, corpusIsHierarchical {
             for pin in pins {
                 if let place = pin.places.first(where: { $0.kind == activeKind }) {
                     maskedByPlace[place.id, default: (place, [])].members.append(pin)
-                } else if pin.places.isEmpty {
-                    unmasked.append(pin)
                 }
-                // else: laddered, but no rung at the active depth — hidden.
+                // else: no rung at the active depth — hidden, whatever else
+                // the pin's ladder says (or doesn't).
             }
         } else {
             unmasked = pins
