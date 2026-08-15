@@ -45,8 +45,17 @@ enum MapClusterEngine {
         /// members' centroid for a group.
         let latitude: Double
         let longitude: Double
+        /// The one place EVERY member belongs to, or `nil` for a mixed or
+        /// untagged group. Set on singles too (it is the pin's own tag), but
+        /// behaviour keys on `isSemanticCluster`: a lone pin is Case A
+        /// whatever it is tagged with.
+        let place: MapPlace?
 
         var isCluster: Bool { memberIDs.count > 1 }
+
+        /// A multi-post group whose members all share one place — the ONLY
+        /// marker whose tap opens the place gallery behind the feed (Case B).
+        var isSemanticCluster: Bool { isCluster && place != nil }
 
         /// The representative's id. Note this is NOT a stable marker identity: a
         /// cluster's representative churns as the Top-K set shifts, which is
@@ -71,10 +80,68 @@ enum MapClusterEngine {
     /// - Parameters:
     ///   - cellPoints: marker collision size in screen points (side + margin).
     ///   - zoomScale: `mapView.bounds.width / mapView.visibleMapRect.size.width`.
-    static func cluster(_ pins: [MapPin], zoomScale: Double, cellPoints: Double) -> [Item] {
-        guard zoomScale > 0, cellPoints > 0 else {
-            return pins.map(Self.single)
+    ///   - zoomLevel: the viewport's 0–15 zoom (`MapViewport.zoomLevel`),
+    ///     driving the SEMANTIC pre-pass below; `nil` skips it (the pure
+    ///     proximity behaviour, and what geometry-only tests exercise).
+    static func cluster(
+        _ pins: [MapPin], zoomScale: Double, cellPoints: Double, zoomLevel: Int32? = nil
+    ) -> [Item] {
+        // SEMANTIC PRE-PASS (hierarchical masking): a place whose band is
+        // active at this zoom absorbs EVERY pin tagged with it into one
+        // marker, however far apart they sit on screen — the "Paris • City"
+        // pin stands for all of the city's posts, and none of its children
+        // render independently. Extracted BEFORE the proximity passes so a
+        // masked pin can neither appear alone nor drag an unrelated pin
+        // into the place's group (a gallery titled "Paris" must never open
+        // posts that did not claim Paris). A group of one is left to the
+        // proximity pass — a lone pin needs no masking, and a lone marker
+        // wearing a place name would promise a gallery of one.
+        var maskedByPlace: [String: [MapPin]] = [:]
+        var unmasked: [MapPin] = []
+        if let zoomLevel {
+            for pin in pins {
+                if let place = pin.place, place.kind.masksChildren(atZoomLevel: zoomLevel) {
+                    maskedByPlace[place.id, default: []].append(pin)
+                } else {
+                    unmasked.append(pin)
+                }
+            }
+        } else {
+            unmasked = pins
         }
+        let semantic: [Item] = maskedByPlace
+            .filter { $0.value.count > 1 }
+            .sorted { $0.key < $1.key } // deterministic output order
+            .map { _, members in
+                let ordered = members.sorted { $0.postID.rawValue < $1.postID.rawValue }
+                let face = representative(of: ordered)
+                return Item(
+                    representative: face,
+                    memberIDs: [face.postID] + ordered.lazy
+                        .map(\.postID)
+                        .filter { $0 != face.postID },
+                    // Plain averages: a place spans city blocks, not oceans,
+                    // so spherical-centroid math would be precision theatre.
+                    latitude: ordered.reduce(0) { $0 + $1.latitude } / Double(ordered.count),
+                    longitude: ordered.reduce(0) { $0 + $1.longitude } / Double(ordered.count),
+                    place: ordered[0].place
+                )
+            }
+        // Groups of one fall through to proximity clustering with everyone else.
+        let single = maskedByPlace.values.filter { $0.count == 1 }.flatMap { $0 }
+        let pins = unmasked + single
+
+        guard zoomScale > 0, cellPoints > 0 else {
+            return semantic + pins.map(Self.single)
+        }
+        return semantic + proximityCluster(pins, zoomScale: zoomScale, cellPoints: cellPoints)
+    }
+
+    /// The screen-space passes (grid + agglomerative merge), unchanged from
+    /// the pre-semantic engine.
+    private static func proximityCluster(
+        _ pins: [MapPin], zoomScale: Double, cellPoints: Double
+    ) -> [Item] {
         // Collision distance and grid cell, both in MKMapPoints.
         let cell = cellPoints / zoomScale
 
@@ -150,9 +217,21 @@ enum MapClusterEngine {
                     .map(\.postID)
                     .filter { $0 != face.postID },
                 latitude: center.latitude,
-                longitude: center.longitude
+                longitude: center.longitude,
+                place: commonPlace(of: ordered)
             )
         }
+    }
+
+    /// The place a whole group belongs to: every member tagged, and all with
+    /// one id. A single untagged member — a scattered pin that merely drifted
+    /// into a venue's cell at low zoom — makes the group generic: a gallery
+    /// titled "Paris" must not open over posts that never claimed Paris.
+    /// (The server-side rule in `BACKEND_CLUSTER_TYPES.md` aggregates before
+    /// Top-K instead; this stricter client rule exists only for the mock era.)
+    private static func commonPlace(of members: [MapPin]) -> MapPlace? {
+        guard let first = members.first?.place else { return nil }
+        return members.dropFirst().allSatisfy { $0.place?.id == first.id } ? first : nil
     }
 
     /// The member whose face a group wears: **the lowest id, whatever kind it
@@ -178,7 +257,10 @@ enum MapClusterEngine {
     }
 
     private static func single(_ pin: MapPin) -> Item {
-        Item(representative: pin, memberIDs: [pin.postID], latitude: pin.latitude, longitude: pin.longitude)
+        Item(
+            representative: pin, memberIDs: [pin.postID],
+            latitude: pin.latitude, longitude: pin.longitude, place: pin.place
+        )
     }
 }
 
@@ -196,10 +278,14 @@ final class MapComputedCluster: NSObject, MKAnnotation {
     @objc dynamic var coordinate: CLLocationCoordinate2D
     private(set) var representative: MapPin
     private(set) var memberIDs: [PostID]
+    /// The group's common place, when it has one — what routes a tap to the
+    /// gallery-backed presentation (Case B). See `MapClusterEngine.Item.place`.
+    private(set) var place: MapPlace?
 
     init(_ item: MapClusterEngine.Item) {
         self.representative = item.representative
         self.memberIDs = item.memberIDs
+        self.place = item.place
         self.coordinate = CLLocationCoordinate2D(latitude: item.latitude, longitude: item.longitude)
         super.init()
     }
@@ -208,6 +294,7 @@ final class MapComputedCluster: NSObject, MKAnnotation {
     func apply(_ item: MapClusterEngine.Item) {
         representative = item.representative
         memberIDs = item.memberIDs
+        place = item.place
         let next = CLLocationCoordinate2D(latitude: item.latitude, longitude: item.longitude)
         if next.latitude != coordinate.latitude || next.longitude != coordinate.longitude {
             coordinate = next

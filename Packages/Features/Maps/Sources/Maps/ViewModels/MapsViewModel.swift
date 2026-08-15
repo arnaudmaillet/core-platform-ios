@@ -101,7 +101,13 @@ public final class MapsViewModel {
                 return
             }
             guard !Task.isCancelled else { return }
+            #if DEBUG
+            // `-maps-mock-semantic-clusters`: stand-in place tags on the mock
+            // venues, until the wire can carry them (BACKEND_GAPS §18).
+            self.apply(MapMockPlaces.decorate(result.pins))
+            #else
             self.apply(result.pins)
+            #endif
             self.onTileCount?(result.tileCount)
         }
     }

@@ -43,6 +43,12 @@ public struct MapPin: Sendable, Equatable, Identifiable {
     /// (`RadarPin.preview_video_url`) the backend hasn't scoped yet. The video
     /// pool is fully built behind this and lights up when the URL arrives.
     public let previewVideoURL: URL?
+    /// The semantic place this post belongs to, or `nil` for the ordinary pin.
+    /// Always `nil` in production — the wire carries no place identity
+    /// (`dev/BACKEND_GAPS.md` §18); populated only by `MapMockPlaces` under
+    /// its DEBUG launch argument. A cluster whose members all share one place
+    /// is a SEMANTIC cluster (Case B); everything else is generic.
+    public let place: MapPlace?
 
     /// Whether this marker shows a symbol instead of a cover image.
     public var isText: Bool { kind == .text }
@@ -53,7 +59,8 @@ public struct MapPin: Sendable, Equatable, Identifiable {
         longitude: Double,
         thumbnailURL: URL?,
         kind: Kind,
-        previewVideoURL: URL? = nil
+        previewVideoURL: URL? = nil,
+        place: MapPlace? = nil
     ) {
         self.postID = postID
         self.latitude = latitude
@@ -61,5 +68,20 @@ public struct MapPin: Sendable, Equatable, Identifiable {
         self.thumbnailURL = thumbnailURL
         self.kind = kind
         self.previewVideoURL = previewVideoURL
+        self.place = place
+    }
+
+    /// The same pin, tagged with a place — the decoration seam `MapMockPlaces`
+    /// uses (a `let`-field struct has no other way to amend one field).
+    public func tagged(with place: MapPlace?) -> MapPin {
+        MapPin(
+            postID: postID,
+            latitude: latitude,
+            longitude: longitude,
+            thumbnailURL: thumbnailURL,
+            kind: kind,
+            previewVideoURL: previewVideoURL,
+            place: place
+        )
     }
 }
