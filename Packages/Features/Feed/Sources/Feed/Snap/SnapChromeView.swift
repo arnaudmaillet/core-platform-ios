@@ -58,7 +58,7 @@ final class SnapChromeView: UIView {
     /// populated from `configure` with a per-post deterministic payload, so
     /// the flight replica draws the identical wheel.
     private let shortcutRail = SnapShortcutRailView()
-    /// The fixed compose affordance: a Liquid Glass circle filling the
+    /// The fixed boost affordance: a Liquid Glass circle filling the
     /// square where the rail overlaps the ticker band (diameter == the
     /// band's height), the zone's ONLY layer — the old frosted backdrop
     /// chip was removed in its favor. A chrome sibling ABOVE the rail
@@ -70,7 +70,7 @@ final class SnapChromeView: UIView {
     /// Present on every MEDIA page and no text page — set from `configure`,
     /// never from the stream (see there for why the band's hidden state is
     /// the wrong authority for it).
-    private let composeButton = SnapRailComposeButton()
+    private let boostButton = SnapRailBoostButton()
     /// The rail's top edge as a cell-relative constant (see `buildLayout`).
     /// Optional: margins change during `init` before the layout exists.
     private var railTopConstraint: NSLayoutConstraint?
@@ -104,12 +104,23 @@ final class SnapChromeView: UIView {
     /// empty-state pill, the subtitle zone, the ticker band — the
     /// engagement's entry points; hidden views receive no touches, so each
     /// claims taps only while shown).
-    var interactionRoots: [UIView] { [shortcutRail, composeButton, commentEmptyState, subtitleView, commentTicker] }
+    var interactionRoots: [UIView] { [shortcutRail, boostButton, commentEmptyState, subtitleView, commentTicker] }
 
     /// A comments surface was tapped (empty-state pill, subtitle zone, or
     /// ticker band — one fan-in, one path) — the cell forwards this as a
     /// comments-engagement request with its post identity attached.
     var onCommentsTapped: (() -> Void)?
+
+    /// The rail's boost anchor asked to spend `amount` points on this post
+    /// (tap = the default denomination, long-press menu = a chosen one).
+    /// The cell forwards it with the post identity attached; whether the
+    /// wallet can afford it is the OWNER's answer, which comes back through
+    /// `playBoostConfirmation` / `playBoostDenied`.
+    var onBoostRequested: ((Int) -> Void)?
+    /// The anchor's menu asked to take back the session's spend on this
+    /// post. Same fan-out as the spend: cell attaches the identity, the
+    /// owner does the refund and answers with `playBoostRefund`.
+    var onBoostUndoRequested: (() -> Void)?
 
     private var representedID: PostID?
 
@@ -268,28 +279,30 @@ final class SnapChromeView: UIView {
             shortcutRail.bottomAnchor.constraint(equalTo: commentTicker.bottomAnchor)
         }
 
-        // The fixed "+" fills 100% of the overlap square, above the rail:
+        // The boost anchor fills 100% of the overlap square, above the rail:
         // emotes scroll (and rubber-band) beneath it while it holds still.
         // Skinned in the SYSTEM's Liquid Glass (materialized on window
-        // attach — see `SnapRailComposeButton`); capsule on the square box
+        // attach — see `SnapRailBoostButton`); capsule on the square box
         // (width == the band's height) renders a perfect circle inscribed
         // in the zone — the zone's only layer, now that the frosted chip
         // is gone. Constrained off ticker + margins, exactly the bounds
         // the old backdrop occupied.
-        composeButton.isHidden = true
+        boostButton.isHidden = true
+        boostButton.onBoost = { [weak self] amount in self?.onBoostRequested?(amount) }
+        boostButton.onUndo = { [weak self] in self?.onBoostUndoRequested?() }
         // The anchor is fully framed from outside (band edges + margins);
         // its intrinsic content size must exert ZERO back-pressure on the
         // graph — floor priorities mean it can never squeeze the band or
         // stretch itself (the other half of the height-authority contract).
-        composeButton.setContentHuggingPriority(UILayoutPriority(1), for: .vertical)
-        composeButton.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
-        composeButton.setContentCompressionResistancePriority(UILayoutPriority(1), for: .vertical)
-        composeButton.setContentCompressionResistancePriority(UILayoutPriority(1), for: .horizontal)
-        composeButton.constrain(in: self) { parent in
-            composeButton.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md)
-            composeButton.widthAnchor.constraint(equalTo: commentTicker.heightAnchor)
-            composeButton.topAnchor.constraint(equalTo: commentTicker.topAnchor)
-            composeButton.bottomAnchor.constraint(equalTo: commentTicker.bottomAnchor)
+        boostButton.setContentHuggingPriority(UILayoutPriority(1), for: .vertical)
+        boostButton.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
+        boostButton.setContentCompressionResistancePriority(UILayoutPriority(1), for: .vertical)
+        boostButton.setContentCompressionResistancePriority(UILayoutPriority(1), for: .horizontal)
+        boostButton.constrain(in: self) { parent in
+            boostButton.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md)
+            boostButton.widthAnchor.constraint(equalTo: commentTicker.heightAnchor)
+            boostButton.topAnchor.constraint(equalTo: commentTicker.topAnchor)
+            boostButton.bottomAnchor.constraint(equalTo: commentTicker.bottomAnchor)
         }
 
         // The subtitle zone extends the same one-directional chain one link
@@ -435,25 +448,25 @@ final class SnapChromeView: UIView {
         timestampText = hasMedia ? model.timestampText : nil
         caption = hasMedia ? model.caption : nil
         applyCaptionVisibility()
-        // THE "+" IS FORMAT-SCOPED, NOT STATE-SCOPED. Every media page owns
-        // the compose anchor from its first frame — it is the entry point to
-        // the comment system, and a page whose comments are empty is exactly
-        // where writing the first one matters most. It used to mirror the
+        // THE BOOST ANCHOR IS FORMAT-SCOPED, NOT STATE-SCOPED — the rule the
+        // compose "+" that held this slot established. Every media page owns
+        // it from its first frame; its predecessor used to mirror the
         // ticker's hidden state (`updateCommentStreams`), which meant it
         // vanished on every page the band declined to animate: zero-comment
         // posts, the sparse seed, and any page at all under Reduce Motion —
-        // the anchor disappearing precisely where it was most useful.
+        // the anchor disappearing where it was most useful.
         //
         // Text-only pages keep it hidden. Their engagement is a permanent
-        // resting state with its own composer, so the anchor there is chrome
-        // for a layout the page never shows; setting it here rather than
-        // leaving the engagement's fade to swallow it also kills the flash
-        // it used to make in the frames before that engagement mounts.
+        // resting state with its own composer bar, and that bar carries its
+        // OWN boost button — so the anchor here would be a second spend
+        // control for one post; setting it here rather than leaving the
+        // engagement's fade to swallow it also kills the flash it used to
+        // make in the frames before that engagement mounts.
         //
         // Owned by `configure` (static chrome, like the rail's symbols), so
         // it needs no stream to appear and the flight replica — which never
         // receives one — draws the identical corner.
-        composeButton.isHidden = !hasMedia
+        boostButton.isHidden = !hasMedia
         if !hasMedia {
             commentTicker.setComments([])
             subtitleView.setCues([])
@@ -788,10 +801,16 @@ final class SnapChromeView: UIView {
         caption = nil
         applyCaptionVisibility()
         onCommentsTapped = nil
+        onBoostRequested = nil
+        onBoostUndoRequested = nil
         hasMedia = true
         commentTicker.reset()
         applyBandPresence()
-        composeButton.isHidden = true
+        boostButton.isHidden = true
+        boostButton.setSpentTotal(0)
+        // Back to the unwired default (enabled, nothing undoable) — the
+        // next configure pushes the real context.
+        boostButton.setWalletContext(balance: .max, undoableAmount: 0)
         subtitleView.reset()
         // Both, and in this order: `setActive(false)` clears the visibility
         // seam the scaffold arrived with (the cell's streaming flag is not
@@ -801,6 +820,123 @@ final class SnapChromeView: UIView {
         commentEmptyState.setActive(false)
         commentEmptyState.setVisible(false)
         shortcutRail.reset()
+    }
+
+    // MARK: - Boost feedback
+
+    /// The viewer's cumulative spend on the represented post — flips the
+    /// rail anchor between its glyph face (0) and its gold-number face.
+    /// Owned by the cell's configurator (the chrome has no wallet); reset
+    /// to 0 with the rest of the post state on reuse.
+    func setBoostTotal(_ total: Int) {
+        boostButton.setSpentTotal(total)
+    }
+
+    /// The anchor's wallet context: what the balance can still afford and
+    /// how much of this post's spend is session-undoable — the enable state
+    /// and the menu's live contents both derive from it.
+    func setBoostContext(balance: Int, undoable: Int) {
+        boostButton.setWalletContext(balance: balance, undoableAmount: undoable)
+    }
+
+    /// The spend's visible receipt: a gold "+N" born on the boost anchor
+    /// that rises and dissolves, plus a quick press-bounce on the anchor
+    /// itself. Pure theatre over state that already changed — the wallet
+    /// debited synchronously before this runs, so the animation can be
+    /// dropped (hidden anchor, mid-reuse) without the count going wrong.
+    func playBoostConfirmation(amount: Int) {
+        guard !boostButton.isHidden, boostButton.bounds.width > 0 else { return }
+
+        let label = UILabel()
+        label.text = "+\(amount)"
+        label.font = .monospacedDigitSystemFont(ofSize: 17, weight: .heavy)
+        label.textColor = .systemYellow
+        // The scrim under it is a gradient, not a guarantee — the same
+        // legibility shadow the nav glyphs wear over live media.
+        label.layer.shadowColor = UIColor.black.cgColor
+        label.layer.shadowOpacity = 0.5
+        label.layer.shadowRadius = 3
+        label.layer.shadowOffset = .zero
+        label.sizeToFit()
+        label.center = CGPoint(x: boostButton.center.x, y: boostButton.frame.minY - Spacing.md)
+        label.alpha = 0
+        label.isUserInteractionEnabled = false
+        addSubview(label)
+
+        UIView.animateKeyframes(withDuration: 0.9, delay: 0, options: [.calculationModeCubic]) {
+            UIView.addKeyframe(withRelativeStartTime: 0, relativeDuration: 0.2) {
+                label.alpha = 1
+                label.center.y -= 18
+            }
+            UIView.addKeyframe(withRelativeStartTime: 0.2, relativeDuration: 0.55) {
+                label.center.y -= 26
+            }
+            UIView.addKeyframe(withRelativeStartTime: 0.55, relativeDuration: 0.45) {
+                label.alpha = 0
+            }
+        } completion: { _ in
+            label.removeFromSuperview()
+        }
+
+        // The anchor's own acknowledgement: a press-and-release dip, the
+        // spring profile `MapAnnotationPop` uses for the same "it landed"
+        // beat.
+        boostButton.transform = CGAffineTransform(scaleX: 0.82, y: 0.82)
+        UIView.animate(
+            withDuration: 0.5, delay: 0,
+            usingSpringWithDamping: 0.45, initialSpringVelocity: 4,
+            options: [.allowUserInteraction]
+        ) {
+            self.boostButton.transform = .identity
+        }
+    }
+
+    /// The refund's receipt: a cool "−N" that sinks and dissolves — the
+    /// confirmation float mirrored, in the direction money leaves the post.
+    /// White, not gold: gold is the earning color, and an undo is not a
+    /// payout.
+    func playBoostRefund(amount: Int) {
+        guard !boostButton.isHidden, boostButton.bounds.width > 0 else { return }
+        let label = UILabel()
+        label.text = "−\(amount)"
+        label.font = .monospacedDigitSystemFont(ofSize: 17, weight: .heavy)
+        label.textColor = UIColor.white.withAlphaComponent(0.9)
+        label.layer.shadowColor = UIColor.black.cgColor
+        label.layer.shadowOpacity = 0.5
+        label.layer.shadowRadius = 3
+        label.layer.shadowOffset = .zero
+        label.sizeToFit()
+        label.center = CGPoint(x: boostButton.center.x, y: boostButton.frame.minY - Spacing.md)
+        label.alpha = 0
+        label.isUserInteractionEnabled = false
+        addSubview(label)
+        UIView.animateKeyframes(withDuration: 0.9, delay: 0, options: [.calculationModeCubic]) {
+            UIView.addKeyframe(withRelativeStartTime: 0, relativeDuration: 0.2) {
+                label.alpha = 1
+                label.center.y += 14
+            }
+            UIView.addKeyframe(withRelativeStartTime: 0.2, relativeDuration: 0.55) {
+                label.center.y += 20
+            }
+            UIView.addKeyframe(withRelativeStartTime: 0.55, relativeDuration: 0.45) {
+                label.alpha = 0
+            }
+        } completion: { _ in
+            label.removeFromSuperview()
+        }
+    }
+
+    /// The refusal: a horizontal head-shake on the anchor — the wallet
+    /// couldn't cover the spend, and nothing changed. Paired with the
+    /// error haptic the owner fires; deliberately no floating label (a
+    /// "-0" would read as a payout).
+    func playBoostDenied() {
+        guard !boostButton.isHidden else { return }
+        let shake = CAKeyframeAnimation(keyPath: "transform.translation.x")
+        shake.values = [0, -7, 6, -4, 3, -1, 0]
+        shake.duration = 0.4
+        shake.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        boostButton.layer.add(shake, forKey: "boost.denied")
     }
 }
 

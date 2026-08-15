@@ -7,7 +7,7 @@ import UIKit
 /// perfect circles (capsule corners on a square).
 ///
 /// Configured PLAIN at init; the glass configuration materializes on first
-/// window attach — the house doctrine (`SnapRailComposeButton`, #46):
+/// window attach — the house doctrine (`SnapRailBoostButton`, #46):
 /// creating a system material contacts the render server, a multi-second
 /// main-thread stall on headless CI simulators, where unit-tested views never
 /// join a window and must never pay it.
@@ -55,6 +55,10 @@ final class MapPillButton: UIButton {
     }
 
     private(set) var content: Content
+    /// The pill's fixed height — and, for a circular pill, its diameter. Held
+    /// because the avatar is cropped to fit it: a thumbnail sized by a
+    /// constant cannot follow a bar that changes size.
+    private let height: CGFloat
     private var hasGlass = false
     private var isSelectedAppearance = false
     /// Circular avatar thumbnail replacing the symbol (people pills). Set
@@ -80,6 +84,7 @@ final class MapPillButton: UIButton {
 
     init(content: Content, height: CGFloat) {
         self.content = content
+        self.height = height
         super.init(frame: .zero)
         configuration = makeConfiguration(glass: false, selected: false)
         accessibilityLabel = content.accessibilityLabel
@@ -209,7 +214,31 @@ final class MapPillButton: UIButton {
         }
     }
 
-    private var avatarDiameter: CGFloat { 20 }
+    /// How much glass is left showing around a circular pill's avatar.
+    ///
+    /// A hairline, not a margin: the photo IS the pill, and the ring exists
+    /// only so the glass edge still reads as an edge against a busy map. In a
+    /// capsule (a titled pill) the avatar is a leading thumbnail instead, and
+    /// keeps its old proportions.
+    static let avatarInset: CGFloat = 2
+
+    /// The avatar's rendered diameter for a pill of this size — pure, so the
+    /// rule is testable without a window (the same shape `maxWidth` takes).
+    ///
+    /// Derived from the pill, never a constant: it was pinned at 20pt, so a
+    /// 40pt circle showed a photo half its own width floating in glass. A
+    /// CAPSULE keeps the small thumbnail — there the avatar sits beside a
+    /// title and must not crowd it.
+    static func avatarDiameter(forPillHeight height: CGFloat, isCircular: Bool) -> CGFloat {
+        isCircular ? height - avatarInset * 2 : capsuleAvatarDiameter
+    }
+
+    /// The leading thumbnail's diameter inside a titled capsule.
+    static let capsuleAvatarDiameter: CGFloat = 20
+
+    private var avatarDiameter: CGFloat {
+        Self.avatarDiameter(forPillHeight: height, isCircular: isCircular)
+    }
 
     private static func circularThumbnail(from image: UIImage, diameter: CGFloat) -> UIImage {
         let size = CGSize(width: diameter, height: diameter)
@@ -286,7 +315,12 @@ final class MapPillButton: UIButton {
         let contentColor: UIColor = selected ? .systemBlue : .secondaryLabel
         config.image = avatarImage ?? UIImage(
             systemName: selected ? content.selectedSymbolName : content.symbolName
-        )?.withConfiguration(UIImage.SymbolConfiguration(pointSize: isCircular ? 13 : 11, weight: .semibold))
+        )?.withConfiguration(UIImage.SymbolConfiguration(
+            // Roughly a third of the circle — the proportion the 13pt glyph
+            // struck in the original 40pt pill, kept as the pill grows.
+            pointSize: isCircular ? round(height / 3) : 11,
+            weight: .semibold
+        ))
             .withTintColor(contentColor, renderingMode: .alwaysOriginal)
         config.baseForegroundColor = contentColor
         // Circles get no insets — the constrained square frame centers the

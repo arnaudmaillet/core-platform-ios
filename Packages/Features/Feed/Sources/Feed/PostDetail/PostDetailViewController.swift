@@ -1,3 +1,4 @@
+import CoreStorage
 import MediaCore
 import DesignSystem
 import FeedInterface
@@ -132,17 +133,33 @@ final class PostDetailViewController: UIViewController {
     /// binds to its top-level parent — comment.v1's two-depth contract)
     /// plus the tapped author's name for the placeholder.
     private var replyTarget: (parentID: String, name: String)?
+    /// The viewer's point balance, spent by the compose bar's boost button.
+    /// Injected (one instance app-wide — the map's badge watches it); nil
+    /// leaves the button visible but inert.
+    private let wallet: WalletStore?
+    /// Keeps the compose bar's receipt honest when the SAME post is boosted
+    /// through another surface (a text page shows this bar and the snap
+    /// screen's spend path at once). Token bag, not deinit — the house
+    /// escape hatch for main-actor state a nonisolated deinit can't touch.
+    private let walletObservers = NotificationObserverTokenBag()
+    /// The session's undoable spend through THIS bar. Its window is this
+    /// controller's lifetime, which IS the product rule: the embedded
+    /// comments panel is torn down when the page changes, and the pushed
+    /// screen when it pops — either way, moving on finalizes the spend.
+    private var sessionBoostAmount = 0
 
     init(
         viewModel: PostDetailViewModel,
         imagePipeline: ImagePipeline,
         mode: PostDetailMode = .full,
-        profileSwitcher: (any ProfileSwitcherPresenting)? = nil
+        profileSwitcher: (any ProfileSwitcherPresenting)? = nil,
+        wallet: WalletStore? = nil
     ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
         self.mode = mode
         self.profileSwitcher = profileSwitcher
+        self.wallet = wallet
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -424,6 +441,14 @@ final class PostDetailViewController: UIViewController {
         viewModel.didTapAuthor()
     }
 
+    /// Pushes the wallet's current answer — affordability and the session
+    /// tally — into the bar's boost button: the enable state and the menu
+    /// it will build on its next long-press both derive from it.
+    private func refreshComposeBarBoostState() {
+        guard let wallet else { return }
+        composeBar.setBoostContext(balance: wallet.balance, undoableAmount: sessionBoostAmount)
+    }
+
     private func configureComposeBar() {
         // The Liquid Glass composer (Private Messages' recipe): a floating
         // capsule field, no opaque bar, no separator — the glass carries
@@ -441,6 +466,64 @@ final class PostDetailViewController: UIViewController {
         // The reply state's natural exit: keyboard retired over an empty
         // field — later compositions start top-level again.
         composeBar.onIdleDismiss = { [weak self] in self?.clearReplyState() }
+        // The bar's boost button: wallet verdict here, theatre back on the
+        // bar — the snap rail's exact contract, on the comments surface.
+        // Debit-first, so the animation never promises a state the balance
+        // doesn't have. Nil wallet (an unwired host) leaves the tap inert.
+        composeBar.onBoost = { [weak self] amount in
+            guard let self, let wallet = self.wallet else { return }
+            switch wallet.boost(targetID: self.viewModel.postID.rawValue, amount: amount) {
+            case .boosted(_, let targetTotal, let spent):
+                // `spent`, never the request — a near-cap boost is clamped.
+                self.sessionBoostAmount += spent
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                // Receipt before theatre — the button flips to (or grows)
+                // its number face, then the "+N" float rises off it.
+                self.composeBar.setBoostTotal(targetTotal)
+                self.composeBar.playBoostConfirmation(amount: spent)
+            case .insufficientBalance, .targetCapReached:
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+                self.composeBar.playBoostDenied()
+            }
+            self.refreshComposeBarBoostState()
+        }
+        // The menu's Undo entry: takes back everything this bar spent while
+        // the screen stayed up. Session-scoped by construction — the tally
+        // lives on this controller, and this controller dies with the visit.
+        composeBar.onBoostUndo = { [weak self] in
+            guard let self, let wallet = self.wallet, self.sessionBoostAmount > 0,
+                  let result = wallet.undoBoost(
+                      targetID: self.viewModel.postID.rawValue, amount: self.sessionBoostAmount
+                  )
+            else { return }
+            let refunded = self.sessionBoostAmount
+            self.sessionBoostAmount = 0
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            self.composeBar.setBoostTotal(result.targetTotal)
+            self.composeBar.playBoostRefund(amount: refunded)
+            self.refreshComposeBarBoostState()
+        }
+        // The button's opening face: this viewer's spend so far on this
+        // post, from the wallet's ledger — a boosted post greets its
+        // booster with the receipt, not the invitation. The observer keeps
+        // it honest against spends made through any other surface.
+        if let wallet {
+            composeBar.setBoostTotal(wallet.boostTotal(forTarget: viewModel.postID.rawValue))
+            refreshComposeBarBoostState()
+            walletObservers.tokens = [
+                NotificationCenter.default.addObserver(
+                    forName: WalletStore.didChangeNotification, object: wallet, queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated {
+                        guard let self, let wallet = self.wallet else { return }
+                        self.composeBar.setBoostTotal(
+                            wallet.boostTotal(forTarget: self.viewModel.postID.rawValue)
+                        )
+                        self.refreshComposeBarBoostState()
+                    }
+                },
+            ]
+        }
         // The engaged footer band (hidden outside the engagement): below
         // the bar, above the stream.
         composerBackdrop.isHidden = true

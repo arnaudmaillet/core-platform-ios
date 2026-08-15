@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import UIKit
 
@@ -416,39 +417,173 @@ final class SnapShortcutRailView: UIScrollView {
     }
 }
 
-/// The rail column's fixed compose affordance ("add a react"), filling the
-/// glass square at the rail's bottom. A marker class: the feed pager's
-/// geometric veto (`SnapFeedCollectionView`) treats it as rail territory,
-/// so a swipe born on the button can never page the feed.
+/// The rail column's fixed BOOST affordance ("push this post up trending"),
+/// filling the glass square at the rail's bottom — the slot the compose "+"
+/// held until the boost economy took it (`WalletStore` is the balance it
+/// spends from). A marker class: the feed pager's geometric veto
+/// (`SnapFeedCollectionView`) treats it as rail territory, so a swipe born
+/// on the button can never page the feed.
+///
+/// Two intents, one control: a TAP spends the default amount; a LONG-PRESS
+/// opens the denomination menu (`showsMenuAsPrimaryAction` stays false so
+/// the tap keeps firing `primaryActionTriggered`). Both land on `onBoost` —
+/// the button knows amounts, never targets; the chrome's owner attaches the
+/// post identity.
 ///
 /// Configured PLAIN at init; the Liquid Glass configuration materializes
 /// on first window attach — the subtitle count bubble's doctrine (#46):
 /// creating a system material contacts the render server, a multi-second
 /// main-thread stall on headless CI simulators, where unit-tested views
 /// never join a window and must never pay it.
-final class SnapRailComposeButton: UIButton {
+final class SnapRailBoostButton: UIButton {
+    /// Fired with the point amount to spend — the tap default or a menu pick.
+    var onBoost: ((Int) -> Void)?
+    /// Fired by the menu's Undo entry — the host refunds the session spend
+    /// (it owns the tally and the wallet; the button only shows the door).
+    var onUndo: (() -> Void)?
+
     private var hasGlass = false
+    /// The viewer's cumulative spend on the represented post — the button's
+    /// SECOND face. Zero wears the star glyph (an invitation); anything
+    /// above it wears the gold number itself (a receipt), because "what have
+    /// I already put on this post" is the question the control's own state
+    /// answers best. Owned by the host via `setSpentTotal` — the button
+    /// never reads a wallet.
+    private var spentTotal = 0
+    /// The wallet context the host pushes (`setWalletContext`): what the
+    /// balance can still afford, and how much of this post's spend is
+    /// session-undoable. `Int.max` at rest so an unwired host keeps the
+    /// historical always-enabled affordance.
+    private var availableBalance = Int.max
+    private var undoableAmount = 0
 
     init() {
         super.init(frame: .zero)
-        configuration = Self.makeConfiguration(glass: false)
+        applyFace()
+        addAction(
+            UIAction { [weak self] _ in self?.onBoost?(WalletStore.Policy.tapBoostAmount) },
+            for: .primaryActionTriggered
+        )
+        // DEFERRED and uncached: the menu is built at present time from the
+        // pushed wallet context, so denominations the balance can't cover
+        // arrive disabled and the Undo entry exists exactly while there is
+        // a session spend to take back. A static menu would freeze the
+        // first launch's answer.
+        menu = UIMenu(
+            title: "Boost this post",
+            children: [
+                UIDeferredMenuElement.uncached { [weak self] completion in
+                    completion(self?.currentMenuActions() ?? [])
+                },
+            ]
+        )
+    }
+
+    /// The affordability + undo state, pushed by the host on configure and
+    /// on every wallet change. Disables the control only when it has
+    /// NOTHING to offer — tap unaffordable (or the post full) AND nothing
+    /// to undo — because a disabled `UIButton` delivers no long-press
+    /// either, and the menu is the undo's only door.
+    func setWalletContext(balance: Int, undoableAmount: Int) {
+        availableBalance = balance
+        self.undoableAmount = undoableAmount
+        refreshEnabled()
+    }
+
+    private func refreshEnabled() {
+        let remaining = max(0, WalletStore.Policy.perTargetBoostCap - spentTotal)
+        // A tap near the cap costs only the remainder (the store clamps),
+        // so affordability is judged against that, not the flat tap price.
+        let tapCost = min(WalletStore.Policy.tapBoostAmount, remaining)
+        isEnabled = undoableAmount > 0 || (remaining > 0 && availableBalance >= tapCost)
+    }
+
+    /// The menu, top to bottom: **Max** (what a fill-up would actually
+    /// spend — the cap's remainder bounded by the balance), the fixed
+    /// denomination(s), and Undo while the session holds something.
+    ///
+    /// Internal, not private: the menu is a deferred element resolved only
+    /// at present time, which a unit test can't trigger — so the builder is
+    /// the testable seam.
+    func currentMenuActions() -> [UIMenuElement] {
+        let remaining = max(0, WalletStore.Policy.perTargetBoostCap - spentTotal)
+        let maxAmount = min(remaining, availableBalance)
+        var actions: [UIMenuElement] = []
+
+        // The label names the REAL spend when one is possible; disabled it
+        // still names the door (the remainder, or the cap on a full post).
+        let shownMax = maxAmount > 0
+            ? maxAmount
+            : (remaining > 0 ? remaining : WalletStore.Policy.perTargetBoostCap)
+        let maxAction = UIAction(
+            title: "Max (\(shownMax) points)",
+            image: UIImage(systemName: "star.fill")
+        ) { [weak self] _ in self?.onBoost?(maxAmount) }
+        if maxAmount <= 0 { maxAction.attributes = .disabled }
+        actions.append(maxAction)
+
+        for amount in WalletStore.Policy.boostDenominations.reversed() {
+            let action = UIAction(
+                title: "\(amount) points",
+                image: UIImage(systemName: "star.fill")
+            ) { [weak self] _ in self?.onBoost?(amount) }
+            if amount > availableBalance || amount > remaining { action.attributes = .disabled }
+            actions.append(action)
+        }
+        if undoableAmount > 0 {
+            actions.append(UIAction(
+                title: "Undo boosts (\(undoableAmount))",
+                image: UIImage(systemName: "arrow.uturn.backward"),
+                attributes: .destructive
+            ) { [weak self] _ in self?.onUndo?() })
+        }
+        return actions
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// Renders the viewer's spend on this post. Idempotent; a recycled cell
+    /// resets it to 0 through `SnapChromeView.reset`.
+    func setSpentTotal(_ total: Int) {
+        guard total != spentTotal else { return }
+        spentTotal = total
+        applyFace()
+        // The spend moves the cap's remainder, and the remainder moves the
+        // enable state (a full post refuses even the tap).
+        refreshEnabled()
+    }
+
     override func didMoveToWindow() {
         super.didMoveToWindow()
         if window != nil, !hasGlass {
             hasGlass = true
-            configuration = Self.makeConfiguration(glass: true)
+            applyFace()
         }
     }
 
-    private static func makeConfiguration(glass: Bool) -> UIButton.Configuration {
+    /// One writer for the configuration: glass state and spend face both
+    /// funnel here, so a glass materialization can never resurrect the
+    /// wrong face (the configuration is rebuilt whole each time).
+    private func applyFace() {
+        configuration = Self.makeConfiguration(glass: hasGlass, spentTotal: spentTotal)
+        accessibilityLabel = "Boost post"
+        accessibilityValue = spentTotal > 0 ? "\(spentTotal) points spent" : nil
+    }
+
+    private static func makeConfiguration(glass: Bool, spentTotal: Int) -> UIButton.Configuration {
         var config: UIButton.Configuration = glass ? .glass() : .plain()
-        config.image = UIImage(systemName: "plus")?
-            .withConfiguration(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
+        if spentTotal > 0 {
+            // The receipt face: the compact count in wallet gold, replacing
+            // the glyph outright — the 36pt circle holds one or the other.
+            var title = AttributedString(spentTotal.formattedCompact())
+            title.font = .monospacedDigitSystemFont(ofSize: 13, weight: .bold)
+            title.foregroundColor = .systemYellow
+            config.attributedTitle = title
+        } else {
+            config.image = UIImage(systemName: "star.fill")?
+                .withConfiguration(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
+        }
         config.baseForegroundColor = .white
         config.contentInsets = .zero
         config.cornerStyle = .capsule

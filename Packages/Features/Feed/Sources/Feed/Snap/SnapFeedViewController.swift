@@ -50,6 +50,14 @@ final class SnapFeedViewController: UIViewController {
     /// sort selector beside the author pill and take it away again.
     private var authorItem = UIBarButtonItem()
     private var sortItem = UIBarButtonItem()
+    /// The viewer's balance, closing the trailing run on its left —
+    /// [‹ back] … [🪙 solde] [author pill] — so a spend made on this very
+    /// screen is visibly paid for. DISPLAY-ONLY here: the map's badge is
+    /// the claim entry point, this one just watches the store (same shared
+    /// instance) and re-renders. Built only when a wallet is injected; a
+    /// nil-wallet feed keeps its historical author-only run.
+    private let walletBadge = WalletBadgeButton()
+    private var walletBadgeItem: UIBarButtonItem?
     /// The nav bar's LEADING item at rest: the back arrow, when the feed was
     /// opened onto a stack it can leave (never on the tab root). Built on
     /// first appearance, when the stack relationship is finally knowable.
@@ -68,6 +76,19 @@ final class SnapFeedViewController: UIViewController {
     /// surfaces reading one list is precisely what a store is for. See
     /// `PostBookmarkStore` for what a client-owned list can and cannot claim.
     private let bookmarks = PostBookmarkStore()
+
+    /// The viewer's point balance, spent by the rail's boost anchor.
+    ///
+    /// INJECTED, not created in place like `bookmarks`, because the map
+    /// toolbar's currency badge watches the same instance — a spend here must
+    /// move that number, and `WalletStore`'s change post is scoped to the
+    /// instance that changed (see its doc). Nil (an unwired surface, or a
+    /// unit-tested one) leaves the boost anchor visible but inert.
+    private let wallet: WalletStore?
+    /// Vends the wallet/claim sheet the header's balance badge presents —
+    /// the SAME shell-owned sheet the map's badge opens, injected so the
+    /// two entries can never diverge. Nil keeps the badge display-only.
+    private let makeWalletSheet: (@MainActor () -> UIViewController)?
 
     /// id → display model; lookups only, never measurement.
     private var modelsByID: [PostID: FeedItemDisplayModel] = [:]
@@ -145,12 +166,16 @@ final class SnapFeedViewController: UIViewController {
         viewModel: FeedViewModel,
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController? = nil,
-        makeCommentsPanelContent: ((PostID) -> UIViewController)? = nil
+        makeCommentsPanelContent: ((PostID) -> UIViewController)? = nil,
+        wallet: WalletStore? = nil,
+        makeWalletSheet: (@MainActor () -> UIViewController)? = nil
     ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
         self.videoPlayback = videoPlayback
         self.makeCommentsPanelContent = makeCommentsPanelContent
+        self.wallet = wallet
+        self.makeWalletSheet = makeWalletSheet
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -204,8 +229,16 @@ final class SnapFeedViewController: UIViewController {
         //
         // Re-applied here, where the width is real. Idempotent (the setter
         // no-ops on an unchanged cap), so a settled page pays nothing.
+        //
+        // The RESTING run has the same hole since the wallet badge joined
+        // it: its budget is bar-width arithmetic too (the badge is the
+        // PRIORITY item — the author is what truncates), and a budget
+        // computed at zero width is nil, an uncapped pill, and the same
+        // `•••` failure on narrow bars.
         if commentsEngagedID != nil {
             applyEngagedTrailingRunFit()
+        } else {
+            authorIdentityView.setWidthBudget(restingAuthorBudget())
         }
     }
 
@@ -338,6 +371,52 @@ final class SnapFeedViewController: UIViewController {
                 guard let self, self.orderedIDs.indices.contains(target) else { return }
                 self.collectionView.scrollToItem(at: IndexPath(item: target, section: 0), at: .top, animated: false)
                 self.updateActiveItem()
+            }
+        }
+        // `-feed-open-wallet`: presents the wallet sheet over the feed ~2s
+        // after settle — the header badge opens it on tap, which the sim
+        // can't deliver. The map's `-open-wallet` stays separate: both
+        // firing at once would race two presentations of one sheet.
+        if arguments.contains("-feed-open-wallet") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                self?.presentWalletSheet()
+            }
+        }
+        // `-wallet-demo-boost [amount]`: boosts the ACTIVE post through the
+        // real spend path (wallet debit → haptic → "+N" float) shortly after
+        // settle — the rail anchor opens it on tap, which the sim can't
+        // deliver. Pair with `-wallet-log` for the ledger line and
+        // `-wallet-balance 0` for the denied shake.
+        if arguments.contains("-wallet-demo-boost") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                guard let self else { return }
+                let index = self.lifecycle.activeIndex ?? 0
+                guard self.orderedIDs.indices.contains(index) else { return }
+                let amount: Int
+                if let flagIndex = arguments.firstIndex(of: "-wallet-demo-boost"),
+                   arguments.indices.contains(flagIndex + 1),
+                   let chosen = Int(arguments[flagIndex + 1]) {
+                    amount = chosen
+                } else {
+                    amount = WalletStore.Policy.tapBoostAmount
+                }
+                let cell = self.collectionView.visibleCells
+                    .compactMap { $0 as? SnapFeedCell }.first
+                self.performBoost(on: self.orderedIDs[index], amount: amount, feedbackCell: cell)
+            }
+        }
+        // `-wallet-demo-undo`: takes back the active post's session boosts
+        // ~2s after `-wallet-demo-boost` landed them — the menu's Undo
+        // entry, minus the long-press the sim can't deliver. The pair
+        // exercises the full loop: spend, receipt face, refund, glyph face.
+        if arguments.contains("-wallet-demo-undo") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4.5) { [weak self] in
+                guard let self else { return }
+                let index = self.lifecycle.activeIndex ?? 0
+                guard self.orderedIDs.indices.contains(index) else { return }
+                let cell = self.collectionView.visibleCells
+                    .compactMap { $0 as? SnapFeedCell }.first
+                self.performBoostUndo(on: self.orderedIDs[index], feedbackCell: cell)
             }
         }
         // `-snap-scroll-demo`: animated-scrolls one page forward shortly
@@ -476,6 +555,12 @@ final class SnapFeedViewController: UIViewController {
         settleToolbarAfterDisappearance()
         isOnScreen = false
         refreshVisibility()
+        // Leaving the screen finalizes the session's boosts, same as paging
+        // away — "undo until you move on", and you just moved on. (The
+        // retained timeline can come back to the same post; the spend is
+        // still final: the window is the visit, not the post.)
+        sessionBoostID = nil
+        sessionBoostAmount = 0
     }
 
     // MARK: - Setup
@@ -588,6 +673,26 @@ final class SnapFeedViewController: UIViewController {
                 // pill opens the panel, a strip tap while engaged closes it.
                 cell.onRequestComments = { [weak self] id in self?.presentComments(for: id) }
                 cell.onRequestCommentsClose = { [weak self] in self?.dismissComments() }
+                // The boost spend: wallet verdict here (the cell holds no
+                // balance), theatre back on the cell that asked.
+                cell.onRequestBoost = { [weak self, weak cell] id, amount in
+                    self?.performBoost(on: id, amount: amount, feedbackCell: cell)
+                }
+                cell.onRequestBoostUndo = { [weak self, weak cell] id in
+                    self?.performBoostUndo(on: id, feedbackCell: cell)
+                }
+                // The anchor's number face and wallet context: what this
+                // viewer has already put on this post (the ledger), what
+                // the balance can still afford, and whether any of it is
+                // still session-undoable — a recycled cell for a boosted
+                // post gets its receipt back.
+                if let wallet = self.wallet {
+                    cell.setBoostTotal(wallet.boostTotal(forTarget: id.rawValue))
+                    cell.setBoostContext(
+                        balance: wallet.balance,
+                        undoable: self.sessionBoostID == id ? self.sessionBoostAmount : 0
+                    )
+                }
                 cell.onRequestCommentsPageDrive = { [weak self] phase, translation, velocity in
                     self?.drivePageSwipe(phase, translation: translation, velocity: velocity)
                 }
@@ -600,10 +705,13 @@ final class SnapFeedViewController: UIViewController {
     /// once — they are one state, and splitting them across call sites is
     /// how a half-engaged bar happens.
     ///
-    ///   resting          NAV [‹ back] … [author pill]
-    ///   comments (media) NAV [✕]      … [⇅ sort] [author pill]
-    ///   comments (text)  NAV [‹ back] … [⇅ sort] [author pill]
+    ///   resting          NAV [‹ back] … [🪙 solde] [author pill]
+    ///   comments (media) NAV [✕]      … [🪙 solde] [⇅ sort] [author pill]
+    ///   comments (text)  NAV [‹ back] … [🪙 solde] [⇅ sort] [author pill]
     ///   TOOLBAR          [♫ attribution] … [🔖 ⬆︎] [⋯]   — in every state
+    ///
+    /// (The wallet badge appears only when a wallet is injected; a
+    /// nil-wallet feed keeps the historical runs without it.)
     ///
     /// `hasMedia` picks the LEADING slot: a media post can collapse back to
     /// its layout, a text post has none to collapse to. (It used to pick the
@@ -654,13 +762,22 @@ final class SnapFeedViewController: UIViewController {
         if engaged {
             applyEngagedTrailingRunFit()
         } else {
-            authorIdentityView.setWidthBudget(nil)
+            // Nil (no cap) without a wallet badge, as before; with one the
+            // author gives up the badge's footprint the same way it gives
+            // up the sort pill's — overflow hides the WHOLE item behind a
+            // `•••`, so the cap must be arithmetic, not hope.
+            authorIdentityView.setWidthBudget(restingAuthorBudget())
             commentSortButton.setTitleHidden(false)
         }
 
-        let navItems: [UIBarButtonItem] = engaged
+        var navItems: [UIBarButtonItem] = engaged
             ? [authorItem, .fixedSpace(Spacing.sm), sortItem]
             : [authorItem]
+        // The wallet badge closes the run's left in BOTH states — the same
+        // fixed-space idiom that keeps the sort and author two pills.
+        if let walletBadgeItem {
+            navItems += [.fixedSpace(Spacing.sm), walletBadgeItem]
+        }
         applyTrailingNavItems(navItems, animated: animated)
 
         applyLeadingNavItem(engaged: engaged, hasMedia: hasMedia, animated: animated)
@@ -705,6 +822,7 @@ final class SnapFeedViewController: UIViewController {
                 - (sortWidth + pad)
                 - Spacing.sm
                 - pad
+                - walletItemFootprint()
         }
         func sortWidth() -> CGFloat {
             commentSortButton.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
@@ -723,6 +841,39 @@ final class SnapFeedViewController: UIViewController {
         // Rung 3 needs no branch: if it is STILL below that threshold the
         // handle truncates on its own, because the name has nothing left.
         authorIdentityView.setWidthBudget(budget)
+    }
+
+    /// What the wallet badge takes from the trailing run: its fitted width,
+    /// its glass platter, and the spacer that keeps it its own pill. Zero
+    /// when no wallet is wired — the run is then exactly its historical
+    /// shape and the historical (nil) budgets stay right.
+    private func walletItemFootprint() -> CGFloat {
+        guard walletBadgeItem != nil else { return 0 }
+        let width = walletBadge.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+        return width + Self.itemPlatterPadding + Spacing.sm
+    }
+
+    /// The resting run's items: the author pill alone (no wallet), or the
+    /// pill with the badge to its left, spacer-separated so iOS 26 never
+    /// fuses them into one platter.
+    private func restingTrailingItems() -> [UIBarButtonItem] {
+        guard let walletBadgeItem else { return [authorItem] }
+        return [authorItem, .fixedSpace(Spacing.sm), walletBadgeItem]
+    }
+
+    /// The resting author cap: nil (uncapped, the historical contract)
+    /// without a wallet badge; with one, the bar minus everything that
+    /// isn't the author — the engaged fit's arithmetic minus the sort pill.
+    private func restingAuthorBudget() -> CGFloat? {
+        guard walletBadgeItem != nil else { return nil }
+        let bar = navigationController?.navigationBar.bounds.width ?? view.bounds.width
+        guard bar > 0 else { return nil }
+        let pad = Self.itemPlatterPadding
+        return bar
+            - Self.barSideMargin * 2
+            - (Self.leadingItemWidth + pad)
+            - pad
+            - walletItemFootprint()
     }
 
     /// The leading slot's two faces:
@@ -769,13 +920,63 @@ final class SnapFeedViewController: UIViewController {
         // The author identity rides the *trailing* bar item (right-aligned,
         // like a system floating action), not the centered titleView. One
         // stable custom view, installed exactly once: author changes
-        // cross-fade inside it, never re-negotiating bar layout. It is the
-        // bar's ONLY trailing item — the feed's chrome is identical on every
-        // entry path (menu push and pin flight), so nothing may install
-        // extra items, here or from outside.
+        // cross-fade inside it, never re-negotiating bar layout. The run is
+        // closed on its left by the wallet badge (when a wallet is wired) —
+        // the feed's chrome stays identical on every entry path (menu push
+        // and pin flight), so nothing else may install items, here or from
+        // outside.
         authorItem = UIBarButtonItem(customView: authorIdentityView)
         sortItem = UIBarButtonItem(customView: commentSortButton)
-        navigationItem.rightBarButtonItems = [authorItem]
+        if wallet != nil {
+            // Tappable exactly when a sheet is wired: the badge opens the
+            // same claim sheet the map's does, from any post. Without one
+            // it stays display-only and must not swallow taps meant for
+            // the page.
+            walletBadge.isUserInteractionEnabled = makeWalletSheet != nil
+            if makeWalletSheet != nil {
+                walletBadge.addAction(
+                    UIAction { [weak self] _ in self?.presentWalletSheet() },
+                    for: .primaryActionTriggered
+                )
+            }
+            walletBadgeItem = UIBarButtonItem(customView: walletBadge)
+            // A grown count needs a re-measured wrapper, and the wrapper
+            // belongs to the ITEM: re-adding the same item hands the bar
+            // the same wrapper with the same frozen size (measured in-sim).
+            // A FRESH item is the only thing the bar measures anew.
+            walletBadge.onFittedWidthChange = { [weak self] in
+                guard let self, let old = self.walletBadgeItem,
+                      var items = self.navigationItem.rightBarButtonItems,
+                      let index = items.firstIndex(of: old) else { return }
+                let fresh = UIBarButtonItem(customView: self.walletBadge)
+                self.walletBadgeItem = fresh
+                items[index] = fresh
+                self.navigationItem.rightBarButtonItems = items
+                // The badge is the run's PRIORITY member: when it grows,
+                // the author's budget shrinks by the same points — re-fit
+                // now, or the run overflows into a `•••` on narrow bars.
+                if self.commentsEngagedID != nil {
+                    self.applyEngagedTrailingRunFit()
+                } else {
+                    self.authorIdentityView.setWidthBudget(self.restingAuthorBudget())
+                }
+            }
+            refreshWalletBadge()
+            // The badge (and every visible boost control) re-renders on
+            // every store change — a rail spend, a comments-bar spend, or a
+            // claim taken on the map while this screen sits in the stack
+            // below.
+            appObservers.add(NotificationCenter.default.addObserver(
+                forName: WalletStore.didChangeNotification, object: wallet, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.refreshWalletBadge()
+                    self.refreshVisibleBoostControls()
+                }
+            })
+        }
+        navigationItem.rightBarButtonItems = restingTrailingItems()
 
         // The comments exit, built once and held: it takes the leading slot
         // whenever a media post's comments are open.
@@ -1222,6 +1423,130 @@ final class SnapFeedViewController: UIViewController {
         guard let indexPath = dataSource.indexPath(for: id),
               let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell else { return }
         cell.updateCommentStreams(streams)
+    }
+
+    // MARK: - Boost
+
+    /// The active post's UNDOABLE spend: what this screen has boosted onto
+    /// it while it stayed the active page. Paging away FINALIZES it — the
+    /// lifecycle's resign hook clears the tally — which is the product
+    /// rule stated as ownership: the undo window IS the post's time on
+    /// screen. One post at a time, because only one post is on screen.
+    private var sessionBoostID: PostID?
+    private var sessionBoostAmount = 0
+
+    /// One boost spend, wallet-first: the debit lands synchronously (or is
+    /// refused) before any pixel moves, so the feedback can never promise a
+    /// state the balance doesn't have. Haptics here with the verdict —
+    /// constructed inline, the codebase's idiom — visuals on the cell that
+    /// asked. A nil wallet (unwired host) drops the tap silently; the mock
+    /// store is always wired in the app itself.
+    private func performBoost(on id: PostID, amount: Int, feedbackCell: SnapFeedCell?) {
+        guard let wallet else { return }
+        switch wallet.boost(targetID: id.rawValue, amount: amount) {
+        case .boosted(_, let targetTotal, let spent):
+            // `spent`, never the request: a near-cap boost is CLAMPED to
+            // the remainder, and the tally/float must say what actually
+            // left the wallet.
+            if sessionBoostID == id {
+                sessionBoostAmount += spent
+            } else {
+                sessionBoostID = id
+                sessionBoostAmount = spent
+            }
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            // Receipt before theatre: the anchor flips to (or grows) its
+            // number face, then the "+N" float rises off it.
+            feedbackCell?.setBoostTotal(targetTotal)
+            feedbackCell?.playBoostConfirmation(amount: spent)
+            refreshVisibleBoostControls()
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-wallet-log") {
+                print("[wallet] boosted post=\(id.rawValue) requested=\(amount) spent=\(spent) targetTotal=\(targetTotal) balance=\(wallet.balance)")
+            }
+            #endif
+        case .insufficientBalance(let balance):
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            feedbackCell?.playBoostDenied()
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-wallet-log") {
+                print("[wallet] boost DENIED post=\(id.rawValue) amount=\(amount) balance=\(balance)")
+            }
+            #endif
+        case .targetCapReached(let targetTotal):
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            feedbackCell?.playBoostDenied()
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-wallet-log") {
+                print("[wallet] boost CAP post=\(id.rawValue) targetTotal=\(targetTotal)")
+            }
+            #endif
+        }
+    }
+
+    /// Takes back the whole session spend on `id` — the menu's Undo entry.
+    /// Session-scoped by construction: the guard requires the tally to
+    /// still name this post, and the tally dies the moment the post resigns
+    /// the active page.
+    private func performBoostUndo(on id: PostID, feedbackCell: SnapFeedCell?) {
+        guard let wallet, sessionBoostID == id, sessionBoostAmount > 0,
+              let result = wallet.undoBoost(targetID: id.rawValue, amount: sessionBoostAmount)
+        else { return }
+        let refunded = sessionBoostAmount
+        sessionBoostID = nil
+        sessionBoostAmount = 0
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        feedbackCell?.setBoostTotal(result.targetTotal)
+        feedbackCell?.playBoostRefund(amount: refunded)
+        refreshVisibleBoostControls()
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-wallet-log") {
+            print("[wallet] boost UNDO post=\(id.rawValue) refunded=\(refunded) targetTotal=\(result.targetTotal) balance=\(result.newBalance)")
+        }
+        #endif
+    }
+
+    /// Renders one wallet snapshot onto the header badge — balance in the
+    /// compact spelling, plus the claim-countdown ring (self-animating, so
+    /// this only needs to run on store changes, not on a clock). The pulse
+    /// rides the sheet's presence: a badge that can open the claim sheet
+    /// may advertise a waiting claim; a display-only one must not promise
+    /// what it can't deliver.
+    private func refreshWalletBadge() {
+        guard let wallet else { return }
+        let snapshot = wallet.snapshot()
+        walletBadge.update(
+            balance: snapshot.balance,
+            claimAvailable: makeWalletSheet != nil && snapshot.claimAvailable,
+            claimProgress: snapshot.claimCountdown.map {
+                WalletBadgeButton.ClaimProgress(fraction: $0.fraction, remaining: $0.remaining)
+            }
+        )
+    }
+
+    /// Presents the shell-vended wallet sheet over this screen — the badge's
+    /// tap, and the `-feed-open-wallet` hook's shared path.
+    private func presentWalletSheet() {
+        guard let makeWalletSheet, presentedViewController == nil else { return }
+        present(makeWalletSheet(), animated: true)
+    }
+
+    /// Pushes the wallet's current answer — affordability and the
+    /// session-undoable tally — into every visible cell's boost anchor, so
+    /// a spend (or a claim on another screen) enables/disables the control
+    /// and updates the menu it will build on its next long-press.
+    private func refreshVisibleBoostControls() {
+        guard let wallet else { return }
+        let balance = wallet.balance
+        for indexPath in collectionView.indexPathsForVisibleItems {
+            guard orderedIDs.indices.contains(indexPath.item),
+                  let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell else { continue }
+            let id = orderedIDs[indexPath.item]
+            cell.setBoostContext(
+                balance: balance,
+                undoable: sessionBoostID == id ? sessionBoostAmount : 0
+            )
+        }
     }
 
     // MARK: - Comments engagement
@@ -1773,6 +2098,12 @@ final class SnapFeedViewController: UIViewController {
     private func apply(_ transition: SnapLifecycleDispatcher.Transition) {
         if let resign = transition.resign {
             lifecycleCell(at: resign)?.didResignActive()
+            // Paging away FINALIZES the session's boosts: the undo window
+            // is the post's time on screen, and it just ended.
+            if orderedIDs.indices.contains(resign), sessionBoostID == orderedIDs[resign] {
+                sessionBoostID = nil
+                sessionBoostAmount = 0
+            }
             // An engagement is PAGE-SCOPED: the engaged page resigning
             // retires it instantly (a belt for interrupted teardowns —
             // the animated dismiss normally lands before any page change,
@@ -2372,6 +2703,9 @@ extension SnapFeedViewController: ZoomTransitionDestination {
               let model = modelsByID[orderedIDs[index]] else { return }
         chrome.configure(with: model)
         chrome.setImagePipeline(imagePipeline)
+        // The replica's boost anchor wears the same face as the live one —
+        // a boosted post must not flash back to the glyph mid-flight.
+        chrome.setBoostTotal(wallet?.boostTotal(forTarget: model.id.rawValue) ?? 0)
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
             print("[flight-chrome] \(model.id.rawValue) hasMedia=\(model.mediaURL != nil)"
@@ -2568,7 +2902,7 @@ final class SnapFeedCollectionView: UICollectionView {
     static func claimsTouches(_ view: UIView) -> Bool {
         for current in sequence(first: view, next: { $0.superview }) {
             if current is CommentsInputBar { return false }
-            if current is SnapShortcutRailView || current is SnapRailComposeButton
+            if current is SnapShortcutRailView || current is SnapRailBoostButton
                 || current is SnapCommentsContainerView {
                 return true
             }

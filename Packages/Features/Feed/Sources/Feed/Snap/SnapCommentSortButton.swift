@@ -17,7 +17,7 @@ import UIKit
 /// Selection is honest local state (menu checkmark + title follow the
 /// chosen order); the ordering of the stream itself is a SEAM — the mock
 /// BFF carries no comment ranking yet, so `onOrderChange` waits unwired,
-/// exactly like the composer's `onAttachMedia`.
+/// exactly like the composer's `onVoiceNote`.
 final class SnapCommentSortButton: UIButton {
     enum Order: String, CaseIterable {
         case recent = "Recent"

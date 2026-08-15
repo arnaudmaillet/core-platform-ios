@@ -38,6 +38,10 @@ actor FixedPostsFeedProvider: FeedProviding, RepointableFeedProviding {
 
     func cachedFirstPage() async -> [FeedEntry]? { nil }
 
+    /// Forwarded: the pre-push seed peeks THROUGH this provider at the real
+    /// repository's warmed cache (the pins prewarmed it).
+    nonisolated func peekPost(_ id: PostID) -> FeedEntry? { base.peekPost(id) }
+
     func loadFirstPage() async throws -> FeedPage {
         // Hydrate concurrently, preserving the tapped order. A post that fails to
         // hydrate (deleted, expired) is dropped rather than failing the whole

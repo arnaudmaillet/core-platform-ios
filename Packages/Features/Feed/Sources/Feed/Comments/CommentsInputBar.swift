@@ -1,3 +1,4 @@
+import CoreStorage
 import DesignSystem
 import MediaCore
 import UIKit
@@ -12,12 +13,17 @@ import UIKit
 final class CommentsInputBar: UIView {
     /// Fired with trimmed, non-empty text; the field clears itself first.
     var onSend: ((String) -> Void)?
-    /// Fired by the media (+) button; media composition is the host's affair
-    /// (the chat bar's contract, verbatim).
-    var onAttachMedia: (() -> Void)?
+    /// Fired by the boost (star) button with the point amount to spend —
+    /// the tap default, or a denomination from the long-press menu. The spend
+    /// itself is the host's affair (it owns the post identity and the
+    /// wallet); the refusal comes back through `playBoostDenied`.
+    var onBoost: ((Int) -> Void)?
+    /// Fired by the boost menu's Undo entry — the host refunds the session
+    /// spend (it owns the tally and the wallet; the bar only shows the door).
+    var onBoostUndo: (() -> Void)?
     /// Fired by the MICROPHONE face (the idle trailing slot): the voice-note
     /// seam. Unwired for now — an honest affordance whose capture flow does
-    /// not exist yet, the same posture as `onAttachMedia`.
+    /// not exist yet.
     ///
     /// The slot used to hold a ✕ that collapsed the engagement. The exit
     /// moved to the toolbar, which is where the layout's other mode controls
@@ -56,7 +62,7 @@ final class CommentsInputBar: UIView {
         static let controlSize: CGFloat = 38
         /// The face inside the 38pt bubble. Inset so the glass reads as a
         /// container around it rather than a rim the disc has covered —
-        /// the same relationship the mic and "+" glyphs have with theirs.
+        /// the same relationship the mic and boost glyphs have with theirs.
         static let avatarDiameter: CGFloat = 30
     }
 
@@ -68,7 +74,7 @@ final class CommentsInputBar: UIView {
     private let avatarView = MonogramAvatarView(diameter: Metrics.avatarDiameter)
     private let avatarImageView = AvatarImageView()
     /// The glass bubble the avatar sits in, and the button that owns its
-    /// touches. The bubble matches the mic and "+" beside it — the composer
+    /// touches. The bubble matches the mic and boost button beside it — the composer
     /// reads as one row of glass controls with a face at its head — and the
     /// button carries the profile switcher menu.
     ///
@@ -88,7 +94,7 @@ final class CommentsInputBar: UIView {
     private let field = UIVisualEffectView(effect: nil)
     private let textView = UITextView()
     private let placeholderLabel = UILabel()
-    private let mediaButton = UIButton(configuration: .glass())
+    private let boostButton = UIButton(configuration: .glass())
     private let sendButton = UIButton(configuration: .prominentGlass())
     /// The trailing slot's UTILITY face (send's overlay partner): a
     /// keyboard-state morphing control. Keyboard closed → the MICROPHONE
@@ -142,12 +148,31 @@ final class CommentsInputBar: UIView {
         field.clipsToBounds = true
         field.cornerConfiguration = .capsule(maximumRadius: Metrics.controlSize / 2)
 
-        mediaButton.configuration?.image = UIImage(
-            systemName: "plus",
+        // The boost control, in the slot the media "+" held: tap spends the
+        // default denomination, long-press opens the amount menu (the rail
+        // anchor's exact contract — one post, two surfaces, one behavior).
+        boostButton.configuration?.image = UIImage(
+            systemName: "star.fill",
             withConfiguration: UIImage.SymbolConfiguration(weight: .semibold)
         )
-        mediaButton.configuration?.cornerStyle = .capsule
-        mediaButton.addAction(UIAction { [weak self] _ in self?.onAttachMedia?() }, for: .primaryActionTriggered)
+        boostButton.configuration?.cornerStyle = .capsule
+        boostButton.accessibilityLabel = "Boost post"
+        boostButton.addAction(
+            UIAction { [weak self] _ in self?.onBoost?(WalletStore.Policy.tapBoostAmount) },
+            for: .primaryActionTriggered
+        )
+        // DEFERRED and uncached, like the rail anchor's: built at present
+        // time from the pushed wallet context, so unaffordable denominations
+        // arrive disabled and the Undo entry exists exactly while a session
+        // spend is takeable.
+        boostButton.menu = UIMenu(
+            title: "Boost this post",
+            children: [
+                UIDeferredMenuElement.uncached { [weak self] completion in
+                    completion(self?.currentBoostMenuActions() ?? [])
+                },
+            ]
+        )
 
         sendButton.configuration?.image = UIImage(
             systemName: "arrow.up",
@@ -212,19 +237,19 @@ final class CommentsInputBar: UIView {
         addSubview(field)
         addSubview(sendButton)
         addSubview(utilityButton)
-        addSubview(mediaButton)
+        addSubview(boostButton)
         avatarBubble.translatesAutoresizingMaskIntoConstraints = false
-        mediaButton.translatesAutoresizingMaskIntoConstraints = false
+        boostButton.translatesAutoresizingMaskIntoConstraints = false
         field.translatesAutoresizingMaskIntoConstraints = false
         sendButton.translatesAutoresizingMaskIntoConstraints = false
         utilityButton.translatesAutoresizingMaskIntoConstraints = false
         fieldHeight = field.heightAnchor.constraint(equalToConstant: Metrics.controlSize)
         // Four slots, leading to trailing: the viewer's AVATAR, the field,
-        // the mic/send toggle, and "+". Bottom-baseline anchoring — the
+        // the mic/send toggle, and the boost button. Bottom-baseline anchoring — the
         // field grows upward while the round controls hold their stations,
         // and the field owns all the flexible width.
         //
-        // The "+" moved from the leading edge to the trailing one so the
+        // This slot moved from the leading edge to the trailing one so the
         // avatar could open the bar (a composer says who is speaking before
         // it offers what to attach), which also puts both action controls in
         // one thumb-reachable cluster. Mic and send OVERLAY a single slot
@@ -246,11 +271,11 @@ final class CommentsInputBar: UIView {
             utilityButton.centerYAnchor.constraint(equalTo: sendButton.centerYAnchor),
             utilityButton.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
             utilityButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
-            mediaButton.leadingAnchor.constraint(equalTo: sendButton.trailingAnchor, constant: Spacing.sm),
-            mediaButton.trailingAnchor.constraint(equalTo: trailingAnchor),
-            mediaButton.bottomAnchor.constraint(equalTo: bottomAnchor),
-            mediaButton.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
-            mediaButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
+            boostButton.leadingAnchor.constraint(equalTo: sendButton.trailingAnchor, constant: Spacing.sm),
+            boostButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+            boostButton.bottomAnchor.constraint(equalTo: bottomAnchor),
+            boostButton.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
+            boostButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
         ])
 
         // The disc is NEVER empty. Before an identity resolves the bar shows
@@ -478,6 +503,195 @@ final class CommentsInputBar: UIView {
     /// Raises the keyboard into the composer — the row-tap reply trigger.
     func focusComposer() {
         textView.becomeFirstResponder()
+    }
+
+    // MARK: - Boost feedback
+
+    /// The viewer's cumulative spend on the represented post — flips the
+    /// boost button between its star-glyph face (0, an invitation) and
+    /// the gold number itself (a receipt): the rail anchor's exact contract
+    /// (`SnapRailBoostButton.setSpentTotal`), on this surface. Owned by the
+    /// host, which owns the post identity and the wallet.
+    func setBoostTotal(_ total: Int) {
+        guard total != boostSpentTotal else { return }
+        boostSpentTotal = total
+        if total > 0 {
+            var title = AttributedString(total.formattedCompact())
+            title.font = .monospacedDigitSystemFont(ofSize: 13, weight: .bold)
+            title.foregroundColor = .systemYellow
+            boostButton.configuration?.attributedTitle = title
+            boostButton.configuration?.image = nil
+            // `.glass()`'s default content insets leave a 38pt circle ~10pt
+            // of text width, so "100" WRAPPED into a vertical digit stack
+            // (measured in-sim). The number face zeroes them — the rail
+            // anchor's recipe, whose circle never wrapped.
+            boostButton.configuration?.contentInsets = .zero
+        } else {
+            boostButton.configuration?.attributedTitle = nil
+            boostButton.configuration?.image = UIImage(
+                systemName: "star.fill",
+                withConfiguration: UIImage.SymbolConfiguration(weight: .semibold)
+            )
+        }
+        boostButton.accessibilityValue = total > 0 ? "\(total) points spent" : nil
+        // The receipt moves the cap's remainder, and the remainder moves
+        // the enable state (a full post refuses even the tap).
+        refreshBoostEnabled()
+    }
+
+    /// The number face's current value, so `setBoostTotal` is cheap to call
+    /// from every refresh path without re-rendering an unchanged button.
+    private var boostSpentTotal = 0
+    /// The wallet context the host pushes (`setBoostContext`): what the
+    /// balance can still afford, and how much of this post's spend is
+    /// session-undoable. `Int.max` at rest so an unwired host keeps the
+    /// historical always-enabled affordance.
+    private var boostBalance = Int.max
+    private var boostUndoableAmount = 0
+
+    /// The affordability + undo state, pushed on configure and on every
+    /// wallet change. Disables the button only when it has NOTHING to
+    /// offer — tap unaffordable AND nothing to undo — because a disabled
+    /// `UIButton` delivers no long-press either, and the menu is the
+    /// undo's only door.
+    func setBoostContext(balance: Int, undoableAmount: Int) {
+        boostBalance = balance
+        boostUndoableAmount = undoableAmount
+        refreshBoostEnabled()
+    }
+
+    private func refreshBoostEnabled() {
+        let remaining = max(0, WalletStore.Policy.perTargetBoostCap - boostSpentTotal)
+        // A tap near the cap costs only the remainder (the store clamps),
+        // so affordability is judged against that, not the flat tap price.
+        let tapCost = min(WalletStore.Policy.tapBoostAmount, remaining)
+        boostButton.isEnabled = boostUndoableAmount > 0 || (remaining > 0 && boostBalance >= tapCost)
+    }
+
+    /// Internal, not private: the deferred menu resolves only at present
+    /// time, which a unit test can't trigger — the builder is the seam.
+    func currentBoostMenuActions() -> [UIMenuElement] {
+        // The rail anchor's exact menu: Max (the cap's remainder bounded by
+        // the balance), the fixed denomination(s), Undo while the session
+        // holds something.
+        let remaining = max(0, WalletStore.Policy.perTargetBoostCap - boostSpentTotal)
+        let maxAmount = min(remaining, boostBalance)
+        var actions: [UIMenuElement] = []
+
+        let shownMax = maxAmount > 0
+            ? maxAmount
+            : (remaining > 0 ? remaining : WalletStore.Policy.perTargetBoostCap)
+        let maxAction = UIAction(
+            title: "Max (\(shownMax) points)",
+            image: UIImage(systemName: "star.fill")
+        ) { [weak self] _ in self?.onBoost?(maxAmount) }
+        if maxAmount <= 0 { maxAction.attributes = .disabled }
+        actions.append(maxAction)
+
+        for amount in WalletStore.Policy.boostDenominations.reversed() {
+            let action = UIAction(
+                title: "\(amount) points",
+                image: UIImage(systemName: "star.fill")
+            ) { [weak self] _ in self?.onBoost?(amount) }
+            if amount > boostBalance || amount > remaining { action.attributes = .disabled }
+            actions.append(action)
+        }
+        if boostUndoableAmount > 0 {
+            actions.append(UIAction(
+                title: "Undo boosts (\(boostUndoableAmount))",
+                image: UIImage(systemName: "arrow.uturn.backward"),
+                attributes: .destructive
+            ) { [weak self] _ in self?.onBoostUndo?() })
+        }
+        return actions
+    }
+
+    /// The refund's receipt: the confirmation float mirrored — a cool "−N"
+    /// sinking off the button. White, not gold: an undo is not a payout.
+    func playBoostRefund(amount: Int) {
+        guard boostButton.bounds.width > 0 else { return }
+        let label = UILabel()
+        label.text = "−\(amount)"
+        label.font = .monospacedDigitSystemFont(ofSize: 17, weight: .heavy)
+        label.textColor = UIColor.white.withAlphaComponent(0.9)
+        label.layer.shadowColor = UIColor.black.cgColor
+        label.layer.shadowOpacity = 0.5
+        label.layer.shadowRadius = 3
+        label.layer.shadowOffset = .zero
+        label.sizeToFit()
+        label.center = CGPoint(x: boostButton.center.x, y: boostButton.frame.minY - Spacing.sm)
+        label.alpha = 0
+        label.isUserInteractionEnabled = false
+        addSubview(label)
+        UIView.animateKeyframes(withDuration: 0.9, delay: 0, options: [.calculationModeCubic]) {
+            UIView.addKeyframe(withRelativeStartTime: 0, relativeDuration: 0.2) {
+                label.alpha = 1
+                label.center.y += 14
+            }
+            UIView.addKeyframe(withRelativeStartTime: 0.2, relativeDuration: 0.55) {
+                label.center.y += 20
+            }
+            UIView.addKeyframe(withRelativeStartTime: 0.55, relativeDuration: 0.45) {
+                label.alpha = 0
+            }
+        } completion: { _ in
+            label.removeFromSuperview()
+        }
+    }
+
+    /// The spend's visible receipt: a gold "+N" born on the boost button that
+    /// rises and dissolves, plus a press-bounce on the button — the rail
+    /// anchor's theatre (`SnapChromeView.playBoostConfirmation`), replayed on
+    /// this surface so one spend looks the same wherever it was made. The bar
+    /// doesn't clip, so the label may rise past its top edge by design.
+    func playBoostConfirmation(amount: Int) {
+        guard boostButton.bounds.width > 0 else { return }
+        let label = UILabel()
+        label.text = "+\(amount)"
+        label.font = .monospacedDigitSystemFont(ofSize: 17, weight: .heavy)
+        label.textColor = .systemYellow
+        label.layer.shadowColor = UIColor.black.cgColor
+        label.layer.shadowOpacity = 0.5
+        label.layer.shadowRadius = 3
+        label.layer.shadowOffset = .zero
+        label.sizeToFit()
+        label.center = CGPoint(x: boostButton.center.x, y: boostButton.frame.minY - Spacing.sm)
+        label.alpha = 0
+        label.isUserInteractionEnabled = false
+        addSubview(label)
+        UIView.animateKeyframes(withDuration: 0.9, delay: 0, options: [.calculationModeCubic]) {
+            UIView.addKeyframe(withRelativeStartTime: 0, relativeDuration: 0.2) {
+                label.alpha = 1
+                label.center.y -= 18
+            }
+            UIView.addKeyframe(withRelativeStartTime: 0.2, relativeDuration: 0.55) {
+                label.center.y -= 26
+            }
+            UIView.addKeyframe(withRelativeStartTime: 0.55, relativeDuration: 0.45) {
+                label.alpha = 0
+            }
+        } completion: { _ in
+            label.removeFromSuperview()
+        }
+        boostButton.transform = CGAffineTransform(scaleX: 0.82, y: 0.82)
+        UIView.animate(
+            withDuration: 0.5, delay: 0,
+            usingSpringWithDamping: 0.45, initialSpringVelocity: 4,
+            options: [.allowUserInteraction]
+        ) {
+            self.boostButton.transform = .identity
+        }
+    }
+
+    /// The refusal: a head-shake on the boost button — the wallet couldn't
+    /// cover the spend, nothing changed, and no label flies (a "-0" would
+    /// read as a payout). The host pairs it with the error haptic.
+    func playBoostDenied() {
+        let shake = CAKeyframeAnimation(keyPath: "transform.translation.x")
+        shake.values = [0, -7, 6, -4, 3, -1, 0]
+        shake.duration = 0.4
+        shake.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        boostButton.layer.add(shake, forKey: "boost.denied")
     }
 
     /// The trailing slot's three-state toggle:
