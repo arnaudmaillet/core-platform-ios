@@ -1,6 +1,7 @@
 import CoreModels
 import DesignSystem
 import MediaCore
+import QuartzCore
 import UIKit
 
 /// One entry in the sub-filter bar: the refinement it applies plus its pill
@@ -35,7 +36,7 @@ struct MapSubFilterOption: Equatable {
         MapSubFilterOption(
             subFilter: .placeCategory("cafes"),
             content: MapPillButton.Content(
-                title: "Cafes",
+                title: nil,
                 symbolName: "cup.and.saucer", selectedSymbolName: "cup.and.saucer.fill",
                 accessibilityLabel: "Cafes"
             ),
@@ -44,7 +45,7 @@ struct MapSubFilterOption: Equatable {
         MapSubFilterOption(
             subFilter: .placeCategory("restaurants"),
             content: MapPillButton.Content(
-                title: "Restaurants",
+                title: nil,
                 symbolName: "fork.knife", selectedSymbolName: "fork.knife",
                 accessibilityLabel: "Restaurants"
             ),
@@ -53,7 +54,7 @@ struct MapSubFilterOption: Equatable {
         MapSubFilterOption(
             subFilter: .placeCategory("parks"),
             content: MapPillButton.Content(
-                title: "Parks",
+                title: nil,
                 symbolName: "tree", selectedSymbolName: "tree.fill",
                 accessibilityLabel: "Parks"
             ),
@@ -62,7 +63,7 @@ struct MapSubFilterOption: Equatable {
         MapSubFilterOption(
             subFilter: .placeCategory("nightlife"),
             content: MapPillButton.Content(
-                title: "Nightlife",
+                title: nil,
                 symbolName: "moon.stars", selectedSymbolName: "moon.stars.fill",
                 accessibilityLabel: "Nightlife"
             ),
@@ -83,13 +84,21 @@ struct MapSubFilterOption: Equatable {
         !catalogue.isEmpty
     }
 
-    /// Person refinements (Friends/Following rows): avatar + first name.
+    /// Person refinements (Friends/Following rows): the AVATAR, and nothing
+    /// else. `MapPillButton` pins width to height for a title-less pill, so
+    /// dropping the name is what makes the pill a circle.
+    ///
+    /// A face identifies someone faster than a first name does, and a row of
+    /// circles fits roughly twice as many people on a phone — the row exists
+    /// to be scanned. The name has not disappeared: it is the long-press
+    /// menu's title (`menu(for:)`), and it is what VoiceOver reads, since the
+    /// label is the only name a screen reader ever had.
     static func people(_ people: [MapFavorite]) -> [MapSubFilterOption] {
         people.map { person in
             MapSubFilterOption(
                 subFilter: .profile(person.profileID),
                 content: MapPillButton.Content(
-                    title: firstName(of: person.title),
+                    title: nil,
                     symbolName: "person.crop.circle", selectedSymbolName: "person.crop.circle.fill",
                     accessibilityLabel: person.title
                 ),
@@ -174,9 +183,17 @@ final class MapSubFilterBarView: UIView {
     private(set) var selectedSubFilters: Set<MapSubFilter> = []
 
     /// One size below the main bar's 36pt family, per the type ladder.
-    static let pillHeight: CGFloat = 32
+    /// The pill's diameter — every pill in this row is a circle now, so this
+    /// is both. 32 → 40 → 48: a bare avatar has to carry the identity a name
+    /// used to, and it is the whole tap target. At 48 the photo inside it
+    /// (`MapPillButton.avatarInset` off the diameter, so 44pt of face) is
+    /// legible at a glance rather than a coloured dot.
+    static let pillHeight: CGFloat = 48
     /// Same halo headroom rationale as the main bar.
-    static let verticalPadding: CGFloat = 6
+    /// Breathing room above and below the pills, so the glass highlights and
+    /// the selection glow render fully. Grown with the pills — the same 6pt
+    /// that framed a 32pt pill reads as a crowded band around a 48pt one.
+    static let verticalPadding: CGFloat = 8
     static var barHeight: CGFloat { pillHeight + verticalPadding * 2 }
 
     /// The fixed button's trailing edge in bar coordinates. A CONSTANT, not a
@@ -204,7 +221,7 @@ final class MapSubFilterBarView: UIView {
     }
 
     private static let allContent = MapPillButton.Content(
-        title: "All",
+        title: nil,
         symbolName: "sparkles", selectedSymbolName: "sparkles",
         accessibilityLabel: "All"
     )
@@ -216,6 +233,12 @@ final class MapSubFilterBarView: UIView {
     /// Resolved avatars, keyed by profile — survives cell reuse and option
     /// refreshes (the pipeline's cache makes re-resolution cheap anyway).
     private var avatarCache: [ProfileID: UIImage] = [:]
+    /// Handles already seen for a profile, so an option set that arrives
+    /// without one cannot un-name someone the bar has already identified.
+    /// See `carryingKnownHandles(_:)`.
+    private var handleCache: [ProfileID: String] = [:]
+    /// Menu-header faces, circle-cropped from `avatarCache`.
+    private var headerImageCache: [ProfileID: UIImage] = [:]
     private var avatarTasks: [Task<Void, Never>] = []
     /// Monotonic token superseding in-flight cross-dissolves: a stale
     /// fade-out completion must never swap content selected later (rapid
@@ -248,7 +271,10 @@ final class MapSubFilterBarView: UIView {
         configuration.scrollDirection = .horizontal
 
         let itemSize = NSCollectionLayoutSize(
-            widthDimension: .estimated(80), heightDimension: .absolute(Self.pillHeight)
+            // Absolute, not estimated: every pill is a circle, so its width IS
+            // its height and there is nothing left to measure.
+            widthDimension: .absolute(Self.pillHeight),
+            heightDimension: .absolute(Self.pillHeight)
         )
         let group = NSCollectionLayoutGroup.horizontal(
             layoutSize: itemSize, subitems: [NSCollectionLayoutItem(layoutSize: itemSize)]
@@ -302,7 +328,7 @@ final class MapSubFilterBarView: UIView {
                 cell.onTap = { [weak self] in self?.didTap(subFilter) }
                 cell.setAvatar(self.optionsBySubFilter[subFilter]?.favorite
                     .flatMap { self.avatarCache[$0.profileID] })
-                cell.menuProvider = { [weak self] in self?.menu(for: subFilter) }
+                cell.menuProvider = { [weak self] in self?.pillMenu(for: subFilter) }
             }
         }
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) {
@@ -349,6 +375,7 @@ final class MapSubFilterBarView: UIView {
         for task in avatarTasks { task.cancel() }
         avatarTasks.removeAll()
         selectedSubFilters = []
+        let options = carryingKnownHandles(options)
         orderedSubFilters = options.map(\.subFilter)
         optionsBySubFilter = Dictionary(uniqueKeysWithValues: options.map { ($0.subFilter, $0) })
 
@@ -385,6 +412,76 @@ final class MapSubFilterBarView: UIView {
         loadAvatars(for: options)
     }
 
+    #if DEBUG
+    /// `-maps-subfilter-menu-open`: presents a pill's long-press menu so it
+    /// can be SEEN. The audit print proves the menu is built and titled; only
+    /// a screenshot proves iOS renders that title, and a long press cannot be
+    /// injected. Flipping the pill to menu-as-primary for the one demo tap is
+    /// the only way to make UIKit present it.
+    /// The header of the menu INSTALLED on that pill — see
+    /// `MapPillCell.debugInstalledMenuTitle`.
+    func debugInstalledMenuTitle(for subFilter: MapSubFilter) -> String? {
+        guard let indexPath = dataSource.indexPath(for: .subFilter(subFilter)),
+              let cell = collectionView.cellForItem(at: indexPath) as? MapPillCell
+        else { return nil }
+        return cell.debugInstalledMenuTitle
+    }
+
+    /// The header's second line as INSTALLED on the pill.
+    func debugInstalledMenuSubtitle(for subFilter: MapSubFilter) -> String? {
+        guard let indexPath = dataSource.indexPath(for: .subFilter(subFilter)),
+              let cell = collectionView.cellForItem(at: indexPath) as? MapPillCell
+        else { return nil }
+        return cell.debugInstalledMenuSubtitle
+    }
+
+    func debugPresentMenu(for subFilter: MapSubFilter) {
+        guard let indexPath = dataSource.indexPath(for: .subFilter(subFilter)),
+              let cell = collectionView.cellForItem(at: indexPath) as? MapPillCell
+        else { return }
+        cell.debugPresentMenu()
+    }
+    #endif
+
+    /// Fills in handles the bar already knows.
+    ///
+    /// ⚠️ The menu header is drawn from whatever `MapFavorite` the row is
+    /// holding, and a person whose handle is momentarily absent renders a
+    /// one-line header that grows a second line when a fuller favorite
+    /// arrives — the menu changing shape under a thumb that is already on it.
+    /// A screen recording caught exactly that: the handle appearing ~1.8s
+    /// after the menu opened, in place.
+    ///
+    /// Every path in this feature hydrates title, avatar and handle from ONE
+    /// profile response, so a handle-less favorite should not exist — and on
+    /// the current code none is reachable (traced at every timing, both the
+    /// curated and the graph-fallback paths). This does not trust that. Once
+    /// a handle is known for a profile it is kept and reapplied, so identity
+    /// only ever gains detail, never loses it, whichever path fills the row.
+    private func carryingKnownHandles(_ options: [MapSubFilterOption]) -> [MapSubFilterOption] {
+        for option in options {
+            guard let favorite = option.favorite,
+                  let handle = favorite.handle, !handle.isEmpty else { continue }
+            handleCache[favorite.profileID] = handle
+        }
+        return options.map { option in
+            guard let favorite = option.favorite,
+                  favorite.handle?.isEmpty ?? true,
+                  let known = handleCache[favorite.profileID]
+            else { return option }
+            return MapSubFilterOption(
+                subFilter: option.subFilter,
+                content: option.content,
+                favorite: MapFavorite(
+                    profileID: favorite.profileID,
+                    title: favorite.title,
+                    avatarURL: favorite.avatarURL,
+                    handle: known
+                )
+            )
+        }
+    }
+
     /// The row's items: All at the head, then the refinements in order.
     /// How many refinements a row needs before it is worth heading with All.
     ///
@@ -419,6 +516,7 @@ final class MapSubFilterBarView: UIView {
     /// laid out for). Lands as the sheet begins dismissing, so the row is
     /// already right by the time it is uncovered.
     func restack(to options: [MapSubFilterOption]) {
+        let options = carryingKnownHandles(options)
         orderedSubFilters = options.map(\.subFilter)
         optionsBySubFilter = Dictionary(uniqueKeysWithValues: options.map { ($0.subFilter, $0) })
         // A restack can now ADD people (someone favorited from their profile
@@ -486,10 +584,16 @@ final class MapSubFilterBarView: UIView {
                 guard let image = try? await imagePipeline.image(for: url),
                       let self, !Task.isCancelled else { return }
                 self.avatarCache[favorite.profileID] = image
+                self.headerImageCache[favorite.profileID] = nil
                 // Atomic content refresh — no width animation on arrival.
                 UIView.performWithoutAnimation {
                     if let indexPath = self.dataSource.indexPath(for: .subFilter(subFilter)) {
-                        (self.collectionView.cellForItem(at: indexPath) as? MapPillCell)?.setAvatar(image)
+                        let cell = self.collectionView.cellForItem(at: indexPath) as? MapPillCell
+                        cell?.setAvatar(image)
+                        // The menu was built while this face was still a
+                        // placeholder glyph — rebuild it, or the header keeps
+                        // the glyph until the next restack.
+                        cell?.refreshMenu()
                         self.collectionView.collectionViewLayout.invalidateLayout()
                         self.collectionView.layoutIfNeeded()
                     }
@@ -526,8 +630,72 @@ final class MapSubFilterBarView: UIView {
     /// Remove nearest the thumb. `.priority` pins the first action closest to
     /// the touch and leaves Remove farthest from it.
     func menu(for subFilter: MapSubFilter) -> UIMenu? {
+        guard let built = pillMenu(for: subFilter) else { return nil }
+        return UIMenu(
+            title: built.title,
+            children: [built.header].compactMap { $0 } + built.liveSection()
+        )
+    }
+
+    /// The same menu, split into what the pill can draw immediately and what
+    /// it must ask for when the menu opens — see `MapPillMenu`. This is what
+    /// the cell installs; `menu(for:)` is the assembled view of it, and both
+    /// come from the same two builders so they cannot drift.
+    func pillMenu(for subFilter: MapSubFilter) -> MapPillMenu? {
         guard let option = optionsBySubFilter[subFilter] else { return nil }
         let entity = MapSubFilterEntity(option: option)
+        let label = option.content.accessibilityLabel
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-maps-trace-menu") {
+            print("[maps] pill menu built at \(CACurrentMediaTime()) for \(subFilter) "
+                + "title=\"\(option.favorite?.title ?? "-")\" "
+                + "handle=\(option.favorite?.handle.map { "\"\($0)\"" } ?? "nil")")
+        }
+        #endif
+        let header = headerSection(for: option, entity: entity, fallback: label)
+        return MapPillMenu(
+            // A headed menu has no caption: the header IS the name, and UIKit
+            // would otherwise draw it twice.
+            title: header == nil ? entity.menuTitle(fallback: label) : "",
+            header: header,
+            liveSection: { [weak self] in
+                [self?.verbsSection(for: subFilter, entity: entity)].compactMap { $0 }
+            }
+        )
+    }
+
+    /// A PERSON is headed by a tappable row — their face, their name, and
+    /// their handle under it — which opens the profile. It sits in its own
+    /// inline section, and that is what draws the separator between the
+    /// subject of the menu and the verbs acting on it.
+    ///
+    /// Everything else keeps the plain caption: a place category has no
+    /// profile behind it, so a header that navigates nowhere would only look
+    /// like a dead row.
+    ///
+    /// Every field here is read straight off the in-memory `MapFavorite` —
+    /// nothing is fetched, awaited or resolved, which is what lets the cell
+    /// install this eagerly.
+    private func headerSection(
+        for option: MapSubFilterOption,
+        entity: MapSubFilterEntity,
+        fallback: String
+    ) -> UIMenu? {
+        guard let header = entity.menuHeader(fallback: fallback) else { return nil }
+        let subFilter = option.subFilter
+        return UIMenu(options: .displayInline, children: [
+            UIAction(
+                title: header.title,
+                subtitle: header.subtitle,
+                image: headerImage(for: option),
+                handler: { [weak self] _ in self?.perform(header.action, on: subFilter) }
+            )
+        ])
+    }
+
+    /// The verbs, read at the moment the menu opens: the mute entry reflects
+    /// live state rather than whatever was true when the cell was configured.
+    private func verbsSection(for subFilter: MapSubFilter, entity: MapSubFilterEntity) -> UIMenu {
         let muted = if case .person(let favorite) = entity {
             isMuted?(favorite.profileID) ?? false
         } else {
@@ -541,7 +709,26 @@ final class MapSubFilterBarView: UIView {
                 handler: { [weak self] _ in self?.perform(action, on: subFilter) }
             )
         }
-        return UIMenu(children: children)
+        return UIMenu(options: .displayInline, children: children)
+    }
+
+    /// The header's face: the resolved avatar, circle-cropped, or the generic
+    /// person glyph while it is still loading. Cropped rather than handed over
+    /// square because every other place this photo appears is a circle, and a
+    /// menu row is the one place UIKit will not round it for us.
+    private func headerImage(for option: MapSubFilterOption) -> UIImage? {
+        guard let profileID = option.favorite?.profileID,
+              let avatar = avatarCache[profileID]
+        else { return UIImage(systemName: "person.crop.circle") }
+        if let cropped = headerImageCache[profileID] { return cropped }
+        // Cropping is a render pass, and the menu is now built whenever a
+        // cell is configured rather than when one is opened — so this runs
+        // for every visible pill on every restack. Cached against the avatar
+        // that produced it (`loadAvatars` drops the entry when a new one
+        // resolves).
+        let cropped = avatar.mapMenuHeaderAvatar()
+        headerImageCache[profileID] = cropped
+        return cropped
     }
 
     /// Routes one chosen verb to its callback. Split out from menu building so

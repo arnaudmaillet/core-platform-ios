@@ -86,32 +86,46 @@ struct MapSubFilterMenuTests {
 
     // MARK: - The ladders
 
-    @Test("A person offers the full ladder, destructive last")
+    /// No View Profile in the ladder: the header is the way to the profile,
+    /// and one menu should not offer the same destination twice.
+    @Test("A person offers message, mute, remove, share — the profile is the header")
     func personLadder() {
         #expect(MapSubFilterMenuAction.actions(for: .person(
             MapFavorite(profileID: ProfileID("a"), title: "A")
-        )) == [.viewProfile, .sendMessage, .toggleMute, .share, .unpin])
+        )) == [.sendMessage, .toggleMute, .unpin, .share])
     }
 
-    @Test("A place offers details, share, remove — nothing account-shaped")
+    @Test("A place offers details, remove, share — nothing account-shaped")
     func placeLadder() {
         #expect(MapSubFilterMenuAction.actions(for: .place("cafes"))
-            == [.viewDetails, .share, .unpin])
+            == [.viewDetails, .unpin, .share])
     }
 
     @Test("Generic offers only the verbs that need no identity")
     func genericLadder() {
-        #expect(MapSubFilterMenuAction.actions(for: .generic) == [.share, .unpin])
+        #expect(MapSubFilterMenuAction.actions(for: .generic) == [.unpin, .share])
     }
 
-    @Test("Every ladder ends in the destructive removal, and only that is destructive")
+    /// Share closes every ladder, so the ordering rule reads the same wherever
+    /// the viewer long-presses.
+    @Test("Share is the last entry everywhere")
+    func shareClosesEveryLadder() {
+        let entities: [MapSubFilterEntity] = [
+            .person(MapFavorite(profileID: ProfileID("a"), title: "A")), .place("cafes"), .generic
+        ]
+        for entity in entities {
+            #expect(MapSubFilterMenuAction.actions(for: entity).last == .share)
+        }
+    }
+
+    @Test("Every ladder carries exactly one destructive entry, and it is Remove")
     func onlyRemovalIsDestructive() {
         let entities: [MapSubFilterEntity] = [
             .person(MapFavorite(profileID: ProfileID("a"), title: "A")), .place("cafes"), .generic
         ]
         for entity in entities {
             let ladder = MapSubFilterMenuAction.actions(for: entity)
-            #expect(ladder.last == .unpin)
+            #expect(ladder.contains(.unpin))
             #expect(ladder.filter(\.isDestructive) == [.unpin])
         }
     }
@@ -207,22 +221,161 @@ struct MapSubFilterMenuTests {
 
     // MARK: - Assembled menu
 
+    /// The verbs sit one level down, in the LAST inline section — a person's
+    /// menu leads with the header section, and the boundary between the two
+    /// is what draws the separator.
+    private static func verbs(of menu: UIMenu?) -> [String] {
+        guard let group = menu?.children.compactMap({ $0 as? UIMenu }).last else { return [] }
+        #expect(group.options.contains(.displayInline), "no inline section, so no separator")
+        return group.children.compactMap { ($0 as? UIAction)?.title }
+    }
+
+    /// The header row: the first section's single action.
+    private static func header(of menu: UIMenu?) -> UIAction? {
+        guard let group = menu?.children.compactMap({ $0 as? UIMenu }).first,
+              menu?.children.count == 2
+        else { return nil }
+        return group.children.compactMap { $0 as? UIAction }.first
+    }
+
     @Test("The built menu matches the ladder, one child per action")
     func menuMirrorsTheLadder() {
         let person = Self.person("ava")
         let place = Self.place
         let (bar, _) = Self.makeBar([person, place])
 
-        let personMenu = bar.menu(for: person.subFilter)
-        #expect(personMenu?.children.count == 5)
-        #expect(personMenu?.children.compactMap { ($0 as? UIAction)?.title }
-            == ["View Profile", "Message", "Mute", "Share", "Remove"])
+        #expect(Self.verbs(of: bar.menu(for: person.subFilter))
+            == ["Message", "Mute", "Remove", "Share"])
 
         let placeMenu = bar.menu(for: place.subFilter)
-        #expect(placeMenu?.children.compactMap { ($0 as? UIAction)?.title }
-            == ["View Details", "Share", "Remove"])
+        #expect(Self.verbs(of: placeMenu) == ["View Details", "Remove", "Share"])
         // The removal is marked destructive so UIKit tints it red.
-        #expect((placeMenu?.children.last as? UIAction)?.attributes.contains(.destructive) == true)
+        let group = placeMenu?.children.compactMap { $0 as? UIMenu }.last
+        let remove = group?.children.first { ($0 as? UIAction)?.title == "Remove" } as? UIAction
+        #expect(remove?.attributes.contains(.destructive) == true)
+    }
+
+    /// ⚠️ The pills are bare avatars now, so this header is the only place the
+    /// person's name appears while the menu is open. A menu that lost it would
+    /// leave the viewer holding a face and no name.
+    @Test("The menu is headed by the name the pill no longer shows")
+    func theMenuIsTitledWithTheIdentity() {
+        let person = Self.person("ava")
+        let (bar, _) = Self.makeBar([person])
+
+        #expect(Self.header(of: bar.menu(for: person.subFilter))?.title == "AVA")
+    }
+
+    /// The header carries a face, so the menu identifies the person the way
+    /// the pill does. Unresolved, it is the generic glyph rather than nothing
+    /// — a header row with a hole where the avatar goes reads as broken.
+    @Test("The header carries an image even before the avatar resolves")
+    func theHeaderAlwaysCarriesAnImage() {
+        let person = Self.person("ava")
+        let (bar, _) = Self.makeBar([person])
+
+        #expect(Self.header(of: bar.menu(for: person.subFilter))?.image != nil)
+    }
+
+    /// A place keeps the plain caption: there is no profile to open, and a
+    /// header that navigates nowhere is a dead row.
+    @Test("A place is captioned, not headed")
+    func aPlaceKeepsItsCaption() {
+        let place = Self.place
+        let (bar, _) = Self.makeBar([place])
+        let menu = bar.menu(for: place.subFilter)
+
+        #expect(Self.header(of: menu) == nil)
+        #expect(menu?.title == place.content.accessibilityLabel)
+    }
+
+    // MARK: - The header
+
+    /// Tapping the name opens the profile — that is the whole reason it is an
+    /// action and not a caption.
+    @Test("The header routes to the profile")
+    func theHeaderOpensTheProfile() {
+        let entity = MapSubFilterEntity.person(
+            MapFavorite(profileID: ProfileID("a"), title: "Ava Moreau", handle: "ava.moreau")
+        )
+
+        #expect(entity.menuHeader(fallback: "x")?.action == .viewProfile)
+    }
+
+    @Test("The header carries the handle under the name")
+    func theHeaderSubtitlesWithTheHandle() {
+        let entity = MapSubFilterEntity.person(
+            MapFavorite(profileID: ProfileID("a"), title: "Ava Moreau", handle: "ava.moreau")
+        )
+
+        let header = entity.menuHeader(fallback: "x")
+        #expect(header?.title == "Ava Moreau")
+        #expect(header?.subtitle == "@ava.moreau")
+    }
+
+    /// When the handle IS the title, the subtitle would repeat it.
+    @Test("A nameless profile does not say its handle twice")
+    func theHandleIsNotRepeated() {
+        let entity = MapSubFilterEntity.person(
+            MapFavorite(profileID: ProfileID("a"), title: "", handle: "ava.moreau")
+        )
+
+        let header = entity.menuHeader(fallback: "x")
+        #expect(header?.title == "@ava.moreau")
+        #expect(header?.subtitle == nil)
+    }
+
+    /// Only a person has a profile to open.
+    @Test(arguments: [MapSubFilterEntity.place("cafes"), .generic])
+    func nonPeopleHaveNoHeader(entity: MapSubFilterEntity) {
+        #expect(entity.menuHeader(fallback: "Cafés") == nil)
+    }
+
+    /// A profile the bar cannot name has no header to tap — and never offered
+    /// View Profile either, so the ladder loses nothing.
+    @Test("The generic ladder is unchanged")
+    func theGenericLadderIsUnchanged() {
+        #expect(MapSubFilterMenuAction.actions(for: .generic) == [.unpin, .share])
+    }
+
+    // MARK: - Where the title comes from
+
+    /// From the PROFILE, not from anything the pill draws — the pill draws no
+    /// text at all.
+    @Test("A person's menu is titled from their display name")
+    func theTitleComesFromTheProfile() {
+        let entity = MapSubFilterEntity.person(
+            MapFavorite(profileID: ProfileID("a"), title: "Ava Moreau", handle: "ava.moreau")
+        )
+
+        #expect(entity.menuTitle(fallback: "something else") == "Ava Moreau")
+    }
+
+    /// A profile whose display name never hydrated still names itself.
+    @Test("A nameless profile falls back to its handle")
+    func aNamelessProfileUsesItsHandle() {
+        let entity = MapSubFilterEntity.person(
+            MapFavorite(profileID: ProfileID("a"), title: "", handle: "ava.moreau")
+        )
+
+        #expect(entity.menuTitle(fallback: "unused") == "@ava.moreau")
+    }
+
+    /// And one with neither takes what the pill can offer rather than opening
+    /// a menu headed by an empty line.
+    @Test("A profile with no name at all takes the pill's label")
+    func anAnonymousProfileTakesTheFallback() {
+        let entity = MapSubFilterEntity.person(
+            MapFavorite(profileID: ProfileID("a"), title: "", handle: nil)
+        )
+
+        #expect(entity.menuTitle(fallback: "Person") == "Person")
+    }
+
+    /// A place has no profile behind it: its own label IS its name.
+    @Test(arguments: [MapSubFilterEntity.place("cafes"), .generic])
+    func nonPeopleKeepTheirLabel(entity: MapSubFilterEntity) {
+        #expect(entity.menuTitle(fallback: "Cafés") == "Cafés")
     }
 
     @Test("The menu reads mute state when it is BUILT, not when the pill was configured")
@@ -231,9 +384,9 @@ struct MapSubFilterMenuTests {
         let (bar, _) = Self.makeBar([option])
         var muted = false
         bar.isMuted = { _ in muted }
-        #expect((bar.menu(for: option.subFilter)?.children[2] as? UIAction)?.title == "Mute")
+        #expect(Self.verbs(of: bar.menu(for: option.subFilter))[1] == "Mute")
         muted = true
-        #expect((bar.menu(for: option.subFilter)?.children[2] as? UIAction)?.title == "Unmute")
+        #expect(Self.verbs(of: bar.menu(for: option.subFilter))[1] == "Unmute")
     }
 
     @Test("A refinement the row doesn't carry has no menu at all")
