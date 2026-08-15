@@ -34,9 +34,24 @@ enum MapMockPlaces {
     /// Case-B reachable. Venue-only proximity clusters at the mixed and
     /// text venues still wear the TEXT face and fall back to the plain
     /// push (a documented gap until the text-cluster gallery lands).
-    static let paris = MapPlace(id: "city:paris", name: "Paris", kind: .city)
-    static let france = MapPlace(id: "country:france", name: "France", kind: .country)
-    static let ileDeFrance = MapPlace(id: "region:idf", name: "Île-de-France", kind: .region)
+    /// Each place carries a well-formed H3 index at the resolution its real
+    /// footprint calls for — Paris ≈ res 5 (span ~17 km), Île-de-France ≈
+    /// res 3 (~120 km), France ≈ res 1 (~840 km) — so the DYNAMIC banding
+    /// (cell span vs viewport diagonal) governs the demo exactly as the wire
+    /// will. Base cell 14 is a stand-in: the scale math never reads it, and
+    /// the true Paris base cell needs the H3 kernel to compute.
+    static let paris = MapPlace(
+        id: "city:paris", name: "Paris", kind: .city,
+        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 14)
+    )
+    static let france = MapPlace(
+        id: "country:france", name: "France", kind: .country,
+        h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 14)
+    )
+    static let ileDeFrance = MapPlace(
+        id: "region:idf", name: "Île-de-France", kind: .region,
+        h3Index: H3CellGeometry.makeIndex(resolution: 3, baseCell: 14)
+    )
 
     static var isEnabled: Bool {
         ProcessInfo.processInfo.arguments.contains(launchArgument)

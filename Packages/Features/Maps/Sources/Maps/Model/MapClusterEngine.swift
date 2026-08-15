@@ -87,11 +87,16 @@ enum MapClusterEngine {
     /// - Parameters:
     ///   - cellPoints: marker collision size in screen points (side + margin).
     ///   - zoomScale: `mapView.bounds.width / mapView.visibleMapRect.size.width`.
-    ///   - zoomLevel: the viewport's 0–15 zoom (`MapViewport.zoomLevel`),
-    ///     driving the SEMANTIC pre-pass below; `nil` skips it (the pure
-    ///     proximity behaviour, and what geometry-only tests exercise).
+    ///   - zoomLevel: the viewport's 0–15 zoom (`MapViewport.zoomLevel`) —
+    ///     the semantic pre-pass's FALLBACK input when the corpus carries no
+    ///     H3 indexes; `nil` together with no diagonal skips the pass (the
+    ///     pure proximity behaviour, and what geometry-only tests exercise).
+    ///   - viewportDiagonalKm: the camera viewport's diagonal, driving the
+    ///     DYNAMIC banding against the ladder's H3 cell spans
+    ///     (`MapHierarchyBanding`).
     static func cluster(
-        _ pins: [MapPin], zoomScale: Double, cellPoints: Double, zoomLevel: Int32? = nil
+        _ pins: [MapPin], zoomScale: Double, cellPoints: Double,
+        zoomLevel: Int32? = nil, viewportDiagonalKm: Double? = nil
     ) -> [Item] {
         // SEMANTIC PRE-PASS (STRICT nested banding): the zoom selects ONE
         // active hierarchy depth (`MapPlace.Kind.activeKind` — country,
@@ -124,11 +129,44 @@ enum MapClusterEngine {
         // never through the proximity pool.
         var maskedByPlace: [String: (place: MapPlace, members: [MapPin])] = [:]
         var unmasked: [MapPin] = []
-        // `nil` twice over means the LOCAL band: no zoom given (geometry-only
-        // callers), or zoom ≥ 13 — where the city opens up and every post,
-        // laddered or not, renders through ordinary proximity below.
-        let activeKind = zoomLevel.flatMap(MapPlace.Kind.activeKind(atZoomLevel:))
+        // Each level's characteristic H3 span, over the whole corpus (the
+        // minimum where places of one kind differ) — the dynamic banding's
+        // input. Empty when no rung carries an index → zoom fallback.
+        var spansByKind: [MapPlace.Kind: Double] = [:]
+        for pin in pins {
+            for place in pin.places {
+                guard let h3 = place.h3Index, let cell = H3CellGeometry(index: h3) else { continue }
+                spansByKind[place.kind] = min(
+                    spansByKind[place.kind] ?? .greatestFiniteMagnitude, cell.averageSpanKm
+                )
+            }
+        }
+        // `nil` means the LOCAL band — the viewer is inside the deepest
+        // cell (dynamic), past the fallback's city band, or no banding
+        // input was given at all (geometry-only callers): the hierarchy
+        // stands down and every post renders through ordinary proximity.
+        let activeKind = MapHierarchyBanding.activeKind(
+            viewportDiagonalKm: viewportDiagonalKm,
+            spansByKind: spansByKind,
+            zoomLevel: zoomLevel
+        )
         let corpusIsHierarchical = pins.contains { !$0.places.isEmpty }
+        #if DEBUG
+        // `-maps-banding-log`: one line per reconcile with the banding
+        // decision's actual inputs — the difference between "the dynamic
+        // rule chose X" and "the fallback fired because no spans arrived"
+        // is invisible on screen.
+        if ProcessInfo.processInfo.arguments.contains("-maps-banding-log") {
+            let spans = spansByKind
+                .map { "\($0.key)=\(String(format: "%.1f", $0.value))km" }
+                .sorted().joined(separator: " ")
+            print("[banding] pins=\(pins.count) hierarchical=\(corpusIsHierarchical)"
+                + " diag=\(viewportDiagonalKm.map { String(format: "%.1f", $0) } ?? "nil")km"
+                + " zoom=\(zoomLevel.map(String.init) ?? "nil")"
+                + " spans=[\(spans)]"
+                + " active=\(activeKind.map(String.init(describing:)) ?? "local")")
+        }
+        #endif
         if let activeKind, corpusIsHierarchical {
             for pin in pins {
                 if let place = pin.places.first(where: { $0.kind == activeKind }) {

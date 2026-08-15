@@ -1188,11 +1188,12 @@ final class MapsViewController: UIViewController {
             Array(pins.values),
             zoomScale: currentZoomScale,
             cellPoints: Double(Self.clusterCellPoints),
-            // Drives the semantic pre-pass: an active place (city/country/
-            // region, mock-tagged today) absorbs all its pins into one
-            // marker at this zoom and dissolves when the viewer zooms past
-            // its band.
-            zoomLevel: MapViewport.zoomLevel(forLongitudeSpan: mapView.region.span.longitudeDelta)
+            // The semantic pre-pass's two banding inputs: the zoom level is
+            // the FALLBACK for an H3-less corpus; the viewport diagonal
+            // drives the dynamic cell-span rule (`MapHierarchyBanding`)
+            // whenever the ladder carries H3 indexes.
+            zoomLevel: MapViewport.zoomLevel(forLongitudeSpan: mapView.region.span.longitudeDelta),
+            viewportDiagonalKm: currentViewportDiagonalKm
         )
         var target = Set<String>()
         target.reserveCapacity(items.count)
@@ -1288,6 +1289,18 @@ final class MapsViewController: UIViewController {
         let mapWidth = mapView.visibleMapRect.size.width
         guard mapWidth > 0 else { return 0 }
         return Double(mapView.bounds.width) / mapWidth
+    }
+
+    /// The camera viewport's diagonal in km — what the dynamic hierarchy
+    /// banding compares H3 cell spans against. Flat-earth arithmetic (111 km
+    /// per degree, longitude scaled by the latitude's cosine) is exact
+    /// enough at banding scales.
+    private var currentViewportDiagonalKm: Double {
+        let region = mapView.region
+        let latKm = region.span.latitudeDelta * 111.0
+        let lngKm = region.span.longitudeDelta * 111.0
+            * max(0.01, cos(region.center.latitude * .pi / 180))
+        return (latKm * latKm + lngKm * lngKm).squareRoot()
     }
 
     // MARK: - Live previews

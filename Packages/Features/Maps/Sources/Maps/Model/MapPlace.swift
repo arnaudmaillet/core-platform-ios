@@ -20,32 +20,8 @@ public struct MapPlace: Sendable, Equatable, Hashable {
         case country = "Country"
         case region = "Region"
 
-        /// The ONE hierarchy depth rendered at `zoomLevel` (the viewport's
-        /// 0–15 scale, `MapViewport.zoomLevel`) — STRICT banding: every
-        /// semantic band has exactly one active level, hierarchy members
-        /// render ONLY through that level's markers, and members whose
-        /// ladder has no rung at the active depth are hidden outright
-        /// rather than mixed in. Country ≤ 8, region 9–10, city 11–12 —
-        /// and `nil` from 13 up: the LOCAL band, where the city cluster
-        /// opens and the whole hierarchy stands down in favour of
-        /// individual posts and ordinary generic proximity clusters.
-        ///
-        /// Client-side, mock-era banding. The contract proposal
-        /// (`BACKEND_CLUSTER_TYPES.md` §C) puts this decision on the server —
-        /// which sees the whole corpus — and these thresholds are deleted
-        /// with the rest of the mock layer when `GeoCluster` ships. Anchors:
-        /// the map opens at level 12 (0.09° span), inside the city band;
-        /// `-maps-wide-region` lands at level 9 (region);
-        /// `-maps-country-region` at level 8 (country);
-        /// `-maps-tight-region` at level 13 (local).
-        static func activeKind(atZoomLevel zoomLevel: Int32) -> Kind? {
-            switch zoomLevel {
-            case ..<9: .country
-            case 9...10: .region
-            case 11...12: .city
-            default: nil
-            }
-        }
+        // Which depth renders at a given camera is `MapHierarchyBanding`'s
+        // question now — dynamic from H3 cell spans, with a zoom fallback.
     }
 
     /// Stable identity ("city:paris") — what decides that two pins share a
@@ -54,11 +30,18 @@ public struct MapPlace: Sendable, Equatable, Hashable {
     /// Display name ("Paris"). Rendered verbatim.
     public let name: String
     public let kind: Kind
+    /// The H3 cell this place aggregates over (mode-1 index; see
+    /// `H3CellGeometry`), or `nil` when the wire hasn't said — the cell's
+    /// span is what the DYNAMIC banding compares against the viewport, and
+    /// its region is what a camera fit targets. Mock-filled today
+    /// (`dev/issues/BACKEND_H3_BOUNDING_BOX.md`).
+    public let h3Index: UInt64?
 
-    public init(id: String, name: String, kind: Kind) {
+    public init(id: String, name: String, kind: Kind, h3Index: UInt64? = nil) {
         self.id = id
         self.name = name
         self.kind = kind
+        self.h3Index = h3Index
     }
 
     /// The gallery screen's title: "Paris • City Cluster".
