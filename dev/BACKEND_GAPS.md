@@ -24,6 +24,8 @@ full functionality.
 | 14 | No discovery / recommendation feed for the "For You" tab | For You is three client-side orderings of the following feed | Medium |
 | 15 | No lightweight-preview rendition, and `RadarPin` can't express video | Map pin live previews (**blocked**); gallery-grid autoplay at scale | **High** (map) |
 | 16 | No topic/category on a post | For You's `ContentContext` lens filters by caption keywords | Medium |
+| 17 | No per-conversation unread count | All-list avatar badges saturate at the fetched window | Medium |
+| 18 | No semantic geo clusters (city/country/region) | Map cluster gallery — mocked client-side in DEBUG | Medium |
 
 ---
 
@@ -698,6 +700,31 @@ the limit went from 1 message to `unreadWindow` (20).
 **What we need.** `unread_count` on the conversation or member view, computed
 server-side from `last_read`. Then the window drops back to 1 and the client
 stops counting.
+
+---
+
+## 18. No semantic geo clusters — city/country/region grouping is unexpressible
+
+**What the client wants.** Tapping a **City / Country / Region cluster** on the
+map opens the post viewer with a gallery of the place's popular posts behind it
+("Paris • City Cluster"). Generic proximity clusters and single pins keep the
+plain viewer.
+
+**What `geo_discovery.v1` offers.** `RadarPin` carries no place identity, no
+name, no grouping key, and `QueryTile` is Top-K-capped per tile — so at country
+zoom the client receives a sample and cannot aggregate, count, or name anything.
+No RPC ranks a place's posts (§14) or reverse-geocodes a name.
+
+**What ships meanwhile.** The full navigation surface, driven by a DEBUG-only
+client-side place catalog over the mock venues (`-maps-mock-semantic-clusters`);
+production builds show no semantic clusters at all.
+
+**What we need.** The additive contract in
+`dev/issues/BACKEND_CLUSTER_TYPES.md`: a `ClusterKind` enum, a `GeoCluster`
+message (id, kind, name, centroid, `member_count`, representative,
+`top_post_ids`), `QueryTileResponse.clusters = 12` banded by the `zoom_level`
+already in the request, and a paged `QueryClusterPosts` RPC for the gallery
+body.
 
 ---
 
