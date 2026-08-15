@@ -191,7 +191,10 @@ final class MapsViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Maps"
+        // No title, deliberately: the map is the tab's whole surface and
+        // names itself; the header band belongs to its controls — the
+        // compose "+", the wallet badge, the bell. (The tab bar still says
+        // "Maps"; that label lives on `UITab`, not here.)
         configureMapView()
         bindViewModel()
         observeAppLifecycle()

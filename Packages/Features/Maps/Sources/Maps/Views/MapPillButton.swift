@@ -7,7 +7,7 @@ import UIKit
 /// perfect circles (capsule corners on a square).
 ///
 /// Configured PLAIN at init; the glass configuration materializes on first
-/// window attach — the house doctrine (`SnapRailComposeButton`, #46):
+/// window attach — the house doctrine (`SnapRailBoostButton`, #46):
 /// creating a system material contacts the render server, a multi-second
 /// main-thread stall on headless CI simulators, where unit-tested views never
 /// join a window and must never pay it.

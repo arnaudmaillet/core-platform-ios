@@ -51,6 +51,29 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// The user asked for the comments surface (the empty-state pill today;
     /// more entry points later). Carries the represented post.
     var onRequestComments: ((PostID) -> Void)?
+    /// The rail's boost anchor asked to spend `amount` points on the
+    /// represented post. The owning VC answers through the wallet and calls
+    /// back `playBoostConfirmation` / `playBoostDenied` — the cell holds no
+    /// balance opinion of its own.
+    var onRequestBoost: ((PostID, _ amount: Int) -> Void)?
+    /// The anchor's menu asked to take back this post's session spend —
+    /// the VC owns the tally and the refund.
+    var onRequestBoostUndo: ((PostID) -> Void)?
+
+    /// Boost feedback pass-throughs — the chrome owns the anchor and its
+    /// theatre; the VC owns the wallet verdict that picks which one plays.
+    func playBoostConfirmation(amount: Int) { chrome.playBoostConfirmation(amount: amount) }
+    func playBoostDenied() { chrome.playBoostDenied() }
+    func playBoostRefund(amount: Int) { chrome.playBoostRefund(amount: amount) }
+    /// The viewer's cumulative spend on this post — the anchor's number
+    /// face. Set at configure (from the wallet's ledger) and again after
+    /// each confirmed spend; chrome reset returns it to 0 on reuse.
+    func setBoostTotal(_ total: Int) { chrome.setBoostTotal(total) }
+    /// The anchor's wallet context (affordability + undoable tally) —
+    /// pushed at configure and on every wallet change.
+    func setBoostContext(balance: Int, undoable: Int) {
+        chrome.setBoostContext(balance: balance, undoable: undoable)
+    }
     /// While engaged, a tap on the strip (the docked media / the page
     /// background) asks to expand back — the owning VC dismisses the panel.
     var onRequestCommentsClose: (() -> Void)?
@@ -457,6 +480,14 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         chrome.onCommentsTapped = { [weak self] in
             guard let self, let id = self.representedID, !self.isCommentsEngaged else { return }
             self.onRequestComments?(id)
+        }
+        chrome.onBoostRequested = { [weak self] amount in
+            guard let self, let id = self.representedID else { return }
+            self.onRequestBoost?(id, amount)
+        }
+        chrome.onBoostUndoRequested = { [weak self] in
+            guard let self, let id = self.representedID else { return }
+            self.onRequestBoostUndo?(id)
         }
         #if DEBUG
         // Which projection fields are present the moment the page is
@@ -1024,6 +1055,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         setCommentsEngaged(false)
         clearComments()
         onRequestComments = nil
+        onRequestBoost = nil
+        onRequestBoostUndo = nil
         onRequestCommentsClose = nil
         onRequestCommentsPageDrive = nil
         setPauseGlyphVisible(false)

@@ -49,7 +49,7 @@ struct SnapTapArbitrationTests {
         let chrome = SnapChromeView()
         #expect(chrome.interactionRoots.count == 5)
         #expect(chrome.interactionRoots.contains(where: { $0 is SnapShortcutRailView }))
-        #expect(chrome.interactionRoots.contains(where: { $0 is SnapRailComposeButton }))
+        #expect(chrome.interactionRoots.contains(where: { $0 is SnapRailBoostButton }))
         #expect(chrome.interactionRoots.contains(where: { $0 is SnapCommentEmptyStateView }))
         #expect(chrome.interactionRoots.contains(where: { $0 is SnapSubtitleView }))
         #expect(chrome.interactionRoots.contains(where: { $0 is SnapCommentTickerView }))
