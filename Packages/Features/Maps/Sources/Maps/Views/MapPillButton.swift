@@ -273,6 +273,11 @@ final class MapPillButton: UIButton {
         ProcessInfo.processInfo.arguments.contains("-maps-long-titles")
     #endif
 
+    /// The accent, resolved per trait collection: `systemBlue` is already the
+    /// selected content colour here, and it brightens in dark mode, which is
+    /// what keeps the rim legible when the map goes dark.
+    private static let selectionRingColor = UIColor.systemBlue
+
     private func makeConfiguration(glass: Bool, selected: Bool) -> UIButton.Configuration {
         // Selection is carried by the CONTENT, not the material: a selected
         // pill keeps a neutral frosted lift (soft white fill + subtle
@@ -286,6 +291,24 @@ final class MapPillButton: UIButton {
             config.background.strokeColor = UIColor.white.withAlphaComponent(0.25)
             config.background.strokeWidth = 1
         }
+        // ...and where the content cannot carry it, the rim does. See
+        // `MapPillSelectionRing`: a title-less pill wearing a photograph has
+        // no glyph to tint and no label to embolden, so selected and
+        // unselected looked identical.
+        let ring = MapPillSelectionRing.resolve(selected: selected, isCircular: isCircular)
+        if ring.isVisible {
+            config.background.strokeColor = Self.selectionRingColor
+            config.background.strokeWidth = ring.strokeWidth
+            config.background.strokeOutset = ring.outset
+        }
+        // The halo is set on BOTH branches, never only when lit: these
+        // properties hang off a reference type, so a configuration built for
+        // a selected pill would otherwise leave its glow on the next pill
+        // that reuses the object.
+        config.background.shadowProperties.color = Self.selectionRingColor
+        config.background.shadowProperties.offset = .zero
+        config.background.shadowProperties.radius = ring.glowRadius
+        config.background.shadowProperties.opacity = ring.glowOpacity
         // A morphing pill hides its title while resting as a circle; the
         // label only exists in the expanded capsule.
         if let title = content.title, !isCircular {
