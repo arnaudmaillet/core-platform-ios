@@ -2735,7 +2735,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         let point = collectionView.convert(location, from: view)
         guard let hit = collectionView.hitTest(point, with: nil) else { return true }
         for current in sequence(first: hit, next: { $0.superview }) {
-            if current is SnapShortcutRailView || current is SnapRailComposeButton
+            if current is SnapShortcutRailView || current is SnapRailBoostButton
                 || current is CommentsInputBar {
                 return false
             }
