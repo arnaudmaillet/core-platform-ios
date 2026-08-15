@@ -702,6 +702,15 @@ final class PostDetailViewController: UIViewController {
     /// Restores the value that was there rather than assuming `true`: the
     /// stream is also frozen by the resting engagement's settle lock, and a
     /// gesture that ended inside that window must not thaw it early.
+    /// Whether the stream rests at its very top — the one place a downward
+    /// drag has nothing left to scroll, which is where a RESTING page's
+    /// vertical slide-to-dismiss may claim the touch instead (the sheet
+    /// idiom; see `SnapFeedViewController.zoomVerticalDismissalPermitted`).
+    /// Same top test the pull-dismiss arming uses.
+    var streamIsAtTop: Bool {
+        collectionView.contentOffset.y <= -collectionView.contentInset.top + 0.5
+    }
+
     func setStreamScrollEnabled(_ enabled: Bool) {
         if enabled { streamLock.thaw(collectionView) } else { streamLock.freeze(collectionView) }
     }

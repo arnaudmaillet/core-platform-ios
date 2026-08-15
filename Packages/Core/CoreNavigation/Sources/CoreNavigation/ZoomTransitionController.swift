@@ -22,6 +22,38 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
     /// delegate customizes.
     private weak var feedViewController: UIViewController?
     private let interaction = ZoomDismissInteractionController()
+    /// Extra grab drivers with their OWN pop targets — the cluster-gallery
+    /// shape, where a vertical grab lands on the gallery beneath while the
+    /// horizontal one escapes to the map. Each is attached with its own
+    /// source and dismissal closure; the delegate answers for whichever is
+    /// interacting.
+    private var extraInteractions: [ZoomDismissInteractionController] = []
+
+    /// Per-pop-target flight sources. A pop from the feed normally flies to
+    /// `source` (the screen that presented it), but a stack that carries an
+    /// intermediate — map, gallery, feed — dismisses to DIFFERENT screens
+    /// depending on the gesture, and the card must fly to whichever screen
+    /// the pop actually lands on.
+    private struct DismissTarget {
+        weak var target: UIViewController?
+        let source: any ZoomTransitionSource
+    }
+    private var dismissTargets: [DismissTarget] = []
+
+    /// Registers `source` as the flight target for pops landing on `target`.
+    public func setDismissSource(_ source: any ZoomTransitionSource, for target: UIViewController) {
+        dismissTargets.append(DismissTarget(target: target, source: source))
+    }
+
+    /// A pop landed on a REGISTERED intermediate (see `setDismissSource`) —
+    /// the feed is gone but the flow's origin screen has not returned.
+    /// `onSourceReturned` deliberately does not fire for this landing; the
+    /// owner uses this hook for the intermediate's chrome instead.
+    public var onDismissedToIntermediate: ((UIViewController) -> Void)?
+
+    private func dismissSource(for toVC: UIViewController) -> any ZoomTransitionSource {
+        dismissTargets.first { $0.target === toVC }?.source ?? source
+    }
 
     /// Completed-transition hooks, set by the map VC. `didShow` only reports
     /// *completed* transitions, so a cancelled interactive pop fires neither —
@@ -37,14 +69,20 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
     /// after the card has landed. The owner is responsible for its hidden
     /// state; this only drives alpha.
     public var returningSourceChrome: UIView? {
-        didSet { interaction.setReturningChrome(returningSourceChrome) }
+        didSet {
+            interaction.setReturningChrome(returningSourceChrome)
+            extraInteractions.forEach { $0.setReturningChrome(returningSourceChrome) }
+        }
     }
 
     /// Fires when an interactive grab is CANCELLED — the destination stays up,
     /// so anything the owner undid at grab-begin (the tab bar's hidden state)
     /// has to go back. A completed return reports through `onSourceReturned`.
     public var onDismissalCancelled: (() -> Void)? {
-        didSet { interaction.onCancelled = onDismissalCancelled }
+        didSet {
+            interaction.onCancelled = onDismissalCancelled
+            extraInteractions.forEach { $0.onCancelled = onDismissalCancelled }
+        }
     }
 
     /// Fires when the PUSH itself is reversed mid-air — the flight was caught
@@ -74,10 +112,42 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
     }
 
     /// Installs the grab-to-dismiss gesture on the pushed feed's view. Called
-    /// by the presenter once it holds the feed VC.
-    public func attachInteractiveDismissal(to view: UIView, onDismiss: @escaping () -> Void) {
+    /// by the presenter once it holds the feed VC. `axes` arms the grab's
+    /// directions — both by default, the forward-only feed's contract: a
+    /// rightward or a downward grab flies the card home identically.
+    public func attachInteractiveDismissal(
+        to view: UIView,
+        axes: Set<ZoomDismissAxis> = [.horizontal, .vertical],
+        onDismiss: @escaping () -> Void
+    ) {
         guard let destination else { return }
-        interaction.attach(to: view, source: source, destination: destination, onBeginDismiss: onDismiss)
+        interaction.attach(
+            to: view, source: source, destination: destination, axes: axes,
+            onBeginDismiss: onDismiss
+        )
+    }
+
+    /// A SECOND grab on the same view, flying `towards` a different source
+    /// when it commits — the cluster-gallery split, where the vertical axis
+    /// pops one level (to the gallery, registered via `setDismissSource`)
+    /// and the horizontal axis escapes the whole stack. Keep the axis sets
+    /// of the drivers disjoint: each pan self-gates on its own axes, so
+    /// disjoint sets mean exactly one driver ever claims a drag.
+    public func attachInteractiveDismissal(
+        to view: UIView,
+        axes: Set<ZoomDismissAxis>,
+        towards flightSource: any ZoomTransitionSource,
+        onDismiss: @escaping () -> Void
+    ) {
+        guard let destination else { return }
+        let driver = ZoomDismissInteractionController()
+        driver.setReturningChrome(returningSourceChrome)
+        driver.onCancelled = onDismissalCancelled
+        driver.attach(
+            to: view, source: flightSource, destination: destination, axes: axes,
+            onBeginDismiss: onDismiss
+        )
+        extraInteractions.append(driver)
     }
 
     #if DEBUG
@@ -91,14 +161,22 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
 
     /// `-maps-demo-grab`: drives the interactive dismissal without touches
     /// (the sim can't inject pans) — one diagonal grab below the completion
-    /// threshold (floats down-right, then springs back to full screen from
-    /// its 2D position), then one past it (completes the clip-morph home).
-    /// Exercises the exact begin/update/release path a finger does.
+    /// threshold (floats along the axis, then springs back to full screen
+    /// from its 2D position), then one past it (completes the clip-morph
+    /// home). Exercises the exact begin/update/release path a finger does.
+    /// With `-zoom-demo-grab-vertical` alongside, the same script drives the
+    /// VERTICAL grab (forward-only milestone) instead of the horizontal one.
     public func debugScriptedGrab() {
+        let axis: ZoomDismissAxis = ProcessInfo.processInfo.arguments
+            .contains("-zoom-demo-grab-vertical") ? .vertical : .horizontal
         Task { @MainActor [weak self] in
-            await self?.interaction.debugPerformGrab(peakProgress: 0.22, verticalDrift: 180)
+            await self?.interaction.debugPerformGrab(
+                peakProgress: 0.22, verticalDrift: 180, axis: axis
+            )
             try? await Task.sleep(nanoseconds: 1_200_000_000)
-            await self?.interaction.debugPerformGrab(peakProgress: 0.55, verticalDrift: 70)
+            await self?.interaction.debugPerformGrab(
+                peakProgress: 0.55, verticalDrift: 70, axis: axis
+            )
         }
     }
     #endif
@@ -124,7 +202,10 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
             return animator
         case .pop where fromVC === feed:
             return ZoomAnimator(
-                isPresenting: false, source: source, destination: destination,
+                // The flight flies to whichever screen this pop LANDS on —
+                // the presenting screen normally, a registered intermediate
+                // (the cluster gallery) when the stack carries one.
+                isPresenting: false, source: dismissSource(for: toVC), destination: destination,
                 returningChrome: returningSourceChrome
             )
         default:
@@ -140,9 +221,9 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         // animator has to stand down completely: it stages its own flight, so
         // an animator that also built one would put a second card over the one
         // under the finger.
-        if interaction.isInteracting {
+        if let live = ([interaction] + extraInteractions).first(where: { $0.isInteracting }) {
             (animationController as? ZoomAnimator)?.isSupersededByInteractiveDriver = true
-            return interaction
+            return live
         }
         // Otherwise the flight gets a dormant interruptor — either leg. It
         // starts the transition non-interactively, exactly as a tap always did,
@@ -176,6 +257,14 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         flightInterruptor = nil
         if viewController === feedViewController {
             onDestinationShown?()
+            return
+        }
+        // A pop that landed on a REGISTERED intermediate (the cluster
+        // gallery) is not the origin's return: the map is still buried and
+        // its chrome must stay down. The owner hears about it through its
+        // own hook and decides what the landing means.
+        if dismissTargets.contains(where: { $0.target === viewController }) {
+            onDismissedToIntermediate?(viewController)
             return
         }
         // The feed left the stack (popped, or already deallocated): the map —

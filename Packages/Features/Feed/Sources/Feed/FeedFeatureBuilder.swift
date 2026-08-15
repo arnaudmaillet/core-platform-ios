@@ -240,6 +240,39 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         nav.pushViewController(destination, animated: true)
     }
 
+    public func makeClusterGallery(
+        postIDs: [PostID],
+        title: String,
+        feed: UIViewController
+    ) -> UIViewController {
+        let base = repository
+        let gallery = ClusterGalleryViewController(
+            postIDs: postIDs,
+            imagePipeline: imagePipeline,
+            videoPlayback: videoPlayback,
+            loadPosts: {
+                // One hydration over the same provider shape the feed above
+                // uses, so every member is a cache hit; ranked client-side
+                // because no ranking RPC exists (BACKEND_GAPS §14/§18).
+                let provider = FixedPostsFeedProvider(base: base, ids: postIDs)
+                let members = try await ForYouRepository(feed: provider).firstPage().posts
+                return DiscoverySource.trending.ordering(members)
+            },
+            openPost: { presenter, origin, ids in
+                presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
+            }
+        )
+        gallery.title = title
+        gallery.activePostID = { [weak feed] in
+            (feed as? SnapFeedViewController)?.activePostID
+        }
+        // Eager on purpose: the gallery lives its early life invisible under
+        // the feed (a mid-stack insertion never loads its view), and the
+        // first anyone sees of it is a dismissal LANDING on it.
+        gallery.beginLoading()
+        return gallery
+    }
+
     /// The plain push, for a caller with no origin to describe.
     ///
     /// `presentSnapFeedHero` reaches the same place when its origin reports
@@ -287,7 +320,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         let dismissal = InteractiveSlideDismissal()
         retainer.dismissal = dismissal
         // Accessing `view` loads it so the pan has something to attach to.
-        dismissal.attach(to: destination)
+        dismissal.attach(to: destination, axes: [.horizontal, .vertical])
         dismissal.onFeedPopped = { nav in
             // Completed pops only — swipe or back button. A cancelled swipe
             // reports nothing here, which is exactly right: the feed is staying

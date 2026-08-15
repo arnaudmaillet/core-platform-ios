@@ -151,6 +151,27 @@ public protocol FeedFeatureBuilding {
     /// the network — used by Maps to prefetch the visible pins on viewport
     /// settle, eliminating the metadata desync on tap. Safe for ids never opened.
     func prewarmPosts(_ ids: [PostID]) async
+    /// Builds the place gallery that sits BENEATH a semantic-cluster feed
+    /// (city/country/region — the cluster-gallery milestone's Case B): a grid
+    /// of the cluster's members ranked by engagement, titled `title`
+    /// ("Paris • City Cluster"), with its hydration already started so the
+    /// first dismissal into it lands on tiles rather than a skeleton.
+    ///
+    /// `feed` is the snap feed ABOUT to be pushed over it (built by
+    /// `makeSnapFeedViewController` from the same ids): the gallery watches
+    /// its active post so a dismissal lands on the tile of the post the
+    /// viewer actually left, and the wiring between the two is Feed-internal.
+    ///
+    /// The returned controller is an ordinary navigation citizen (tab bar
+    /// visible, native pop back) that ALSO conforms to CoreNavigation's
+    /// `ZoomTransitionSource` — the caller registers it as the flight target
+    /// for pops that land on it. Tapping a tile opens that post over the
+    /// gallery with the standard hero pair.
+    func makeClusterGallery(
+        postIDs: [PostID],
+        title: String,
+        feed: UIViewController
+    ) -> UIViewController
 }
 
 extension FeedFeatureBuilding {

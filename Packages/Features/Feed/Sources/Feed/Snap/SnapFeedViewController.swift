@@ -20,7 +20,6 @@ final class SnapFeedViewController: UIViewController {
 
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, PostID>!
-    private let refreshControl = UIRefreshControl()
     private let statusLabel = UILabel()
     /// The author identity, hosted as the trailing bar item's custom view —
     /// content-hugging, so the system glass pill wraps it flush. Content
@@ -639,9 +638,11 @@ final class SnapFeedViewController: UIViewController {
         collectionView.register(SnapFeedCell.self, forCellWithReuseIdentifier: SnapFeedCell.reuseIdentifier)
         collectionView.pin(to: view)
 
-        refreshControl.tintColor = .white
-        refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
-        collectionView.refreshControl = refreshControl
+        // No pull-to-refresh: the feed is FORWARD-ONLY (cluster-gallery
+        // milestone) — the whole downward direction belongs to the dismissal
+        // hero, so there is no top overscroll left to hang a refresh on.
+        // Refresh lives on the source surfaces (the grids), which own their
+        // own vertical axis.
 
         let pipeline = imagePipeline
         dataSource = UICollectionViewDiffableDataSource<Section, PostID>(collectionView: collectionView) {
@@ -1336,8 +1337,6 @@ final class SnapFeedViewController: UIViewController {
     // MARK: - Rendering
 
     private func render(_ state: FeedViewModel.RenderState) {
-        refreshControl.endRefreshing()
-
         let previousModels = modelsByID
         orderedIDs = state.items.map(\.id)
         modelsByID = Dictionary(uniqueKeysWithValues: state.items.map { ($0.id, $0) })
@@ -1955,7 +1954,13 @@ final class SnapFeedViewController: UIViewController {
     private func updatePageDrive(translation dy: CGFloat) {
         guard let start = pageDriveStartOffset else { return }
         // Drag up (dy < 0) advances toward the next post (offset grows).
-        collectionView.contentOffset.y = rubberBandedOffset(start - dy)
+        // FORWARD-ONLY: downward travel rubber-bands against the drive's own
+        // origin page rather than previewing the previous post — the floor is
+        // the page this drive would settle back to, so a re-grab mid-settle
+        // can still be dragged home, but never past it.
+        let page = collectionView.bounds.height
+        let floor = page > 0 ? (start / page).rounded() * page : 0
+        collectionView.contentOffset.y = rubberBandedOffset(start - dy, floor: floor)
     }
 
     private func endPageDrive(translation dy: CGFloat, velocity vy: CGFloat) {
@@ -1964,10 +1969,7 @@ final class SnapFeedViewController: UIViewController {
         let page = collectionView.bounds.height
         guard page > 0 else { return }
         let startIndex = Int((start / page).rounded())
-        // Commit on a decisive drag OR a fling; the projected motion (drag +
-        // a slice of velocity) picks the direction — up pages next.
-        let committed = abs(dy) > page * 0.18 || abs(vy) > 500
-        let step = committed ? ((dy + vy * 0.2) < 0 ? 1 : -1) : 0
+        let step = Self.pageDriveStep(translation: dy, velocity: vy, page: page)
         let target = max(0, min(orderedIDs.count - 1, startIndex + step))
         let targetOffset = CGFloat(target) * page
         // FOOTER MORPH, timed with the settle: if this drive commits to a
@@ -2002,13 +2004,26 @@ final class SnapFeedViewController: UIViewController {
         }
     }
 
-    /// UIScrollView-style rubber-band past the first/last page: the drive
-    /// resists beyond the ends so you cannot fling off the feed.
-    private func rubberBandedOffset(_ offset: CGFloat) -> CGFloat {
+    /// The engaged drive's commit rule: a decisive drag OR a fling commits;
+    /// the projected motion (drag + a slice of velocity) picks the direction —
+    /// up pages next. FORWARD-ONLY: a downward projection settles home (step
+    /// 0), never to the previous post. Internal statics for the pure-logic
+    /// test, same as `rubberBand`.
+    static func pageDriveStep(translation dy: CGFloat, velocity vy: CGFloat, page: CGFloat) -> Int {
+        let committed = abs(dy) > page * 0.18 || abs(vy) > 500
+        guard committed else { return 0 }
+        return (dy + vy * 0.2) < 0 ? 1 : 0
+    }
+
+    /// UIScrollView-style rubber-band past `floor`/last page: the drive
+    /// resists beyond the ends so you cannot fling off the feed — and, with
+    /// the feed forward-only, `floor` is the drive's own origin page rather
+    /// than offset zero.
+    private func rubberBandedOffset(_ offset: CGFloat, floor: CGFloat) -> CGFloat {
         let page = collectionView.bounds.height
         guard page > 0 else { return offset }
         let maxOffset = CGFloat(max(0, orderedIDs.count - 1)) * page
-        if offset < 0 { return -Self.rubberBand(-offset, dimension: page) }
+        if offset < floor { return floor - Self.rubberBand(floor - offset, dimension: page) }
         if offset > maxOffset { return maxOffset + Self.rubberBand(offset - maxOffset, dimension: page) }
         return offset
     }
@@ -2700,12 +2715,44 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         #endif
     }
 
-    /// A rightward grab may begin from any page — the horizontal axis is free
-    /// (paging and pull-to-refresh are both vertical) — but not mid-fling,
-    /// where the user's intent is still vertical and freezing the pager would
-    /// strand it between pages.
+    /// A grab may begin from any page — but not mid-fling, where the user's
+    /// intent is still vertical and freezing the pager would strand it
+    /// between pages.
     public var isReadyForInteractiveDismissal: Bool {
         !collectionView.isDecelerating
+    }
+
+    /// The vertical grab's extra gate (the horizontal one needs none: the
+    /// pager owns no horizontal gestures). Refused while a comments panel is
+    /// OPEN — the engaged layer owns the whole vertical axis (page drive,
+    /// pull-dismiss), so a downward drag there is never a dismissal. A
+    /// RESTING engagement is a text page's ordinary layout, not an open
+    /// panel, and stays grabbable — with one nuance below. Also refused over
+    /// territory that owns its own vertical gestures (the shortcut rail's
+    /// column, the composer).
+    public func zoomVerticalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool {
+        guard commentsEngagedID == nil || commentsEngagementIsResting else { return false }
+        let point = collectionView.convert(location, from: view)
+        guard let hit = collectionView.hitTest(point, with: nil) else { return true }
+        for current in sequence(first: hit, next: { $0.superview }) {
+            if current is SnapShortcutRailView || current is SnapRailBoostButton
+                || current is CommentsInputBar {
+                return false
+            }
+            if current is SnapCommentsContainerView {
+                // A RESTING text page's whole body is this container, which
+                // would put the vertical dismissal out of reach on exactly
+                // the pages that have no other downward verb. The sheet
+                // idiom resolves it: at the stream's TOP a downward drag has
+                // nothing left to scroll, so the territory yields to the
+                // dismissal precisely there — mid-stream it keeps scrolling,
+                // and an OPEN panel never reaches this line (the guard
+                // above).
+                let stream = commentsContentVC as? PostDetailViewController
+                return commentsEngagementIsResting && stream?.streamIsAtTop == true
+            }
+        }
+        return true
     }
 
     public func setContentScrollEnabled(_ enabled: Bool) {
@@ -2808,7 +2855,25 @@ final class SnapFeedCollectionView: UICollectionView {
         if let hit = hitTest(location, with: nil), Self.claimsTouches(hit) {
             return false
         }
+        // FORWARD-ONLY (cluster-gallery milestone): the pager declines any
+        // predominantly-downward touch, per touch, via the same public seam as
+        // the rail divorce — no gesture-graph edges. One decline kills
+        // backward paging, the top rubber-band and pull-to-refresh at once,
+        // and leaves the whole downward direction to the dismissal hero's pan
+        // (which self-gates on the mirror of this test, so exactly one of the
+        // two ever claims a drag).
+        if let pan = gestureRecognizer as? UIPanGestureRecognizer,
+           Self.declinesDownwardPagingTouch(velocity: pan.velocity(in: self)) {
+            return false
+        }
         return super.gestureRecognizerShouldBegin(gestureRecognizer)
+    }
+
+    /// The forward-only axis test, mirrored from the dismissal pan's begin
+    /// gate: a downward, predominantly-vertical movement is not the pager's.
+    /// Pure so the routing rule is unit-testable.
+    static func declinesDownwardPagingTouch(velocity: CGPoint) -> Bool {
+        velocity.y > 0 && abs(velocity.y) > abs(velocity.x)
     }
 
     /// The swipe exit's missing half: `UIScrollView` refuses BY DEFAULT to

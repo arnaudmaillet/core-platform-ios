@@ -261,6 +261,15 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// while the destination's own scrolling still owns the user's intent
     /// (e.g. a page-snap fling that hasn't settled).
     var isReadyForInteractiveDismissal: Bool { get }
+
+    /// Whether a VERTICAL grab may claim a touch at `location` (in `view`'s
+    /// coordinates). The vertical axis shares the screen with subsurfaces
+    /// that own their own vertical gestures — a scrolling rail, an open
+    /// comments panel — so the destination is asked per touch; the
+    /// horizontal axis has no such tenants and is never asked. Default is
+    /// "anywhere": a destination with no vertical tenants has nothing to
+    /// refuse.
+    func zoomVerticalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool
     /// Freeze/unfreeze the feed's own scrolling while a grab-to-dismiss drives,
     /// so its rubber-band doesn't fight the shrinking card.
     func setContentScrollEnabled(_ enabled: Bool)
@@ -270,6 +279,7 @@ public extension ZoomTransitionDestination {
     var zoomDestinationContentIsReady: Bool { true }
     var zoomOwnsInteractiveDismissal: Bool { true }
     var zoomDestinationMediaIsRendering: Bool { true }
+    func zoomVerticalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool { true }
     func zoomMirrorLiveMedia(onto surface: UIView) -> Bool { false }
     func zoomDonateLiveMediaView() -> UIView? { nil }
     func zoomReclaimLiveMediaView(_ view: UIView) {}

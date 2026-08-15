@@ -62,11 +62,26 @@ public final class InteractiveSlideDismissal: NSObject {
     /// has to duplicate the pan to get one.
     public private(set) weak var dismissalPan: UIPanGestureRecognizer?
 
+    /// Which axes may begin a swipe, and the axis of the LIVE one (chosen per
+    /// gesture from the hand's velocity, exactly like the zoom grab).
+    ///
+    /// Horizontal-only by default — the historical behaviour, and the right
+    /// one for surfaces that own their vertical axis (a profile scrolls).
+    /// The FEED surfaces opt into `.vertical` too now that the pager is
+    /// forward-only: a text page dismisses downward the way a media page's
+    /// hero does, so the two page kinds feel the same in the hand.
+    private var axes: Set<ZoomDismissAxis> = [.horizontal]
+    private var activeAxis: ZoomDismissAxis = .horizontal
+
     /// Installs the pan on the feed's view. Called once; the retained feed
     /// keeps its recognizer across pushes.
-    public func attach(to feedViewController: UIViewController) {
+    public func attach(
+        to feedViewController: UIViewController,
+        axes: Set<ZoomDismissAxis> = [.horizontal]
+    ) {
         guard self.feedViewController == nil else { return }
         self.feedViewController = feedViewController
+        self.axes = axes
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
         pan.maximumNumberOfTouches = 1
         pan.delegate = self
@@ -122,7 +137,8 @@ public final class InteractiveSlideDismissal: NSObject {
             beginSwipe()
         case .changed:
             interaction?.update(ZoomTransitionGeometry.dismissProgress(
-                translation: translation.x, span: view.bounds.width
+                translation: activeAxis.along(translation),
+                span: activeAxis.span(of: view.bounds.size)
             ))
         case .ended, .cancelled:
             releaseSwipe(
@@ -157,11 +173,13 @@ public final class InteractiveSlideDismissal: NSObject {
         (feedViewController as? any ZoomTransitionDestination)?.setContentScrollEnabled(true)
 
         let progress = ZoomTransitionGeometry.dismissProgress(
-            translation: translation.x, span: view.bounds.width
+            translation: activeAxis.along(translation),
+            span: activeAxis.span(of: view.bounds.size)
         )
-        // The shared release contract — identical to the pin grab's.
+        // The shared release contract — identical to the pin grab's, on
+        // whichever axis this swipe travelled.
         let commit = ended && ZoomTransitionGeometry.shouldCompleteDismissal(
-            progress: progress, velocity: velocity.x
+            progress: progress, velocity: activeAxis.along(velocity)
         )
         commit ? interaction.finish() : interaction.cancel()
     }
@@ -225,7 +243,9 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
         // pops). The feed's push, and everything else on this stack, stay
         // native.
         guard operation == .pop, fromVC === feedViewController else { return nil }
-        return TimelineSlidePopAnimator()
+        // The axis is the live swipe's; a back-button pop (no interaction)
+        // exits horizontally, the platform's own direction.
+        return TimelineSlidePopAnimator(axis: interaction != nil ? activeAxis : .horizontal)
     }
 
     public func navigationController(
@@ -273,8 +293,18 @@ extension InteractiveSlideDismissal: UIGestureRecognizerDelegate {
         if let destination = feed as? any ZoomTransitionDestination,
            !destination.isReadyForInteractiveDismissal { return false }
         if let canBeginDismissal, !canBeginDismissal() { return false }
-        let velocity = pan.velocity(in: view)
-        return velocity.x > 0 && abs(velocity.x) > abs(velocity.y)
+        guard let axis = ZoomDismissAxis.match(velocity: pan.velocity(in: view), axes: axes)
+        else { return false }
+        // Same extra gate as the zoom grab's vertical leg: subsurfaces that
+        // own their vertical gestures (a text page's comment stream, the
+        // shortcut rail) keep their touches.
+        if axis == .vertical,
+           let destination = feed as? any ZoomTransitionDestination,
+           !destination.zoomVerticalDismissalPermitted(at: pan.location(in: view), in: view) {
+            return false
+        }
+        activeAxis = axis
+        return true
     }
 
     public func gestureRecognizer(
@@ -287,14 +317,22 @@ extension InteractiveSlideDismissal: UIGestureRecognizerDelegate {
 
 // MARK: - Animator
 
-/// The pop leg the swipe scrubs: a native-style slide — the feed exits right
-/// at 1:1 while the underlying screen advances from its parallax offset under
-/// a fading dim. Linear inside, so scrubbed progress tracks the finger; the
-/// percent driver's completion curve eases the remainder on release.
+/// The pop leg the swipe scrubs: a native-style slide — the feed exits along
+/// the swipe's axis (rightward, or downward for the forward-only feed's
+/// vertical swipe) at 1:1 while the underlying screen advances from its
+/// parallax offset under a fading dim. Linear inside, so scrubbed progress
+/// tracks the finger; the percent driver's completion curve eases the
+/// remainder on release.
 private final class TimelineSlidePopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
-    /// How far (fraction of width) the underlying screen sits shifted left
-    /// before the pop reveals it — the native parallax depth.
+    /// How far (fraction of the travel span) the underlying screen sits
+    /// shifted against the exit direction before the pop reveals it — the
+    /// native parallax depth, applied on whichever axis the exit travels.
     private let parallax: CGFloat = 0.3
+    private let axis: ZoomDismissAxis
+
+    init(axis: ZoomDismissAxis = .horizontal) {
+        self.axis = axis
+    }
 
     func transitionDuration(using context: (any UIViewControllerContextTransitioning)?) -> TimeInterval {
         0.35
@@ -332,13 +370,16 @@ private final class TimelineSlidePopAnimator: NSObject, UIViewControllerAnimated
             fromView.layer.masksToBounds = true
         }
 
-        toView.transform = CGAffineTransform(translationX: -container.bounds.width * parallax, y: 0)
+        let span = axis.span(of: container.bounds.size)
+        let entry = axis.offset(along: -span * parallax, across: 0)
+        let exit = axis.offset(along: span, across: 0)
+        toView.transform = CGAffineTransform(translationX: entry.x, y: entry.y)
         UIView.animate(
             withDuration: transitionDuration(using: context),
             delay: 0,
             options: [.curveLinear]
         ) {
-            fromView.transform = CGAffineTransform(translationX: container.bounds.width, y: 0)
+            fromView.transform = CGAffineTransform(translationX: exit.x, y: exit.y)
             toView.transform = .identity
             dim.alpha = 0
         } completion: { _ in

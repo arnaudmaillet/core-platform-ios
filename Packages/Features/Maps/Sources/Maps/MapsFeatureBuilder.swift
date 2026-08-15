@@ -75,6 +75,12 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             pushPlainSnapFeed: { postIDs, presenter in
                 feedFeature().pushSnapFeed(postIDs: postIDs, from: presenter)
             },
+            // The place gallery a semantic cluster's feed dismisses into —
+            // built by the Feed feature because the grid, the flight card and
+            // the retarget wiring are all its internals.
+            makeClusterGallery: { postIDs, title, feed in
+                feedFeature().makeClusterGallery(postIDs: postIDs, title: title, feed: feed)
+            },
             prewarm: { ids in await feedFeature().prewarmPosts(ids) },
             openProfile: openProfile,
             openConversation: openConversation

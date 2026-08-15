@@ -41,6 +41,11 @@ final class MapsViewController: UIViewController {
     /// attached and retained with it, and that belongs where the other two
     /// surfaces already get it.
     private let pushPlainSnapFeed: ([PostID], UIViewController) -> Void
+    /// Builds the place gallery a SEMANTIC cluster's feed dismisses into
+    /// (`FeedFeatureBuilding.makeClusterGallery`): (member ids, title, the
+    /// feed about to cover it) → the gallery screen, which also serves as the
+    /// vertical grab's flight target (`ZoomTransitionSource`).
+    private let makeClusterGallery: ([PostID], String, UIViewController) -> UIViewController
     /// Warms the given posts into the shared cache so a tap opens instantly.
     private let prewarm: ([PostID]) async -> Void
     /// Opens someone's profile (the sub-filter sheet's Profile swipe). A
@@ -169,6 +174,7 @@ final class MapsViewController: UIViewController {
         videoPlayback: VideoPlaybackController,
         makeSnapFeed: @escaping ([PostID]) -> UIViewController,
         pushPlainSnapFeed: @escaping ([PostID], UIViewController) -> Void,
+        makeClusterGallery: @escaping ([PostID], String, UIViewController) -> UIViewController,
         prewarm: @escaping ([PostID]) async -> Void,
         openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
         openConversation: @escaping (ProfileID) -> Void
@@ -180,6 +186,7 @@ final class MapsViewController: UIViewController {
         self.videoCoordinator = MapVideoPlaybackCoordinator(pool: videoPlayback)
         self.makeSnapFeed = makeSnapFeed
         self.pushPlainSnapFeed = pushPlainSnapFeed
+        self.makeClusterGallery = makeClusterGallery
         self.prewarm = prewarm
         self.openProfile = openProfile
         self.openConversation = openConversation
@@ -210,6 +217,18 @@ final class MapsViewController: UIViewController {
             var region = Self.defaultRegion
             region.span.latitudeDelta *= 6
             region.span.longitudeDelta *= 6
+            mapView.setRegion(region, animated: false)
+        }
+        // `-maps-tight-region`: open one zoom level PAST the city band
+        // (span 0.045° → level 13, against the default 0.09° → level 12),
+        // framing almost the same pins — so the semantic masking's
+        // break-down half (the place marker dissolving back into pins) can
+        // be screenshotted as an A/B in the sim, where a pinch can't be
+        // injected.
+        if ProcessInfo.processInfo.arguments.contains("-maps-tight-region") {
+            var region = Self.defaultRegion
+            region.span.latitudeDelta = 0.045
+            region.span.longitudeDelta = 0.045
             mapView.setRegion(region, animated: false)
         }
         // `-maps-select-filter <token>`: selects a filter pill (~1.5s after
@@ -1158,7 +1177,12 @@ final class MapsViewController: UIViewController {
         let items = MapClusterEngine.cluster(
             Array(pins.values),
             zoomScale: currentZoomScale,
-            cellPoints: Double(Self.clusterCellPoints)
+            cellPoints: Double(Self.clusterCellPoints),
+            // Drives the semantic pre-pass: an active place (city/country/
+            // region, mock-tagged today) absorbs all its pins into one
+            // marker at this zoom and dissolves when the viewer zooms past
+            // its band.
+            zoomLevel: MapViewport.zoomLevel(forLongitudeSpan: mapView.region.span.longitudeDelta)
         )
         var target = Set<String>()
         target.reserveCapacity(items.count)
@@ -1411,10 +1435,19 @@ extension MapsViewController: MKMapViewDelegate {
     private func debugOpenFirstClusterIfRequested(among views: [MKAnnotationView]) {
         let arguments = ProcessInfo.processInfo.arguments
         let wantsText = arguments.contains("-maps-open-first-text-cluster")
+        // `-maps-open-first-media-cluster`: the biggest MEDIA-faced cluster —
+        // the hero-presented kind, which is also what the semantic-cluster
+        // gallery flow rides (pair with `-maps-mock-semantic-clusters`).
+        let wantsMedia = arguments.contains("-maps-open-first-media-cluster")
         guard !didDebugOpenPin,
-              wantsText || arguments.contains("-maps-open-first-cluster") else { return }
+              wantsText || wantsMedia || arguments.contains("-maps-open-first-cluster")
+        else { return }
         let clusters = views.compactMap { $0.annotation as? MapComputedCluster }
-            .filter { $0.memberIDs.count > 1 && (!wantsText || $0.representative.isText) }
+            .filter {
+                $0.memberIDs.count > 1
+                    && (!wantsText || $0.representative.isText)
+                    && (!wantsMedia || !$0.representative.isText)
+            }
         guard let cluster = clusters.max(by: { $0.memberIDs.count < $1.memberIDs.count })
         else { return }
         didDebugOpenPin = true
@@ -1561,6 +1594,48 @@ extension MapsViewController: MKMapViewDelegate {
         let transition = ZoomTransitionController(source: source, destination: destination)
         activeTransition = transition
 
+        // CASE B (cluster-gallery milestone): a SEMANTIC cluster — one whose
+        // members all share a city/country/region (mock-only today, see
+        // `MapPlace`) — carries a place gallery beneath its feed. The gallery
+        // joins the stack invisibly in the same transaction as the feed
+        // (UIKit animates a stack whose last element is new exactly like a
+        // push, and never even loads the mid controller's view), and the
+        // VERTICAL grab flies the active post into its tile there instead of
+        // back to the pin. Generic clusters and single pins skip all of this.
+        var gallery: UIViewController?
+        if let cluster = annotation as? MapComputedCluster, let place = cluster.place {
+            let built = makeClusterGallery(postIDs, place.galleryTitle, feedVC)
+            gallery = built
+            if let gallerySource = built as? any ZoomTransitionSource {
+                transition.setDismissSource(gallerySource, for: built)
+                transition.attachInteractiveDismissal(
+                    to: feedVC.view, axes: [.vertical], towards: gallerySource
+                ) { [weak self, weak nav] in
+                    // Same grab-begin contract as the pin return: the tab
+                    // bar's hidden STATE goes back outside the transition
+                    // (at alpha 0, for the drag to fade in); the filter bars
+                    // are invisible under the gallery either way.
+                    self?.restoreBottomChromeForReturn(alpha: 0)
+                    nav?.popViewController(animated: true)
+                }
+            }
+            transition.onDismissedToIntermediate = { [weak self, source] _ in
+                // The gallery is the screen now — an ordinary one. The flow's
+                // transition is over: hand the delegate slot back so the
+                // gallery's own pushes/pops are native, and let the map's
+                // chrome settle silently beneath (it is invisible until the
+                // gallery pops, when `viewWillAppear` finds
+                // `activeTransition == nil` and resumes previews normally).
+                guard let self else { return }
+                self.navigationController?.delegate = nil
+                self.activeTransition = nil
+                self.barsStack.alpha = 1
+                // The present flight hid the tapped marker; nothing on the
+                // gallery path would ever restore it.
+                source.setZoomSourceHidden(false)
+            }
+        }
+
         var didLand = false
         transition.onDestinationShown = { [weak self, weak transition] in
             // Landed (fires again if a detail above the feed pops back — the
@@ -1595,19 +1670,68 @@ extension MapsViewController: MKMapViewDelegate {
             self.videoCoordinator.setSurfaceVisible(true)
             self.refreshVideoPlayback()
         }
-        transition.onDismissalCancelled = { [weak self] in
+        transition.onDismissalCancelled = { [weak self, gallery, weak nav, weak feedVC] in
             // The feed is staying up: put the bottom chrome back down behind it.
             self?.tabBarController?.setTabBarHidden(true, animated: false)
             self?.tabBarController?.tabBar.alpha = 1
             self?.barsStack.alpha = 0
+            // An abandoned ESCAPE grab already dropped the gallery from the
+            // stack (the reorder half of the recipe below); put it back
+            // beneath the feed, invisibly, so the vertical grab keeps its
+            // landing. `gallery` is captured STRONGLY on purpose: between the
+            // reorder and this cancel, this closure is the only thing keeping
+            // the dropped screen alive to reinsert.
+            //
+            // Deferred one runloop turn, and that hop is load-bearing: this
+            // callback fires inside `completeTransition(false)`'s own call
+            // stack, and a `setViewControllers` issued there is silently
+            // swallowed by UIKit's post-cancel bookkeeping — measured in-sim
+            // as the next vertical grab landing on the MAP because the stack
+            // was still [map, feed]. Same transaction-sharing rule the spike
+            // suite records for the reorder half.
+            DispatchQueue.main.async { [weak nav, weak feedVC] in
+                guard let nav, let gallery, let feedVC,
+                      !nav.viewControllers.contains(gallery),
+                      let feedIndex = nav.viewControllers.firstIndex(of: feedVC)
+                else { return }
+                var stack = nav.viewControllers
+                stack.insert(gallery, at: feedIndex)
+                nav.setViewControllers(stack, animated: false)
+            }
         }
         // Accessing `view` loads it so the grab-to-dismiss pan can attach.
-        transition.attachInteractiveDismissal(to: feedVC.view) { [weak self, weak nav] in
-            // Restore the bar's hidden STATE at grab-begin, before the pop and
-            // so outside any transition — the one point at which it paints
-            // correctly. Invisible, so the drag can fade it in.
-            self?.restoreBottomChromeForReturn(alpha: 0)
-            nav?.popViewController(animated: true)
+        if let clusterGallery = gallery {
+            // Case B's HORIZONTAL escape: straight back to the map, skipping
+            // the gallery. Never a scrubbed multi-pop — UIKit commits a
+            // popTo's stack mutation at begin and a cancel does not restore
+            // it (see `InteractivePopToStackTests`) — so the recipe is: drop
+            // the gallery invisibly while the feed is top and nothing is
+            // transitioning, then run the ordinary, fully cancellable single
+            // pop the pin grab has always been. The pop's landing is the map,
+            // so the default (pin) source flies the card home. Axes stay
+            // disjoint with the gallery driver above: exactly one of the two
+            // ever claims a drag.
+            transition.attachInteractiveDismissal(to: feedVC.view, axes: [.horizontal]) {
+                [weak self, weak nav] in
+                guard let nav else { return }
+                if let index = nav.viewControllers.firstIndex(of: clusterGallery) {
+                    var stack = nav.viewControllers
+                    stack.remove(at: index)
+                    nav.setViewControllers(stack, animated: false)
+                }
+                self?.restoreBottomChromeForReturn(alpha: 0)
+                nav.popViewController(animated: true)
+            }
+        } else {
+            // Case A (single pin / generic cluster): both axes fly home to
+            // the pin.
+            transition.attachInteractiveDismissal(to: feedVC.view) { [weak self, weak nav] in
+                // Restore the bar's hidden STATE at grab-begin, before the pop
+                // and so outside any transition — the one point at which it
+                // paints correctly. Invisible, so the drag can fade it in.
+                self?.restoreBottomChromeForReturn(alpha: 0)
+                nav?.popViewController(animated: true)
+            }
         }
         // Map is covered by the feed → stop its previews, except the tapped
         // pin's, which the flight card is still rendering. Set *before* the
@@ -1625,7 +1749,16 @@ extension MapsViewController: MKMapViewDelegate {
         tabBarController?.setTabBarHidden(true, animated: true)
         setFilterBar(hidden: true)
         nav.delegate = transition
-        nav.pushViewController(feedVC, animated: true)
+        if let gallery {
+            // One transaction: the gallery slides in BENEATH the feed. UIKit
+            // runs the same map→feed hero this delegate already vends (the
+            // pair check is on the top controllers) and the gallery is never
+            // seen — its view is not even loaded (pinned by the spike suite,
+            // `InteractivePopToStackTests`).
+            nav.setViewControllers(nav.viewControllers + [gallery, feedVC], animated: true)
+        } else {
+            nav.pushViewController(feedVC, animated: true)
+        }
     }
 }
 
