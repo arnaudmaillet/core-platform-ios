@@ -22,11 +22,17 @@ import UIKit
 /// release simply springs from the card's exact current 2D coordinate to
 /// `poseAtSource` (commit: the same clip-morph home the button dismiss flies)
 /// or `poseAsPage` (cancel), seeding the spring with the gesture's release
-/// velocity so the card is visibly "caught". The horizontal axis is chosen
-/// deliberately: the feed pages and pulls-to-refresh vertically, so a
-/// rightward grab has no scroll view to fight; direction is vetted in
-/// `gestureRecognizerShouldBegin`, which is what lets `.began` claim
-/// immediately.
+/// velocity so the card is visibly "caught".
+///
+/// The grab is armed per AXIS (`ZoomDismissAxis`): rightward, downward, or
+/// both, chosen by the owner at attach time. The axis is picked per gesture
+/// in `gestureRecognizerShouldBegin` from the hand's velocity — which is
+/// what lets `.began` claim immediately — and selects the progress
+/// component, the drift component, the span, and the release velocity;
+/// every other channel is axis-blind. A vertical grab exists at all because
+/// the feed is FORWARD-ONLY: its pager declines downward touches (the
+/// mirror of this pan's begin gate), so downward is free the way rightward
+/// always was.
 @MainActor
 final class ZoomDismissInteractionController: NSObject, UIViewControllerInteractiveTransitioning {
     /// Whether a grab is currently driving the dismissal — the transitioning
@@ -106,9 +112,15 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// gate — cannot fire afterwards and strand the feed invisible.
     private var hasAbandonedContentHide = false
 
-    /// Rubber-band caps: generous vertically (the float), tight against
-    /// dragging backwards past the origin.
-    private let verticalDriftLimit: CGFloat = 140
+    /// Which axes may begin a grab, set at attach; the axis of the LIVE grab
+    /// is chosen from the hand's velocity in `gestureRecognizerShouldBegin`
+    /// and holds for the gesture's whole lifetime.
+    private var axes: Set<ZoomDismissAxis> = [.horizontal]
+    private var activeAxis: ZoomDismissAxis = .horizontal
+
+    /// Rubber-band caps: generous across the travel axis (the float), tight
+    /// against dragging backwards past the origin.
+    private let crossDriftLimit: CGFloat = 140
     private let backDragLimit: CGFloat = 60
     /// How far the card may travel along the dismissal axis, however hard it is
     /// thrown. Asymptotic, not a clamp — see `rubberBand` — so the card keeps
@@ -130,15 +142,19 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     var onCancelled: (() -> Void)?
 
     /// Installs the pan on the presented feed's view. `onBeginDismiss` should
-    /// pop (or dismiss) the presented view controller.
+    /// pop (or dismiss) the presented view controller; `axes` arms the grab's
+    /// directions (both by default — the forward-only feed leaves downward
+    /// free everywhere this driver is used).
     func attach(
         to view: UIView,
         source: any ZoomTransitionSource,
         destination: any ZoomTransitionDestination,
+        axes: Set<ZoomDismissAxis> = [.horizontal, .vertical],
         onBeginDismiss: @escaping () -> Void
     ) {
         self.source = source
         self.destination = destination
+        self.axes = axes
         self.onBeginDismiss = onBeginDismiss
         self.pannedView = view
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
@@ -343,7 +359,8 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     private func updateDrag(translation: CGPoint, in view: UIView) {
         guard isInteracting, let flight, let context else { return }
         let progress = ZoomTransitionGeometry.dismissProgress(
-            translation: translation.x, span: view.bounds.width
+            translation: activeAxis.along(translation),
+            span: activeAxis.span(of: view.bounds.size)
         )
         // Re-read the target every event rather than trusting the stage-time
         // snapshot. It is one rect conversion per pan, and it means anything
@@ -352,18 +369,23 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // surfacing as a correction the moment the finger lifts.
         stagedLanding = currentLanding(in: context.containerView)
 
-        // Position channel: free 2D float. Horizontal 1:1 (it is also the
-        // progress axis); vertical and back-drag rubber-band so the card
-        // follows the hand but resists leaving the dismissal axis.
+        // Position channel: free 2D float, decomposed along the LIVE axis.
+        // Travel and back-drag rubber-band along it; drift rubber-bands
+        // across it — so the card follows the hand but resists leaving the
+        // dismissal axis, whichever axis that is.
         // Both directions resist now. Forward used to be 1:1, so a hard throw
         // could put the card most of the way off screen while the finger was
         // still down — motion that promises the card has left when the gesture
         // can still be abandoned.
-        let dx = translation.x >= 0
-            ? ZoomTransitionGeometry.rubberBand(translation.x, limit: forwardDragLimit)
-            : ZoomTransitionGeometry.rubberBand(translation.x, limit: backDragLimit)
-        let dy = ZoomTransitionGeometry.rubberBand(translation.y, limit: verticalDriftLimit)
-        flight.card.center = CGPoint(x: pageCenter.x + dx, y: pageCenter.y + dy)
+        let along = activeAxis.along(translation)
+        let bandedAlong = along >= 0
+            ? ZoomTransitionGeometry.rubberBand(along, limit: forwardDragLimit)
+            : ZoomTransitionGeometry.rubberBand(along, limit: backDragLimit)
+        let bandedAcross = ZoomTransitionGeometry.rubberBand(
+            activeAxis.across(translation), limit: crossDriftLimit
+        )
+        let offset = activeAxis.offset(along: bandedAlong, across: bandedAcross)
+        flight.card.center = CGPoint(x: pageCenter.x + offset.x, y: pageCenter.y + offset.y)
 
         // Scale channel: the card shrinks but keeps the PAGE's aspect ratio the
         // whole time it is held.
@@ -433,12 +455,14 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         destination?.setContentScrollEnabled(true)
 
         let progress = ZoomTransitionGeometry.dismissProgress(
-            translation: translation.x, span: view.bounds.width
+            translation: activeAxis.along(translation),
+            span: activeAxis.span(of: view.bounds.size)
         )
         // Thresholds come from the shared release contract (CoreNavigation),
-        // so the pin grab and the timeline slide complete identically.
+        // so the pin grab and the timeline slide complete identically — and
+        // both axes read the same fraction-of-span and flick numbers.
         let commit = ended && ZoomTransitionGeometry.shouldCompleteDismissal(
-            progress: progress, velocity: velocity.x
+            progress: progress, velocity: activeAxis.along(velocity)
         )
         // The outcome is reported NOW, at release — the framework's contract
         // for the end of the user-driven phase. UIKit then runs the remaining
@@ -669,13 +693,19 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// Scripted grab for sim recordings (`-maps-demo-grab`): touch injection
     /// is impossible in the simulator, so this walks the exact
     /// begin/update/release path a finger drives — a diagonal drag to
-    /// (`peakProgress` × width, `verticalDrift`), a hold, then a release.
+    /// (`peakProgress` × span, `drift` across it), a hold, then a release.
     /// Whether it completes or springs back is decided by the same threshold
-    /// logic as a real release.
-    func debugPerformGrab(peakProgress: CGFloat, verticalDrift: CGFloat = 0) async {
+    /// logic as a real release. `axis` substitutes for the velocity vetting a
+    /// real gesture gets in `gestureRecognizerShouldBegin`.
+    func debugPerformGrab(
+        peakProgress: CGFloat, verticalDrift: CGFloat = 0, axis: ZoomDismissAxis = .horizontal
+    ) async {
         guard let view = pannedView else { return }
+        activeAxis = axis
         beginGrab()
-        let peak = CGPoint(x: peakProgress * view.bounds.width, y: verticalDrift)
+        let peak = axis.offset(
+            along: peakProgress * axis.span(of: view.bounds.size), across: verticalDrift
+        )
         let steps = 30
         for step in 1...steps {
             try? await Task.sleep(nanoseconds: 16_000_000)
@@ -691,10 +721,11 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
 // MARK: - Direction and coexistence
 
 extension ZoomDismissInteractionController: UIGestureRecognizerDelegate {
-    /// The whole conflict story lives here: the pan begins only for a
-    /// rightward, predominantly horizontal movement, so vertical paging and
-    /// pull-to-refresh never see a competitor — and when it does begin, the
-    /// intent is unambiguous enough to claim on the spot.
+    /// The whole conflict story lives here: the pan begins only for an
+    /// outbound movement predominantly along one ARMED axis (rightward, or —
+    /// with the pager forward-only — downward), so the paging the feed still
+    /// owns never sees a competitor — and when it does begin, the intent is
+    /// unambiguous enough to claim on the spot.
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         // `context == nil` also gates on the PREVIOUS grab's transition having
         // fully completed — overlapping lifecycles must never share state.
@@ -707,8 +738,19 @@ extension ZoomDismissInteractionController: UIGestureRecognizerDelegate {
         // the feed is already `topViewController` then, and beginning a grab
         // would start a second pop mid-transition. Refuse; the next grab retries.
         guard (destination as? UIViewController)?.transitionCoordinator == nil else { return false }
-        let velocity = pan.velocity(in: view)
-        return velocity.x > 0 && abs(velocity.x) > abs(velocity.y)
+        guard let axis = ZoomDismissAxis.match(velocity: pan.velocity(in: view), axes: axes)
+        else { return false }
+        // The vertical axis carries one gate the horizontal never needed: the
+        // destination may host subsurfaces that own their own vertical
+        // gestures (a scrolling rail, an open comments panel), and a grab
+        // must not fight them. The destination answers per touch; horizontal
+        // grabs keep their historical behaviour unchanged.
+        if axis == .vertical,
+           destination?.zoomVerticalDismissalPermitted(at: pan.location(in: view), in: view) == false {
+            return false
+        }
+        activeAxis = axis
+        return true
     }
 
     func gestureRecognizer(
