@@ -482,6 +482,22 @@ final class ForYouGridPage: UIView {
         )
     }
 
+    /// Brings `postID`'s tile into the unobstructed viewport NOW, layout
+    /// settled — the cluster gallery's landing rule. Unlike the For You
+    /// dismissal (which anchors on the departure tile and never scrolls —
+    /// see `ForYouGridZoomSource`), a cluster gallery has never been seen
+    /// when the first dismissal stages, so there is no viewer context to
+    /// preserve and the grid is free to travel to the landing post's own
+    /// tile.
+    func revealPost(_ postID: PostID) {
+        guard let index = posts.firstIndex(where: { $0.id == postID }) else { return }
+        collectionView.layoutIfNeeded()
+        ScrollIntoView.revealImmediately(
+            collectionView.layoutAttributesForItem(at: indexPath(for: index))?.frame,
+            in: collectionView
+        )
+    }
+
     /// Whether a post autoplays ON THIS PAGE — the one autoplay rule that
     /// differs by shape, so the difference lives in exactly one place.
     ///

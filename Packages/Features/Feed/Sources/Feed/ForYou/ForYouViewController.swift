@@ -791,7 +791,7 @@ final class ForYouViewController: UIViewController {
             // gesture stays out of its way (see `NativePopGestureEnabler`) —
             // the two would otherwise both try to drive one pop.
             (feed as? SnapFeedViewController)?.zoomOwnsInteractiveDismissal = true
-            textSlideDismissal.attach(to: feed)
+            textSlideDismissal.attach(to: feed, axes: [.horizontal, .vertical])
             textSlideDismissal.onFeedPopped = { [weak self] _ in
                 // Completed pops only — a cancelled swipe reports nothing here,
                 // which is exactly why this is a safe place to reveal from.

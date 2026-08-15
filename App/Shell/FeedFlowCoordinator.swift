@@ -57,7 +57,7 @@ final class FeedFlowCoordinator: Coordinator {
         // Accessing `view` loads it so the swipe-to-pop pan can attach (a
         // no-op after the first push); the delegate slot is taken per push
         // and handed back when the feed leaves this stack.
-        slideDismissal.attach(to: feed)
+        slideDismissal.attach(to: feed, axes: [.horizontal, .vertical])
         slideDismissal.onFeedPopped = { [weak self] nav in self?.restoreTabBar(on: nav) }
         slideDismissal.install(on: navigationController)
         // Tab bar managed by hand, NOT hidesBottomBarWhenPushed: that flag's
