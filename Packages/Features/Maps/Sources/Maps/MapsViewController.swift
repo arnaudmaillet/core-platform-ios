@@ -231,6 +231,16 @@ final class MapsViewController: UIViewController {
             region.span.longitudeDelta = 0.045
             mapView.setRegion(region, animated: false)
         }
+        // `-maps-country-region`: open at the COUNTRY band (span 1.44° →
+        // level 8), where the whole hierarchy has rolled up into one France
+        // marker — the top of the nesting ladder, unreachable by the ×6
+        // wide region (level 9 = region band).
+        if ProcessInfo.processInfo.arguments.contains("-maps-country-region") {
+            var region = Self.defaultRegion
+            region.span.latitudeDelta = 1.44
+            region.span.longitudeDelta = 1.44
+            mapView.setRegion(region, animated: false)
+        }
         // `-maps-select-filter <token>`: selects a filter pill (~1.5s after
         // launch, once the first unfiltered settle has painted) — drives the
         // filtered-query path in the sim, where taps can't be injected.

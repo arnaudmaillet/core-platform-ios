@@ -86,22 +86,28 @@ enum MapClusterEngine {
     static func cluster(
         _ pins: [MapPin], zoomScale: Double, cellPoints: Double, zoomLevel: Int32? = nil
     ) -> [Item] {
-        // SEMANTIC PRE-PASS (hierarchical masking): a place whose band is
-        // active at this zoom absorbs EVERY pin tagged with it into one
-        // marker, however far apart they sit on screen — the "Paris • City"
-        // pin stands for all of the city's posts, and none of its children
-        // render independently. Extracted BEFORE the proximity passes so a
-        // masked pin can neither appear alone nor drag an unrelated pin
-        // into the place's group (a gallery titled "Paris" must never open
-        // posts that did not claim Paris). A group of one is left to the
-        // proximity pass — a lone pin needs no masking, and a lone marker
-        // wearing a place name would promise a gallery of one.
-        var maskedByPlace: [String: [MapPin]] = [:]
+        // SEMANTIC PRE-PASS (nested hierarchical roll-up): the zoom selects
+        // ONE active hierarchy depth (`MapPlace.Kind.activeKind` — country,
+        // region, city, or none), and every pin whose place LADDER carries
+        // an entry at that depth is absorbed into that entry's marker,
+        // however far apart the members sit on screen. Because a city pin's
+        // ladder also names its region and its country, zooming out
+        // collapses whole cities into their parent region's marker and
+        // whole regions into their country's — the roll-up is a consequence
+        // of the ladder, not a second mechanism. Extracted BEFORE the
+        // proximity passes so a masked pin can neither appear alone nor
+        // drag an unrelated pin into the place's group (a gallery titled
+        // "Paris" must never open posts that did not claim Paris). A group
+        // of one is left to the proximity pass — a lone pin needs no
+        // masking, and a lone marker wearing a place name would promise a
+        // gallery of one.
+        var maskedByPlace: [String: (place: MapPlace, members: [MapPin])] = [:]
         var unmasked: [MapPin] = []
-        if let zoomLevel {
+        let activeKind = zoomLevel.flatMap(MapPlace.Kind.activeKind(atZoomLevel:))
+        if let activeKind {
             for pin in pins {
-                if let place = pin.place, place.kind.masksChildren(atZoomLevel: zoomLevel) {
-                    maskedByPlace[place.id, default: []].append(pin)
+                if let place = pin.places.first(where: { $0.kind == activeKind }) {
+                    maskedByPlace[place.id, default: (place, [])].members.append(pin)
                 } else {
                     unmasked.append(pin)
                 }
@@ -110,10 +116,10 @@ enum MapClusterEngine {
             unmasked = pins
         }
         let semantic: [Item] = maskedByPlace
-            .filter { $0.value.count > 1 }
+            .filter { $0.value.members.count > 1 }
             .sorted { $0.key < $1.key } // deterministic output order
-            .map { _, members in
-                let ordered = members.sorted { $0.postID.rawValue < $1.postID.rawValue }
+            .map { _, group in
+                let ordered = group.members.sorted { $0.postID.rawValue < $1.postID.rawValue }
                 let face = representative(of: ordered)
                 return Item(
                     representative: face,
@@ -124,11 +130,14 @@ enum MapClusterEngine {
                     // so spherical-centroid math would be precision theatre.
                     latitude: ordered.reduce(0) { $0 + $1.latitude } / Double(ordered.count),
                     longitude: ordered.reduce(0) { $0 + $1.longitude } / Double(ordered.count),
-                    place: ordered[0].place
+                    // The marker speaks at the ACTIVE depth: a region's
+                    // group says Île-de-France even though every member's
+                    // leaf place is a city inside it.
+                    place: group.place
                 )
             }
         // Groups of one fall through to proximity clustering with everyone else.
-        let single = maskedByPlace.values.filter { $0.count == 1 }.flatMap { $0 }
+        let single = maskedByPlace.values.filter { $0.members.count == 1 }.flatMap(\.members)
         let pins = unmasked + single
 
         guard zoomScale > 0, cellPoints > 0 else {

@@ -23,15 +23,17 @@ import Foundation
 enum MapMockPlaces {
     static let launchArgument = "-maps-mock-semantic-clusters"
 
-    /// The three places, one per `MapPlace.Kind`.
+    /// The three places, one per `MapPlace.Kind`, nested by their ladders
+    /// (see `ladder(for:)`).
     ///
-    /// The assignment is deliberate: the MEDIA-ONLY venue anchors the
-    /// flagship City case, because a venue's cluster wears its lowest-id
-    /// member's face and only a media face gets the hero presentation the
-    /// gallery flow rides today — the mixed and text venues' groups wear
-    /// the TEXT face (their lowest ids are text posts) and still fall back
-    /// to the plain push (a documented gap until the text-cluster gallery
-    /// lands).
+    /// The MEDIA-ONLY venue anchors the City ring deliberately: a group
+    /// wears its lowest-id member's face, and only a media face gets the
+    /// hero presentation the gallery flow rides today. Because the city's
+    /// members ride along in every roll-up, the REGION and COUNTRY markers
+    /// inherit that same media face — every level of the hierarchy is
+    /// Case-B reachable. Venue-only proximity clusters at the mixed and
+    /// text venues still wear the TEXT face and fall back to the plain
+    /// push (a documented gap until the text-cluster gallery lands).
     static let paris = MapPlace(id: "city:paris", name: "Paris", kind: .city)
     static let france = MapPlace(id: "country:france", name: "France", kind: .country)
     static let ileDeFrance = MapPlace(id: "region:idf", name: "Île-de-France", kind: .region)
@@ -40,44 +42,44 @@ enum MapMockPlaces {
         ProcessInfo.processInfo.arguments.contains(launchArgument)
     }
 
-    /// The place a pin belongs to — ZONES, not exact venue coordinates, so
-    /// each place has genuinely SPREAD-OUT children for the hierarchical
-    /// masking to absorb (a place with one coordinate masks nothing anyone
-    /// can see). Three disjoint zones tiling most of the mock's ±0.15°
-    /// Paris scatter, each containing its anchor venue
-    /// (`MockGeoDiscoveryService`), each big enough that its collapse is
-    /// unmistakable at the zoom that activates it:
+    /// The place LADDER a pin belongs to, most specific first — genuinely
+    /// NESTED zones (Paris ⊂ Île-de-France ⊂ France), so the zoom-banded
+    /// roll-up has a real hierarchy to climb: at the city band Paris masks
+    /// its posts; at the region band the whole city collapses into
+    /// Île-de-France's marker together with the region's other posts; at
+    /// the country band everything tagged folds into France. Concentric
+    /// over the mock's ±0.15° scatter, each ring containing its anchor
+    /// venue (`MockGeoDiscoveryService`):
     ///
-    /// - **France • Country**: everything north of latitude 48.863 —
-    ///   including the mixed venue (48.8640, 2.3400) and roughly half the
-    ///   scatter.
-    /// - **Île-de-France • Region**: east of longitude 2.360, below the
-    ///   country line — including the text-only venue (48.8480, 2.3660).
-    /// - **Paris • City**: the remaining band down to latitude 48.800 —
-    ///   including the media-only venue (48.8500, 2.3380) and the handful
-    ///   of scattered pins visible in the opening viewport's lower half,
-    ///   which is what makes the city mask legible at launch.
+    /// - **France • Country**: everything north of latitude 48.780 — most
+    ///   of the scatter. Anchored by the text-only venue (48.8480, 2.3660),
+    ///   which sits in no region, so it also demonstrates a country-only
+    ///   ladder.
+    /// - **Île-de-France • Region** (⊂ France): latitude ≥ 48.800 AND
+    ///   longitude < 2.360. Anchored by the mixed venue (48.8640, 2.3400),
+    ///   which sits in no city.
+    /// - **Paris • City** (⊂ Île-de-France): the region's slice below
+    ///   latitude 48.863 — anchored by the media-only venue
+    ///   (48.8500, 2.3380), with the scattered pins of the opening
+    ///   viewport's lower half, which is what makes the city mask legible
+    ///   at launch.
     ///
-    /// South of 48.800 stays UNTAGGED, so generic pins and proximity
-    /// clusters (Case A) remain reachable with the flag on. Checked in
-    /// this order, the zones are disjoint by construction. True NESTING
-    /// (Paris inside Île-de-France inside France) needs one pin to carry
-    /// several places at once, which is the server's aggregation to express
-    /// (`BACKEND_CLUSTER_TYPES.md`); the mock trades it for disjoint zones.
-    static func place(for pin: MapPin) -> MapPlace? {
-        if pin.latitude >= 48.863 { return france }
-        if pin.longitude >= 2.360 { return ileDeFrance }
-        if pin.latitude >= 48.800 { return paris }
-        return nil
+    /// South of 48.780 stays UNTAGGED, so generic pins and proximity
+    /// clusters (Case A) remain reachable with the flag on.
+    static func ladder(for pin: MapPin) -> [MapPlace] {
+        guard pin.latitude >= 48.780 else { return [] }
+        guard pin.latitude >= 48.800, pin.longitude < 2.360 else { return [france] }
+        guard pin.latitude < 48.863 else { return [ileDeFrance, france] }
+        return [paris, ileDeFrance, france]
     }
 
-    /// Tags every pin in a place's zone. A no-op (identity, not even a
+    /// Tags every pin with its zone ladder. A no-op (identity, not even a
     /// copy) when the launch argument is absent.
     static func decorate(_ pins: [MapPin]) -> [MapPin] {
         guard isEnabled else { return pins }
         return pins.map { pin in
-            guard let place = place(for: pin) else { return pin }
-            return pin.tagged(with: place)
+            let ladder = ladder(for: pin)
+            return ladder.isEmpty ? pin : pin.tagged(with: ladder)
         }
     }
 }

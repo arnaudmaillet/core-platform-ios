@@ -20,25 +20,28 @@ public struct MapPlace: Sendable, Equatable, Hashable {
         case country = "Country"
         case region = "Region"
 
-        /// Whether a place of this kind MASKS its children at `zoomLevel`
-        /// (the viewport's 0–15 scale, `MapViewport.zoomLevel`): while
-        /// active, every pin tagged with the place is absorbed into ONE
-        /// marker regardless of screen distance, and none of its members
-        /// render independently; zoomed in past the band, the group
-        /// dissolves back into pins and ordinary proximity clusters.
+        /// The ONE hierarchy depth that clusters at `zoomLevel` (the
+        /// viewport's 0–15 scale, `MapViewport.zoomLevel`) — the nested
+        /// roll-up rule. Exactly one level of the ladder is active per band:
+        /// zoomed to the city band, city clusters absorb their posts; zoom
+        /// out to the region band and whole CITIES collapse into their
+        /// parent region's marker; further out, regions collapse into their
+        /// country; zoomed in past every band, nothing semantic renders and
+        /// local proximity clustering is all there is.
         ///
         /// Client-side, mock-era banding. The contract proposal
         /// (`BACKEND_CLUSTER_TYPES.md` §C) puts this decision on the server —
         /// which sees the whole corpus — and these thresholds are deleted
         /// with the rest of the mock layer when `GeoCluster` ships. Anchors:
-        /// the map opens at level 12 (0.09° span), where a CITY should
-        /// already stand for its posts; `-maps-wide-region` lands at level 9,
-        /// where a COUNTRY does.
-        func masksChildren(atZoomLevel zoomLevel: Int32) -> Bool {
-            switch self {
-            case .city: zoomLevel <= 12
-            case .region: zoomLevel <= 10
-            case .country: zoomLevel <= 9
+        /// the map opens at level 12 (0.09° span), inside the city band;
+        /// `-maps-wide-region` lands at level 9 (region);
+        /// `-maps-country-region` at level 8 (country).
+        static func activeKind(atZoomLevel zoomLevel: Int32) -> Kind? {
+            switch zoomLevel {
+            case ..<9: .country
+            case 9...10: .region
+            case 11...12: .city
+            default: nil
             }
         }
     }
