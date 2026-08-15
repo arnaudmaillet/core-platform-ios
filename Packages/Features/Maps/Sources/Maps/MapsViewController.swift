@@ -274,6 +274,53 @@ final class MapsViewController: UIViewController {
                 subFilterBar.perform(.unpin, on: .profile(ProfileID(id)))
             }
         }
+        // `-maps-subfilter-menu-audit <profileID>`: prints the pill's
+        // long-press menu ~5s in — its title and its verbs, in order. The menu
+        // needs a long press the simulator cannot deliver, so this is how a
+        // scripted run sees what it would contain (the same instrument
+        // `-profile-menu-audit` is for the profile's overflow menu).
+        if let id = Self.debugArgumentValue("-maps-subfilter-menu-audit") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+                guard let menu = self?.subFilterBar.menu(for: .profile(ProfileID(id))) else {
+                    print("[maps] pill menu: no pill for \(id)")
+                    return
+                }
+                // A person's name is the FIRST section's action now, not the
+                // root title: it is the header the viewer taps. Print both,
+                // plus what the pill actually carries — the header used to be
+                // built correctly and never reach the screen.
+                let sections = menu.children.compactMap { $0 as? UIMenu }
+                let header = sections.first?.children.compactMap { $0 as? UIAction }.first
+                let verbs = sections.last?.children
+                    .compactMap { ($0 as? UIAction)?.title } ?? []
+                let separated = sections.count > 1 || !menu.title.isEmpty
+                // `installed*` is read off the pill WITHOUT opening anything:
+                // the header is installed when the cell is configured, so the
+                // name and handle are already on it before any thumb lands.
+                let installed = self?.subFilterBar
+                    .debugInstalledMenuTitle(for: .profile(ProfileID(id))) ?? "<none>"
+                let installedSubtitle = self?.subFilterBar
+                    .debugInstalledMenuSubtitle(for: .profile(ProfileID(id))) ?? "<none>"
+                print("[maps] pill menu: header=\"\(header?.title ?? menu.title)\" "
+                    + "subtitle=\"\(header?.subtitle ?? "")\" "
+                    + "headerTappable=\(header != nil) headerImage=\(header?.image != nil) "
+                    + "separator=\(separated) verbs=\(verbs) "
+                    + "installedHeader=\"\(installed)\" "
+                    + "installedSubtitle=\"\(installedSubtitle)\"")
+            }
+        }
+        // `-maps-subfilter-menu-open <profileID>`: presents that pill's
+        // long-press menu ~5s in, so the header can be screenshotted.
+        if let id = Self.debugArgumentValue("-maps-subfilter-menu-open") {
+            // The delay is a knob because WHEN the menu opens is the whole
+            // question: opened late everything has settled, opened while the
+            // row is still hydrating it shows what a fast thumb would see.
+            let delay = Self.debugArgumentValue("-maps-subfilter-menu-open-after")
+                .flatMap(Double.init) ?? 5.0
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.subFilterBar.debugPresentMenu(for: .profile(ProfileID(id)))
+            }
+        }
         // `-maps-open-subfilter-sheet`: presents the sub-filter full-list
         // sheet ~3s in (the header's organize tap). Pair with
         // `-maps-select-filter friends|following|pinned`.
@@ -609,7 +656,7 @@ final class MapsViewController: UIViewController {
             case .hide: "hide"
             case .unchanged: "unchanged"
             }
-            print("[maps] sub-filter row update: \(style)")
+            print("[maps] sub-filter row update: \(style) at \(CACurrentMediaTime())")
         }
         #endif
         switch update {

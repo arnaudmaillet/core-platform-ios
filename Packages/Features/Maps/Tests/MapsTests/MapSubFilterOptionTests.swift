@@ -17,9 +17,26 @@ struct MapSubFilterOptionTests {
         let option = Self.person("prof-0", title: "Ava Moreau", handle: "ava.moreau")
         #expect(option.sheetTitle == "Ava Moreau")
         #expect(option.sheetSubtitle == "@ava.moreau")
-        // The PILL still shows only the first name — the sheet is the place
-        // with room for the full identity.
-        #expect(option.content.title == "Ava")
+        // The PILL carries no name at all — it is a bare avatar circle, so
+        // the sheet and the long-press menu are where the identity is
+        // written. The accessibility label is the exception: a screen reader
+        // never had the avatar, and the full name is what it always read.
+        #expect(option.content.title == nil)
+        #expect(option.content.accessibilityLabel == "Ava Moreau")
+    }
+
+    /// Every pill in the row is a circle, so none of them may carry a title —
+    /// one titled pill among the circles would be a capsule twice the width of
+    /// its neighbours.
+    @Test func noSubFilterPillCarriesATitle() {
+        let people = MapSubFilterOption.people([
+            MapFavorite(profileID: ProfileID("prof-0"), title: "Ava Moreau"),
+            MapFavorite(profileID: ProfileID("prof-1"), title: "Kenji Tanaka")
+        ])
+        for option in people + MapSubFilterOption.placeCategories {
+            #expect(option.content.title == nil)
+            #expect(!option.content.accessibilityLabel.isEmpty, "and each still names itself")
+        }
     }
 
     @Test func handleFallsBackToNothingRatherThanAnEmptySigil() {
