@@ -86,31 +86,45 @@ enum MapClusterEngine {
     static func cluster(
         _ pins: [MapPin], zoomScale: Double, cellPoints: Double, zoomLevel: Int32? = nil
     ) -> [Item] {
-        // SEMANTIC PRE-PASS (nested hierarchical roll-up): the zoom selects
-        // ONE active hierarchy depth (`MapPlace.Kind.activeKind` — country,
-        // region, city, or none), and every pin whose place LADDER carries
-        // an entry at that depth is absorbed into that entry's marker,
-        // however far apart the members sit on screen. Because a city pin's
-        // ladder also names its region and its country, zooming out
-        // collapses whole cities into their parent region's marker and
-        // whole regions into their country's — the roll-up is a consequence
-        // of the ladder, not a second mechanism. Extracted BEFORE the
-        // proximity passes so a masked pin can neither appear alone nor
-        // drag an unrelated pin into the place's group (a gallery titled
-        // "Paris" must never open posts that did not claim Paris). A group
-        // of one is left to the proximity pass — a lone pin needs no
-        // masking, and a lone marker wearing a place name would promise a
-        // gallery of one.
+        // SEMANTIC PRE-PASS (STRICT nested banding): the zoom selects ONE
+        // active hierarchy depth (`MapPlace.Kind.activeKind` — country,
+        // region, or city), and hierarchy members render ONLY through that
+        // depth. Every pin whose place LADDER carries an entry at the
+        // active depth is absorbed into that entry's marker, however far
+        // apart the members sit on screen; a pin whose ladder is non-empty
+        // but has NO rung at the active depth — a region-only post while
+        // the city band is up, a country-only post at the region band — is
+        // HIDDEN outright, never mixed in as itself or through proximity.
+        // Because a city pin's ladder also names its region and country,
+        // zooming out collapses whole cities into their parent region's
+        // marker and whole regions into their country's — the roll-up is a
+        // consequence of the ladder, not a second mechanism.
+        //
+        // Pins with an EMPTY ladder are outside the hierarchy and keep
+        // rendering through proximity at every band — deliberately, and not
+        // only for the mock's Case-A reachability: in production NO pin
+        // carries places (the wire has none, BACKEND_GAPS §18), so a strict
+        // filter that also dropped unladdered pins would blank the entire
+        // real map at every zoom the moment this shipped.
+        //
+        // Extracted BEFORE the proximity passes so a masked pin can neither
+        // appear alone nor drag an unrelated pin into the place's group (a
+        // gallery titled "Paris" must never open posts that did not claim
+        // Paris). A group of ONE renders as a lone pin — its level's only
+        // content is still that level's content — but as a standalone item,
+        // never through the proximity pool, where it could merge into an
+        // unladdered neighbour's generic cluster and escape its band.
         var maskedByPlace: [String: (place: MapPlace, members: [MapPin])] = [:]
         var unmasked: [MapPin] = []
-        let activeKind = zoomLevel.flatMap(MapPlace.Kind.activeKind(atZoomLevel:))
+        let activeKind = zoomLevel.map(MapPlace.Kind.activeKind(atZoomLevel:))
         if let activeKind {
             for pin in pins {
                 if let place = pin.places.first(where: { $0.kind == activeKind }) {
                     maskedByPlace[place.id, default: (place, [])].members.append(pin)
-                } else {
+                } else if pin.places.isEmpty {
                     unmasked.append(pin)
                 }
+                // else: laddered, but no rung at the active depth — hidden.
             }
         } else {
             unmasked = pins
@@ -136,14 +150,17 @@ enum MapClusterEngine {
                     place: group.place
                 )
             }
-        // Groups of one fall through to proximity clustering with everyone else.
-        let single = maskedByPlace.values.filter { $0.members.count == 1 }.flatMap(\.members)
-        let pins = unmasked + single
+        // Groups of one render as standalone pins — OUTSIDE the proximity
+        // pool, so a level's lone post can't be merged into an unladdered
+        // neighbour's generic cluster and escape its band.
+        let lone = maskedByPlace.values.filter { $0.members.count == 1 }
+            .flatMap(\.members).map(Self.single)
 
         guard zoomScale > 0, cellPoints > 0 else {
-            return semantic + pins.map(Self.single)
+            return semantic + lone + unmasked.map(Self.single)
         }
-        return semantic + proximityCluster(pins, zoomScale: zoomScale, cellPoints: cellPoints)
+        return semantic + lone
+            + proximityCluster(unmasked, zoomScale: zoomScale, cellPoints: cellPoints)
     }
 
     /// The screen-space passes (grid + agglomerative merge), unchanged from

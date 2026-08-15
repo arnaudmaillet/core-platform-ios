@@ -219,11 +219,11 @@ final class MapsViewController: UIViewController {
             region.span.longitudeDelta *= 6
             mapView.setRegion(region, animated: false)
         }
-        // `-maps-tight-region`: open one zoom level PAST the city band
-        // (span 0.045° → level 13, against the default 0.09° → level 12),
-        // framing almost the same pins — so the semantic masking's
-        // break-down half (the place marker dissolving back into pins) can
-        // be screenshotted as an A/B in the sim, where a pinch can't be
+        // `-maps-tight-region`: open at level 13 (span 0.045°, against the
+        // default 0.09° → level 12), framing almost the same pins — the A/B
+        // that shows STRICT banding holding at high zoom: the city cluster
+        // persists (the band runs to the top of the scale), it does not
+        // dissolve. Screenshotable in the sim, where a pinch can't be
         // injected.
         if ProcessInfo.processInfo.arguments.contains("-maps-tight-region") {
             var region = Self.defaultRegion

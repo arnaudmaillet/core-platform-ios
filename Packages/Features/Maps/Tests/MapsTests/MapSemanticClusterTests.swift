@@ -59,6 +59,9 @@ struct MapSemanticClusterTests {
 
     // MARK: - The zoom bands (one active depth each)
 
+    /// The bands TILE the whole zoom scale — strict banding means there is
+    /// always exactly one active depth, and the city band runs all the way
+    /// up (a city cluster does not dissolve however close the viewer gets).
     @Test func eachBandActivatesExactlyOneDepth() {
         #expect(MapPlace.Kind.activeKind(atZoomLevel: 0) == .country)
         #expect(MapPlace.Kind.activeKind(atZoomLevel: 8) == .country)
@@ -66,8 +69,8 @@ struct MapSemanticClusterTests {
         #expect(MapPlace.Kind.activeKind(atZoomLevel: 10) == .region)
         #expect(MapPlace.Kind.activeKind(atZoomLevel: 11) == .city)
         #expect(MapPlace.Kind.activeKind(atZoomLevel: 12) == .city)
-        #expect(MapPlace.Kind.activeKind(atZoomLevel: 13) == nil)
-        #expect(MapPlace.Kind.activeKind(atZoomLevel: 15) == nil)
+        #expect(MapPlace.Kind.activeKind(atZoomLevel: 13) == .city)
+        #expect(MapPlace.Kind.activeKind(atZoomLevel: 15) == .city)
     }
 
     // MARK: - The nested roll-up
@@ -125,44 +128,70 @@ struct MapSemanticClusterTests {
                 "the bystander must not be dragged into the country's marker")
     }
 
-    /// Past every band the hierarchy dissolves entirely: pins render
-    /// through proximity alone.
-    @Test func zoomingPastTheCityBandDissolvesTheHierarchy() {
+    /// STRICT banding has no dissolve: the city band runs to the top of the
+    /// scale, so a city cluster holds however close the viewer zooms.
+    @Test func theCityClusterPersistsAtEveryHighZoom() {
         let spread = [
             pin("post-1", lat: 48.80, lng: 2.30, places: parisLadder),
             pin("post-2", lat: 48.90, lng: 2.40, places: parisLadder),
         ]
-        let masked = MapClusterEngine.cluster(spread, zoomScale: 1, cellPoints: 64, zoomLevel: 12)
-        let dissolved = MapClusterEngine.cluster(spread, zoomScale: 1, cellPoints: 64, zoomLevel: 13)
-        #expect(masked.count == 1)
-        #expect(dissolved.count == 2, "past the city band the children render independently")
-        #expect(dissolved.allSatisfy { !$0.isSemanticCluster })
+        for level in [Int32(11), 12, 13, 15] {
+            let items = MapClusterEngine.cluster(
+                spread, zoomScale: 1, cellPoints: 64, zoomLevel: level
+            )
+            #expect(items.count == 1, "the city must stay one marker at level \(level)")
+            #expect(items[0].place == paris)
+        }
     }
 
-    /// A pin whose ladder has no entry at the active depth (a region-only
-    /// pin at city zoom) falls through to proximity — it is nobody's child
-    /// at that depth.
-    @Test func aPinWithoutTheActiveDepthFallsThroughToProximity() {
+    /// The strict filter: a pin whose ladder has NO rung at the active depth
+    /// is HIDDEN outright — a region-only post at the city band belongs to a
+    /// higher level and must not render as itself, alone or via proximity.
+    @Test func aPinWithoutTheActiveDepthIsStrictlyHidden() {
         let items = MapClusterEngine.cluster(
             [
                 pin("post-1", lat: 48.80, lng: 2.30, places: [idf, france]),
                 pin("post-2", lat: 48.90, lng: 2.40, places: [idf, france]),
+                pin("post-3", lat: 48.70, lng: 2.20, places: parisLadder),
+                pin("post-4", lat: 48.71, lng: 2.21, places: parisLadder),
             ],
             zoomScale: 1, cellPoints: 64, zoomLevel: 12
         )
-        #expect(items.count == 2, "no city in the ladder means no city-band masking")
+        #expect(items.count == 1, "only the city's marker may render at the city band")
+        #expect(items[0].place == paris)
+        #expect(items[0].memberIDs == [PostID("post-3"), PostID("post-4")])
     }
 
-    /// A place with ONE member at the active depth is not a parent — the
-    /// pin renders as an ordinary single, because a marker wearing a place
-    /// name would promise a gallery of one.
-    @Test func aGroupOfOneFallsThroughToProximity() {
+    /// And symmetrically at the region band: a country-only post is hidden
+    /// while the region's members group.
+    @Test func aCountryOnlyPinIsHiddenAtTheRegionBand() {
         let items = MapClusterEngine.cluster(
-            [pin("post-1", lat: 48.80, lng: 2.30, places: parisLadder)],
-            zoomScale: 1, cellPoints: 64, zoomLevel: 12
+            [
+                pin("post-1", lat: 48.80, lng: 2.30, places: parisLadder),
+                pin("post-2", lat: 48.90, lng: 2.40, places: [idf, france]),
+                pin("post-3", lat: 48.70, lng: 2.20, places: [france]),
+            ],
+            zoomScale: 1, cellPoints: 64, zoomLevel: 9
         )
         #expect(items.count == 1)
-        #expect(!items[0].isCluster)
+        #expect(items[0].place == idf)
+        #expect(!items[0].memberIDs.contains(PostID("post-3")))
+    }
+
+    /// A place with ONE member at the active depth renders as a lone pin —
+    /// its level's only content is still that level's content — but as a
+    /// STANDALONE item: dropped into the proximity pool it could merge with
+    /// an unladdered neighbour's generic cluster and escape its band.
+    @Test func aGroupOfOneRendersAloneAndNeverMergesAcrossTheBand() {
+        let items = MapClusterEngine.cluster(
+            [
+                pin("post-1", lat: 48.80, lng: 2.30, places: parisLadder),
+                pin("post-2", lat: 48.80, lng: 2.30), // co-located, unladdered
+            ],
+            zoomScale: 1, cellPoints: 64, zoomLevel: 12
+        )
+        #expect(items.count == 2, "the city's lone post must not fold into the generic cluster")
+        #expect(items.allSatisfy { !$0.isCluster })
     }
 
     /// No zoom level (geometry-only callers, older tests) means no semantic
