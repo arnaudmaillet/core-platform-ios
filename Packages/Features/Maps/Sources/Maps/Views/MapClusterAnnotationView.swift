@@ -82,8 +82,11 @@ final class MapClusterAnnotationView: MKAnnotationView {
         // change the marker's level (a re-layout that gains or loses the
         // shared place) while the representative — and so the face and URL —
         // stays put. Re-applying an unchanged ring is a cheap set; missing a
-        // level change leaves the wrong color on a live marker.
-        let kind = cluster.place?.kind
+        // level change leaves the wrong color on a live marker. Only the
+        // active band's OWN markers wear a color: a local-band proximity
+        // cluster sharing a leaf place keeps its gallery tap but dresses
+        // neutral.
+        let kind = cluster.isHierarchyMarker ? cluster.place?.kind : nil
         card.setRing(color: MapMarkerRing.color(for: kind), width: MapMarkerRing.width(for: kind))
         // Idempotent: a tracked cluster is re-configured on every reconcile even
         // when its face is unchanged (same representative thumbnail). Blanking

@@ -21,13 +21,14 @@ public struct MapPlace: Sendable, Equatable, Hashable {
         case region = "Region"
 
         /// The ONE hierarchy depth rendered at `zoomLevel` (the viewport's
-        /// 0–15 scale, `MapViewport.zoomLevel`) — STRICT banding: every band
-        /// has exactly one active level, hierarchy members render ONLY
-        /// through that level's markers, and members whose ladder has no
-        /// rung at the active depth are hidden outright rather than mixed
-        /// in. The bands tile the whole scale — country ≤ 8, region 9–10,
-        /// city from 11 up — so a laddered pin is never rendered at two
-        /// depths, and never as itself while its parent's band is active.
+        /// 0–15 scale, `MapViewport.zoomLevel`) — STRICT banding: every
+        /// semantic band has exactly one active level, hierarchy members
+        /// render ONLY through that level's markers, and members whose
+        /// ladder has no rung at the active depth are hidden outright
+        /// rather than mixed in. Country ≤ 8, region 9–10, city 11–12 —
+        /// and `nil` from 13 up: the LOCAL band, where the city cluster
+        /// opens and the whole hierarchy stands down in favour of
+        /// individual posts and ordinary generic proximity clusters.
         ///
         /// Client-side, mock-era banding. The contract proposal
         /// (`BACKEND_CLUSTER_TYPES.md` §C) puts this decision on the server —
@@ -35,12 +36,14 @@ public struct MapPlace: Sendable, Equatable, Hashable {
         /// with the rest of the mock layer when `GeoCluster` ships. Anchors:
         /// the map opens at level 12 (0.09° span), inside the city band;
         /// `-maps-wide-region` lands at level 9 (region);
-        /// `-maps-country-region` at level 8 (country).
-        static func activeKind(atZoomLevel zoomLevel: Int32) -> Kind {
+        /// `-maps-country-region` at level 8 (country);
+        /// `-maps-tight-region` at level 13 (local).
+        static func activeKind(atZoomLevel zoomLevel: Int32) -> Kind? {
             switch zoomLevel {
             case ..<9: .country
             case 9...10: .region
-            default: .city
+            case 11...12: .city
+            default: nil
             }
         }
     }

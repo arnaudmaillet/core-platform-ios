@@ -59,9 +59,9 @@ struct MapSemanticClusterTests {
 
     // MARK: - The zoom bands (one active depth each)
 
-    /// The bands TILE the whole zoom scale — strict banding means there is
-    /// always exactly one active depth, and the city band runs all the way
-    /// up (a city cluster does not dissolve however close the viewer gets).
+    /// Each semantic band has exactly one active depth; from 13 up the
+    /// LOCAL band takes over (no active depth — the city opens into
+    /// individual posts and generic proximity clusters).
     @Test func eachBandActivatesExactlyOneDepth() {
         #expect(MapPlace.Kind.activeKind(atZoomLevel: 0) == .country)
         #expect(MapPlace.Kind.activeKind(atZoomLevel: 8) == .country)
@@ -69,8 +69,8 @@ struct MapSemanticClusterTests {
         #expect(MapPlace.Kind.activeKind(atZoomLevel: 10) == .region)
         #expect(MapPlace.Kind.activeKind(atZoomLevel: 11) == .city)
         #expect(MapPlace.Kind.activeKind(atZoomLevel: 12) == .city)
-        #expect(MapPlace.Kind.activeKind(atZoomLevel: 13) == .city)
-        #expect(MapPlace.Kind.activeKind(atZoomLevel: 15) == .city)
+        #expect(MapPlace.Kind.activeKind(atZoomLevel: 13) == nil)
+        #expect(MapPlace.Kind.activeKind(atZoomLevel: 15) == nil)
     }
 
     // MARK: - The nested roll-up
@@ -149,20 +149,41 @@ struct MapSemanticClusterTests {
         }
     }
 
-    /// STRICT banding has no dissolve: the city band runs to the top of the
-    /// scale, so a city cluster holds however close the viewer zooms.
-    @Test func theCityClusterPersistsAtEveryHighZoom() {
+    /// The LOCAL band (≥ 13): the city cluster opens up — spread members
+    /// render as individual posts, and NOTHING on screen is a hierarchy
+    /// marker.
+    @Test func theLocalBandOpensTheCityIntoIndividualPosts() {
         let spread = [
             pin("post-1", lat: 48.80, lng: 2.30, places: parisLadder),
             pin("post-2", lat: 48.90, lng: 2.40, places: parisLadder),
         ]
-        for level in [Int32(11), 12, 13, 15] {
+        let city = MapClusterEngine.cluster(spread, zoomScale: 1, cellPoints: 64, zoomLevel: 12)
+        #expect(city.count == 1, "one city marker inside the band")
+        #expect(city[0].isHierarchyMarker)
+
+        for level in [Int32(13), 15] {
             let items = MapClusterEngine.cluster(
                 spread, zoomScale: 1, cellPoints: 64, zoomLevel: level
             )
-            #expect(items.count == 1, "the city must stay one marker at level \(level)")
-            #expect(items[0].place == paris)
+            #expect(items.count == 2, "the members render individually at level \(level)")
+            #expect(items.allSatisfy { !$0.isHierarchyMarker && !$0.isCluster })
         }
+    }
+
+    /// Co-located members at the local band form an ordinary PROXIMITY
+    /// cluster: it keeps its gallery tap (all members still share the leaf
+    /// place) but it is NOT a hierarchy marker — the ring it wears below the
+    /// city band is neutral.
+    @Test func aLocalProximityClusterIsNotAHierarchyMarker() {
+        let venue = [
+            pin("post-1", lat: 48.85, lng: 2.33, places: parisLadder),
+            pin("post-2", lat: 48.85, lng: 2.33, places: parisLadder),
+        ]
+        let items = MapClusterEngine.cluster(venue, zoomScale: 1, cellPoints: 64, zoomLevel: 13)
+        #expect(items.count == 1)
+        #expect(items[0].isCluster)
+        #expect(items[0].isSemanticCluster, "the shared leaf still routes the tap to the gallery")
+        #expect(!items[0].isHierarchyMarker, "but below the city band it dresses neutral")
     }
 
     /// The strict filter: a pin whose ladder has NO rung at the active depth

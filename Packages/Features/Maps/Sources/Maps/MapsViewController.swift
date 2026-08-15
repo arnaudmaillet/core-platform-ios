@@ -221,9 +221,9 @@ final class MapsViewController: UIViewController {
         }
         // `-maps-tight-region`: open at level 13 (span 0.045°, against the
         // default 0.09° → level 12), framing almost the same pins — the A/B
-        // that shows STRICT banding holding at high zoom: the city cluster
-        // persists (the band runs to the top of the scale), it does not
-        // dissolve. Screenshotable in the sim, where a pinch can't be
+        // for the LOCAL band: the city cluster opens up and its members
+        // render as individual posts and generic proximity clusters, all in
+        // neutral rings. Screenshotable in the sim, where a pinch can't be
         // injected.
         if ProcessInfo.processInfo.arguments.contains("-maps-tight-region") {
             var region = Self.defaultRegion
@@ -1594,8 +1594,11 @@ extension MapsViewController: MKMapViewDelegate {
             thumbnail: thumbnail,
             face: Self.face(of: annotation),
             // The marker's hierarchy ring rides the flight, so the card is
-            // the tapped marker's twin down to its border color.
-            ringKind: (annotation as? MapComputedCluster)?.place?.kind,
+            // the tapped marker's twin down to its border color — neutral
+            // for anything that isn't the active band's own marker.
+            ringKind: (annotation as? MapComputedCluster).flatMap {
+                $0.isHierarchyMarker ? $0.place?.kind : nil
+            },
             mirrorLive: tappedID.map { id in
                 { renderView in coordinator.mirrorLivePreview(of: id, to: renderView) }
             }

@@ -50,6 +50,13 @@ enum MapClusterEngine {
         /// behaviour keys on `isSemanticCluster`: a lone pin is Case A
         /// whatever it is tagged with.
         let place: MapPlace?
+        /// Whether this item was produced BY the semantic pre-pass — i.e. it
+        /// is the active band's marker for its place. Only these wear the
+        /// hierarchy ring colors: a LOCAL-band proximity cluster that happens
+        /// to share a leaf place keeps its gallery tap (`isSemanticCluster`)
+        /// but dresses neutral, because below the city band everything on
+        /// screen is ordinary local content.
+        var isHierarchyMarker = false
 
         var isCluster: Bool { memberIDs.count > 1 }
 
@@ -117,7 +124,10 @@ enum MapClusterEngine {
         // never through the proximity pool.
         var maskedByPlace: [String: (place: MapPlace, members: [MapPin])] = [:]
         var unmasked: [MapPin] = []
-        let activeKind = zoomLevel.map(MapPlace.Kind.activeKind(atZoomLevel:))
+        // `nil` twice over means the LOCAL band: no zoom given (geometry-only
+        // callers), or zoom ≥ 13 — where the city opens up and every post,
+        // laddered or not, renders through ordinary proximity below.
+        let activeKind = zoomLevel.flatMap(MapPlace.Kind.activeKind(atZoomLevel:))
         let corpusIsHierarchical = pins.contains { !$0.places.isEmpty }
         if let activeKind, corpusIsHierarchical {
             for pin in pins {
@@ -148,7 +158,8 @@ enum MapClusterEngine {
                     // The marker speaks at the ACTIVE depth: a region's
                     // group says Île-de-France even though every member's
                     // leaf place is a city inside it.
-                    place: group.place
+                    place: group.place,
+                    isHierarchyMarker: true
                 )
             }
         // Groups of one render as standalone pins — OUTSIDE the proximity
@@ -308,11 +319,16 @@ final class MapComputedCluster: NSObject, MKAnnotation {
     /// The group's common place, when it has one — what routes a tap to the
     /// gallery-backed presentation (Case B). See `MapClusterEngine.Item.place`.
     private(set) var place: MapPlace?
+    /// Whether this marker is the active band's own (see
+    /// `MapClusterEngine.Item.isHierarchyMarker`) — what the hierarchy ring
+    /// colors key on.
+    private(set) var isHierarchyMarker = false
 
     init(_ item: MapClusterEngine.Item) {
         self.representative = item.representative
         self.memberIDs = item.memberIDs
         self.place = item.place
+        self.isHierarchyMarker = item.isHierarchyMarker
         self.coordinate = CLLocationCoordinate2D(latitude: item.latitude, longitude: item.longitude)
         super.init()
     }
@@ -322,6 +338,7 @@ final class MapComputedCluster: NSObject, MKAnnotation {
         representative = item.representative
         memberIDs = item.memberIDs
         place = item.place
+        isHierarchyMarker = item.isHierarchyMarker
         let next = CLLocationCoordinate2D(latitude: item.latitude, longitude: item.longitude)
         if next.latitude != coordinate.latitude || next.longitude != coordinate.longitude {
             coordinate = next
