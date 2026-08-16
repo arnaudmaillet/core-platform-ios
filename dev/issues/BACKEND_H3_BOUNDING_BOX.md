@@ -65,10 +65,14 @@ message GeoCluster {
 1. Derive the viewport's **diagonal in km** from the `Viewport` corners already
    on the request (`sw`/`ne`; no new field needed — haversine or the flat
    approximation is fine at these scales).
-2. Choose the aggregation resolution as the finest H3 resolution whose average
-   cell span (2 × average hex edge length) is ≥ `diagonal_km × fit_ratio`,
-   with `fit_ratio ≈ 0.5` (tunable; the client mirrors this rule for
-   rendering, see below). Clamp to the service's supported range.
+2. Choose the aggregation resolution as the coarsest H3 resolution whose
+   average cell span (2 × average hex edge length) satisfies
+   `diagonal_km > span_km × dissolve_span_multiple`, with
+   `dissolve_span_multiple ≈ 2.7` (tunable; the client mirrors this rule for
+   rendering, see below): a level dissolves into its children as soon as the
+   viewport closes to within that multiple of the level's own cell span —
+   i.e. once a boundary fits (or nearly fits) the screen, its single marker
+   stops being informative. Clamp to the service's supported range.
 3. `zoom_level` stays on the wire for compatibility and telemetry, but no
    longer selects the resolution; requests from old clients (which always send
    it) band identically because the server derives the diagonal from the same
@@ -90,10 +94,14 @@ drop its own zoom tables.
 - **Dynamic banding rule** (mirrors the server's): with `spanKm(level)` the
   H3-derived span of each hierarchy level present in the corpus and
   `diagKm` the camera viewport's diagonal —
-  - if the DEEPEST level's `spanKm / diagKm > local_ratio (≈1.6)`, the viewer
-    is inside that cell: render individual posts / local proximity clusters;
-  - else render the deepest level with `spanKm / diagKm ≥ fit_ratio (≈0.75)`;
-  - else (zoomed out past everything) render the coarsest level.
+  - a level DISSOLVES once
+    `diagKm ≤ spanKm(level) × dissolve_span_multiple (≈2.7)`;
+  - render the COARSEST level present that has not dissolved (zoomed out
+    past everything, nothing has dissolved and the coarsest level renders);
+  - when even the deepest level has dissolved, the hierarchy stands down:
+    render individual posts / local proximity clusters.
+  In UX terms: frame Europe → countries; frame one country → its regions;
+  frame one region → its cities; frame one city → local posts.
   One level renders at a time (the strict-banding contract in PR #117);
   fixed zoom thresholds remain only as the fallback when no `h3_index` is
   present anywhere in the corpus.
@@ -119,6 +127,6 @@ drop its own zoom tables.
 1. Does the fleet's geo store already keep per-post H3 at multiple
    resolutions (r7 exists on `MapPostCard.h3_index_r7`), or is re-indexing
    required for coarse resolutions?
-2. Should `fit_ratio` ship as a server-tunable (config) with the client
+2. Should `dissolve_span_multiple` ship as a server-tunable (config) with the client
    simply consuming whatever resolution arrives? (Client preference: yes —
    the client rule above then only governs its own mock era.)

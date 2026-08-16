@@ -25,14 +25,16 @@ struct MapSemanticClusterTests {
         h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 14) // span ~840 km
     )
 
-    /// Viewport diagonals (km) anchoring each band under the dynamic rule —
-    /// the MEASURED figures the QA launch args actually produce in the sim
-    /// (`-maps-banding-log`; MapKit's fitted regions are tighter than naive
-    /// span math suggests).
-    private let cityDiagonal = 12.9    // default region (0.09° span)
-    private let regionDiagonal = 77.0  // -maps-wide-region
-    private let countryDiagonal = 205.0 // -maps-country-region
-    private let localDiagonal = 6.4    // -maps-tight-region
+    /// Viewport diagonals (km) anchoring each band under the DISSOLVE rule
+    /// (a level dissolves once the viewport closes to within
+    /// `dissolveSpanMultiple ×` its cell span) — the MEASURED figures the
+    /// four canonical framings actually produce in the sim
+    /// (`-maps-banding-log` + `-maps-set-region`; MapKit's portrait fit can
+    /// double a wide target's geographic diagonal).
+    private let localDiagonal = 35.7    // Paris framed (48.85,2.35,0.25)
+    private let cityDiagonal = 228.6    // Île-de-France framed (48.7,2.5,1.6)
+    private let regionDiagonal = 1398.6 // France framed (46.6,2.4,9.5)
+    private let countryDiagonal = 2884.3 // Europe framed (47.0,5.0,20)
 
     private func pin(
         _ id: String, lat: Double = 48.85, lng: Double = 2.35, places: [MapPlace] = []
@@ -93,6 +95,26 @@ struct MapSemanticClusterTests {
         #expect(kind(countryDiagonal) == .country)
         #expect(kind(localDiagonal) == nil, "inside the city cell → local")
         #expect(kind(5000) == .country, "zoomed out past everything, the coarsest level holds")
+    }
+
+    /// The dissolve thresholds themselves — each level dies exactly when the
+    /// viewport closes to within `dissolveSpanMultiple ×` its own span. The
+    /// country edge is the reported regression: France filling the screen
+    /// (~1400 km measured) must show REGIONS, never one France marker.
+    @Test func aLevelDissolvesOnceItsBoundaryFitsTheViewport() {
+        let spans: [MapPlace.Kind: Double] = [.city: 17.1, .region: 119.6, .country: 837.4]
+        func kind(_ diagonal: Double) -> MapPlace.Kind? {
+            MapHierarchyBanding.activeKind(
+                viewportDiagonalKm: diagonal, spansByKind: spans, zoomLevel: nil
+            )
+        }
+        let multiple = MapHierarchyBanding.dissolveSpanMultiple
+        #expect(kind(837.4 * multiple + 1) == .country, "just wider than the country's window")
+        #expect(kind(837.4 * multiple - 1) == .region, "the country's boundary fits → regions")
+        #expect(kind(119.6 * multiple + 1) == .region)
+        #expect(kind(119.6 * multiple - 1) == .city, "the region's boundary fits → cities")
+        #expect(kind(17.1 * multiple + 1) == .city)
+        #expect(kind(17.1 * multiple - 1) == nil, "the city's boundary fits → local")
     }
 
     /// The fallback ladder for an H3-less corpus: country ≤ 5, region 6–8,
@@ -323,7 +345,7 @@ struct MapSemanticClusterTests {
     /// country band a Europe-wide corpus renders France, Spain AND Germany,
     /// each holding exactly its own posts.
     @Test func multipleCountriesRenderAsDistinctMarkers() {
-        let europeDiagonal = 1500.0
+        let europeDiagonal = countryDiagonal
         let items = MapClusterEngine.cluster(
             [
                 pin("post-1", lat: 48.85, lng: 2.35, places: parisLadder),

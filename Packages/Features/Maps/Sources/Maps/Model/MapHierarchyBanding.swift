@@ -6,36 +6,38 @@ import Foundation
 /// (`dev/issues/BACKEND_H3_BOUNDING_BOX.md`). The strict-banding contract is
 /// unchanged: exactly one level renders at a time.
 ///
-/// The rule, deepest-first over the levels present in the corpus:
-/// 1. If the DEEPEST level's `span / diagonal > localRatio`, the viewer is
-///    inside that cell — the LOCAL band: individual posts and generic
-///    proximity clusters.
-/// 2. Otherwise the deepest level whose `span / diagonal ≥ fitRatio` — the
-///    level that still dominates the view.
-/// 3. Otherwise (zoomed out past everything) the coarsest level present:
-///    a hierarchical map never goes blank outward.
+/// The rule: a level DISSOLVES into its children as soon as the viewport has
+/// closed to within `dissolveSpanMultiple ×` that level's own cell span — the
+/// moment a boundary fits (or nearly fits) the screen, its single marker
+/// stops being informative and the next depth takes over. The active band is
+/// the COARSEST level present that has not yet dissolved; when even the
+/// deepest level has dissolved the hierarchy stands down entirely — the
+/// LOCAL band: individual posts and generic proximity clusters. Zoomed out
+/// past everything, nothing has dissolved and the coarsest level renders:
+/// a hierarchical map never goes blank outward.
 ///
 /// Fixed zoom thresholds survive only as the FALLBACK for a laddered corpus
 /// with no H3 anywhere (`fallbackKind`).
 enum MapHierarchyBanding {
-    /// A level "fits" the view while its cell spans at least this fraction
-    /// of the viewport diagonal. Mirrored by the server's resolution rule.
+    /// A level survives while the viewport diagonal exceeds this multiple of
+    /// its cell span; at or below it, the level dissolves. Mirrored by the
+    /// server's resolution rule.
     ///
     /// ⚠️ Calibrated against MEASURED viewport diagonals (`-maps-banding-log`
-    /// prints them), not against back-of-envelope span math — MapKit's
-    /// fitted region is tighter than the naive aspect blow-up suggests. The
-    /// four QA anchors and their city-span (17.1 km) ratios:
-    /// default ≈ 12.9 km → city 1.33 · wide ≈ 77 km → region 1.55 ·
-    /// country ≈ 205 km → region 0.58 (must NOT fit) / country 4.1 ·
-    /// tight ≈ 6.4 km → city 2.67 (must read as inside).
-    static let fitRatio = 0.75
-    /// Past this the viewer is INSIDE the deepest cell and the hierarchy
-    /// stands down — 1.6 puts the default view (1.33) safely in the city
-    /// band and the tight view (2.67) safely local.
-    static let localRatio = 1.6
+    /// prints them), not against back-of-envelope span math — MapKit fits a
+    /// requested region to the portrait aspect, so the measured diagonal can
+    /// double a wide target's geographic diagonal. The four framings and the
+    /// window they leave, against the mock spans (city 17.1 / region 119.6 /
+    /// country 837.4 km): Europe framed = 2884 km must keep country
+    /// (multiple < 3.44) · France framed = 1399 km must dissolve it
+    /// (≥ 1.67) · Île-de-France framed = 229 km must dissolve region
+    /// (≥ 1.91) · Paris framed = 36 km must dissolve city (≥ 2.09).
+    /// 2.7 sits mid-window: thresholds country 2261 / region 323 / city 46 km.
+    static let dissolveSpanMultiple = 2.7
 
-    /// Depth order, most specific first.
-    private static let depthFirst: [MapPlace.Kind] = [.city, .region, .country]
+    /// Coarse-to-deep walk order: the first level that still commands a view
+    /// wider than its own cell is the one that renders.
+    private static let coarsestFirst: [MapPlace.Kind] = [.country, .region, .city]
 
     /// The active depth — `nil` is the LOCAL band. `spansByKind` holds each
     /// level's H3-derived span (km) where the corpus has one; when it is
@@ -46,16 +48,12 @@ enum MapHierarchyBanding {
         zoomLevel: Int32?
     ) -> MapPlace.Kind? {
         if let diagonal = viewportDiagonalKm, diagonal > 0, !spansByKind.isEmpty {
-            if let deepest = depthFirst.first(where: { spansByKind[$0] != nil }),
-               let span = spansByKind[deepest], span / diagonal > localRatio {
-                return nil
-            }
-            for kind in depthFirst {
-                if let span = spansByKind[kind], span / diagonal >= fitRatio {
+            for kind in coarsestFirst {
+                if let span = spansByKind[kind], diagonal > span * dissolveSpanMultiple {
                     return kind
                 }
             }
-            return depthFirst.reversed().first { spansByKind[$0] != nil }
+            return nil
         }
         guard let zoomLevel else { return nil }
         return fallbackKind(atZoomLevel: zoomLevel)
