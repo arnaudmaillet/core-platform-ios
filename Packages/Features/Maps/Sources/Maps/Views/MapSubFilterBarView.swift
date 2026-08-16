@@ -604,6 +604,14 @@ final class MapSubFilterBarView: UIView {
 
     // MARK: - Selection
 
+    #if DEBUG
+    /// `-maps-tap-subfilter`: drives a pill through the SAME handler a real
+    /// tap reaches, so the toggle can be seen in a screenshot. The touch
+    /// itself is UIKit's business; what is being verified here is that a
+    /// second tap on a selected pill takes the ring off.
+    func debugTap(_ subFilter: MapSubFilter) { didTap(subFilter) }
+    #endif
+
     private func didTap(_ subFilter: MapSubFilter) {
         // Every tap toggles its own pill; the rest hold their state.
         let next = selectedSubFilters.symmetricDifference([subFilter])

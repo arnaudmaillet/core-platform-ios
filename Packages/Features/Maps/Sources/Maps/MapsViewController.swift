@@ -366,6 +366,14 @@ final class MapsViewController: UIViewController {
                 self?.subFilterBar.debugPresentMenu(for: .profile(ProfileID(id)))
             }
         }
+        // `-maps-tap-subfilter <profileID>`: taps a refinement pill ~6s in,
+        // after `-maps-select-subfilter` has had its turn — so the pair shows
+        // a selected pill being toggled back off.
+        if let id = Self.debugArgumentValue("-maps-tap-subfilter") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) { [weak self] in
+                self?.subFilterBar.debugTap(.profile(ProfileID(id)))
+            }
+        }
         // `-maps-open-subfilter-sheet`: presents the sub-filter full-list
         // sheet ~3s in (the header's organize tap). Pair with
         // `-maps-select-filter friends|following|pinned`.
