@@ -299,6 +299,53 @@ struct MapSemanticClusterTests {
         #expect(MapMockPlaces.ladder(for: pin("p", lat: 48.7700, lng: 2.3000)).isEmpty)
     }
 
+    /// The European roster's anchors land in their zones with the ladders
+    /// their geography implies — several entities per level, mirrored from
+    /// `MockGeoDiscoveryService.hierarchyAnchors`.
+    @Test func theEuropeanAnchorsCarryTheirLadders() {
+        #expect(MapMockPlaces.ladder(for: pin("p", lat: 45.7640, lng: 4.8357)).map(\.id)
+                == ["city:lyon", "country:france"])
+        #expect(MapMockPlaces.ladder(for: pin("p", lat: 43.2965, lng: 5.3698)).map(\.id)
+                == ["city:marseille", "region:paca", "country:france"])
+        #expect(MapMockPlaces.ladder(for: pin("p", lat: 41.3874, lng: 2.1686)).map(\.id)
+                == ["city:barcelona", "region:catalonia", "country:spain"])
+        #expect(MapMockPlaces.ladder(for: pin("p", lat: 43.9000, lng: 6.2000)).map(\.id)
+                == ["region:paca", "country:france"])
+        #expect(MapMockPlaces.ladder(for: pin("p", lat: 41.9000, lng: 1.6000)).map(\.id)
+                == ["region:catalonia", "country:spain"])
+        #expect(MapMockPlaces.ladder(for: pin("p", lat: 40.4200, lng: -3.7000)).map(\.id)
+                == ["country:spain"])
+        #expect(MapMockPlaces.ladder(for: pin("p", lat: 52.5200, lng: 13.4050)).map(\.id)
+                == ["country:germany"])
+    }
+
+    /// Distinct entities of ONE level group into distinct markers — at the
+    /// country band a Europe-wide corpus renders France, Spain AND Germany,
+    /// each holding exactly its own posts.
+    @Test func multipleCountriesRenderAsDistinctMarkers() {
+        let europeDiagonal = 1500.0
+        let items = MapClusterEngine.cluster(
+            [
+                pin("post-1", lat: 48.85, lng: 2.35, places: parisLadder),
+                pin("post-2", lat: 45.76, lng: 4.84,
+                    places: [MapMockPlaces.lyon, MapMockPlaces.france]),
+                pin("post-3", lat: 41.39, lng: 2.17,
+                    places: [MapMockPlaces.barcelona, MapMockPlaces.catalonia, MapMockPlaces.spain]),
+                pin("post-4", lat: 40.42, lng: -3.70, places: [MapMockPlaces.spain]),
+                pin("post-5", lat: 52.52, lng: 13.40, places: [MapMockPlaces.germany]),
+                pin("post-6", lat: 52.60, lng: 13.30, places: [MapMockPlaces.germany]),
+            ],
+            zoomScale: 1, cellPoints: 64, viewportDiagonalKm: europeDiagonal
+        )
+        #expect(items.allSatisfy { $0.place?.kind == .country || !$0.isHierarchyMarker })
+        let countries = items.filter { $0.isHierarchyMarker }
+        #expect(Set(countries.compactMap { $0.place?.id })
+                == ["country:france", "country:spain", "country:germany"])
+        #expect(countries.first { $0.place?.id == "country:spain" }?.memberIDs.count == 2)
+        #expect(countries.first { $0.place?.id == "country:france" }?.memberIDs.count == 2)
+        #expect(countries.first { $0.place?.id == "country:germany" }?.memberIDs.count == 2)
+    }
+
     /// Every ladder is leaf-first, strictly widening in kind AND in H3 span.
     @Test func laddersAreLeafFirstAndNested() {
         for (lat, lng) in [(48.85, 2.33), (48.87, 2.34), (48.80, 2.45), (48.79, 2.30)] {

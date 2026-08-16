@@ -241,6 +241,22 @@ final class MapsViewController: UIViewController {
             region.span.longitudeDelta = 1.44
             mapView.setRegion(region, animated: false)
         }
+        // `-maps-set-region <lat>,<lng>,<spanDegrees>`: open anywhere at any
+        // scale — the generic hook the European hierarchy sweep drives (the
+        // sim can't inject a continent's worth of panning). Example:
+        // `-maps-set-region 41.39,2.17,0.09` opens on Barcelona at the city
+        // band.
+        let arguments = ProcessInfo.processInfo.arguments
+        if let position = arguments.firstIndex(of: "-maps-set-region"),
+           position + 1 < arguments.count {
+            let parts = arguments[position + 1].split(separator: ",").compactMap { Double($0) }
+            if parts.count == 3 {
+                mapView.setRegion(MKCoordinateRegion(
+                    center: CLLocationCoordinate2D(latitude: parts[0], longitude: parts[1]),
+                    span: MKCoordinateSpan(latitudeDelta: parts[2], longitudeDelta: parts[2])
+                ), animated: false)
+            }
+        }
         // `-maps-select-filter <token>`: selects a filter pill (~1.5s after
         // launch, once the first unfiltered settle has painted) — drives the
         // filtered-query path in the sim, where taps can't be injected.

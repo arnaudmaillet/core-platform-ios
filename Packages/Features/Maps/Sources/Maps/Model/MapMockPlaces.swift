@@ -53,6 +53,41 @@ enum MapMockPlaces {
         h3Index: H3CellGeometry.makeIndex(resolution: 3, baseCell: 14)
     )
 
+    // The wider European roster (`MockGeoDiscoveryService.hierarchyAnchors`
+    // seeds their members): several entities PER level, so multi-entity
+    // banding is exercised at every scale. Resolutions stay uniform per
+    // kind — cities res 5, regions res 3, countries res 1 — because the
+    // banding's span table is per-KIND across the corpus; span variation
+    // across kinds (17 / 120 / 840 km) is what the dynamic rule reads.
+    static let lyon = MapPlace(
+        id: "city:lyon", name: "Lyon", kind: .city,
+        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 14)
+    )
+    static let marseille = MapPlace(
+        id: "city:marseille", name: "Marseille", kind: .city,
+        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 14)
+    )
+    static let barcelona = MapPlace(
+        id: "city:barcelona", name: "Barcelona", kind: .city,
+        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 20)
+    )
+    static let provence = MapPlace(
+        id: "region:paca", name: "Provence-Alpes-Côte d'Azur", kind: .region,
+        h3Index: H3CellGeometry.makeIndex(resolution: 3, baseCell: 14)
+    )
+    static let catalonia = MapPlace(
+        id: "region:catalonia", name: "Catalonia", kind: .region,
+        h3Index: H3CellGeometry.makeIndex(resolution: 3, baseCell: 20)
+    )
+    static let spain = MapPlace(
+        id: "country:spain", name: "Spain", kind: .country,
+        h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 20)
+    )
+    static let germany = MapPlace(
+        id: "country:germany", name: "Germany", kind: .country,
+        h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 15)
+    )
+
     static var isEnabled: Bool {
         ProcessInfo.processInfo.arguments.contains(launchArgument)
     }
@@ -86,10 +121,44 @@ enum MapMockPlaces {
     /// (Case A) are exercised with the flag OFF, where no pin carries a
     /// ladder and the map is the ordinary proximity playground.
     static func ladder(for pin: MapPin) -> [MapPlace] {
-        guard pin.latitude >= 48.780 else { return [] }
-        guard pin.latitude >= 48.800, pin.longitude < 2.360 else { return [france] }
-        guard pin.latitude < 48.863 else { return [ileDeFrance, france] }
-        return [paris, ileDeFrance, france]
+        // The historical Paris-scatter rules first, verbatim (tests pin
+        // them, including the deliberately untagged southern corner): the
+        // scatter box takes precedence over the country boxes below.
+        if (48.70...49.02).contains(pin.latitude), (2.20...2.51).contains(pin.longitude) {
+            guard pin.latitude >= 48.780 else { return [] }
+            guard pin.latitude >= 48.800, pin.longitude < 2.360 else { return [france] }
+            guard pin.latitude < 48.863 else { return [ileDeFrance, france] }
+            return [paris, ileDeFrance, france]
+        }
+        // The European roster: cities first (each inside its region/country),
+        // then region boxes, then country boxes — most specific wins.
+        if within(pin, of: (45.7640, 4.8357), radius: 0.15) { return [lyon, france] }
+        if within(pin, of: (43.2965, 5.3698), radius: 0.15) { return [marseille, provence, france] }
+        if within(pin, of: (41.3874, 2.1686), radius: 0.15) { return [barcelona, catalonia, spain] }
+        if (42.90...44.90).contains(pin.latitude), (4.40...7.60).contains(pin.longitude) {
+            return [provence, france]
+        }
+        if (40.60...42.90).contains(pin.latitude), (0.20...3.40).contains(pin.longitude) {
+            return [catalonia, spain]
+        }
+        if (42.30...51.10).contains(pin.latitude), (-5.00...8.20).contains(pin.longitude) {
+            return [france]
+        }
+        if (36.00...43.80).contains(pin.latitude), (-9.50...3.50).contains(pin.longitude) {
+            return [spain]
+        }
+        if (47.20...55.00).contains(pin.latitude), (5.90...15.00).contains(pin.longitude) {
+            return [germany]
+        }
+        return []
+    }
+
+    private static func within(
+        _ pin: MapPin, of anchor: (lat: Double, lng: Double), radius: Double
+    ) -> Bool {
+        let dLat = pin.latitude - anchor.lat
+        let dLng = pin.longitude - anchor.lng
+        return dLat * dLat + dLng * dLng <= radius * radius
     }
 
     /// Tags every pin with its zone ladder. A no-op (identity, not even a
