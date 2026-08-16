@@ -23,6 +23,12 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
     /// Handed OUT through `profilePinning` so the composition root can give
     /// the same instance to another feature.
     private let pinService: MapProfilePinService
+    /// The followed PLACES, built here for the same reason as `pinService`:
+    /// no service vends them, so the device is where they live. One instance
+    /// feeds both consumers — the gallery header's toggle and the map's
+    /// Favorites sub-filter — which is what makes the toggle show up on the
+    /// map at all.
+    private let placeFollows = MapPlaceFollowStore()
 
     /// The interface-typed seam the composition root hands to other features.
     public var profilePinning: any MapProfilePinning { pinService }
@@ -63,8 +69,12 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
 
     public func makeMapViewController() -> UIViewController {
         let feedFeature = feedFeature
+        let placeFollows = placeFollows
         return MapsViewController(
-            viewModel: MapsViewModel(repository: repository),
+            viewModel: MapsViewModel(
+                repository: repository,
+                followedPlaceIDs: { placeFollows.followedPlaceIDs }
+            ),
             favoritesRepository: favoritesRepository,
             pinService: pinService,
             imagePipeline: imagePipeline,
@@ -78,8 +88,20 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             // The place gallery a semantic cluster's feed dismisses into —
             // built by the Feed feature because the grid, the flight card and
             // the retarget wiring are all its internals.
-            makeClusterGallery: { postIDs, title, feed in
-                feedFeature().makeClusterGallery(postIDs: postIDs, title: title, feed: feed)
+            makeClusterGallery: { postIDs, place, feed in
+                feedFeature().makeClusterGallery(
+                    postIDs: postIDs,
+                    title: place.galleryTitle,
+                    // The header's follow toggle, bound to THIS place's
+                    // identity in the map's own store — which is also what
+                    // the Favorites sub-filter reads, so the button and the
+                    // filter agree by construction.
+                    following: ClusterGalleryFollowing(
+                        isFollowing: { placeFollows.isFollowed(place.id) },
+                        toggle: { placeFollows.toggle(place.id) }
+                    ),
+                    feed: feed
+                )
             },
             prewarm: { ids in await feedFeature().prewarmPosts(ids) },
             openProfile: openProfile,

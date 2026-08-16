@@ -167,11 +167,35 @@ public protocol FeedFeatureBuilding {
     /// `ZoomTransitionSource` — the caller registers it as the flight target
     /// for pops that land on it. Tapping a tile opens that post over the
     /// gallery with the standard hero pair.
+    ///
+    /// `following` puts the follow-this-place toggle in the gallery's header
+    /// (`nil` hides it — a caller whose subject has no followable identity).
     func makeClusterGallery(
         postIDs: [PostID],
         title: String,
+        following: ClusterGalleryFollowing?,
         feed: UIViewController
     ) -> UIViewController
+}
+
+/// The follow-this-place seam a cluster gallery's header renders: the caller
+/// (Maps, whose store owns the followed set) hands the gallery the state and
+/// the toggle, and the gallery is just a button. Closures rather than a
+/// protocol on purpose — the gallery must not know what a place IS, only
+/// whether its subject is followed and how to flip that.
+public struct ClusterGalleryFollowing {
+    /// The current state, read fresh whenever the button renders.
+    public let isFollowing: @MainActor () -> Bool
+    /// Flips the state, returning the NEW value — what the button shows next.
+    public let toggle: @MainActor () -> Bool
+
+    public init(
+        isFollowing: @escaping @MainActor () -> Bool,
+        toggle: @escaping @MainActor () -> Bool
+    ) {
+        self.isFollowing = isFollowing
+        self.toggle = toggle
+    }
 }
 
 extension FeedFeatureBuilding {

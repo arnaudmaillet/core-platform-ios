@@ -33,6 +33,18 @@ struct MapSubFilterOption: Equatable {
     /// category contract exists; the tokens ride the Phase-1 filter header as
     /// `pinned:<token>` and are matched literally by the mock.
     static let placeCategories: [MapSubFilterOption] = [
+        // First on purpose: the viewer's OWN curation outranks the fixed
+        // vocabulary. Client-side (never on the wire) — see
+        // `MapSubFilter.followedPlaces`.
+        MapSubFilterOption(
+            subFilter: .followedPlaces,
+            content: MapPillButton.Content(
+                title: nil,
+                symbolName: "heart", selectedSymbolName: "heart.fill",
+                accessibilityLabel: "Favorites"
+            ),
+            favorite: nil
+        ),
         MapSubFilterOption(
             subFilter: .placeCategory("cafes"),
             content: MapPillButton.Content(

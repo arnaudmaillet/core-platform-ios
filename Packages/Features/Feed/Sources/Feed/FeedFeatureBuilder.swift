@@ -243,6 +243,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     public func makeClusterGallery(
         postIDs: [PostID],
         title: String,
+        following: ClusterGalleryFollowing?,
         feed: UIViewController
     ) -> UIViewController {
         let base = repository
@@ -250,13 +251,14 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             postIDs: postIDs,
             imagePipeline: imagePipeline,
             videoPlayback: videoPlayback,
+            following: following,
             loadPosts: {
                 // One hydration over the same provider shape the feed above
-                // uses, so every member is a cache hit; ranked client-side
-                // because no ranking RPC exists (BACKEND_GAPS §14/§18).
+                // uses, so every member is a cache hit. Unranked: the
+                // gallery applies its own popularity order
+                // (`ClusterGalleryViewController.ranked`).
                 let provider = FixedPostsFeedProvider(base: base, ids: postIDs)
-                let members = try await ForYouRepository(feed: provider).firstPage().posts
-                return DiscoverySource.trending.ordering(members)
+                return try await ForYouRepository(feed: provider).firstPage().posts
             },
             openPost: { presenter, origin, ids in
                 presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)

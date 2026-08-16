@@ -39,6 +39,11 @@ final class ClusterGalleryViewController: UIViewController {
     /// so this screen never has to know what a feed is.
     var activePostID: (() -> PostID?)?
 
+    /// The header's follow-this-place toggle, when the caller's subject has a
+    /// followable identity (`ClusterGalleryFollowing`); nil hides the button.
+    private let following: ClusterGalleryFollowing?
+    private let followButton = UIButton(configuration: .plain())
+
     /// The tile a dismissal is currently flying to. Starts at the cluster's
     /// representative (the feed's first post) and re-points to whatever the
     /// feed settled on when a dismissal stages.
@@ -53,10 +58,12 @@ final class ClusterGalleryViewController: UIViewController {
         postIDs: [PostID],
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController?,
+        following: ClusterGalleryFollowing? = nil,
         loadPosts: @escaping () async throws -> [GalleryPost],
         openPost: @escaping (UIViewController, SnapFeedHeroOrigin, [PostID]) -> Void
     ) {
         self.postIDs = postIDs
+        self.following = following
         self.loadPosts = loadPosts
         self.openPost = openPost
         self.anchorID = postIDs.first ?? PostID("")
@@ -84,6 +91,48 @@ final class ClusterGalleryViewController: UIViewController {
         ])
         page.render(.loading)
         page.onItemTapped = { [weak self] index in self?.openTile(at: index) }
+        configureFollowButton()
+    }
+
+    /// The header's trailing item: heart + "Follow" flipping to filled heart
+    /// + "Following". A custom view rather than a plain `UIBarButtonItem`
+    /// because the design pairs the icon WITH a label, and a bar item shows
+    /// one or the other.
+    private func configureFollowButton() {
+        guard let following else { return }
+        var configuration = UIButton.Configuration.plain()
+        configuration.imagePadding = 4
+        configuration.preferredSymbolConfigurationForImage =
+            UIImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
+        followButton.configuration = configuration
+        // The bar squeezes a custom view before it truncates the TITLE; let
+        // the long nav title give way instead — "Following" must never wrap
+        // into "Follow-ing".
+        followButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+        followButton.titleLabel?.numberOfLines = 1
+        followButton.addAction(UIAction { [weak self] _ in
+            guard let self, let following = self.following else { return }
+            self.renderFollowState(following.toggle())
+        }, for: .primaryActionTriggered)
+        renderFollowState(following.isFollowing())
+        navigationItem.rightBarButtonItem = UIBarButtonItem(customView: followButton)
+    }
+
+    /// One place decides both states' looks, so they can't drift: outline
+    /// heart + tinted "Follow" against filled heart + neutral "Following"
+    /// (the resting state whispers; the call to action doesn't).
+    private func renderFollowState(_ isFollowing: Bool) {
+        guard var configuration = followButton.configuration else { return }
+        configuration.image = UIImage(systemName: isFollowing ? "heart.fill" : "heart")
+        var title = AttributedString(isFollowing ? "Following" : "Follow")
+        title.font = UIFont.systemFont(
+            ofSize: UIFont.preferredFont(forTextStyle: .subheadline).pointSize,
+            weight: .semibold
+        )
+        configuration.attributedTitle = title
+        configuration.baseForegroundColor = isFollowing ? .secondaryLabel : .tintColor
+        followButton.configuration = configuration
+        followButton.accessibilityLabel = isFollowing ? "Unfollow this place" : "Follow this place"
     }
 
     /// Starts the one hydration this screen ever does. Called by the builder
@@ -98,7 +147,7 @@ final class ClusterGalleryViewController: UIViewController {
         loadTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let posts = try await loadPosts()
+                let posts = Self.ranked(try await loadPosts())
                 guard !Task.isCancelled else { return }
                 page.render(posts.isEmpty
                     ? .empty(.init(title: "No posts here yet"))
@@ -112,6 +161,22 @@ final class ClusterGalleryViewController: UIViewController {
             }
         }
     }
+
+    /// The gallery's default order: POPULARITY descending — the place
+    /// profile leads with what the place is known for, not what happened
+    /// last. `DiscoverySource.trending`'s rule verbatim (reactions, then
+    /// recency, then id, so ties are stable), applied HERE rather than in
+    /// the builder so the screen owns its own ordering contract. Client-side
+    /// because no ranking RPC exists (`dev/BACKEND_GAPS.md` §14/§18); it
+    /// matches the map above by construction — the cluster's pin wears its
+    /// most-liked member's face, which is this grid's first tile.
+    static func ranked(_ posts: [GalleryPost]) -> [GalleryPost] {
+        DiscoverySource.trending.ordering(posts)
+    }
+
+    /// What the grid currently shows, in its rendered order — for the tests
+    /// that pin the popularity ranking without reaching into the page.
+    var renderedPosts: [GalleryPost] { page.posts }
 
     private func openTile(at index: Int) {
         let posts = page.posts

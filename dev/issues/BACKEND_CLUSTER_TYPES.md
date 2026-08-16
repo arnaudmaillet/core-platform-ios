@@ -92,7 +92,10 @@ message GeoCluster {
   double      lng            = 5;
   int64       member_count   = 6;  // total posts in the place, NOT capped —
                                    // this is the number the client can't compute
-  RadarPin    representative = 7;  // the marker's face; same contract as a pin
+  RadarPin    representative = 7;  // the marker's face: the MOST POPULAR
+                                   // member (engagement desc — the same rule
+                                   // that ranks top_post_ids, so the face is
+                                   // top_post_ids[0]); same contract as a pin
                                    // (empty thumbnail_url = text face)
   repeated string top_post_ids = 8; // popular members, ranked (virality desc),
                                     // capped ~60; seeds the gallery's first

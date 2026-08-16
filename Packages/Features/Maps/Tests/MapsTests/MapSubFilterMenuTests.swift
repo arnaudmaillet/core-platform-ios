@@ -19,7 +19,27 @@ struct MapSubFilterMenuTests {
         ])[0]
     }
 
-    private static var place: MapSubFilterOption { MapSubFilterOption.placeCategories[0] }
+    /// The first CATEGORY entry — by case, not by index: the row now leads
+    /// with the Favorites pill (`.followedPlaces`), which is deliberately not
+    /// a category and takes the generic ladder.
+    private static var place: MapSubFilterOption {
+        MapSubFilterOption.placeCategories.first {
+            if case .placeCategory = $0.subFilter { return true }
+            return false
+        }!
+    }
+
+    /// The Places row LEADS with Favorites — the viewer's own curation
+    /// outranks the fixed vocabulary — and the pill is generic on purpose:
+    /// no category token means no View Details, just Remove and Share.
+    @Test func theFavoritesPillLeadsTheRowWithTheGenericLadder() {
+        let favorites = MapSubFilterOption.placeCategories[0]
+        #expect(favorites.subFilter == .followedPlaces)
+        #expect(favorites.content.accessibilityLabel == "Favorites")
+        let entity = MapSubFilterEntity(option: favorites)
+        #expect(entity == .generic)
+        #expect(MapSubFilterMenuAction.actions(for: entity) == [.unpin, .share])
+    }
 
     /// A `.profile` refinement whose `MapFavorite` never hydrated — a real
     /// state, and the only way to reach the generic ladder.

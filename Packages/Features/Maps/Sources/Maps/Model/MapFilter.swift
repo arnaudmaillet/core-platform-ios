@@ -110,6 +110,11 @@ public enum MapFilter: Hashable, Sendable {
 public enum MapSubFilter: Hashable, Sendable {
     case profile(ProfileID)
     case placeCategory(String)
+    /// Only the places the viewer FOLLOWS (`MapPlaceFollowStore`) — the
+    /// Places row's "Favorites" pill. Never travels on the wire: the followed
+    /// set is client state the mock can't know, so `MapsViewModel` applies it
+    /// to the response instead of resolving it into the filter header.
+    case followedPlaces
 }
 
 /// One person in the filter bars: a favorite pill in the main bar, or a

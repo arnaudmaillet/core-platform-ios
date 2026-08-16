@@ -44,9 +44,18 @@ public extension GeoDiscoveryProviding {
 /// generated `RadarPin` onto the MapKit-free `MapPin` projection.
 public actor GeoDiscoveryRepository: GeoDiscoveryProviding {
     private let geoClient: any GeoDiscovery_V1_GeoDiscoveryServiceClientInterface
+    /// counter.v1, for the one engagement read the Radar path makes: each
+    /// pin's LIKE count, batch-fetched per tile query so a cluster can put
+    /// its most popular member's face forward. Optional — a caller without
+    /// counters (tests, a future surface) still gets pins, at likeCount 0.
+    private let counterClient: (any Counter_V1_CounterServiceClientInterface)?
 
-    public init(geoClient: any GeoDiscovery_V1_GeoDiscoveryServiceClientInterface) {
+    public init(
+        geoClient: any GeoDiscovery_V1_GeoDiscoveryServiceClientInterface,
+        counterClient: (any Counter_V1_CounterServiceClientInterface)? = nil
+    ) {
         self.geoClient = geoClient
+        self.counterClient = counterClient
     }
 
     public func queryTile(_ viewport: MapViewport, filter: MapFilter?) async throws -> TileResult {
@@ -67,11 +76,50 @@ public actor GeoDiscoveryRepository: GeoDiscoveryProviding {
         switch response.result {
         case .success(let body):
             return TileResult(
-                pins: body.pins.compactMap(Self.makePin),
+                pins: await withLikeCounts(body.pins.compactMap(Self.makePin)),
                 tileCount: Int(body.tileCount)
             )
         case .failure(let error):
             throw GeoDiscoveryError.transport(message: error.message ?? "code \(error.code)")
+        }
+    }
+
+    /// Stamps each pin with its counter.v1 LIKE projection, in one batch —
+    /// the popularity signal `MapClusterEngine.representative` competes on.
+    ///
+    /// This is the one deliberate exception to "engagement is hydrated on
+    /// tap": a cluster face has to be chosen BEFORE any tap, and one batch
+    /// read per settled viewport is the whole cost. Fail-open like the rest
+    /// of the Radar path — no client, an error, or a missing snapshot all
+    /// leave 0, which only costs those pins their claim on a group's face.
+    private func withLikeCounts(_ pins: [MapPin]) async -> [MapPin] {
+        guard let counterClient, !pins.isEmpty else { return pins }
+        var request = Counter_V1_BatchGetCountersRequest()
+        request.entities = pins.map { pin in
+            var entity = Counter_V1_EntityRef()
+            entity.entityType = .post
+            entity.id = pin.postID.rawValue
+            return entity
+        }
+        request.metrics = [.like]
+        let response = await counterClient.batchGetCounters(request: request, headers: [:])
+        guard let snapshots = response.message?.snapshots else { return pins }
+        let likes = Dictionary(
+            snapshots.compactMap { snapshot in
+                snapshot.values.first { $0.metric == .like }.map { (snapshot.entity.id, $0.value) }
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        return Self.stamped(pins, likesByPostID: likes)
+    }
+
+    /// The pure half of the stamping, split out so the mapping rule is
+    /// testable without a client: known ids take their count, unknown ids
+    /// keep 0.
+    static func stamped(_ pins: [MapPin], likesByPostID: [String: Int64]) -> [MapPin] {
+        pins.map { pin in
+            guard let likes = likesByPostID[pin.postID.rawValue] else { return pin }
+            return pin.liked(likes)
         }
     }
 
