@@ -212,33 +212,36 @@ final class MapsViewController: UIViewController {
         #if DEBUG
         // `-maps-wide-region`: open zoomed out far enough that the mock pins
         // collapse into clusters — for screenshotting/driving cluster UI in
-        // the sim, where pinch gestures can't be injected.
+        // the sim, where pinch gestures can't be injected. Under dissolve
+        // banding (~77 km diagonal) this is the CITY band.
         if ProcessInfo.processInfo.arguments.contains("-maps-wide-region") {
             var region = Self.defaultRegion
             region.span.latitudeDelta *= 6
             region.span.longitudeDelta *= 6
             mapView.setRegion(region, animated: false)
         }
-        // `-maps-tight-region`: open at level 13 (span 0.045°, against the
-        // default 0.09° → level 12), framing almost the same pins — the A/B
-        // for the LOCAL band: the city cluster opens up and its members
-        // render as individual posts and generic proximity clusters, all in
-        // neutral rings. Screenshotable in the sim, where a pinch can't be
-        // injected.
+        // `-maps-tight-region`: open at level 13 (span 0.045°, ~6.4 km
+        // diagonal), framing almost the same pins as the default view. Both
+        // are LOCAL-band views under dissolve banding (a city-scale viewport
+        // dissolves the city): individual posts and generic proximity
+        // clusters, all in neutral rings. The city-band A/B is a region-scale
+        // framing (e.g. `-maps-set-region 48.7,2.5,1.6`). Screenshotable in
+        // the sim, where a pinch can't be injected.
         if ProcessInfo.processInfo.arguments.contains("-maps-tight-region") {
             var region = Self.defaultRegion
             region.span.latitudeDelta = 0.045
             region.span.longitudeDelta = 0.045
             mapView.setRegion(region, animated: false)
         }
-        // `-maps-country-region`: open at the COUNTRY band (span 1.44° →
-        // level 8), where the whole hierarchy has rolled up into one France
-        // marker — the top of the nesting ladder, unreachable by the ×6
-        // wide region (level 9 = region band).
+        // `-maps-country-region`: open at the COUNTRY band. Dissolve banding
+        // keeps a country marker only while the viewport diagonal exceeds
+        // ~2261 km (2.7 × the res-1 span), so this is a Europe-scale framing:
+        // countries roll up into amber markers — the top of the nesting
+        // ladder, unreachable by the ×6 wide region (city band).
         if ProcessInfo.processInfo.arguments.contains("-maps-country-region") {
             var region = Self.defaultRegion
-            region.span.latitudeDelta = 1.44
-            region.span.longitudeDelta = 1.44
+            region.span.latitudeDelta = 20
+            region.span.longitudeDelta = 20
             mapView.setRegion(region, animated: false)
         }
         // `-maps-set-region <lat>,<lng>,<spanDegrees>`: open anywhere at any
