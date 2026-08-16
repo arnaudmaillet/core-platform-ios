@@ -50,6 +50,13 @@ enum MapClusterEngine {
         /// behaviour keys on `isSemanticCluster`: a lone pin is Case A
         /// whatever it is tagged with.
         let place: MapPlace?
+        /// Whether this item was produced BY the semantic pre-pass — i.e. it
+        /// is the active band's marker for its place. Only these wear the
+        /// hierarchy ring colors: a LOCAL-band proximity cluster that happens
+        /// to share a leaf place keeps its gallery tap (`isSemanticCluster`)
+        /// but dresses neutral, because below the city band everything on
+        /// screen is ordinary local content.
+        var isHierarchyMarker = false
 
         var isCluster: Bool { memberIDs.count > 1 }
 
@@ -80,40 +87,102 @@ enum MapClusterEngine {
     /// - Parameters:
     ///   - cellPoints: marker collision size in screen points (side + margin).
     ///   - zoomScale: `mapView.bounds.width / mapView.visibleMapRect.size.width`.
-    ///   - zoomLevel: the viewport's 0–15 zoom (`MapViewport.zoomLevel`),
-    ///     driving the SEMANTIC pre-pass below; `nil` skips it (the pure
-    ///     proximity behaviour, and what geometry-only tests exercise).
+    ///   - zoomLevel: the viewport's 0–15 zoom (`MapViewport.zoomLevel`) —
+    ///     the semantic pre-pass's FALLBACK input when the corpus carries no
+    ///     H3 indexes; `nil` together with no diagonal skips the pass (the
+    ///     pure proximity behaviour, and what geometry-only tests exercise).
+    ///   - viewportDiagonalKm: the camera viewport's diagonal, driving the
+    ///     DYNAMIC banding against the ladder's H3 cell spans
+    ///     (`MapHierarchyBanding`).
     static func cluster(
-        _ pins: [MapPin], zoomScale: Double, cellPoints: Double, zoomLevel: Int32? = nil
+        _ pins: [MapPin], zoomScale: Double, cellPoints: Double,
+        zoomLevel: Int32? = nil, viewportDiagonalKm: Double? = nil
     ) -> [Item] {
-        // SEMANTIC PRE-PASS (hierarchical masking): a place whose band is
-        // active at this zoom absorbs EVERY pin tagged with it into one
-        // marker, however far apart they sit on screen — the "Paris • City"
-        // pin stands for all of the city's posts, and none of its children
-        // render independently. Extracted BEFORE the proximity passes so a
-        // masked pin can neither appear alone nor drag an unrelated pin
-        // into the place's group (a gallery titled "Paris" must never open
-        // posts that did not claim Paris). A group of one is left to the
-        // proximity pass — a lone pin needs no masking, and a lone marker
-        // wearing a place name would promise a gallery of one.
-        var maskedByPlace: [String: [MapPin]] = [:]
+        // SEMANTIC PRE-PASS (STRICT nested banding): the zoom selects ONE
+        // active hierarchy depth (`MapPlace.Kind.activeKind` — country,
+        // region, or city), and hierarchy members render ONLY through that
+        // depth. Every pin whose place LADDER carries an entry at the
+        // active depth is absorbed into that entry's marker, however far
+        // apart the members sit on screen; a pin whose ladder is non-empty
+        // but has NO rung at the active depth — a region-only post while
+        // the city band is up, a country-only post at the region band — is
+        // HIDDEN outright, never mixed in as itself or through proximity.
+        // Because a city pin's ladder also names its region and country,
+        // zooming out collapses whole cities into their parent region's
+        // marker and whole regions into their country's — the roll-up is a
+        // consequence of the ladder, not a second mechanism.
+        //
+        // The band is exclusive exactly WHEN THE CORPUS IS HIERARCHICAL: if
+        // any pin carries a ladder, everything without a rung at the active
+        // depth is hidden — laddered at another level or not laddered at
+        // all — so one zoom band never shows two kinds of marker. When NO
+        // pin carries a ladder, the whole pass stands down and proximity
+        // clustering runs untouched; that is production's permanent reality
+        // today (the wire carries no place identity, BACKEND_GAPS §18), so
+        // exclusivity can never blank the real map.
+        //
+        // Extracted BEFORE the proximity passes so a masked pin can neither
+        // appear alone nor drag an unrelated pin into the place's group (a
+        // gallery titled "Paris" must never open posts that did not claim
+        // Paris). A group of ONE renders as a lone pin — its level's only
+        // content is still that level's content — but as a standalone item,
+        // never through the proximity pool.
+        var maskedByPlace: [String: (place: MapPlace, members: [MapPin])] = [:]
         var unmasked: [MapPin] = []
-        if let zoomLevel {
+        // Each level's characteristic H3 span, over the whole corpus (the
+        // minimum where places of one kind differ) — the dynamic banding's
+        // input. Empty when no rung carries an index → zoom fallback.
+        var spansByKind: [MapPlace.Kind: Double] = [:]
+        for pin in pins {
+            for place in pin.places {
+                guard let h3 = place.h3Index, let cell = H3CellGeometry(index: h3) else { continue }
+                spansByKind[place.kind] = min(
+                    spansByKind[place.kind] ?? .greatestFiniteMagnitude, cell.averageSpanKm
+                )
+            }
+        }
+        // `nil` means the LOCAL band — the viewer is inside the deepest
+        // cell (dynamic), past the fallback's city band, or no banding
+        // input was given at all (geometry-only callers): the hierarchy
+        // stands down and every post renders through ordinary proximity.
+        let activeKind = MapHierarchyBanding.activeKind(
+            viewportDiagonalKm: viewportDiagonalKm,
+            spansByKind: spansByKind,
+            zoomLevel: zoomLevel
+        )
+        let corpusIsHierarchical = pins.contains { !$0.places.isEmpty }
+        #if DEBUG
+        // `-maps-banding-log`: one line per reconcile with the banding
+        // decision's actual inputs — the difference between "the dynamic
+        // rule chose X" and "the fallback fired because no spans arrived"
+        // is invisible on screen.
+        if ProcessInfo.processInfo.arguments.contains("-maps-banding-log") {
+            let spans = spansByKind
+                .map { "\($0.key)=\(String(format: "%.1f", $0.value))km" }
+                .sorted().joined(separator: " ")
+            print("[banding] pins=\(pins.count) hierarchical=\(corpusIsHierarchical)"
+                + " diag=\(viewportDiagonalKm.map { String(format: "%.1f", $0) } ?? "nil")km"
+                + " zoom=\(zoomLevel.map(String.init) ?? "nil")"
+                + " spans=[\(spans)]"
+                + " active=\(activeKind.map(String.init(describing:)) ?? "local")")
+        }
+        #endif
+        if let activeKind, corpusIsHierarchical {
             for pin in pins {
-                if let place = pin.place, place.kind.masksChildren(atZoomLevel: zoomLevel) {
-                    maskedByPlace[place.id, default: []].append(pin)
-                } else {
-                    unmasked.append(pin)
+                if let place = pin.places.first(where: { $0.kind == activeKind }) {
+                    maskedByPlace[place.id, default: (place, [])].members.append(pin)
                 }
+                // else: no rung at the active depth — hidden, whatever else
+                // the pin's ladder says (or doesn't).
             }
         } else {
             unmasked = pins
         }
         let semantic: [Item] = maskedByPlace
-            .filter { $0.value.count > 1 }
+            .filter { $0.value.members.count > 1 }
             .sorted { $0.key < $1.key } // deterministic output order
-            .map { _, members in
-                let ordered = members.sorted { $0.postID.rawValue < $1.postID.rawValue }
+            .map { _, group in
+                let ordered = group.members.sorted { $0.postID.rawValue < $1.postID.rawValue }
                 let face = representative(of: ordered)
                 return Item(
                     representative: face,
@@ -124,17 +193,24 @@ enum MapClusterEngine {
                     // so spherical-centroid math would be precision theatre.
                     latitude: ordered.reduce(0) { $0 + $1.latitude } / Double(ordered.count),
                     longitude: ordered.reduce(0) { $0 + $1.longitude } / Double(ordered.count),
-                    place: ordered[0].place
+                    // The marker speaks at the ACTIVE depth: a region's
+                    // group says Île-de-France even though every member's
+                    // leaf place is a city inside it.
+                    place: group.place,
+                    isHierarchyMarker: true
                 )
             }
-        // Groups of one fall through to proximity clustering with everyone else.
-        let single = maskedByPlace.values.filter { $0.count == 1 }.flatMap { $0 }
-        let pins = unmasked + single
+        // Groups of one render as standalone pins — OUTSIDE the proximity
+        // pool, so a level's lone post can't be merged into an unladdered
+        // neighbour's generic cluster and escape its band.
+        let lone = maskedByPlace.values.filter { $0.members.count == 1 }
+            .flatMap(\.members).map(Self.single)
 
         guard zoomScale > 0, cellPoints > 0 else {
-            return semantic + pins.map(Self.single)
+            return semantic + lone + unmasked.map(Self.single)
         }
-        return semantic + proximityCluster(pins, zoomScale: zoomScale, cellPoints: cellPoints)
+        return semantic + lone
+            + proximityCluster(unmasked, zoomScale: zoomScale, cellPoints: cellPoints)
     }
 
     /// The screen-space passes (grid + agglomerative merge), unchanged from
@@ -281,11 +357,16 @@ final class MapComputedCluster: NSObject, MKAnnotation {
     /// The group's common place, when it has one — what routes a tap to the
     /// gallery-backed presentation (Case B). See `MapClusterEngine.Item.place`.
     private(set) var place: MapPlace?
+    /// Whether this marker is the active band's own (see
+    /// `MapClusterEngine.Item.isHierarchyMarker`) — what the hierarchy ring
+    /// colors key on.
+    private(set) var isHierarchyMarker = false
 
     init(_ item: MapClusterEngine.Item) {
         self.representative = item.representative
         self.memberIDs = item.memberIDs
         self.place = item.place
+        self.isHierarchyMarker = item.isHierarchyMarker
         self.coordinate = CLLocationCoordinate2D(latitude: item.latitude, longitude: item.longitude)
         super.init()
     }
@@ -295,6 +376,7 @@ final class MapComputedCluster: NSObject, MKAnnotation {
         representative = item.representative
         memberIDs = item.memberIDs
         place = item.place
+        isHierarchyMarker = item.isHierarchyMarker
         let next = CLLocationCoordinate2D(latitude: item.latitude, longitude: item.longitude)
         if next.latitude != coordinate.latitude || next.longitude != coordinate.longitude {
             coordinate = next

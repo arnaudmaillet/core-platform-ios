@@ -18,7 +18,10 @@ final class PinCardView: UIView {
     /// card is a circle instead — see `Face.cornerRadius`, which reads this and
     /// so must be able to from outside the main actor.
     nonisolated static let cornerRadius: CGFloat = 12
-    static let ringWidth: CGFloat = 2
+    // `nonisolated` like `cornerRadius` above: a UIView subclass's statics are
+    // `@MainActor` by inference, and `MapMarkerRing` reads this from a
+    // nonisolated default value.
+    nonisolated static let ringWidth: CGFloat = 2
 
     /// The glyph a text-only post's marker shows in place of a cover. Product
     /// vocabulary for a text post elsewhere in the app is "Short"
@@ -71,17 +74,35 @@ final class PinCardView: UIView {
 
         ringView.isUserInteractionEnabled = false
         ringView.layer.borderWidth = Self.ringWidth
-        ringView.layer.borderColor = UIColor.systemBackground.cgColor
+        ringView.layer.borderColor = ringColor.cgColor
         ringView.layer.cornerRadius = Self.cornerRadius
         ringView.layer.cornerCurve = .continuous
         ringView.frame = bounds
         ringView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         addSubview(ringView)
 
-        // `borderColor` is a CGColor and doesn't follow dark/light on its own.
+        // `borderColor` is a CGColor and doesn't follow dark/light on its own —
+        // re-resolve whatever ring color is CURRENTLY worn (neutral, or a
+        // hierarchy color; both are dynamic).
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _) in
-            self.ringView.layer.borderColor = UIColor.systemBackground.cgColor
+            self.ringView.layer.borderColor = self.ringColor.resolvedColor(
+                with: self.traitCollection
+            ).cgColor
         }
+    }
+
+    /// The ring's current color — neutral by default, a hierarchy color when
+    /// the marker speaks for a city/region/country (see `MapMarkerRing`).
+    /// Stored as the DYNAMIC color so trait changes can re-resolve it.
+    private var ringColor: UIColor = .systemBackground
+
+    /// Dresses the ring for the marker's hierarchy level. One call sets both
+    /// halves so a marker can never wear one level's color at another's
+    /// weight.
+    func setRing(color: UIColor, width: CGFloat) {
+        ringColor = color
+        ringView.layer.borderColor = color.resolvedColor(with: traitCollection).cgColor
+        ringView.layer.borderWidth = width
     }
 
     @available(*, unavailable)

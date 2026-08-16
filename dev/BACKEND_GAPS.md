@@ -720,11 +720,15 @@ client-side place catalog over the mock venues (`-maps-mock-semantic-clusters`);
 production builds show no semantic clusters at all.
 
 **What we need.** The additive contract in
-`dev/issues/BACKEND_CLUSTER_TYPES.md`: a `ClusterKind` enum, a `GeoCluster`
-message (id, kind, name, centroid, `member_count`, representative,
-`top_post_ids`), `QueryTileResponse.clusters = 12` banded by the `zoom_level`
-already in the request, and a paged `QueryClusterPosts` RPC for the gallery
-body.
+`dev/issues/BACKEND_CLUSTER_TYPES.md` (a `ClusterKind` enum, a `GeoCluster`
+message, `QueryTileResponse.clusters = 12`, a paged `QueryClusterPosts` RPC),
+now refined by the ALIGNED architecture in
+`dev/issues/BACKEND_H3_BOUNDING_BOX.md`: clusters (and pins, additively) carry
+an **H3 index** (`RadarPin.h3_index = 6` — field 5 belongs to the renditions
+proposal), whose cell deterministically defines the cluster's bounds; the
+server derives aggregation resolution from the viewport's diagonal rather
+than the fixed `zoom_level` table, and the client banded rendering follows
+the cell-span-vs-viewport rule instead of client-side zoom thresholds.
 
 ---
 

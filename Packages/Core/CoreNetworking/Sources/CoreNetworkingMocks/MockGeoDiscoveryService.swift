@@ -224,11 +224,44 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     /// so selecting the pill visibly thins the field at the default zoom.
     private static let nearbyRadius = 0.04
 
+    /// Mirrors the Maps feature's semantic-clusters launch argument (read
+    /// here the same way `-maps-force-video` is): with it, a deterministic
+    /// THIRD of the non-venue corpus is seeded across European anchors —
+    /// cities, regions and countries beyond Paris — so the H3 hierarchy has
+    /// several distinct entities per level to band, at every geographic
+    /// scale. Without the flag the scatter is exactly the historical
+    /// Paris-only fixture.
+    static let spreadsHierarchy =
+        ProcessInfo.processInfo.arguments.contains("-maps-mock-semantic-clusters")
+
+    /// The European anchors the spread rotates over, matching the zone
+    /// ladders in the Maps feature's `MapMockPlaces` (the spec's mock-parity
+    /// contract ties the two files): three cities, two region scatters, two
+    /// country scatters.
+    static let hierarchyAnchors: [(lat: Double, lng: Double, jitter: Double)] = [
+        (45.7640, 4.8357, 0.10),  // Lyon (city)
+        (43.2965, 5.3698, 0.10),  // Marseille (city)
+        (43.9000, 6.2000, 0.30),  // Provence scatter (region)
+        (41.3874, 2.1686, 0.10),  // Barcelona (city)
+        (41.9000, 1.6000, 0.30),  // Catalonia scatter (region)
+        (40.4200, -3.7000, 0.30), // Madrid area (Spain, country)
+        (52.5200, 13.4050, 0.30), // Berlin area (Germany, country)
+    ]
+
     /// Deterministic scatter: two coprime strides over the index fan posts out
-    /// across the box without randomness, so runs are reproducible.
+    /// across the box without randomness, so runs are reproducible. Under the
+    /// hierarchy flag, every third post is re-anchored across Europe instead —
+    /// same strides, so which posts travel never changes between runs.
     private static func coordinate(forIndex index: Int) -> (lat: Double, lng: Double) {
         let latFraction = Double((index * 73) % 1000) / 1000.0
         let lngFraction = Double((index * 137) % 1000) / 1000.0
+        if spreadsHierarchy, index % 3 == 2 {
+            let anchor = hierarchyAnchors[(index / 3) % hierarchyAnchors.count]
+            return (
+                anchor.lat + (latFraction * 2 - 1) * anchor.jitter,
+                anchor.lng + (lngFraction * 2 - 1) * anchor.jitter
+            )
+        }
         let lat = baseLat + (latFraction * 2 - 1) * spread
         let lng = baseLng + (lngFraction * 2 - 1) * spread
         return (lat, lng)

@@ -219,17 +219,43 @@ final class MapsViewController: UIViewController {
             region.span.longitudeDelta *= 6
             mapView.setRegion(region, animated: false)
         }
-        // `-maps-tight-region`: open one zoom level PAST the city band
-        // (span 0.045° → level 13, against the default 0.09° → level 12),
-        // framing almost the same pins — so the semantic masking's
-        // break-down half (the place marker dissolving back into pins) can
-        // be screenshotted as an A/B in the sim, where a pinch can't be
+        // `-maps-tight-region`: open at level 13 (span 0.045°, against the
+        // default 0.09° → level 12), framing almost the same pins — the A/B
+        // for the LOCAL band: the city cluster opens up and its members
+        // render as individual posts and generic proximity clusters, all in
+        // neutral rings. Screenshotable in the sim, where a pinch can't be
         // injected.
         if ProcessInfo.processInfo.arguments.contains("-maps-tight-region") {
             var region = Self.defaultRegion
             region.span.latitudeDelta = 0.045
             region.span.longitudeDelta = 0.045
             mapView.setRegion(region, animated: false)
+        }
+        // `-maps-country-region`: open at the COUNTRY band (span 1.44° →
+        // level 8), where the whole hierarchy has rolled up into one France
+        // marker — the top of the nesting ladder, unreachable by the ×6
+        // wide region (level 9 = region band).
+        if ProcessInfo.processInfo.arguments.contains("-maps-country-region") {
+            var region = Self.defaultRegion
+            region.span.latitudeDelta = 1.44
+            region.span.longitudeDelta = 1.44
+            mapView.setRegion(region, animated: false)
+        }
+        // `-maps-set-region <lat>,<lng>,<spanDegrees>`: open anywhere at any
+        // scale — the generic hook the European hierarchy sweep drives (the
+        // sim can't inject a continent's worth of panning). Example:
+        // `-maps-set-region 41.39,2.17,0.09` opens on Barcelona at the city
+        // band.
+        let arguments = ProcessInfo.processInfo.arguments
+        if let position = arguments.firstIndex(of: "-maps-set-region"),
+           position + 1 < arguments.count {
+            let parts = arguments[position + 1].split(separator: ",").compactMap { Double($0) }
+            if parts.count == 3 {
+                mapView.setRegion(MKCoordinateRegion(
+                    center: CLLocationCoordinate2D(latitude: parts[0], longitude: parts[1]),
+                    span: MKCoordinateSpan(latitudeDelta: parts[2], longitudeDelta: parts[2])
+                ), animated: false)
+            }
         }
         // `-maps-select-filter <token>`: selects a filter pill (~1.5s after
         // launch, once the first unfiltered settle has painted) — drives the
@@ -1186,11 +1212,12 @@ final class MapsViewController: UIViewController {
             Array(pins.values),
             zoomScale: currentZoomScale,
             cellPoints: Double(Self.clusterCellPoints),
-            // Drives the semantic pre-pass: an active place (city/country/
-            // region, mock-tagged today) absorbs all its pins into one
-            // marker at this zoom and dissolves when the viewer zooms past
-            // its band.
-            zoomLevel: MapViewport.zoomLevel(forLongitudeSpan: mapView.region.span.longitudeDelta)
+            // The semantic pre-pass's two banding inputs: the zoom level is
+            // the FALLBACK for an H3-less corpus; the viewport diagonal
+            // drives the dynamic cell-span rule (`MapHierarchyBanding`)
+            // whenever the ladder carries H3 indexes.
+            zoomLevel: MapViewport.zoomLevel(forLongitudeSpan: mapView.region.span.longitudeDelta),
+            viewportDiagonalKm: currentViewportDiagonalKm
         )
         var target = Set<String>()
         target.reserveCapacity(items.count)
@@ -1286,6 +1313,18 @@ final class MapsViewController: UIViewController {
         let mapWidth = mapView.visibleMapRect.size.width
         guard mapWidth > 0 else { return 0 }
         return Double(mapView.bounds.width) / mapWidth
+    }
+
+    /// The camera viewport's diagonal in km — what the dynamic hierarchy
+    /// banding compares H3 cell spans against. Flat-earth arithmetic (111 km
+    /// per degree, longitude scaled by the latitude's cosine) is exact
+    /// enough at banding scales.
+    private var currentViewportDiagonalKm: Double {
+        let region = mapView.region
+        let latKm = region.span.latitudeDelta * 111.0
+        let lngKm = region.span.longitudeDelta * 111.0
+            * max(0.01, cos(region.center.latitude * .pi / 180))
+        return (latKm * latKm + lngKm * lngKm).squareRoot()
     }
 
     // MARK: - Live previews
@@ -1591,6 +1630,12 @@ extension MapsViewController: MKMapViewDelegate {
             annotation: annotation,
             thumbnail: thumbnail,
             face: Self.face(of: annotation),
+            // The marker's hierarchy ring rides the flight, so the card is
+            // the tapped marker's twin down to its border color — neutral
+            // for anything that isn't the active band's own marker.
+            ringKind: (annotation as? MapComputedCluster).flatMap {
+                $0.isHierarchyMarker ? $0.place?.kind : nil
+            },
             mirrorLive: tappedID.map { id in
                 { renderView in coordinator.mirrorLivePreview(of: id, to: renderView) }
             }

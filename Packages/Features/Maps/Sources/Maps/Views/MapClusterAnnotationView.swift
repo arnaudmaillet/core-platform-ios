@@ -78,6 +78,16 @@ final class MapClusterAnnotationView: MKAnnotationView {
     func configure(with cluster: MapComputedCluster, imagePipeline: ImagePipeline) {
         let url = cluster.representative.thumbnailURL
         let face: PinCardView.Face = cluster.representative.isText ? .text : .media
+        // The hierarchy ring, ABOVE the idempotence guard: a reconcile can
+        // change the marker's level (a re-layout that gains or loses the
+        // shared place) while the representative — and so the face and URL —
+        // stays put. Re-applying an unchanged ring is a cheap set; missing a
+        // level change leaves the wrong color on a live marker. Only the
+        // active band's OWN markers wear a color: a local-band proximity
+        // cluster sharing a leaf place keeps its gallery tap but dresses
+        // neutral.
+        let kind = cluster.isHierarchyMarker ? cluster.place?.kind : nil
+        card.setRing(color: MapMarkerRing.color(for: kind), width: MapMarkerRing.width(for: kind))
         // Idempotent: a tracked cluster is re-configured on every reconcile even
         // when its face is unchanged (same representative thumbnail). Blanking
         // and re-fetching it then would flash the card, so leave it be.
@@ -108,6 +118,7 @@ final class MapClusterAnnotationView: MKAnnotationView {
         representedURL = nil
         representedFace = nil
         card.imageView.image = nil
+        card.setRing(color: MapMarkerRing.color(for: nil), width: MapMarkerRing.width(for: nil))
         applyFace(.media)
     }
 }

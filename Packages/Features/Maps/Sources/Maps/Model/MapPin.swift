@@ -43,12 +43,17 @@ public struct MapPin: Sendable, Equatable, Identifiable {
     /// (`RadarPin.preview_video_url`) the backend hasn't scoped yet. The video
     /// pool is fully built behind this and lights up when the URL arrives.
     public let previewVideoURL: URL?
-    /// The semantic place this post belongs to, or `nil` for the ordinary pin.
-    /// Always `nil` in production — the wire carries no place identity
+    /// The NESTED semantic places this post belongs to, most specific first
+    /// (city, then its region, then its country) — the hierarchy ladder the
+    /// zoom-banded roll-up climbs. Empty for the ordinary pin, and always
+    /// empty in production — the wire carries no place identity
     /// (`dev/BACKEND_GAPS.md` §18); populated only by `MapMockPlaces` under
-    /// its DEBUG launch argument. A cluster whose members all share one place
-    /// is a SEMANTIC cluster (Case B); everything else is generic.
-    public let place: MapPlace?
+    /// its DEBUG launch argument.
+    public let places: [MapPlace]
+
+    /// The most specific place — what a proximity cluster's members must
+    /// share to make it SEMANTIC (Case B); everything else is generic.
+    public var place: MapPlace? { places.first }
 
     /// Whether this marker shows a symbol instead of a cover image.
     public var isText: Bool { kind == .text }
@@ -60,7 +65,7 @@ public struct MapPin: Sendable, Equatable, Identifiable {
         thumbnailURL: URL?,
         kind: Kind,
         previewVideoURL: URL? = nil,
-        place: MapPlace? = nil
+        places: [MapPlace] = []
     ) {
         self.postID = postID
         self.latitude = latitude
@@ -68,12 +73,13 @@ public struct MapPin: Sendable, Equatable, Identifiable {
         self.thumbnailURL = thumbnailURL
         self.kind = kind
         self.previewVideoURL = previewVideoURL
-        self.place = place
+        self.places = places
     }
 
-    /// The same pin, tagged with a place — the decoration seam `MapMockPlaces`
-    /// uses (a `let`-field struct has no other way to amend one field).
-    public func tagged(with place: MapPlace?) -> MapPin {
+    /// The same pin, tagged with its place ladder — the decoration seam
+    /// `MapMockPlaces` uses (a `let`-field struct has no other way to amend
+    /// one field).
+    public func tagged(with places: [MapPlace]) -> MapPin {
         MapPin(
             postID: postID,
             latitude: latitude,
@@ -81,7 +87,7 @@ public struct MapPin: Sendable, Equatable, Identifiable {
             thumbnailURL: thumbnailURL,
             kind: kind,
             previewVideoURL: previewVideoURL,
-            place: place
+            places: places
         )
     }
 }
