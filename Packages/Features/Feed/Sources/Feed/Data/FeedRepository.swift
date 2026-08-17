@@ -56,6 +56,15 @@ public protocol EngagementProviding: Sendable {
     /// Authoritative like counts — the reconcile read after a realtime
     /// reconnect (the plane buffers nothing).
     func likeCounts(for postIDs: [PostID]) async throws -> [PostID: Int64]
+    /// counter.v1's VIEW projection, batched — what the place profile's
+    /// aggregated Views metric reads (the timeline hydration carries likes
+    /// only). Defaulted to empty so fakes and providers without a counter
+    /// read stay valid; consumers treat absence as zero.
+    func viewCounts(for postIDs: [PostID]) async throws -> [PostID: Int64]
+}
+
+public extension EngagementProviding {
+    func viewCounts(for postIDs: [PostID]) async throws -> [PostID: Int64] { [:] }
 }
 
 /// Orchestrates the timeline read path: bare (post_id, author_id) tuples from
@@ -424,6 +433,33 @@ extension FeedRepository: EngagementProviding {
             for snapshot in body.snapshots {
                 if let like = snapshot.values.first(where: { $0.metric == .like }) {
                     counts[PostID(snapshot.entity.id)] = like.value
+                }
+            }
+            return counts
+        case .failure(let error):
+            throw FeedError.transport(message: error.message ?? "code \(error.code)")
+        }
+    }
+
+    public func viewCounts(for postIDs: [PostID]) async throws -> [PostID: Int64] {
+        guard !postIDs.isEmpty else { return [:] }
+
+        var request = Counter_V1_BatchGetCountersRequest()
+        request.entities = postIDs.map { id in
+            var entity = Counter_V1_EntityRef()
+            entity.entityType = .post
+            entity.id = id.rawValue
+            return entity
+        }
+        request.metrics = [.view]
+
+        let response = await counterClient.batchGetCounters(request: request, headers: [:])
+        switch response.result {
+        case .success(let body):
+            var counts: [PostID: Int64] = [:]
+            for snapshot in body.snapshots {
+                if let view = snapshot.values.first(where: { $0.metric == .view }) {
+                    counts[PostID(snapshot.entity.id)] = view.value
                 }
             }
             return counts

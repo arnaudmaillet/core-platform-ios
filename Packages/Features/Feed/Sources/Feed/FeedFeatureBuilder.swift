@@ -184,7 +184,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // tile): the vertical grab keeps the tile morph — the local context —
         // while the horizontal swipe is the platform's back gesture and pops
         // PAST the gallery to the map, via the escape wired below.
-        let galleryPresenter = presenter as? ClusterGalleryViewController
+        let galleryPresenter = presenter as? PlaceProfileViewController
         // THE GRAB. Without it this push had no dismissal gesture at all:
         // claiming `zoomOwnsInteractiveDismissal` above tells the stack's
         // native edge-swipe to stay out of the way, which is correct only
@@ -329,7 +329,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         feed: UIViewController
     ) -> UIViewController {
         let base = repository
-        let gallery = ClusterGalleryViewController(
+        let engagement = engagementProvider
+        let gallery = PlaceProfileViewController(
             postIDs: postIDs,
             imagePipeline: imagePipeline,
             videoPlayback: videoPlayback,
@@ -337,10 +338,23 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             loadPosts: {
                 // One hydration over the same provider shape the feed above
                 // uses, so every member is a cache hit. Unranked: the
-                // gallery applies its own popularity order
-                // (`ClusterGalleryViewController.ranked`).
+                // profile applies its own popularity order
+                // (`PlaceProfileViewController.ranked`).
                 let provider = FixedPostsFeedProvider(base: base, ids: postIDs)
-                return try await ForYouRepository(feed: provider).firstPage().posts
+                var members = try await ForYouRepository(feed: provider).firstPage().posts
+                // The timeline read hydrates likes only; the place's VIEWS
+                // metric needs counter.v1's view projection, batched here
+                // and fail-open — a missing read leaves the aggregate to
+                // count what it has.
+                if let engagement,
+                   let views = try? await engagement.viewCounts(for: members.map(\.id)) {
+                    members = members.map { post in
+                        var decorated = post
+                        decorated.viewCount = views[post.id] ?? post.viewCount
+                        return decorated
+                    }
+                }
+                return members
             },
             openPost: { presenter, origin, ids in
                 presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)

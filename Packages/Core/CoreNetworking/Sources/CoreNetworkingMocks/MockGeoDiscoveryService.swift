@@ -87,6 +87,13 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
             for _ in 0..<textCount { if let id = text.next() { assignments[id] = venue } }
             for _ in 0..<mediaCount { if let id = media.next() { assignments[id] = venue } }
         }
+        // ⚠️ These counts are load-bearing beyond clustering: which posts land
+        // here decides each venue's MOST-LIKED member, and that is the face
+        // under popularity representatives — the text-faced-mixed fixture
+        // (`aTextFacedMixedClusterOpensBothKinds`) rests on the current
+        // arithmetic. The PLACE PROFILE's three tabs don't need more members
+        // at venue scale: the mixed venue already spans all three kinds, and
+        // the city/region markers roll up the whole zone's corpus.
         assign(mixedVenue, text: 2, media: 3)
         assign(textOnlyVenue, text: 3, media: 0)
         assign(mediaOnlyVenue, text: 0, media: 3)
