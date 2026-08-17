@@ -47,6 +47,19 @@ public final class InteractiveSlideDismissal: NSObject {
     /// the manually hidden tab bar here.
     public var onFeedPopped: ((UINavigationController) -> Void)?
 
+    /// Fired at swipe-begin, after the drive is armed and BEFORE the pop is
+    /// triggered — the one moment an owner can restage the pop's landing.
+    ///
+    /// Exists for the cluster-gallery escape: a post opened from the place
+    /// gallery swipes right past the gallery to the MAP, and UIKit's popTo
+    /// commits its stack mutation at begin where a cancel cannot restore it
+    /// (`InteractivePopToStackTests`) — so the recipe is the Case-B one: this
+    /// hook drops the intermediate invisibly (`setViewControllers` without
+    /// animation, no transition running yet) and installs this driver as the
+    /// stack's delegate, and the ordinary, fully cancellable single pop that
+    /// follows lands one screen deeper than the stack said a moment ago.
+    public var onWillBeginPop: (() -> Void)?
+
     /// An extra veto the owner can impose, asked at begin-time.
     ///
     /// Exists for surfaces where a full-width swipe means something else some
@@ -161,6 +174,9 @@ public final class InteractiveSlideDismissal: NSObject {
         let interaction = UIPercentDrivenInteractiveTransition()
         interaction.completionCurve = .easeOut
         self.interaction = interaction
+        // The restaging window — see `onWillBeginPop`. Before the pop, so a
+        // stack edit here is a plain transaction, not a mid-transition one.
+        onWillBeginPop?()
         // Triggers the pop; the delegate below vends the slide animator and
         // this driver because `interaction` is now non-nil.
         nav.popViewController(animated: true)

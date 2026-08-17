@@ -176,16 +176,98 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             nav?.delegate = previousDelegate
             origin.setConcealed(false)
             retainer.transition = nil
+            retainer.slideEscape = nil
             Self.restoreTabBar(on: nav)
         }
+        // A post opened from the PLACE GALLERY splits its two dismissal axes
+        // (the issue this branch exists for: both used to fly back to the
+        // tile): the vertical grab keeps the tile morph — the local context —
+        // while the horizontal swipe is the platform's back gesture and pops
+        // PAST the gallery to the map, via the escape wired below.
+        let galleryPresenter = presenter as? ClusterGalleryViewController
         // THE GRAB. Without it this push had no dismissal gesture at all:
         // claiming `zoomOwnsInteractiveDismissal` above tells the stack's
         // native edge-swipe to stay out of the way, which is correct only
         // because the flight attaches its own — and a claim with nothing
         // behind it leaves the screen unswipeable. Accessing `view` loads it
         // so the pan has something to attach to.
-        transition.attachInteractiveDismissal(to: destination.view) { [weak nav] in
+        transition.attachInteractiveDismissal(
+            to: destination.view,
+            axes: galleryPresenter == nil ? [.horizontal, .vertical] : [.vertical]
+        ) { [weak nav, weak transition] in
+            // Re-assert the flight as the stack's delegate: a CANCELLED
+            // escape below leaves the slide driver holding the slot (a
+            // cancelled swipe tears nothing down), and the tile flight would
+            // otherwise pop on the wrong animator.
+            if let transition { nav?.delegate = transition }
             nav?.popViewController(animated: true)
+        }
+        if let gallery = galleryPresenter {
+            let slide = InteractiveSlideDismissal()
+            retainer.slideEscape = slide
+            slide.attach(to: destination, axes: [.horizontal])
+            // Installed NOW — before the push hands the delegate slot to the
+            // zoom flight below — for two reasons: the driver's begin gate
+            // needs its navigation controller, and this capture is the one
+            // `install` trusts (whoever owned the stack before this screen
+            // existed). The flight immediately takes the slot back; the
+            // re-install at swipe-begin reclaims it per-gesture.
+            slide.install(on: nav)
+            // The Case-B escape recipe, one level deeper (see the map's
+            // cluster-feed branch for the original): UIKit commits a popTo's
+            // stack mutation at begin and a cancel does not restore it, so
+            // never a scrubbed multi-pop — drop the gallery invisibly while
+            // the post is top and nothing is transitioning, then run the
+            // ordinary, fully cancellable single pop, which now lands on
+            // whatever sat beneath the gallery (the map).
+            slide.onWillBeginPop = { [weak nav, weak destination, weak slide, gallery] in
+                guard let nav else { return }
+                // The slide owns this pop: delegate per-gesture, not at
+                // attach — the vertical grab above needs the zoom flight's
+                // controller in this same slot.
+                slide?.install(on: nav)
+                if let index = nav.viewControllers.firstIndex(of: gallery) {
+                    var stack = nav.viewControllers
+                    stack.remove(at: index)
+                    nav.setViewControllers(stack, animated: false)
+                }
+                // The reinsert half, for an abandoned swipe: the gallery goes
+                // back beneath the post so the vertical grab keeps its
+                // landing. `gallery` is captured STRONGLY on purpose — while
+                // off the stack, this closure chain is its only owner. Both
+                // hops are load-bearing: the coordinator exists only once the
+                // pop has begun (next turn), and its completion fires inside
+                // `completeTransition(false)`'s call stack, where a same-turn
+                // `setViewControllers` is silently swallowed (measured on the
+                // map's escape; see its cancel closure).
+                DispatchQueue.main.async { [weak nav, weak destination] in
+                    guard let coordinator = destination?.transitionCoordinator else { return }
+                    coordinator.animate(alongsideTransition: nil) { context in
+                        guard context.isCancelled else { return }
+                        DispatchQueue.main.async { [weak nav, weak destination] in
+                            guard let nav, let destination,
+                                  !nav.viewControllers.contains(gallery),
+                                  let feedIndex = nav.viewControllers.firstIndex(of: destination)
+                            else { return }
+                            var stack = nav.viewControllers
+                            stack.insert(gallery, at: feedIndex)
+                            nav.setViewControllers(stack, animated: false)
+                        }
+                    }
+                }
+            }
+            slide.onFeedPopped = { [weak previousDelegate] nav in
+                // The escape landed on the map: the same close-out the
+                // vertical return runs through `onSourceReturned`, minus the
+                // tile reveal — the gallery left the stack with the drop.
+                // (`install`'s own teardown restored the ZOOM controller a
+                // beat ago; the flight is over, so the slot goes back to
+                // whoever owned it before the push.)
+                nav.delegate = previousDelegate
+                retainer.transition = nil
+                retainer.slideEscape = nil
+                Self.restoreTabBar(on: nav)
+            }
         }
         #if DEBUG
         // `-zoom-live-log`: the grab is invisible until a finger arrives, and
@@ -525,6 +607,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
 @MainActor
 final class HeroTransitionRetainer {
     var transition: ZoomTransitionController?
+    /// The horizontal ESCAPE driver of a gallery-opened post (see
+    /// `presentSnapFeedHero`'s gallery branch) — retained here for exactly
+    /// the flight's lifetime, like the transition above, and cleared by
+    /// whichever close-out fires: the vertical return to the gallery or the
+    /// escape's own landing on the map.
+    var slideEscape: InteractiveSlideDismissal?
 }
 
 /// Keeps a plain push's swipe-to-dismiss alive for the length of the screen.
