@@ -13,6 +13,11 @@ import Foundation
 @MainActor
 public final class MapsViewModel {
     private let repository: any GeoDiscoveryProviding
+    /// The viewer's followed places (`MapPlaceFollowStore`), read fresh per
+    /// query — what the Places row's "Favorites" refinement filters by.
+    /// A closure (not the store) so tests inject a set and the view model
+    /// stays storage-free.
+    private let followedPlaceIDs: () -> Set<String>
 
     /// Authoritative id → pin state; the diff is computed against this.
     private var pins: [PostID: MapPin] = [:]
@@ -33,8 +38,12 @@ public final class MapsViewModel {
     /// telemetry/hint signal, not an error.
     public var onTileCount: ((Int) -> Void)?
 
-    public init(repository: any GeoDiscoveryProviding) {
+    public init(
+        repository: any GeoDiscoveryProviding,
+        followedPlaceIDs: @escaping () -> Set<String> = { [] }
+    ) {
         self.repository = repository
+        self.followedPlaceIDs = followedPlaceIDs
     }
 
     /// The map settled on a new viewport (debounced by the caller). Cancels any
@@ -67,12 +76,24 @@ public final class MapsViewModel {
         query(viewport)
     }
 
+    /// The viewer's follow set changed while the map was up (a gallery
+    /// header's toggle) — re-apply the Favorites refinement, which is the
+    /// only thing that reads it. Without it, unfollowing from the gallery
+    /// and popping back would show yesterday's map.
+    public func followedPlacesChanged() {
+        guard activeSubFilters.contains(.followedPlaces),
+              let viewport = lastViewport else { return }
+        query(viewport)
+    }
+
     /// (primary, subs) resolved into the one filter that goes on the wire: a
     /// person refinement becomes `.profile` (a person's posts are already a
     /// subset of Friends/Following), a category refinement becomes
     /// `.pinnedCategory`, and several of either collapse into `.any` (OR).
-    /// A sub that doesn't fit the primary is dropped (defensive — the UI
-    /// never produces one); if that leaves nothing, the bare primary stands.
+    /// A sub that doesn't fit the primary is dropped — defensive for people/
+    /// categories, and DELIBERATE for `.followedPlaces`, which is client
+    /// state the wire can't answer (it narrows the response instead, see
+    /// `query`); if that leaves nothing, the bare primary stands.
     private var resolvedFilter: MapFilter? {
         guard let activeFilter else { return nil }
         let refinements = activeSubFilters.compactMap { sub -> MapFilter? in
@@ -104,10 +125,25 @@ public final class MapsViewModel {
             #if DEBUG
             // `-maps-mock-semantic-clusters`: stand-in place tags on the mock
             // venues, until the wire can carry them (BACKEND_GAPS §18).
-            self.apply(MapMockPlaces.decorate(result.pins))
+            var pins = MapMockPlaces.decorate(result.pins)
             #else
-            self.apply(result.pins)
+            var pins = result.pins
             #endif
+            // The Favorites refinement, applied to the RESPONSE: only posts
+            // whose place ladder holds a followed place. Client-side because
+            // the followed set lives on the device (`MapPlaceFollowStore`) —
+            // it composes with any wire-side refinement as an intersection,
+            // not the row's usual OR, because it is a different axis (place
+            // identity, not venue category). An unladdered corpus filters to
+            // empty here, which is honest: production has no places to have
+            // followed yet.
+            if self.activeSubFilters.contains(.followedPlaces) {
+                let followed = self.followedPlaceIDs()
+                pins = pins.filter { pin in
+                    pin.places.contains { followed.contains($0.id) }
+                }
+            }
+            self.apply(pins)
             self.onTileCount?(result.tileCount)
         }
     }

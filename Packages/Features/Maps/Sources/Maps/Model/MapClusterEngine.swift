@@ -22,8 +22,9 @@ import MapKit
 enum MapClusterEngine {
     /// One thing to draw: a lone pin (`memberIDs.count == 1`) or a group.
     struct Item: Equatable {
-        /// The pin whose face the marker shows — the group's lowest-id member,
-        /// of whatever kind (see `representative(of:)`), or the lone pin itself.
+        /// The pin whose face the marker shows — the group's most-liked
+        /// member, of whatever kind (see `representative(of:)`), or the lone
+        /// pin itself.
         let representative: MapPin
         /// Every post folded into this marker, representative included — the
         /// REPRESENTATIVE FIRST, then the rest ascending by id. A cluster tap
@@ -310,26 +311,32 @@ enum MapClusterEngine {
         return members.dropFirst().allSatisfy { $0.place?.id == first.id } ? first : nil
     }
 
-    /// The member whose face a group wears: **the lowest id, whatever kind it
-    /// is**. A text post and a photograph have exactly equal claim on the face.
+    /// The member whose face a group wears: **the most liked, whatever kind
+    /// it is** — ties fall to the lowest id, so a corpus with no counters
+    /// (production until the batch hydration ran, or a failed read) degrades
+    /// to the old deterministic rule rather than churning.
     ///
-    /// An earlier version preferred the lowest-id member WITH a cover, on the
-    /// grounds that a photograph previews a group better than a symbol. The
-    /// cost was that the symbol face became unreachable for any group
-    /// containing one photo — text markers could only ever mean "all text
-    /// here", which is a category the map does not otherwise have, and it made
-    /// a text tap synonymous with a text-only feed.
+    /// Popularity is a POST judgement, not a format one, so this stays
+    /// kind-neutral: a text post and a photograph have exactly equal claim on
+    /// the face. (An earlier rule preferred members WITH a cover and was
+    /// reverted — it made the symbol face unreachable for any group holding
+    /// one photo. Popularity has no such reachability hole: every member can
+    /// win by being liked.)
     ///
-    /// Kind-neutral also makes the three things a marker says agree, which the
-    /// preference had split apart: the face, the presentation
+    /// The three things a marker says still agree: the face, the presentation
     /// (`MapMarkerPresentation`) and the post the feed opens on
-    /// (`memberIDs.first`) are now all THE SAME POST. A viewer who taps a
-    /// symbol lands on the words they tapped, and swipes on into whatever else
-    /// — photos included — shares that address.
+    /// (`memberIDs.first`) are all THE SAME POST — the `memberIDs` rotation
+    /// above is what guarantees "you land on what you tapped" survives any
+    /// face rule, this one included. It also matches the gallery underneath:
+    /// the place gallery ranks by popularity, so the face on the pin is the
+    /// first tile in its grid.
     ///
-    /// - Parameter ordered: the members, ascending by post id.
+    /// - Parameter ordered: the members, ascending by post id — which is what
+    ///   makes "first max wins" the lowest-id tie-break.
     private static func representative(of ordered: [MapPin]) -> MapPin {
-        ordered[0]
+        ordered.dropFirst().reduce(ordered[0]) { best, pin in
+            pin.likeCount > best.likeCount ? pin : best
+        }
     }
 
     private static func single(_ pin: MapPin) -> Item {

@@ -43,6 +43,13 @@ public struct MapPin: Sendable, Equatable, Identifiable {
     /// (`RadarPin.preview_video_url`) the backend hasn't scoped yet. The video
     /// pool is fully built behind this and lights up when the URL arrives.
     public let previewVideoURL: URL?
+    /// counter.v1's LIKE projection for this post — the popularity signal a
+    /// cluster's face competes on (`MapClusterEngine.representative`).
+    /// Batch-hydrated by `GeoDiscoveryRepository` after the Radar query (the
+    /// Radar wire itself carries no engagement), fail-open: a failed or
+    /// missing counter read leaves 0, which only costs the marker its claim
+    /// on a group's face.
+    public let likeCount: Int64
     /// The NESTED semantic places this post belongs to, most specific first
     /// (city, then its region, then its country) — the hierarchy ladder the
     /// zoom-banded roll-up climbs. Empty for the ordinary pin, and always
@@ -65,6 +72,7 @@ public struct MapPin: Sendable, Equatable, Identifiable {
         thumbnailURL: URL?,
         kind: Kind,
         previewVideoURL: URL? = nil,
+        likeCount: Int64 = 0,
         places: [MapPlace] = []
     ) {
         self.postID = postID
@@ -73,6 +81,7 @@ public struct MapPin: Sendable, Equatable, Identifiable {
         self.thumbnailURL = thumbnailURL
         self.kind = kind
         self.previewVideoURL = previewVideoURL
+        self.likeCount = likeCount
         self.places = places
     }
 
@@ -87,6 +96,23 @@ public struct MapPin: Sendable, Equatable, Identifiable {
             thumbnailURL: thumbnailURL,
             kind: kind,
             previewVideoURL: previewVideoURL,
+            likeCount: likeCount,
+            places: places
+        )
+    }
+
+    /// The same pin carrying its counter projection — the hydration seam
+    /// `GeoDiscoveryRepository` amends through, for the same reason as
+    /// `tagged(with:)`.
+    public func liked(_ likeCount: Int64) -> MapPin {
+        MapPin(
+            postID: postID,
+            latitude: latitude,
+            longitude: longitude,
+            thumbnailURL: thumbnailURL,
+            kind: kind,
+            previewVideoURL: previewVideoURL,
+            likeCount: likeCount,
             places: places
         )
     }

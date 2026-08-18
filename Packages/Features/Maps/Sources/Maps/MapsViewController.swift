@@ -42,10 +42,12 @@ final class MapsViewController: UIViewController {
     /// surfaces already get it.
     private let pushPlainSnapFeed: ([PostID], UIViewController) -> Void
     /// Builds the place gallery a SEMANTIC cluster's feed dismisses into
-    /// (`FeedFeatureBuilding.makeClusterGallery`): (member ids, title, the
-    /// feed about to cover it) → the gallery screen, which also serves as the
-    /// vertical grab's flight target (`ZoomTransitionSource`).
-    private let makeClusterGallery: ([PostID], String, UIViewController) -> UIViewController
+    /// (`FeedFeatureBuilding.makeClusterGallery`): (member ids, the place
+    /// itself, the feed about to cover it) → the gallery screen, which also
+    /// serves as the vertical grab's flight target (`ZoomTransitionSource`).
+    /// The whole `MapPlace` travels (not just its `galleryTitle`) so the
+    /// builder can wire the header's follow toggle to this place's identity.
+    private let makeClusterGallery: ([PostID], MapPlace, UIViewController) -> UIViewController
     /// Warms the given posts into the shared cache so a tap opens instantly.
     private let prewarm: ([PostID]) async -> Void
     /// Opens someone's profile (the sub-filter sheet's Profile swipe). A
@@ -174,7 +176,7 @@ final class MapsViewController: UIViewController {
         videoPlayback: VideoPlaybackController,
         makeSnapFeed: @escaping ([PostID]) -> UIViewController,
         pushPlainSnapFeed: @escaping ([PostID], UIViewController) -> Void,
-        makeClusterGallery: @escaping ([PostID], String, UIViewController) -> UIViewController,
+        makeClusterGallery: @escaping ([PostID], MapPlace, UIViewController) -> UIViewController,
         prewarm: @escaping ([PostID]) async -> Void,
         openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
         openConversation: @escaping (ProfileID) -> Void
@@ -524,6 +526,16 @@ final class MapsViewController: UIViewController {
                     self.filterBar.selectedFilter.map { self.updateSubFilterBar(for: $0) }
                 }
             }
+        })
+        // Followed PLACES are a different store with one consumer here: the
+        // Places row's Favorites refinement. A gallery header's toggle writes
+        // it while this map sits loaded beneath the whole Case-B stack, so
+        // popping back must find the refinement re-applied, not yesterday's
+        // pins. The view model no-ops unless that refinement is active.
+        appObservers.add(NotificationCenter.default.addObserver(
+            forName: MapPlaceFollowStore.didChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.viewModel.followedPlacesChanged() }
         })
     }
 
@@ -1660,7 +1672,7 @@ extension MapsViewController: MKMapViewDelegate {
         // back to the pin. Generic clusters and single pins skip all of this.
         var gallery: UIViewController?
         if let cluster = annotation as? MapComputedCluster, let place = cluster.place {
-            let built = makeClusterGallery(postIDs, place.galleryTitle, feedVC)
+            let built = makeClusterGallery(postIDs, place, feedVC)
             gallery = built
             if let gallerySource = built as? any ZoomTransitionSource {
                 transition.setDismissSource(gallerySource, for: built)

@@ -228,7 +228,10 @@ final class AppContainer {
     /// real service through the gateway; mock mode is served by
     /// `MockGeoDiscoveryService`, which scatters the shared dataset around Paris.
     private lazy var mapsRepository = GeoDiscoveryRepository(
-        geoClient: GeoDiscovery_V1_GeoDiscoveryServiceClient(client: authenticatedRPCClient)
+        geoClient: GeoDiscovery_V1_GeoDiscoveryServiceClient(client: authenticatedRPCClient),
+        // counter.v1, so each tile's pins carry their LIKE counts and a
+        // cluster can wear its most popular member's face.
+        counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient)
     )
 
     /// The filter bar's favorites section (Phase 1: the viewer's followed
