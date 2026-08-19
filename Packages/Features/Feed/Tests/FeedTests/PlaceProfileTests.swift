@@ -185,6 +185,79 @@ struct PlaceProfileTests {
         #expect(profile.navigationItem.rightBarButtonItem == nil)
     }
 
+    // MARK: - The collapsible header's coordinator rules
+
+    /// The alignment rule that keeps the header still across tab switches —
+    /// the profile pager's, verbatim: below the dock line the offset belongs
+    /// to the SCREEN (every page must agree); above it, to the TAB (its own
+    /// place, floored at the first row under the chrome).
+    @Test func alignedOffsetSharesBelowTheDockLineAndFreesAbove() {
+        // Below the line: every page takes the screen's number, even one
+        // that had its own.
+        #expect(PlaceProfileViewController.alignedOffset(
+            current: 120, pageOwn: 300, dockLine: 227, contentFloor: 281
+        ) == 120)
+        // Above it: the tab keeps its own place...
+        #expect(PlaceProfileViewController.alignedOffset(
+            current: 500, pageOwn: 400, dockLine: 227, contentFloor: 281
+        ) == 400)
+        // ...but never above the floor that would leave its first row under
+        // the chrome.
+        #expect(PlaceProfileViewController.alignedOffset(
+            current: 500, pageOwn: 0, dockLine: 227, contentFloor: 281
+        ) == 281)
+        // Degenerate geometry (nothing to dock) shares everywhere.
+        #expect(PlaceProfileViewController.alignedOffset(
+            current: 500, pageOwn: 0, dockLine: 0, contentFloor: 0
+        ) == 500)
+    }
+
+    /// The identity fade is position-driven and lands at exactly zero on the
+    /// dock line — where the metrics would otherwise draw through the
+    /// transparent navigation bar.
+    @Test func identityFadesOutExactlyAtTheDock() {
+        #expect(PlaceProfileViewController.identityAlpha(travelled: 0, dockLine: 227) == 1)
+        #expect(PlaceProfileViewController.identityAlpha(travelled: 227, dockLine: 227) == 0)
+        #expect(PlaceProfileViewController.identityAlpha(travelled: 187, dockLine: 227) == 0.5)
+        #expect(PlaceProfileViewController.identityAlpha(travelled: 300, dockLine: 227) == 0,
+                "past the dock stays gone, never negative")
+        #expect(PlaceProfileViewController.identityAlpha(travelled: -80, dockLine: 227) == 1,
+                "overscroll stays opaque, never over 1")
+    }
+
+    /// The whole mechanism, window-hosted: scrolling the active page collapses
+    /// the header (its top constraint follows the offset), stops at the dock
+    /// line, and comes back — and a pull-down carries the header below rest.
+    @Test func theHeaderRidesTheActivePageAndDocks() async {
+        let profile = makeProfile(posts: (1...30).map {
+            post("post-\($0)", reactions: Int64($0))
+        })
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = profile
+        window.makeKeyAndVisible()
+        profile.beginLoading()
+        for _ in 0..<50 where profile.renderedPosts.isEmpty { await Task.yield() }
+        window.layoutIfNeeded()
+
+        #expect(profile.debugHeaderConstant == 0, "at rest the header sits at its origin")
+        let dock = profile.debugHeaderTravel
+        #expect(dock > 0)
+
+        profile.debugScrollActivePage(to: dock / 2)
+        #expect(abs(profile.debugHeaderConstant + dock / 2) < 1, "mid-travel the header rides 1:1")
+
+        profile.debugScrollActivePage(to: dock + 400)
+        #expect(abs(profile.debugHeaderConstant + dock) < 1, "past the line the header is DOCKED")
+        #expect(profile.debugIdentityAlpha == 0, "identity is gone under the bar")
+
+        profile.debugScrollActivePage(to: 0)
+        #expect(abs(profile.debugHeaderConstant) < 1, "and it comes all the way back")
+        #expect(profile.debugIdentityAlpha == 1)
+
+        profile.debugScrollActivePage(to: -60)
+        #expect(profile.debugHeaderConstant == 60, "overscroll carries the header down, unclamped")
+    }
+
     // MARK: - Relative age
 
     @Test func relativeAgeSpeaksTheFeedsShortVocabulary() {

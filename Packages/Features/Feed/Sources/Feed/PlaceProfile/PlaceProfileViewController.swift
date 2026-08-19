@@ -47,6 +47,20 @@ final class PlaceProfileViewController: UIViewController {
     private let tabBar = PagedTabBar(titles: ["Gallery", "Shorts", "Activity"], style: .floating)
     private var pager: HorizontalPagerView!
 
+    /// The floating header: banner + metrics + tab bar in one host that
+    /// RIDES THE ACTIVE PAGE'S OFFSET (the profile page's mechanics, adopted
+    /// wholesale). The pages fill the screen and scroll themselves; this
+    /// host sits above them, moved by its top constraint, and stops moving
+    /// when the tab bar reaches the navigation bar — the sticky dock.
+    private let headerHost = UIView()
+    private var headerTopConstraint: NSLayoutConstraint?
+    /// The three pages under their hosted-header contract, pager order.
+    private var hostedPages: [any PlaceProfileHostedPage] = []
+    /// Which page the header is riding. Adopted at tab-tap time (the
+    /// destination takes the offset BEFORE it travels) and confirmed on
+    /// swipe settle.
+    private var activeIndex = 0
+
     private let postIDs: [PostID]
     private let imagePipeline: ImagePipeline
     private let loadPosts: () async throws -> [GalleryPost]
@@ -120,69 +134,206 @@ final class PlaceProfileViewController: UIViewController {
         configureFollowButton()
     }
 
-    // MARK: - Header (banner + metrics)
+    // MARK: - Layout (floating header over full-screen pages)
 
     private func configureHeader() {
-        // The banner runs to the view's TOP edge, under the translucent bar —
-        // the profile page's banner-behind-chrome look without its collapsing
-        // machinery. `clipsToBounds` because an aspect-filled cover bleeds.
+        // The PAGES fill the screen and scroll themselves; the header floats
+        // over them (added second, so it draws above the content sliding
+        // under it) and is moved by its top constraint from whichever page
+        // is being read.
+        hostedPages = [page, shortsPage, activityList]
+        pager = HorizontalPagerView(pages: [page, shortsPage, activityList])
+        pager.pin(to: view)
+
+        headerHost.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(headerHost)
+        let top = headerHost.topAnchor.constraint(equalTo: view.topAnchor)
+        headerTopConstraint = top
+
         bannerView.contentMode = .scaleAspectFill
         bannerView.clipsToBounds = true
         bannerView.backgroundColor = .secondarySystemBackground
         bannerView.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(bannerView)
+        headerHost.addSubview(bannerView)
         bannerScrim.translatesAutoresizingMaskIntoConstraints = false
         bannerView.addSubview(bannerScrim)
 
         let metrics = UIStackView(arrangedSubviews: [reactionsMetric, viewsMetric])
         metrics.distribution = .fillEqually
         metrics.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(metrics)
+        headerHost.addSubview(metrics)
+        self.metricsBand = metrics
 
+        tabBar.translatesAutoresizingMaskIntoConstraints = false
+        headerHost.addSubview(tabBar)
+
+        // ⚠️ Stretchy banner, the profile's own mechanism: the host is moved
+        // by its TOP CONSTRAINT rather than a transform precisely so this
+        // works — the banner's top is pinned `lessThanOrEqualTo` the view's
+        // top at required priority over its natural host-top equality, so a
+        // pull-down (the host travelling below rest) stretches the banner
+        // from the viewport's top edge instead of dragging it away and
+        // exposing the background behind.
+        let bannerRestingTop = bannerView.topAnchor.constraint(equalTo: headerHost.topAnchor)
+        bannerRestingTop.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            bannerView.topAnchor.constraint(equalTo: view.topAnchor),
-            bannerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            bannerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            bannerView.heightAnchor.constraint(equalToConstant: Self.bannerHeight),
+            top,
+            headerHost.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            headerHost.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            bannerRestingTop,
+            bannerView.topAnchor.constraint(lessThanOrEqualTo: view.topAnchor),
+            bannerView.leadingAnchor.constraint(equalTo: headerHost.leadingAnchor),
+            bannerView.trailingAnchor.constraint(equalTo: headerHost.trailingAnchor),
+            // The BOTTOM is the fixed edge (host.top + bannerHeight), so a
+            // stretched banner grows upward while the metrics hold still.
+            bannerView.bottomAnchor.constraint(
+                equalTo: headerHost.topAnchor, constant: Self.bannerHeight
+            ),
             bannerScrim.leadingAnchor.constraint(equalTo: bannerView.leadingAnchor),
             bannerScrim.trailingAnchor.constraint(equalTo: bannerView.trailingAnchor),
             bannerScrim.bottomAnchor.constraint(equalTo: bannerView.bottomAnchor),
             bannerScrim.heightAnchor.constraint(equalToConstant: 80),
-            metrics.topAnchor.constraint(equalTo: bannerView.bottomAnchor, constant: 12),
-            metrics.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            metrics.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            metrics.topAnchor.constraint(
+                equalTo: headerHost.topAnchor, constant: Self.bannerHeight + 12
+            ),
+            metrics.leadingAnchor.constraint(equalTo: headerHost.leadingAnchor, constant: 16),
+            metrics.trailingAnchor.constraint(equalTo: headerHost.trailingAnchor, constant: -16),
+            // Both edges, not leading-only: a `.floating` bar SPANS its host
+            // (its intrinsic width is `noIntrinsicMetric`), so an unpinned
+            // trailing edge collapses it to zero width.
+            tabBar.topAnchor.constraint(equalTo: metrics.bottomAnchor, constant: 8),
+            tabBar.leadingAnchor.constraint(equalTo: headerHost.leadingAnchor),
+            tabBar.trailingAnchor.constraint(equalTo: headerHost.trailingAnchor),
+            tabBar.bottomAnchor.constraint(equalTo: headerHost.bottomAnchor),
         ])
-        self.metricsBand = metrics
     }
 
     private var metricsBand: UIStackView!
 
     private func configureTabs() {
-        pager = HorizontalPagerView(pages: [page, shortsPage, activityList])
-        tabBar.translatesAutoresizingMaskIntoConstraints = false
-        pager.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(tabBar)
-        view.addSubview(pager)
-        NSLayoutConstraint.activate([
-            // Both edges, not leading-only: a `.floating` bar SPANS its host
-            // (`spansItsHost` — its intrinsic width is `noIntrinsicMetric`),
-            // so an unpinned trailing edge collapses it to zero width. The
-            // bar insets its capsule on the style's own margins.
-            tabBar.topAnchor.constraint(equalTo: metricsBand.bottomAnchor, constant: 8),
-            tabBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            tabBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            pager.topAnchor.constraint(equalTo: tabBar.bottomAnchor, constant: 8),
-            pager.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            pager.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            pager.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-        ])
-        // Tap → page; swipe → lens: the exact two-way sync the relationship
-        // screen ships, so tabs feel identical everywhere.
+        // The header rides the ACTIVE page's offset — every page reports,
+        // the coordinator listens to one.
+        for (index, hosted) in hostedPages.enumerated() {
+            hosted.onVerticalScroll = { [weak self] offset in
+                guard let self, index == activeIndex else { return }
+                applyHeaderOffset(offset)
+            }
+        }
+        // Tap → the destination takes its aligned position BEFORE it
+        // travels, and the header adopts it immediately — so the page
+        // sliding in is already where it belongs.
         tabBar.addAction(UIAction { [weak self] _ in
             guard let self else { return }
-            pager.setActivePage(tabBar.selectedIndex, animated: true)
+            let destination = tabBar.selectedIndex
+            guard destination != activeIndex, hostedPages.indices.contains(destination)
+            else { return }
+            hostedPages[destination].setVerticalOffset(alignedOffset(for: destination))
+            activeIndex = destination
+            pager.setActivePage(destination, animated: true)
+            applyHeaderOffset(hostedPages[destination].verticalOffset)
         }, for: .valueChanged)
-        pager.onProgress = { [weak self] progress in self?.tabBar.setProgress(progress) }
+        // Swipe → lens, every frame — and the neighbours are settled every
+        // frame too: mid-swipe both pages are on screen, and a neighbour
+        // arriving at a stale offset is a header jump the viewer watches.
+        pager.onProgress = { [weak self] progress in
+            guard let self else { return }
+            tabBar.setProgress(progress)
+            for (index, hosted) in hostedPages.enumerated() where index != activeIndex {
+                hosted.setVerticalOffset(alignedOffset(for: index))
+            }
+        }
+        pager.onSettled = { [weak self] index in
+            guard let self, hostedPages.indices.contains(index) else { return }
+            activeIndex = index
+            tabBar.select(index)
+            // Re-read where the landed page ACTUALLY is — a short page takes
+            // as much of the shared offset as it has content for, and a
+            // header riding a stale number stays hidden over a page sitting
+            // at its top.
+            applyHeaderOffset(hostedPages[index].verticalOffset)
+        }
+    }
+
+    // MARK: - The scroll coordinator (the profile page's arithmetic)
+
+    /// The height the header takes at rest — what the pages are inset by so
+    /// their content starts below it rather than behind it.
+    private var headerHeight: CGFloat {
+        headerHost.systemLayoutSizeFitting(
+            CGSize(width: view.bounds.width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        ).height
+    }
+
+    /// How far the header travels before the tab bar reaches the navigation
+    /// bar — the moment it docks and stops climbing.
+    private var headerTravel: CGFloat {
+        max(0, headerHeight - PagedTabBar.height - view.safeAreaInsets.top)
+    }
+
+    /// The offset that puts a page's FIRST ROW directly under the navigation
+    /// bar — a tab-bar slot further than `headerTravel`, because the pages
+    /// are inset by the header's whole height, tab bar included.
+    private var contentFloor: CGFloat {
+        max(0, headerHeight - view.safeAreaInsets.top)
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // Idempotent per value — the pages guard their own writes.
+        let header = headerHeight
+        for hosted in hostedPages {
+            hosted.setHostedInsets(top: header, bottom: view.safeAreaInsets.bottom)
+            // Room to hold ANY position the header can be in, so a tab
+            // switch moves the chrome by nothing.
+            hosted.setMinimumScrollTravel(contentFloor)
+        }
+        applyHeaderOffset(hostedPages.indices.contains(activeIndex)
+            ? hostedPages[activeIndex].verticalOffset : 0)
+    }
+
+    /// Moves the header from the active page's offset, and fades the
+    /// identity content (banner, metrics) as it slips under the translucent
+    /// navigation bar — position-driven, both directions.
+    ///
+    /// Negative travel is NOT clamped, deliberately (the profile's rule):
+    /// a pull-down at rest carries the header down with the content, and
+    /// the banner's viewport-top pin turns that travel into stretch.
+    private func applyHeaderOffset(_ travelled: CGFloat) {
+        headerTopConstraint?.constant = -min(travelled, headerTravel)
+        let alpha = Self.identityAlpha(travelled: travelled, dockLine: headerTravel)
+        bannerView.alpha = alpha
+        metricsBand?.alpha = alpha
+    }
+
+    /// The identity fade's ramp: opaque until the last stretch of travel,
+    /// gone exactly at the dock — where the metrics would otherwise go on
+    /// drawing through the transparent bar.
+    static func identityAlpha(travelled: CGFloat, dockLine: CGFloat, ramp: CGFloat = 80) -> CGFloat {
+        guard dockLine > 0, ramp > 0 else { return 1 }
+        return min(1, max(0, (dockLine - travelled) / ramp))
+    }
+
+    /// Where a page should sit, given where the screen currently is — the
+    /// profile pager's rule verbatim: below the dock line the offset belongs
+    /// to the SCREEN (every page must agree or the header teleports on a tab
+    /// switch); above it, to the TAB (each keeps its own place, floored so
+    /// its first row is never left under the chrome).
+    private func alignedOffset(for index: Int) -> CGFloat {
+        Self.alignedOffset(
+            current: hostedPages[activeIndex].verticalOffset,
+            pageOwn: hostedPages[index].verticalOffset,
+            dockLine: headerTravel,
+            contentFloor: contentFloor
+        )
+    }
+
+    static func alignedOffset(
+        current: CGFloat, pageOwn: CGFloat, dockLine: CGFloat, contentFloor: CGFloat
+    ) -> CGFloat {
+        guard dockLine > 0, current >= dockLine else { return current }
+        return max(pageOwn, contentFloor)
     }
 
     /// Starts the one hydration this screen ever does. Called by the builder
@@ -424,6 +575,13 @@ extension PlaceProfileViewController: ZoomTransitionSource {
     /// not from a tile — so there is no departure context to preserve and
     /// the honest landing is the post's own place in the ranking.
     func zoomSourceWillStageDismissal() {
+        if activeIndex != 0 {
+            // Adopt the Gallery tab through the same alignment rule as a tap,
+            // so the header does not move for the switch.
+            page.setVerticalOffset(alignedOffset(for: 0))
+            activeIndex = 0
+            applyHeaderOffset(page.verticalOffset)
+        }
         tabBar.select(0)
         pager.setActivePage(0, animated: false)
         page.beginHeroFreeze()
@@ -458,6 +616,40 @@ extension PlaceProfileViewController: ZoomTransitionSource {
         )
     }
 }
+
+#if DEBUG
+extension PlaceProfileViewController {
+    /// The header's live top-constraint constant — negative while collapsed,
+    /// positive under a pull-down.
+    var debugHeaderConstant: CGFloat { headerTopConstraint?.constant ?? 0 }
+    /// The dock line, as the coordinator computed it for this layout.
+    var debugHeaderTravel: CGFloat { headerTravel }
+    var debugIdentityAlpha: CGFloat { bannerView.alpha }
+    /// Drives the active page to a travel offset through the same path a
+    /// finger's scroll reports through.
+    func debugScrollActivePage(to offset: CGFloat) {
+        hostedPages[activeIndex].setVerticalOffset(offset)
+        applyHeaderOffset(hostedPages[activeIndex].verticalOffset)
+    }
+}
+#endif
+
+// MARK: - The hosted-header contract
+
+/// What a page owes the floating header's coordinator: report travel, take a
+/// travel offset, and reserve room. One shape for both page kinds, so the
+/// coordinator rides whichever is active without caring which it is.
+@MainActor
+protocol PlaceProfileHostedPage: UIView {
+    var onVerticalScroll: ((CGFloat) -> Void)? { get set }
+    var verticalOffset: CGFloat { get }
+    func setVerticalOffset(_ offset: CGFloat)
+    func setHostedInsets(top: CGFloat, bottom: CGFloat)
+    func setMinimumScrollTravel(_ travel: CGFloat)
+}
+
+extension ForYouGridPage: PlaceProfileHostedPage {}
+extension PlaceActivityListView: PlaceProfileHostedPage {}
 
 // MARK: - Header pieces
 
