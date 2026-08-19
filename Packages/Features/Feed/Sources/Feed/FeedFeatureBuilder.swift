@@ -332,6 +332,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         let engagement = engagementProvider
         let gallery = PlaceProfileViewController(
             postIDs: postIDs,
+            placeName: title,
             imagePipeline: imagePipeline,
             videoPlayback: videoPlayback,
             following: following,
@@ -360,7 +361,10 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
             }
         )
-        gallery.title = title
+        // No `gallery.title`: the place's name lives on the BANNER while the
+        // header is expanded and crossfades into the profile's own
+        // `navigationItem.titleView` as it docks — a bar title set here would
+        // sit at full strength over both.
         gallery.activePostID = { [weak feed] in
             (feed as? SnapFeedViewController)?.activePostID
         }

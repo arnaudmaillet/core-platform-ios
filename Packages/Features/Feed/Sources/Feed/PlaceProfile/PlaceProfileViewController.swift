@@ -54,6 +54,20 @@ final class PlaceProfileViewController: UIViewController {
     /// when the tab bar reaches the navigation bar — the sticky dock.
     private let headerHost = UIView()
     private var headerTopConstraint: NSLayoutConstraint?
+    /// The place's display title ("Paris • City Cluster") — worn as the HERO
+    /// TITLE on the banner while the header is expanded, and crossfading into
+    /// the navigation bar's title slot as the banner scrolls under the chrome.
+    /// The navigation item's own `title` stays empty for the whole life of
+    /// the screen: the name is either on the banner or in `navTitleLabel`,
+    /// never in both places at full strength.
+    private let placeName: String
+    /// The banner's hero identity: the place kind whispered above the name.
+    private let heroKindLabel = UILabel()
+    private let heroNameLabel = UILabel()
+    /// The docked replacement, alpha-driven from the same scroll ramp the
+    /// identity fade runs on — the two are complements, so the name is
+    /// always exactly once on screen.
+    private let navTitleLabel = UILabel()
     /// The three pages under their hosted-header contract, pager order.
     private var hostedPages: [any PlaceProfileHostedPage] = []
     /// Which page the header is riding. Adopted at tab-tap time (the
@@ -93,6 +107,7 @@ final class PlaceProfileViewController: UIViewController {
 
     init(
         postIDs: [PostID],
+        placeName: String = "",
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController?,
         following: ClusterGalleryFollowing? = nil,
@@ -100,6 +115,7 @@ final class PlaceProfileViewController: UIViewController {
         openPost: @escaping (UIViewController, SnapFeedHeroOrigin, [PostID]) -> Void
     ) {
         self.postIDs = postIDs
+        self.placeName = placeName
         self.imagePipeline = imagePipeline
         self.following = following
         self.loadPosts = loadPosts
@@ -158,6 +174,62 @@ final class PlaceProfileViewController: UIViewController {
         bannerScrim.translatesAutoresizingMaskIntoConstraints = false
         bannerView.addSubview(bannerScrim)
 
+        // The HERO TITLE: the place's name at the banner's foot, over the
+        // legibility scrim — the identity leads the page, not the chrome.
+        // `.label` over the background-tinted scrim keeps contrast in both
+        // appearances; the soft shadow covers the strip where the scrim is
+        // still mostly image.
+        let (heroName, heroKind) = Self.heroTitleComponents(of: placeName)
+        heroKindLabel.text = heroKind?.uppercased()
+        heroKindLabel.font = .preferredFont(forTextStyle: .caption1)
+        heroKindLabel.textColor = .secondaryLabel
+        heroKindLabel.isHidden = heroKind == nil
+        heroNameLabel.text = heroName
+        heroNameLabel.font = UIFont.systemFont(
+            ofSize: UIFont.preferredFont(forTextStyle: .title1).pointSize, weight: .bold
+        )
+        heroNameLabel.textColor = .label
+        heroNameLabel.adjustsFontSizeToFitWidth = true
+        heroNameLabel.minimumScaleFactor = 0.6
+        for label in [heroKindLabel, heroNameLabel] {
+            label.layer.shadowColor = UIColor.systemBackground.cgColor
+            label.layer.shadowOpacity = 0.8
+            label.layer.shadowRadius = 6
+            label.layer.shadowOffset = .zero
+        }
+        let heroTitle = UIStackView(arrangedSubviews: [heroKindLabel, heroNameLabel])
+        heroTitle.axis = .vertical
+        heroTitle.spacing = 2
+        heroTitle.translatesAutoresizingMaskIntoConstraints = false
+        bannerView.addSubview(heroTitle)
+
+        // The docked twin, in the navigation bar's title slot from day one —
+        // at alpha 0 while the hero is on the banner; the scroll ramp
+        // crossfades the two (`applyHeaderOffset`). The item's own `title`
+        // is never set, so nothing else can draw the name at full strength.
+        //
+        // ⚠️ The label rides inside a WRAPPER, and the wrapper is what the
+        // bar gets. iOS 26's navigation bar animates its title slot through
+        // snapshots and NORMALIZES the hosted view's alpha around push/pop
+        // (measured: the label arrived at alpha 1 after the pop into this
+        // screen, with nothing of ours having written it) — so the driven
+        // knob has to live one level below the view UIKit manages.
+        navTitleLabel.text = placeName
+        navTitleLabel.font = UIFont.systemFont(
+            ofSize: UIFont.preferredFont(forTextStyle: .headline).pointSize, weight: .semibold
+        )
+        navTitleLabel.alpha = 0
+        navTitleLabel.translatesAutoresizingMaskIntoConstraints = false
+        let navTitleHost = UIView()
+        navTitleHost.addSubview(navTitleLabel)
+        NSLayoutConstraint.activate([
+            navTitleLabel.topAnchor.constraint(equalTo: navTitleHost.topAnchor),
+            navTitleLabel.leadingAnchor.constraint(equalTo: navTitleHost.leadingAnchor),
+            navTitleLabel.trailingAnchor.constraint(equalTo: navTitleHost.trailingAnchor),
+            navTitleLabel.bottomAnchor.constraint(equalTo: navTitleHost.bottomAnchor),
+        ])
+        navigationItem.titleView = navTitleHost
+
         let metrics = UIStackView(arrangedSubviews: [reactionsMetric, viewsMetric])
         metrics.distribution = .fillEqually
         metrics.translatesAutoresizingMaskIntoConstraints = false
@@ -193,6 +265,14 @@ final class PlaceProfileViewController: UIViewController {
             bannerScrim.trailingAnchor.constraint(equalTo: bannerView.trailingAnchor),
             bannerScrim.bottomAnchor.constraint(equalTo: bannerView.bottomAnchor),
             bannerScrim.heightAnchor.constraint(equalToConstant: 80),
+            // The hero title rides the banner's FIXED bottom edge (see the
+            // stretch note above), so a pull-down stretches the image behind
+            // it while the name holds its seat over the scrim.
+            heroTitle.leadingAnchor.constraint(equalTo: bannerView.leadingAnchor, constant: 16),
+            heroTitle.trailingAnchor.constraint(
+                lessThanOrEqualTo: bannerView.trailingAnchor, constant: -16
+            ),
+            heroTitle.bottomAnchor.constraint(equalTo: bannerView.bottomAnchor, constant: -10),
             metrics.topAnchor.constraint(
                 equalTo: headerHost.topAnchor, constant: Self.bannerHeight + 12
             ),
@@ -305,6 +385,13 @@ final class PlaceProfileViewController: UIViewController {
         let alpha = Self.identityAlpha(travelled: travelled, dockLine: headerTravel)
         bannerView.alpha = alpha
         metricsBand?.alpha = alpha
+        // The name's two homes are COMPLEMENTS on one ramp: as the hero
+        // title (a banner subview, riding `bannerView.alpha`) fades out
+        // under the chrome, the navigation title fades in by exactly the
+        // amount the hero gave up — expanded shows the banner name only,
+        // docked shows the inline name only, and mid-ramp the crossfade
+        // sums to one.
+        navTitleLabel.alpha = 1 - alpha
     }
 
     /// The identity fade's ramp: opaque until the last stretch of travel,
@@ -313,6 +400,16 @@ final class PlaceProfileViewController: UIViewController {
     static func identityAlpha(travelled: CGFloat, dockLine: CGFloat, ramp: CGFloat = 80) -> CGFloat {
         guard dockLine > 0, ramp > 0 else { return 1 }
         return min(1, max(0, (dockLine - travelled) / ramp))
+    }
+
+    /// Splits the gallery title's "Name • Kind Cluster" shape into the hero
+    /// title's two lines: the name big, the kind whispered above it. A title
+    /// with no separator is all name — the hero simply has no kind line.
+    static func heroTitleComponents(of title: String) -> (name: String, kind: String?) {
+        guard let range = title.range(of: " • ") else { return (title, nil) }
+        let name = String(title[..<range.lowerBound])
+        let kind = String(title[range.upperBound...])
+        return (name, kind.isEmpty ? nil : kind)
     }
 
     /// Where a page should sit, given where the screen currently is — the
@@ -625,6 +722,10 @@ extension PlaceProfileViewController {
     /// The dock line, as the coordinator computed it for this layout.
     var debugHeaderTravel: CGFloat { headerTravel }
     var debugIdentityAlpha: CGFloat { bannerView.alpha }
+    var debugNavTitleAlpha: CGFloat { navTitleLabel.alpha }
+    var debugHeroName: String? { heroNameLabel.text }
+    var debugHeroKind: String? { heroKindLabel.isHidden ? nil : heroKindLabel.text }
+    var debugNavTitleText: String? { navTitleLabel.text }
     /// Drives the active page to a travel offset through the same path a
     /// finger's scroll reports through.
     func debugScrollActivePage(to offset: CGFloat) {

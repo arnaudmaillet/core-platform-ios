@@ -35,6 +35,7 @@ struct PlaceProfileTests {
     ) -> PlaceProfileViewController {
         PlaceProfileViewController(
             postIDs: posts.map(\.id),
+            placeName: "Paris • City Cluster",
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             videoPlayback: nil,
             following: following,
@@ -249,13 +250,43 @@ struct PlaceProfileTests {
         profile.debugScrollActivePage(to: dock + 400)
         #expect(abs(profile.debugHeaderConstant + dock) < 1, "past the line the header is DOCKED")
         #expect(profile.debugIdentityAlpha == 0, "identity is gone under the bar")
+        #expect(profile.debugNavTitleAlpha == 1, "…and the name has moved into the bar")
 
         profile.debugScrollActivePage(to: 0)
         #expect(abs(profile.debugHeaderConstant) < 1, "and it comes all the way back")
         #expect(profile.debugIdentityAlpha == 1)
+        #expect(profile.debugNavTitleAlpha == 0, "expanded, the bar's title slot is empty again")
 
         profile.debugScrollActivePage(to: -60)
         #expect(profile.debugHeaderConstant == 60, "overscroll carries the header down, unclamped")
+    }
+
+    // MARK: - The hero title and its crossfade
+
+    /// The gallery title's "Name • Kind" shape splits into the hero's two
+    /// lines; a separatorless title is all name.
+    @Test func heroTitleSplitsNameFromKind() {
+        let paris = PlaceProfileViewController.heroTitleComponents(of: "Paris • City Cluster")
+        #expect(paris.name == "Paris")
+        #expect(paris.kind == "City Cluster")
+        let bare = PlaceProfileViewController.heroTitleComponents(of: "France")
+        #expect(bare.name == "France")
+        #expect(bare.kind == nil)
+    }
+
+    /// The name lives on the banner while expanded and in the bar while
+    /// docked — one string, two homes, complementary alphas — and the
+    /// navigation item's own `title` stays empty so nothing draws it at
+    /// full strength over either.
+    @Test func thePlaceNameCrossfadesBetweenBannerAndBar() {
+        let profile = makeProfile()
+        profile.loadViewIfNeeded()
+        #expect(profile.debugHeroName == "Paris")
+        #expect(profile.debugHeroKind == "CITY CLUSTER")
+        #expect(profile.debugNavTitleText == "Paris • City Cluster")
+        #expect(profile.debugNavTitleAlpha == 0, "expanded: the bar slot starts empty")
+        #expect(profile.navigationItem.title == nil)
+        #expect(profile.navigationItem.titleView != nil)
     }
 
     // MARK: - Relative age
