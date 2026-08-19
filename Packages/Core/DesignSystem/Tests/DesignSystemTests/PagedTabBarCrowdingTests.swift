@@ -200,6 +200,42 @@ struct PagedTabBarStripScrollTests {
         #expect(abs(bar.debugStripOffset) < 0.5)
     }
 
+    /// ⚠️ **A bar CAPPED after it was already laid out still reveals its
+    /// selection**, and this is the one the profile's docked selector failed.
+    ///
+    /// A leading bar item is sized twice: once at the bar's intrinsic width,
+    /// where the strip fits and there is nothing to reveal, and again when the
+    /// host's ceiling caps it, where it overflows. The bar decided "nothing to
+    /// scroll" on the FIRST of those and never asked again — it read the scroll
+    /// view's bounds from its own `layoutSubviews`, which runs before the scroll
+    /// view has been resized, so it was measuring a viewport it had already
+    /// stopped having. Measured on iPhone SE 3: `capsule=149` while
+    /// `scroller=198`, and "Short" sat clipped outside a capsule showing
+    /// "Activity Gallery" for the life of the screen.
+    ///
+    /// ⚠️ This pins the half a test CAN hold — that a cap arriving after the
+    /// first layout still reveals the selection. It does not reproduce the
+    /// stale-bounds half: `layoutIfNeeded()` settles the whole tree, so the
+    /// test always gets the extra pass the real screen never had. That half is
+    /// held by `StripScrollView.onLayout` and was proved in the simulator.
+    @Test func aBarCappedAfterLayoutStillRevealsItsSelection() {
+        let bar = PagedTabBar(titles: ["Activity", "Gallery", "Short"], style: .navigationTitle)
+        // First pass: its own intrinsic width, where everything fits.
+        bar.frame = CGRect(origin: .zero, size: bar.intrinsicContentSize)
+        bar.setNeedsLayout()
+        bar.layoutIfNeeded()
+        bar.setProgress(2)
+        bar.layoutIfNeeded()
+        #expect(abs(bar.debugStripOffset) < 0.5, "nothing to reveal while it fits")
+
+        // Second pass: the host caps it, exactly as `LeadingSelectorHost` does.
+        bar.frame.size.width = bar.intrinsicContentSize.width - 50
+        bar.setNeedsLayout()
+        bar.layoutIfNeeded()
+        #expect(bar.debugOverflow > 0, "the cap has to make it overflow, or the test proves nothing")
+        #expect(bar.debugStripOffset > 0, "the selected tab was never scrolled into view")
+    }
+
     /// A bar with room to spare has nothing to scroll and stays put.
     @Test func aBarThatFitsNeverScrolls() {
         let bar = PagedTabBar(titles: ["All", "Requests"], style: .navigationTitle)

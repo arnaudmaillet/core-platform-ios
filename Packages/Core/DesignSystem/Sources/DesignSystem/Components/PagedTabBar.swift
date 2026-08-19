@@ -515,6 +515,8 @@ public final class PagedTabBar: UIControl {
     /// changes nothing must not undo a scroll the viewer made by hand — see
     /// `keepLensVisible`.
     private var lensFollowedProgress: CGFloat?
+    /// The viewport the lens was last revealed against — see `keepLensVisible`.
+    private var lensFollowedWidth: CGFloat?
 
     public init(titles: [String], style: Style = .floating) {
         self.titles = titles
@@ -555,6 +557,10 @@ public final class PagedTabBar: UIControl {
         // Segments are buttons: without this the scroll view swallows the first
         // touch and a tap only registers after a perceptible delay.
         scroller.delaysContentTouches = false
+        // The strip reveals the selected tab from HERE, not from the bar's own
+        // layout — the viewport is only final once the scroll view has been
+        // sized. See `StripScrollView.onLayout`.
+        scroller.onLayout = { [weak self] in self?.keepLensVisible() }
         scroller.pin(to: capsule.contentView)
 
         content.constrain(in: scroller) { _ in
@@ -1224,18 +1230,78 @@ public final class PagedTabBar: UIControl {
     /// Skipped mid-drag as well, so a scroll in progress is never yanked from
     /// under the finger by a page change arriving at the same time.
     private func keepLensVisible() {
-        guard lensFollowedProgress != progress else { return }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-tabbar-shape-trace") {
+            print(String(format: "[lens-follow] p=%.2f followed=%@ content=%.1f scroller=%.1f "
+                         + "capsule=%.1f self=%.1f lens=%.1f@%.1f offset=%.1f dragging=%@",
+                         progress, lensFollowedProgress.map { String(format: "%.2f", $0) } ?? "nil",
+                         scroller.contentSize.width, scroller.bounds.width,
+                         capsule.bounds.width, bounds.width,
+                         lens.frame.width, lens.frame.minX, scroller.contentOffset.x,
+                         scroller.isDragging || scroller.isDecelerating ? "yes" : "no"))
+        }
+        #endif
+        // ⚠️ **A REAL VIEWPORT FIRST, and this order is the whole bug.** The
+        // overflow test below is `content > bounds`, which is trivially true
+        // while `bounds` is still zero — so the first layout pass after the
+        // segments exist passed it, spent the one-shot latch on a scroll view
+        // with no size, and every later pass took the `followed == progress`
+        // early return. Measured on a pushed profile's docked selector at 375pt:
+        // `content=198 bounds=0` set the latch, `content=198 bounds=198` returned,
+        // and "Short" sat outside a capsule showing "Activity Gallery" for the
+        // life of the screen. It never showed on a 402pt bar because the strip
+        // fits there and has nothing to reveal.
+        guard scroller.bounds.width > 0 else { return }
+        // ⚠️ The WIDTH is part of the latch, not just the selection. The bar is
+        // sized twice — once at its intrinsic width, then again when the leading
+        // item's ceiling caps it — and only the second one overflows. Latching on
+        // the selection alone means the reveal is decided against a viewport the
+        // bar has already stopped having. A viewer's own scroll changes neither
+        // number, so it still survives a layout pass, which is what this guard
+        // exists for.
+        guard lensFollowedProgress != progress || lensFollowedWidth != scroller.bounds.width
+        else { return }
         guard scroller.contentSize.width > scroller.bounds.width,
               !scroller.isDragging, !scroller.isDecelerating
         else { return }
         lensFollowedProgress = progress
+        lensFollowedWidth = scroller.bounds.width
         // `Metrics`, not the instance padding: this is how much CONTEXT to
         // reveal beside the lens when scrolling to it, not how far inside the
         // capsule it is drawn. A bare bar's lens stands on its own edge, and
         // revealing it with nothing either side of it would read as clipped.
-        scroller.scrollRectToVisible(
-            lens.frame.insetBy(dx: -Metrics.capsulePadding, dy: 0), animated: false
-        )
+        // ⚠️ **The offset is COMPUTED, not asked for.** This used to be
+        // `scrollRectToVisible`, which is the natural call and does the right
+        // arithmetic — but it silently declines from inside the scroll view's
+        // own layout pass, which is where the reveal now has to happen (see
+        // `StripScrollView.onLayout`). Measured on the profile's docked
+        // selector, twice over: `rect=258…321 content=317 viewport=196 →
+        // offset=0`, and still `offset=0` once the rect was clamped inside the
+        // content. Assigning the offset works from anywhere and needs no
+        // agreement with UIKit about what an out-of-bounds rect means.
+        //
+        // The semantics are the ones the doc above describes and are worth
+        // keeping: the MINIMUM distance that brings the lens into view, and
+        // nothing at all when it is already there.
+        let reveal = lens.frame.insetBy(dx: -Metrics.capsulePadding, dy: 0)
+        let viewport = scroller.bounds.width
+        var offset = scroller.contentOffset.x
+        if reveal.minX < offset {
+            offset = reveal.minX
+        } else if reveal.maxX > offset + viewport {
+            offset = reveal.maxX - viewport
+        }
+        offset = min(max(0, offset), max(0, scroller.contentSize.width - viewport))
+        guard abs(offset - scroller.contentOffset.x) > 0.5 else { return }
+        scroller.contentOffset.x = offset
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-tabbar-shape-trace") {
+            print(String(format: "[lens-follow] REVEAL rect=%.1f…%.1f content=%.1f viewport=%.1f "
+                         + "→ offset=%.1f",
+                         reveal.minX, reveal.maxX, scroller.contentSize.width,
+                         viewport, scroller.contentOffset.x))
+        }
+        #endif
     }
 
     /// Re-states the row's horizontal padding, and everything derived from it.
@@ -1296,6 +1362,24 @@ public final class PagedTabBar: UIControl {
 /// keeps "tap to choose" working alongside "drag to see the rest".
 private final class StripScrollView: UIScrollView {
     override func touchesShouldCancel(in view: UIView) -> Bool { true }
+
+    /// ⚠️ **THE authoritative moment for "does this strip overflow".** The same
+    /// lesson `SegmentRow.onLayout` records, one level out: the bar reads this
+    /// view's bounds from its own `layoutSubviews`, which runs BEFORE this view
+    /// has been resized — so when a host caps the bar's width, the bar decides
+    /// "nothing to scroll" against the viewport it had a pass ago. Measured on a
+    /// pushed profile's docked selector: `capsule=149` while `scroller=198`, the
+    /// strip therefore judged 198 ≤ 198 and never revealed the selected tab,
+    /// which sat clipped outside a capsule showing the first two.
+    ///
+    /// `layoutIfNeeded()` on the content does not fix it — the scroll view is
+    /// this view's own business and it lays itself out later in the same pass.
+    var onLayout: (() -> Void)?
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        onLayout?()
+    }
 }
 
 /// ⚠️ **The selection lens is built entirely out of segment FRAMES, and a stack
