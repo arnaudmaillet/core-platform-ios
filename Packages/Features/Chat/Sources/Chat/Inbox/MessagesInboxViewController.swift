@@ -162,6 +162,12 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // 375pt collapses the whole group into a `•••`; with compose trailing, both
         // host. Width is not the trigger, so a narrower selector does not help.
         navigationItem.leftBarButtonItem = nil
+        // ⚠️ AFTER `configureSearchAffordance`, which is what puts the magnifier
+        // in the trailing group — and that order is what the width arithmetic
+        // reads. The selector's ceiling is the bar's width less what everything
+        // ELSE on this item wants, so an action added afterwards is an action the
+        // first measurement did not know about. It is re-measured on the next
+        // layout regardless; the order only saves a pass.
         selectorItem = navigationItem.installLeadingSelector(categoryBar)
 
         // NO `additionalSafeAreaInsets.top`, and no constraints for the capsule:

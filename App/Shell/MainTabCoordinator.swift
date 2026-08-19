@@ -211,6 +211,19 @@ final class MainTabCoordinator: NSObject, Coordinator {
            let tabIndex = Int(arguments[index + 1]), AppTab.allCases.indices.contains(tabIndex) {
             selectTab(AppTab.allCases[tabIndex])
         }
+        // `-switch-tab N` selects a tab a few seconds AFTER launch, which is a
+        // different thing from `-select-tab N` and the difference is
+        // load-bearing: `-select-tab` fires before the shell is in a window, so
+        // the tab's navigation bar lays out once, already showing. A real viewer
+        // arrives by switching, and the Messages selector collapsed into a `•••`
+        // on exactly that path while `-select-tab` showed it hosted perfectly.
+        // Pair with `-header-audit-current`.
+        if let index = arguments.firstIndex(of: "-switch-tab"), index + 1 < arguments.count,
+           let tabIndex = Int(arguments[index + 1]), AppTab.allCases.indices.contains(tabIndex) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                self?.selectTab(AppTab.allCases[tabIndex])
+            }
+        }
         // `-open-feed` pushes the open-ended timeline — the `AppRoute.feed`
         // path, which no longer has a bar button behind it. Deferred a tick:
         // at `start()` the shell isn't the window root yet, so an immediate
