@@ -47,9 +47,70 @@ final class PlaceActivityListView: UIView {
     private let tableView = UITableView(frame: .zero, style: .plain)
     private let emptyLabel = UILabel()
 
+    /// This page's half of the hosted-header contract — the same shape as
+    /// `ForYouGridPage`'s, so the profile's coordinator can ride whichever
+    /// page is active without caring which kind it is.
+    var onVerticalScroll: ((CGFloat) -> Void)?
+    private var hostedTopInset: CGFloat = 0
+    private var hostedBottomInset: CGFloat = 0
+    private var minimumScrollTravel: CGFloat = 0
+
+    var verticalOffset: CGFloat {
+        tableView.contentOffset.y + tableView.contentInset.top
+    }
+
+    func setHostedInsets(top: CGFloat, bottom: CGFloat) {
+        guard hostedTopInset != top || hostedBottomInset != bottom else { return }
+        let travelled = verticalOffset
+        hostedTopInset = top
+        hostedBottomInset = bottom
+        tableView.contentInset.top = top
+        tableView.verticalScrollIndicatorInsets.top = top
+        tableView.contentOffset.y = travelled - top
+        emptyTopConstraint?.constant = top + 48
+        applyBottomInset()
+    }
+
+    func setMinimumScrollTravel(_ travel: CGFloat) {
+        guard minimumScrollTravel != travel else { return }
+        minimumScrollTravel = travel
+        applyBottomInset()
+    }
+
+    func setVerticalOffset(_ offset: CGFloat) {
+        tableView.layoutIfNeeded()
+        applyBottomInset()
+        let inset = tableView.contentInset.top
+        let travel = tableView.contentSize.height
+            + inset
+            + tableView.contentInset.bottom
+            - tableView.bounds.height
+        let target = offset < 0 ? offset : min(offset, max(0, travel))
+        guard abs(verticalOffset - target) > 0.5 else { return }
+        tableView.contentOffset = CGPoint(x: 0, y: target - inset)
+    }
+
+    /// Same rule as the grids': room to travel the header's full distance,
+    /// whatever the stream holds, so a switch to a short Activity tab cannot
+    /// snap the header back down.
+    private func applyBottomInset() {
+        let needed = minimumScrollTravel
+            + tableView.bounds.height
+            - tableView.contentSize.height
+            - tableView.contentInset.top
+        let bottom = max(hostedBottomInset, needed)
+        guard abs(tableView.contentInset.bottom - bottom) > 0.5 else { return }
+        tableView.contentInset.bottom = bottom
+        tableView.verticalScrollIndicatorInsets.bottom = hostedBottomInset
+    }
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         tableView.dataSource = self
+        tableView.delegate = self
+        // Manual insets for the hosted-header contract; UIKit adding safe
+        // areas on top would double-count the header's own region.
+        tableView.contentInsetAdjustmentBehavior = .never
         tableView.allowsSelection = false
         tableView.separatorInset = UIEdgeInsets(top: 0, left: 56, bottom: 0, right: 0)
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "activity")
@@ -62,15 +123,20 @@ final class PlaceActivityListView: UIView {
         emptyLabel.isHidden = true
         emptyLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(emptyLabel)
+        let emptyTop = emptyLabel.topAnchor.constraint(equalTo: topAnchor, constant: 48)
+        emptyTopConstraint = emptyTop
         NSLayoutConstraint.activate([
             tableView.topAnchor.constraint(equalTo: topAnchor),
             tableView.leadingAnchor.constraint(equalTo: leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: trailingAnchor),
             tableView.bottomAnchor.constraint(equalTo: bottomAnchor),
             emptyLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
-            emptyLabel.topAnchor.constraint(equalTo: topAnchor, constant: 48),
+            emptyTop,
         ])
     }
+
+    /// The empty state sits below the floating header, not behind it.
+    private var emptyTopConstraint: NSLayoutConstraint?
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -79,6 +145,9 @@ final class PlaceActivityListView: UIView {
         self.events = events
         emptyLabel.isHidden = !events.isEmpty
         tableView.reloadData()
+        // Content changed under the minimum-travel rule; restate the room.
+        tableView.layoutIfNeeded()
+        applyBottomInset()
     }
 
     /// "3d" / "5w" — the feed's own relative vocabulary, shortest form.
@@ -92,6 +161,12 @@ final class PlaceActivityListView: UIView {
         let days = hours / 24
         if days < 7 { return "\(days)d" }
         return "\(days / 7)w"
+    }
+}
+
+extension PlaceActivityListView: UITableViewDelegate {
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        onVerticalScroll?(verticalOffset)
     }
 }
 

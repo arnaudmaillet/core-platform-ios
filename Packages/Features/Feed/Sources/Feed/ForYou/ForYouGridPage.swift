@@ -359,9 +359,91 @@ final class ForYouGridPage: UIView {
         // see `beginHeroFreeze`. Writing to it here would unpick that, so the
         // value is held and applied when the flight thaws.
         guard frozenContentInset == nil else { return }
-        let bottom = trayInset + footerInset
+        var bottom = trayInset + footerInset + hostedBottomInset
+        if hostedTopInset != nil {
+            // Hosted pages must be ABLE to travel the header's full distance
+            // whatever they hold — a short tab with nowhere to put the viewer
+            // is what makes the header snap back on a tab switch (the same
+            // rule, for the same reason, as the profile grid's
+            // `setMinimumScrollTravel`). The room is empty space below the
+            // last row.
+            let needed = minimumScrollTravel
+                + collectionView.bounds.height
+                - collectionView.contentSize.height
+                - collectionView.contentInset.top
+            bottom = max(bottom, needed)
+        }
+        // Value-guarded: this runs per scroll tick in hosted mode, and an
+        // unconditional write mid-drag disturbs the pan.
+        guard abs(collectionView.contentInset.bottom - bottom) > 0.5 else { return }
         collectionView.contentInset.bottom = bottom
-        collectionView.verticalScrollIndicatorInsets.bottom = bottom
+        collectionView.verticalScrollIndicatorInsets.bottom =
+            trayInset + footerInset + hostedBottomInset
+    }
+
+    // MARK: - Hosted collapsible header (the Place Profile's mechanics)
+
+    /// The page's distance from its content top, every scroll tick — what a
+    /// floating header rides. Fired for every page; a pager gates on the
+    /// active one.
+    var onVerticalScroll: ((CGFloat) -> Void)?
+
+    /// Where this page is scrolled to, measured from the top of its CONTENT
+    /// rather than from its own origin: hosted pages rest at `-inset`, and
+    /// reporting travel keeps every caller out of that arithmetic.
+    var verticalOffset: CGFloat {
+        collectionView.contentOffset.y + collectionView.adjustedContentInset.top
+    }
+
+    /// Non-nil once hosted — the height of the header floating above.
+    private var hostedTopInset: CGFloat?
+    private var hostedBottomInset: CGFloat = 0
+    private var minimumScrollTravel: CGFloat = 0
+
+    /// Puts the page under a floating header: `top` is the header's height
+    /// (content starts below it, scrolls under it), `bottom` the chrome at the
+    /// screen's foot. Switches inset management to manual (`.never`) — the
+    /// host's safe areas are the header's business now, and UIKit adding its
+    /// own on top double-counted the bar region.
+    func setHostedInsets(top: CGFloat, bottom: CGFloat) {
+        guard hostedTopInset != top || hostedBottomInset != bottom else { return }
+        let travelled = verticalOffset
+        hostedTopInset = top
+        hostedBottomInset = bottom
+        collectionView.contentInsetAdjustmentBehavior = .never
+        collectionView.contentInset.top = top
+        collectionView.verticalScrollIndicatorInsets.top = top
+        // Changing the inset moves the content under a stationary offset, so
+        // the offset is restated to keep the page where it was.
+        collectionView.contentOffset.y = travelled - top
+        applyBottomInset()
+    }
+
+    /// How far this page must be able to scroll, whatever it holds — see the
+    /// note in `applyBottomInset`.
+    func setMinimumScrollTravel(_ travel: CGFloat) {
+        guard minimumScrollTravel != travel else { return }
+        minimumScrollTravel = travel
+        applyBottomInset()
+    }
+
+    /// Scrolls to a travel offset, clamped to what the content can hold.
+    /// What keeps a floating header still across a tab switch: the page
+    /// arriving is put level with the page leaving BEFORE it shows.
+    func setVerticalOffset(_ offset: CGFloat) {
+        // Make room BEFORE asking the page to travel: on a tab switch the
+        // page may not have laid out since its content arrived, and it would
+        // clamp against a range that has not been extended yet.
+        collectionView.layoutIfNeeded()
+        applyBottomInset()
+        let inset = collectionView.adjustedContentInset.top
+        let travel = collectionView.contentSize.height
+            + inset
+            + collectionView.contentInset.bottom
+            - collectionView.bounds.height
+        let target = offset < 0 ? offset : min(offset, max(0, travel))
+        guard abs(verticalOffset - target) > 0.5 else { return }
+        collectionView.contentOffset = CGPoint(x: 0, y: target - inset)
     }
 
     // MARK: - Paging footer
@@ -976,7 +1058,10 @@ final class ForYouGridPage: UIView {
     func endHeroFreeze() {
         guard let frozenContentInset else { return }
         self.frozenContentInset = nil
-        collectionView.contentInsetAdjustmentBehavior = .automatic
+        // A hosted page manages its insets manually for its whole life — the
+        // pre-freeze behaviour to restore is `.never` there, not the default.
+        collectionView.contentInsetAdjustmentBehavior =
+            hostedTopInset == nil ? .automatic : .never
         collectionView.contentInset = frozenContentInset
         // The footer may have opened or closed while the inset was pinned, and
         // those writes were dropped. Re-apply now that it is ours again.
@@ -1470,6 +1555,13 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // frame reads as the video sliding against its own tile.
         onGeometryChanged?()
         positionPagingFooter()
+        if hostedTopInset != nil {
+            // Content can land without a layout pass reaching the host —
+            // re-derive the travel room here (value-guarded, so this is a
+            // comparison per tick, not a write) and report for the header.
+            applyBottomInset()
+            onVerticalScroll?(verticalOffset)
+        }
         // Autoplay reconciles DURING the scroll, so a brick starts playing as
         // it slides into view rather than after the scroll has stopped.
         // Throttled rather than run per callback: `scrollViewDidScroll` fires
