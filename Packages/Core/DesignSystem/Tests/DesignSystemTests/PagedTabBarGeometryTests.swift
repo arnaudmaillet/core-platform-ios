@@ -33,6 +33,48 @@ struct PagedTabBarGeometryTests {
         #expect(vertical == horizontal)
     }
 
+    /// ⚠️ **A bare bar stands its lens on its own edge, and that is what makes
+    /// the clearance the viewer sees the same as inline.**
+    ///
+    /// The bar renders bare only inside a `UIBarButtonItem`'s platter, and the
+    /// platter is 4pt larger than the view it hosts on every side (measured: a
+    /// 149×36 host in a 157×44 platter). So a lens inset 4pt inside the view
+    /// lands 8pt inside the pill the viewer sees — twice the clearance the same
+    /// bar shows inline on the profile, and visibly chunkier. Zero here is 4
+    /// there.
+    @Test func aBareBarGivesItsLensTheEdgeAndABackdroppedOneDoesNot() {
+        let backdropped = laidOutBar(titles: ["All", "Requests", "Suggestions"])
+        guard let inset = backdropped.debugLensAlignment?.segment else {
+            Issue.record("the backdropped bar reported no lens")
+            return
+        }
+        #expect(inset.minX == 4)
+        #expect(inset.height == backdropped.bounds.height - 8)
+
+        let bare = PagedTabBar(titles: ["All", "Requests", "Suggestions"], style: .navigationTitle)
+        bare.suppressesBackdrop = true
+        bare.frame = CGRect(origin: .zero, size: bare.intrinsicContentSize)
+        bare.setNeedsLayout()
+        bare.layoutIfNeeded()
+        guard let flush = bare.debugLensAlignment?.segment else {
+            Issue.record("the bare bar reported no lens")
+            return
+        }
+        #expect(flush.minX == 0)
+        #expect(flush.height == bare.bounds.height)
+    }
+
+    /// The width has to follow the padding, or the bar asks for room it no
+    /// longer uses — 8pt of it, which is a capsule that never quite hugs its
+    /// titles.
+    @Test func aBareBarAsksForEightPointsLessThanABackdroppedOne() {
+        let titles = ["All", "Requests", "Suggestions"]
+        let backdropped = PagedTabBar(titles: titles, style: .navigationTitle)
+        let bare = PagedTabBar(titles: titles, style: .navigationTitle)
+        bare.suppressesBackdrop = true
+        #expect(backdropped.intrinsicContentSize.width - bare.intrinsicContentSize.width == 8)
+    }
+
     /// A segment narrower than the lens is tall cannot draw a round selection:
     /// the pill's radius is half its height, which would exceed half its width.
     @Test func aShortTitleStillSelectsAsACircle() {

@@ -405,8 +405,8 @@ public final class PagedTabBar: UIControl {
     /// least width at which this bar still says something: one whole tab,
     /// legible, with every other reachable by scrolling.
     public var firstSegmentWidth: CGFloat {
-        guard let first = segments.first else { return Metrics.capsulePadding * 2 }
-        return ceil(first.pinnedWidth) + Metrics.capsulePadding * 2
+        guard let first = segments.first else { return capsulePadding * 2 }
+        return ceil(first.pinnedWidth) + capsulePadding * 2
     }
 
     #if DEBUG
@@ -423,8 +423,28 @@ public final class PagedTabBar: UIControl {
             } else {
                 materializeEffects()
             }
+            applyCapsulePadding()
         }
     }
+
+    /// The lens's clearance inside THIS VIEW — which is not the clearance the
+    /// viewer sees when something else is drawing the capsule.
+    ///
+    /// ⚠️ **Zero when a bar item's platter supplies the pill, and that is not a
+    /// missing margin.** The platter is 4pt larger than the view it hosts on
+    /// every side (measured: a 149×36 host in a 157×44 platter), so a lens inset
+    /// 4pt inside the view lands **8pt** inside the pill the viewer actually
+    /// sees — twice the clearance the same bar shows inline on the profile, and
+    /// visibly chunkier. Standing the lens on this view's own edge puts the
+    /// platter's overhang in the margin's place and the two read identically.
+    ///
+    /// The radii agree by construction: the lens is a capsule of its own height,
+    /// so a 36pt lens centred in a 44pt pill is concentric with it (18 = 22 − 4).
+    private var lensInset: CGFloat { suppressesBackdrop ? 0 : Metrics.lensInset }
+
+    /// The same clearance on the horizontal axis — between the capsule's edge
+    /// and the first segment.
+    private var capsulePadding: CGFloat { lensInset }
 
     public var fillsWidth: Bool = false {
         didSet {
@@ -451,6 +471,10 @@ public final class PagedTabBar: UIControl {
 
     private var rowHugsConstraints: [NSLayoutConstraint] = []
     private var rowFillsConstraints: [NSLayoutConstraint] = []
+    /// The row constraints whose constant IS `capsulePadding`, kept so a change
+    /// of host can re-state it — see `applyCapsulePadding`.
+    private var paddedLeadingConstraints: [NSLayoutConstraint] = []
+    private var paddedTrailingConstraints: [NSLayoutConstraint] = []
 
     /// The segment the bar is reporting — updated by taps AND by the pages
     /// moving under it, so it is never stale. Reading it is how a
@@ -591,23 +615,30 @@ public final class PagedTabBar: UIControl {
         // decide — a hugging bar that is asked to fill has to stop centring, or
         // the extra width lands as margin at its two ends and the segments never
         // see it. See `fillsWidth`.
+        let hugsLeading = row.leadingAnchor.constraint(
+            greaterThanOrEqualTo: content.leadingAnchor, constant: capsulePadding
+        )
+        let hugsTrailing = row.trailingAnchor.constraint(
+            lessThanOrEqualTo: content.trailingAnchor, constant: -capsulePadding
+        )
         rowHugsConstraints = [
-            row.leadingAnchor.constraint(
-                greaterThanOrEqualTo: content.leadingAnchor, constant: Metrics.capsulePadding
-            ),
-            row.trailingAnchor.constraint(
-                lessThanOrEqualTo: content.trailingAnchor, constant: -Metrics.capsulePadding
-            ),
+            hugsLeading, hugsTrailing,
             row.centerXAnchor.constraint(equalTo: content.centerXAnchor)
         ]
-        rowFillsConstraints = [
-            row.leadingAnchor.constraint(
-                equalTo: content.leadingAnchor, constant: Metrics.capsulePadding
-            ),
-            row.trailingAnchor.constraint(
-                equalTo: content.trailingAnchor, constant: -Metrics.capsulePadding
-            )
-        ]
+        let fillsLeading = row.leadingAnchor.constraint(
+            equalTo: content.leadingAnchor, constant: capsulePadding
+        )
+        let fillsTrailing = row.trailingAnchor.constraint(
+            equalTo: content.trailingAnchor, constant: -capsulePadding
+        )
+        rowFillsConstraints = [fillsLeading, fillsTrailing]
+        // ⚠️ Held by NAME, because `capsulePadding` is not a constant here:
+        // `suppressesBackdrop` is set by the host AFTER init (a bar item's
+        // platter supplies the pill), and it takes the padding to zero. Without
+        // these the row keeps the 4pt it was built with and only the lens moves,
+        // which is half a change and looks like a bug.
+        paddedLeadingConstraints = [hugsLeading, fillsLeading]
+        paddedTrailingConstraints = [hugsTrailing, fillsTrailing]
         NSLayoutConstraint.activate(spansItsHost ? rowFillsConstraints : rowHugsConstraints)
 
         // How the content relates to the capsule's width — and this is what
@@ -719,7 +750,7 @@ public final class PagedTabBar: UIControl {
         default: widths.reduce(0, +)
         }
         let spacing = Metrics.interSegmentSpacing * CGFloat(max(0, segments.count - 1))
-        return ceil(total + spacing) + Metrics.capsulePadding * 2
+        return ceil(total + spacing) + capsulePadding * 2
     }
 
     /// Materialized in-window, never in init: creating a real effect off
@@ -1198,9 +1229,27 @@ public final class PagedTabBar: UIControl {
               !scroller.isDragging, !scroller.isDecelerating
         else { return }
         lensFollowedProgress = progress
+        // `Metrics`, not the instance padding: this is how much CONTEXT to
+        // reveal beside the lens when scrolling to it, not how far inside the
+        // capsule it is drawn. A bare bar's lens stands on its own edge, and
+        // revealing it with nothing either side of it would read as clipped.
         scroller.scrollRectToVisible(
             lens.frame.insetBy(dx: -Metrics.capsulePadding, dy: 0), animated: false
         )
+    }
+
+    /// Re-states the row's horizontal padding, and everything derived from it.
+    ///
+    /// Three things move together and leaving any one behind is visible: the
+    /// row's own inset, the width the bar ASKS for (which includes that inset
+    /// twice), and the lens, which is placed off the segments the row just
+    /// moved.
+    private func applyCapsulePadding() {
+        for constraint in paddedLeadingConstraints { constraint.constant = capsulePadding }
+        for constraint in paddedTrailingConstraints { constraint.constant = -capsulePadding }
+        invalidateIntrinsicContentSize()
+        setNeedsLayout()
+        applyProgress()
     }
 
     /// Built by hand rather than with `insetBy`: insetting a rect past its own
@@ -1216,9 +1265,9 @@ public final class PagedTabBar: UIControl {
         let segment = segments[index].frame
         return CGRect(
             x: row.frame.minX + segment.minX,
-            y: row.frame.minY + segment.minY + Metrics.lensInset,
+            y: row.frame.minY + segment.minY + lensInset,
             width: segment.width,
-            height: max(0, segment.height - Metrics.lensInset * 2)
+            height: max(0, segment.height - lensInset * 2)
         )
     }
 }
