@@ -66,10 +66,28 @@ public final class EmptyStateView: UIView {
         stack.setCustomSpacing(Spacing.lg, after: subtitleLabel)
         stack.setCustomSpacing(Spacing.md, after: icon)
 
+        // ⚠️ So the view can SAY how tall it is. Centred and nothing more, it
+        // fits to ZERO height and its stack simply draws outside the bounds —
+        // which reads fine until a host has to know the block's height to place
+        // it, and the profile's gallery does: it centres the block between the
+        // header's bottom and the bottom chrome, and a block measured as zero
+        // was centred in a band it did not fit, putting its glyph behind the tab
+        // selector on iPhone SE 3.
+        //
+        // 999, not required: a host that pins this view into a box shorter than
+        // the block keeps the old overflow rather than breaking, and
+        // `systemLayoutSizeFitting` reads them either way.
+        let spanTop = stack.topAnchor.constraint(greaterThanOrEqualTo: topAnchor)
+        let spanBottom = stack.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor)
+        spanTop.priority = UILayoutPriority(999)
+        spanBottom.priority = UILayoutPriority(999)
+
         stack.constrain(in: self) { parent in
             stack.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
             stack.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
             stack.widthAnchor.constraint(lessThanOrEqualToConstant: Self.readableWidth)
+            spanTop
+            spanBottom
             // The margins win when the screen is narrower than the readable
             // width; `<=` on both means neither has to know about the other.
             stack.leadingAnchor.constraint(

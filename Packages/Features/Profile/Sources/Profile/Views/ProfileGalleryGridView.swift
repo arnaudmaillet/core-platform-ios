@@ -750,8 +750,31 @@ extension ProfileGalleryGridView {
         // Centre of the region between the header's bottom and the chrome at
         // the foot of the screen — not of the page, which is taller than either.
         let visibleTop = collectionView.contentInset.top
-        let visibleBottom = max(visibleTop, bounds.height - baseBottomInset)
-        statusTopConstraint?.constant = (visibleTop + visibleBottom) / 2 - verticalOffset
+        let visibleBottom = bounds.height - baseBottomInset
+        let blockHeight = emptyStateHeight
+        let centre = ProfileEmptyStatePlacement.centreY(
+            visibleTop: visibleTop, visibleBottom: visibleBottom, blockHeight: blockHeight
+        )
+        statusTopConstraint?.constant = centre - verticalOffset
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-profile-layout-audit"), !emptyStateView.isHidden {
+            print(String(format: "PROFILE-EMPTY-STATE pageH=%.0f visibleTop=%.0f visibleBottom=%.0f "
+                         + "block=%.0f centre=%.0f offset=%.0f bottomInset=%.0f",
+                         bounds.height, visibleTop, visibleBottom, blockHeight,
+                         centre, verticalOffset, baseBottomInset))
+        }
+        #endif
+    }
+
+    /// The empty state's own height — asked of it rather than assumed, because
+    /// the block's height is its glyph, title, subtitle and optional action, and
+    /// which of those it carries changes with the state being shown.
+    private var emptyStateHeight: CGFloat {
+        emptyStateView.systemLayoutSizeFitting(
+            CGSize(width: bounds.width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        ).height
     }
 
     func setContentBottomInset(_ inset: CGFloat) {
