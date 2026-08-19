@@ -511,12 +511,17 @@ public final class PagedTabBar: UIControl {
     private let row = SegmentRow()
     private var segments: [SegmentView] = []
     private var progress: CGFloat = 0
-    /// The progress the strip was last scrolled to follow. A layout pass that
-    /// changes nothing must not undo a scroll the viewer made by hand — see
-    /// `keepLensVisible`.
-    private var lensFollowedProgress: CGFloat?
-    /// The viewport the lens was last revealed against — see `keepLensVisible`.
-    private var lensFollowedWidth: CGFloat?
+    /// What the strip looked like the last time it was asked whether the
+    /// selection needed revealing: the selection, the viewport it sits in, and
+    /// the content it sits on. A layout pass that changes NONE of these must not
+    /// undo a scroll the viewer made by hand — see `keepLensVisible`.
+    private var lastSeenStripGeometry: StripGeometry?
+
+    private struct StripGeometry: Equatable {
+        var progress: CGFloat
+        var viewportWidth: CGFloat
+        var contentWidth: CGFloat
+    }
 
     public init(titles: [String], style: Style = .floating) {
         self.titles = titles
@@ -1232,9 +1237,10 @@ public final class PagedTabBar: UIControl {
     private func keepLensVisible() {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-tabbar-shape-trace") {
-            print(String(format: "[lens-follow] p=%.2f followed=%@ content=%.1f scroller=%.1f "
+            print(String(format: "[lens-follow] p=%.2f seen=%@ content=%.1f scroller=%.1f "
                          + "capsule=%.1f self=%.1f lens=%.1f@%.1f offset=%.1f dragging=%@",
-                         progress, lensFollowedProgress.map { String(format: "%.2f", $0) } ?? "nil",
+                         progress,
+                         lastSeenStripGeometry.map { String(format: "%.0f/%.0f", $0.viewportWidth, $0.contentWidth) } ?? "nil",
                          scroller.contentSize.width, scroller.bounds.width,
                          capsule.bounds.width, bounds.width,
                          lens.frame.width, lens.frame.minX, scroller.contentOffset.x,
@@ -1244,28 +1250,40 @@ public final class PagedTabBar: UIControl {
         // ⚠️ **A REAL VIEWPORT FIRST, and this order is the whole bug.** The
         // overflow test below is `content > bounds`, which is trivially true
         // while `bounds` is still zero — so the first layout pass after the
-        // segments exist passed it, spent the one-shot latch on a scroll view
-        // with no size, and every later pass took the `followed == progress`
-        // early return. Measured on a pushed profile's docked selector at 375pt:
-        // `content=198 bounds=0` set the latch, `content=198 bounds=198` returned,
-        // and "Short" sat outside a capsule showing "Activity Gallery" for the
-        // life of the screen. It never showed on a 402pt bar because the strip
-        // fits there and has nothing to reveal.
+        // segments exist passed it, decided against a scroll view with no size,
+        // and left the strip where it was. Measured on a pushed profile's docked
+        // selector at 375pt: `content=198 bounds=0`, then `content=198
+        // bounds=198`, and "Short" sat outside a capsule showing "Activity
+        // Gallery" for the life of the screen. It never showed on a 402pt bar
+        // because the strip fits there and has nothing to reveal.
         guard scroller.bounds.width > 0 else { return }
-        // ⚠️ The WIDTH is part of the latch, not just the selection. The bar is
-        // sized twice — once at its intrinsic width, then again when the leading
-        // item's ceiling caps it — and only the second one overflows. Latching on
-        // the selection alone means the reveal is decided against a viewport the
-        // bar has already stopped having. A viewer's own scroll changes neither
-        // number, so it still survives a layout pass, which is what this guard
-        // exists for.
-        guard lensFollowedProgress != progress || lensFollowedWidth != scroller.bounds.width
-        else { return }
+        // ⚠️ **WHAT CHANGED SINCE LAST TIME, not what we last acted on.** The
+        // reveal is a function of three things — the selection, the viewport,
+        // and the content — and re-running it whenever any of them MOVES is what
+        // separates "the world changed" from "something laid out". Recording
+        // every geometry we see, rather than only the ones we acted on, is the
+        // part that took two attempts:
+        //
+        // The profile's selector docks at 149pt, undocks to 198, and docks again.
+        // Revealing at 149 put the strip at offset 49 — correct — and then the
+        // undock grew the viewport to 198, where the strip no longer overflows,
+        // so UIKit clamped the offset back to 0. Re-docking returned the viewport
+        // to 149, and a latch that remembered "we already revealed at 149"
+        // skipped it. The offset it was protecting had been thrown away two
+        // passes earlier. Measured end to end with `-header-dock-demo`.
+        //
+        // A viewer's own scroll moves NONE of these three, so it still survives
+        // a layout pass, which is what this guard exists for.
+        let geometry = StripGeometry(
+            progress: progress,
+            viewportWidth: scroller.bounds.width,
+            contentWidth: scroller.contentSize.width
+        )
+        defer { lastSeenStripGeometry = geometry }
+        guard geometry != lastSeenStripGeometry else { return }
         guard scroller.contentSize.width > scroller.bounds.width,
               !scroller.isDragging, !scroller.isDecelerating
         else { return }
-        lensFollowedProgress = progress
-        lensFollowedWidth = scroller.bounds.width
         // `Metrics`, not the instance padding: this is how much CONTEXT to
         // reveal beside the lens when scrolling to it, not how far inside the
         // capsule it is drawn. A bare bar's lens stands on its own edge, and

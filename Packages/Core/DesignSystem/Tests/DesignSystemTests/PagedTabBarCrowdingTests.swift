@@ -236,6 +236,47 @@ struct PagedTabBarStripScrollTests {
         #expect(bar.debugStripOffset > 0, "the selected tab was never scrolled into view")
     }
 
+    /// ⚠️ **Docked, undocked, docked again — the selection is revealed EVERY
+    /// time**, and this is the one a real finger found that a programmatic jump
+    /// to the dock line did not.
+    ///
+    /// The profile's selector is capped at 149pt while docked and sits at 198
+    /// while not. Revealing at 149 puts the strip at its offset correctly; the
+    /// undock then grows the viewport to 198, where the strip no longer
+    /// overflows, so UIKit clamps that offset back to zero. Re-docking returns
+    /// the viewport to 149 — and a rule that remembered "already revealed at
+    /// 149" skipped it, protecting an offset that had been thrown away two
+    /// passes earlier. Measured end to end with `-header-dock-demo`, and the
+    /// screen showed "Activity Gallery" with the selected tab clipped off.
+    ///
+    /// ⚠️ Like its neighbour above, this pins the INTENT rather than the exact
+    /// failure: `layoutIfNeeded()` settles the tree and never reproduces the
+    /// clamp UIKit applies when the viewport grows past the content. What
+    /// actually proved it was a real CGEvent drag on an iPhone SE 3.
+    @Test func aSelectionSurvivesDockingUndockingAndDockingAgain() {
+        let titles = ["Activity", "Gallery", "Short"]
+        let bar = PagedTabBar(titles: titles, style: .navigationTitle)
+        let loose = bar.intrinsicContentSize.width
+        let docked = loose - 50
+
+        func layOut(at width: CGFloat) {
+            bar.frame = CGRect(x: 0, y: 0, width: width, height: PagedTabBar.Style.navigationTitle.height)
+            bar.setNeedsLayout()
+            bar.layoutIfNeeded()
+        }
+
+        layOut(at: loose)
+        bar.setProgress(2)
+        bar.layoutIfNeeded()
+
+        layOut(at: docked)
+        #expect(bar.debugStripOffset > 0, "first dock never revealed the selection")
+
+        layOut(at: loose)
+        layOut(at: docked)
+        #expect(bar.debugStripOffset > 0, "the second dock left the selection off screen")
+    }
+
     /// A bar with room to spare has nothing to scroll and stays put.
     @Test func aBarThatFitsNeverScrolls() {
         let bar = PagedTabBar(titles: ["All", "Requests"], style: .navigationTitle)
