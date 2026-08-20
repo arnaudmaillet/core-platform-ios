@@ -1795,12 +1795,20 @@ final class ForYouViewController: UIViewController {
            position + 1 < arguments.count, let steps = Int(arguments[position + 1]) {
             scheduleScrollDemo(steps: steps)
         }
-        // `-foryou-expand <index>`: presses a row's "Show more". Polls for
-        // content rather than firing on a delay, for the same reason
+        // `-foryou-expand <index> [delay]`: presses a row's "Show more". Polls
+        // for content rather than firing on a delay, for the same reason
         // `-foryou-open` does — a fixed wait silently no-ops under
         // `-mock-latency`.
+        //
+        // The optional delay is for FILMING it. A capture has to be started
+        // after the app has settled or it is mostly launch, and by then the
+        // default one-second press has already happened: three recordings in a
+        // row caught nothing but the expanded end state.
         if let position = arguments.firstIndex(of: "-foryou-expand"),
            position + 1 < arguments.count, let index = Int(arguments[position + 1]) {
+            let delay = position + 2 < arguments.count
+                ? (Double(arguments[position + 2]) ?? 1.0)
+                : 1.0
             var attempts = 0
             func attempt() {
                 attempts += 1
@@ -1815,7 +1823,7 @@ final class ForYouViewController: UIViewController {
                     print("[foryou-expand] NOTHING TO EXPAND at row \(index)")
                 }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: attempt)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: attempt)
         }
         guard let position = arguments.firstIndex(of: "-foryou-open"), position + 1 < arguments.count,
               let index = Int(arguments[position + 1])

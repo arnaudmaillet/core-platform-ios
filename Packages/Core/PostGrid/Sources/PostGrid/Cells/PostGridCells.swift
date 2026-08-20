@@ -11,7 +11,7 @@ import UIKit
 /// quiet metadata line closing the card: views, reactions, comments on the
 /// leading side, the post's compact age trailing. Short pages never have
 /// media, so their rows are text + metadata.
-public final class PostGridListRowCell: UICollectionViewCell {
+public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognizerDelegate {
     public static let reuseID = "PostGridListRowCell"
     /// The inner preview's rounding — the radius a hero flying from this row
     /// must start at, so the card is the preview's twin rather than its
@@ -153,7 +153,7 @@ public final class PostGridListRowCell: UICollectionViewCell {
         if abs(bounds.width - targetWidth) > 0.5 {
             bounds.size.width = targetWidth
         }
-        updateRevealAffordance(atWidth: targetWidth)
+        composeCaption(atWidth: targetWidth)
         contentView.setNeedsLayout()
         contentView.layoutIfNeeded()
         let fitted = contentView.systemLayoutSizeFitting(
@@ -167,33 +167,166 @@ public final class PostGridListRowCell: UICollectionViewCell {
         return layoutAttributes
     }
 
-    private func updateRevealAffordance(atWidth width: CGFloat) {
-        guard !isCaptionExpanded else {
-            revealButton.isHidden = true
-            return
-        }
-        let text = captionLabel.text ?? ""
-        guard !text.isEmpty, let font = captionLabel.font else {
-            revealButton.isHidden = true
-            return
-        }
+    /// The ellipsis and the affordance, written INTO the caption so they sit at
+    /// the end of the truncated text rather than under it.
+    ///
+    /// A label cannot do this for itself: `.byTruncatingTail` puts its ellipsis
+    /// at the very end of the last line and leaves nowhere to put anything
+    /// after it. So the text is shortened here, by hand, to the longest
+    /// word-boundary prefix that still leaves room for "… Show more" on the
+    /// last line — which is what makes the affordance read as part of the
+    /// sentence it interrupts.
+    private func composeCaption(atWidth width: CGFloat) {
+        let font = captionLabel.font ?? .preferredFont(forTextStyle: .body)
         let available = width - Self.captionInset * 2
-        guard available > 0 else {
-            revealButton.isHidden = true
+        guard !isCaptionExpanded, !fullCaption.isEmpty, available > 0 else {
+            showMoreRange = nil
+            captionLabel.attributedText = Self.plain(fullCaption, font: font)
             return
         }
-        let full = (text as NSString).boundingRect(
-            with: CGSize(width: available, height: .greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: [.font: font],
-            context: nil
-        ).height
-        // The cap in points, from the font's own line height — never a
-        // hardcoded number, or a Dynamic Type step silently changes which
-        // captions are considered long.
-        let capped = font.lineHeight * CGFloat(Self.captionLineLimit)
-        // A one-point overhang is a rounding artefact, not a fifth line.
-        revealButton.isHidden = full <= capped + 1
+        // Measured in LINES, from the font's own metrics — never a hardcoded
+        // height, or a Dynamic Type step silently changes which captions are
+        // considered long.
+        let whole = Self.plain(fullCaption, font: font)
+        guard Self.lineCount(whole, width: available) > Self.captionLineLimit else {
+            showMoreRange = nil
+            captionLabel.attributedText = whole
+            return
+        }
+        let composed = Self.truncated(
+            fullCaption, font: font, width: available, capLines: Self.captionLineLimit
+        )
+        captionLabel.attributedText = composed.text
+        showMoreRange = composed.showMore
+    }
+
+    private static let showMoreTitle = "Show more"
+    private static let ellipsis = "\u{2026} "
+
+    private static func plain(_ text: String, font: UIFont?) -> NSAttributedString {
+        NSAttributedString(string: text, attributes: [
+            .font: font ?? UIFont.preferredFont(forTextStyle: .body),
+            .foregroundColor: UIColor.label
+        ])
+    }
+
+    /// How many lines `text` occupies at `width`, counted as LINE FRAGMENTS.
+    ///
+    /// Not `height / font.lineHeight`, which is what this did first and is
+    /// wrong in a way that hides: `boundingRect` returns the laid-out height
+    /// including leading, which for four lines of body text measured 88pt
+    /// against a 20.5pt line height — 4.29, not 4. Rounding rescues small
+    /// counts and drifts into over-reporting as they grow, so the error only
+    /// appears at large Dynamic Type sizes or long captions.
+    private static func lineCount(_ text: NSAttributedString, width: CGFloat) -> Int {
+        guard text.length > 0 else { return 0 }
+        let storage = NSTextStorage(attributedString: text)
+        let manager = NSLayoutManager()
+        let container = NSTextContainer(
+            size: CGSize(width: width, height: .greatestFiniteMagnitude)
+        )
+        container.lineFragmentPadding = 0
+        storage.addLayoutManager(manager)
+        manager.addTextContainer(container)
+        manager.ensureLayout(for: container)
+
+        var count = 0
+        var index = 0
+        while index < manager.numberOfGlyphs {
+            var effective = NSRange()
+            _ = manager.lineFragmentRect(forGlyphAt: index, effectiveRange: &effective)
+            count += 1
+            index = NSMaxRange(effective)
+        }
+        return count
+    }
+
+    /// The longest word-boundary prefix of `text` whose last line still has
+    /// room for "… Show more" AFTER it, plus the range that affordance
+    /// occupies.
+    ///
+    /// Two steps, because the property wanted is not monotone and a single
+    /// search cannot find it:
+    ///
+    /// 1. binary search for the longest prefix that fills at most `capLines` on
+    ///    its own — this part IS monotone;
+    /// 2. walk back a word at a time until the affordance fits on the same line
+    ///    the prefix ends on.
+    ///
+    /// Searching in one step on "does the composition fit in `capLines`"
+    /// instead — which is what this did first — maximises the wrong thing: a
+    /// prefix filling three lines with the affordance wrapped alone onto a
+    /// fourth satisfies it perfectly, and puts the affordance back on its own
+    /// line, which is exactly what it exists to avoid. Caught by a test that
+    /// counted the prefix's lines rather than the composition's.
+    ///
+    /// Word boundaries rather than characters: a caption cut mid-word reads as
+    /// a rendering fault rather than as an interruption, and there are far
+    /// fewer of them to search.
+    private static func truncated(
+        _ text: String, font: UIFont, width: CGFloat, capLines: Int
+    ) -> (text: NSAttributedString, showMore: NSRange) {
+        let ns = text as NSString
+        var boundaries: [Int] = []
+        ns.enumerateSubstrings(in: NSRange(location: 0, length: ns.length),
+                               options: [.byWords, .substringNotRequired]) { _, range, _, _ in
+            boundaries.append(range.location + range.length)
+        }
+        if boundaries.isEmpty { boundaries = [ns.length] }
+
+        func prefix(upTo end: Int) -> String {
+            ns.substring(to: min(end, ns.length))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        func compose(_ prefix: String) -> NSAttributedString {
+            let composed = NSMutableAttributedString(
+                attributedString: plain(prefix + ellipsis, font: font)
+            )
+            composed.append(NSAttributedString(string: showMoreTitle, attributes: [
+                .font: font,
+                .foregroundColor: UIColor.tintColor
+            ]))
+            return composed
+        }
+
+        // 1. The longest prefix that fills at most `capLines` by itself.
+        var low = 0
+        var high = boundaries.count - 1
+        var fullest = 0
+        while low <= high {
+            let mid = (low + high) / 2
+            let candidate = plain(prefix(upTo: boundaries[mid]), font: font)
+            if lineCount(candidate, width: width) <= capLines {
+                fullest = mid
+                low = mid + 1
+            } else {
+                high = mid - 1
+            }
+        }
+
+        // 2. Back off until the affordance shares the prefix's last line.
+        var index = fullest
+        while index >= 0 {
+            let body = prefix(upTo: boundaries[index])
+            let composed = compose(body)
+            let bodyLines = lineCount(plain(body, font: font), width: width)
+            let composedLines = lineCount(composed, width: width)
+            if composedLines == bodyLines, composedLines <= capLines {
+                return (composed, showMoreRange(in: composed))
+            }
+            index -= 1
+        }
+        // Nothing fits beside it — a first word wider than the row. Show the
+        // affordance alone rather than nothing at all.
+        let composed = compose(prefix(upTo: boundaries[0]))
+        return (composed, showMoreRange(in: composed))
+    }
+
+    private static func showMoreRange(in composed: NSAttributedString) -> NSRange {
+        NSRange(
+            location: composed.length - (showMoreTitle as NSString).length,
+            length: (showMoreTitle as NSString).length
+        )
     }
 
     #if DEBUG
@@ -203,16 +336,9 @@ public final class PostGridListRowCell: UICollectionViewCell {
     /// The simulator injects no touches, so this is the only way this control
     /// is reachable in an automated run.
     ///
-    /// It calls the handler rather than `sendActions(for:)`, and the reason is
-    /// worth recording: target-action dispatch goes through `UIApplication`,
-    /// which a test bundle with no app host does not have — `sendActions`
-    /// there returns having done nothing at all, so the hook reported success
-    /// while the cell had not moved. The button's own wiring to this handler
-    /// is asserted separately (`CaptionTruncationTests`), so nothing is left
-    /// untested by going straight to it.
     @discardableResult
     public func debugTapShowMore() -> Bool {
-        guard !revealButton.isHidden else { return false }
+        guard showMoreRange != nil else { return false }
         revealTapped()
         return true
     }
@@ -272,15 +398,18 @@ public final class PostGridListRowCell: UICollectionViewCell {
 
     private let card = UIView()
     private let captionLabel = UILabel()
-    /// The affordance under a truncated caption. Built always, shown only when
-    /// the caption actually overflows — decided in
-    /// `preferredLayoutAttributesFitting`, where the width is authoritative.
-    private let revealButton = UIButton(type: .system)
-    /// Caption + affordance as one column, so hiding the affordance closes its
-    /// gap and everything below it hangs off ONE anchor rather than two that
-    /// have to be swapped.
-    private var captionColumn: UIStackView!
     private var isCaptionExpanded = false
+    /// The caption as the post carries it. The label shows a SHORTENED version
+    /// while truncated, so the label's own text is not a copy of this and
+    /// cannot be used in its place.
+    private var fullCaption = ""
+    /// Where "Show more" sits inside the label's current attributed text, or
+    /// nil when the caption fits and there is no affordance at all.
+    ///
+    /// It is the tap target: a range, not a view, because the affordance is a
+    /// run of glyphs inside the caption's own layout now — see
+    /// `captionTapped`.
+    private var showMoreRange: NSRange?
     private let mediaView = UIImageView()
     private let playBadge = UIImageView(image: UIImage(systemName: "play.fill"))
     private static let metaFont = UIFont.preferredFont(forTextStyle: .footnote)
@@ -305,31 +434,34 @@ public final class PostGridListRowCell: UICollectionViewCell {
         captionLabel.adjustsFontForContentSizeCategory = true
         captionLabel.textColor = .label
         captionLabel.numberOfLines = Self.captionLineLimit
-        // TAIL TRUNCATION IS THE POINT HERE, unlike every other caption in the
-        // app: the ellipsis is what says there is more, and the affordance
-        // below it says how to get it. A wrapping label with a line cap would
-        // simply cut mid-word with no sign that anything was withheld.
-        captionLabel.lineBreakMode = .byTruncatingTail
-
-        revealButton.setTitle("Show more", for: .normal)
-        revealButton.titleLabel?.font = .preferredFont(forTextStyle: .subheadline)
-        revealButton.titleLabel?.adjustsFontForContentSizeCategory = true
-        revealButton.contentHorizontalAlignment = .leading
-        // No collapse. The card opens the post on tap, so a second, opposite
-        // control inside it competes with the primary one — and a "Show less"
-        // at the foot of an expanded card is far from the finger that opened
-        // it. Expansion is one-way, which is also what every feed that does
-        // this does.
-        revealButton.addTarget(self, action: #selector(revealTapped), for: .touchUpInside)
-
-        captionColumn = UIStackView(arrangedSubviews: [captionLabel, revealButton])
-        captionColumn.axis = .vertical
-        captionColumn.alignment = .fill
-        captionColumn.spacing = 4
-        captionColumn.constrain(in: card) { parent in
-            captionColumn.topAnchor.constraint(equalTo: parent.topAnchor, constant: Self.captionTopInset)
-            captionColumn.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Self.captionInset)
-            captionColumn.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Self.captionInset)
+        // WORD WRAPPING, not tail truncation, and that is not a detail: the
+        // ellipsis is written into the text here rather than drawn by the
+        // label, because it has to be followed by "Show more" ON THE SAME
+        // LINE. A label that truncates for itself puts the ellipsis at the
+        // very end of the last line and leaves nowhere to put anything after
+        // it.
+        captionLabel.lineBreakMode = .byWordWrapping
+        // TOP-ANCHORED DRAWING, and this is what makes the expansion read as a
+        // reveal rather than as a jump.
+        //
+        // A label centres its text block inside its own bounds. Expanding sets
+        // the whole caption on a label whose frame is still four lines tall and
+        // then animates that frame open — so for the length of the animation
+        // the text is taller than the box holding it, and centred means the
+        // lines already on screen slide UP and out before drifting back down.
+        // Anchored to the top they simply stay where they are while the rest
+        // arrives underneath.
+        captionLabel.contentMode = .top
+        // The affordance is a run of glyphs inside this label, so the label is
+        // what receives its tap.
+        captionLabel.isUserInteractionEnabled = true
+        let tap = UITapGestureRecognizer(target: self, action: #selector(captionTapped))
+        tap.delegate = self
+        captionLabel.addGestureRecognizer(tap)
+        captionLabel.constrain(in: card) { parent in
+            captionLabel.topAnchor.constraint(equalTo: parent.topAnchor, constant: Self.captionTopInset)
+            captionLabel.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Self.captionInset)
+            captionLabel.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Self.captionInset)
         }
 
         mediaView.contentMode = .scaleAspectFill
@@ -368,12 +500,12 @@ public final class PostGridListRowCell: UICollectionViewCell {
             metaRow.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Self.metaBottomInset)
         }
         metaFollowsCaption = metaRow.topAnchor.constraint(
-            equalTo: captionColumn.bottomAnchor, constant: Self.captionFollowGap
+            equalTo: captionLabel.bottomAnchor, constant: Self.captionFollowGap
         )
         metaFollowsCaption.isActive = true
         mediaConstraints = [
             mediaView.topAnchor.constraint(
-                equalTo: captionColumn.bottomAnchor, constant: Self.captionFollowGap
+                equalTo: captionLabel.bottomAnchor, constant: Self.captionFollowGap
             ),
             mediaView.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
             mediaView.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
@@ -405,31 +537,87 @@ public final class PostGridListRowCell: UICollectionViewCell {
         // Back to truncated. A recycled row must not inherit the previous
         // post's expansion — `configure` re-applies the host's answer for the
         // post it is actually bound to.
-        applyCaptionExpanded(false)
+        isCaptionExpanded = false
+        captionLabel.numberOfLines = Self.captionLineLimit
+        showMoreRange = nil
     }
 
-    @objc private func revealTapped() {
-        applyCaptionExpanded(true)
+    private func revealTapped() {
+        guard !isCaptionExpanded else { return }
+        isCaptionExpanded = true
+        captionLabel.numberOfLines = 0
+        showMoreRange = nil
+        captionLabel.attributedText = Self.plain(fullCaption, font: captionLabel.font)
         onRevealFullCaption?()
     }
 
-    /// Truncated or whole. The affordance disappears once expanded — there is
-    /// nothing left to reveal, and the expansion is one-way.
-    private func applyCaptionExpanded(_ expanded: Bool) {
-        isCaptionExpanded = expanded
-        captionLabel.numberOfLines = expanded ? 0 : Self.captionLineLimit
-        // Word wrapping once whole: with no cap left to hit, truncation can
-        // only swallow the end of the caption behind an ellipsis, which is the
-        // opposite of what "show more" just promised.
-        captionLabel.lineBreakMode = expanded ? .byWordWrapping : .byTruncatingTail
-        if expanded { revealButton.isHidden = true }
+    @objc private func captionTapped() {
+        revealTapped()
+    }
+
+    /// ⚠️ The recognizer must REFUSE every touch that is not on the affordance,
+    /// not merely ignore it.
+    ///
+    /// A gesture recognizer on the label consumes taps on the label whether or
+    /// not its action does anything, so a recognizer that simply returned early
+    /// for a miss would make the caption — the largest thing on the card —
+    /// stop opening the post. Refusing at `shouldBegin` leaves the touch to the
+    /// collection view's own selection.
+    public override func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
+        guard let range = showMoreRange, !isCaptionExpanded else { return false }
+        return Self.characterIndex(
+            at: gesture.location(in: captionLabel), in: captionLabel
+        ).map { NSLocationInRange($0, range) } ?? false
+    }
+
+    /// Which character of the label's text is under `point`, laid out exactly
+    /// as the label lays it out.
+    ///
+    /// TextKit rather than arithmetic on line heights: the affordance is the
+    /// tail of a wrapped line, so its position depends on where the line broke,
+    /// which only a real layout knows. The container is configured to match the
+    /// label — zero padding, the label's line-break mode and line cap — because
+    /// a container that differs in any of those breaks the text somewhere else
+    /// and hit-tests a different string.
+    ///
+    /// Returns nil when the point is outside the laid-out glyphs, so a tap in
+    /// the empty tail of the last line is a miss rather than the nearest
+    /// character.
+    private static func characterIndex(at point: CGPoint, in label: UILabel) -> Int? {
+        guard let attributed = label.attributedText, attributed.length > 0 else { return nil }
+        let storage = NSTextStorage(attributedString: attributed)
+        let manager = NSLayoutManager()
+        let container = NSTextContainer(size: label.bounds.size)
+        container.lineFragmentPadding = 0
+        container.lineBreakMode = label.lineBreakMode
+        container.maximumNumberOfLines = label.numberOfLines
+        storage.addLayoutManager(manager)
+        manager.addTextContainer(container)
+        manager.ensureLayout(for: container)
+
+        let index = manager.glyphIndex(for: point, in: container, fractionOfDistanceThroughGlyph: nil)
+        // `glyphIndex(for:)` clamps to the nearest glyph, so a point past the
+        // end of a line answers with that line's last character. Rejecting a
+        // point outside the glyph's own rect is what turns that clamp back into
+        // a miss.
+        let glyphRect = manager.boundingRect(
+            forGlyphRange: NSRange(location: index, length: 1), in: container
+        )
+        guard glyphRect.contains(point) else { return nil }
+        return manager.characterIndexForGlyph(at: index)
     }
 
     public func configure(
         with post: GalleryPost, imagePipeline: ImagePipeline, captionExpanded: Bool = false
     ) {
-        applyCaptionExpanded(captionExpanded)
-        captionLabel.text = post.caption
+        isCaptionExpanded = captionExpanded
+        captionLabel.numberOfLines = captionExpanded ? 0 : Self.captionLineLimit
+        fullCaption = post.caption
+        showMoreRange = nil
+        // Provisional: the real composition needs the row's final width, which
+        // only `preferredLayoutAttributesFitting` knows. Set here so a cell
+        // that is never sized (a measuring instance) still reads correctly.
+        captionLabel.attributedText = Self.plain(post.caption, font: captionLabel.font)
         let hasMedia = post.kind != .text
         mediaView.isHidden = !hasMedia
         playBadge.isHidden = post.kind != .video

@@ -1068,10 +1068,14 @@ final class ForYouGridPage: UIView {
     func debugTapShowMore(atIndex index: Int) -> Bool {
         guard posts.indices.contains(index) else { return false }
         let path = indexPath(for: index)
-        // Bring it into range first: an unrealized cell cannot be pressed, and
-        // the row with the long caption is rarely the one on screen.
-        collectionView.scrollToItem(at: path, at: .centeredVertically, animated: false)
-        collectionView.layoutIfNeeded()
+        // Scroll ONLY if the row is not already realized. Scrolling anyway is
+        // what the first version did, and it made the expansion impossible to
+        // film: every frame of the capture was the list travelling, with the
+        // growth buried inside it.
+        if collectionView.cellForItem(at: path) == nil {
+            collectionView.scrollToItem(at: path, at: .centeredVertically, animated: false)
+            collectionView.layoutIfNeeded()
+        }
         guard let row = collectionView.cellForItem(at: path) as? PostGridListRowCell
         else { return false }
         return row.debugTapShowMore()
