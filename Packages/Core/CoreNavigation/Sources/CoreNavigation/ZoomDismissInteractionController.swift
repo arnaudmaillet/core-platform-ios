@@ -118,19 +118,6 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     private var axes: Set<ZoomDismissAxis> = [.horizontal]
     private var activeAxis: ZoomDismissAxis = .horizontal
 
-    /// Rubber-band caps: generous across the travel axis (the float), tight
-    /// against dragging backwards past the origin.
-    private let crossDriftLimit: CGFloat = 140
-    private let backDragLimit: CGFloat = 60
-    /// How far the card may travel along the dismissal axis, however hard it is
-    /// thrown. Asymptotic, not a clamp — see `rubberBand` — so the card keeps
-    /// answering the finger the whole way instead of sticking at a wall.
-    ///
-    /// Generous next to the other two because this is the INTENDED direction:
-    /// it should feel free for the first part of the gesture and only firm up
-    /// well past the commit threshold, where more travel means nothing anyway.
-    private let forwardDragLimit: CGFloat = 320
-
     /// Set by the owner alongside `attach`; see `returningChrome`.
     func setReturningChrome(_ chrome: UIView?) {
         returningChrome = chrome
@@ -379,10 +366,10 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // can still be abandoned.
         let along = activeAxis.along(translation)
         let bandedAlong = along >= 0
-            ? ZoomTransitionGeometry.rubberBand(along, limit: forwardDragLimit)
-            : ZoomTransitionGeometry.rubberBand(along, limit: backDragLimit)
+            ? ZoomTransitionGeometry.rubberBand(along, limit: ZoomTransitionGeometry.forwardDragLimit)
+            : ZoomTransitionGeometry.rubberBand(along, limit: ZoomTransitionGeometry.backDragLimit)
         let bandedAcross = ZoomTransitionGeometry.rubberBand(
-            activeAxis.across(translation), limit: crossDriftLimit
+            activeAxis.across(translation), limit: ZoomTransitionGeometry.crossDriftLimit
         )
         let offset = activeAxis.offset(along: bandedAlong, across: bandedAcross)
         flight.card.center = CGPoint(x: pageCenter.x + offset.x, y: pageCenter.y + offset.y)
@@ -490,7 +477,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         let target = commit
             ? CGPoint(x: landing.midX, y: landing.midY)
             : pageCenter
-        let springVelocity = Self.normalizedSpringVelocity(
+        let springVelocity = ZoomTransitionGeometry.springVelocity(
             of: velocity, from: flight.card.center, to: target
         )
         #if DEBUG
@@ -547,64 +534,8 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // either way (measured). So this watches the card's PRESENTATION
         // instead, which is on whatever clock the animation is actually on, and
         // keeps a wall-clock ceiling as the backstop the old timer was.
-        whenCardSettles(flight.card, ceiling: Self.releaseSettleCeiling) { [weak self] in
+        whenViewSettles(flight.card, ceiling: viewSettleCeiling) { [weak self] in
             self?.finishTransition(cancelled: !commit)
-        }
-    }
-
-    /// A spring is done when it stops moving, and no timer can know when that
-    /// is under an unknown animation clock.
-    ///
-    /// Settles on the PRESENTATION layer: two consecutive frames that move the
-    /// card less than a quarter point, having seen it move at all first — the
-    /// "moved first" gate matters because the first tick can land before the
-    /// animation has committed, and an ungated check would call that settled
-    /// and retire the card immediately.
-    private static let releaseSettleCeiling: CFTimeInterval = 6
-
-    private func whenCardSettles(
-        _ card: UIView, ceiling: CFTimeInterval, then work: @escaping () -> Void
-    ) {
-        let watcher = SettleWatcher(card: card, deadline: CACurrentMediaTime() + ceiling, work: work)
-        let link = CADisplayLink(target: watcher, selector: #selector(SettleWatcher.tick))
-        link.add(to: .main, forMode: .common)
-        watcher.link = link
-    }
-
-    private final class SettleWatcher: NSObject {
-        private weak var card: UIView?
-        private let deadline: CFTimeInterval
-        private let work: () -> Void
-        private var previous: CGRect?
-        private var hasMoved = false
-        private var stillFrames = 0
-        var link: CADisplayLink?
-
-        init(card: UIView, deadline: CFTimeInterval, work: @escaping () -> Void) {
-            self.card = card
-            self.deadline = deadline
-            self.work = work
-        }
-
-        @objc func tick() {
-            guard let card, CACurrentMediaTime() < deadline else { return finish() }
-            let frame = card.layer.presentation()?.frame ?? card.layer.frame
-            defer { previous = frame }
-            guard let previous else { return }
-            let delta = max(abs(frame.origin.x - previous.origin.x),
-                            abs(frame.origin.y - previous.origin.y),
-                            abs(frame.width - previous.width),
-                            abs(frame.height - previous.height))
-            if delta > 1 { hasMoved = true; stillFrames = 0; return }
-            guard hasMoved else { return }
-            stillFrames += 1
-            if stillFrames >= 2 { finish() }
-        }
-
-        private func finish() {
-            link?.invalidate()
-            link = nil
-            work()
         }
     }
 
@@ -676,17 +607,6 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         dim = nil
         toolbar = nil
         detachDeadline = 0
-    }
-
-    /// UIKit's spring velocity is normalized to "distances to target per
-    /// second": project the hand's speed onto the remaining travel, clamped
-    /// so a wild flick can't detonate the spring.
-    private static func normalizedSpringVelocity(
-        of velocity: CGPoint, from current: CGPoint, to target: CGPoint
-    ) -> CGFloat {
-        let distance = hypot(target.x - current.x, target.y - current.y)
-        guard distance > 1 else { return 0 }
-        return min(hypot(velocity.x, velocity.y) / distance, 3)
     }
 
     #if DEBUG
