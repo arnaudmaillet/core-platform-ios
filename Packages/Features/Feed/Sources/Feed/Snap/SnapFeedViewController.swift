@@ -1683,7 +1683,17 @@ final class SnapFeedViewController: UIViewController {
         // The caption the FEED already has, so the row exists while the hero
         // is in the air rather than arriving with the post fetch.
         if let model = modelsByID[id], let caption = model.caption, !caption.isEmpty {
-            detail?.seedCaption(caption, timestamp: model.timestampText)
+            // `.flat` unconditionally, and it is not an assumption: this whole
+            // method is the TEXT page's resting engagement — a media page
+            // never reaches it (`presentComments` is its path). The face is
+            // still stated rather than defaulted, so the one caller that means
+            // "no glass" says so.
+            detail?.seedCaption(
+                caption,
+                timestamp: model.timestampText,
+                style: .flat,
+                metrics: model.cardMetrics
+            )
         }
         // No close handler — a resting page is undismissable; the swipe
         // handler pages the feed (the only way off a text post).
@@ -2462,6 +2472,31 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     public func seedProjection(_ models: [FeedItemDisplayModel]) {
         loadViewIfNeeded()
         viewModel.seed(models)
+    }
+
+    /// **PROTOTYPE** (`-text-reveal`). Where the active TEXT page draws its
+    /// caption bubble, in `space` — the anchor a clip-window reveal matches to
+    /// the row it opened from.
+    ///
+    /// Answered off the resting engagement's own child controller, which is
+    /// the only thing that knows: a text page's caption is the first ROW of
+    /// its comment stream (`CaptionBubbleCell`), not a view this screen owns a
+    /// reference to. Nil for a media page, and for a text page whose stream
+    /// has not been mounted — both want the plain reveal, which needs no
+    /// anchor.
+    public func revealCaptionAnchor(in space: UICoordinateSpace) -> CGRect? {
+        (commentsContentVC as? PostDetailViewController)?.revealCaptionAnchor(in: space)
+    }
+
+    /// **PROTOTYPE** (`-text-reveal`). Lends the active page a ground for the
+    /// length of a reveal — see `SnapFeedCell.setRevealGroundTint`.
+    ///
+    /// Aimed at the ACTIVE cell only. A reveal opens onto one page, and the
+    /// pages either side of it are off screen behind the mask; tinting them
+    /// too would mean colours to hand back for cells the transition never
+    /// touched.
+    public func setRevealGroundTint(_ color: UIColor?) {
+        activeSnapCell?.setRevealGroundTint(color)
     }
 
     public var zoomDestinationContentIsReady: Bool { !orderedIDs.isEmpty }

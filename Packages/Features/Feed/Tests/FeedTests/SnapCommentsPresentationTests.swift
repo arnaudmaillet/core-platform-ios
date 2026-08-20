@@ -3,6 +3,7 @@ import CoreModels
 import DesignSystem
 import MediaCore
 import MediaPlayback
+import PostGrid
 import Testing
 import UIKit
 @testable import Feed
@@ -1740,6 +1741,80 @@ struct SnapCommentsPresentationTests {
         #expect(Self.avatarImage(in: cell) == nil)
     }
 
+    /// A TEXT post's caption wears the gallery card's face, not the bubble's.
+    ///
+    /// This is the reveal's handshake expressed as a unit test: the page is
+    /// opened by a mask that grows the gallery row into the screen, so the
+    /// caption the row was showing and the caption the page shows first have
+    /// to be the same object at the same place. A bubble and an avatar make it
+    /// a different object — measured before this branch existed, the row's
+    /// caption started 32pt from the screen edge and the page's started at 71.
+    @Test func aTextPostsCaptionWearsTheCardsFaceInsteadOfTheBubble() throws {
+        let width: CGFloat = 402
+        let cell = CaptionBubbleCell(frame: CGRect(x: 0, y: 0, width: width, height: 120))
+        cell.configure(
+            with: Self.post(caption: "Shipping the new build tonight.", avatar: nil, hasMedia: false),
+            imagePipeline: nil,
+            metrics: PostCardMetrics(views: 12, reactions: 40, comments: 3)
+        )
+        cell.layoutIfNeeded()
+
+        // The bubble and the avatar are BUILT but off — both faces are kept so
+        // the glass never has to re-materialize on a scrolling row — so the
+        // assertion is on what renders, not on what exists.
+        let bubble = try #require(Self.firstView(SnapPostInfoCardView.self, in: cell))
+        #expect(Self.isEffectivelyHidden(bubble))
+        let avatar = try #require(Self.firstView(MonogramAvatarView.self, in: cell))
+        #expect(Self.isEffectivelyHidden(avatar))
+
+        let flat = try #require(Self.firstView(PostCaptionRowView.self, in: cell))
+        #expect(!Self.isEffectivelyHidden(flat))
+
+        // THE NUMBER THE TRANSITION DEPENDS ON: the caption's leading edge, in
+        // the cell's own space. The cell sits at the card's leading edge, so
+        // one card inset inside it is where the card draws its own caption.
+        let caption = try #require(
+            Self.firstView(UILabel.self, in: flat, matching: { $0.text == "Shipping the new build tonight." })
+        )
+        let originInCell = flat.convert(caption.frame.origin, to: cell)
+        #expect(abs(originInCell.x - PostGridListRowCell.captionInset) < 0.5)
+        #expect(abs(originInCell.y - PostGridListRowCell.captionTopInset) < 0.5)
+    }
+
+    /// A MEDIA post keeps the glass. The bubble exists to buy text contrast
+    /// over an arbitrary photograph, so the face follows the format and not
+    /// the screen.
+    @Test func aMediaPostsCaptionKeepsTheGlassBubble() throws {
+        let cell = CaptionBubbleCell(frame: CGRect(x: 0, y: 0, width: 402, height: 120))
+        cell.configure(
+            with: Self.post(caption: "Golden hour over the harbour.", avatar: nil),
+            imagePipeline: nil
+        )
+        cell.layoutIfNeeded()
+
+        let bubble = try #require(Self.firstView(SnapPostInfoCardView.self, in: cell))
+        #expect(!Self.isEffectivelyHidden(bubble))
+        let flat = try #require(Self.firstView(PostCaptionRowView.self, in: cell))
+        #expect(Self.isEffectivelyHidden(flat))
+    }
+
+    /// Absent is not zero. `PostMetricLabel` hides a `nil` and renders a `0`,
+    /// so a page seeded by an opener that knew no counts must show the age
+    /// alone — exactly as the gallery row does for the same post.
+    @Test func aCaptionRowWithNoKnownCountsShowsNoMetrics() throws {
+        let cell = CaptionBubbleCell(frame: CGRect(x: 0, y: 0, width: 402, height: 120))
+        cell.configure(
+            with: Self.post(caption: "Shipping the new build tonight.", avatar: nil, hasMedia: false),
+            imagePipeline: nil,
+            metrics: nil
+        )
+        cell.layoutIfNeeded()
+        let flat = try #require(Self.firstView(PostCaptionRowView.self, in: cell))
+        let metrics = Self.allViews(PostMetricLabel.self, in: flat)
+        #expect(!metrics.isEmpty)
+        #expect(metrics.allSatisfy { $0.isHidden })
+    }
+
     /// The caption bubble is NON-INTERACTIVE — a standard row in the list,
     /// like every comment beside it. It carried a close tap for one round;
     /// a row that silently dismisses the screen under a stray tap is not
@@ -1770,17 +1845,57 @@ struct SnapCommentsPresentationTests {
         #expect(cell.onAvatarTap == nil)
     }
 
-    private static func post(caption: String, avatar: URL?, id: String = "post-0001") -> PostDetailDisplayModel {
+    /// MEDIA by default, and that is now load-bearing: `CaptionBubbleCell`
+    /// picks its face from the post's format, so a post with no attachment
+    /// wears the flat gallery-card content and has neither bubble nor avatar
+    /// to assert on. Pass `hasMedia: false` to exercise that face instead.
+    private static func post(
+        caption: String, avatar: URL?, id: String = "post-0001", hasMedia: Bool = true
+    ) -> PostDetailDisplayModel {
         PostDetailDisplayModel(entry: FeedEntry(
             post: Post(
                 id: PostID(id), authorID: ProfileID("p1"), caption: caption,
-                attachments: [], publishedAt: Date(timeIntervalSince1970: 0)
+                attachments: hasMedia ? [MediaAttachment(
+                    url: URL(string: "mock://photo/0"),
+                    thumbnailURL: URL(string: "mock://poster/0"),
+                    mimeType: "image/jpeg",
+                    pixelWidth: 1080,
+                    pixelHeight: 1080
+                )] : [],
+                publishedAt: Date(timeIntervalSince1970: 0)
             ),
             author: AuthorSummary(
                 id: ProfileID("p1"), handle: "ava", displayName: "Ava Moreau",
                 avatarURL: avatar
             )
         ))
+    }
+
+    /// Hidden by itself or by any ancestor up to `root` — the question a
+    /// toggled face has to answer, since neither view is ever removed.
+    private static func isEffectivelyHidden(_ view: UIView) -> Bool {
+        var node: UIView? = view
+        while let current = node {
+            if current.isHidden { return true }
+            node = current.superview
+        }
+        return false
+    }
+
+    private static func allViews<T: UIView>(_ type: T.Type, in root: UIView) -> [T] {
+        var found: [T] = []
+        var stack: [UIView] = [root]
+        while let view = stack.popLast() {
+            if let match = view as? T { found.append(match) }
+            stack.append(contentsOf: view.subviews)
+        }
+        return found
+    }
+
+    private static func firstView<T: UIView>(
+        _ type: T.Type, in root: UIView, matching predicate: (T) -> Bool
+    ) -> T? {
+        allViews(type, in: root).first(where: predicate)
     }
 
     private static func firstView<T: UIView>(_ type: T.Type, in root: UIView) -> T? {

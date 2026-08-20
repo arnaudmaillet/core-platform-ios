@@ -48,6 +48,14 @@ public struct FeedItemDisplayModel: Identifiable, Sendable, Equatable {
     /// use the same). Rendered leading on the engaged info card's actions
     /// row. Empty only for models built outside the feed builder (tests).
     let timestampText: String
+    /// The gallery card's metric line, when the opener knew it — views,
+    /// reactions, comments, each optional because absent and zero are
+    /// different claims (`PostMetricLabel` hides a `nil` and renders a `0`).
+    ///
+    /// `nil` for a model built from a `FeedEntry`, which carries a like count
+    /// and nothing else. Only a grid knows all three, so only a grid-seeded
+    /// model can fill this — see `GalleryPostProjection`.
+    let cardMetrics: PostCardMetrics?
 
     init(
         id: PostID,
@@ -61,7 +69,8 @@ public struct FeedItemDisplayModel: Identifiable, Sendable, Equatable {
         thumbnailURL: URL?,
         audioText: String?,
         likeCount: Int64 = 0,
-        timestampText: String = ""
+        timestampText: String = "",
+        cardMetrics: PostCardMetrics? = nil
     ) {
         self.id = id
         self.authorID = authorID
@@ -75,6 +84,7 @@ public struct FeedItemDisplayModel: Identifiable, Sendable, Equatable {
         self.audioText = audioText
         self.likeCount = likeCount
         self.timestampText = timestampText
+        self.cardMetrics = cardMetrics
     }
 }
 

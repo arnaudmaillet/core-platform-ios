@@ -126,6 +126,12 @@ final class PostDetailViewController: UIViewController {
     /// flight had no target and the caption appeared as a second one when the
     /// post arrived.
     private var seededCaption: (text: String, timestamp: String)?
+    /// The caption row's face and metric line, from the surface that opened
+    /// this page. Survives hydration: a `FeedEntry` knows the format but not
+    /// the view or comment counts, so the seed stays the source for the line
+    /// (see `CaptionBubbleCell.configure`).
+    private var seededCardMetrics: PostCardMetrics?
+    private var seededCaptionStyle: CaptionBubbleCell.Style = .bubble
     /// Parents whose full reply pool is shown (the "view more" seam's
     /// state). Per-screen, like scroll position.
     private var expandedReplyParents: Set<String> = []
@@ -879,11 +885,43 @@ final class PostDetailViewController: UIViewController {
     /// caption dropped in afterwards. The feed already holds the caption and
     /// the timestamp, so it hands them over at mount and the real post replaces
     /// the row later with the same text, moving nothing.
-    func seedCaption(_ text: String, timestamp: String) {
+    /// `style` and `metrics` come from the OPENER, because only it knows both.
+    ///
+    /// The face is a property of the post's format — a text page's caption
+    /// wears the gallery card's flat content, a media page's wears the glass
+    /// bubble — and the metric line exists nowhere else in the pipeline: a
+    /// `FeedEntry` carries a like count and neither a view nor a comment
+    /// count, so a hydrated model knows less than the grid that opened this.
+    func seedCaption(
+        _ text: String,
+        timestamp: String,
+        style: CaptionBubbleCell.Style = .bubble,
+        metrics: PostCardMetrics? = nil
+    ) {
         guard mode == .commentsOnly, !text.isEmpty, latestPost == nil else { return }
         seededCaption = (text, timestamp)
+        seededCaptionStyle = style
+        seededCardMetrics = metrics
         loadViewIfNeeded()
         applyStream(animated: false)
+    }
+
+    /// Where the caption bubble is drawn, in `space` — the reveal transition's
+    /// matched anchor (`RevealGeometry.anchorFrame`).
+    ///
+    /// Read from the LAYOUT rather than from a realized cell: the anchor is
+    /// wanted at the instant the page is first laid out, which is before the
+    /// collection view has necessarily dequeued anything, and a nil answer
+    /// there silently degrades the matched reveal to the plain one. Layout
+    /// attributes exist as soon as the snapshot does.
+    ///
+    /// Nil when the stream has no caption row at all — a post whose caption is
+    /// empty, which has no anchor and wants the plain reveal.
+    func revealCaptionAnchor(in space: UICoordinateSpace) -> CGRect? {
+        guard let indexPath = streamDataSource?.indexPath(for: .caption),
+              let attributes = collectionView.layoutAttributesForItem(at: indexPath)
+        else { return nil }
+        return collectionView.convert(attributes.frame, to: space)
     }
 
     private func renderComments(_ state: PostDetailViewModel.CommentsState) {
@@ -1002,9 +1040,18 @@ final class PostDetailViewController: UIViewController {
             [weak self] cell, _, _ in
             guard let self else { return }
             if let post = self.latestPost {
-                cell.configure(with: post, imagePipeline: self.imagePipeline)
+                cell.configure(
+                    with: post,
+                    imagePipeline: self.imagePipeline,
+                    metrics: self.seededCardMetrics
+                )
             } else if let seed = self.seededCaption {
-                cell.configureSeed(caption: seed.text, timestamp: seed.timestamp)
+                cell.configureSeed(
+                    caption: seed.text,
+                    timestamp: seed.timestamp,
+                    style: self.seededCaptionStyle,
+                    metrics: self.seededCardMetrics
+                )
             } else {
                 return
             }
@@ -1177,7 +1224,11 @@ final class PostDetailViewController: UIViewController {
         guard width > 0, mode == .commentsOnly,
               let post = latestPost, post.hasCaption else { return 0 }
         let sizingCell = captionSizingCell
-        sizingCell.configure(with: post, imagePipeline: nil)
+        // The SAME metrics the real row gets: this cell exists to answer how
+        // tall the caption row will be, and a metric line it was not given is
+        // a line of height it does not reserve. (The face itself follows
+        // `post.hasMedia` inside `configure`, so both cells wear it.)
+        sizingCell.configure(with: post, imagePipeline: nil, metrics: seededCardMetrics)
         sizingCell.bounds.size.width = width
         sizingCell.contentView.setNeedsLayout()
         sizingCell.contentView.layoutIfNeeded()

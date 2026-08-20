@@ -742,6 +742,19 @@ final class ForYouGridPage: UIView {
 
     var debugViewportHeight: CGFloat { collectionView.bounds.height }
 
+    /// The three numbers that decide where a cell is on screen, for tracing a
+    /// landing that missed. A rect alone cannot say WHY it moved; these can.
+    var debugInsetState: String {
+        String(
+            format: "offset=%.1f adjInset=(t%.1f b%.1f) frozen=%@ h=%.1f",
+            collectionView.contentOffset.y,
+            collectionView.adjustedContentInset.top,
+            collectionView.adjustedContentInset.bottom,
+            frozenContentInset == nil ? "N" : "Y",
+            collectionView.bounds.height
+        )
+    }
+
     /// The posts on screen that COULD play, with the same centre distance the
     /// ranking uses — the independent check on what the coordinator chose.
     var debugVisibleVideoRanking: [(id: String, distance: Int)] {
@@ -1023,6 +1036,27 @@ final class ForYouGridPage: UIView {
         }
     }
 
+    /// **PROTOTYPE** (`-text-reveal`). The whole card of a TEXT row, in
+    /// `space` — the rect a clip-window reveal opens from and closes onto.
+    ///
+    /// Deliberately NOT `hero(for:in:)`'s rect, and the difference is the
+    /// point. A media row flies its PREVIEW, because the preview is the one
+    /// object that exists at both ends; a text row has no such object, so what
+    /// opens is the card itself — caption, metrics and all. The card fills the
+    /// cell (`PostGridListRowCell` pins it to `contentView`), so the cell's
+    /// own bounds are the card's.
+    ///
+    /// Answers nil for anything that is not a realized text row: a media row,
+    /// a tile, or a post scrolled out of the viewport. The reveal then falls
+    /// back to a centred window, exactly as a hero falls back to a centred
+    /// collapse.
+    func textRowFrame(for postID: PostID, in space: UICoordinateSpace) -> CGRect? {
+        guard let row = cell(for: postID) as? PostGridListRowCell,
+              row.mediaHeroRect == nil
+        else { return nil }
+        return row.convert(row.bounds, to: space)
+    }
+
     /// Whether a realized cell for the post is currently within the viewport —
     /// the hero falls back to a centered collapse when it isn't.
     func isPostVisible(_ postID: PostID) -> Bool {
@@ -1047,22 +1081,47 @@ final class ForYouGridPage: UIView {
     /// only after forcing a layout with the tab bar restored, so the value
     /// captured is the RESTING one — the same inset the grid will still have
     /// when the pop finishes, which is why thawing cannot move anything either.
+    /// The OFFSET is preserved across the switch, and that is not belt and
+    /// braces — it is the difference between freezing the grid and scrolling
+    /// it.
+    ///
+    /// `contentInsetAdjustmentBehavior = .never` lands one assignment before
+    /// `contentInset = resolved`, and in that instant the adjusted inset
+    /// collapses to whatever `contentInset` still holds (zero, for this grid).
+    /// UIKit re-clamps `contentOffset` against it immediately, so a grid
+    /// resting at the TOP — where `offset.y == -adjustedInset.top` — is
+    /// yanked to 0 and every cell moves up by the whole top inset. Measured
+    /// on this screen: `offset=-116 → offset=0`, which put a landing rect
+    /// 116pt above the row it departed from.
+    ///
+    /// It only shows when the grid is scrolled to its very top, because that
+    /// is the only place where the offset is pinned to the inset it is about
+    /// to lose — which is why a freeze that has been correct for every
+    /// mid-scroll flight still had this in it.
     func beginHeroFreeze() {
         guard frozenContentInset == nil else { return }
+        let offset = collectionView.contentOffset
         frozenContentInset = collectionView.contentInset
         let resolved = collectionView.adjustedContentInset
         collectionView.contentInsetAdjustmentBehavior = .never
         collectionView.contentInset = resolved
+        collectionView.contentOffset = offset
     }
 
+    /// Symmetrical with the freeze, and for the same reason: the two
+    /// assignments below each re-clamp `contentOffset` against an inset that
+    /// is momentarily wrong, so the offset is carried across by hand rather
+    /// than left to survive them.
     func endHeroFreeze() {
         guard let frozenContentInset else { return }
+        let offset = collectionView.contentOffset
         self.frozenContentInset = nil
         // A hosted page manages its insets manually for its whole life — the
         // pre-freeze behaviour to restore is `.never` there, not the default.
         collectionView.contentInsetAdjustmentBehavior =
             hostedTopInset == nil ? .automatic : .never
         collectionView.contentInset = frozenContentInset
+        collectionView.contentOffset = offset
         // The footer may have opened or closed while the inset was pinned, and
         // those writes were dropped. Re-apply now that it is ours again.
         applyBottomInset()

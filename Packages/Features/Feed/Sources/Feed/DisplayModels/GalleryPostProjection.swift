@@ -33,10 +33,14 @@ enum GalleryPostProjection {
     }
 
     /// ⚠️ A PROJECTION, not a substitute for hydration: it carries only what a
-    /// grid tile knows. Anything a tile does not show — the comment count, the
-    /// engagement state — is absent here and arrives with the real entry. Fields
-    /// are left at their empty values rather than guessed, so nothing renders a
-    /// number the backend has not confirmed.
+    /// grid knows. Fields are left at their empty values rather than guessed,
+    /// so nothing renders a number the backend has not confirmed.
+    ///
+    /// The metric line is the one thing that travels the OTHER way. A
+    /// `FeedEntry` has a like count and no more, so a hydrated model knows
+    /// strictly less about views and comments than the grid that opened it —
+    /// which is why `cardMetrics` is seeded here and never recomputed
+    /// downstream (see `CaptionBubbleCell.configure`).
     ///
     /// **How complete this is depends on the origin, and the difference is
     /// visible.** `ForYouDiscovery` and `ExploreRepository` build their
@@ -72,7 +76,15 @@ enum GalleryPostProjection {
             audioText: post.kind == .video && !handle.isEmpty
                 ? "Original audio · \(handle)" : nil,
             likeCount: post.reactionCount ?? 0,
-            timestampText: FeedDisplayModelBuilder.readableTimestamp(from: published, to: now)
+            timestampText: FeedDisplayModelBuilder.readableTimestamp(from: published, to: now),
+            // Passed through as OPTIONALS, not collapsed to zero: this is the
+            // one place that knows all three, and a text page's caption row
+            // spells them exactly as the row it was opened from does.
+            cardMetrics: PostCardMetrics(
+                views: post.viewCount,
+                reactions: post.reactionCount,
+                comments: post.commentCount
+            )
         )
     }
 }

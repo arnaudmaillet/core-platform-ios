@@ -60,6 +60,25 @@ public final class InteractiveSlideDismissal: NSObject {
     /// follows lands one screen deeper than the stack said a moment ago.
     public var onWillBeginPop: (() -> Void)?
 
+    /// **PROTOTYPE** (`-text-reveal`): swaps the slide for a clip-window
+    /// reveal on BOTH legs — see `RevealGeometry`.
+    ///
+    /// An optional value rather than a pair of animator factories, because the
+    /// two legs must never disagree about the geometry: one rect calculation,
+    /// read forwards on the push and backwards on the pop. Left `nil` this
+    /// class behaves exactly as it always has — native push, slide pop — which
+    /// is what the timeline and the shipped text path keep getting.
+    ///
+    /// The gesture, the axes, the release contract, the delegate hand-back and
+    /// the `onFeedPopped` bookkeeping are all unchanged and shared: a reveal is
+    /// a different ANIMATION of the same dismissal, not a second dismissal.
+    public var revealGeometry: RevealGeometry?
+
+    /// Source chrome the reveal's pop brings back on its own curve — the app's
+    /// tab bar. Only consulted while `revealGeometry` is set; the slide leaves
+    /// the bar to the owner's `onFeedPopped`, as before.
+    public weak var revealReturningChrome: UIView?
+
     /// An extra veto the owner can impose, asked at begin-time.
     ///
     /// Exists for surfaces where a full-width swipe means something else some
@@ -258,7 +277,18 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
         // back-button pop, while the same restore call held after custom
         // pops). The feed's push, and everything else on this stack, stay
         // native.
+        // PROTOTYPE: the reveal is the only thing here that customizes a PUSH.
+        // The slide never did — a text post arrived on UIKit's own slide —
+        // which is exactly the gap this is measuring.
+        if operation == .push, toVC === feedViewController, let revealGeometry {
+            return RevealPresentAnimator(geometry: revealGeometry)
+        }
         guard operation == .pop, fromVC === feedViewController else { return nil }
+        if let revealGeometry {
+            return RevealPopAnimator(
+                geometry: revealGeometry, returningChrome: revealReturningChrome
+            )
+        }
         // The axis is the live swipe's; a back-button pop (no interaction)
         // exits horizontally, the platform's own direction.
         return TimelineSlidePopAnimator(axis: interaction != nil ? activeAxis : .horizontal)

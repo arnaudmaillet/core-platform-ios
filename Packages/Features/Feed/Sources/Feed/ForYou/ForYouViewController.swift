@@ -729,6 +729,108 @@ final class ForYouViewController: UIViewController {
         return feed
     }
 
+    /// **PROTOTYPE** `-text-reveal`: opens a text post with a clip-window
+    /// reveal instead of UIKit's slide. `-text-reveal-plain` compares the
+    /// unmatched variant (the window opens over a page that never moves);
+    /// `-text-reveal-log` prints the rects both legs measured.
+    ///
+    /// ASSIGNED ON EVERY TEXT PUSH, including with `nil`, and that is not
+    /// defensive — `textSlideDismissal` is one retained instance shared by
+    /// every plain push this screen makes, and the branch it lives in is taken
+    /// by more than text rows (a media row scrolled out of the viewport lands
+    /// here too). A geometry left over from the previous tap would aim the
+    /// next post's reveal at a row that has nothing to do with it.
+    ///
+    /// Whether a row can be revealed is asked of the GRID, not of the post's
+    /// kind: `textRowFrame` answers only for a realized, on-screen text row,
+    /// which is the same question the reveal has to answer again at dismissal.
+    /// One predicate, so the two legs cannot disagree about whether this
+    /// transition exists.
+    private func installTextReveal(
+        feed: UIViewController, format: GalleryFilter.Format, postID: PostID
+    ) {
+        textSlideDismissal.revealGeometry = nil
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        guard arguments.contains("-text-reveal"),
+              let page = pager.page(for: format),
+              page.textRowFrame(for: postID, in: view) != nil
+        else { return }
+        // The grid's inset state at each stage of a round trip. It exists
+        // because a rect alone cannot say why a landing missed, and the first
+        // run's did: departure y=741, landing y=625.
+        let trace = arguments.contains("-text-reveal-log")
+        func log(_ stage: String) {
+            guard trace else { return }
+            print("[text-reveal] \(stage) \(page.debugInsetState)")
+        }
+        log("atTap        ")
+        // THE LANDING SETTLES BEFORE THE POP DOES, and the first run without
+        // this is why the line exists: the close measured its landing at
+        // y=625 for a row that had departed from y=741 — 116pt out, which is
+        // this grid's own `adjustedContentInset.top`.
+        //
+        // The grid's cells live inside the tab bar's safe area. The bar is
+        // hidden while the post is up, so the row's rect only returns to what
+        // it will actually be once the bar is back — and putting it back at
+        // alpha 0 BEFORE the pop is triggered settles the layout while
+        // nothing is in flight. Inside the transition instead, the bar comes
+        // back as a row of empty glass capsules that never paint (measured on
+        // the hero path, which restores it at grab-begin for this exact
+        // reason). The pop then drives its alpha from 0, so it fades in with
+        // the grid rather than switching on after it.
+        textSlideDismissal.onWillBeginPop = { [weak self] in
+            log("beginPop  pre")
+            self?.showTabBar(alpha: 0)
+            log("beginPop post")
+        }
+        textSlideDismissal.revealReturningChrome = tabBarController?.tabBar
+        textSlideDismissal.revealGeometry = RevealGeometry(
+            sourceFrame: { [weak page] space in page?.textRowFrame(for: postID, in: space) },
+            sourceCornerRadius: PostGridListRowCell.cardCornerRadius,
+            // The card's own fill, borrowed by the page for the length of the
+            // reveal. Read from PostGrid rather than restated, for the same
+            // reason the radius and the insets are: three copies of one colour
+            // is how two surfaces stop matching.
+            sourceFill: PostGridListRowCell.cardFillColor,
+            setDestinationGround: { [weak feed] color in
+                (feed as? SnapFeedViewController)?.setRevealGroundTint(color)
+            },
+            // The anchor is re-asked at dismissal too: the viewer may have
+            // paged the feed to a different post, whose caption is a different
+            // height. Reading it live means the close aims at what is on
+            // screen rather than at what was there on the way in.
+            anchorFrame: { [weak feed] space in
+                (feed as? SnapFeedViewController)?.revealCaptionAnchor(in: space)
+            },
+            anchorTopInset: PostGridListRowCell.captionTopInset,
+            // The gallery recedes; the tray and the title stay grounded — the
+            // same view the hero's depth cue rides, for the same reason.
+            depthView: { [weak self] in self?.pager },
+            // Pin the grid's inset before the landing rect is read. The pop
+            // animates the safe area and this collection view adds it to its
+            // own inset, so an unpinned grid keeps drifting under a close that
+            // has already measured where it is going.
+            willStageDismissal: { [weak page] in
+                log("freeze    pre")
+                page?.beginHeroFreeze()
+                log("freeze   post")
+            },
+            dismissalDidEnd: { [weak self, weak page] committed in
+                page?.endHeroFreeze()
+                // A cancelled swipe leaves the post on screen, so the bar
+                // restored at grab-begin has to go back down — unanimated and
+                // behind the page that sprang back, where nothing renders the
+                // change. Committed pops leave it up; `onFeedPopped` takes it
+                // from there.
+                guard !committed else { return }
+                self?.tabBarController?.setTabBarHidden(true, animated: false)
+            },
+            matchesAnchor: !arguments.contains("-text-reveal-plain")
+        )
+        #endif
+    }
+
     private func openFeed(from format: GalleryFilter.Format, at index: Int) {
         // One flight at a time: a second tap while a card is in the air would
         // stage a transition over a live one. Same guard as the map's.
@@ -820,6 +922,10 @@ final class ForYouViewController: UIViewController {
                 // underneath should stay stopped.
                 self?.pager.endPlaybackHandoff()
             }
+            // PROTOTYPE, and it must be decided BEFORE the install: the
+            // dismissal is the stack's delegate from that moment, and the push
+            // it is about to answer for is the reveal's opening leg.
+            installTextReveal(feed: feed, format: format, postID: tapped.id)
             textSlideDismissal.install(on: navigationController)
             navigationController.pushViewController(feed, animated: true)
             #if DEBUG
