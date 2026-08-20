@@ -27,9 +27,32 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// Answering `nil` for an untruncated row is what keeps every ordinary
     /// post's transition untouched.
     public var truncatedCaptionEnd: CGFloat? {
-        guard showMoreRange != nil else { return nil }
-        layoutIfNeeded()
-        return captionLabel.frame.maxY
+        guard showMoreRange != nil, bounds.width > 0 else { return nil }
+        // MEASURED, never read off the label's frame — and that distinction is
+        // the whole of this property.
+        //
+        // A self-sizing cell gets its height from the collection view's
+        // attributes, but its subtree keeps the geometry of whatever pass last
+        // ran over it. Arm a reveal before that pass and the numbers disagree
+        // in a way that looks like nothing is wrong: measured on an iPhone SE,
+        // `bounds` was a correct 343x145 while the card underneath was still
+        // 343x88 and the label inside it 311x30 — for text that needs 86.5.
+        // `setNeedsLayout` + `layoutIfNeeded` did NOT reconcile them.
+        //
+        // The veil built on 46pt instead of 103 cut the page three lines too
+        // high, so the flight carried a greyed slab where the card's own four
+        // lines belonged.
+        //
+        // So the two inputs here are the ones that are always right: `bounds`,
+        // which comes from the layout attributes, and the label's own opinion
+        // of its text. `ceil` for the reason `preferredLayoutAttributesFitting`
+        // ceils — half a point short is a clipped descender.
+        let available = bounds.width - Self.captionInset * 2
+        guard available > 0 else { return nil }
+        let text = captionLabel.sizeThatFits(
+            CGSize(width: available, height: .greatestFiniteMagnitude)
+        )
+        return Self.captionTopInset + ceil(text.height)
     }
 
     /// The preview's rect in this cell's own space, or nil for a text-only row

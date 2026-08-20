@@ -103,6 +103,46 @@ struct CaptionTruncationTests {
         makes sense.
         """
 
+    /// The reveal's cut line is a MEASUREMENT, and this pins that a wrong
+    /// subview frame cannot produce a wrong cut.
+    ///
+    /// It used to read `captionLabel.frame.maxY`, which is only as true as the
+    /// last layout pass over the cell's subtree. A self-sizing cell takes its
+    /// height from the collection view's attributes, so the two can disagree
+    /// while nothing looks wrong: on an iPhone SE a row whose `bounds` were a
+    /// correct 343x145 still held a card of 343x88 and a caption label of
+    /// 311x30, for text that measures 86.5. The cut came out at 46pt instead
+    /// of 103 — three lines too high — and the flight carried a greyed slab of
+    /// the page where the card's own four lines belonged. Neither
+    /// `setNeedsLayout` nor `layoutIfNeeded` reconciled it.
+    ///
+    /// So the stale frame is applied here BY HAND, at the size it really had.
+    /// Within a point rather than exactly: the value ceils a fractional text
+    /// height, and `==` on fractional-scale `CGFloat`s is how this repo has
+    /// failed CI before.
+    @Test func theCutLineIgnoresAStaleSubviewFrame() throws {
+        let cell = Self.sized(Self.long)
+        let measured = try #require(cell.truncatedCaptionEnd)
+        let label = try #require(Self.captionLabel(in: cell))
+        label.frame = CGRect(x: 16, y: 16, width: 311, height: 30)
+        #expect(abs(try #require(cell.truncatedCaptionEnd) - measured) < 1)
+    }
+
+    /// And it lands under the FOURTH line, not some other count — the number
+    /// the veil hangs on.
+    @Test func theCutLineSitsUnderTheLastLineTheCardShows() throws {
+        let end = try #require(Self.sized(Self.long).truncatedCaptionEnd)
+        let lineHeight = UIFont.preferredFont(forTextStyle: .body).lineHeight
+        let lines = (end - PostGridListRowCell.captionTopInset) / lineHeight
+        #expect(abs(lines - CGFloat(PostGridListRowCell.captionLineLimit)) < 0.5)
+    }
+
+    /// An untruncated caption still answers nil — a card showing all of its
+    /// text has no difference for the veil to hide.
+    @Test func aCaptionThatFitsHasNoCutLine() {
+        #expect(Self.sized(Self.short).truncatedCaptionEnd == nil)
+    }
+
     @Test func aCaptionThatFitsIsOfferedNothing() throws {
         let cell = Self.sized(Self.short)
         #expect(try Self.rendered(cell) == Self.short)
