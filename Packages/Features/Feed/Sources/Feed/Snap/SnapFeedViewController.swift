@@ -2503,8 +2503,12 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         revealVeil = nil
         guard let cut, let tint, cut < view.bounds.height else { return }
         let veil = RevealVeilView(tint: tint)
+        // Hung a band ABOVE the cut, so the gradient reaches solid exactly AT
+        // it. Starting the ramp at the cut is what let the page's next line
+        // ride the whole flight as a grey ghost — see `RevealVeilView`.
+        let top = max(0, cut - RevealVeilView.fadeBand)
         veil.frame = CGRect(
-            x: 0, y: cut, width: view.bounds.width, height: view.bounds.height - cut
+            x: 0, y: top, width: view.bounds.width, height: view.bounds.height - top
         )
         veil.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         view.addSubview(veil)

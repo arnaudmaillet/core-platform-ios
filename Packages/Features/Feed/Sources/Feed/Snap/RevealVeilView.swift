@@ -28,9 +28,29 @@ import UIKit
 ///                          the veil            └───────────────┘
 /// ```
 final class RevealVeilView: UIView {
-    /// The dissolve at the top edge. Without it the veil's own boundary is a
-    /// hard line across a sentence — the same cut, in a different colour.
-    private static let fadeBand: CGFloat = 28
+    /// The dissolve at the top edge, and it is deliberately TINY.
+    ///
+    /// It was 28pt, and that was the bug the veil existed to prevent. The band
+    /// ramps the tint from nothing to solid across its own height, so 28pt of
+    /// ramp starting at the cut covered the page's fifth line — a 20.5pt line —
+    /// at an average alpha of about a third. Not hidden: greyed, and perfectly
+    /// legible, sitting exactly where the card's `♡ 86 · now` was about to
+    /// arrive. A whole sentence rode the flight in the metric line's seat.
+    ///
+    /// So the band is small AND `installRevealVeil` hangs it ABOVE the cut, so
+    /// the ramp finishes where the caption ends rather than starting there.
+    /// Everything from the cut down is solid, and the dissolve spends itself on
+    /// the descender strip of the line above — where the tint matches the
+    /// ground it covers and there is nothing to grey.
+    ///
+    /// ```
+    ///          28pt, below the cut          4pt, above it
+    ///   line 4  launch, a migration…        launch, a migration…
+    ///   cut    ─────────────────────       ─────────────────────
+    ///   line 5  silently no-oping…  ← !!   ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒
+    ///           ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒         ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒
+    /// ```
+    static let fadeBand: CGFloat = 4
 
     override class var layerClass: AnyClass { CAGradientLayer.self }
 

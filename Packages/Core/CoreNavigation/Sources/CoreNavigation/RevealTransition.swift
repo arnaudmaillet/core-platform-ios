@@ -305,6 +305,10 @@ private func installVeil(geometry: RevealGeometry, anchor: CGRect?) {
         geometry.installDestinationVeil(nil, nil)
         return
     }
+    #if DEBUG
+    RevealStage.log("veil", "anchorY=\(Int(anchor.minY)) captionEnd=\(Int(end))"
+        + " cut=\(Int(anchor.minY + end))")
+    #endif
     geometry.installDestinationVeil(anchor.minY + end, geometry.sourceFill)
 }
 
