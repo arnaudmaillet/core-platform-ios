@@ -757,10 +757,26 @@ final class ProfileHeaderView: UIView {
         // The avatar spans the identity column's three lines: a square tied to
         // the column's height (the column sits at its natural height; the
         // avatar has no intrinsic size — see CircleAvatarView — so it follows).
-        // The tie sits just under the required Dynamic-Type cap: past the cap
-        // the avatar stops growing and re-centers against the column.
+        // Past the required Dynamic-Type cap the avatar stops growing and
+        // re-centers against the column.
+        //
+        // ⚠️ **BELOW the labels' compression resistance (750), and the 250 points
+        // between this and the old 999 are a clipped name on iPhone SE 3.** The
+        // tie runs BOTH ways: the avatar is square, so its height is also its
+        // width, and its width is whatever the action tray leaves beside it. At
+        // 375pt the tray needs ~236 of the 335 available, which leaves an 87pt
+        // avatar — and an equality that outranks the labels then dragged the
+        // column down to 87 as well, against the ~101 its three lines need. The
+        // shortfall landed on the least resistant thing in the column, and a
+        // `UILabel` squashed to 9pt draws its line clipped rather than moving it:
+        // measured `frame = (0 0; 114 9)` for a title3 name, top half missing.
+        //
+        // At 749 the column keeps its natural height and the tie simply breaks
+        // by the shortfall — the avatar stays as wide as the room allows and
+        // centers against a taller column. Nothing changes where both fit: 402pt
+        // resolves a 100pt avatar against a 100pt column, tie intact.
         let avatarSpan = avatarView.heightAnchor.constraint(equalTo: identityColumn.heightAnchor)
-        avatarSpan.priority = UILayoutPriority(999)
+        avatarSpan.priority = .defaultHigh - 1
         NSLayoutConstraint.activate([
             bannerView.bottomAnchor.constraint(equalTo: actionRow.bottomAnchor),
             avatarView.widthAnchor.constraint(equalTo: avatarView.heightAnchor),

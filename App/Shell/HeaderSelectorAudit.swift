@@ -100,6 +100,13 @@ final class HeaderSelectorAudit {
             return finding
         }
         let bar = nav.navigationBar
+        // `-header-bar-tree` on the sweep too, not only on the current-surface
+        // mode: a bar that fails is read against one that does not, and the
+        // comparison is the diagnosis.
+        if ProcessInfo.processInfo.arguments.contains("-header-bar-tree") {
+            print("[bar-tree] ---- \(surface) ----")
+            dumpBarTree()
+        }
         guard let selector = firstPagedTabBar(in: bar) else {
             if let tab = AppTab(rawValue: surface), mustHaveSelector.contains(tab) {
                 finding.problems.append("NO SELECTOR on a surface that must have one")
@@ -120,6 +127,13 @@ final class HeaderSelectorAudit {
                     + "titleView=\(item?.titleView.map { String(describing: type(of: $0)) } ?? "nil") "
                     + "search=\(item?.searchController == nil ? "none" : "set") "
                     + "top=\(nav.topViewController.map { String(describing: type(of: $0)) } ?? "nil")")
+                // ⚠️ The inventory says the item is THERE and the custom view is
+                // not in a window; it does not say what UIKit put on the bar
+                // instead. Dumped unconditionally on a surface that must have a
+                // selector and does not — the sweep visits five tabs and cannot
+                // be re-run against the one that failed, so evidence not taken
+                // here is evidence gone.
+                dumpBarTree()
             } else {
                 print("[header-audit] \(surface): no selector on this bar")
             }
@@ -178,6 +192,10 @@ final class HeaderSelectorAudit {
         let overflow = overflowControls(in: bar)
         if !overflow.isEmpty {
             finding.problems.append("COLLAPSED items — \(overflow.joined(separator: ", "))")
+        }
+        let trailingCount = (item?.rightBarButtonItems ?? []).count(where: { !$0.isHidden })
+        if let narrow = undersizedTrailingPlatter(in: bar, holding: trailingCount) {
+            finding.problems.append(narrow)
         }
 
         // 5. On a pushed surface, is the back button still there and reachable?
@@ -247,10 +265,44 @@ final class HeaderSelectorAudit {
                          view.frame.minX, view.frame.minY,
                          view.frame.width, view.frame.height,
                          view.accessibilityLabel ?? "-"))
-            guard depth < 6 else { return }
+            // ⚠️ Deep enough to reach a platter's CONTENT. At 6 the walk stopped
+            // on the two nested `AnimationView`s every platter wraps its item in,
+            // so a `•••` and a magnifier printed identically — which is how a
+            // collapsed bar read as an intact one.
+            guard depth < 9 else { return }
             view.subviews.forEach { walk($0, depth + 1) }
         }
         walk(bar, 0)
+    }
+
+    /// The trailing platter, when it is too narrow to be holding the items the
+    /// navigation item says are there.
+    ///
+    /// ⚠️ **The zero-width check below misses this one entirely, and it is the
+    /// failure the viewer actually reported.** When UIKit collapses a group it
+    /// does not always leave an empty platter behind — for the profile's two
+    /// trailing actions it replaced the pair with a single 46pt `•••`, a platter
+    /// that is present, non-zero, and hit-testable. The audit called that bar
+    /// clean while a screenshot showed one dot-dot-dot where two buttons belong.
+    ///
+    /// Two glyphs share ONE pill and it measures 115pt, so a platter holding `n`
+    /// items is at least `44n`. Anything under that is an overflow wearing the
+    /// group's place.
+    private func undersizedTrailingPlatter(in bar: UIView, holding count: Int) -> String? {
+        guard count > 1 else { return nil }
+        var platters: [CGRect] = []
+        func walk(_ view: UIView) {
+            if String(describing: type(of: view)).contains("PlatterView") {
+                platters.append(view.frame)
+            }
+            view.subviews.forEach(walk)
+        }
+        walk(bar)
+        guard let trailing = platters.max(by: { $0.minX < $1.minX }) else { return nil }
+        let needed = CGFloat(count) * 44
+        guard trailing.width < needed else { return nil }
+        return String(format: "COLLAPSED trailing group — %d items in a %.0fpt platter (needs %.0f)",
+                      count, trailing.width, needed)
     }
 
     /// Bar items UIKit has COLLAPSED, reported as zero-width platters.
