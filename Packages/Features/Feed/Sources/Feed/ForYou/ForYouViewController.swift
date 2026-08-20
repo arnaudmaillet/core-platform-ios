@@ -764,7 +764,7 @@ final class ForYouViewController: UIViewController {
         textSlideDismissal.revealGeometry = nil
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        guard arguments.contains("-text-reveal"),
+        guard TextRevealInstaller.isEnabled,
               let page = pager.page(for: format),
               page.textRowFrame(for: postID, in: view) != nil
         else { return false }
@@ -804,82 +804,72 @@ final class ForYouViewController: UIViewController {
             log("beginPop post")
         }
         textSlideDismissal.revealReturningChrome = tabBarController?.tabBar
-        textSlideDismissal.revealGeometry = RevealGeometry(
-            sourceFrame: { [weak page] space in page?.textRowFrame(for: postID, in: space) },
-            sourceCornerRadius: PostGridListRowCell.cardCornerRadius,
-            // The card's own fill, borrowed by the page for the length of the
-            // reveal. Read from PostGrid rather than restated, for the same
-            // reason the radius and the insets are: three copies of one colour
-            // is how two surfaces stop matching.
-            sourceFill: PostGridListRowCell.cardFillColor,
-            // Read ONCE, at staging, and deliberately not re-asked at
-            // dismissal: `applyPendingReveal` may have scrolled the row, and a
-            // row that scrolled out is not realized to answer. The cut is a
-            // property of the caption, not of where the row happens to be.
-            sourceCaptionEnd: page.textRowCaptionEnd(for: postID),
-            installDestinationVeil: { [weak feed] cut, tint in
-                (feed as? SnapFeedViewController)?.installRevealVeil(below: cut, tint: tint)
-            },
-            setDestinationVeilOpacity: { [weak feed] alpha in
-                (feed as? SnapFeedViewController)?.setRevealVeilOpacity(alpha)
-            },
-            setDestinationGround: { [weak feed] color in
-                (feed as? SnapFeedViewController)?.setRevealGroundTint(color)
-            },
-            // The anchor is re-asked at dismissal too: the viewer may have
-            // paged the feed to a different post, whose caption is a different
-            // height. Reading it live means the close aims at what is on
-            // screen rather than at what was there on the way in.
-            anchorFrame: { [weak feed] space in
-                (feed as? SnapFeedViewController)?.revealCaptionAnchor(in: space)
-            },
-            // The gallery recedes; the tray and the title stay grounded — the
-            // same view the hero's depth cue rides, for the same reason.
-            depthView: { [weak self] in self?.pager },
-            presentationDidEnd: { [weak self] landed in
-                // The flight faded the bar to nothing; take it down for real
-                // now, under the landed page where the frame change cannot be
-                // seen. A REVERSED opening never showed the page, so the bar
-                // goes back to being the grid's.
-                self?.tabBarController?.setTabBarHidden(landed, animated: false)
-                self?.tabBarController?.tabBar.alpha = 1
-            },
-            // Pin the grid's inset before the landing rect is read. The pop
-            // animates the safe area and this collection view adds it to its
-            // own inset, so an unpinned grid keeps drifting under a close that
-            // has already measured where it is going.
-            willStageDismissal: { [weak page] in
-                log("freeze    pre")
-                page?.beginHeroFreeze()
-                log("freeze   post")
-            },
-            dismissalDidEnd: { [weak self, weak page] committed in
-                page?.endHeroFreeze()
-                // The card is alone again: bring in the two things it has and
-                // the page never did — its metric line and its affordance —
-                // rather than letting them arrive in one frame. Committed pops
-                // only; a cancelled swipe leaves the page up, and the card
-                // stays covered.
-                // DEFERRED BY A TURN, and it has to be: this fires from the
-                // pop animator's completion, which is immediately followed by
-                // `completeTransition` — and that re-parents the grid out of
-                // the transition container, which cancels any animation just
-                // started on its cells. Measured: the dissolve simply did not
-                // appear, the card arriving whole in a single frame exactly as
-                // before. Run after the turn, the hierarchy is settled and the
-                // animation survives.
-                if committed {
-                    DispatchQueue.main.async { page?.fadeInRevealedFurniture(for: postID) }
+        // The GEOMETRY is not built here — see `TextRevealInstaller`. A
+        // profile draws the same row and must open it the same way, and two
+        // hand-written copies of thirteen fields agree only on the day they
+        // are written. What stays is what genuinely differs between the two
+        // screens: which chrome comes back, and what has to settle first.
+        textSlideDismissal.revealGeometry = TextRevealInstaller.geometry(
+            feed: feed,
+            origin: TextRevealOrigin(
+                rowFrame: { [weak page] space in
+                    page?.textRowFrame(for: postID, in: space)
+                },
+                // Read ONCE, at staging, and deliberately not re-asked at
+                // dismissal: `applyPendingReveal` may have scrolled the row,
+                // and a row that scrolled out is not realized to answer. The
+                // cut is a property of the caption, not of where the row
+                // happens to be.
+                captionEnd: page.textRowCaptionEnd(for: postID),
+                // The gallery recedes; the tray and the title stay grounded —
+                // the same view the hero's depth cue rides, for the same
+                // reason.
+                depthView: { [weak self] in self?.pager },
+                presentationDidEnd: { [weak self] landed in
+                    // The flight faded the bar to nothing; take it down for
+                    // real now, under the landed page where the frame change
+                    // cannot be seen. A REVERSED opening never showed the
+                    // page, so the bar goes back to being the grid's.
+                    self?.tabBarController?.setTabBarHidden(landed, animated: false)
+                    self?.tabBarController?.tabBar.alpha = 1
+                },
+                // Pin the grid's inset before the landing rect is read. The pop
+                // animates the safe area and this collection view adds it to
+                // its own inset, so an unpinned grid keeps drifting under a
+                // close that has already measured where it is going.
+                willStageDismissal: { [weak page] in
+                    log("freeze    pre")
+                    page?.beginHeroFreeze()
+                    log("freeze   post")
+                },
+                dismissalDidEnd: { [weak self, weak page] committed in
+                    page?.endHeroFreeze()
+                    // The card is alone again: bring in the two things it has
+                    // and the page never did — its metric line and its
+                    // affordance — rather than letting them arrive in one
+                    // frame. Committed pops only; a cancelled swipe leaves the
+                    // page up, and the card stays covered.
+                    //
+                    // DEFERRED BY A TURN, and it has to be: this fires from the
+                    // close's completion, which is immediately followed by
+                    // `completeTransition` — and that re-parents the grid out
+                    // of the transition container, which cancels any animation
+                    // just started on its cells. Measured: the dissolve simply
+                    // did not appear, the card arriving whole in a single frame
+                    // exactly as before. Run after the turn, the hierarchy is
+                    // settled and the animation survives.
+                    if committed {
+                        DispatchQueue.main.async { page?.fadeInRevealedFurniture(for: postID) }
+                    }
+                    // A cancelled swipe leaves the post on screen, so the bar
+                    // restored at grab-begin has to go back down — unanimated
+                    // and behind the page that sprang back, where nothing
+                    // renders the change. Committed pops leave it up;
+                    // `onFeedPopped` takes it from there.
+                    guard !committed else { return }
+                    self?.tabBarController?.setTabBarHidden(true, animated: false)
                 }
-                // A cancelled swipe leaves the post on screen, so the bar
-                // restored at grab-begin has to go back down — unanimated and
-                // behind the page that sprang back, where nothing renders the
-                // change. Committed pops leave it up; `onFeedPopped` takes it
-                // from there.
-                guard !committed else { return }
-                self?.tabBarController?.setTabBarHidden(true, animated: false)
-            },
-            matchesAnchor: !arguments.contains("-text-reveal-plain")
+            )
         )
         return true
         #else

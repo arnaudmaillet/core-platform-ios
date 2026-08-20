@@ -13,6 +13,65 @@ public enum SnapFeedHeroStyle: Sendable {
     case listMedia
 }
 
+/// What a surface has to say about the ROW a text-only post is opening from.
+///
+/// A post with no media has nothing to fly, and for a long time that meant a
+/// plain push — which is what `SnapFeedHeroOrigin.hasHero == false` still
+/// selects. The reveal replaces the push with a window: the real page,
+/// installed at full size, seen through a mask that sweeps from the row's rect
+/// to the whole screen. Nothing impersonates anything, so there is no card to
+/// describe — only a rect, a cut line, and the three moments the surface has to
+/// act on.
+///
+/// Separate from the flight fields above rather than folded into them, because
+/// every one of those describes a CARD (its cover, its style, what to conceal
+/// while its twin is in the air) and a reveal has none. An origin that carried
+/// both would be answering, for every post, half a set of questions that do not
+/// apply to it.
+///
+/// `nil` on an origin means the surface cannot describe a row — it shows the
+/// post as a tile, or does not know where it is — and the plain push is still
+/// the honest answer.
+@MainActor
+public struct TextRevealOrigin {
+    /// The row's rect, RE-ASKED at dismissal: the surface may have scrolled.
+    /// `nil` means off screen, and the window falls back to a centred one.
+    public let rowFrame: (UICoordinateSpace) -> CGRect?
+    /// Where the row's caption ends when it is TRUNCATED — the cut below which
+    /// the page is veiled, so the window shows no more than the card did.
+    /// `nil` when the row shows its whole caption and there is no difference to
+    /// hide. Read ONCE, at staging: it is a property of the caption, not of
+    /// where the row happens to be, and a row that scrolled out cannot answer.
+    public let captionEnd: CGFloat?
+    /// The view the depth cue recedes — the content, not the chrome around it.
+    public let depthView: () -> UIView?
+    /// The opening is over: `true` landed, `false` reversed mid-air. For chrome
+    /// the opening FADED rather than dismissed.
+    public let presentationDidEnd: (Bool) -> Void
+    /// Last chance to move before the dismissal measures its landing — pinning
+    /// a content inset, or scrolling the row back into view.
+    public let willStageDismissal: () -> Void
+    /// The close is over, WHICHEVER WAY IT WENT: `true` committed, `false`
+    /// sprang back. Both, because what it undoes is set on every dismissal.
+    public let dismissalDidEnd: (Bool) -> Void
+
+    public init(
+        rowFrame: @escaping (UICoordinateSpace) -> CGRect?,
+        captionEnd: CGFloat?,
+        depthView: @escaping () -> UIView? = { nil },
+        presentationDidEnd: @escaping (Bool) -> Void = { _ in },
+        willStageDismissal: @escaping () -> Void = {},
+        dismissalDidEnd: @escaping (Bool) -> Void = { _ in }
+    ) {
+        self.rowFrame = rowFrame
+        self.captionEnd = captionEnd
+        self.depthView = depthView
+        self.presentationDidEnd = presentationDidEnd
+        self.willStageDismissal = willStageDismissal
+        self.dismissalDidEnd = dismissalDidEnd
+    }
+}
+
 /// Everything the feed needs in order to fly a hero FROM a surface it knows
 /// nothing about.
 ///
@@ -75,6 +134,9 @@ public struct SnapFeedHeroOrigin {
     public let setConcealed: (Bool) -> Void
     /// The view the depth cue recedes — the content, not the chrome around it.
     public let depthView: () -> UIView?
+    /// How to open this post as a REVEAL when there is no hero to fly — see
+    /// `TextRevealOrigin`. `nil` keeps the plain push.
+    public let textReveal: TextRevealOrigin?
 
     public init(
         post: GalleryPost,
@@ -85,7 +147,8 @@ public struct SnapFeedHeroOrigin {
         frame: @escaping (UICoordinateSpace) -> CGRect?,
         isOnScreen: @escaping () -> Bool,
         setConcealed: @escaping (Bool) -> Void,
-        depthView: @escaping () -> UIView? = { nil }
+        depthView: @escaping () -> UIView? = { nil },
+        textReveal: TextRevealOrigin? = nil
     ) {
         self.post = post
         self.stream = stream
@@ -96,5 +159,6 @@ public struct SnapFeedHeroOrigin {
         self.isOnScreen = isOnScreen
         self.setConcealed = setConcealed
         self.depthView = depthView
+        self.textReveal = textReveal
     }
 }
