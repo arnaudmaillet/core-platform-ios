@@ -146,7 +146,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // that failed the cast was silently dropped on the floor — the tap did
         // nothing at all. Neither is a presentation.
         guard origin.hasHero, let flyable = destination as? any ZoomTransitionDestination else {
-            pushWithoutFlight(destination, on: nav)
+            pushWithoutFlight(destination, on: nav, reveal: origin.textReveal)
             return
         }
         let source = ExternalHeroZoomSource(origin: origin)
@@ -391,7 +391,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// guards.
     public func pushSnapFeed(postIDs: [PostID], from presenter: UIViewController) {
         guard !postIDs.isEmpty, let nav = presenter.navigationController else { return }
-        pushWithoutFlight(makeSnapFeedViewController(postIDs: postIDs), on: nav)
+        pushWithoutFlight(makeSnapFeedViewController(postIDs: postIDs), on: nav, reveal: nil)
     }
 
     /// Pushes the feed with no flight, and gives it a way back by hand.
@@ -410,8 +410,17 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// push that inherited the claim (it is the type's default) and attached
     /// nothing: a screen that refused every horizontal drag, edge or surface,
     /// leaving the back chevron as the only way out.
-    private func pushWithoutFlight(_ destination: UIViewController, on nav: UINavigationController) {
+    private func pushWithoutFlight(
+        _ destination: UIViewController,
+        on nav: UINavigationController,
+        reveal: TextRevealOrigin?
+    ) {
         (destination as? SnapFeedViewController)?.zoomOwnsInteractiveDismissal = true
+        // A surface that can describe the ROW it is opening from gets the
+        // reveal instead of the bare push — the window, not the slide. Every
+        // caller of this method reaches it the same way (nothing to fly), so
+        // this is the one place a second screen has to be taught.
+        let revealing = reveal.map { _ in TextRevealInstaller.isEnabled } ?? false
 
         // This builder is a struct and `UINavigationController.delegate` is
         // weak, so nothing here would otherwise keep the dismissal alive to see
@@ -436,10 +445,37 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // dismissal), and that has to survive this push intact.
         dismissal.install(on: nav)
 
-        // Hidden BY HAND for the same reason the flight path states at length:
-        // `hidesBottomBarWhenPushed`'s choreography does not scrub with a custom
-        // interactive pop, and this screen now has one.
-        nav.tabBarController?.setTabBarHidden(true, animated: true)
+        if let reveal, revealing {
+            // THE BAR STAYS UP for frame 0, and that is the whole of it. The
+            // dock draws over the grid without insetting it, so at rest it
+            // covers the bottom of the row a reveal departs from — measured on
+            // an iPhone 17 Pro, 26pt of a 145pt card, which is its entire
+            // metric line. Taken down before the push as the branch below does
+            // it, that line SNAPS into existence one frame after the mask
+            // opens: the card the viewer tapped is not the card that starts
+            // growing. Driven by the flight instead, the bar is fully in place
+            // when the window is measured and dissolves as the page grows past
+            // it, and `presentationDidEnd` retires it for real underneath the
+            // landed page where the frame change cannot be seen.
+            dismissal.revealReturningChrome = nav.tabBarController?.tabBar
+            // Restoring it at alpha 0 BEFORE the pop is triggered settles the
+            // grid's layout while nothing is in flight. Inside the transition
+            // instead, the bar comes back as a row of empty glass capsules that
+            // never paint.
+            dismissal.onWillBeginPop = { [weak nav] in
+                nav?.tabBarController?.setTabBarHidden(false, animated: false)
+                nav?.tabBarController?.tabBar.alpha = 0
+            }
+            dismissal.revealGeometry = TextRevealInstaller.geometry(
+                feed: destination,
+                origin: Self.withDockChoreography(reveal, on: nav)
+            )
+        } else {
+            // Hidden BY HAND for the same reason the flight path states at
+            // length: `hidesBottomBarWhenPushed`'s choreography does not scrub
+            // with a custom interactive pop, and this screen now has one.
+            nav.tabBarController?.setTabBarHidden(true, animated: true)
+        }
         nav.pushViewController(destination, animated: true)
         #if DEBUG
         // `-zoom-live-log`: the only way a scripted run can tell "attached" from
@@ -474,6 +510,42 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             }
         }
         #endif
+    }
+
+    /// Wraps a surface's reveal hooks with the DOCK's own choreography.
+    ///
+    /// Composed rather than asked of the surface, because the dock belongs to
+    /// the navigation shell and not to whichever screen is opening a post — a
+    /// profile should no more have to know how the bar is retired than For You
+    /// should have to be told where a profile's rows are. Each hook runs both:
+    /// the shell's part and the surface's own.
+    private static func withDockChoreography(
+        _ reveal: TextRevealOrigin, on nav: UINavigationController
+    ) -> TextRevealOrigin {
+        TextRevealOrigin(
+            rowFrame: reveal.rowFrame,
+            captionEnd: reveal.captionEnd,
+            depthView: reveal.depthView,
+            presentationDidEnd: { [weak nav] landed in
+                // The flight faded the bar to nothing; take it down for real
+                // now. A REVERSED opening never showed the page, so the bar
+                // goes back to being the grid's.
+                nav?.tabBarController?.setTabBarHidden(landed, animated: false)
+                nav?.tabBarController?.tabBar.alpha = 1
+                reveal.presentationDidEnd(landed)
+            },
+            willStageDismissal: reveal.willStageDismissal,
+            dismissalDidEnd: { [weak nav] committed in
+                reveal.dismissalDidEnd(committed)
+                // A cancelled swipe leaves the post on screen, so the bar
+                // restored at grab-begin has to go back down — unanimated and
+                // behind the page that sprang back, where nothing renders the
+                // change. Committed pops leave it up; `onFeedPopped` takes it
+                // from there.
+                guard !committed else { return }
+                nav?.tabBarController?.setTabBarHidden(true, animated: false)
+            }
+        )
     }
 
     /// Brings the dock back after a flight that hid it.

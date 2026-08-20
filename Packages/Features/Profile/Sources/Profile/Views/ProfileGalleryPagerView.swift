@@ -179,6 +179,24 @@ final class ProfileGalleryPagerView: UIView {
         return pages[activeIndex].heroGeometry(for: postID)
     }
 
+    /// The text reveal's three questions, asked of the ACTIVE page — the same
+    /// rule `heroGeometry` follows, and for the same reason: a rect read from
+    /// one page and a cut read from another would describe two different lists.
+    func textRowFrame(for postID: PostID, in space: UICoordinateSpace) -> CGRect? {
+        guard pages.indices.contains(activeIndex) else { return nil }
+        return pages[activeIndex].textRowFrame(for: postID, in: space)
+    }
+
+    func textRowCaptionEnd(for postID: PostID) -> CGFloat? {
+        guard pages.indices.contains(activeIndex) else { return nil }
+        return pages[activeIndex].textRowCaptionEnd(for: postID)
+    }
+
+    func fadeInRevealedFurniture(for postID: PostID) {
+        guard pages.indices.contains(activeIndex) else { return }
+        pages[activeIndex].fadeInRevealedFurniture(for: postID)
+    }
+
     func setHeroConcealed(_ concealed: Bool, for postID: PostID) {
         guard pages.indices.contains(activeIndex) else { return }
         pages[activeIndex].setHeroConcealed(concealed, for: postID)
