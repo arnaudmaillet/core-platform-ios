@@ -54,10 +54,19 @@ enum GalleryPostProjection {
     /// guessing an author here (a tagged, saved or liked post is by somebody
     /// else, and this type cannot tell which).
     ///
-    /// Both time strings are the FEED's registers, deliberately not the grid's.
-    /// A tile spells an old post's age as a calendar date and the feed keeps
-    /// counting days; seeding the tile's spelling made the nav pill rewrite
-    /// itself from "28 May" to "75d" the moment the entry landed.
+    /// The two time strings answer to DIFFERENT masters, and the split is the
+    /// point.
+    ///
+    /// `metaText` feeds the nav pill, which is the FEED's furniture and keeps
+    /// the feed's register: seeding the tile's spelling there made the pill
+    /// rewrite itself from "28 May" to "75d" the moment the entry landed.
+    ///
+    /// `timestampText` feeds the caption ROW, which is the card's twin — a
+    /// reveal opens the gallery row into it, so the row's closing line and the
+    /// page's first line are one line seen twice. It therefore takes the
+    /// GRID's spelling, and `PostDetailDisplayModel` takes it too, so seeded
+    /// and hydrated agree with each other as well as with the card. Three
+    /// spellings of one instant is what this replaces.
     static func seedModel(from post: GalleryPost) -> FeedItemDisplayModel {
         let handle = post.authorHandle.map { "@\($0)" } ?? ""
         let published = Date(timeIntervalSince1970: TimeInterval(post.publishedAtMS) / 1000)
@@ -76,7 +85,7 @@ enum GalleryPostProjection {
             audioText: post.kind == .video && !handle.isEmpty
                 ? "Original audio · \(handle)" : nil,
             likeCount: post.reactionCount ?? 0,
-            timestampText: FeedDisplayModelBuilder.readableTimestamp(from: published, to: now),
+            timestampText: PostMetadata.compactAge(ofMillis: post.publishedAtMS, now: now),
             // Passed through as OPTIONALS, not collapsed to zero: this is the
             // one place that knows all three, and a text page's caption row
             // spells them exactly as the row it was opened from does.

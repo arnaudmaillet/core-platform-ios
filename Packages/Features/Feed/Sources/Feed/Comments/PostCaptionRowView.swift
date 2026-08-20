@@ -1,4 +1,5 @@
 import PostGrid
+import DesignSystem
 import UIKit
 
 /// The card's metric line, as the grid spells it: absent counts are `nil`, not
@@ -63,6 +64,19 @@ final class PostCaptionRowView: UIView {
     /// The gap the card puts between its caption and its metric line, held so
     /// the row can close up when there is no metric line to separate from.
     private var metaTopGap: NSLayoutConstraint!
+    /// The rule between the post and the conversation about it.
+    ///
+    /// It sits BELOW everything the card has — below the metric line, below the
+    /// card's own bottom inset — and that placement is doing two jobs at once.
+    /// Read as design, it separates the post from its comments instead of
+    /// letting a caption run straight into the first reply. Read as geometry,
+    /// it falls past `PostGridListRowCell.revealCut`, so a reveal veils it
+    /// along with the comments it introduces: the card's twin ends where the
+    /// card ends, and nothing the card has no counterpart for rides the flight.
+    private let separator = UIView()
+    private var separatorHeight: NSLayoutConstraint!
+    /// The breath between the card's bottom edge and the rule.
+    private static let separatorGap = Spacing.lg
 
     override init(frame: CGRect) {
         // Views lead, reactions and comments follow, age trailing — the card's
@@ -106,12 +120,24 @@ final class PostCaptionRowView: UIView {
         metaRow.constrain(in: self) { parent in
             metaRow.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: inset)
             metaRow.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -inset)
-            metaRow.bottomAnchor.constraint(
-                equalTo: parent.bottomAnchor, constant: -PostGridListRowCell.metaBottomInset
-            )
         }
         metaTopGap = metaRow.topAnchor.constraint(equalTo: captionLabel.bottomAnchor, constant: 12)
         metaTopGap.isActive = true
+
+        separator.backgroundColor = .separator
+        separator.constrain(in: self) { parent in
+            separator.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: inset)
+            separator.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -inset)
+            // The card's own bottom inset first — so the region above the rule
+            // is EXACTLY the card, to the point — and then the breath.
+            separator.topAnchor.constraint(
+                equalTo: metaRow.bottomAnchor,
+                constant: PostGridListRowCell.metaBottomInset + Self.separatorGap
+            )
+            separator.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
+        }
+        separatorHeight = separator.heightAnchor.constraint(equalToConstant: 1)
+        separatorHeight.isActive = true
     }
 
     @available(*, unavailable)
@@ -123,6 +149,12 @@ final class PostCaptionRowView: UIView {
     /// know, and a self-sizing cell is measured once.
     override func layoutSubviews() {
         super.layoutSubviews()
+        // A real hairline, not a point: on a 3x screen a 1pt rule is three
+        // device pixels and reads as a drawn line rather than a division.
+        let hairline = 1 / max(traitCollection.displayScale, 1)
+        if abs(separatorHeight.constant - hairline) > 0.001 {
+            separatorHeight.constant = hairline
+        }
         let available = bounds.width - PostGridListRowCell.captionInset * 2
         if available > 0, abs(captionLabel.preferredMaxLayoutWidth - available) > 0.5 {
             captionLabel.preferredMaxLayoutWidth = available

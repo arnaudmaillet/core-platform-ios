@@ -41,6 +41,10 @@ final class PostDetailViewController: UIViewController {
     /// never manual view surgery. Still a UIScrollView underneath, so the
     /// engaged inset/keyboard machinery operates on it unchanged.
     private lazy var collectionView: UICollectionView = {
+        // Captured by VALUE: the layout closure outlives nothing here, but a
+        // section provider that reaches back through `self` is a retain cycle
+        // waiting for someone to forget the `weak`.
+        let leadsWithCaption = mode != .full
         let layout = UICollectionViewCompositionalLayout { _, environment in
             var config = UICollectionLayoutListConfiguration(appearance: .plain)
             config.showsSeparators = false
@@ -50,8 +54,24 @@ final class PostDetailViewController: UIViewController {
             // trailing inset used to carry an exclusion for the shortcut
             // rail's column; the engagement fades the rail now, so there is
             // no column to leave clear.)
+            // NO TOP INSET when the caption leads, and the reason is that the
+            // caption row already carries one.
+            //
+            // It is the CARD's `captionTopInset`, reproduced deliberately so
+            // that a reveal opening the gallery row into this page finds its
+            // caption at the same offset inside the row at both ends of the
+            // flight. A section inset above it is therefore a SECOND top
+            // padding on the same edge — 32pt of air over a caption the card
+            // sets 16pt down — and the page opened looking loose against the
+            // row it grew from.
+            //
+            // Dropping it moves the row up bodily, caption and all, so the
+            // reveal's registration is untouched: the anchor is the row's own
+            // frame and it travels with it. Full mode leads with the post
+            // section instead, which has no inset of its own, so it keeps the
+            // section's.
             section.contentInsets = NSDirectionalEdgeInsets(
-                top: Spacing.lg,
+                top: leadsWithCaption ? 0 : Spacing.lg,
                 leading: Spacing.lg,
                 bottom: Spacing.lg,
                 trailing: Spacing.lg
