@@ -257,6 +257,9 @@ final class ForYouGridPage: UIView {
     /// Which captions the viewer has opened out. Owned here rather than by the
     /// rows, which are recycled — see `CaptionExpansion`.
     private let captionExpansion = CaptionExpansion()
+    /// The viewer's followed authors — see `AuthorFollowStore` for why this is
+    /// on the device and not on the service.
+    private let authorFollows = AuthorFollowStore()
     /// Throttle state for the during-scroll autoplay reconcile.
     private var lastReconcileTime: CFTimeInterval = 0
     private var lastReconcileOffset: CGFloat = 0
@@ -1057,7 +1060,11 @@ final class ForYouGridPage: UIView {
         guard let row = cell(for: postID) as? PostGridListRowCell,
               row.mediaHeroRect == nil
         else { return nil }
-        return row.convert(row.bounds, to: space)
+        // The BAND, not the whole card: an author band has no counterpart on
+        // the post's page, and handing it to the flight would both claim a
+        // strip the page cannot fill and move the caption off the offset the
+        // registration rests on. See `PostGridListRowCell.revealBand`.
+        return row.convert(row.revealBand, to: space)
     }
 
     #if DEBUG
@@ -1086,6 +1093,12 @@ final class ForYouGridPage: UIView {
     /// `PostGridListRowCell.fadeInRevealedFurniture`. A no-op for a row that
     /// is not realized, which is the honest answer: nothing is on screen to
     /// fade.
+    /// The author band's opacity while a flight is in the air — see
+    /// `PostGridListRowCell.setAuthorBandOpacity`.
+    func setAuthorBandOpacity(_ alpha: CGFloat, for postID: PostID) {
+        (cell(for: postID) as? PostGridListRowCell)?.setAuthorBandOpacity(alpha)
+    }
+
     func fadeInRevealedFurniture(for postID: PostID) {
         let row = cell(for: postID) as? PostGridListRowCell
         #if DEBUG
@@ -1632,6 +1645,16 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             // a cover arriving is the only event that can re-open the gate for
             // a row that came up faceless while the timeline sat still.
             cell.onCoverLoaded = { [weak self] in self?.updateAutoplay() }
+            // The band's control, if the post carries an author to follow.
+            // Captured by AUTHOR for the same reason the caption's handler is
+            // captured by post: the row that asked can have moved.
+            if let authorID = post.authorID {
+                let follows = authorFollows
+                cell.setFollowing(follows.isFollowing(authorID))
+                cell.onFollowTapped = { [weak cell] in
+                    cell?.setFollowing(follows.toggle(authorID))
+                }
+            }
             Self.applyHeroConcealment(isFlying, to: cell)
             return cell
         case .grid:

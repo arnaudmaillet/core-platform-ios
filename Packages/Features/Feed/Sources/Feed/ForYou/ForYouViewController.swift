@@ -825,6 +825,9 @@ final class ForYouViewController: UIViewController {
                 // the same view the hero's depth cue rides, for the same
                 // reason.
                 depthView: { [weak self] in self?.pager },
+                setBandOpacity: { [weak page] alpha in
+                    page?.setAuthorBandOpacity(alpha, for: postID)
+                },
                 presentationDidEnd: { [weak self] landed in
                     // The flight faded the bar to nothing; take it down for
                     // real now, under the landed page where the frame change

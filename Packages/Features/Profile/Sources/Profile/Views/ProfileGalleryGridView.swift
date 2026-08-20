@@ -600,7 +600,11 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         guard let row = cell(for: postID) as? PostGridListRowCell,
               row.mediaHeroRect == nil
         else { return nil }
-        return row.convert(row.bounds, to: space)
+        // The BAND, not the whole card: an author band has no counterpart on
+        // the post's page, and handing it to the flight would both claim a
+        // strip the page cannot fill and move the caption off the offset the
+        // registration rests on. See `PostGridListRowCell.revealBand`.
+        return row.convert(row.revealBand, to: space)
     }
 
     /// Where the page stops matching the row, in the row's own space — the
@@ -612,6 +616,13 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     /// Brings the landed row's own furniture in gently — see
     /// `PostGridListRowCell.fadeInRevealedFurniture`. A no-op for a row that is
     /// not realized, which is the honest answer: nothing is on screen to fade.
+    /// The author band's opacity while a flight is in the air. A profile
+    /// gallery's posts carry no author, so the band is absent here and this is
+    /// a no-op — kept so both grids answer the same questions.
+    func setAuthorBandOpacity(_ alpha: CGFloat, for postID: PostID) {
+        (cell(for: postID) as? PostGridListRowCell)?.setAuthorBandOpacity(alpha)
+    }
+
     func fadeInRevealedFurniture(for postID: PostID) {
         (cell(for: postID) as? PostGridListRowCell)?.fadeInRevealedFurniture()
     }

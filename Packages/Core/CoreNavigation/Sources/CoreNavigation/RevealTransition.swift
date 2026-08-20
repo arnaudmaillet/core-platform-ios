@@ -86,6 +86,19 @@ public struct RevealGeometry {
     /// Matched mode aligns this with the source rect at t=0; `nil` (or plain
     /// mode) leaves the page unmoved and the window simply opens over it.
     public let anchorFrame: (UICoordinateSpace) -> CGRect?
+    /// The SOURCE row's own furniture that the destination has no counterpart
+    /// for — an author band above the caption, which a page carries in its nav
+    /// pill instead.
+    ///
+    /// The window departs from below it (see the source's own `revealBand`), so
+    /// for most of a flight the band is simply behind the page. It is the first
+    /// and last moments that need a channel: without one the band sits crisp
+    /// and undimmed beside a window that has already started moving, which
+    /// reads as the card being torn in half rather than leaving.
+    ///
+    /// Driven like the departing chrome and for the same reason — one clock for
+    /// everything the grid does while a page is on its way.
+    public let setSourceBandOpacity: (CGFloat) -> Void
     /// The view the depth cue recedes: the content, not the chrome around it.
     /// Same rule (and same reason) as `ZoomTransitionSource.zoomPresenterDepthView`.
     public let depthView: () -> UIView?
@@ -128,6 +141,7 @@ public struct RevealGeometry {
         setDestinationVeilOpacity: @escaping (CGFloat) -> Void = { _ in },
         setDestinationGround: @escaping (UIColor?) -> Void = { _ in },
         anchorFrame: @escaping (UICoordinateSpace) -> CGRect? = { _ in nil },
+        setSourceBandOpacity: @escaping (CGFloat) -> Void = { _ in },
         depthView: @escaping () -> UIView? = { nil },
         presentationDidEnd: @escaping (Bool) -> Void = { _ in },
         willStageDismissal: @escaping () -> Void = {},
@@ -142,6 +156,7 @@ public struct RevealGeometry {
         self.setDestinationVeilOpacity = setDestinationVeilOpacity
         self.setDestinationGround = setDestinationGround
         self.anchorFrame = anchorFrame
+        self.setSourceBandOpacity = setSourceBandOpacity
         self.depthView = depthView
         self.presentationDidEnd = presentationDidEnd
         self.willStageDismissal = willStageDismissal
@@ -502,6 +517,8 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
         let chrome = departingChrome
         UIView.animate(withDuration: duration * 0.6, delay: 0, options: [.curveEaseIn]) {
             chrome?.alpha = 0
+            // The band leaves WITH the card it belongs to, not a frame later.
+            self.geometry.setSourceBandOpacity(0)
         } completion: { _ in
             #if DEBUG
             RevealStage.log("present", "chrome faded to \(chrome?.alpha ?? -1)")
@@ -688,6 +705,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             dim.alpha = 0
             presenting.transform = .identity
             chrome?.alpha = chromeAlpha
+            self.geometry.setSourceBandOpacity(1)
         }
         animator.addCompletion { _ in
             let cancelled = context.transitionWasCancelled
@@ -705,6 +723,9 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             self.geometry.setDestinationGround(nil)
             self.geometry.installDestinationVeil(nil, nil)
             chrome?.alpha = cancelled ? 0 : chromeAlpha
+            // A cancelled close leaves the page up, so the band stays gone
+            // under it; a committed one has just landed beside it.
+            self.geometry.setSourceBandOpacity(cancelled ? 0 : 1)
             self.geometry.dismissalDidEnd(!cancelled)
             context.completeTransition(!cancelled)
         }

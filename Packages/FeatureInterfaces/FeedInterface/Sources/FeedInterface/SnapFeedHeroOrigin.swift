@@ -45,6 +45,11 @@ public struct TextRevealOrigin {
     public let captionEnd: CGFloat?
     /// The view the depth cue recedes — the content, not the chrome around it.
     public let depthView: () -> UIView?
+    /// The row's own furniture that the page has no counterpart for — an author
+    /// band above the caption. Driven by the flight so it leaves with the card
+    /// it belongs to rather than a frame later; see
+    /// `RevealGeometry.setSourceBandOpacity`.
+    public let setBandOpacity: (CGFloat) -> Void
     /// The opening is over: `true` landed, `false` reversed mid-air. For chrome
     /// the opening FADED rather than dismissed.
     public let presentationDidEnd: (Bool) -> Void
@@ -59,6 +64,7 @@ public struct TextRevealOrigin {
         rowFrame: @escaping (UICoordinateSpace) -> CGRect?,
         captionEnd: CGFloat?,
         depthView: @escaping () -> UIView? = { nil },
+        setBandOpacity: @escaping (CGFloat) -> Void = { _ in },
         presentationDidEnd: @escaping (Bool) -> Void = { _ in },
         willStageDismissal: @escaping () -> Void = {},
         dismissalDidEnd: @escaping (Bool) -> Void = { _ in }
@@ -66,6 +72,7 @@ public struct TextRevealOrigin {
         self.rowFrame = rowFrame
         self.captionEnd = captionEnd
         self.depthView = depthView
+        self.setBandOpacity = setBandOpacity
         self.presentationDidEnd = presentationDidEnd
         self.willStageDismissal = willStageDismissal
         self.dismissalDidEnd = dismissalDidEnd
