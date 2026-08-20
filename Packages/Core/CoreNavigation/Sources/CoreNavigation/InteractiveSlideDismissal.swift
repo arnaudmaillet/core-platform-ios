@@ -74,9 +74,10 @@ public final class InteractiveSlideDismissal: NSObject {
     /// a different ANIMATION of the same dismissal, not a second dismissal.
     public var revealGeometry: RevealGeometry?
 
-    /// Source chrome the reveal's pop brings back on its own curve — the app's
-    /// tab bar. Only consulted while `revealGeometry` is set; the slide leaves
-    /// the bar to the owner's `onFeedPopped`, as before.
+    /// Source chrome the reveal drives on BOTH legs — the app's tab bar: faded
+    /// out as the page opens over it, faded back in as the page closes. Only
+    /// consulted while `revealGeometry` is set; the slide leaves the bar to the
+    /// owner's `onFeedPopped`, as before.
     public weak var revealReturningChrome: UIView?
 
     /// An extra veto the owner can impose, asked at begin-time.
@@ -281,7 +282,9 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
         // The slide never did — a text post arrived on UIKit's own slide —
         // which is exactly the gap this is measuring.
         if operation == .push, toVC === feedViewController, let revealGeometry {
-            return RevealPresentAnimator(geometry: revealGeometry)
+            return RevealPresentAnimator(
+                geometry: revealGeometry, departingChrome: revealReturningChrome
+            )
         }
         guard operation == .pop, fromVC === feedViewController else { return nil }
         if let revealGeometry {

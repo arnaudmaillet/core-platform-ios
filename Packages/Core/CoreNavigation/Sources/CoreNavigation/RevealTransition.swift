@@ -69,6 +69,13 @@ public struct RevealGeometry {
     /// The view the depth cue recedes: the content, not the chrome around it.
     /// Same rule (and same reason) as `ZoomTransitionSource.zoomPresenterDepthView`.
     public let depthView: () -> UIView?
+    /// The opening is over, `true` landed and `false` reversed mid-air.
+    ///
+    /// Exists for chrome the opening FADED rather than dismissed: the source's
+    /// bar is driven to alpha 0 by the flight, and the owner takes it down for
+    /// real here — under the landed page, where the frame change cannot be
+    /// seen. A reversed opening puts it back instead.
+    public let presentationDidEnd: (Bool) -> Void
     /// Last chance to move before a dismissal measures its landing — the grid
     /// scrolling the row back into view, or pinning its content inset.
     public let willStageDismissal: () -> Void
@@ -100,6 +107,7 @@ public struct RevealGeometry {
         anchorFrame: @escaping (UICoordinateSpace) -> CGRect? = { _ in nil },
         anchorTopInset: CGFloat = 0,
         depthView: @escaping () -> UIView? = { nil },
+        presentationDidEnd: @escaping (Bool) -> Void = { _ in },
         willStageDismissal: @escaping () -> Void = {},
         dismissalDidEnd: @escaping (Bool) -> Void = { _ in },
         matchesAnchor: Bool = true
@@ -111,6 +119,7 @@ public struct RevealGeometry {
         self.anchorFrame = anchorFrame
         self.anchorTopInset = anchorTopInset
         self.depthView = depthView
+        self.presentationDidEnd = presentationDidEnd
         self.willStageDismissal = willStageDismissal
         self.dismissalDidEnd = dismissalDidEnd
         self.matchesAnchor = matchesAnchor
@@ -231,6 +240,17 @@ private enum RevealStage {
     }
 
     #if DEBUG
+    /// The TIMESTAMP is half the value of these lines, not decoration.
+    ///
+    /// The simulator's Slow Animations multiplies every duration by ten and is
+    /// invisible from inside the process — the code is unchanged and only the
+    /// wall clock knows. It cost a wrong diagnosis here: a chrome fade timed at
+    /// 2.65s for a 0.25s animation read as "the fade never ran", and the frames
+    /// backing that up read as a regression that did not exist. `xcodebuild
+    /// test` relaunches Simulator.app and turns the slowdown back on, so a run
+    /// that was headless when it started may not be by the time it is measured.
+    /// Compare consecutive stamps against the durations asked for before
+    /// believing any of it.
     static func log(_ leg: String, _ message: String) {
         guard ProcessInfo.processInfo.arguments.contains("-text-reveal-log") else { return }
         print(String(format: "[text-reveal] %.3f %@ %@", CACurrentMediaTime(), leg, message))
@@ -245,9 +265,25 @@ private enum RevealStage {
 @MainActor
 final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     private let geometry: RevealGeometry
+    /// Source chrome that must LEAVE with the opening rather than before it —
+    /// the app's floating tab bar.
+    ///
+    /// The bar draws OVER the grid without insetting it, so at rest it covers
+    /// the bottom of the row a reveal departs from: measured on an iPhone 17
+    /// Pro, the bar occupies y 791…874 and the row 741…817, so 26pt of the
+    /// card — its whole metric line — is not on screen. Hidden before the push,
+    /// as a plain push does it, that line SNAPS into existence one frame after
+    /// the mask opens: the card the viewer tapped is not the card that starts
+    /// growing.
+    ///
+    /// Driven here instead, the bar is fully in place on frame 0 — so the
+    /// revealed rect is pixel-identical to what was there — and dissolves as
+    /// the page grows past it.
+    private weak var departingChrome: UIView?
 
-    init(geometry: RevealGeometry) {
+    init(geometry: RevealGeometry, departingChrome: UIView?) {
         self.geometry = geometry
+        self.departingChrome = departingChrome
     }
 
     func transitionDuration(using context: (any UIViewControllerContextTransitioning)?) -> TimeInterval {
@@ -319,6 +355,19 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
         UIView.animate(withDuration: duration * 0.65, delay: duration * 0.35, options: [.curveEaseIn]) {
             dim.alpha = 1
         }
+        // FRONT-LOADED, unlike the dim: the bar has to be gone by the time the
+        // mask has grown past where it sits, or it stands over the opening
+        // page (it is a sibling of the navigation controller and renders above
+        // the whole transition). Fading over the first 60% clears it while the
+        // mask is still below it.
+        let chrome = departingChrome
+        UIView.animate(withDuration: duration * 0.6, delay: 0, options: [.curveEaseIn]) {
+            chrome?.alpha = 0
+        } completion: { _ in
+            #if DEBUG
+            RevealStage.log("present", "chrome faded to \(chrome?.alpha ?? -1)")
+            #endif
+        }
         UIView.animate(
             withDuration: duration,
             delay: 0,
@@ -343,6 +392,14 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             // Cleared under the opaque page, where the reset cannot be seen.
             presenting?.transform = .identity
             ZoomFlight.clearRecededChrome(from: presenting)
+            // The owner takes the chrome down for real (or puts it back on a
+            // reversal); the alpha goes home either way, since the view is
+            // shared with every other screen that shows it.
+            #if DEBUG
+            RevealStage.log("present", "landed")
+            #endif
+            chrome?.alpha = 1
+            self.geometry.presentationDidEnd(!cancelled)
             context.completeTransition(!cancelled)
         }
     }

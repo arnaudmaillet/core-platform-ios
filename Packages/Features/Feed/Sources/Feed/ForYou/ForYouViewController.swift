@@ -746,16 +746,28 @@ final class ForYouViewController: UIViewController {
     /// which is the same question the reveal has to answer again at dismissal.
     /// One predicate, so the two legs cannot disagree about whether this
     /// transition exists.
+    /// Returns whether the reveal is armed — the caller uses it to leave the
+    /// tab bar alone, because a reveal takes the bar down ITSELF.
+    ///
+    /// The bar FLOATS: it draws over the grid without insetting it (measured on
+    /// an iPhone 17 Pro — bar at y 791 height 83, while the grid reserves 34),
+    /// so it covers the bottom 26pt of the very row a reveal departs from.
+    /// Hidden before the push, as every plain push does it, that 26pt is the
+    /// card's whole metric line snapping into existence one frame after the
+    /// mask opens: the card the viewer tapped is not the card that starts
+    /// growing. Driven by the flight instead, the bar is fully in place on
+    /// frame 0 and dissolves as the page grows past it.
+    @discardableResult
     private func installTextReveal(
         feed: UIViewController, format: GalleryFilter.Format, postID: PostID
-    ) {
+    ) -> Bool {
         textSlideDismissal.revealGeometry = nil
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
         guard arguments.contains("-text-reveal"),
               let page = pager.page(for: format),
               page.textRowFrame(for: postID, in: view) != nil
-        else { return }
+        else { return false }
         // The grid's inset state at each stage of a round trip. It exists
         // because a rect alone cannot say why a landing missed, and the first
         // run's did: departure y=741, landing y=625.
@@ -765,6 +777,13 @@ final class ForYouViewController: UIViewController {
             print("[text-reveal] \(stage) \(page.debugInsetState)")
         }
         log("atTap        ")
+        if trace, let rect = page.textRowFrame(for: postID, in: view) {
+            // The row's rect BEFORE the push hides the tab bar. Compared with
+            // the animator's `source=`, this says whether the grid moved
+            // between the tap and the opening — which is what a pre-opening
+            // jump would be.
+            print("[text-reveal] atTap  row=\(NSCoder.string(for: rect))")
+        }
         // THE LANDING SETTLES BEFORE THE POP DOES, and the first run without
         // this is why the line exists: the close measured its landing at
         // y=625 for a row that had departed from y=741 — 116pt out, which is
@@ -807,6 +826,14 @@ final class ForYouViewController: UIViewController {
             // The gallery recedes; the tray and the title stay grounded — the
             // same view the hero's depth cue rides, for the same reason.
             depthView: { [weak self] in self?.pager },
+            presentationDidEnd: { [weak self] landed in
+                // The flight faded the bar to nothing; take it down for real
+                // now, under the landed page where the frame change cannot be
+                // seen. A REVERSED opening never showed the page, so the bar
+                // goes back to being the grid's.
+                self?.tabBarController?.setTabBarHidden(landed, animated: false)
+                self?.tabBarController?.tabBar.alpha = 1
+            },
             // Pin the grid's inset before the landing rect is read. The pop
             // animates the safe area and this collection view adds it to its
             // own inset, so an unpinned grid keeps drifting under a close that
@@ -828,6 +855,9 @@ final class ForYouViewController: UIViewController {
             },
             matchesAnchor: !arguments.contains("-text-reveal-plain")
         )
+        return true
+        #else
+        return false
         #endif
     }
 
@@ -878,7 +908,18 @@ final class ForYouViewController: UIViewController {
         // Worth recording what it got right, because it is the half this
         // screen had wrong: cancel and commit both settled correctly by
         // themselves. Only the mid-drag frames were unusable.
-        tabBarController?.setTabBarHidden(true, animated: true)
+        // ARMED FIRST, because the next line is the one it changes: a reveal
+        // drives the bar down on its own curve (`RevealPresentAnimator`), and
+        // hiding it here would take it away before the opening starts — which
+        // is the 26pt of card that used to pop into existence one frame in.
+        //
+        // Hiding it and putting it back was tried and is worse: UIKit runs its
+        // own show/hide animation on the bar, and a second one fighting it left
+        // the bar sitting fully opaque OVER the landed page for ~0.25s.
+        let revealing = installTextReveal(feed: feed, format: format, postID: tapped.id)
+        if !revealing {
+            tabBarController?.setTabBarHidden(true, animated: true)
+        }
 
         guard let page = pager.page(for: format),
               let destination = feed as? any ZoomTransitionDestination,
@@ -922,10 +963,6 @@ final class ForYouViewController: UIViewController {
                 // underneath should stay stopped.
                 self?.pager.endPlaybackHandoff()
             }
-            // PROTOTYPE, and it must be decided BEFORE the install: the
-            // dismissal is the stack's delegate from that moment, and the push
-            // it is about to answer for is the reveal's opening leg.
-            installTextReveal(feed: feed, format: format, postID: tapped.id)
             textSlideDismissal.install(on: navigationController)
             navigationController.pushViewController(feed, animated: true)
             #if DEBUG
