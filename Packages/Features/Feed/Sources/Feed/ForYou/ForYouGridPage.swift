@@ -254,6 +254,9 @@ final class ForYouGridPage: UIView {
     /// while the post is open — a page can land, or a lens can re-derive the
     /// whole list — and an index would then name a different post.
     private var pendingRevealPostID: PostID?
+    /// Which captions the viewer has opened out. Owned here rather than by the
+    /// rows, which are recycled — see `CaptionExpansion`.
+    private let captionExpansion = CaptionExpansion()
     /// Throttle state for the during-scroll autoplay reconcile.
     private var lastReconcileTime: CFTimeInterval = 0
     private var lastReconcileOffset: CGFloat = 0
@@ -1057,6 +1060,24 @@ final class ForYouGridPage: UIView {
         return row.convert(row.bounds, to: space)
     }
 
+    #if DEBUG
+    /// `-foryou-expand <index>`: presses the row's "Show more". Returns false
+    /// when the row is not realized or its caption fits, so a harness can tell
+    /// "did not expand" from "had nothing to expand".
+    @discardableResult
+    func debugTapShowMore(atIndex index: Int) -> Bool {
+        guard posts.indices.contains(index) else { return false }
+        let path = indexPath(for: index)
+        // Bring it into range first: an unrealized cell cannot be pressed, and
+        // the row with the long caption is rarely the one on screen.
+        collectionView.scrollToItem(at: path, at: .centeredVertically, animated: false)
+        collectionView.layoutIfNeeded()
+        guard let row = collectionView.cellForItem(at: path) as? PostGridListRowCell
+        else { return false }
+        return row.debugTapShowMore()
+    }
+    #endif
+
     /// Whether a realized cell for the post is currently within the viewport —
     /// the hero falls back to a centered collapse when it isn't.
     func isPostVisible(_ postID: PostID) -> Bool {
@@ -1570,7 +1591,18 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             let cell = collectionView.dequeueReusableCell(
                 withReuseIdentifier: PostGridListRowCell.reuseID, for: indexPath
             ) as! PostGridListRowCell
-            cell.configure(with: post, imagePipeline: imagePipeline)
+            cell.configure(
+                with: post,
+                imagePipeline: imagePipeline,
+                captionExpanded: captionExpansion.isExpanded(post.id)
+            )
+            // Captured by POST, never by index path: the row that asked can
+            // have moved by the time the answer is applied, and an index path
+            // held across a reload names a different post.
+            cell.onRevealFullCaption = { [weak self] in
+                guard let self else { return }
+                captionExpansion.expand(post.id, in: collectionView)
+            }
             // Same reason as the tile below: autoplay is gated on the cover, so
             // a cover arriving is the only event that can re-open the gate for
             // a row that came up faceless while the timeline sat still.

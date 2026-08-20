@@ -1795,6 +1795,28 @@ final class ForYouViewController: UIViewController {
            position + 1 < arguments.count, let steps = Int(arguments[position + 1]) {
             scheduleScrollDemo(steps: steps)
         }
+        // `-foryou-expand <index>`: presses a row's "Show more". Polls for
+        // content rather than firing on a delay, for the same reason
+        // `-foryou-open` does — a fixed wait silently no-ops under
+        // `-mock-latency`.
+        if let position = arguments.firstIndex(of: "-foryou-expand"),
+           position + 1 < arguments.count, let index = Int(arguments[position + 1]) {
+            var attempts = 0
+            func attempt() {
+                attempts += 1
+                let page = pager.page(for: viewModel.format)
+                if page?.debugTapShowMore(atIndex: index) == true {
+                    print("[foryou-expand] expanded row \(index)")
+                    return
+                }
+                if attempts < 60 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: attempt)
+                } else {
+                    print("[foryou-expand] NOTHING TO EXPAND at row \(index)")
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: attempt)
+        }
         guard let position = arguments.firstIndex(of: "-foryou-open"), position + 1 < arguments.count,
               let index = Int(arguments[position + 1])
         else { return }

@@ -142,17 +142,46 @@ public struct MockSocialDataset: Sendable {
     ) -> [PostRecord] {
         // Ahead of the clock by enough that a slow launch cannot overtake it.
         let epochMS = Int64(Date().timeIntervalSince1970 * 1000) + 5 * 60_000
+        // TWO OF THESE ARE LONG ON PURPOSE, and the lengths are as load-bearing
+        // as the keywords: the timeline card truncates a caption at
+        // `PostGridListRowCell.captionLineLimit` and offers the rest, and
+        // nothing exercised that until the fixture had a caption that overran
+        // it. Index 2 is the TEXT arrival — the one `-foryou-open 2` opens, so
+        // the long case is also the one the hero transition is measured on —
+        // and index 0 is a MEDIA arrival, because a card truncates whether or
+        // not it carries a preview.
+        //
+        // ⚠️ Both extensions stay inside `ContentContext.work`'s vocabulary and
+        // introduce no other context's. `MockForYouArrivalTests` pins three
+        // work, one focus, one neither, and the search is a plain substring
+        // match — so "notes", "quiet", "show", "watch", "play", "stream",
+        // "level" and their kin cannot appear here by accident. The focus
+        // arrival is index 3 and must keep its wording exactly.
         let captions = [
-            "Standup moved to nine. The deadline holds.",
+            """
+            Standup moved to nine. The deadline holds. We cut the scope of the \
+            settings rewrite rather than the date, which means the migration \
+            ships as-is and the polish lands next week. Anyone who needs the \
+            old behaviour can keep it behind the flag until the end of the month.
+            """,
             "Refactor landed and the office survived it.",
-            "Shipping the new build tonight.",
+            """
+            Shipping the new build tonight. The changelog is longer than I \
+            expected: two crashes that only reproduced on a cold launch, a \
+            migration that had been silently no-oping since spring, and a \
+            rewrite of the retry logic that finally makes sense. Everything is \
+            behind a flag, so if the numbers look wrong in the morning we turn \
+            it off and nobody has to be woken up. The summary for standup is \
+            already in the doc.
+            """,
             "Quiet morning, notes and a long walk before anything else.",
             "Golden hour over the harbour."
         ]
         let shapes: [(Int, Int)] = [(1080, 1350), (1600, 900), (1080, 1080)]
         return captions.enumerated().map { index, caption in
-            // Two of the five are text-only, mirroring the corpus's own mix so
-            // the arrivals do not all land in one cell path.
+            // ONE of the five is text-only (index 2), on the corpus's own
+            // `index % 3 == 2` rule so the arrivals do not all land in one cell
+            // path.
             let hasMedia = index % 3 != 2
             let shape = shapes[index % shapes.count]
             let isVideo = index % 2 == 1

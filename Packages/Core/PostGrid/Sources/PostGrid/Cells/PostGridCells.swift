@@ -130,6 +130,94 @@ public final class PostGridListRowCell: UICollectionViewCell {
     /// takes its player back before the cell is bound to another post.
     public var onReuse: (() -> Void)?
 
+    /// Decides whether the caption OVERFLOWS, at the width the layout is
+    /// actually going to give this row.
+    ///
+    /// It cannot be decided in `configure`: a self-sizing cell is configured
+    /// before it is sized, so the width there is whatever the recycled cell
+    /// happened to be carrying, and a caption measured against the wrong width
+    /// answers the wrong question — three lines at one width is five at
+    /// another. The attributes are authoritative, which is the same reason
+    /// `CaptionBubbleCell` measures here rather than there.
+    ///
+    /// The measurement is the honest one: how tall the caption WANTS to be
+    /// against how tall the cap allows. Asking `UILabel` whether it truncated
+    /// would be reading a result of the layout pass that is being computed.
+    override public func preferredLayoutAttributesFitting(
+        _ layoutAttributes: UICollectionViewLayoutAttributes
+    ) -> UICollectionViewLayoutAttributes {
+        let targetWidth = layoutAttributes.frame.width
+        guard targetWidth > 0 else {
+            return super.preferredLayoutAttributesFitting(layoutAttributes)
+        }
+        if abs(bounds.width - targetWidth) > 0.5 {
+            bounds.size.width = targetWidth
+        }
+        updateRevealAffordance(atWidth: targetWidth)
+        contentView.setNeedsLayout()
+        contentView.layoutIfNeeded()
+        let fitted = contentView.systemLayoutSizeFitting(
+            CGSize(width: targetWidth, height: 0),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        // Ceil, not round: half a point short of the caption is a clipped
+        // descender on the last line.
+        layoutAttributes.frame.size.height = ceil(fitted.height)
+        return layoutAttributes
+    }
+
+    private func updateRevealAffordance(atWidth width: CGFloat) {
+        guard !isCaptionExpanded else {
+            revealButton.isHidden = true
+            return
+        }
+        let text = captionLabel.text ?? ""
+        guard !text.isEmpty, let font = captionLabel.font else {
+            revealButton.isHidden = true
+            return
+        }
+        let available = width - Self.captionInset * 2
+        guard available > 0 else {
+            revealButton.isHidden = true
+            return
+        }
+        let full = (text as NSString).boundingRect(
+            with: CGSize(width: available, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font],
+            context: nil
+        ).height
+        // The cap in points, from the font's own line height — never a
+        // hardcoded number, or a Dynamic Type step silently changes which
+        // captions are considered long.
+        let capped = font.lineHeight * CGFloat(Self.captionLineLimit)
+        // A one-point overhang is a rounding artefact, not a fifth line.
+        revealButton.isHidden = full <= capped + 1
+    }
+
+    #if DEBUG
+    /// Presses "Show more". Returns false when there was nothing to reveal,
+    /// which is the answer a harness must not mistake for success.
+    ///
+    /// The simulator injects no touches, so this is the only way this control
+    /// is reachable in an automated run.
+    ///
+    /// It calls the handler rather than `sendActions(for:)`, and the reason is
+    /// worth recording: target-action dispatch goes through `UIApplication`,
+    /// which a test bundle with no app host does not have — `sendActions`
+    /// there returns having done nothing at all, so the hook reported success
+    /// while the cell had not moved. The button's own wiring to this handler
+    /// is asserted separately (`CaptionTruncationTests`), so nothing is left
+    /// untested by going straight to it.
+    @discardableResult
+    public func debugTapShowMore() -> Bool {
+        guard !revealButton.isHidden else { return false }
+        revealTapped()
+        return true
+    }
+    #endif
+
     /// Hides ONLY the preview while its twin is in the air.
     ///
     /// A row is a card of which the media is one part, and the flight carries
@@ -165,9 +253,34 @@ public final class PostGridListRowCell: UICollectionViewCell {
     /// stands in for a text row.
     public static let metaBottomInset: CGFloat = 14
     public static let metaSpacing: CGFloat = 14
+    /// How many lines of caption a card previews before it offers the rest.
+    ///
+    /// A card is a PREVIEW and the post is where the text is read, so the cap
+    /// is set where a long caption still reads as a paragraph rather than as a
+    /// wall — four lines. Only the card truncates: `PostCaptionRowView`, which
+    /// wears the same face on the post's own page, deliberately does not.
+    public static let captionLineLimit = 4
+    /// The gap between the caption and whatever follows it — the metric line,
+    /// the media preview, or the reveal affordance.
+    public static let captionFollowGap: CGFloat = 12
+
+    /// Fired when the viewer asks for the rest of a truncated caption. The HOST
+    /// owns the answer, not this cell: a cell is recycled and the expansion has
+    /// to survive that, so the set of expanded posts lives in
+    /// `CaptionExpansion` and comes back through `configure`.
+    public var onRevealFullCaption: (() -> Void)?
 
     private let card = UIView()
     private let captionLabel = UILabel()
+    /// The affordance under a truncated caption. Built always, shown only when
+    /// the caption actually overflows — decided in
+    /// `preferredLayoutAttributesFitting`, where the width is authoritative.
+    private let revealButton = UIButton(type: .system)
+    /// Caption + affordance as one column, so hiding the affordance closes its
+    /// gap and everything below it hangs off ONE anchor rather than two that
+    /// have to be swapped.
+    private var captionColumn: UIStackView!
+    private var isCaptionExpanded = false
     private let mediaView = UIImageView()
     private let playBadge = UIImageView(image: UIImage(systemName: "play.fill"))
     private static let metaFont = UIFont.preferredFont(forTextStyle: .footnote)
@@ -191,11 +304,32 @@ public final class PostGridListRowCell: UICollectionViewCell {
         captionLabel.font = .preferredFont(forTextStyle: .body)
         captionLabel.adjustsFontForContentSizeCategory = true
         captionLabel.textColor = .label
-        captionLabel.numberOfLines = 0
-        captionLabel.constrain(in: card) { parent in
-            captionLabel.topAnchor.constraint(equalTo: parent.topAnchor, constant: Self.captionTopInset)
-            captionLabel.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Self.captionInset)
-            captionLabel.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Self.captionInset)
+        captionLabel.numberOfLines = Self.captionLineLimit
+        // TAIL TRUNCATION IS THE POINT HERE, unlike every other caption in the
+        // app: the ellipsis is what says there is more, and the affordance
+        // below it says how to get it. A wrapping label with a line cap would
+        // simply cut mid-word with no sign that anything was withheld.
+        captionLabel.lineBreakMode = .byTruncatingTail
+
+        revealButton.setTitle("Show more", for: .normal)
+        revealButton.titleLabel?.font = .preferredFont(forTextStyle: .subheadline)
+        revealButton.titleLabel?.adjustsFontForContentSizeCategory = true
+        revealButton.contentHorizontalAlignment = .leading
+        // No collapse. The card opens the post on tap, so a second, opposite
+        // control inside it competes with the primary one — and a "Show less"
+        // at the foot of an expanded card is far from the finger that opened
+        // it. Expansion is one-way, which is also what every feed that does
+        // this does.
+        revealButton.addTarget(self, action: #selector(revealTapped), for: .touchUpInside)
+
+        captionColumn = UIStackView(arrangedSubviews: [captionLabel, revealButton])
+        captionColumn.axis = .vertical
+        captionColumn.alignment = .fill
+        captionColumn.spacing = 4
+        captionColumn.constrain(in: card) { parent in
+            captionColumn.topAnchor.constraint(equalTo: parent.topAnchor, constant: Self.captionTopInset)
+            captionColumn.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Self.captionInset)
+            captionColumn.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Self.captionInset)
         }
 
         mediaView.contentMode = .scaleAspectFill
@@ -233,10 +367,14 @@ public final class PostGridListRowCell: UICollectionViewCell {
             metaRow.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Self.captionInset)
             metaRow.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Self.metaBottomInset)
         }
-        metaFollowsCaption = metaRow.topAnchor.constraint(equalTo: captionLabel.bottomAnchor, constant: 12)
+        metaFollowsCaption = metaRow.topAnchor.constraint(
+            equalTo: captionColumn.bottomAnchor, constant: Self.captionFollowGap
+        )
         metaFollowsCaption.isActive = true
         mediaConstraints = [
-            mediaView.topAnchor.constraint(equalTo: captionLabel.bottomAnchor, constant: 12),
+            mediaView.topAnchor.constraint(
+                equalTo: captionColumn.bottomAnchor, constant: Self.captionFollowGap
+            ),
             mediaView.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
             mediaView.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
             mediaView.heightAnchor.constraint(equalToConstant: 180),
@@ -263,9 +401,34 @@ public final class PostGridListRowCell: UICollectionViewCell {
         loadTask?.cancel()
         loadTask = nil
         mediaView.image = nil
+        onRevealFullCaption = nil
+        // Back to truncated. A recycled row must not inherit the previous
+        // post's expansion — `configure` re-applies the host's answer for the
+        // post it is actually bound to.
+        applyCaptionExpanded(false)
     }
 
-    public func configure(with post: GalleryPost, imagePipeline: ImagePipeline) {
+    @objc private func revealTapped() {
+        applyCaptionExpanded(true)
+        onRevealFullCaption?()
+    }
+
+    /// Truncated or whole. The affordance disappears once expanded — there is
+    /// nothing left to reveal, and the expansion is one-way.
+    private func applyCaptionExpanded(_ expanded: Bool) {
+        isCaptionExpanded = expanded
+        captionLabel.numberOfLines = expanded ? 0 : Self.captionLineLimit
+        // Word wrapping once whole: with no cap left to hit, truncation can
+        // only swallow the end of the caption behind an ellipsis, which is the
+        // opposite of what "show more" just promised.
+        captionLabel.lineBreakMode = expanded ? .byWordWrapping : .byTruncatingTail
+        if expanded { revealButton.isHidden = true }
+    }
+
+    public func configure(
+        with post: GalleryPost, imagePipeline: ImagePipeline, captionExpanded: Bool = false
+    ) {
+        applyCaptionExpanded(captionExpanded)
         captionLabel.text = post.caption
         let hasMedia = post.kind != .text
         mediaView.isHidden = !hasMedia

@@ -60,6 +60,9 @@ final class ProfileGalleryGridView: UIView {
     private var statusTopConstraint: NSLayoutConstraint?
 
     private let imagePipeline: ImagePipeline
+    /// Which captions the viewer has opened out — owned here because the rows
+    /// that show them are recycled (see `CaptionExpansion`).
+    private let captionExpansion = CaptionExpansion()
     private let style: Style
     private var posts: [GalleryPost] = []
     /// Autoplay for this page's video media. Absent only where the host
@@ -366,7 +369,17 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
             let cell = collectionView.dequeueReusableCell(
                 withReuseIdentifier: PostGridListRowCell.reuseID, for: indexPath
             ) as! PostGridListRowCell
-            cell.configure(with: post, imagePipeline: imagePipeline)
+            cell.configure(
+                with: post,
+                imagePipeline: imagePipeline,
+                captionExpanded: captionExpansion.isExpanded(post.id)
+            )
+            // Captured by POST, never by index path: the row that asked can
+            // have moved by the time the answer is applied.
+            cell.onRevealFullCaption = { [weak self] in
+                guard let self else { return }
+                captionExpansion.expand(post.id, in: collectionView)
+            }
             // Autoplay is gated on the cover, so a cover arriving is the only
             // event that can re-open the gate for an item that came up
             // faceless while the page sat still.
