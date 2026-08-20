@@ -43,8 +43,18 @@ import UIKit
 /// starts, and that is a pure function of the frozen top inset (the feed's
 /// pushed-threshold doctrine).
 enum SnapCommentsLayout {
-    static let stripTopPadding: CGFloat = Spacing.sm
-    static let stripBottomPadding: CGFloat = Spacing.md
+    /// The gap between the screen chrome and the first row of the stream.
+    ///
+    /// It was two constants summing to 20pt, and both were named for a "strip"
+    /// — the floating caption card that used to sit in this band. That card is
+    /// gone; the caption scrolls as the list's first row and brings the gallery
+    /// card's own `captionTopInset` with it. So 20pt here was a third helping
+    /// of top padding on one edge, under the 16pt the row already has.
+    ///
+    /// What is left is what the name says: enough that a row gliding past the
+    /// blur band does not touch it, and nothing more. The row's own inset is
+    /// the breath the reader sees.
+    static let streamTopBreath: CGFloat = Spacing.xs
 
     // MARK: The caption bubble's interior
     //
@@ -140,7 +150,7 @@ enum SnapCommentsLayout {
     /// height was a measured function of the caption — a whole apparatus
     /// whose only purpose was holding a fixed rectangle open.)
     static func commentsTopInset(topInset: CGFloat) -> CGFloat {
-        topInset + stripTopPadding + stripBottomPadding
+        topInset + streamTopBreath
     }
 
     /// The caption bubble's corner radius: the app's MESSAGE-BUBBLE radius,

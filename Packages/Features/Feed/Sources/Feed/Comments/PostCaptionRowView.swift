@@ -75,7 +75,9 @@ final class PostCaptionRowView: UIView {
     /// card ends, and nothing the card has no counterpart for rides the flight.
     private let separator = UIView()
     private var separatorHeight: NSLayoutConstraint!
-    /// The breath between the card's bottom edge and the rule.
+    /// The breath either side of the rule — the same measure above and below,
+    /// because a divider that hugs one neighbour reads as belonging to it
+    /// rather than as separating the two.
     private static let separatorGap = Spacing.lg
 
     override init(frame: CGRect) {
@@ -134,7 +136,9 @@ final class PostCaptionRowView: UIView {
                 equalTo: metaRow.bottomAnchor,
                 constant: PostGridListRowCell.metaBottomInset + Self.separatorGap
             )
-            separator.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
+            separator.bottomAnchor.constraint(
+                equalTo: parent.bottomAnchor, constant: -Self.separatorGap
+            )
         }
         separatorHeight = separator.heightAnchor.constraint(equalToConstant: 1)
         separatorHeight.isActive = true
