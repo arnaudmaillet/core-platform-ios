@@ -472,6 +472,8 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     /// Source chrome that comes back with the return (the app's tab bar), so
     /// it is revealed by the hand rather than switched on after the landing.
     private weak var returningChrome: UIView?
+    /// Held so `interruptibleAnimator` hands UIKit the same object every time.
+    private var staged: UIViewPropertyAnimator?
 
     init(geometry: RevealGeometry, returningChrome: UIView?) {
         self.geometry = geometry
@@ -482,14 +484,66 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         ZoomFlight.springDuration
     }
 
+    /// ## The close springs, and `scrubsLinearly` is why it can
+    ///
+    /// This leg is the one a finger scrubs, and for a long time it was linear
+    /// because `UIPercentDrivenInteractiveTransition` tracks 1:1 only against
+    /// a linear curve. That is true — but it constrains the SCRUB, not the
+    /// release, and the two were being conflated. The open has always been a
+    /// spring; the close ran at constant velocity and stopped dead, and that
+    /// asymmetry is what reads as stiff.
+    ///
+    /// A `UIViewPropertyAnimator` splits them. While the driver scrubs
+    /// `fractionComplete`, `scrubsLinearly` maps progress linearly, so the page
+    /// still tracks the hand exactly. On `finish()` the driver continues the
+    /// animation and the animator reverts to its OWN timing — the spring
+    /// below. One object, both behaviours, no branch on `isInteractive`.
+    ///
+    /// The chevron pop starts the same animator with no driver attached, so it
+    /// wears the spring over its whole length.
+    func interruptibleAnimator(
+        using context: any UIViewControllerContextTransitioning
+    ) -> any UIViewImplicitlyAnimating {
+        // UIKit asks more than once per transition and expects the SAME
+        // object — a fresh one each time would stage the flight twice.
+        if let staged { return staged }
+        let animator = makeAnimator(using: context)
+        staged = animator
+        return animator
+    }
+
     func animateTransition(using context: any UIViewControllerContextTransitioning) {
+        interruptibleAnimator(using: context).startAnimation()
+    }
+
+    func animationEnded(_ transitionCompleted: Bool) {
+        staged = nil
+    }
+
+    private func makeAnimator(
+        using context: any UIViewControllerContextTransitioning
+    ) -> UIViewPropertyAnimator {
+        // The open's spring, worn by the close. Same damping, so both legs
+        // settle alike; the overshoot at 0.82 is a couple of points on a card
+        // this size, which is the life and not a wobble.
+        let animator = UIViewPropertyAnimator(
+            duration: transitionDuration(using: context),
+            timingParameters: UISpringTimingParameters(
+                dampingRatio: ZoomFlight.springDamping
+            )
+        )
+        // Defaulted true, but the whole design above rests on it — said out
+        // loud so nobody "tidies" it away.
+        animator.scrubsLinearly = true
+
         let container = context.containerView
         guard let fromView = context.view(forKey: .from),
               let toVC = context.viewController(forKey: .to),
               let toView = context.view(forKey: .to)
         else {
-            context.completeTransition(false)
-            return
+            animator.addAnimations {}
+            animator.addCompletion { _ in context.completeTransition(false) }
+            return animator
         }
         let pageFrame = fromView.frame
         toView.frame = context.finalFrame(for: toVC)
@@ -538,15 +592,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let chromeAlpha: CGFloat = 1
         chrome?.alpha = 0
 
-        // LINEAR, and that is not a style choice: this leg is what a finger
-        // scrubs, and `UIPercentDrivenInteractiveTransition` tracks 1:1 only
-        // against a linear curve. The release spring is the driver's own
-        // completion curve, not this one's.
-        UIView.animate(
-            withDuration: transitionDuration(using: context),
-            delay: 0,
-            options: [.curveLinear]
-        ) {
+        animator.addAnimations {
             RevealStage.apply(closed, mask: mask, page: fromView)
             // Back into the card's tone as the mask closes onto it, so the
             // last frame of the close and the row underneath are one colour.
@@ -557,7 +603,8 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             dim.alpha = 0
             presenting.transform = .identity
             chrome?.alpha = chromeAlpha
-        } completion: { _ in
+        }
+        animator.addCompletion { _ in
             let cancelled = context.transitionWasCancelled
             RevealStage.unwrap(fromView, from: host, to: container, frame: pageFrame)
             dim.removeFromSuperview()
@@ -576,5 +623,6 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             self.geometry.dismissalDidEnd(!cancelled)
             context.completeTransition(!cancelled)
         }
+        return animator
     }
 }
