@@ -603,11 +603,10 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         return row.convert(row.bounds, to: space)
     }
 
-    /// Where the row's caption ends when it is TRUNCATED, in the row's own
-    /// space — the reveal's cut line. Nil when the row shows its whole caption,
-    /// or is not realized.
+    /// Where the page stops matching the row, in the row's own space — the
+    /// reveal's cut line. Nil when the row is not realized.
     func textRowCaptionEnd(for postID: PostID) -> CGFloat? {
-        (cell(for: postID) as? PostGridListRowCell)?.truncatedCaptionEnd
+        (cell(for: postID) as? PostGridListRowCell)?.revealCut
     }
 
     /// Brings the landed row's own furniture in gently — see

@@ -18,35 +18,61 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// approximation.
     public static let mediaCornerRadius: CGFloat = 12
 
-    /// Where this row's caption ENDS in the row's own space — but only while
-    /// the caption is truncated. `nil` when the whole thing is shown.
+    /// Where the page STOPS MATCHING this card, in the card's own space — the
+    /// reveal's cut line. Below it the destination is veiled for the length of
+    /// a flight, so the window shows no more of itself than the card does.
     ///
-    /// It is the reveal's cut line: below it a collapsed card has nothing but
-    /// its metric line, while the page it opens into carries the rest of the
-    /// caption, and something has to say where that difference starts.
-    /// Answering `nil` for an untruncated row is what keeps every ordinary
-    /// post's transition untouched.
-    public var truncatedCaptionEnd: CGFloat? {
-        guard showMoreRange != nil, bounds.width > 0 else { return nil }
-        // MEASURED, never read off the label's frame — and that distinction is
-        // the whole of this property.
-        //
-        // A self-sizing cell gets its height from the collection view's
-        // attributes, but its subtree keeps the geometry of whatever pass last
-        // ran over it. Arm a reveal before that pass and the numbers disagree
-        // in a way that looks like nothing is wrong: measured on an iPhone SE,
-        // `bounds` was a correct 343x145 while the card underneath was still
-        // 343x88 and the label inside it 311x30 — for text that needs 86.5.
-        // `setNeedsLayout` + `layoutIfNeeded` did NOT reconcile them.
-        //
-        // The veil built on 46pt instead of 103 cut the page three lines too
-        // high, so the flight carried a greyed slab where the card's own four
-        // lines belonged.
-        //
-        // So the two inputs here are the ones that are always right: `bounds`,
-        // which comes from the layout attributes, and the label's own opinion
-        // of its text. `ceil` for the reason `preferredLayoutAttributesFitting`
-        // ceils — half a point short is a clipped descender.
+    /// ## Two answers, one rule
+    ///
+    /// The rule is not about truncation, though it was written as if it were.
+    /// A card shows a caption and a metric line; the page shows the same
+    /// caption, the same metric line, and then its comments and its composer.
+    /// The cut is wherever the two part company:
+    ///
+    /// * **Truncated caption** — they part at the card's fourth line, because
+    ///   the page has a fifth. Measured on an iPhone SE, that is 103pt into a
+    ///   145pt card, and 154pt of the page below it has no counterpart at all.
+    /// * **Whole caption** — the caption matches AND the metric line matches
+    ///   (the page's caption row borrows this cell's own constants, so the two
+    ///   are the same layout at the same offsets — measured, a 101pt row
+    ///   against a 101pt anchor). They part below the card's own bottom, where
+    ///   the page keeps going into its comments.
+    ///
+    /// Answering `nil` for the second case is what this used to do, and it left
+    /// a short post's comments on screen for the whole flight only to have them
+    /// vanish in the final frame. There is no post for which the page and the
+    /// card agree all the way down: the page always has a comment stream.
+    ///
+    /// MEASURED, never read off a subview's frame — see the note in
+    /// `captionEnd` below, and `CaptionTruncationTests`.
+    public var revealCut: CGFloat? {
+        guard bounds.width > 0, bounds.height > 0 else { return nil }
+        // The whole caption is shown: the card ends where its own bounds do,
+        // and everything past that on the page is the stream.
+        guard showMoreRange != nil else { return bounds.height }
+        return captionEnd
+    }
+
+    /// The caption's own bottom in the card's space.
+    ///
+    /// MEASURED, never read off the label's frame — and that distinction is the
+    /// whole of this property.
+    ///
+    /// A self-sizing cell gets its height from the collection view's
+    /// attributes, but its subtree keeps the geometry of whatever pass last ran
+    /// over it. Arm a reveal in that window and they disagree in a way that
+    /// looks like nothing is wrong: measured on an iPhone SE, `bounds` was a
+    /// correct 343x145 while the card underneath was still 343x88 and the label
+    /// inside it 311x30 — for text that measures 86.5. `setNeedsLayout` +
+    /// `layoutIfNeeded` did NOT reconcile them.
+    ///
+    /// The veil built on 46pt instead of 103 cut the page three lines too high,
+    /// so the flight carried a greyed slab where the card's own four lines
+    /// belonged. So the two inputs here are the ones that are always right:
+    /// `bounds`, which comes from the attributes, and the label's own opinion
+    /// of its text. `ceil` for the reason `preferredLayoutAttributesFitting`
+    /// ceils — half a point short is a clipped descender.
+    private var captionEnd: CGFloat? {
         let available = bounds.width - Self.captionInset * 2
         guard available > 0 else { return nil }
         let text = captionLabel.sizeThatFits(
@@ -392,6 +418,14 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// for the flight, or the veil hiding it so the card's can arrive into
     /// empty space — and both are structural rather than a fade.
     public func fadeInRevealedFurniture(duration: TimeInterval = 0.22) {
+        // ONLY when the caption was truncated, and the symmetry with
+        // `revealCut` is the reason. A truncated card's metric line arrives
+        // into a band the page was filling with words, so it has to be brought
+        // in rather than switched on. A whole caption's does not: the page
+        // carries the same metric line at the same offset, unveiled, for the
+        // entire flight — fading it in here would blink something that was
+        // already on screen.
+        guard showMoreRange != nil else { return }
         metaRow.alpha = 0
         UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseOut]) {
             self.metaRow.alpha = 1

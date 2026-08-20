@@ -1097,11 +1097,10 @@ final class ForYouGridPage: UIView {
         row?.fadeInRevealedFurniture()
     }
 
-    /// Where the row's caption ends when it is TRUNCATED, in the row's own
-    /// space — the reveal's cut line. `nil` when the row shows its whole
-    /// caption, or is not realized.
+    /// Where the page stops matching the row, in the row's own space — the
+    /// reveal's cut line. `nil` when the row is not realized.
     func textRowCaptionEnd(for postID: PostID) -> CGFloat? {
-        (cell(for: postID) as? PostGridListRowCell)?.truncatedCaptionEnd
+        (cell(for: postID) as? PostGridListRowCell)?.revealCut
     }
 
     /// Whether a realized cell for the post is currently within the viewport —

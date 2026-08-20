@@ -122,25 +122,38 @@ struct CaptionTruncationTests {
     /// failed CI before.
     @Test func theCutLineIgnoresAStaleSubviewFrame() throws {
         let cell = Self.sized(Self.long)
-        let measured = try #require(cell.truncatedCaptionEnd)
+        let measured = try #require(cell.revealCut)
         let label = try #require(Self.captionLabel(in: cell))
         label.frame = CGRect(x: 16, y: 16, width: 311, height: 30)
-        #expect(abs(try #require(cell.truncatedCaptionEnd) - measured) < 1)
+        #expect(abs(try #require(cell.revealCut) - measured) < 1)
     }
 
     /// And it lands under the FOURTH line, not some other count — the number
     /// the veil hangs on.
     @Test func theCutLineSitsUnderTheLastLineTheCardShows() throws {
-        let end = try #require(Self.sized(Self.long).truncatedCaptionEnd)
+        let end = try #require(Self.sized(Self.long).revealCut)
         let lineHeight = UIFont.preferredFont(forTextStyle: .body).lineHeight
         let lines = (end - PostGridListRowCell.captionTopInset) / lineHeight
         #expect(abs(lines - CGFloat(PostGridListRowCell.captionLineLimit)) < 0.5)
     }
 
-    /// An untruncated caption still answers nil — a card showing all of its
-    /// text has no difference for the veil to hide.
-    @Test func aCaptionThatFitsHasNoCutLine() {
-        #expect(Self.sized(Self.short).truncatedCaptionEnd == nil)
+    /// An untruncated caption cuts BELOW the card, not nowhere.
+    ///
+    /// It used to answer nil, on the reasoning that a card showing all of its
+    /// text has no difference for the veil to hide. The caption has none — but
+    /// the page does not stop at the caption. It carries a comment stream and a
+    /// composer that the card has no counterpart for, and answering nil left
+    /// those on screen for a whole flight only to have them vanish in the final
+    /// frame. There is no post for which the two agree all the way down.
+    @Test func aCaptionThatFitsCutsBelowTheCard() throws {
+        let cell = Self.sized(Self.short)
+        let cut = try #require(cell.revealCut)
+        #expect(cut == cell.bounds.height)
+        // And it is BELOW the metric line, not above it: the page carries the
+        // same one at the same offset, so veiling it would hide something the
+        // card is showing.
+        let lineHeight = UIFont.preferredFont(forTextStyle: .body).lineHeight
+        #expect(cut > PostGridListRowCell.captionTopInset + lineHeight)
     }
 
     @Test func aCaptionThatFitsIsOfferedNothing() throws {
