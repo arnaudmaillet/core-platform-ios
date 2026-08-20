@@ -343,6 +343,38 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         )
     }
 
+    /// Brings in the closing metric line, which the page never had, instead of
+    /// letting it appear in a single frame.
+    ///
+    /// It runs at the LANDING — once the page is gone and the card is alone —
+    /// and not during the flight, because the page is veiled over exactly that
+    /// band: anything faded underneath an opaque cover arrives at full opacity
+    /// anyway.
+    ///
+    /// ## Why the caption is NOT faded with it
+    ///
+    /// The card and the page differ on one more thing: the tail of the last
+    /// line, where the affordance displaced the words the page still shows —
+    /// "…a migration that… Show more" against "…a migration that had been".
+    /// Cross-fading that was tried twice, once by dissolving the whole page
+    /// against the card and once by dissolving this label against a copy of
+    /// the page's version. Both showed the same artifact, because it is not a
+    /// property of the mechanism: blending two DIFFERENT runs of text draws
+    /// both of them, and the result reads as "that.had beenmore" rather than
+    /// as a substitution.
+    ///
+    /// A fade only works against nothing, which is why the metric line takes
+    /// one and the caption does not. Removing that last pop needs the two
+    /// sides to stop differing — either the page truncating its own line four
+    /// for the flight, or the veil hiding it so the card's can arrive into
+    /// empty space — and both are structural rather than a fade.
+    public func fadeInRevealedFurniture(duration: TimeInterval = 0.22) {
+        metaRow.alpha = 0
+        UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseOut]) {
+            self.metaRow.alpha = 1
+        }
+    }
+
     #if DEBUG
     /// Presses "Show more". Returns false when there was nothing to reveal,
     /// which is the answer a harness must not mistake for success.
@@ -417,6 +449,9 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// while truncated, so the label's own text is not a copy of this and
     /// cannot be used in its place.
     private var fullCaption = ""
+    /// The closing metric line, held so a landing can bring it in gently —
+    /// see `fadeInRevealedFurniture`.
+    private var metaRow: UIStackView!
     /// Where "Show more" sits inside the label's current attributed text, or
     /// nil when the caption fits and there is no affordance at all.
     ///
@@ -505,6 +540,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // Views lead, reactions and comments follow — the same reach-first
         // order as the media tiles' counter pair.
         let metaRow = UIStackView(arrangedSubviews: [views, reactions, comments, spacer, ageLabel])
+        self.metaRow = metaRow
         metaRow.axis = .horizontal
         metaRow.alignment = .center
         metaRow.spacing = Self.metaSpacing
@@ -554,6 +590,9 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         isCaptionExpanded = false
         captionLabel.numberOfLines = Self.captionLineLimit
         showMoreRange = nil
+        // A landing's fade is per-flight state and must not ride a recycled
+        // cell to whatever post it is bound to next.
+        metaRow.alpha = 1
     }
 
     private func revealTapped() {

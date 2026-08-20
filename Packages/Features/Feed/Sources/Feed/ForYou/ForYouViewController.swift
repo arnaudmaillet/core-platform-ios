@@ -855,6 +855,22 @@ final class ForYouViewController: UIViewController {
             },
             dismissalDidEnd: { [weak self, weak page] committed in
                 page?.endHeroFreeze()
+                // The card is alone again: bring in the two things it has and
+                // the page never did — its metric line and its affordance —
+                // rather than letting them arrive in one frame. Committed pops
+                // only; a cancelled swipe leaves the page up, and the card
+                // stays covered.
+                // DEFERRED BY A TURN, and it has to be: this fires from the
+                // pop animator's completion, which is immediately followed by
+                // `completeTransition` — and that re-parents the grid out of
+                // the transition container, which cancels any animation just
+                // started on its cells. Measured: the dissolve simply did not
+                // appear, the card arriving whole in a single frame exactly as
+                // before. Run after the turn, the hierarchy is settled and the
+                // animation survives.
+                if committed {
+                    DispatchQueue.main.async { page?.fadeInRevealedFurniture(for: postID) }
+                }
                 // A cancelled swipe leaves the post on screen, so the bar
                 // restored at grab-begin has to go back down — unanimated and
                 // behind the page that sprang back, where nothing renders the

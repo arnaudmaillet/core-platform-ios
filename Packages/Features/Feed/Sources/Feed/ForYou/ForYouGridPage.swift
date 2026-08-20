@@ -1082,6 +1082,21 @@ final class ForYouGridPage: UIView {
     }
     #endif
 
+    /// Brings the landed row's own furniture in gently — see
+    /// `PostGridListRowCell.fadeInRevealedFurniture`. A no-op for a row that
+    /// is not realized, which is the honest answer: nothing is on screen to
+    /// fade.
+    func fadeInRevealedFurniture(for postID: PostID) {
+        let row = cell(for: postID) as? PostGridListRowCell
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-text-reveal-log") {
+            print("[text-reveal] landing fade: row=\(row == nil ? "MISSING" : "found")"
+                  + " window=\(row?.window == nil ? "no" : "yes")")
+        }
+        #endif
+        row?.fadeInRevealedFurniture()
+    }
+
     /// Where the row's caption ends when it is TRUNCATED, in the row's own
     /// space — the reveal's cut line. `nil` when the row shows its whole
     /// caption, or is not realized.
