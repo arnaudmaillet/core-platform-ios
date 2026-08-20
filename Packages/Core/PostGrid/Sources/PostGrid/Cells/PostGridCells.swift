@@ -18,6 +18,20 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// approximation.
     public static let mediaCornerRadius: CGFloat = 12
 
+    /// Where this row's caption ENDS in the row's own space — but only while
+    /// the caption is truncated. `nil` when the whole thing is shown.
+    ///
+    /// It is the reveal's cut line: below it a collapsed card has nothing but
+    /// its metric line, while the page it opens into carries the rest of the
+    /// caption, and something has to say where that difference starts.
+    /// Answering `nil` for an untruncated row is what keeps every ordinary
+    /// post's transition untouched.
+    public var truncatedCaptionEnd: CGFloat? {
+        guard showMoreRange != nil else { return nil }
+        layoutIfNeeded()
+        return captionLabel.frame.maxY
+    }
+
     /// The preview's rect in this cell's own space, or nil for a text-only row
     /// (which has no media to fly). A hero source reads this to decide whether
     /// a row can host a flight at all.

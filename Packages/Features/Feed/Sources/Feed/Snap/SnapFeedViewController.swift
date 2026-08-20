@@ -133,6 +133,9 @@ final class SnapFeedViewController: UIViewController {
     /// scroll position, and reply drafts must never live in a recycled
     /// cell); the cell only hosts its view while engaged.
     private var commentsContentVC: UIViewController?
+    /// Transition-scoped: covers what a COLLAPSED card has no room for, for
+    /// the length of a reveal. See `installRevealVeil`.
+    private var revealVeil: RevealVeilView?
     /// Whether the active engagement is a text page's RESTING interface —
     /// PRE-RENDERED on visibility (as the cell scrolls in, fully formed,
     /// no reveal spring), then LOCKED at settle. The two phases are split
@@ -2486,6 +2489,33 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// anchor.
     public func revealCaptionAnchor(in space: UICoordinateSpace) -> CGRect? {
         (commentsContentVC as? PostDetailViewController)?.revealCaptionAnchor(in: space)
+    }
+
+    /// **PROTOTYPE** (`-text-reveal`). Covers everything below `cut` for the
+    /// length of a reveal, so a page opened from a COLLAPSED card shows no
+    /// more of itself than the card did — see `RevealVeilView`.
+    ///
+    /// Hosted on this screen's own view rather than on the page cell, because
+    /// it has to cover the comment stream and the composer as well, and those
+    /// are not the cell's. `nil` takes it away.
+    public func installRevealVeil(below cut: CGFloat?, tint: UIColor?) {
+        revealVeil?.removeFromSuperview()
+        revealVeil = nil
+        guard let cut, let tint, cut < view.bounds.height else { return }
+        let veil = RevealVeilView(tint: tint)
+        veil.frame = CGRect(
+            x: 0, y: cut, width: view.bounds.width, height: view.bounds.height - cut
+        )
+        veil.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.addSubview(veil)
+        revealVeil = veil
+    }
+
+    /// Driven inside the flight's animation block, so the page unfolds as the
+    /// window opens and folds back as it closes — and scrubs with the finger
+    /// on a dismissal.
+    public func setRevealVeilOpacity(_ alpha: CGFloat) {
+        revealVeil?.alpha = alpha
     }
 
     /// **PROTOTYPE** (`-text-reveal`). Lends the active page a ground for the

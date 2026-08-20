@@ -50,6 +50,29 @@ public struct RevealGeometry {
     /// `nil` leaves the destination's ground alone, which is the behaviour for
     /// a source that has no fill of its own to lend.
     public let sourceFill: UIColor?
+    /// How far below the SOURCE's top its own caption ends, when that caption
+    /// is truncated — `nil` when the source shows the whole thing.
+    ///
+    /// This is the number that makes a collapsed card openable without a cut.
+    /// Measured on an iPhone SE: a card whose caption is capped at four lines
+    /// is 145pt tall, while the page's caption row for the same post is 299 —
+    /// so 154pt of the destination has no counterpart in the source at all,
+    /// and the mask slices straight through it. Worse than the slicing, the
+    /// source spends its last ~44pt on its metric line while the destination
+    /// has text there, so the final frame swaps words for furniture.
+    ///
+    /// Below this offset the destination is VEILED for the length of the
+    /// flight, so the window shows what the card shows — the same four lines —
+    /// and the card's own closing line arrives into empty space rather than
+    /// over a sentence.
+    public let sourceCaptionEnd: CGFloat?
+    /// Puts the veil on the destination at `cut` (in the destination's own
+    /// coordinates), or takes it away with `nil`.
+    public let installDestinationVeil: (CGFloat?, UIColor?) -> Void
+    /// The veil's opacity. Driven inside the flight's animation block, so it
+    /// lifts as the page opens and returns as it closes — and scrubs with a
+    /// finger on the dismissal.
+    public let setDestinationVeilOpacity: (CGFloat) -> Void
     /// Lends the destination a ground, or hands its own back with `nil`.
     ///
     /// Driven rather than composited, and that is deliberate: an overlay in
@@ -100,6 +123,9 @@ public struct RevealGeometry {
         sourceFrame: @escaping (UICoordinateSpace) -> CGRect?,
         sourceCornerRadius: CGFloat,
         sourceFill: UIColor? = nil,
+        sourceCaptionEnd: CGFloat? = nil,
+        installDestinationVeil: @escaping (CGFloat?, UIColor?) -> Void = { _, _ in },
+        setDestinationVeilOpacity: @escaping (CGFloat) -> Void = { _ in },
         setDestinationGround: @escaping (UIColor?) -> Void = { _ in },
         anchorFrame: @escaping (UICoordinateSpace) -> CGRect? = { _ in nil },
         depthView: @escaping () -> UIView? = { nil },
@@ -111,6 +137,9 @@ public struct RevealGeometry {
         self.sourceFrame = sourceFrame
         self.sourceCornerRadius = sourceCornerRadius
         self.sourceFill = sourceFill
+        self.sourceCaptionEnd = sourceCaptionEnd
+        self.installDestinationVeil = installDestinationVeil
+        self.setDestinationVeilOpacity = setDestinationVeilOpacity
         self.setDestinationGround = setDestinationGround
         self.anchorFrame = anchorFrame
         self.depthView = depthView
@@ -265,6 +294,20 @@ private enum RevealStage {
     #endif
 }
 
+/// Places the veil, given the anchor the flight measured.
+///
+/// Nothing to do when the source shows its whole caption (`sourceCaptionEnd`
+/// nil) or when there is no anchor to measure from — a plain reveal has no
+/// overflow to hide, and veiling one would only dim a page that matches.
+@MainActor
+private func installVeil(geometry: RevealGeometry, anchor: CGRect?) {
+    guard let end = geometry.sourceCaptionEnd, let anchor else {
+        geometry.installDestinationVeil(nil, nil)
+        return
+    }
+    geometry.installDestinationVeil(anchor.minY + end, geometry.sourceFill)
+}
+
 // MARK: - Present
 
 /// The window opens. Non-interactive, and on the hero's own spring, so a text
@@ -338,6 +381,11 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
         // animation block so frame 0 is already the card's tone; the block
         // below hands the ground back, which cross-fades it.
         geometry.setDestinationGround(geometry.sourceFill)
+        // …and shows no more of itself than the card did. The cut is measured
+        // from the SOURCE's top, and the two tops are aligned by `closed`, so
+        // it lands in the destination at the anchor's top plus that offset.
+        installVeil(geometry: geometry, anchor: anchor)
+        geometry.setDestinationVeilOpacity(1)
 
         #if DEBUG
         RevealStage.log("present", "source=\(NSCoder.string(for: sourceRect))"
@@ -385,6 +433,7 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             // On the SAME spring as the mask, so the card does not become the
             // page a beat before or after it becomes the screen.
             self.geometry.setDestinationGround(nil)
+            self.geometry.setDestinationVeilOpacity(0)
             presenting?.transform = CGAffineTransform(
                 scaleX: ZoomFlight.presenterDepthScale, y: ZoomFlight.presenterDepthScale
             )
@@ -393,6 +442,7 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             // Idempotent close-out: the ground is already back by now, this
             // only guarantees it if the animation was interrupted.
             self.geometry.setDestinationGround(nil)
+            self.geometry.installDestinationVeil(nil, nil)
             RevealStage.unwrap(toView, from: host, to: container, frame: pageFrame)
             dim.removeFromSuperview()
             // Cleared under the opaque page, where the reset cannot be seen.
@@ -469,6 +519,8 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         )
         RevealStage.apply(open, mask: mask, page: fromView)
         geometry.setDestinationGround(nil)
+        installVeil(geometry: geometry, anchor: anchor)
+        geometry.setDestinationVeilOpacity(0)
 
         #if DEBUG
         RevealStage.log("pop", "landing=\(NSCoder.string(for: sourceRect))"
@@ -499,6 +551,9 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             // Back into the card's tone as the mask closes onto it, so the
             // last frame of the close and the row underneath are one colour.
             self.geometry.setDestinationGround(self.geometry.sourceFill)
+            // …and back to showing only what the card shows, so the mask never
+            // slices a sentence on its way home.
+            self.geometry.setDestinationVeilOpacity(1)
             dim.alpha = 0
             presenting.transform = .identity
             chrome?.alpha = chromeAlpha
@@ -516,6 +571,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             // ground again; a committed one is leaving, and the retained feed
             // must not carry a borrowed colour into its next push.
             self.geometry.setDestinationGround(nil)
+            self.geometry.installDestinationVeil(nil, nil)
             chrome?.alpha = cancelled ? 0 : chromeAlpha
             self.geometry.dismissalDidEnd(!cancelled)
             context.completeTransition(!cancelled)

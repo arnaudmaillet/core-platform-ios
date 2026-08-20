@@ -812,6 +812,17 @@ final class ForYouViewController: UIViewController {
             // reason the radius and the insets are: three copies of one colour
             // is how two surfaces stop matching.
             sourceFill: PostGridListRowCell.cardFillColor,
+            // Read ONCE, at staging, and deliberately not re-asked at
+            // dismissal: `applyPendingReveal` may have scrolled the row, and a
+            // row that scrolled out is not realized to answer. The cut is a
+            // property of the caption, not of where the row happens to be.
+            sourceCaptionEnd: page.textRowCaptionEnd(for: postID),
+            installDestinationVeil: { [weak feed] cut, tint in
+                (feed as? SnapFeedViewController)?.installRevealVeil(below: cut, tint: tint)
+            },
+            setDestinationVeilOpacity: { [weak feed] alpha in
+                (feed as? SnapFeedViewController)?.setRevealVeilOpacity(alpha)
+            },
             setDestinationGround: { [weak feed] color in
                 (feed as? SnapFeedViewController)?.setRevealGroundTint(color)
             },
