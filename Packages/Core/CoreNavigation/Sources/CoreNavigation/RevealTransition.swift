@@ -63,9 +63,6 @@ public struct RevealGeometry {
     /// Matched mode aligns this with the source rect at t=0; `nil` (or plain
     /// mode) leaves the page unmoved and the window simply opens over it.
     public let anchorFrame: (UICoordinateSpace) -> CGRect?
-    /// How far below the window's top edge the anchor is aimed — the source
-    /// row's own caption inset, so the two captions start on the same line.
-    public let anchorTopInset: CGFloat
     /// The view the depth cue recedes: the content, not the chrome around it.
     /// Same rule (and same reason) as `ZoomTransitionSource.zoomPresenterDepthView`.
     public let depthView: () -> UIView?
@@ -105,7 +102,6 @@ public struct RevealGeometry {
         sourceFill: UIColor? = nil,
         setDestinationGround: @escaping (UIColor?) -> Void = { _ in },
         anchorFrame: @escaping (UICoordinateSpace) -> CGRect? = { _ in nil },
-        anchorTopInset: CGFloat = 0,
         depthView: @escaping () -> UIView? = { nil },
         presentationDidEnd: @escaping (Bool) -> Void = { _ in },
         willStageDismissal: @escaping () -> Void = {},
@@ -117,7 +113,6 @@ public struct RevealGeometry {
         self.sourceFill = sourceFill
         self.setDestinationGround = setDestinationGround
         self.anchorFrame = anchorFrame
-        self.anchorTopInset = anchorTopInset
         self.depthView = depthView
         self.presentationDidEnd = presentationDidEnd
         self.willStageDismissal = willStageDismissal
@@ -182,16 +177,28 @@ private enum RevealStage {
         sourceRect: CGRect,
         radius: CGFloat,
         anchor: CGRect?,
-        anchorTopInset: CGFloat,
         matchesAnchor: Bool
     ) -> Pose {
-        // Matched: the page is pushed down so its caption lands
-        // `anchorTopInset` below the mask's top edge — where the row draws its
-        // own caption, so the two occupy the same line at the handshake.
+        // Matched: the page is pushed down so the caption row's CONTAINER
+        // starts where the source row's does. Top to top, with nothing added —
+        // the two are the same layout, so their captions land on the same line
+        // by construction. `PostCaptionRowView` insets its caption by
+        // `PostGridListRowCell.captionTopInset` because that is what the card
+        // does, and a transition that re-applied the same inset on top would
+        // be counting it twice.
+        //
+        // It did. Measured on the user's iPhone SE recording: the close
+        // settled, held for two frames, then the row jumped — a single
+        // frame-to-frame delta larger than any frame of the animation itself,
+        // showing the caption doubled 33px apart. 33px at 2x is 16pt, which is
+        // exactly `captionTopInset`. The parameter that carried it is gone
+        // rather than set to zero, so nothing can re-introduce the double
+        // count.
+        //
         // Plain: no travel at all, and the mask is a hole opening onto a page
         // that never moves.
         let translation: CGFloat = if matchesAnchor, let anchor {
-            sourceRect.minY + anchorTopInset - anchor.minY
+            sourceRect.minY - anchor.minY
         } else {
             0
         }
@@ -323,7 +330,6 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             sourceRect: sourceRect,
             radius: geometry.sourceCornerRadius,
             anchor: anchor,
-            anchorTopInset: geometry.anchorTopInset,
             matchesAnchor: geometry.matchesAnchor
         )
         let open = RevealStage.open(container: container)
@@ -459,7 +465,6 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             sourceRect: sourceRect,
             radius: geometry.sourceCornerRadius,
             anchor: anchor,
-            anchorTopInset: geometry.anchorTopInset,
             matchesAnchor: geometry.matchesAnchor
         )
         RevealStage.apply(open, mask: mask, page: fromView)

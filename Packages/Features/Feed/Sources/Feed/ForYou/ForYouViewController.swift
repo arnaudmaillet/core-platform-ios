@@ -822,7 +822,6 @@ final class ForYouViewController: UIViewController {
             anchorFrame: { [weak feed] space in
                 (feed as? SnapFeedViewController)?.revealCaptionAnchor(in: space)
             },
-            anchorTopInset: PostGridListRowCell.captionTopInset,
             // The gallery recedes; the tray and the title stay grounded — the
             // same view the hero's depth cue rides, for the same reason.
             depthView: { [weak self] in self?.pager },
