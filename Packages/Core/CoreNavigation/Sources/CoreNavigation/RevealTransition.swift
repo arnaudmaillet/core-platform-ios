@@ -181,13 +181,21 @@ public struct RevealGeometry {
 /// * the page's travel is a `transform`, which moves pixels and leaves bounds
 ///   — and therefore safe area, and therefore the caption — alone.
 @MainActor
-private enum RevealStage {
+enum RevealStage {
     /// `mask` is in container coordinates; `pageTranslation` is the page's
-    /// vertical transform.
+    /// transform.
+    ///
+    /// A POINT, not a height, even though both poses below translate purely
+    /// vertically. A grab moves the window in two dimensions, and the page has
+    /// to travel with it or the window slides ACROSS the text like a hole
+    /// panning over a page — the words clipped at one edge and appearing at the
+    /// other, which is nothing like carrying a card. Keeping the horizontal
+    /// component here means the grab poses the page through the same function
+    /// the two legs do, rather than reaching past it.
     struct Pose {
         let mask: CGRect
         let maskRadius: CGFloat
-        let pageTranslation: CGFloat
+        let pageTranslation: CGPoint
     }
 
     /// The whole page, unmasked and untranslated — the landed pose, identical
@@ -196,7 +204,7 @@ private enum RevealStage {
         Pose(
             mask: container.bounds,
             maskRadius: ScreenGeometry.cornerRadius(behind: container),
-            pageTranslation: 0
+            pageTranslation: .zero
         )
     }
 
@@ -231,7 +239,49 @@ private enum RevealStage {
         } else {
             0
         }
-        return Pose(mask: sourceRect, maskRadius: radius, pageTranslation: translation)
+        return Pose(
+            mask: sourceRect, maskRadius: radius,
+            pageTranslation: CGPoint(x: 0, y: translation)
+        )
+    }
+
+    /// How far the page slides so its caption stays REGISTERED with a window
+    /// that a finger is moving.
+    ///
+    /// The animated legs get this for free: their window travels toward the
+    /// landing while the page's transform interpolates alongside, so the gap
+    /// between the window's edges and the caption's shrinks from its resting
+    /// value to nothing. A GRAB breaks that, because the window's position is
+    /// the finger's and no longer a function of progress. Interpolate the
+    /// transform on its own and the window slides ACROSS the page — measured on
+    /// a scripted grab, a window dragged 134pt right showed "…ping the new
+    /// build tonight" with its first word cut off at the left edge: a hole
+    /// panning over text, not a card being carried.
+    ///
+    /// So the law is written down rather than left to emerge. The gap between
+    /// the window's edge and the caption's is the RESTING gap, scaled by how
+    /// far from home the grab is:
+    ///
+    ///     captionEdge - windowEdge = (1 - progress) * anchorEdge
+    ///
+    /// and since `captionEdge = anchorEdge + translation`, that is the line
+    /// below. It reduces to both poses exactly — `.zero` at rest, and
+    /// `closed`'s own translation once the window is home — so no two numbers
+    /// have to be kept in agreement by hand. `RevealRegistrationTests` pins
+    /// both ends.
+    ///
+    /// Both axes, because a grab moves in both. The horizontal component is
+    /// zero at each END — the row and the page carry their captions at the same
+    /// inset, which is why the animated legs never needed it — and non-zero for
+    /// every frame in between, which is the only interval a grab lives in.
+    static func pageTranslation(
+        carrying window: CGRect, anchor: CGRect?, progress: CGFloat
+    ) -> CGPoint {
+        guard let anchor else { return .zero }
+        return CGPoint(
+            x: window.minX - progress * anchor.minX,
+            y: window.minY - progress * anchor.minY
+        )
     }
 
     /// The static full-screen host and its mask. The page keeps the frame the
@@ -255,7 +305,9 @@ private enum RevealStage {
     static func apply(_ pose: Pose, mask: UIView, page: UIView) {
         mask.frame = pose.mask
         mask.layer.cornerRadius = pose.maskRadius
-        page.transform = CGAffineTransform(translationX: 0, y: pose.pageTranslation)
+        page.transform = CGAffineTransform(
+            translationX: pose.pageTranslation.x, y: pose.pageTranslation.y
+        )
     }
 
     /// Puts `page` back where the transition context expects to find it and
@@ -300,7 +352,7 @@ private enum RevealStage {
 /// nil) or when there is no anchor to measure from — a plain reveal has no
 /// overflow to hide, and veiling one would only dim a page that matches.
 @MainActor
-private func installVeil(geometry: RevealGeometry, anchor: CGRect?) {
+func installVeil(geometry: RevealGeometry, anchor: CGRect?) {
     guard let end = geometry.sourceCaptionEnd, let anchor else {
         geometry.installDestinationVeil(nil, nil)
         return
@@ -310,6 +362,35 @@ private func installVeil(geometry: RevealGeometry, anchor: CGRect?) {
         + " cut=\(Int(anchor.minY + end))")
     #endif
     geometry.installDestinationVeil(anchor.minY + end, geometry.sourceFill)
+}
+
+/// The animation controller UIKit insists on having beside a custom
+/// interactive driver — and which must do NOTHING, because the driver IS the
+/// animation.
+///
+/// Vending `RevealPopAnimator` here instead is not harmless. UIKit asks an
+/// animator for `interruptibleAnimator` even when an interaction controller is
+/// driving, and that call STAGES: measured, the grab set up its host, mask and
+/// dim, and a heartbeat later the animator built a second set over the same
+/// page, reading its landing through the depth recede the grab had already
+/// applied (a 343x145 row came back 325.85x137.75). Two stages, one page.
+///
+/// So the grab's leg gets an animator that owns no geometry at all. Duration is
+/// still answered because UIKit budgets the transition with it.
+@MainActor
+final class RevealGrabAnimator: NSObject, UIViewControllerAnimatedTransitioning {
+    func transitionDuration(using context: (any UIViewControllerContextTransitioning)?) -> TimeInterval {
+        ZoomFlight.springDuration
+    }
+
+    /// EMPTY, and it has to be. UIKit routes an interactive pop to the
+    /// interaction controller's `startInteractiveTransition` and — verified by
+    /// tracing a scripted grab — never calls this at all. Completing the
+    /// transition here "just in case" is not a safety net: it would end the
+    /// transition under a grab that is still holding the page, which renders as
+    /// the whole dismissal collapsing into a single frame. The grab owns the
+    /// completion, on both outcomes, in its own teardown.
+    func animateTransition(using context: any UIViewControllerContextTransitioning) {}
 }
 
 // MARK: - Present
@@ -394,7 +475,7 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
         #if DEBUG
         RevealStage.log("present", "source=\(NSCoder.string(for: sourceRect))"
             + " anchor=\(anchor.map(NSCoder.string(for:)) ?? "nil")"
-            + " travel=\(Int(closed.pageTranslation)) matched=\(geometry.matchesAnchor)")
+            + " travel=\(Int(closed.pageTranslation.y)) matched=\(geometry.matchesAnchor)")
         #endif
 
         // The grid recedes behind the opening mask — the same depth cue a hero
@@ -583,7 +664,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         #if DEBUG
         RevealStage.log("pop", "landing=\(NSCoder.string(for: sourceRect))"
             + " anchor=\(anchor.map(NSCoder.string(for:)) ?? "nil")"
-            + " travel=\(Int(closed.pageTranslation))")
+            + " travel=\(Int(closed.pageTranslation.y))")
         #endif
 
         let presenting = geometry.depthView() ?? toView
