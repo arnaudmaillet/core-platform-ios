@@ -464,6 +464,23 @@ enum RevealStage {
     /// The page dissolving into the card's fill.
     static let pageFadeStart: CGFloat = 0.10
     static let pageFadeEnd: CGFloat = 0.45
+    /// The reveal's OWN damping, looser than the media flight's.
+    ///
+    /// The flight runs at 0.82, which overshoots by about 1% — a number chosen
+    /// for a photograph landing on the same photograph, where any wobble reads
+    /// as the picture failing to sit still. A window has nothing to keep still:
+    /// what is arriving is a rounded rect becoming a screen, and at 0.82 that
+    /// looked like it was being drawn open on rails rather than released.
+    ///
+    /// 0.70 overshoots by roughly 5%, which is a shoulder that visibly springs
+    /// past its edge and settles. Its own constant rather than a change to
+    /// `ZoomFlight.springDamping`, because the media hero was never the thing
+    /// that read flat and must not move.
+    static let springDamping: CGFloat = 0.70
+    /// The push-off. Livelier than the flight's for the same reason the damping
+    /// is looser: the window should leave the source rather than ease away from
+    /// it.
+    static let springVelocity: CGFloat = 0.9
     /// How much of a spring's DURATION its visible travel occupies.
     ///
     /// The hand-off's fractions are shares of the window's journey, and a timed
@@ -828,8 +845,8 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
         UIView.animate(
             withDuration: duration,
             delay: 0,
-            usingSpringWithDamping: ZoomFlight.springDamping,
-            initialSpringVelocity: ZoomFlight.springVelocity,
+            usingSpringWithDamping: RevealStage.springDamping,
+            initialSpringVelocity: RevealStage.springVelocity,
             options: [.allowUserInteraction]
         ) {
             RevealStage.apply(open, mask: mask, page: toView, standIn: standIn)
@@ -940,7 +957,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let animator = UIViewPropertyAnimator(
             duration: transitionDuration(using: context),
             timingParameters: UISpringTimingParameters(
-                dampingRatio: ZoomFlight.springDamping
+                dampingRatio: RevealStage.springDamping
             )
         )
         // Defaulted true, but the whole design above rests on it — said out

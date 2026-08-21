@@ -326,7 +326,7 @@ final class RevealDismissInteractionController: NSObject,
         // differs, which is what makes the window feel caught.
         UIView.animate(
             withDuration: ZoomFlight.springDuration, delay: 0,
-            usingSpringWithDamping: ZoomFlight.springDamping,
+            usingSpringWithDamping: RevealStage.springDamping,
             initialSpringVelocity: springVelocity,
             options: [.beginFromCurrentState, .allowUserInteraction]
         ) {
