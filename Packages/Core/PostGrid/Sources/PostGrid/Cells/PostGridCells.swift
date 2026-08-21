@@ -270,6 +270,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             bounds.size.width = targetWidth
         }
         composeCaption(atWidth: targetWidth)
+        // The preview's height is a function of the row's width, so it belongs
+        // in the same pass and for the same reason: `configure` runs before the
+        // cell is sized, and a height resolved against a recycled cell's old
+        // width is the wrong height.
+        resolveMediaHeight(atWidth: targetWidth)
         contentView.setNeedsLayout()
         contentView.layoutIfNeeded()
         let fitted = contentView.systemLayoutSizeFitting(
@@ -281,6 +286,12 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // descender on the last line.
         layoutAttributes.frame.size.height = ceil(fitted.height)
         return layoutAttributes
+    }
+
+    private func resolveMediaHeight(atWidth width: CGFloat) {
+        mediaHeight.constant = Self.mediaHeight(
+            forCardWidth: width, aspectRatio: mediaAspectRatio
+        )
     }
 
     /// The ellipsis and the affordance, written INTO the caption so they sit at
@@ -717,6 +728,47 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     // chip at radius 2 is a rectangle. The choice looked like "correct shape or
     // correct radius" until the third option turned up — move the chip off the
     // corner, where neither answer is required.
+    // MARK: - The preview's height
+
+    /// The widest a preview may be drawn: 16:9. A floor on HEIGHT, and it is
+    /// what stops a 21:9 clip from becoming a slit with a subject in it.
+    public static let widestMediaAspect: CGFloat = 16.0 / 9.0
+    /// The tallest a preview may be drawn: 4:5, the portrait cap Instagram
+    /// settled on and the same one the mock corpus already seeds.
+    ///
+    /// It is the number that decides how much of a screen one card may take.
+    /// Measured on this device (402pt wide, 348pt of preview): 4:5 is 435pt of
+    /// preview and about 63% of the screen with the band, caption and padding
+    /// on top. Uncapped, a 9:16 post would be 619 and **84%** — one post, one
+    /// screen, which is what this exists to prevent.
+    public static let tallestMediaAspect: CGFloat = 5.0 / 4.0
+
+    /// How tall the preview is for a post of a given shape, in a card of a
+    /// given width.
+    ///
+    /// A pure function of the two, deliberately: the height has to come from
+    /// the MODEL and never from the image once it lands. `MediaAttachment`
+    /// already states the rule — heights are computed from `aspectRatio`, never
+    /// by sizing views — because a height that changes when the file arrives
+    /// reflows everything below it in a list the viewer is already scrolling.
+    ///
+    /// ⚠️ `aspectRatio` is 1 for a SQUARE post and 1 for a post the backend
+    /// never stamped with dimensions; `GalleryPost` says so in as many words.
+    /// So an unmeasured post lands here as a square — 348pt rather than the
+    /// 180pt letterbox rows used to draw. That is the fail-open direction and
+    /// it is the right one for a height (a square is a plausible photo; a slit
+    /// is not), but it is a real behaviour change for any surface whose
+    /// payload omits width and height.
+    public static func mediaHeight(forCardWidth cardWidth: CGFloat, aspectRatio: Double) -> CGFloat {
+        let mediaWidth = cardWidth - contentInset * 2
+        guard mediaWidth > 0 else { return 0 }
+        let ratio = aspectRatio > 0 ? CGFloat(aspectRatio) : 1
+        let natural = mediaWidth / ratio
+        let shortest = mediaWidth / widestMediaAspect
+        let tallest = mediaWidth * tallestMediaAspect
+        return (min(max(natural, shortest), tallest)).rounded()
+    }
+
     /// How many lines of caption a card previews before it offers the rest.
     ///
     /// A card is a PREVIEW and the post is where the text is read, so the cap
@@ -831,6 +883,15 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// configure is whether it CLOSES the card. A media row's line is hidden
     /// under the preview, laid out but drawing nothing, which is what keeps it
     /// out of the height without leaving it unconstrained.
+    /// The preview's height, which is the post's OWN aspect ratio clamped —
+    /// see `mediaHeight(forCardWidth:aspectRatio:)`. Held so a width change can
+    /// re-resolve it.
+    private lazy var mediaHeight: NSLayoutConstraint =
+        mediaView.heightAnchor.constraint(equalToConstant: 0)
+    /// The aspect the current post declares, kept because the height depends on
+    /// a width this cell does not know until it is measured.
+    private var mediaAspectRatio: Double = 1
+
     private var metaFollowsCaption: NSLayoutConstraint!
     /// Active for text rows only: the line is the card's last thing. A media
     /// row ends at the preview instead — see `mediaClosesCard`.
@@ -947,7 +1008,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             ),
             mediaView.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Self.mediaInset),
             mediaView.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Self.mediaInset),
-            mediaView.heightAnchor.constraint(equalToConstant: 180),
+            mediaHeight,
             // The preview CLOSES a media card, at the same inset it is held off
             // the sides by — the metadata that used to sit under it is on the
             // preview now. Concentric all the way round, and the card is 28pt
@@ -1157,6 +1218,12 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // that is never sized (a measuring instance) still reads correctly.
         captionLabel.attributedText = Self.plain(post.caption, font: captionLabel.font)
         let hasMedia = post.kind != .text
+        mediaAspectRatio = post.aspectRatio
+        // Provisional, on whatever width this cell currently carries — the
+        // authoritative pass is `preferredLayoutAttributesFitting`. Set here so
+        // a cell that is never measured (a stand-in, a preview) is not left
+        // with a zero-height preview.
+        resolveMediaHeight(atWidth: bounds.width)
         mediaView.isHidden = !hasMedia
         playBadge.isHidden = post.kind != .video
         // The line and the pills are the same four values in two placements, so

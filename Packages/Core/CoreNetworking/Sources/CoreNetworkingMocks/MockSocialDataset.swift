@@ -177,7 +177,30 @@ public struct MockSocialDataset: Sendable {
             "Quiet morning, notes and a long walk before anything else.",
             "Golden hour over the harbour."
         ]
-        let shapes: [(Int, Int)] = [(1080, 1350), (1600, 900), (1080, 1080)]
+        // One entry PER ARRIVAL rather than a short roster cycled by modulus,
+        // because with five arrivals and a `% 3` roster only two of the shapes
+        // were ever reachable here: media lands on indices 0, 1, 3 and 4, which
+        // is `{0, 1, 0, 1}` over three. The Following feed therefore had no
+        // story-format post at all while the main corpus did — which is exactly
+        // what "the feed only has landscape media" was.
+        //
+        // Chosen against the slot's KIND, since only indices 1 and 3 are video:
+        //
+        //   0  image  4:5    the portrait CAP, the shape drawn uncropped
+        //   1  video  16:9   the landscape end
+        //   2  —             text-only, so this entry is never read
+        //   3  video  9:16   a vertical VIDEO (synthetic catalog only, below)
+        //   4  image  9:16   a vertical PHOTO, in both catalogs
+        //
+        // ⚠️ Index 3 is vertical only WITHOUT `-rich-media`. Under the real-asset
+        // catalog a video takes its dimensions from the fixture, and every
+        // fixture is landscape: no stable public source vends portrait test
+        // video, and declaring a landscape encode as 9:16 is the pre-layout
+        // defect `MockMediaFixtures` was cleaned up to stop. Vertical photos
+        // work in both catalogs, because Picsum returns exactly the size asked.
+        let shapes: [(Int, Int)] = [
+            (1080, 1350), (1600, 900), (1080, 1080), (900, 1600), (1080, 1920)
+        ]
         return captions.enumerated().map { index, caption in
             // ONE of the five is text-only (index 2), on the corpus's own
             // `index % 3 == 2` rule so the arrivals do not all land in one cell
