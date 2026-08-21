@@ -260,6 +260,19 @@ final class ForYouGridPage: UIView {
     /// The viewer's followed authors — see `AuthorFollowStore` for why this is
     /// on the device and not on the service.
     private let authorFollows = AuthorFollowStore()
+    /// The row a REVEAL is currently holding, hidden until its window lands.
+    ///
+    /// Its own slot, deliberately not `heroHiddenPostID`. Sharing that one was
+    /// the first attempt and the frames caught it: a media flight ending
+    /// anywhere on this grid calls `setHeroHidden(false, …)`, which nulls the
+    /// flag for WHATEVER post it names and then sweeps every visible cell —
+    /// and the sweep only knows how to un-hide a preview. So a reveal's row
+    /// came back mid-grab, and the viewer held a window with a second copy of
+    /// the same post sitting underneath it.
+    ///
+    /// Two flights, two kinds of concealment, two slots. They are OR-ed at the
+    /// one place that applies them, so neither can clear the other.
+    private var revealConcealedPostID: PostID?
     /// Throttle state for the during-scroll autoplay reconcile.
     private var lastReconcileTime: CFTimeInterval = 0
     private var lastReconcileOffset: CGFloat = 0
@@ -1364,6 +1377,14 @@ final class ForYouGridPage: UIView {
         }
     }
 
+    /// Hides the row a reveal's window was taken from, for the flight's length.
+    /// See `revealConcealedPostID` for why this does not go through
+    /// `setHeroHidden`.
+    func setRevealConcealed(_ concealed: Bool, for postID: PostID) {
+        revealConcealedPostID = concealed ? postID : nil
+        (cell(for: postID) as? PostGridListRowCell)?.setHeroConcealed(concealed)
+    }
+
     func setHeroHidden(_ hidden: Bool, for postID: PostID, conceals: Bool = true) {
         heroFlyingPostID = hidden ? postID : nil
         heroHiddenPostID = (hidden && conceals) ? postID : nil
@@ -1384,7 +1405,13 @@ final class ForYouGridPage: UIView {
             // is nil, so nothing on screen may legitimately be invisible.
             for visible in collectionView.visibleCells {
                 if visible.isHidden { visible.isHidden = false }
-                (visible as? PostGridListRowCell)?.setHeroMediaConcealed(false)
+                // Skip a row a REVEAL is holding: this broom is for a media
+                // flight's leftovers, and sweeping the other flight's row back
+                // into view mid-grab is exactly what it must not do.
+                if let row = visible as? PostGridListRowCell,
+                   revealConcealedPostID == nil || cell(for: revealConcealedPostID!) !== row {
+                    row.setHeroConcealed(false)
+                }
             }
         }
         // Unhiding is the end of a flight. The tile is excluded from
@@ -1619,7 +1646,8 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // Set on EVERY dequeue, both ways: the flight's stand-in stays hidden
         // across reloads, and a recycled cell can never carry a stale hide to
         // another tile.
-        let isFlying = post.id == heroHiddenPostID
+        // Either flight hides it, and neither knows about the other.
+        let isFlying = post.id == heroHiddenPostID || post.id == revealConcealedPostID
         switch style {
         case .list:
             let cell = collectionView.dequeueReusableCell(
