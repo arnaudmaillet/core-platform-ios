@@ -663,7 +663,15 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         // property of the LIST rather than of any particular cell.
         let width = cell(for: postID)?.bounds.width ?? collectionView.bounds.width
         guard width > 0 else { return nil }
-        return RevealDismissCardView(post: post, width: width, imagePipeline: imagePipeline)
+        return RevealDismissCardView(
+            post: post,
+            width: width,
+            imagePipeline: imagePipeline,
+            // See For You's twin: the expansion belongs to the surface, and a
+            // stand-in built without it lands a truncated card on an expanded
+            // row.
+            captionExpanded: captionExpansion.isExpanded(postID)
+        )
     }
 
     /// The row's author band, for the destination to borrow during a flight, so

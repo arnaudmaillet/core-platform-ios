@@ -45,13 +45,26 @@ public final class RevealDismissCardView: UIView, RevealStandInShaping {
     /// the row does. Never the window's: the window is wider at the start of a
     /// flight and narrows as it lands, and a caption re-wrapping mid-flight is
     /// a reflow nobody asked for.
-    public init(post: GalleryPost, width: CGFloat, imagePipeline: ImagePipeline) {
+    ///
+    /// `captionExpanded` is the other half of "exactly as the row does", and it
+    /// is not optional in practice — it only carries a default so a caller with
+    /// no expansion state at all can still build one. A row whose caption the
+    /// viewer opened is TALLER and ends in the last word rather than in an
+    /// ellipsis and a "Show more"; a stand-in built without that flies a
+    /// truncated card home and lands it on an expanded one, which is a jump in
+    /// both the text and the height.
+    public init(
+        post: GalleryPost,
+        width: CGFloat,
+        imagePipeline: ImagePipeline,
+        captionExpanded: Bool = false
+    ) {
         card = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: width, height: 200))
         super.init(frame: .zero)
         backgroundColor = PostGridListRowCell.cardFillColor
         isUserInteractionEnabled = false
 
-        card.configure(with: post, imagePipeline: imagePipeline)
+        card.configure(with: post, imagePipeline: imagePipeline, captionExpanded: captionExpanded)
         // The "..." is drawn but not wired. A stand-in with no handlers would
         // hide the control, and the row it lands on has one — a glyph appearing
         // in the last frame of a transition whose entire job is that the last

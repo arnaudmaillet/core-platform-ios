@@ -27,12 +27,20 @@ struct RevealDismissCardTests {
         )
     }
 
-    private func standIn(width: CGFloat, caption: String = "a short note") -> RevealDismissCardView {
+    private func standIn(
+        width: CGFloat, caption: String = "a short note", expanded: Bool = false
+    ) -> RevealDismissCardView {
         RevealDismissCardView(
             post: post(caption: caption),
             width: width,
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            captionExpanded: expanded
         )
+    }
+
+    /// A caption long enough to truncate at the row's four-line limit.
+    private var longCaption: String {
+        String(repeating: "Shipping the new build tonight and the changelog is long. ", count: 8)
     }
 
     /// The card is laid out at the ROW's width, and sized to the height that
@@ -73,6 +81,37 @@ struct RevealDismissCardTests {
         // tripped through a float, and 0.4 comes back as 0.40000000596.
         #expect(abs(view.alpha - 0.4) < 0.001)
         #expect(abs((view.subviews.first?.alpha ?? 0) - 0.1) < 0.001)
+    }
+
+    /// A viewer who opened a caption out with "Show more" and then opened the
+    /// post must not have a TRUNCATED card flown home to them: it lands on a
+    /// row that is showing the whole text, so the last frame changes both the
+    /// words and the height.
+    @Test func anOpenedCaptionTravelsHomeOpened() {
+        let truncated = standIn(width: 343, caption: longCaption, expanded: false)
+        let opened = standIn(width: 343, caption: longCaption, expanded: true)
+        for view in [truncated, opened] {
+            view.frame = CGRect(x: 0, y: 0, width: 402, height: 900)
+            view.layoutIfNeeded()
+        }
+
+        let truncatedHeight = truncated.subviews.first?.bounds.height ?? 0
+        let openedHeight = opened.subviews.first?.bounds.height ?? 0
+        #expect(openedHeight > truncatedHeight,
+                "the stand-in ignored the expansion, so it flies the wrong card home")
+    }
+
+    /// The default is the truncated card, which is what a surface with no
+    /// expansion state should get — the flag is an answer, not a guess.
+    @Test func aShortCaptionIsTheSameEitherWay() {
+        let plain = standIn(width: 343)
+        let opened = standIn(width: 343, expanded: true)
+        for view in [plain, opened] {
+            view.frame = CGRect(x: 0, y: 0, width: 402, height: 900)
+            view.layoutIfNeeded()
+        }
+
+        #expect(plain.subviews.first?.bounds.height == opened.subviews.first?.bounds.height)
     }
 
     /// It takes no touches — it is scenery flying over a live screen.

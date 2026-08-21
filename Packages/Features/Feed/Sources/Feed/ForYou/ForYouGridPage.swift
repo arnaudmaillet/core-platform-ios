@@ -1143,7 +1143,17 @@ final class ForYouGridPage: UIView {
         // property of the LIST rather than of any particular cell.
         let width = cell(for: postID)?.bounds.width ?? collectionView.bounds.width
         guard width > 0 else { return nil }
-        return RevealDismissCardView(post: post, width: width, imagePipeline: imagePipeline)
+        return RevealDismissCardView(
+            post: post,
+            width: width,
+            imagePipeline: imagePipeline,
+            // The viewer may have opened this caption out before opening the
+            // post. The expansion belongs to the SURFACE, not to the cell, so
+            // it is here to be asked for — and a stand-in that does not ask
+            // flies a truncated card home, "Show more" and all, onto a row that
+            // is showing the whole thing.
+            captionExpanded: captionExpansion.isExpanded(postID)
+        )
     }
 
     /// The row's author band, for the destination to borrow during a flight.
