@@ -70,6 +70,9 @@ final class RevealDismissInteractionController: NSObject,
     /// and anything that moves the row underneath is then absorbed
     /// continuously instead of surfacing as a correction at release.
     private var stagedLanding: CGRect = .zero
+    /// The card the window carries home — see
+    /// `RevealGeometry.makeDismissStandIn`.
+    private var standIn: UIView?
 
     /// The row's rect in the container, read with the presenter momentarily at
     /// IDENTITY — which is the space the window's own mask lives in.
@@ -132,7 +135,15 @@ final class RevealDismissInteractionController: NSObject,
             around: fromView, in: container, pageFrame: pageFrame
         )
         let open = RevealStage.open(container: container)
-        RevealStage.apply(open, mask: mask, page: fromView)
+        // See `RevealGeometry.makeDismissStandIn`: what a dismissal carries
+        // home is the card, not the page it was read from.
+        let standIn = geometry.makeDismissStandIn()
+        if let standIn {
+            standIn.alpha = 0
+            host.addSubview(standIn)
+        }
+        self.standIn = standIn
+        RevealStage.apply(open, mask: mask, page: fromView, standIn: standIn)
         openRect = open.mask
         openCentre = CGPoint(x: open.mask.midX, y: open.mask.midY)
         screenRadius = open.maskRadius
@@ -218,7 +229,10 @@ final class RevealDismissInteractionController: NSObject,
         stagedLanding = currentLanding(in: context.containerView)
 
         let staged = self.pose(for: translation, in: view)
-        RevealStage.apply(staged.pose, mask: windowMask, page: page)
+        RevealStage.apply(staged.pose, mask: windowMask, page: page, standIn: standIn)
+        // On the finger's own channel: the further home the window is, the more
+        // of it is the card rather than the page.
+        standIn?.alpha = staged.progress
 
         let pose = staged
         dim?.alpha = 1 - pose.progress
@@ -296,7 +310,8 @@ final class RevealDismissInteractionController: NSObject,
             initialSpringVelocity: springVelocity,
             options: [.beginFromCurrentState, .allowUserInteraction]
         ) {
-            RevealStage.apply(target, mask: windowMask, page: page)
+            RevealStage.apply(target, mask: windowMask, page: page, standIn: self.standIn)
+            self.standIn?.alpha = commit ? 1 : 0
             dim?.alpha = commit ? 0 : 1
             chrome?.alpha = commit ? 1 : 0
             self.geometry.setDestinationVeilOpacity(commit ? 1 : 0)
@@ -327,6 +342,8 @@ final class RevealDismissInteractionController: NSObject,
         // transaction is invisible — while restoring after the unwrap is a
         // frame of empty grid where the card should be.
         geometry.setSourceConcealed(cancelled)
+        standIn?.removeFromSuperview()
+        standIn = nil
         if let page, let host, let container = context?.containerView {
             RevealStage.unwrap(page, from: host, to: container, frame: pageFrame)
         }

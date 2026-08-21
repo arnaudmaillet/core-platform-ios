@@ -50,6 +50,11 @@ public struct TextRevealOrigin {
     /// names its author. The window is the WHOLE row, so the destination's
     /// caption has to be told where the row's own sits.
     public let captionTop: CGFloat
+    /// Builds the card a DISMISSAL carries home, drawn fresh, rather than the
+    /// page seen through a window — see `RevealGeometry.makeDismissStandIn`.
+    /// `nil` keeps the page itself, which is still correct for a surface that
+    /// cannot draw one.
+    public let makeDismissStandIn: () -> UIView?
     /// The row's author band, so the destination can borrow it for the flight —
     /// see `RevealGeometry.installDestinationAuthorBand`. `nil` for a row that
     /// names no author, which is every profile gallery's.
@@ -76,6 +81,7 @@ public struct TextRevealOrigin {
         depthView: @escaping () -> UIView? = { nil },
         captionTop: CGFloat = 0,
         authorBand: PostAuthorBandView.Model? = nil,
+        makeDismissStandIn: @escaping () -> UIView? = { nil },
         setConcealed: @escaping (Bool) -> Void = { _ in },
         presentationDidEnd: @escaping (Bool) -> Void = { _ in },
         willStageDismissal: @escaping () -> Void = {},
@@ -86,6 +92,7 @@ public struct TextRevealOrigin {
         self.depthView = depthView
         self.captionTop = captionTop
         self.authorBand = authorBand
+        self.makeDismissStandIn = makeDismissStandIn
         self.setConcealed = setConcealed
         self.presentationDidEnd = presentationDidEnd
         self.willStageDismissal = willStageDismissal

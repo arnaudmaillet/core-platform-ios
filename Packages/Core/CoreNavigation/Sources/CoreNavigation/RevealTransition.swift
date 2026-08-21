@@ -100,6 +100,18 @@ public struct RevealGeometry {
     /// Matched mode aligns this with the source rect at t=0; `nil` (or plain
     /// mode) leaves the page unmoved and the window simply opens over it.
     public let anchorFrame: (UICoordinateSpace) -> CGRect?
+    /// Builds the stand-in a DISMISSAL carries home — the card itself, drawn
+    /// fresh, rather than the page seen through a window.
+    ///
+    /// It exists because the page stops being usable as its own hero the moment
+    /// its comments are scrolled: the caption moves, often off screen, and a
+    /// window aligned to it either carries the wrong rows home or drags the
+    /// whole stream across the display to fetch the right ones. Neither is a
+    /// transition. See `RevealDismissCardView`.
+    ///
+    /// `nil` keeps the old behaviour — the page itself, registered — which is
+    /// still correct for a surface that cannot draw a stand-in.
+    public let makeDismissStandIn: () -> UIView?
     /// How far below the SOURCE's top edge its caption begins — zero for a card
     /// that shows only its caption, the author band plus its gap for one that
     /// names its author. See `RevealStage.pageTranslation`.
@@ -165,6 +177,7 @@ public struct RevealGeometry {
         setDestinationGround: @escaping (UIColor?) -> Void = { _ in },
         anchorFrame: @escaping (UICoordinateSpace) -> CGRect? = { _ in nil },
         sourceCaptionTop: CGFloat = 0,
+        makeDismissStandIn: @escaping () -> UIView? = { nil },
         setSourceConcealed: @escaping (Bool) -> Void = { _ in },
         depthView: @escaping () -> UIView? = { nil },
         presentationDidEnd: @escaping (Bool) -> Void = { _ in },
@@ -183,6 +196,7 @@ public struct RevealGeometry {
         self.setDestinationGround = setDestinationGround
         self.anchorFrame = anchorFrame
         self.sourceCaptionTop = sourceCaptionTop
+        self.makeDismissStandIn = makeDismissStandIn
         self.setSourceConcealed = setSourceConcealed
         self.depthView = depthView
         self.presentationDidEnd = presentationDidEnd
@@ -190,6 +204,13 @@ public struct RevealGeometry {
         self.dismissalDidEnd = dismissalDidEnd
         self.matchesAnchor = matchesAnchor
     }
+}
+
+/// A stand-in that can wear the window's rounding. Declared here so
+/// CoreNavigation can shape one without knowing what draws it.
+@MainActor
+public protocol RevealStandInShaping: AnyObject {
+    func setCornerRadius(_ radius: CGFloat)
 }
 
 // MARK: - Shared staging
@@ -359,12 +380,18 @@ enum RevealStage {
         return (host, mask)
     }
 
-    static func apply(_ pose: Pose, mask: UIView, page: UIView) {
+    /// `standIn`, when there is one, takes the WINDOW's frame rather than the
+    /// page's transform — which is the whole point of it. The page moves with
+    /// its own scroll and its own registration; the stand-in is the card, and
+    /// the card is wherever the window is.
+    static func apply(_ pose: Pose, mask: UIView, page: UIView, standIn: UIView? = nil) {
         mask.frame = pose.mask
         mask.layer.cornerRadius = pose.maskRadius
         page.transform = CGAffineTransform(
             translationX: pose.pageTranslation.x, y: pose.pageTranslation.y
         )
+        standIn?.frame = pose.mask
+        (standIn as? RevealStandInShaping)?.setCornerRadius(pose.maskRadius)
     }
 
     /// Puts `page` back where the transition context expects to find it and
@@ -742,7 +769,17 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             matchesAnchor: geometry.matchesAnchor,
             captionTop: geometry.sourceCaptionTop
         )
-        RevealStage.apply(open, mask: mask, page: fromView)
+        // The stand-in: the card, drawn fresh, above the page inside the same
+        // window. It fades in over the flight while the page fades out under
+        // it, so a page that was scrolled stops mattering the moment the
+        // dismissal starts. Unscrolled, the two agree and the cross-fade is
+        // the identity.
+        let standIn = geometry.makeDismissStandIn()
+        if let standIn {
+            standIn.alpha = 0
+            host.addSubview(standIn)
+        }
+        RevealStage.apply(open, mask: mask, page: fromView, standIn: standIn)
         geometry.setDestinationGround(nil)
         installVeil(geometry: geometry, anchor: anchor)
         installAuthorBand(geometry: geometry, anchor: anchor)
@@ -766,7 +803,8 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         chrome?.alpha = 0
 
         animator.addAnimations {
-            RevealStage.apply(closed, mask: mask, page: fromView)
+            RevealStage.apply(closed, mask: mask, page: fromView, standIn: standIn)
+            standIn?.alpha = 1
             // Back into the card's tone as the mask closes onto it, so the
             // last frame of the close and the row underneath are one colour.
             self.geometry.setDestinationGround(self.geometry.sourceFill)
@@ -786,6 +824,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             // frame of empty grid where the card should be. A cancelled close
             // leaves the page up, and the row stays hidden under it.
             self.geometry.setSourceConcealed(cancelled)
+            standIn?.removeFromSuperview()
             RevealStage.unwrap(fromView, from: host, to: container, frame: pageFrame)
             dim.removeFromSuperview()
             presenting.transform = .identity

@@ -829,6 +829,11 @@ final class ForYouViewController: UIViewController {
                 // Borrowed by the destination for the flight, so the window
                 // shows the header the card does instead of a blank strip.
                 authorBand: page.textRowAuthorBand(for: postID),
+                // What the CLOSE carries home. Built from the post rather than
+                // read off the page, so a viewer who scrolled the comments
+                // still lands on the card they came from — see
+                // `RevealDismissCardView`.
+                makeDismissStandIn: { [weak page] in page?.makeDismissStandIn(for: postID) },
                 // The reveal's OWN concealment slot, not the hero's — see
                 // `ForYouGridPage.revealConcealedPostID`. Applied on every
                 // dequeue too, so a row that recycles mid-flight comes back

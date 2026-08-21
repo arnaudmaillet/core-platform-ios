@@ -1120,6 +1120,18 @@ final class ForYouGridPage: UIView {
 
     /// Where the page stops matching the row, in the row's own space — the
     /// reveal's cut line. `nil` when the row is not realized.
+    /// The card a dismissal carries home, drawn at the ROW's own width so its
+    /// caption wraps and truncates exactly as the row's does.
+    func makeDismissStandIn(for postID: PostID) -> UIView? {
+        guard let post = posts.first(where: { $0.id == postID }) else { return nil }
+        // The realized row's width when there is one, the list's own otherwise:
+        // a row scrolled out still has to produce a card, and the width is a
+        // property of the LIST rather than of any particular cell.
+        let width = cell(for: postID)?.bounds.width ?? collectionView.bounds.width
+        guard width > 0 else { return nil }
+        return RevealDismissCardView(post: post, width: width, imagePipeline: imagePipeline)
+    }
+
     /// The row's author band, for the destination to borrow during a flight.
     /// Read from the POST rather than from the cell, so it answers for a row
     /// that has scrolled out as readily as for one on screen.

@@ -123,6 +123,7 @@ enum TextRevealInstaller {
                 (feed as? SnapFeedViewController)?.revealCaptionAnchor(in: space)
             },
             sourceCaptionTop: origin.captionTop,
+            makeDismissStandIn: origin.makeDismissStandIn,
             setSourceConcealed: origin.setConcealed,
             depthView: origin.depthView,
             presentationDidEnd: origin.presentationDidEnd,
