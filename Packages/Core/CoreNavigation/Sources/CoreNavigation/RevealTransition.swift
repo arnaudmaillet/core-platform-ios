@@ -273,13 +273,24 @@ enum RevealStage {
 
     /// The page seen through the source's rect. `anchor` is the caption
     /// bubble's rect on the full-size page, in CONTAINER space.
+    /// `ridingFrom`, when given, is the OPEN window — and it wins: a pose that
+    /// rides carries the page by the window's displacement rather than aligning
+    /// it to anything. See `pageRiding`.
     static func closed(
         sourceRect: CGRect,
         radius: CGFloat,
         anchor: CGRect?,
         matchesAnchor: Bool,
-        captionTop: CGFloat = 0
+        captionTop: CGFloat = 0,
+        ridingFrom open: CGRect? = nil
     ) -> Pose {
+        if let open {
+            return Pose(
+                mask: sourceRect,
+                maskRadius: radius,
+                pageTranslation: pageRiding(sourceRect, from: open)
+            )
+        }
         // Matched: the page is pushed down so the caption row's CONTAINER
         // starts where the source row's does. Top to top, with nothing added —
         // the two are the same layout, so their captions land on the same line
@@ -360,6 +371,29 @@ enum RevealStage {
             x: window.minX - progress * anchor.minX,
             y: window.minY - progress * anchor.minY + progress * captionTop
         )
+    }
+
+    /// The page RIDING the window: it moves with it, rigidly, and nothing
+    /// inside it moves relative to anything else.
+    ///
+    /// The third of three ways a page can behave under a flight, and each
+    /// answers a different question:
+    ///
+    /// * **registered** (`pageTranslation`) — the page slides so its caption
+    ///   lands on the card's. Right when the window is going to SHOW the page,
+    ///   wrong once a stand-in is showing the card instead: the alignment then
+    ///   chases a caption nobody will see, and the comments slide under the
+    ///   stand-in for the length of the grab.
+    /// * **still** (`.zero`) — the page does not move and the window opens over
+    ///   it. The `-text-reveal-plain` behaviour, and what the first fix for the
+    ///   slide reached for. It removes the slide and introduces a worse one:
+    ///   the window travels under the finger while its contents stay nailed to
+    ///   the screen, so the viewer is dragging a hole rather than a card.
+    /// * **riding** (this) — the page translates by exactly the window's own
+    ///   displacement. Nothing inside the window moves relative to the window,
+    ///   which is what holding something feels like.
+    static func pageRiding(_ window: CGRect, from open: CGRect) -> CGPoint {
+        CGPoint(x: window.minX - open.minX, y: window.minY - open.minY)
     }
 
     /// The static full-screen host and its mask. The page keeps the frame the
@@ -784,8 +818,9 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             sourceRect: sourceRect,
             radius: geometry.sourceCornerRadius,
             anchor: anchor,
-            matchesAnchor: geometry.matchesAnchor && standIn == nil,
-            captionTop: geometry.sourceCaptionTop
+            matchesAnchor: geometry.matchesAnchor,
+            captionTop: geometry.sourceCaptionTop,
+            ridingFrom: standIn != nil ? open.mask : nil
         )
         RevealStage.apply(open, mask: mask, page: fromView, standIn: standIn)
         geometry.setDestinationGround(nil)

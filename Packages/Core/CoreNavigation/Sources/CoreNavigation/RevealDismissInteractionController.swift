@@ -213,18 +213,21 @@ final class RevealDismissInteractionController: NSObject,
         let staged = RevealStage.Pose(
             mask: rect,
             maskRadius: radius,
-            // A STAND-IN MAKES THE PAGE'S ALIGNMENT MEANINGLESS, so it stops
-            // being asked for. Registering the page while a card is fading in
-            // over it was the whole of the "scroll" artifact: the comments slid
-            // under the stand-in for the length of the grab, chasing a caption
-            // the window was no longer going to show. Nothing behind the
-            // stand-in needs to move; it only needs to hold still and fade.
-            pageTranslation: RevealStage.pageTranslation(
-                carrying: rect,
-                anchor: (geometry.matchesAnchor && standIn == nil) ? anchor : nil,
-                progress: progress,
-                captionTop: geometry.sourceCaptionTop
-            )
+            // A stand-in changes what the page is FOR: it is no longer what
+            // the window shows, it is what the window is carrying. So it rides
+            // — moving with the window, rigidly — rather than registering
+            // against a caption nobody is going to see. Registering was the
+            // "scroll" artifact; holding still would have been a worse one,
+            // the window travelling under the finger while its contents stay
+            // nailed to the screen. See `RevealStage.pageRiding`.
+            pageTranslation: standIn != nil
+                ? RevealStage.pageRiding(rect, from: openRect)
+                : RevealStage.pageTranslation(
+                    carrying: rect,
+                    anchor: geometry.matchesAnchor ? anchor : nil,
+                    progress: progress,
+                    captionTop: geometry.sourceCaptionTop
+                )
         )
         return (staged, progress)
     }
@@ -284,14 +287,17 @@ final class RevealDismissInteractionController: NSObject,
             sourceRect: landing,
             radius: geometry.sourceCornerRadius,
             anchor: anchor,
-            matchesAnchor: geometry.matchesAnchor && standIn == nil,
-            captionTop: geometry.sourceCaptionTop
+            matchesAnchor: geometry.matchesAnchor,
+            captionTop: geometry.sourceCaptionTop,
+            ridingFrom: standIn != nil ? openRect : nil
         )
         let target = commit
             ? closed
             : RevealStage.Pose(
                 mask: openRect, maskRadius: screenRadius, pageTranslation: .zero
             )
+        // (An abandoned grab returns the window to the whole screen, where
+        // riding and still are the same thing: zero displacement.)
 
         let springVelocity = ZoomTransitionGeometry.springVelocity(
             of: velocity,

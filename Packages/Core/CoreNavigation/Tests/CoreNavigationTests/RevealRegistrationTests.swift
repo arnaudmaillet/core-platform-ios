@@ -127,6 +127,48 @@ struct RevealRegistrationTests {
         #expect(closed.pageTranslation == law)
     }
 
+    /// A page under a flight moves one of three ways, and the three are not
+    /// interchangeable. These pin the one a stand-in selects.
+    ///
+    /// * REGISTERED — the page slides so its caption lands on the card's.
+    /// * STILL — the page does not move; the window opens over it.
+    /// * RIDING — the page moves with the window, rigidly.
+    ///
+    /// The middle one is the trap. It looks like the safe answer once a
+    /// stand-in is showing the card (nothing behind it matters, so why move
+    /// it?) and it is wrong for a GRAB: the window travels under the finger
+    /// while its contents stay nailed to the screen, which is dragging a hole
+    /// rather than holding a card.
+    @Test func aRidingPageMovesExactlyWithItsWindow() {
+        let held = Self.screen.offsetBy(dx: 120, dy: 60)
+        let translation = RevealStage.pageRiding(held, from: Self.screen)
+        #expect(translation == CGPoint(x: 120, y: 60))
+    }
+
+    /// A window back at rest has ridden nowhere — which is why an abandoned
+    /// grab needs no special case.
+    @Test func aWindowAtRestHasRiddenNowhere() {
+        #expect(RevealStage.pageRiding(Self.screen, from: Self.screen) == .zero)
+    }
+
+    /// And a closed pose that rides carries the page by the LANDING's
+    /// displacement, ignoring the anchor entirely — the alignment is what a
+    /// stand-in makes meaningless.
+    @Test func aRidingClosedPoseIgnoresTheAnchor() {
+        let riding = RevealStage.closed(
+            sourceRect: Self.landing, radius: 18, anchor: Self.anchor,
+            matchesAnchor: true, captionTop: 52, ridingFrom: Self.screen
+        )
+        #expect(riding.pageTranslation
+            == RevealStage.pageRiding(Self.landing, from: Self.screen))
+        // Emphatically NOT the registered answer, which is the whole point.
+        let registered = RevealStage.closed(
+            sourceRect: Self.landing, radius: 18, anchor: Self.anchor,
+            matchesAnchor: true, captionTop: 52
+        )
+        #expect(riding.pageTranslation != registered.pageTranslation)
+    }
+
     /// Plain mode has no anchor to register against, and the page simply sits
     /// still while the window moves over it — the `-text-reveal-plain`
     /// behaviour, unchanged by any of this.
