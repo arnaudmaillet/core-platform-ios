@@ -203,7 +203,8 @@ final class RevealDismissInteractionController: NSObject,
             pageTranslation: RevealStage.pageTranslation(
                 carrying: rect,
                 anchor: geometry.matchesAnchor ? anchor : nil,
-                progress: progress
+                progress: progress,
+                captionTop: geometry.sourceCaptionTop
             )
         )
         return (staged, progress)
@@ -258,7 +259,8 @@ final class RevealDismissInteractionController: NSObject,
             sourceRect: landing,
             radius: geometry.sourceCornerRadius,
             anchor: anchor,
-            matchesAnchor: geometry.matchesAnchor
+            matchesAnchor: geometry.matchesAnchor,
+            captionTop: geometry.sourceCaptionTop
         )
         let target = commit
             ? closed

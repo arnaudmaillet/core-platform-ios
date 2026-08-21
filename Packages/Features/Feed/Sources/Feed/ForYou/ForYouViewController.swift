@@ -825,6 +825,7 @@ final class ForYouViewController: UIViewController {
                 // the same view the hero's depth cue rides, for the same
                 // reason.
                 depthView: { [weak self] in self?.pager },
+                captionTop: page.textRowCaptionTop(for: postID),
                 // The reveal's OWN concealment slot, not the hero's — see
                 // `ForYouGridPage.revealConcealedPostID`. Applied on every
                 // dequeue too, so a row that recycles mid-flight comes back

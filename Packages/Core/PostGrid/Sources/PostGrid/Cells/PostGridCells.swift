@@ -47,57 +47,41 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// `captionEnd` below, and `CaptionTruncationTests`.
     public var revealCut: CGFloat? {
         guard bounds.width > 0, bounds.height > 0 else { return nil }
-        // The whole caption is shown: the band ends where the card does, and
-        // everything past that on the page is the stream.
-        guard showMoreRange != nil else { return revealBand.height }
+        // PAGE-relative, not card-relative, and the distinction matters now
+        // that a card can carry a band the page has no counterpart for. The
+        // veil is hung at `anchor.minY + cut` inside the DESTINATION, whose
+        // caption sits at `captionTopInset` from its row's top — so the cut is
+        // measured from where the caption starts, never from the card's edge.
+        //
+        // The whole caption is shown: the difference starts below everything
+        // the card has, which is its height less the band above the caption.
+        guard showMoreRange != nil else { return bounds.height - revealCaptionTop }
         return captionEnd
     }
 
-    /// The part of this card a reveal actually opens from — everything from the
-    /// caption down, and NOT the author band above it.
+    /// How far below this card's top its CAPTION begins.
     ///
-    /// The band is the one thing on this card the post's page has no
-    /// counterpart for: a page carries its author in the nav pill, so there is
-    /// no second identity to fly to. Handing the whole card to the flight
-    /// therefore breaks the reveal's central promise in two ways at once. The
-    /// window would claim a strip of the page that does not exist, and — worse
-    /// — the caption would no longer be `captionTopInset` from the window's
-    /// top edge at both ends, which is the ONE coincidence the whole
-    /// registration rests on.
+    /// Zero without an author band, and the band plus its gap with one. It is
+    /// the number a reveal needs in order to depart from the whole card while
+    /// still landing its caption on the card's own.
     ///
-    /// Answering with the band restores both. Inside it the caption sits at
-    /// `captionTopInset` exactly as it does inside the page's own caption row,
-    /// so `RevealStage.pageTranslation` needs no term for the band and the two
-    /// legs are unchanged. And the band stays behind in the grid, where it
-    /// belongs, instead of being covered at frame 0 by a page that has nothing
-    /// to put there.
-    ///
-    /// ```
-    ///   ┌──────────────────┐
-    ///   │ ◍  Ava           │  ← the band: stays in the grid, dims with it
-    ///   │    @ava   Follow │
-    ///   ├──────────────────┤  ← revealBand.minY: where a flight departs
-    ///   │ Shipping the…    │
-    ///   │ ♡ 86        now  │
-    ///   └──────────────────┘
-    /// ```
-    public var revealBand: CGRect {
-        // The band's own top inset cancels: the author band starts at
-        // `captionTopInset` and so does the caption inside the reveal band, so
-        // what is left between them is the disc and the gap under it.
-        let top = showsAuthorBand
-            ? Self.authorAvatarDiameter + Self.authorFollowGap
-            : 0
-        return CGRect(
-            x: 0, y: top, width: bounds.width, height: max(0, bounds.height - top)
-        )
+    /// The first attempt avoided needing it: the flight departed from below the
+    /// band instead, which kept the caption at `captionTopInset` inside the
+    /// window at both ends and left the registration untouched. The frames
+    /// killed it. A window that stops short of the card's top edge leaves the
+    /// band outside the transition entirely, so the card gains it in one frame
+    /// at the landing — a cut exactly where this transition is supposed to be
+    /// seamless. The window has to be the card, and the offset has to be
+    /// carried instead of avoided.
+    public var revealCaptionTop: CGFloat {
+        guard showsAuthorBand else { return 0 }
+        return Self.authorAvatarDiameter + Self.authorFollowGap
     }
 
-
-
-    /// The caption's own bottom in the card's space.
+    /// The caption's own height plus the inset above it, in the register the
+    /// DESTINATION uses — which is why it does not include the author band.
     ///
-    /// MEASURED, never read off the label's frame — and that distinction is the
+    /// MEASURED, never read off the label's frame, and that distinction is the
     /// whole of this property.
     ///
     /// A self-sizing cell gets its height from the collection view's
@@ -123,7 +107,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         return Self.captionTopInset + ceil(text.height)
     }
 
-    /// The preview's rect in this cell's own space, or nil for a text-only row
+    /// The preview's rect in this cell's own space, or nil for a text-only row    /// The preview's rect in this cell's own space, or nil for a text-only row
     /// (which has no media to fly). A hero source reads this to decide whether
     /// a row can host a flight at all.
     public var mediaHeroRect: CGRect? {
@@ -467,6 +451,16 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // carries the same metric line at the same offset, unveiled, for the
         // entire flight — fading it in here would blink something that was
         // already on screen.
+        // The BAND always fades, truncated or not: the page has no author band
+        // at all, so whatever the window was showing in that strip, it was not
+        // this. It arrives into empty space, which is the only kind of arrival
+        // a fade improves.
+        if showsAuthorBand {
+            authorBand.alpha = 0
+            UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseOut]) {
+                self.authorBand.alpha = 1
+            }
+        }
         guard showMoreRange != nil else { return }
         metaRow.alpha = 0
         UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseOut]) {
@@ -907,6 +901,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // Concealment is per-FLIGHT state and must not ride a recycled cell to
         // whatever post it is bound to next — see `setHeroConcealed`.
         card.alpha = 1
+        authorBand.alpha = 1
     }
 
     private func revealTapped() {

@@ -600,15 +600,22 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         guard let row = cell(for: postID) as? PostGridListRowCell,
               row.mediaHeroRect == nil
         else { return nil }
-        // The BAND, not the whole card: an author band has no counterpart on
-        // the post's page, and handing it to the flight would both claim a
-        // strip the page cannot fill and move the caption off the offset the
-        // registration rests on. See `PostGridListRowCell.revealBand`.
-        return row.convert(row.revealBand, to: space)
+        // The WHOLE card. Departing from below the author band was the first
+        // attempt and the frames killed it: a window that stops short of the
+        // card's top leaves the band outside the transition, so the card gains
+        // it in one frame at the landing. The offset is carried instead — see
+        // `PostGridListRowCell.revealCaptionTop`.
+        return row.convert(row.bounds, to: space)
     }
 
     /// Where the page stops matching the row, in the row's own space — the
     /// reveal's cut line. Nil when the row is not realized.
+    /// How far below the row's top its caption begins — the band's height plus
+    /// its gap, or zero. See `PostGridListRowCell.revealCaptionTop`.
+    func textRowCaptionTop(for postID: PostID) -> CGFloat {
+        (cell(for: postID) as? PostGridListRowCell)?.revealCaptionTop ?? 0
+    }
+
     func textRowCaptionEnd(for postID: PostID) -> CGFloat? {
         (cell(for: postID) as? PostGridListRowCell)?.revealCut
     }

@@ -7,12 +7,16 @@ import UIKit
 /// A list row can carry an author band above its caption, and the post's page
 /// has no counterpart for it — a page carries its author in the nav pill.
 ///
-/// These pin the consequence, which is not obvious and is silent when wrong: a
-/// reveal must depart from BELOW the band, or the caption stops being
-/// `captionTopInset` from the window's top edge, and that single coincidence is
-/// what the whole registration rests on. Get it wrong and the transition still
-/// runs, still lands, still completes — with the text sliding half a band out
-/// of place on the way.
+/// The first design had the flight DEPART from below the band, which kept the
+/// caption `captionTopInset` from the window's top at both ends and left the
+/// registration alone. Frames killed it: a window that stops short of the
+/// card's top leaves the band outside the transition entirely, so the card
+/// gains it in one frame at the landing — a cut exactly where this is supposed
+/// to be seamless.
+///
+/// So the window is the whole card and the offset is CARRIED. These pin the two
+/// numbers that carry it, and the fact that the band moves neither the cut nor
+/// the caption's own measurement.
 @MainActor
 struct AuthorBandRevealTests {
     private static let rowWidth: CGFloat = 343
@@ -60,42 +64,45 @@ struct AuthorBandRevealTests {
         return cell
     }
 
-    /// A post with no author identity has no band, and the flight departs from
-    /// the card itself — the behaviour every profile gallery still gets.
-    @Test func anUnauthoredRowDepartsFromItsWholeCard() {
-        let cell = Self.sized(Self.short, authored: false)
-        #expect(cell.revealBand.minY == 0)
-        #expect(cell.revealBand.height == cell.bounds.height)
+    /// A post with no author identity has no band, so its caption starts at the
+    /// card's own inset and the transition needs no offset at all — the
+    /// behaviour every profile gallery still gets.
+    @Test func anUnauthoredRowHasNoCaptionOffset() {
+        #expect(Self.sized(Self.short, authored: false).revealCaptionTop == 0)
     }
 
-    /// An authored row departs from below the band — the disc and the gap under
-    /// it, exactly.
-    @Test func anAuthoredRowDepartsFromBelowItsBand() {
-        let cell = Self.sized(Self.short, authored: true)
-        #expect(cell.revealBand.minY
+    /// An authored one offsets by the disc and the gap under it, exactly.
+    @Test func anAuthoredRowOffsetsByItsBand() {
+        #expect(Self.sized(Self.short, authored: true).revealCaptionTop
             == PostGridListRowCell.authorAvatarDiameter + PostGridListRowCell.authorFollowGap)
-        #expect(cell.revealBand.height == cell.bounds.height - cell.revealBand.minY)
     }
 
-    /// THE INVARIANT. The band grows the card, and the flight's window must not
-    /// notice: what it departs from is the same rectangle either way, because
-    /// the band is excluded from it exactly.
+    /// The band grows the card by exactly the offset it declares — which is
+    /// what makes the offset usable as a pose term rather than an estimate.
     ///
-    /// Within a point rather than exactly — the heights ceil a fractional text
+    /// Within a point rather than exactly: the heights ceil a fractional text
     /// measurement, and `==` on fractional-scale `CGFloat`s is how this repo has
     /// failed CI before.
-    @Test func theBandGrowsTheCardAndNotTheWindow() {
+    @Test func theBandGrowsTheCardByTheOffsetItDeclares() {
         let bare = Self.sized(Self.short, authored: false)
         let banded = Self.sized(Self.short, authored: true)
-        #expect(banded.bounds.height > bare.bounds.height)
-        #expect(abs(banded.revealBand.height - bare.revealBand.height) < 1)
+        #expect(abs((banded.bounds.height - bare.bounds.height) - banded.revealCaptionTop) < 1)
     }
 
-    /// And the cut is measured from the BAND's top, so a truncated caption's
-    /// veil falls in the same place whether or not the row names its author.
+    /// And the cut does not move, because it is measured in the DESTINATION's
+    /// register — from where the caption starts, never from the card's edge.
+    /// The veil is hung inside the page, whose caption row has no band.
     @Test func theCutIsUnmovedByTheBand() throws {
         let bare = try #require(Self.sized(Self.long, authored: false).revealCut)
         let banded = try #require(Self.sized(Self.long, authored: true).revealCut)
+        #expect(abs(banded - bare) < 1)
+    }
+
+    /// Including for a whole caption, where the cut is the card's height LESS
+    /// the band — the page's equivalent of "everything the card has".
+    @Test func theCutIsUnmovedForAWholeCaptionToo() throws {
+        let bare = try #require(Self.sized(Self.short, authored: false).revealCut)
+        let banded = try #require(Self.sized(Self.short, authored: true).revealCut)
         #expect(abs(banded - bare) < 1)
     }
 }

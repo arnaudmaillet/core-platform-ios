@@ -82,6 +82,51 @@ struct RevealRegistrationTests {
         }
     }
 
+    /// A source card can put its caption BELOW its own top edge — an author
+    /// band above it — and the window is the whole card either way. These pin
+    /// the term that carries the difference.
+    ///
+    /// The band's height, plus the gap under it, as `PostGridListRowCell`
+    /// measures it on an iPhone SE.
+    private static let bandOffset: CGFloat = 52
+
+    /// At rest the band is irrelevant: the page's caption is where the page put
+    /// it, and nothing has moved.
+    @Test func theBandDoesNotMoveTheRestingPose() {
+        #expect(RevealStage.pageTranslation(
+            carrying: Self.screen, anchor: Self.anchor, progress: 0,
+            captionTop: Self.bandOffset
+        ) == .zero)
+    }
+
+    /// And home, the caption lands on the CARD's caption rather than on the
+    /// window's top edge — which is the whole reason the term exists.
+    @Test func theBandOffsetsTheHomePoseByExactlyItself() {
+        let plain = RevealStage.pageTranslation(
+            carrying: Self.landing, anchor: Self.anchor, progress: 1
+        )
+        let banded = RevealStage.pageTranslation(
+            carrying: Self.landing, anchor: Self.anchor, progress: 1,
+            captionTop: Self.bandOffset
+        )
+        #expect(banded.y - plain.y == Self.bandOffset)
+        #expect(banded.x == plain.x)
+    }
+
+    /// And the closed pose agrees with the law, band or no band — otherwise a
+    /// released grab would land somewhere a chevron does not.
+    @Test func theClosedPoseCarriesTheBandToo() {
+        let closed = RevealStage.closed(
+            sourceRect: Self.landing, radius: 18, anchor: Self.anchor,
+            matchesAnchor: true, captionTop: Self.bandOffset
+        )
+        let law = RevealStage.pageTranslation(
+            carrying: Self.landing, anchor: Self.anchor, progress: 1,
+            captionTop: Self.bandOffset
+        )
+        #expect(closed.pageTranslation == law)
+    }
+
     /// Plain mode has no anchor to register against, and the page simply sits
     /// still while the window moves over it — the `-text-reveal-plain`
     /// behaviour, unchanged by any of this.

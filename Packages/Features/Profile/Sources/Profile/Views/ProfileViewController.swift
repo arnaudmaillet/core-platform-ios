@@ -500,6 +500,7 @@ final class ProfileViewController: UIViewController {
                     // out cannot answer.
                     captionEnd: galleryPager.textRowCaptionEnd(for: post.id),
                     depthView: { [weak self] in self?.galleryPager },
+                    captionTop: galleryPager.textRowCaptionTop(for: post.id),
                     // The gallery's own concealment, which the media hero
                     // beside this already drives — one mechanism, two kinds of
                     // flight.

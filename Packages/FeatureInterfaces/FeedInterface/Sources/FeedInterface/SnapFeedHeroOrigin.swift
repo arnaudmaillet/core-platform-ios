@@ -45,6 +45,11 @@ public struct TextRevealOrigin {
     public let captionEnd: CGFloat?
     /// The view the depth cue recedes — the content, not the chrome around it.
     public let depthView: () -> UIView?
+    /// How far below the row's top edge its caption begins — zero for a row
+    /// that shows only its caption, the author band plus its gap for one that
+    /// names its author. The window is the WHOLE row, so the destination's
+    /// caption has to be told where the row's own sits.
+    public let captionTop: CGFloat
     /// Hide the row while the window taken from it is in the air, and put it
     /// back when it lands — the same bargain the flight fields above strike
     /// with `setConcealed`, for the same reason: a grab moves the window off
@@ -65,6 +70,7 @@ public struct TextRevealOrigin {
         rowFrame: @escaping (UICoordinateSpace) -> CGRect?,
         captionEnd: CGFloat?,
         depthView: @escaping () -> UIView? = { nil },
+        captionTop: CGFloat = 0,
         setConcealed: @escaping (Bool) -> Void = { _ in },
         presentationDidEnd: @escaping (Bool) -> Void = { _ in },
         willStageDismissal: @escaping () -> Void = {},
@@ -73,6 +79,7 @@ public struct TextRevealOrigin {
         self.rowFrame = rowFrame
         self.captionEnd = captionEnd
         self.depthView = depthView
+        self.captionTop = captionTop
         self.setConcealed = setConcealed
         self.presentationDidEnd = presentationDidEnd
         self.willStageDismissal = willStageDismissal

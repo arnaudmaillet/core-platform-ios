@@ -192,6 +192,11 @@ final class ProfileGalleryPagerView: UIView {
         return pages[activeIndex].textRowCaptionEnd(for: postID)
     }
 
+    func textRowCaptionTop(for postID: PostID) -> CGFloat {
+        guard pages.indices.contains(activeIndex) else { return 0 }
+        return pages[activeIndex].textRowCaptionTop(for: postID)
+    }
+
     func fadeInRevealedFurniture(for postID: PostID) {
         guard pages.indices.contains(activeIndex) else { return }
         pages[activeIndex].fadeInRevealedFurniture(for: postID)

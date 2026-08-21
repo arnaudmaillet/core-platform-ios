@@ -86,6 +86,10 @@ public struct RevealGeometry {
     /// Matched mode aligns this with the source rect at t=0; `nil` (or plain
     /// mode) leaves the page unmoved and the window simply opens over it.
     public let anchorFrame: (UICoordinateSpace) -> CGRect?
+    /// How far below the SOURCE's top edge its caption begins — zero for a card
+    /// that shows only its caption, the author band plus its gap for one that
+    /// names its author. See `RevealStage.pageTranslation`.
+    public let sourceCaptionTop: CGFloat
     /// Hide the row the window was taken FROM, for as long as it is in the air.
     ///
     /// The reveal can leave the row in place while the window sits exactly on
@@ -144,6 +148,7 @@ public struct RevealGeometry {
         setDestinationVeilOpacity: @escaping (CGFloat) -> Void = { _ in },
         setDestinationGround: @escaping (UIColor?) -> Void = { _ in },
         anchorFrame: @escaping (UICoordinateSpace) -> CGRect? = { _ in nil },
+        sourceCaptionTop: CGFloat = 0,
         setSourceConcealed: @escaping (Bool) -> Void = { _ in },
         depthView: @escaping () -> UIView? = { nil },
         presentationDidEnd: @escaping (Bool) -> Void = { _ in },
@@ -159,6 +164,7 @@ public struct RevealGeometry {
         self.setDestinationVeilOpacity = setDestinationVeilOpacity
         self.setDestinationGround = setDestinationGround
         self.anchorFrame = anchorFrame
+        self.sourceCaptionTop = sourceCaptionTop
         self.setSourceConcealed = setSourceConcealed
         self.depthView = depthView
         self.presentationDidEnd = presentationDidEnd
@@ -232,7 +238,8 @@ enum RevealStage {
         sourceRect: CGRect,
         radius: CGFloat,
         anchor: CGRect?,
-        matchesAnchor: Bool
+        matchesAnchor: Bool,
+        captionTop: CGFloat = 0
     ) -> Pose {
         // Matched: the page is pushed down so the caption row's CONTAINER
         // starts where the source row's does. Top to top, with nothing added —
@@ -253,7 +260,10 @@ enum RevealStage {
         // Plain: no travel at all, and the mask is a hole opening onto a page
         // that never moves.
         let translation: CGFloat = if matchesAnchor, let anchor {
-            sourceRect.minY - anchor.minY
+            // Plus the card's own caption offset: the window is the whole card,
+            // so the page's caption has to land where the CARD's is rather than
+            // at the window's top edge.
+            sourceRect.minY + captionTop - anchor.minY
         } else {
             0
         }
@@ -292,13 +302,24 @@ enum RevealStage {
     /// zero at each END — the row and the page carry their captions at the same
     /// inset, which is why the animated legs never needed it — and non-zero for
     /// every frame in between, which is the only interval a grab lives in.
+    /// `captionTop` is how far below the SOURCE card's top edge its caption
+    /// begins — zero for a plain card, the author band plus its gap for one
+    /// that names its author. It is what lets the window be the whole card
+    /// while the caption still lands on the card's own.
+    ///
+    /// It enters as `progress * captionTop`, which is the only place it can go:
+    /// at rest the page's caption is where the page puts it and the band is
+    /// irrelevant, and at home the gap between the window's top and the
+    /// caption has to be exactly the card's. Everything between interpolates,
+    /// as the rest of the law does.
     static func pageTranslation(
-        carrying window: CGRect, anchor: CGRect?, progress: CGFloat
+        carrying window: CGRect, anchor: CGRect?, progress: CGFloat,
+        captionTop: CGFloat = 0
     ) -> CGPoint {
         guard let anchor else { return .zero }
         return CGPoint(
             x: window.minX - progress * anchor.minX,
-            y: window.minY - progress * anchor.minY
+            y: window.minY - progress * anchor.minY + progress * captionTop
         )
     }
 
@@ -476,7 +497,8 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             sourceRect: sourceRect,
             radius: geometry.sourceCornerRadius,
             anchor: anchor,
-            matchesAnchor: geometry.matchesAnchor
+            matchesAnchor: geometry.matchesAnchor,
+            captionTop: geometry.sourceCaptionTop
         )
         let open = RevealStage.open(container: container)
         RevealStage.apply(closed, mask: mask, page: toView)
@@ -681,7 +703,8 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             sourceRect: sourceRect,
             radius: geometry.sourceCornerRadius,
             anchor: anchor,
-            matchesAnchor: geometry.matchesAnchor
+            matchesAnchor: geometry.matchesAnchor,
+            captionTop: geometry.sourceCaptionTop
         )
         RevealStage.apply(open, mask: mask, page: fromView)
         geometry.setDestinationGround(nil)
