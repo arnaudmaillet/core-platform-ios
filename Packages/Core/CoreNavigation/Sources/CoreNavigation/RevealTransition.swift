@@ -492,6 +492,23 @@ enum RevealStage {
         )
         standIn?.frame = pose.mask
         (standIn as? RevealStandInShaping)?.setCornerRadius(pose.maskRadius)
+        // LAID OUT HERE, inside whatever block is applying the pose, and that
+        // is the whole of keeping a stand-in's contents centred.
+        //
+        // A stand-in holds the card centred by constraint. Constraints resolve
+        // in a layout pass, and a layout pass is not an animation: with the
+        // frame animating from one rect to another, the card inside jumped
+        // straight to its final centre while the window was still travelling —
+        // a gap opening in the middle of the release, exactly where the
+        // transition promises continuity. The drag never showed it, because
+        // direct sets get a layout pass every turn anyway.
+        //
+        // Called from INSIDE the animation, the layout animates too: the frame
+        // interpolates from A to B, the card's centre interpolates from
+        // centre(A) to centre(B), and since centring is affine in the frame and
+        // both ride the same curve, centred at the ends means centred all the
+        // way through.
+        standIn?.layoutIfNeeded()
     }
 
     /// Puts `page` back where the transition context expects to find it and
