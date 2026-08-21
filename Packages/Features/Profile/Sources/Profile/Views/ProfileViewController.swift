@@ -504,6 +504,21 @@ final class ProfileViewController: UIViewController {
                     captionEnd: galleryPager.textRowCaptionEnd(for: post.id),
                     depthView: { [weak self] in self?.galleryPager },
                     captionTop: galleryPager.textRowCaptionTop(for: post.id),
+                    // Borrowed by the destination for the flight, so the window
+                    // shows the header the card does instead of a blank strip
+                    // the card's own header then appears into at the landing.
+                    authorBand: galleryPager.textRowAuthorBand(for: post.id),
+                    // What the CLOSE carries home. Built from the post rather
+                    // than read off the page, so a viewer who scrolled the
+                    // comments still lands on the card they came from.
+                    //
+                    // Both of these were For You's alone until now, which is
+                    // why the two screens' reveals did not feel the same: this
+                    // one flew the live page home and gained its header in a
+                    // single frame.
+                    makeDismissStandIn: { [weak self] in
+                        self?.galleryPager.makeDismissStandIn(for: post.id)
+                    },
                     // The gallery's own concealment, which the media hero
                     // beside this already drives — one mechanism, two kinds of
                     // flight.

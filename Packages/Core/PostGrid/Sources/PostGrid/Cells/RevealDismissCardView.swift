@@ -38,14 +38,14 @@ import UIKit
 /// which is why the swap reads as nothing changing when the page is unscrolled:
 /// the caption is the same words in the same place. The correction only shows
 /// itself when there was something to correct.
-final class RevealDismissCardView: UIView, RevealStandInShaping {
+public final class RevealDismissCardView: UIView, RevealStandInShaping {
     private let card: PostGridListRowCell
 
     /// `width` is the card's own, so the caption wraps and truncates exactly as
     /// the row does. Never the window's: the window is wider at the start of a
     /// flight and narrows as it lands, and a caption re-wrapping mid-flight is
     /// a reflow nobody asked for.
-    init(post: GalleryPost, width: CGFloat, imagePipeline: ImagePipeline) {
+    public init(post: GalleryPost, width: CGFloat, imagePipeline: ImagePipeline) {
         card = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: width, height: 200))
         super.init(frame: .zero)
         backgroundColor = PostGridListRowCell.cardFillColor
@@ -90,9 +90,9 @@ final class RevealDismissCardView: UIView, RevealStandInShaping {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override func layoutSubviews() {
+    override public func layoutSubviews() {
         super.layoutSubviews()
         // The window's rounding, so the stand-in is the window's shape at every
         // size rather than a rectangle inside it.
@@ -100,7 +100,7 @@ final class RevealDismissCardView: UIView, RevealStandInShaping {
     }
 
     /// The window's rounding, driven by the flight.
-    func setCornerRadius(_ radius: CGFloat) {
+    public func setCornerRadius(_ radius: CGFloat) {
         layer.cornerRadius = radius
     }
 
@@ -111,7 +111,7 @@ final class RevealDismissCardView: UIView, RevealStandInShaping {
     /// two independently gives a third thing neither can give alone: a window
     /// that is card-coloured and holds nothing. See `RevealStage.swapToStandIn`
     /// for why that beat matters.
-    func setContentOpacity(_ alpha: CGFloat) {
+    public func setContentOpacity(_ alpha: CGFloat) {
         card.alpha = alpha
     }
 }

@@ -648,6 +648,35 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         (cell(for: postID) as? PostGridListRowCell)?.revealCut
     }
 
+    /// The card a dismissal carries home, drawn at the ROW's own width so its
+    /// caption wraps and truncates exactly as the row's does.
+    ///
+    /// Without one the close flies the live PAGE, which only works while the
+    /// page still shows, in the same place, what the card shows — and a viewer
+    /// who scrolled the comments has already broken that. Same view For You
+    /// flies, because a viewer opening the same post from either screen is
+    /// looking at one screen and must get one transition.
+    func makeDismissStandIn(for postID: PostID) -> UIView? {
+        guard let post = posts.first(where: { $0.id == postID }) else { return nil }
+        // The realized row's width when there is one, the list's own otherwise:
+        // a row scrolled out still has to produce a card, and the width is a
+        // property of the LIST rather than of any particular cell.
+        let width = cell(for: postID)?.bounds.width ?? collectionView.bounds.width
+        guard width > 0 else { return nil }
+        return RevealDismissCardView(post: post, width: width, imagePipeline: imagePipeline)
+    }
+
+    /// The row's author band, for the destination to borrow during a flight, so
+    /// the window a viewer holds shows the header the card does instead of a
+    /// blank strip the card's own header then appears into.
+    ///
+    /// Read from the POST rather than from the cell, so it answers for a row
+    /// that has scrolled out as readily as for one on screen.
+    func textRowAuthorBand(for postID: PostID) -> PostAuthorBandView.Model? {
+        posts.first { $0.id == postID }.flatMap(PostAuthorBandView.Model.init(post:))
+    }
+
+
     /// Brings the landed row's own furniture in gently — see
     /// `PostGridListRowCell.fadeInRevealedFurniture`. A no-op for a row that is
     /// not realized, which is the honest answer: nothing is on screen to fade.

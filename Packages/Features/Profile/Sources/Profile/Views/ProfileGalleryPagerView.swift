@@ -187,9 +187,9 @@ final class ProfileGalleryPagerView: UIView {
         return pages[activeIndex].heroGeometry(for: postID)
     }
 
-    /// The text reveal's three questions, asked of the ACTIVE page — the same
-    /// rule `heroGeometry` follows, and for the same reason: a rect read from
-    /// one page and a cut read from another would describe two different lists.
+    /// The text reveal's questions, asked of the ACTIVE page — the same rule
+    /// `heroGeometry` follows, and for the same reason: a rect read from one
+    /// page and a cut read from another would describe two different lists.
     func textRowFrame(for postID: PostID, in space: UICoordinateSpace) -> CGRect? {
         guard pages.indices.contains(activeIndex) else { return nil }
         return pages[activeIndex].textRowFrame(for: postID, in: space)
@@ -203,6 +203,16 @@ final class ProfileGalleryPagerView: UIView {
     func textRowCaptionTop(for postID: PostID) -> CGFloat {
         guard pages.indices.contains(activeIndex) else { return 0 }
         return pages[activeIndex].textRowCaptionTop(for: postID)
+    }
+
+    func makeDismissStandIn(for postID: PostID) -> UIView? {
+        guard pages.indices.contains(activeIndex) else { return nil }
+        return pages[activeIndex].makeDismissStandIn(for: postID)
+    }
+
+    func textRowAuthorBand(for postID: PostID) -> PostAuthorBandView.Model? {
+        guard pages.indices.contains(activeIndex) else { return nil }
+        return pages[activeIndex].textRowAuthorBand(for: postID)
     }
 
     func fadeInRevealedFurniture(for postID: PostID) {
