@@ -265,6 +265,34 @@ public final class ForYouViewModel {
         publish()
     }
 
+    /// Drops everything by one author from the corpus in hand.
+    ///
+    /// Called after an unfollow succeeds. This surface IS the following feed —
+    /// both its tabs are served by `timeline.v1.GetFollowingFeed` — so an
+    /// author the viewer no longer follows has nothing left to be doing on it,
+    /// and leaving their rows in place makes the action look like it failed.
+    ///
+    /// Both pages lose them together, for that same reason: Discover is an
+    /// ORDERING of the following corpus, not a second one, so a post that does
+    /// not belong on one page does not belong on the other either.
+    ///
+    /// A local edit, deliberately, not a refetch. The next real load answers
+    /// with the server's own list; until then the client removes exactly what
+    /// it knows changed rather than dropping the corpus and making the viewer
+    /// watch the whole surface reload because they tapped one menu row.
+    public func removeAuthor(_ authorID: ProfileID) {
+        guard let current = corpus else { return }
+        let remaining = current.filter { $0.authorID != authorID }
+        guard remaining.count != current.count else { return }
+        corpus = remaining
+        // A REMOVAL is a re-derivation, not an extension — the pages diff
+        // incrementally and have to be told before they see it, exactly as a
+        // lens change tells them. Without this the rows are removed from the
+        // model and left on screen.
+        onCorpusReset?()
+        publish()
+    }
+
     /// Called as the active page nears its end. A no-op when a page is
     /// already in flight, when the corpus is exhausted, or before the first
     /// page has landed.

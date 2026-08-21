@@ -953,18 +953,21 @@ final class ForYouViewController: UIViewController {
         return actions
     }
 
-    /// Unfollows, and says so.
+    /// Unfollows, clears the author off the surface, and says so.
     ///
-    /// The corpus is deliberately left alone. Pulling the author's posts out
-    /// from under the viewer would rewrite the list they are reading at the
-    /// moment they touched it — the next refresh is soon enough, and it is the
-    /// server's answer rather than the client's guess at one.
+    /// The rows go only once the graph has ACCEPTED. Removing them optimistically
+    /// would mean putting them back on a failure — a list that empties and
+    /// refills itself under the reader is worse than one that waits a moment.
     private func unfollow(_ id: ProfileID, handle: String) {
         guard let socialGraph else { return }
         Task { [weak self] in
             do {
                 try await socialGraph.setFollowing(false, for: id)
                 guard let self else { return }
+                // This surface is the following feed, so an author who is no
+                // longer followed has nothing left on it. Without this the
+                // action reads as having failed.
+                viewModel.removeAuthor(id)
                 let name = handle.isEmpty ? "this author" : "@\(handle)"
                 ToastView.present("Unfollowed \(name)", symbol: "person.badge.minus", in: view)
             } catch {

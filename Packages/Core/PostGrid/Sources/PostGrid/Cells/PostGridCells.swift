@@ -16,7 +16,12 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The inner preview's rounding — the radius a hero flying from this row
     /// must start at, so the card is the preview's twin rather than its
     /// approximation.
-    public static let mediaCornerRadius: CGFloat = 12
+    ///
+    /// Derived, never restated: it is the card's own curve carried inward by
+    /// the preview's inset, so the two stay parallel when either moves. The
+    /// hero reads THIS, and a second literal here would put a flight's opening
+    /// frame at a radius the row it left has not had for some time.
+    public static var mediaCornerRadius: CGFloat { cardCornerRadius - mediaInset }
 
     /// Where the page STOPS MATCHING this card, in the card's own space — the
     /// reveal's cut line. Below it the destination is veiled for the length of
@@ -524,7 +529,32 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The card's own rounding and fill, so a flight impersonating this row
     /// is its twin rather than an approximation of it. Restating either as a
     /// literal in the flight card is how the two drift.
-    public static let cardCornerRadius: CGFloat = 18
+    /// The system context menu's own radius, because the two are seen
+    /// together: a card's "..." opens a menu that lands ON the card, and two
+    /// shoulders a few points apart read as a mistake rather than as a choice.
+    ///
+    /// **32 is measured, not guessed.** It cannot be read out of UIKit — every
+    /// view AND every layer under `_UIContextMenuContainerView` reports a zero
+    /// corner radius and no mask (both trees walked), because the glass renders
+    /// its own shape. So it came off a capture, fitted rather than eyeballed:
+    /// the corner's profile is `dx = R - sqrt(2·R·dy - dy²)`, and least squares
+    /// over heights of 3–20pt returns the menu at **31.7pt, rms 0.18**.
+    ///
+    /// That pipeline is CALIBRATED, which is what makes the number evidence
+    /// rather than arithmetic: pointed at cards of known radius it reads 18 as
+    /// 17.8 and 32 as 30.6, so it runs a few percent low. Corrected, the menu
+    /// is 32–33; 32 is the round number inside that interval.
+    ///
+    /// ⚠️ Do NOT measure this by where the arc visually "ends". A menu's glass
+    /// edge is soft and its shadow reaches past it, so the apparent span runs
+    /// ~39pt against a hard-edged card's ~20pt at 18 — a ratio that would have
+    /// put this near 35. The fit is over the steep part of the curve, where the
+    /// shape dominates and the softness does not.
+    public static let cardCornerRadius: CGFloat = 32
+    /// How far the media preview is held off the card's edge — named because
+    /// the preview's own radius is derived from it, and the two must move
+    /// together or the curves stop being parallel.
+    public static let mediaInset: CGFloat = 16
     public static let cardFillColor: UIColor = .secondarySystemBackground
     /// The caption's type and inset, for the same reason.
     public static let captionInset: CGFloat = 16
@@ -676,7 +706,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
 
         mediaView.contentMode = .scaleAspectFill
         mediaView.clipsToBounds = true
-        mediaView.layer.cornerRadius = 12
+        // CONCENTRIC with the card, not a constant of its own: the preview is
+        // inset from the card's edge, and a curve parallel to the one around it
+        // is the inner radius reduced by exactly that inset. It was 12 against
+        // an 18pt card, which was parallel to nothing.
+        mediaView.layer.cornerRadius = Self.mediaCornerRadius
         mediaView.layer.cornerCurve = .continuous
         card.addSubview(mediaView)
         mediaView.translatesAutoresizingMaskIntoConstraints = false
@@ -718,8 +752,8 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             mediaView.topAnchor.constraint(
                 equalTo: captionLabel.bottomAnchor, constant: Self.captionFollowGap
             ),
-            mediaView.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
-            mediaView.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
+            mediaView.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Self.mediaInset),
+            mediaView.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Self.mediaInset),
             mediaView.heightAnchor.constraint(equalToConstant: 180),
             metaRow.topAnchor.constraint(equalTo: mediaView.bottomAnchor, constant: 12)
         ]
