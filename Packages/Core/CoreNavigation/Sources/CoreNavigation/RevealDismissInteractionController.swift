@@ -325,8 +325,8 @@ final class RevealDismissInteractionController: NSObject,
         // a chevron land with identical physics; only the seeded velocity
         // differs, which is what makes the window feel caught.
         UIView.animate(
-            withDuration: ZoomFlight.springDuration, delay: 0,
-            usingSpringWithDamping: ZoomFlight.springDamping,
+            withDuration: RevealStage.springDuration, delay: 0,
+            usingSpringWithDamping: RevealStage.springDamping,
             initialSpringVelocity: springVelocity,
             options: [.beginFromCurrentState, .allowUserInteraction]
         ) {

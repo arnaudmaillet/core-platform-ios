@@ -51,6 +51,19 @@ final class ProfileGalleryGridView: UIView {
     private var pendingRevealPostID: PostID?
     /// Fired when a drag ends, with how far the page was pulled past its top.
     var onPullReleased: ((CGFloat) -> Void)?
+    /// A row's author was tapped — its disc, its name or its handle.
+    var onAuthorTapped: ((GalleryPost) -> Void)?
+    /// What a row's "..." offers. Asked at press time, per row; the screen
+    /// decides, because this view knows nothing about what can be serviced.
+    var authorMenuActions: ((AuthorMenuContext) -> [PostCardMenuAction])?
+
+    /// Everything a host needs to build one row's menu.
+    struct AuthorMenuContext {
+        let post: GalleryPost
+        let authorID: ProfileID
+        /// The control that was pressed, for a popover-shaped follow-up sheet.
+        let anchor: UIView
+    }
 
     /// Clearance the owner asked for — the tab bar, the tray.
     private var baseBottomInset: CGFloat = 0
@@ -384,6 +397,21 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
             // event that can re-open the gate for an item that came up
             // faceless while the page sat still.
             cell.onCoverLoaded = { [weak self] in self?.reconcileAutoplay() }
+            // The band's identity and its "...". A profile gallery's rows carry
+            // an author like any other — the repository decorates them (the
+            // Tagged tab is other people's posts, so the name is not always the
+            // profile's own).
+            if let authorID = post.authorID {
+                cell.onAuthorTapped = { [weak self] in self?.onAuthorTapped?(post) }
+                cell.authorMenuActions = { [weak self, weak cell] in
+                    guard let self, let cell else { return [] }
+                    return authorMenuActions?(
+                        AuthorMenuContext(
+                            post: post, authorID: authorID, anchor: cell.authorMenuAnchor
+                        )
+                    ) ?? []
+                }
+            }
             return cell
         case .grid:
             let cell = collectionView.dequeueReusableCell(
@@ -619,6 +647,65 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     func textRowCaptionEnd(for postID: PostID) -> CGFloat? {
         (cell(for: postID) as? PostGridListRowCell)?.revealCut
     }
+
+    /// The card a dismissal carries home, drawn at the ROW's own width so its
+    /// caption wraps and truncates exactly as the row's does.
+    ///
+    /// Without one the close flies the live PAGE, which only works while the
+    /// page still shows, in the same place, what the card shows — and a viewer
+    /// who scrolled the comments has already broken that. Same view For You
+    /// flies, because a viewer opening the same post from either screen is
+    /// looking at one screen and must get one transition.
+    func makeDismissStandIn(for postID: PostID) -> UIView? {
+        guard let post = posts.first(where: { $0.id == postID }) else { return nil }
+        // The realized row's width when there is one, the list's own otherwise:
+        // a row scrolled out still has to produce a card, and the width is a
+        // property of the LIST rather than of any particular cell.
+        let width = cell(for: postID)?.bounds.width ?? collectionView.bounds.width
+        guard width > 0 else { return nil }
+        return RevealDismissCardView(
+            post: post,
+            width: width,
+            imagePipeline: imagePipeline,
+            // See For You's twin: the expansion belongs to the surface, and a
+            // stand-in built without it lands a truncated card on an expanded
+            // row.
+            captionExpanded: captionExpansion.isExpanded(postID),
+            showsAuthorMenu: showsAuthorMenu(for: post),
+            // The ROW's own height when it is realized — the card is centred
+            // in the window, so a height that disagrees with the row's puts
+            // every line inside it half the difference out.
+            height: cell(for: postID)?.bounds.height
+        )
+    }
+
+    /// Whether the row for `post` draws a "...", asked of the same provider the
+    /// row itself asks.
+    ///
+    /// The stand-in has to match, and on THIS surface the answer is often no: a
+    /// viewer's own post offers nothing, so a stand-in that always drew the
+    /// control ended every dismissal with it vanishing.
+    ///
+    /// The provider rather than the realized cell, because a row that scrolled
+    /// out still has to produce a card and cannot be asked what it is showing.
+    private func showsAuthorMenu(for post: GalleryPost) -> Bool {
+        guard let authorID = post.authorID, let authorMenuActions else { return false }
+        // The anchor is only ever read to place a popover, and nothing is being
+        // presented here — this asks the provider what it WOULD offer.
+        let context = AuthorMenuContext(post: post, authorID: authorID, anchor: UIView())
+        return !authorMenuActions(context).isEmpty
+    }
+
+    /// The row's author band, for the destination to borrow during a flight, so
+    /// the window a viewer holds shows the header the card does instead of a
+    /// blank strip the card's own header then appears into.
+    ///
+    /// Read from the POST rather than from the cell, so it answers for a row
+    /// that has scrolled out as readily as for one on screen.
+    func textRowAuthorBand(for postID: PostID) -> PostAuthorBandView.Model? {
+        posts.first { $0.id == postID }.flatMap(PostAuthorBandView.Model.init(post:))
+    }
+
 
     /// Brings the landed row's own furniture in gently — see
     /// `PostGridListRowCell.fadeInRevealedFurniture`. A no-op for a row that is

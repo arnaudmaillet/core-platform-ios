@@ -16,7 +16,19 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The inner preview's rounding — the radius a hero flying from this row
     /// must start at, so the card is the preview's twin rather than its
     /// approximation.
-    public static let mediaCornerRadius: CGFloat = 12
+    ///
+    /// CONCENTRIC with the card: its radius carried inward by the preview's own
+    /// inset, so the two curves stay parallel the whole way round.
+    ///
+    /// This is the arithmetic `UICornerRadius.containerConcentric` performs,
+    /// written out rather than delegated — the hero reads a NUMBER to open a
+    /// flight at, and a corner configuration resolved at layout time is not
+    /// something a transition can ask for up front.
+    ///
+    /// Derived, never restated, for the same reason: a literal here would put a
+    /// flight's first frame at a curve the row it left has not had for some
+    /// time.
+    public static var mediaCornerRadius: CGFloat { cardCornerRadius - mediaInset }
 
     /// Where the page STOPS MATCHING this card, in the card's own space — the
     /// reveal's cut line. Below it the destination is veiled for the length of
@@ -524,7 +536,33 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The card's own rounding and fill, so a flight impersonating this row
     /// is its twin rather than an approximation of it. Restating either as a
     /// literal in the flight card is how the two drift.
-    public static let cardCornerRadius: CGFloat = 18
+    /// The platform's own radius for a grouped content card.
+    ///
+    /// There is no named constant to read: iOS 26's `UICornerRadius` offers
+    /// only `.fixed(_)` and `.containerConcentric(minimum:)`, and a card at the
+    /// root of a scroll view has no rounded container to be concentric with. So
+    /// the default is taken from what UIKit DRAWS — an `.insetGrouped` list
+    /// section, which is the system's own version of this shape.
+    ///
+    /// Measured off one, on two independent sections, by fitting the corner
+    /// profile `dx = R - sqrt(2·R·dy - dy²)`: **24.8pt (rms 0.28)** and
+    /// **25.3pt (rms 0.16)**. The pipeline is calibrated against known radii and
+    /// runs a couple of percent low, which puts the true value at 25–26.
+    ///
+    /// ❌ Two bespoke values were tried against the system context menu first
+    /// and both are recorded here so they are not re-derived: **32**, the
+    /// menu's own radius, which makes the two curves identical and therefore
+    /// makes the band between them swell through the turn (20.0pt on the
+    /// straights, 22.8pt at 45°); and **48**, the menu's radius plus the 16pt
+    /// margin it sits at, which does hold the band flat (15.5–16.3pt at every
+    /// angle) and is simply too round for a card. Matching a transient overlay
+    /// was the wrong target — the card is on screen all the time, and it should
+    /// look like the platform.
+    public static let cardCornerRadius: CGFloat = 26
+    /// How far the media preview is held off the card's edge — named because
+    /// the preview's own radius is derived from it, and the two must move
+    /// together or the curves stop being parallel.
+    public static let mediaInset: CGFloat = 16
     public static let cardFillColor: UIColor = .secondarySystemBackground
     /// The caption's type and inset, for the same reason.
     public static let captionInset: CGFloat = 16
@@ -554,11 +592,29 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// to survive that, so the set of expanded posts lives in
     /// `CaptionExpansion` and comes back through `configure`.
     public var onRevealFullCaption: (() -> Void)?
-    /// Fired when the viewer presses the band's follow control. The HOST owns
-    /// the answer for the same reason it owns caption expansion: a cell is
-    /// recycled, so the followed set lives outside it and comes back through
-    /// `configure`.
-    public var onFollowTapped: (() -> Void)?
+    /// Fired when the viewer taps the band's identity. The HOST navigates —
+    /// a cell cannot reach a navigation controller and should not try.
+    public var onAuthorTapped: (() -> Void)? {
+        get { authorBand.onAuthorTapped }
+        set { authorBand.onAuthorTapped = newValue }
+    }
+
+    /// The rows the band's "..." offers, asked for when it is pressed. Nil
+    /// hides the control — see `PostAuthorBandView.menuActions`.
+    public var authorMenuActions: (() -> [PostCardMenuAction])? {
+        get { authorBand.menuActions }
+        set { authorBand.menuActions = newValue }
+    }
+
+    /// What a popover-shaped sheet raised from the menu should point at.
+    public var authorMenuAnchor: UIView { authorBand.menuAnchor }
+
+    /// Draws the band's "..." without wiring it — for a transition's stand-in
+    /// card, which must look like the row it stands in for. See
+    /// `PostAuthorBandView.showMenuControlAsScenery`.
+    public func showAuthorMenuControlAsScenery() {
+        authorBand.showMenuControlAsScenery()
+    }
 
     private let card = UIView()
     /// The author band — shown only where the row's post actually carries an
@@ -658,7 +714,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
 
         mediaView.contentMode = .scaleAspectFill
         mediaView.clipsToBounds = true
-        mediaView.layer.cornerRadius = 12
+        // CONCENTRIC with the card, not a constant of its own: the preview is
+        // inset from the card's edge, and a curve parallel to the one around it
+        // is the inner radius reduced by exactly that inset. It was 12 against
+        // an 18pt card, which was parallel to nothing.
+        mediaView.layer.cornerRadius = Self.mediaCornerRadius
         mediaView.layer.cornerCurve = .continuous
         card.addSubview(mediaView)
         mediaView.translatesAutoresizingMaskIntoConstraints = false
@@ -700,15 +760,14 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             mediaView.topAnchor.constraint(
                 equalTo: captionLabel.bottomAnchor, constant: Self.captionFollowGap
             ),
-            mediaView.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
-            mediaView.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
+            mediaView.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Self.mediaInset),
+            mediaView.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Self.mediaInset),
             mediaView.heightAnchor.constraint(equalToConstant: 180),
             metaRow.topAnchor.constraint(equalTo: mediaView.bottomAnchor, constant: 12)
         ]
     }
 
     private func buildAuthorBand() {
-        authorBand.onFollowTapped = { [weak self] in self?.onFollowTapped?() }
         authorBand.constrain(in: card) { parent in
             authorBand.topAnchor.constraint(
                 equalTo: parent.topAnchor, constant: Self.captionTopInset
@@ -733,14 +792,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             return
         }
         authorBand.configure(with: model, imagePipeline: imagePipeline)
-        authorBand.setFollowing(false)
     }
-
-    /// How the row's follow control reads. Forwarded to the band it belongs to.
-    public func setFollowing(_ following: Bool) {
-        authorBand.setFollowing(following)
-    }
-
 
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -772,7 +824,12 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // cell to whatever post it is bound to next.
         metaRow.alpha = 1
         authorBand.cancelPendingWork()
-        onFollowTapped = nil
+        // Both band handlers capture the POST they were built for, so a
+        // recycled row must not keep them: the "..." would offer to unfollow
+        // the previous post's author, and the identity would push their
+        // profile.
+        onAuthorTapped = nil
+        authorMenuActions = nil
         // Concealment is per-FLIGHT state and must not ride a recycled cell to
         // whatever post it is bound to next — see `setHeroConcealed`.
         card.alpha = 1

@@ -7,17 +7,20 @@ import Testing
 ///
 /// The rule is one line, and it is worth a test because it is the only thing
 /// standing between a text post and a hero flight about nothing — a card
-/// carrying a symbol the destination will never show. The view controller that
-/// applies it needs a live `MKMapView` to exist (see `MapAnnotationPopTests`),
-/// so the decision lives in a pure type and this asserts it there.
+/// carrying a symbol the destination will never show. It sent text markers to
+/// a plain push for a long time and sends them to the WINDOW now: the disc is
+/// not a card to fly, it is a hole to grow, so the objection never applied to
+/// it. The view controller that applies the rule needs a live `MKMapView` to
+/// exist (see `MapAnnotationPopTests`), so the decision lives in a pure type
+/// and this asserts it there.
 struct MapMarkerPresentationTests {
-    @Test("A text marker is pushed, not flown — there is no cover to fly")
-    func aTextMarkerIsPushedPlainly() {
-        #expect(MapMarkerPresentation(face: .text) == .plainPush)
+    @Test("A text marker opens as a window, not a flight — there is no cover to fly")
+    func aTextMarkerOpensAsAWindow() {
+        #expect(MapMarkerPresentation(face: .text) == .reveal)
     }
 
-    /// The control. Without it, "always push" would pass the test above and
-    /// silently delete the map's hero transition.
+    /// The control. Without it, "always reveal" would pass the test above and
+    /// silently delete the map's hero flight.
     @Test("A media marker still flies")
     func aMediaMarkerStillFlies() {
         #expect(MapMarkerPresentation(face: .media) == .hero)
@@ -54,12 +57,12 @@ struct MapMarkerPresentationTests {
             return MapMarkerPresentation(face: representative.isText ? .text : .media)
         }
 
-        // Mixed, text first → pushed. This is the case the media preference
-        // made unreachable: any photo in the group used to force a flight.
-        #expect(presentation(of: [pin("p-1", .text), pin("p-2", .photo)]) == .plainPush)
+        // Mixed, text first → the window. This is the case the media
+        // preference made unreachable: any photo in the group forced a flight.
+        #expect(presentation(of: [pin("p-1", .text), pin("p-2", .photo)]) == .reveal)
         // Mixed, media first → flown.
         #expect(presentation(of: [pin("p-1", .photo), pin("p-2", .text)]) == .hero)
-        #expect(presentation(of: [pin("p-1", .text), pin("p-2", .text)]) == .plainPush)
+        #expect(presentation(of: [pin("p-1", .text), pin("p-2", .text)]) == .reveal)
         #expect(presentation(of: [pin("p-1", .photo), pin("p-2", .video)]) == .hero)
     }
 }

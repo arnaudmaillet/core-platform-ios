@@ -146,6 +146,21 @@ public protocol FeedFeatureBuilding {
     /// hand-rolled push leaves behind: perfect pixels, no way back but the
     /// chevron.
     func pushSnapFeed(postIDs: [PostID], from presenter: UIViewController)
+    /// The same push, opened as a WINDOW growing out of `origin` rather than as
+    /// a slide from the edge.
+    ///
+    /// Separate from `presentSnapFeedHero` because that one's origin is built
+    /// around a flying card — it needs the `GalleryPost` and the stream behind
+    /// it to draw one — and a caller here has neither. A map's marker knows a
+    /// coordinate, a tint and some post ids; asked for a post model it would
+    /// have to invent one, which is the objection `pushSnapFeed` was written
+    /// against and it applies just as much to its window-shaped sibling.
+    ///
+    /// What this takes is exactly what the reveal reads: where the source is,
+    /// what shape and colour it is, and what to draw in the window at each end.
+    func revealSnapFeed(
+        postIDs: [PostID], from presenter: UIViewController, origin: TextRevealOrigin
+    )
     /// Best-effort, cancellable warming of these posts into the shared cache, so
     /// a subsequent `makeSnapFeedViewController` hydrates from memory rather than
     /// the network — used by Maps to prefetch the visible pins on viewport

@@ -34,6 +34,23 @@ final class ForYouGridPage: UIView {
     /// The page scrolled near its end and wants another page.
     var onNearEnd: (() -> Void)?
     var onRefresh: (() -> Void)?
+    /// A row's author was tapped — its disc, its name or its handle.
+    var onAuthorTapped: ((GalleryPost) -> Void)?
+    /// What a row's "..." should offer. Asked at press time, per row.
+    ///
+    /// The page holds no opinion about the answer: which rows exist depends on
+    /// what the SCREEN can service (a reporting seam, a social graph), and this
+    /// view has neither. It supplies the context and renders whatever comes
+    /// back — including nothing, which hides the control.
+    var authorMenuActions: ((AuthorMenuContext) -> [PostCardMenuAction])?
+
+    /// Everything a host needs to build one row's menu.
+    struct AuthorMenuContext {
+        let post: GalleryPost
+        let authorID: ProfileID
+        /// The control that was pressed, for a popover-shaped follow-up sheet.
+        let anchor: UIView
+    }
 
     /// Display order — the mosaic's arrangement of `rawPosts`. What the cells,
     /// the hero, and a tile tap all read.
@@ -257,9 +274,6 @@ final class ForYouGridPage: UIView {
     /// Which captions the viewer has opened out. Owned here rather than by the
     /// rows, which are recycled — see `CaptionExpansion`.
     private let captionExpansion = CaptionExpansion()
-    /// The viewer's followed authors — see `AuthorFollowStore` for why this is
-    /// on the device and not on the service.
-    private let authorFollows = AuthorFollowStore()
     /// The row a REVEAL is currently holding, hidden until its window lands.
     ///
     /// Its own slot, deliberately not `heroHiddenPostID`. Sharing that one was
@@ -1055,7 +1069,7 @@ final class ForYouGridPage: UIView {
         }
     }
 
-    /// **PROTOTYPE** (`-text-reveal`). The whole card of a TEXT row, in
+    /// **THE TEXT REVEAL**. The whole card of a TEXT row, in
     /// `space` — the rect a clip-window reveal opens from and closes onto.
     ///
     /// Deliberately NOT `hero(for:in:)`'s rect, and the difference is the
@@ -1129,7 +1143,32 @@ final class ForYouGridPage: UIView {
         // property of the LIST rather than of any particular cell.
         let width = cell(for: postID)?.bounds.width ?? collectionView.bounds.width
         guard width > 0 else { return nil }
-        return RevealDismissCardView(post: post, width: width, imagePipeline: imagePipeline)
+        return RevealDismissCardView(
+            post: post,
+            width: width,
+            imagePipeline: imagePipeline,
+            // The viewer may have opened this caption out before opening the
+            // post. The expansion belongs to the SURFACE, not to the cell, so
+            // it is here to be asked for — and a stand-in that does not ask
+            // flies a truncated card home, "Show more" and all, onto a row that
+            // is showing the whole thing.
+            captionExpanded: captionExpansion.isExpanded(postID),
+            showsAuthorMenu: showsAuthorMenu(for: post),
+            // The ROW's own height when it is realized — see the profile's
+            // twin, and `RevealDismissCardView.init`.
+            height: cell(for: postID)?.bounds.height
+        )
+    }
+
+    /// Whether the row for `post` draws a "...", asked of the same provider the
+    /// row asks. The stand-in has to match it or the control pops in or out in
+    /// the last frame — see `RevealDismissCardView`.
+    private func showsAuthorMenu(for post: GalleryPost) -> Bool {
+        guard let authorID = post.authorID, let authorMenuActions else { return false }
+        // The anchor only ever places a popover, and nothing is being presented
+        // here: this asks the provider what it WOULD offer.
+        let context = AuthorMenuContext(post: post, authorID: authorID, anchor: UIView())
+        return !authorMenuActions(context).isEmpty
     }
 
     /// The row's author band, for the destination to borrow during a flight.
@@ -1699,14 +1738,19 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             // a cover arriving is the only event that can re-open the gate for
             // a row that came up faceless while the timeline sat still.
             cell.onCoverLoaded = { [weak self] in self?.updateAutoplay() }
-            // The band's control, if the post carries an author to follow.
-            // Captured by AUTHOR for the same reason the caption's handler is
-            // captured by post: the row that asked can have moved.
+            // The band's identity and its "...", if the post carries an author.
+            // Captured by AUTHOR and by POST for the same reason the caption's
+            // handler is captured by post: the row that asked can have moved by
+            // the time the answer is applied.
             if let authorID = post.authorID {
-                let follows = authorFollows
-                cell.setFollowing(follows.isFollowing(authorID))
-                cell.onFollowTapped = { [weak cell] in
-                    cell?.setFollowing(follows.toggle(authorID))
+                cell.onAuthorTapped = { [weak self] in self?.onAuthorTapped?(post) }
+                cell.authorMenuActions = { [weak self, weak cell] in
+                    guard let self, let cell else { return [] }
+                    return authorMenuActions?(
+                        AuthorMenuContext(
+                            post: post, authorID: authorID, anchor: cell.authorMenuAnchor
+                        )
+                    ) ?? []
                 }
             }
             Self.applyHeroConcealment(isFlying, to: cell)

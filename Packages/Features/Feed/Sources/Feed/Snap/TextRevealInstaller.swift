@@ -21,19 +21,25 @@ import UIKit
 /// choreography: which chrome comes back with the return, and what has to
 /// settle before a landing is measured. Those arrive as a `TextRevealOrigin`.
 ///
-/// ## The prototype gate
+/// ## No longer a prototype
 ///
-/// `-text-reveal`, and DEBUG only, exactly as it has been. Wiring a second
-/// surface does not promote the prototype — it means the one flag now turns the
-/// transition on everywhere it applies, instead of on one screen out of two.
+/// It shipped behind `-text-reveal`, DEBUG only, for as long as it was one
+/// screen's experiment. It is now how a text post opens, everywhere it applies
+/// and in every build: a text post had no media to fly and so opened with a
+/// plain slide while every other post got a hero, and that gap is what this
+/// closes. Leaving it behind a flag meant the app shipped the gap.
+///
+/// `-no-text-reveal` remains, DEBUG only, as the way back — the A/B side for
+/// anything that needs to compare against the plain push.
 @MainActor
 enum TextRevealInstaller {
-    /// Whether the prototype is on for this launch.
+    /// Whether the reveal is on for this launch. On unless a debug build asks
+    /// for the old plain push.
     static var isEnabled: Bool {
         #if DEBUG
-        ProcessInfo.processInfo.arguments.contains("-text-reveal")
+        !ProcessInfo.processInfo.arguments.contains("-no-text-reveal")
         #else
-        false
+        true
         #endif
     }
 
@@ -79,12 +85,15 @@ enum TextRevealInstaller {
     ) -> RevealGeometry {
         RevealGeometry(
             sourceFrame: origin.rowFrame,
-            sourceCornerRadius: PostGridListRowCell.cardCornerRadius,
-            // The card's own fill, borrowed by the page for the length of the
-            // reveal. Read from PostGrid rather than restated, for the same
-            // reason the radius and the insets are: three copies of one colour
-            // is how two surfaces stop matching.
-            sourceFill: PostGridListRowCell.cardFillColor,
+            // The CARD's shape unless the source says otherwise, which is every
+            // row and is why these are defaults rather than arguments. A map's
+            // marker is a disc in its own tint and supplies both.
+            //
+            // The card's values are read from PostGrid rather than restated,
+            // for the same reason the insets are: three copies of one colour is
+            // how two surfaces stop matching.
+            sourceCornerRadius: origin.cornerRadius ?? PostGridListRowCell.cardCornerRadius,
+            sourceFill: origin.fill ?? PostGridListRowCell.cardFillColor,
             sourceCaptionEnd: origin.captionEnd,
             installDestinationVeil: { [weak feed] cut, tint in
                 (feed as? SnapFeedViewController)?.installRevealVeil(below: cut, tint: tint)
@@ -124,12 +133,16 @@ enum TextRevealInstaller {
             },
             sourceCaptionTop: origin.captionTop,
             makeDismissStandIn: origin.makeDismissStandIn,
+            makePresentStandIn: origin.makePresentStandIn,
             setSourceConcealed: origin.setConcealed,
             depthView: origin.depthView,
             presentationDidEnd: origin.presentationDidEnd,
             willStageDismissal: origin.willStageDismissal,
             dismissalDidEnd: origin.dismissalDidEnd,
-            matchesAnchor: matchesAnchor
+            // A source that has no caption cannot be aligned to, whatever the
+            // launch argument says: asking anyway slid the page 448pt sideways
+            // under a 44pt disc that was covering it.
+            matchesAnchor: matchesAnchor && origin.alignsPageToSource
         )
     }
 }

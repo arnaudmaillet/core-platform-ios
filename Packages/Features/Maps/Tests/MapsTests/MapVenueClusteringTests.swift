@@ -116,8 +116,8 @@ struct MapVenueClusteringTests {
         #expect(Set(opened).count == opened.count, "a member was duplicated")
         // You land on the post you tapped...
         #expect(opened.first == cluster.representative.postID)
-        // ...and it is pushed, not flown, per that post's face.
-        #expect(MapMarkerPresentation(face: .text) == .plainPush)
+        // ...and it opens as a window, not a flight, per that post's face.
+        #expect(MapMarkerPresentation(face: .text) == .reveal)
 
         // The payload is genuinely mixed: the symbol face is not a promise
         // about the group's contents, only about its first post.

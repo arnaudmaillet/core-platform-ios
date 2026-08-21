@@ -1,6 +1,6 @@
 import UIKit
 
-/// **PROTOTYPE** (`-text-reveal`). A hero for a page that has no media to fly.
+/// **THE TEXT REVEAL**. A hero for a page that has no media to fly.
 ///
 /// Every previous attempt at a text hero flew a *replica* of the row and made
 /// it impersonate the destination, and all five of them died of the same
@@ -112,6 +112,23 @@ public struct RevealGeometry {
     /// `nil` keeps the old behaviour — the page itself, registered — which is
     /// still correct for a surface that cannot draw a stand-in.
     public let makeDismissStandIn: () -> UIView?
+    /// Builds what the OPENING starts as, for a source whose content the page
+    /// does not repeat — and the reason this leg needed one at all.
+    ///
+    /// A row does not: its caption IS the page's caption, so the window can
+    /// show the real page from frame 0 and be showing the right thing. That is
+    /// the premise the whole transition was built on, and it holds for a row.
+    ///
+    /// A map's marker is a glyph on a tinted disc, and the page has no glyph
+    /// anywhere. Opened without a stand-in, the disc becomes a 44pt porthole
+    /// onto the page's top-left corner — a window onto something the viewer
+    /// never tapped. So the marker is drawn fresh, the window opens as IT, and
+    /// the two channels hand over in the same order the dismissal uses,
+    /// reversed: the glyph goes first, then the fill it sits on, revealing the
+    /// page that was underneath the whole time.
+    ///
+    /// `nil` keeps the row's behaviour, which is the default.
+    public let makePresentStandIn: () -> UIView?
     /// How far below the SOURCE's top edge its caption begins — zero for a card
     /// that shows only its caption, the author band plus its gap for one that
     /// names its author. See `RevealStage.pageTranslation`.
@@ -178,6 +195,7 @@ public struct RevealGeometry {
         anchorFrame: @escaping (UICoordinateSpace) -> CGRect? = { _ in nil },
         sourceCaptionTop: CGFloat = 0,
         makeDismissStandIn: @escaping () -> UIView? = { nil },
+        makePresentStandIn: @escaping () -> UIView? = { nil },
         setSourceConcealed: @escaping (Bool) -> Void = { _ in },
         depthView: @escaping () -> UIView? = { nil },
         presentationDidEnd: @escaping (Bool) -> Void = { _ in },
@@ -197,6 +215,7 @@ public struct RevealGeometry {
         self.anchorFrame = anchorFrame
         self.sourceCaptionTop = sourceCaptionTop
         self.makeDismissStandIn = makeDismissStandIn
+        self.makePresentStandIn = makePresentStandIn
         self.setSourceConcealed = setSourceConcealed
         self.depthView = depthView
         self.presentationDidEnd = presentationDidEnd
@@ -445,6 +464,61 @@ enum RevealStage {
     /// The page dissolving into the card's fill.
     static let pageFadeStart: CGFloat = 0.10
     static let pageFadeEnd: CGFloat = 0.45
+    /// The reveal's OWN damping, a little looser than the media flight's.
+    ///
+    /// Peak overshoot is `exp(-πζ/√(1-ζ²))`, which puts the three values this
+    /// has worn in order:
+    ///
+    /// ```
+    ///   0.82  1.1%   the flight's — read as drawn open on rails
+    ///   0.70  4.6%   visibly springy, and too much of it
+    ///   0.78  2.0%   here
+    /// ```
+    ///
+    /// The flight's number was chosen for a photograph landing on the same
+    /// photograph, where any wobble reads as the picture failing to sit still.
+    /// A window has nothing to keep still — what arrives is a rounded rect
+    /// becoming a screen — so it can carry roughly twice the flight's bounce
+    /// and no more: at 4.6% the settle stopped reading as momentum and started
+    /// reading as an effect.
+    ///
+    /// Its own constant rather than a change to `ZoomFlight.springDamping`,
+    /// because the media hero was never the thing that read flat and must not
+    /// move.
+    static let springDamping: CGFloat = 0.78
+    /// The push-off — small on purpose now that the DURATION carries the
+    /// character.
+    ///
+    /// A kick off the source is what made this read as abrupt: the window left
+    /// fast and then had to shed all of it, so the fastest and slowest parts of
+    /// the motion were a few frames apart. Starting nearly from rest and taking
+    /// longer gives the same distance a visible acceleration and a visible
+    /// settle, which is what "smooth" is asking for.
+    static let springVelocity: CGFloat = 0.35
+    /// The reveal's own duration, longer than the flight's 0.42.
+    ///
+    /// A media flight moves a card across a screen; a reveal grows a 44pt disc
+    /// into the whole of one, which is a much larger visual change over the
+    /// same time and is why it read as abrupt at the flight's length. The
+    /// distance is the argument for the extra time, not taste.
+    ///
+    /// ⚠️ Everything staged in fractions rides this — see
+    /// `springVisibleFraction` and the hand-off — so it stays a single number
+    /// that the legs are shares of, never a second literal in an animator.
+    static let springDuration: TimeInterval = 0.55
+    /// How much of a spring's DURATION its visible travel occupies.
+    ///
+    /// The hand-off's fractions are shares of the window's journey, and a timed
+    /// animation can only be given shares of a CLOCK. Those are the same thing
+    /// under a linear curve and nothing like it under a spring, which covers
+    /// almost all of its distance early and spends the remainder settling
+    /// invisibly. Legs scheduled against the whole duration therefore fire
+    /// against a window that has already arrived.
+    ///
+    /// Used only where the hand-off is on a timer — a chevron pop, an opening.
+    /// A GRAB needs none of this: it is driven by progress, which is the
+    /// journey itself.
+    static let springVisibleFraction: CGFloat = 0.6
     /// The card arriving into it — starting EXACTLY where the fill finishes.
     ///
     /// There was a beat between them, and it is gone. It was there to keep the
@@ -617,7 +691,7 @@ func installVeil(geometry: RevealGeometry, anchor: CGRect?) {
 @MainActor
 final class RevealGrabAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     func transitionDuration(using context: (any UIViewControllerContextTransitioning)?) -> TimeInterval {
-        ZoomFlight.springDuration
+        RevealStage.springDuration
     }
 
     /// EMPTY, and it has to be. UIKit routes an interactive pop to the
@@ -659,7 +733,7 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
     }
 
     func transitionDuration(using context: (any UIViewControllerContextTransitioning)?) -> TimeInterval {
-        ZoomFlight.springDuration
+        RevealStage.springDuration
     }
 
     func animateTransition(using context: any UIViewControllerContextTransitioning) {
@@ -699,7 +773,18 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             captionTop: geometry.sourceCaptionTop
         )
         let open = RevealStage.open(container: container)
-        RevealStage.apply(closed, mask: mask, page: toView)
+        // The window opens AS THE SOURCE when the source's content is not the
+        // page's — a marker's glyph, which the page has nowhere. Added above
+        // the masked page, posed on the same closed pose, and handed over in
+        // the dismissal's order reversed: content first, then the fill under
+        // it. Nil for a row, whose caption is the page's caption.
+        let standIn = geometry.makePresentStandIn()
+        if let standIn {
+            container.addSubview(standIn)
+            standIn.alpha = 1
+            (standIn as? RevealStandInShaping)?.setContentOpacity(1)
+        }
+        RevealStage.apply(closed, mask: mask, page: toView, standIn: standIn)
         // The page wears the CARD before it wears itself. Set outside the
         // animation block so frame 0 is already the card's tone; the block
         // below hands the ground back, which cross-fades it.
@@ -751,14 +836,45 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             RevealStage.log("present", "chrome faded to \(chrome?.alpha ?? -1)")
             #endif
         }
+        // THE HAND-OFF, which is the dismissal's run backwards.
+        //
+        // The dismissal fades the page into the card's fill and then raises the
+        // card inside it; an opening that starts as its source has to undo
+        // exactly that, in the same order and on the same fractions — content
+        // out first, then the fill it sat on, revealing the page that was
+        // underneath from frame 0. The curves invert with the direction: a rise
+        // that accelerated away from transparent is a fall that decelerates
+        // into it.
+        if let standIn {
+            let shaping = standIn as? RevealStandInShaping
+            // Against the spring's visible window for the same reason the pop
+            // is — see `RevealStage.springVisibleFraction`.
+            let span = duration * RevealStage.springVisibleFraction
+            let contentOut = 1 - RevealStage.cardFadeEnd
+            let fillOut = 1 - RevealStage.pageFadeEnd
+            UIView.animate(
+                withDuration: span * (RevealStage.cardFadeEnd - RevealStage.cardFadeStart),
+                delay: span * contentOut,
+                options: [.curveEaseOut]
+            ) {
+                shaping?.setContentOpacity(0)
+            }
+            UIView.animate(
+                withDuration: span * (RevealStage.pageFadeEnd - RevealStage.pageFadeStart),
+                delay: span * fillOut,
+                options: [.curveEaseIn]
+            ) {
+                standIn.alpha = 0
+            }
+        }
         UIView.animate(
             withDuration: duration,
             delay: 0,
-            usingSpringWithDamping: ZoomFlight.springDamping,
-            initialSpringVelocity: ZoomFlight.springVelocity,
+            usingSpringWithDamping: RevealStage.springDamping,
+            initialSpringVelocity: RevealStage.springVelocity,
             options: [.allowUserInteraction]
         ) {
-            RevealStage.apply(open, mask: mask, page: toView)
+            RevealStage.apply(open, mask: mask, page: toView, standIn: standIn)
             // On the SAME spring as the mask, so the card does not become the
             // page a beat before or after it becomes the screen.
             self.geometry.setDestinationGround(nil)
@@ -780,6 +896,7 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             self.geometry.installDestinationVeil(nil, nil)
             self.geometry.installDestinationAuthorBand(nil)
             RevealStage.unwrap(toView, from: host, to: container, frame: pageFrame)
+            standIn?.removeFromSuperview()
             dim.removeFromSuperview()
             // Cleared under the opaque page, where the reset cannot be seen.
             presenting?.transform = .identity
@@ -796,6 +913,67 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
         }
     }
 }
+
+#if DEBUG
+/// Samples a leg's PRESENTATION values every frame, for the one question a
+/// completion handler cannot answer.
+///
+/// ⚠️ Reading `layer.presentation()` when the transition completes proves
+/// nothing: the animation has just been removed, so presentation returns the
+/// model value and always equals the target. The question — does the window
+/// travel all the way, or is it cut off and the row swapped in — is about the
+/// frames BEFORE that, and only a display link sees them.
+///
+/// Prints one line per sample under `-text-reveal-log`, then a verdict: how far
+/// short of the target the last sampled frame was.
+@MainActor
+final class RevealTrajectoryProbe {
+    private var link: CADisplayLink?
+    private weak var tracked: UIView?
+    private let target: CGRect
+    private let leg: String
+    private let start = CACurrentMediaTime()
+    private var samples: [(t: CFTimeInterval, rect: CGRect)] = []
+
+    static func begin(_ leg: String, tracking view: UIView, to target: CGRect)
+        -> RevealTrajectoryProbe? {
+        guard ProcessInfo.processInfo.arguments.contains("-text-reveal-log") else { return nil }
+        return RevealTrajectoryProbe(leg: leg, tracked: view, target: target)
+    }
+
+    private init(leg: String, tracked: UIView, target: CGRect) {
+        self.leg = leg
+        self.tracked = tracked
+        self.target = target
+        let link = CADisplayLink(target: self, selector: #selector(sample))
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
+    @objc private func sample() {
+        guard let rect = tracked?.layer.presentation()?.frame else { return }
+        samples.append((CACurrentMediaTime() - start, rect))
+    }
+
+    /// Call from the leg's completion, BEFORE anything is torn down.
+    func finish() {
+        link?.invalidate()
+        link = nil
+        guard let last = samples.last else {
+            print("[text-reveal] \(leg) trajectory: no samples")
+            return
+        }
+        for sample in samples {
+            print(String(format: "[text-reveal] %@ t=%.3f y=%.1f h=%.1f",
+                         leg, sample.t, sample.rect.minY, sample.rect.height))
+        }
+        print(String(format: "[text-reveal] %@ trajectory ended %.1fpt short in y,"
+                     + " %.1fpt short in height, over %d frames",
+                     leg, last.rect.minY - target.minY,
+                     last.rect.height - target.height, samples.count))
+    }
+}
+#endif
 
 // MARK: - Pop
 
@@ -817,7 +995,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     }
 
     func transitionDuration(using context: (any UIViewControllerContextTransitioning)?) -> TimeInterval {
-        ZoomFlight.springDuration
+        RevealStage.springDuration
     }
 
     /// ## The close springs, and `scrubsLinearly` is why it can
@@ -865,7 +1043,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let animator = UIViewPropertyAnimator(
             duration: transitionDuration(using: context),
             timingParameters: UISpringTimingParameters(
-                dampingRatio: ZoomFlight.springDamping
+                dampingRatio: RevealStage.springDamping
             )
         )
         // Defaulted true, but the whole design above rests on it — said out
@@ -963,7 +1141,17 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             // ate a timed fade before is specific to an interactive
             // transition's start.
             let shaping = standIn as? RevealStandInShaping
-            let total = transitionDuration(using: context)
+            // ⚠️ Against the spring's VISIBLE window, not its nominal duration.
+            //
+            // The fractions are a share of the window's travel, and the window
+            // travels on a spring — which does nearly all of it in the first
+            // half and spends the rest settling. Scheduled against the whole
+            // duration, a leg that starts at 0.45 starts after the window has
+            // already arrived: measured on a map marker, whose stand-in is a
+            // glyph and nothing else, the glyph never appeared at all. The
+            // card-shaped stand-ins hid it, because a card's fill lands at the
+            // same moment the real row takes over.
+            let total = transitionDuration(using: context) * RevealStage.springVisibleFraction
             UIView.animate(
                 withDuration: total * (RevealStage.pageFadeEnd - RevealStage.pageFadeStart),
                 delay: total * RevealStage.pageFadeStart,
@@ -992,7 +1180,24 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             presenting.transform = .identity
             chrome?.alpha = chromeAlpha
         }
+        #if DEBUG
+        // The WINDOW's own trajectory, sampled every frame — see
+        // `RevealTrajectoryProbe` for why a reading taken at completion cannot
+        // answer this.
+        let probe = RevealTrajectoryProbe.begin("pop", tracking: mask, to: closed.mask)
+        // And the STAND-IN's own, because that is the thing on screen: the
+        // window can land perfectly while the card inside it does not.
+        let cardProbe = standIn.flatMap {
+            RevealTrajectoryProbe.begin("pop-card", tracking: $0, to: closed.mask)
+        }
+        #endif
         animator.addCompletion { _ in
+            #if DEBUG
+            probe?.finish()
+            cardProbe?.finish()
+            RevealStage.log("pop", "settled mask=\(NSCoder.string(for: mask.frame))"
+                + " target=\(NSCoder.string(for: closed.mask))")
+            #endif
             let cancelled = context.transitionWasCancelled
             // FIRST, and the order is the whole of it: the row and the window
             // are identical at the landing rect, so swapping them inside one

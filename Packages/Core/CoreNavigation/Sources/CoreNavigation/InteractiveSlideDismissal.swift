@@ -60,7 +60,7 @@ public final class InteractiveSlideDismissal: NSObject {
     /// follows lands one screen deeper than the stack said a moment ago.
     public var onWillBeginPop: (() -> Void)?
 
-    /// **PROTOTYPE** (`-text-reveal`): swaps the slide for a clip-window
+    /// **THE TEXT REVEAL**: swaps the slide for a clip-window
     /// reveal on BOTH legs — see `RevealGeometry`.
     ///
     /// An optional value rather than a pair of animator factories, because the

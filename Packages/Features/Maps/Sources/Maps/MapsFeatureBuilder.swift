@@ -85,6 +85,11 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             pushPlainSnapFeed: { postIDs, presenter in
                 feedFeature().pushSnapFeed(postIDs: postIDs, from: presenter)
             },
+            // The same feed again, opened as a window growing out of a text
+            // marker's disc — what a marker with no cover to fly opens with now.
+            revealSnapFeed: { postIDs, presenter, origin in
+                feedFeature().revealSnapFeed(postIDs: postIDs, from: presenter, origin: origin)
+            },
             // The place gallery a semantic cluster's feed dismisses into —
             // built by the Feed feature because the grid, the flight card and
             // the retarget wiring are all its internals.

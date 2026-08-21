@@ -34,6 +34,10 @@ final class ForYouPagerView: UIView {
 
     /// The tapped post's index into the *given format page's* posts.
     var onItemTapped: ((GalleryFilter.Format, Int) -> Void)?
+    /// A row's author was tapped, on whichever page is showing.
+    var onAuthorTapped: ((GalleryPost) -> Void)?
+    /// What a row's "..." offers — see `ForYouGridPage.authorMenuActions`.
+    var authorMenuActions: ((ForYouGridPage.AuthorMenuContext) -> [PostCardMenuAction])?
     /// Fired when a page becomes active: a settled finger swipe or a finished
     /// programmatic page. Not fired when the page is unchanged.
     var onPageSettled: ((GalleryFilter.Format) -> Void)?
@@ -102,6 +106,10 @@ final class ForYouPagerView: UIView {
             let format = Self.pageOrder[index]
             page.onItemTapped = { [weak self] item in self?.onItemTapped?(format, item) }
             page.onRefresh = { [weak self] in self?.onRefresh?() }
+            page.onAuthorTapped = { [weak self] post in self?.onAuthorTapped?(post) }
+            page.authorMenuActions = { [weak self] context in
+                self?.authorMenuActions?(context) ?? []
+            }
             // Only the page the user is actually reading may drive pagination:
             // the other two are laid out and would otherwise fire on their own
             // resting offsets while off-screen.

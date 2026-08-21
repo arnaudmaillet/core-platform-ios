@@ -126,7 +126,8 @@ struct MapUnifiedGroupingTests {
         let ids = MapsViewController.postIDs(of: MapComputedCluster(items[0]))
 
         #expect(Set(ids) == Set(pins.map(\.postID)))
-        #expect(MapMarkerPresentation(face: .text) == .plainPush, "and it is pushed, not flown")
+        #expect(MapMarkerPresentation(face: .text) == .reveal,
+                "and it opens as a window, not a flight")
     }
 
     /// A lone pin opens its own post, whatever kind it is.

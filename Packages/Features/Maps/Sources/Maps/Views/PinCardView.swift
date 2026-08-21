@@ -28,7 +28,7 @@ final class PinCardView: UIView {
     /// (`GalleryFilter.short`).
     static let textSymbolName = "text.alignleft"
     /// Point size of that glyph inside the 44pt circle — ~40% of the diameter,
-    /// which reads at pin size while leaving a ring of the tinted ground
+    /// which reads at pin size while leaving a ring of the neutral ground
     /// visible as its own signal.
     static let textSymbolPointSize: CGFloat = 18
 
@@ -119,7 +119,7 @@ final class PinCardView: UIView {
     enum Face: Equatable {
         /// The post's cover image, loaded into `imageView`.
         case media
-        /// A symbol on a tinted ground: a text-only post has no cover to show.
+        /// A symbol on a neutral ground: a text-only post has no cover to show.
         case text
 
         /// The marker's resting side. A text post carries no image worth
@@ -202,32 +202,50 @@ final class PinCardView: UIView {
 
 // MARK: - Text face
 
-/// The face a text-only post's marker wears: a centred SF Symbol on a tinted
-/// ground. First iteration of the custom text marker — deliberately built from
-/// the same 56pt square, ring and shadow as a media pin, so the hero flight's
-/// frame-0 handshake and the cluster grid's collision size stay exactly as they
-/// were and only the *face* differs.
+/// The face a text-only post's marker wears: a centred SF Symbol on a neutral
+/// ground. Deliberately built from the same square, ring and shadow as a media
+/// pin, so the hero flight's frame-0 handshake and the cluster grid's collision
+/// size stay exactly as they were and only the *face* differs.
 ///
-/// The ground is opaque (an accent wash over the system background) rather than
-/// a translucent tint: a marker sits on map tiles of any colour, and a
-/// see-through card makes the glyph unreadable over a park or a motorway.
+/// The ground is OPAQUE, never a translucent tint: a marker sits on map tiles
+/// of any colour, and a see-through card makes the glyph unreadable over a park
+/// or a motorway.
+///
+/// It is also colourless. It was an accent wash, and a blue disc on a map is a
+/// place, a route or a transit line before it is a post — and since the reveal
+/// lends this colour to the whole page for the length of an opening, a tinted
+/// marker painted the screen with it. The glyph keeps the accent; the ground
+/// does not.
 ///
 /// Colours are `UIColor`s, not `CGColor`s, so dark/light follows the trait
 /// change on its own — the trap `PinCardView.ringView` needs a registration to
 /// work around.
 private final class PinTextFaceView: UIView {
-    private let wash = UIView()
+    /// The disc's opaque ground. Named for what it is now that it carries no
+    /// tint — it was a translucent accent wash, and the name outlived it.
+    private let disc = UIView()
     private let glyph = UIImageView()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .systemBackground
 
-        wash.backgroundColor = UIColor.tintColor.withAlphaComponent(0.22)
-        wash.frame = bounds
-        wash.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        wash.isUserInteractionEnabled = false
-        addSubview(wash)
+        // NEUTRAL, and a tone rather than a hue.
+        //
+        // It was an accent wash at 0.22 — the marker read as a blue disc, and a
+        // blue disc on a map is a place, a route or a transit line before it is
+        // a post. Worse for the reveal: the page wears this colour for the
+        // length of the opening, so a tinted marker painted the whole screen in
+        // it for a third of a second.
+        //
+        // `secondarySystemBackground` keeps the disc distinguishable from the
+        // page it opens into — that difference is what makes the ground tween
+        // visible at all — without asserting a colour.
+        disc.backgroundColor = .secondarySystemBackground
+        disc.frame = bounds
+        disc.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        disc.isUserInteractionEnabled = false
+        addSubview(disc)
 
         glyph.image = UIImage(systemName: PinCardView.textSymbolName)?
             .withConfiguration(UIImage.SymbolConfiguration(
@@ -243,6 +261,49 @@ private final class PinTextFaceView: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// The glyph alone. The WASH stays: it is the disc's colour, and the colour
+    /// is what the page is wearing on the other side of the hand-off.
+    func setContentOpacity(_ alpha: CGFloat) {
+        glyph.alpha = alpha
+    }
+
+    /// The disc's colour, for a page to wear while a reveal opened from this
+    /// marker is running.
+    ///
+    /// One value rather than a composite now that the wash is opaque and
+    /// neutral: what the marker shows IS this colour, and the page can simply
+    /// be told it. (It was a hand-composited blend while the wash was a
+    /// translucent tint — a page's `backgroundColor` is a single colour, and a
+    /// translucent one there let the transition's dim through and read as dirty
+    /// grey rather than as the marker.)
+    static let ground: UIColor = .secondarySystemBackground
+}
+
+// MARK: - RevealStandInShaping
+
+/// The pin's face is ALSO what a reveal's window opens as and closes onto — the
+/// same argument that makes it the hero's flying card, applied to the other
+/// transition. `setCornerRadius` is already the shape channel; this adds the
+/// content one, so the two can be handed over separately.
+extension PinCardView: RevealStandInShaping {
+    /// The marker's CONTENT, which the page repeats none of: the glyph, the
+    /// cover, and the ring that draws the marker's edge. Not the ground under
+    /// them — that is the fill, faded by the view's own alpha, and it is the
+    /// colour the page is wearing on the other side of the hand-off.
+    ///
+    /// The ring goes with the content on purpose. It reads as a marker's border
+    /// at 44pt and as an outline drawn around the screen at full size, so it
+    /// has to be gone well before the window is.
+    func setContentOpacity(_ alpha: CGFloat) {
+        textFaceView.setContentOpacity(alpha)
+        imageView.alpha = alpha
+        ringView.alpha = alpha
+    }
+
+    /// The colour a page wears while a reveal opened from a TEXT marker is
+    /// running — the disc's own ground, composited to one opaque value.
+    static var textRevealGround: UIColor { PinTextFaceView.ground }
 }
 
 // MARK: - ZoomFlightCard

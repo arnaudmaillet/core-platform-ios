@@ -8,20 +8,30 @@
 /// watches the photograph they tapped become the page — that is the whole
 /// argument for a hero, and it needs a photograph to make it.
 ///
-/// A text marker has no cover at either end of the flight. Flying a symbol on a
-/// tinted circle is a hero animation about nothing: the card carries no content
-/// the destination will show, so it reads as a graphic effect rather than as
-/// continuity, and it delays the words by the length of a spring. The honest
-/// presentation is the platform's own push — which is also what the same post
-/// gets from For You and from a profile (`SnapFeedHeroOrigin.hasHero`
-/// documents the identical rule), so one post does not arrive three ways.
+/// A text marker has no cover at either end of a FLIGHT, and flying a symbol on
+/// a tinted circle was a hero animation about nothing: the card carried no
+/// content the destination would show, so it read as a graphic effect rather
+/// than as continuity. That argument sent it to the platform's own push for a
+/// long time, and the note here said so.
+///
+/// It opens as a WINDOW now. The disc is not a card to fly, it is a hole to
+/// grow: the real page is installed at full size behind it and the disc sweeps
+/// open to the screen, wearing the marker's own glyph and tint until it has
+/// somewhere to hand them to. Nothing impersonates anything, which is exactly
+/// why the objection above does not apply — see `RevealGeometry`. The same
+/// post opened from For You or a profile gets the same window from its row, so
+/// one post still does not arrive three ways.
 ///
 /// Pure and marker-shaped so the decision can be pinned by a test: the view
 /// controller needs a live `MKMapView` to exist at all, and the rule does not.
 enum MapMarkerPresentation: Equatable {
     /// The custom zoom flight, card and all.
     case hero
-    /// A standard push: right-to-left slide in, swipe or chevron back.
+    /// The clip-window reveal, opened from the marker's own disc.
+    case reveal
+    /// A standard push: right-to-left slide in, swipe or chevron back. The
+    /// fallback for a marker the reveal cannot describe — one that has scrolled
+    /// off, or a build with the window turned off.
     case plainPush
 
     /// Decided by the face the marker is WEARING — which, for a cluster, is its
@@ -34,6 +44,6 @@ enum MapMarkerPresentation: Equatable {
     /// landing page are the same post. The rest of the group (photos included)
     /// is a swipe away either way.
     init(face: PinCardView.Face) {
-        self = face == .text ? .plainPush : .hero
+        self = face == .text ? .reveal : .hero
     }
 }
