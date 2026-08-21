@@ -112,6 +112,23 @@ public struct RevealGeometry {
     /// `nil` keeps the old behaviour — the page itself, registered — which is
     /// still correct for a surface that cannot draw a stand-in.
     public let makeDismissStandIn: () -> UIView?
+    /// Builds what the OPENING starts as, for a source whose content the page
+    /// does not repeat — and the reason this leg needed one at all.
+    ///
+    /// A row does not: its caption IS the page's caption, so the window can
+    /// show the real page from frame 0 and be showing the right thing. That is
+    /// the premise the whole transition was built on, and it holds for a row.
+    ///
+    /// A map's marker is a glyph on a tinted disc, and the page has no glyph
+    /// anywhere. Opened without a stand-in, the disc becomes a 44pt porthole
+    /// onto the page's top-left corner — a window onto something the viewer
+    /// never tapped. So the marker is drawn fresh, the window opens as IT, and
+    /// the two channels hand over in the same order the dismissal uses,
+    /// reversed: the glyph goes first, then the fill it sits on, revealing the
+    /// page that was underneath the whole time.
+    ///
+    /// `nil` keeps the row's behaviour, which is the default.
+    public let makePresentStandIn: () -> UIView?
     /// How far below the SOURCE's top edge its caption begins — zero for a card
     /// that shows only its caption, the author band plus its gap for one that
     /// names its author. See `RevealStage.pageTranslation`.
@@ -178,6 +195,7 @@ public struct RevealGeometry {
         anchorFrame: @escaping (UICoordinateSpace) -> CGRect? = { _ in nil },
         sourceCaptionTop: CGFloat = 0,
         makeDismissStandIn: @escaping () -> UIView? = { nil },
+        makePresentStandIn: @escaping () -> UIView? = { nil },
         setSourceConcealed: @escaping (Bool) -> Void = { _ in },
         depthView: @escaping () -> UIView? = { nil },
         presentationDidEnd: @escaping (Bool) -> Void = { _ in },
@@ -197,6 +215,7 @@ public struct RevealGeometry {
         self.anchorFrame = anchorFrame
         self.sourceCaptionTop = sourceCaptionTop
         self.makeDismissStandIn = makeDismissStandIn
+        self.makePresentStandIn = makePresentStandIn
         self.setSourceConcealed = setSourceConcealed
         self.depthView = depthView
         self.presentationDidEnd = presentationDidEnd
@@ -445,6 +464,19 @@ enum RevealStage {
     /// The page dissolving into the card's fill.
     static let pageFadeStart: CGFloat = 0.10
     static let pageFadeEnd: CGFloat = 0.45
+    /// How much of a spring's DURATION its visible travel occupies.
+    ///
+    /// The hand-off's fractions are shares of the window's journey, and a timed
+    /// animation can only be given shares of a CLOCK. Those are the same thing
+    /// under a linear curve and nothing like it under a spring, which covers
+    /// almost all of its distance early and spends the remainder settling
+    /// invisibly. Legs scheduled against the whole duration therefore fire
+    /// against a window that has already arrived.
+    ///
+    /// Used only where the hand-off is on a timer — a chevron pop, an opening.
+    /// A GRAB needs none of this: it is driven by progress, which is the
+    /// journey itself.
+    static let springVisibleFraction: CGFloat = 0.6
     /// The card arriving into it — starting EXACTLY where the fill finishes.
     ///
     /// There was a beat between them, and it is gone. It was there to keep the
@@ -699,7 +731,18 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             captionTop: geometry.sourceCaptionTop
         )
         let open = RevealStage.open(container: container)
-        RevealStage.apply(closed, mask: mask, page: toView)
+        // The window opens AS THE SOURCE when the source's content is not the
+        // page's — a marker's glyph, which the page has nowhere. Added above
+        // the masked page, posed on the same closed pose, and handed over in
+        // the dismissal's order reversed: content first, then the fill under
+        // it. Nil for a row, whose caption is the page's caption.
+        let standIn = geometry.makePresentStandIn()
+        if let standIn {
+            container.addSubview(standIn)
+            standIn.alpha = 1
+            (standIn as? RevealStandInShaping)?.setContentOpacity(1)
+        }
+        RevealStage.apply(closed, mask: mask, page: toView, standIn: standIn)
         // The page wears the CARD before it wears itself. Set outside the
         // animation block so frame 0 is already the card's tone; the block
         // below hands the ground back, which cross-fades it.
@@ -751,6 +794,37 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             RevealStage.log("present", "chrome faded to \(chrome?.alpha ?? -1)")
             #endif
         }
+        // THE HAND-OFF, which is the dismissal's run backwards.
+        //
+        // The dismissal fades the page into the card's fill and then raises the
+        // card inside it; an opening that starts as its source has to undo
+        // exactly that, in the same order and on the same fractions — content
+        // out first, then the fill it sat on, revealing the page that was
+        // underneath from frame 0. The curves invert with the direction: a rise
+        // that accelerated away from transparent is a fall that decelerates
+        // into it.
+        if let standIn {
+            let shaping = standIn as? RevealStandInShaping
+            // Against the spring's visible window for the same reason the pop
+            // is — see `RevealStage.springVisibleFraction`.
+            let span = duration * RevealStage.springVisibleFraction
+            let contentOut = 1 - RevealStage.cardFadeEnd
+            let fillOut = 1 - RevealStage.pageFadeEnd
+            UIView.animate(
+                withDuration: span * (RevealStage.cardFadeEnd - RevealStage.cardFadeStart),
+                delay: span * contentOut,
+                options: [.curveEaseOut]
+            ) {
+                shaping?.setContentOpacity(0)
+            }
+            UIView.animate(
+                withDuration: span * (RevealStage.pageFadeEnd - RevealStage.pageFadeStart),
+                delay: span * fillOut,
+                options: [.curveEaseIn]
+            ) {
+                standIn.alpha = 0
+            }
+        }
         UIView.animate(
             withDuration: duration,
             delay: 0,
@@ -758,7 +832,7 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             initialSpringVelocity: ZoomFlight.springVelocity,
             options: [.allowUserInteraction]
         ) {
-            RevealStage.apply(open, mask: mask, page: toView)
+            RevealStage.apply(open, mask: mask, page: toView, standIn: standIn)
             // On the SAME spring as the mask, so the card does not become the
             // page a beat before or after it becomes the screen.
             self.geometry.setDestinationGround(nil)
@@ -780,6 +854,7 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             self.geometry.installDestinationVeil(nil, nil)
             self.geometry.installDestinationAuthorBand(nil)
             RevealStage.unwrap(toView, from: host, to: container, frame: pageFrame)
+            standIn?.removeFromSuperview()
             dim.removeFromSuperview()
             // Cleared under the opaque page, where the reset cannot be seen.
             presenting?.transform = .identity
@@ -963,7 +1038,17 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             // ate a timed fade before is specific to an interactive
             // transition's start.
             let shaping = standIn as? RevealStandInShaping
-            let total = transitionDuration(using: context)
+            // ⚠️ Against the spring's VISIBLE window, not its nominal duration.
+            //
+            // The fractions are a share of the window's travel, and the window
+            // travels on a spring — which does nearly all of it in the first
+            // half and spends the rest settling. Scheduled against the whole
+            // duration, a leg that starts at 0.45 starts after the window has
+            // already arrived: measured on a map marker, whose stand-in is a
+            // glyph and nothing else, the glyph never appeared at all. The
+            // card-shaped stand-ins hid it, because a card's fill lands at the
+            // same moment the real row takes over.
+            let total = transitionDuration(using: context) * RevealStage.springVisibleFraction
             UIView.animate(
                 withDuration: total * (RevealStage.pageFadeEnd - RevealStage.pageFadeStart),
                 delay: total * RevealStage.pageFadeStart,

@@ -243,6 +243,66 @@ private final class PinTextFaceView: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// The glyph alone. The WASH stays: it is the disc's colour, and the colour
+    /// is what the page is wearing on the other side of the hand-off.
+    func setContentOpacity(_ alpha: CGFloat) {
+        glyph.alpha = alpha
+    }
+
+    /// The disc's colour as one opaque value, for a page to wear while a reveal
+    /// is open.
+    ///
+    /// Composited by hand because the marker builds it in two layers — an
+    /// opaque system ground with a tint wash over it — and a page's
+    /// `backgroundColor` is a single colour. A translucent one there would let
+    /// the transition's dim through and read as a dirty grey rather than as the
+    /// marker's tint.
+    ///
+    /// Dynamic, so the blend is recomputed per appearance rather than frozen at
+    /// whichever one happened to be current when the pin was built.
+    static let ground = UIColor { traits in
+        let base = UIColor.systemBackground.resolvedColor(with: traits)
+        let tint = UIColor.tintColor.resolvedColor(with: traits)
+        var (br, bg, bb): (CGFloat, CGFloat, CGFloat) = (0, 0, 0)
+        var (tr, tg, tb): (CGFloat, CGFloat, CGFloat) = (0, 0, 0)
+        var alpha: CGFloat = 0
+        base.getRed(&br, green: &bg, blue: &bb, alpha: &alpha)
+        tint.getRed(&tr, green: &tg, blue: &tb, alpha: &alpha)
+        let wash: CGFloat = 0.22
+        return UIColor(
+            red: br + (tr - br) * wash,
+            green: bg + (tg - bg) * wash,
+            blue: bb + (tb - bb) * wash,
+            alpha: 1
+        )
+    }
+}
+
+// MARK: - RevealStandInShaping
+
+/// The pin's face is ALSO what a reveal's window opens as and closes onto — the
+/// same argument that makes it the hero's flying card, applied to the other
+/// transition. `setCornerRadius` is already the shape channel; this adds the
+/// content one, so the two can be handed over separately.
+extension PinCardView: RevealStandInShaping {
+    /// The marker's CONTENT, which the page repeats none of: the glyph, the
+    /// cover, and the ring that draws the marker's edge. Not the ground under
+    /// them — that is the fill, faded by the view's own alpha, and it is the
+    /// colour the page is wearing on the other side of the hand-off.
+    ///
+    /// The ring goes with the content on purpose. It reads as a marker's border
+    /// at 44pt and as an outline drawn around the screen at full size, so it
+    /// has to be gone well before the window is.
+    func setContentOpacity(_ alpha: CGFloat) {
+        textFaceView.setContentOpacity(alpha)
+        imageView.alpha = alpha
+        ringView.alpha = alpha
+    }
+
+    /// The colour a page wears while a reveal opened from a TEXT marker is
+    /// running — the disc's own ground, composited to one opaque value.
+    static var textRevealGround: UIColor { PinTextFaceView.ground }
 }
 
 // MARK: - ZoomFlightCard

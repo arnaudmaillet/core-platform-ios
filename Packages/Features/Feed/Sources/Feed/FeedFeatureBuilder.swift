@@ -413,6 +413,13 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         pushWithoutFlight(makeSnapFeedViewController(postIDs: postIDs), on: nav, reveal: nil)
     }
 
+    public func revealSnapFeed(
+        postIDs: [PostID], from presenter: UIViewController, origin: TextRevealOrigin
+    ) {
+        guard !postIDs.isEmpty, let nav = presenter.navigationController else { return }
+        pushWithoutFlight(makeSnapFeedViewController(postIDs: postIDs), on: nav, reveal: origin)
+    }
+
     /// Pushes the feed with no flight, and gives it a way back by hand.
     ///
     /// The presentation a post with nothing to fly gets: a native push, plus a

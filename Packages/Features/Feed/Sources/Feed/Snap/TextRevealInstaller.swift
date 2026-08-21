@@ -85,12 +85,15 @@ enum TextRevealInstaller {
     ) -> RevealGeometry {
         RevealGeometry(
             sourceFrame: origin.rowFrame,
-            sourceCornerRadius: PostGridListRowCell.cardCornerRadius,
-            // The card's own fill, borrowed by the page for the length of the
-            // reveal. Read from PostGrid rather than restated, for the same
-            // reason the radius and the insets are: three copies of one colour
-            // is how two surfaces stop matching.
-            sourceFill: PostGridListRowCell.cardFillColor,
+            // The CARD's shape unless the source says otherwise, which is every
+            // row and is why these are defaults rather than arguments. A map's
+            // marker is a disc in its own tint and supplies both.
+            //
+            // The card's values are read from PostGrid rather than restated,
+            // for the same reason the insets are: three copies of one colour is
+            // how two surfaces stop matching.
+            sourceCornerRadius: origin.cornerRadius ?? PostGridListRowCell.cardCornerRadius,
+            sourceFill: origin.fill ?? PostGridListRowCell.cardFillColor,
             sourceCaptionEnd: origin.captionEnd,
             installDestinationVeil: { [weak feed] cut, tint in
                 (feed as? SnapFeedViewController)?.installRevealVeil(below: cut, tint: tint)
@@ -130,12 +133,16 @@ enum TextRevealInstaller {
             },
             sourceCaptionTop: origin.captionTop,
             makeDismissStandIn: origin.makeDismissStandIn,
+            makePresentStandIn: origin.makePresentStandIn,
             setSourceConcealed: origin.setConcealed,
             depthView: origin.depthView,
             presentationDidEnd: origin.presentationDidEnd,
             willStageDismissal: origin.willStageDismissal,
             dismissalDidEnd: origin.dismissalDidEnd,
-            matchesAnchor: matchesAnchor
+            // A source that has no caption cannot be aligned to, whatever the
+            // launch argument says: asking anyway slid the page 448pt sideways
+            // under a 44pt disc that was covering it.
+            matchesAnchor: matchesAnchor && origin.alignsPageToSource
         )
     }
 }

@@ -55,6 +55,37 @@ public struct TextRevealOrigin {
     /// `nil` keeps the page itself, which is still correct for a surface that
     /// cannot draw one.
     public let makeDismissStandIn: () -> UIView?
+    /// Builds what the OPENING starts as, for a source whose content the page
+    /// does not repeat.
+    ///
+    /// A row does not need one: its caption is the page's caption, so the
+    /// window can show the real page from frame 0 and be showing the right
+    /// thing. A map's marker is a glyph on a tinted disc, and the page has no
+    /// glyph — so without a stand-in the disc would open onto the page's top
+    /// left corner, which is a window onto nothing the viewer tapped.
+    ///
+    /// `nil` is the row's answer and stays the default.
+    public let makePresentStandIn: () -> UIView?
+    /// Whether the page counter-translates so its caption lands where the
+    /// SOURCE's caption is.
+    ///
+    /// True for a row, whose caption is the same words in the same place — that
+    /// alignment is the whole reason the window reads as the card growing.
+    /// FALSE for a marker: a disc has no caption, so there is nothing to align
+    /// to, and asking anyway drags the page hundreds of points sideways under a
+    /// stand-in that is covering it. Measured before this existed: `travel=448`
+    /// for a 44pt disc.
+    public let alignsPageToSource: Bool
+    /// The source's own rounding. `nil` means the card's, which is what every
+    /// row is; a marker supplies its own, and for a disc that is half its side.
+    public let cornerRadius: CGFloat?
+    /// The source's own fill, worn by the page for the length of the reveal and
+    /// cross-faded back to its real ground. `nil` means the card's.
+    ///
+    /// This is the colour transition, and it is not decoration: the window is
+    /// the source's shape, so it has to be the source's COLOUR at frame 0 or
+    /// the source appears to vanish at the instant it starts growing.
+    public let fill: UIColor?
     /// The row's author band, so the destination can borrow it for the flight —
     /// see `RevealGeometry.installDestinationAuthorBand`. `nil` for a row that
     /// names no author, which is every profile gallery's.
@@ -82,6 +113,10 @@ public struct TextRevealOrigin {
         captionTop: CGFloat = 0,
         authorBand: PostAuthorBandView.Model? = nil,
         makeDismissStandIn: @escaping () -> UIView? = { nil },
+        makePresentStandIn: @escaping () -> UIView? = { nil },
+        alignsPageToSource: Bool = true,
+        cornerRadius: CGFloat? = nil,
+        fill: UIColor? = nil,
         setConcealed: @escaping (Bool) -> Void = { _ in },
         presentationDidEnd: @escaping (Bool) -> Void = { _ in },
         willStageDismissal: @escaping () -> Void = {},
@@ -93,6 +128,10 @@ public struct TextRevealOrigin {
         self.captionTop = captionTop
         self.authorBand = authorBand
         self.makeDismissStandIn = makeDismissStandIn
+        self.makePresentStandIn = makePresentStandIn
+        self.alignsPageToSource = alignsPageToSource
+        self.cornerRadius = cornerRadius
+        self.fill = fill
         self.setConcealed = setConcealed
         self.presentationDidEnd = presentationDidEnd
         self.willStageDismissal = willStageDismissal
@@ -131,6 +170,10 @@ public struct TextRevealOrigin {
             captionTop: captionTop,
             authorBand: authorBand,
             makeDismissStandIn: makeDismissStandIn,
+            makePresentStandIn: makePresentStandIn,
+            alignsPageToSource: alignsPageToSource,
+            cornerRadius: cornerRadius,
+            fill: fill,
             setConcealed: setConcealed,
             presentationDidEnd: presentationDidEnd,
             willStageDismissal: willStageDismissal,

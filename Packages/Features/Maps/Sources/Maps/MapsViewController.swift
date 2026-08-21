@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNavigation
 import DesignSystem
+import FeedInterface
 import MapKit
 import MapsInterface
 import MediaCore
@@ -41,6 +42,10 @@ final class MapsViewController: UIViewController {
     /// attached and retained with it, and that belongs where the other two
     /// surfaces already get it.
     private let pushPlainSnapFeed: ([PostID], UIViewController) -> Void
+    /// Pushes the feed as a WINDOW growing out of a marker — the text pin's
+    /// path. Injected like its plain sibling, and for the same reason: the
+    /// pushed screen's gestures and its transition are the feed's own.
+    private let revealSnapFeed: ([PostID], UIViewController, TextRevealOrigin) -> Void
     /// Builds the place gallery a SEMANTIC cluster's feed dismisses into
     /// (`FeedFeatureBuilding.makeClusterGallery`): (member ids, the place
     /// itself, the feed about to cover it) → the gallery screen, which also
@@ -176,6 +181,7 @@ final class MapsViewController: UIViewController {
         videoPlayback: VideoPlaybackController,
         makeSnapFeed: @escaping ([PostID]) -> UIViewController,
         pushPlainSnapFeed: @escaping ([PostID], UIViewController) -> Void,
+        revealSnapFeed: @escaping ([PostID], UIViewController, TextRevealOrigin) -> Void,
         makeClusterGallery: @escaping ([PostID], MapPlace, UIViewController) -> UIViewController,
         prewarm: @escaping ([PostID]) async -> Void,
         openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
@@ -188,6 +194,7 @@ final class MapsViewController: UIViewController {
         self.videoCoordinator = MapVideoPlaybackCoordinator(pool: videoPlayback)
         self.makeSnapFeed = makeSnapFeed
         self.pushPlainSnapFeed = pushPlainSnapFeed
+        self.revealSnapFeed = revealSnapFeed
         self.makeClusterGallery = makeClusterGallery
         self.prewarm = prewarm
         self.openProfile = openProfile
@@ -1561,6 +1568,32 @@ extension MapsViewController: MKMapViewDelegate {
         guard !postIDs.isEmpty else { return }
         let face = Self.face(of: annotation)
         switch MapMarkerPresentation(face: face) {
+        case .reveal where navigationController != nil:
+            // The disc IS the window. Same seam as the plain push below — the
+            // feed owns the pushed screen's gestures either way — with an
+            // origin that says where the marker is, what shape and colour it
+            // is, and what to draw in the window at each end.
+            isPlainFeedPushed = true
+            revealSnapFeed(
+                postIDs,
+                self,
+                MapPinRevealSource.origin(
+                    mapView: mapView,
+                    annotation: annotation,
+                    face: face,
+                    ringKind: (annotation as? MapComputedCluster).flatMap {
+                        $0.isHierarchyMarker ? $0.place?.kind : nil
+                    },
+                    // Exactly what the hero does to the same marker
+                    // (`MapPinZoomSource.setZoomSourceHidden`), for the same
+                    // reason: while the window is elsewhere the disc must not
+                    // still be sitting on the map.
+                    concealMarker: { [weak mapView] concealed in
+                        mapView?.view(for: annotation)?.isHidden = concealed
+                    },
+                    depthView: { [weak self] in self?.view }
+                )
+            )
         case .plainPush where navigationController != nil:
             // Nothing to fly (see `MapMarkerPresentation`): the platform's own
             // slide, through the feed's shared plain-push seam so this screen
@@ -1575,7 +1608,10 @@ extension MapsViewController: MKMapViewDelegate {
             // this path is.
             isPlainFeedPushed = true
             pushPlainSnapFeed(postIDs, self)
-        case .plainPush, .hero:
+        case .plainPush, .hero, .reveal:
+            // No stack to push onto: the window has nowhere to open, so the
+            // feed is presented instead — the same concession the plain push
+            // already made.
             presentSnapFeed(postIDs: postIDs, from: annotation, thumbnail: thumbnail)
         }
     }
