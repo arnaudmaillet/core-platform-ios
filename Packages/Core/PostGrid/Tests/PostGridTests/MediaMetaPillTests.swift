@@ -175,20 +175,21 @@ struct MediaMetaPillContentTests {
     }
 }
 
-/// The card's shapes, and the one place the card's own rule is deliberately
-/// broken.
+/// A card's shape system: which curve owes which other curve a radius, and
+/// which owes nothing.
 ///
-/// The rule is concentric: a curve's radius is its parent's less the inset
-/// between them, which is what makes the band between two curves the same width
-/// at every angle instead of swelling through the turn. It holds from the card
-/// to its preview. It is REFUSED from the preview to its pills, where the
-/// arithmetic answers 2 and a chip at radius 2 is not a pill.
+/// The concentric rule — a child's radius is its parent's less the inset — is
+/// about CORNERS. Two curves turning together have a band between them, and
+/// unless the radii differ by exactly the inset that band swells through the
+/// turn. Along a straight edge there is no such constraint at all.
 ///
-/// Both halves are worth a test, and the second more than the first: an
-/// exception nobody wrote down is indistinguishable from a mistake, and the
-/// next reader to notice that one curve does not follow the rule will "fix" it.
+/// So the preview is concentric with the card, whose corners it sits on; and
+/// the chips are capsules, because they are held clear of the preview's corners
+/// and meet nothing but flat edge. The second half is the one a test has to
+/// carry: it is invisible, it is what the capsule is standing on, and the
+/// clearance would be the first thing "tidied" by anyone tightening the inset.
 @MainActor
-struct CardRadiusLadderTests {
+struct CardShapeSystemTests {
     @Test func thePreviewIsConcentricWithTheCard() {
         #expect(PostGridListRowCell.cardCornerRadius
             - PostGridListRowCell.mediaCornerRadius == PostGridListRowCell.mediaInset)
@@ -200,31 +201,54 @@ struct CardRadiusLadderTests {
         #expect(PostGridListRowCell.mediaInset == PostGridListRowCell.captionInset)
     }
 
-    /// The pills cannot take the same inset as everything else, and the reason
-    /// is arithmetic rather than taste: concentric inside a 10pt curve at 16
-    /// would be a radius of −6. This is what makes 8 the only workable inset for
-    /// the furniture even though the rest of the card is at 16.
-    @Test func theFurnitureTakesAnInsetItsParentsCurveCanCarry() {
-        #expect(PostGridListRowCell.mediaFurnitureInset < PostGridListRowCell.mediaCornerRadius)
-        #expect(PostGridListRowCell.concentricFurnitureCornerRadius > 0)
+    /// ⚠️ The clearance the capsules rest on, stated as the inequality that
+    /// matters rather than as the value that satisfies it today.
+    ///
+    /// A rounded rect's corner arc occupies a box of its own radius. A chip held
+    /// further in than that from BOTH edges never enters it, so its own corners
+    /// have no curve to agree with. Tighten this below the preview's radius and
+    /// the chips move back inside the arc, where a ~10.5pt capsule against a
+    /// 10pt corner is the equal-radii case: an 8pt band on the straights opening
+    /// to 11.5 at 45°.
+    @Test func theChipsAreHeldClearOfThePreviewsCornerArcs() {
+        #expect(PostGridListRowCell.mediaFurnitureInset
+            >= PostGridListRowCell.mediaCornerRadius)
     }
 
-    /// The pills are CAPSULES, not the concentric radius their parent's curve
-    /// would give them — chosen, and pinned here so the choice survives someone
-    /// reading the rule off the card above it.
+    /// And they really are laid out there, not merely allowed to be — measured
+    /// off the realised frames, since the constant only governs the constraints.
+    @Test func theChipsLandOutsideTheArcs() throws {
+        let cell = row(kind: .photo)
+        let preview = try #require(cell.mediaHeroRect)
+        let arc = PostGridListRowCell.mediaCornerRadius
+        let visible = pills(in: cell.contentView).filter { isVisible($0, within: cell.contentView) }
+        #expect(visible.count == 2)
+
+        // Half a point of slack, and it is not decoration: these are differences
+        // of converted rects, so an exact `>=` compares 13.999999999999972
+        // against 14 and fails on a layout that is right. Measured, not assumed
+        // — that was the first run of this test.
+        for pill in visible {
+            let frame = pill.convert(pill.bounds, to: cell.contentView)
+            #expect(frame.minX - preview.minX >= arc - 0.5)
+            #expect(preview.maxX - frame.maxX >= arc - 0.5)
+            #expect(preview.maxY - frame.maxY >= arc - 0.5)
+        }
+    }
+
+    /// The chips are CAPSULES — pinned so the choice survives someone reading
+    /// the concentric rule off the preview above them and "correcting" it.
     ///
     /// Read from `effectiveRadius` rather than from the corner configuration:
     /// `.capsule()` resolves itself against the bounds, so the only honest
     /// question is what UIKit actually drew.
-    @Test func thePillsAreCapsulesAndNotConcentric() throws {
+    @Test func theChipsAreCapsules() throws {
         let cell = row(kind: .photo)
         let pill = try #require(
             pills(in: cell.contentView).first { isVisible($0, within: cell.contentView) }
         )
-        let resolved = pill.effectiveRadius(corner: .allCorners)
 
-        #expect(abs(resolved - pill.bounds.height / 2) < 0.5)
-        #expect(resolved > PostGridListRowCell.concentricFurnitureCornerRadius + 4)
+        #expect(abs(pill.effectiveRadius(corner: .allCorners) - pill.bounds.height / 2) < 0.5)
     }
 
 }

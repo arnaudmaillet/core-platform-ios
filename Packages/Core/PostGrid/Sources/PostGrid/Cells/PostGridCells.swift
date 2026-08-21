@@ -593,26 +593,80 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// the point — text and image share one pair of vertical lines rather than
     /// each having its own.
     ///
-    /// 16, which is the caption's reading padding and always was. It is the
-    /// TEXT that fixes it: a card is mostly words, and the preview aligning to
-    /// them costs the preview nothing.
+    /// ## It is not only a margin
     ///
-    /// ❌ 8 was tried, to make one number govern every curve in the card
-    /// (26 → 18 → 10, a constant band at all three levels, pills landing within
-    /// half a point of their own capsule). It reads as cramped, and it does not
-    /// stop at the card: `captionInset` is shared with the post's own page —
-    /// structurally, because a reveal has to land the window's caption on the
-    /// card's — so it put a full page of prose 8pt from the screen's edge too.
-    public static let contentInset: CGFloat = 16
+    /// It is the card's ONE free number, and it sets four things at once:
+    ///
+    /// * the reading padding of a card,
+    /// * where the preview's edges fall (on the caption's),
+    /// * **the preview's radius**, `cardCornerRadius - contentInset`, and
+    ///   therefore how close the image's roundness is to the card's,
+    /// * the reading padding of the post's own PAGE — `captionInset` is shared
+    ///   with `PostCaptionRowView` structurally, because a reveal has to land
+    ///   the window's caption on the card's.
+    ///
+    /// The third is the one that is easy to miss and the reason this value
+    /// cannot be argued to. A card at 26 with a 16pt padding gives a 10pt
+    /// preview: correct by the concentric rule and a 2.6× drop in roundness
+    /// between the container and the thing inside it, which reads as a hard
+    /// rectangle in a soft card.
+    ///
+    /// **12**, chosen off three builds side by side:
+    ///
+    /// ```
+    ///   padding   preview   drop     page prose
+    ///   16        10        2.6x     16   the loosest, and the widest gap
+    ///   12        14        1.9x     12   ← here
+    ///   10        16        1.6x     10
+    ///    8        18        1.4x      8   ❌ measured cramped, page worse
+    /// ```
+    ///
+    /// ❌ 8 is recorded rather than merely rejected: geometrically it is the
+    /// most homogeneous of the four, and it is still wrong. It was tried whole —
+    /// one number governing every curve in the card (26 → 18 → 10, a constant
+    /// band at all three levels, chips landing within half a point of their own
+    /// capsule) — and the arithmetic being perfect did not save it. The card
+    /// reads cramped, and because the page shares this number, a full column of
+    /// prose ended up 8pt from the screen's edge.
+    public static let contentInset: CGFloat = 12
 
-    /// How far the preview's own furniture — the metadata pills — is held off
-    /// its edges.
+    /// How far the preview's own furniture — the metadata pills, the play badge
+    /// — is held off its edges. `contentInset` again, and that is the point.
     ///
-    /// NOT `contentInset`, and it cannot be: the preview's curve is only
-    /// `cardCornerRadius - contentInset` = 10pt round, so a child concentric
-    /// inside it at 16 would need a radius of −6. 8 is what leaves the pills a
-    /// positive one at all.
-    public static let mediaFurnitureInset: CGFloat = 8
+    /// ## Why furniture may be a capsule, and the preview may not
+    ///
+    /// The concentric rule — a child's radius is its parent's less the inset
+    /// between them — is about CORNERS. It exists because two curves turning
+    /// together at a corner have a band between them, and unless the radii
+    /// differ by exactly the inset that band swells through the turn. Along a
+    /// STRAIGHT edge there is no such constraint: the band is the inset, at
+    /// every point, whatever shape the child is.
+    ///
+    /// So the question for a chip resting on the preview is not what radius the
+    /// arithmetic gives it (a rectangle, at any padding worth using) but whether
+    /// it is anywhere near the preview's corners at all. Held off both edges by
+    /// the preview's own radius or more, it is not: a rounded rect's corner arc
+    /// occupies a box of exactly its radius. The chip rests on flat edge, has no
+    /// competing curve to hold a band with, and is free to be the capsule a chip
+    /// should be.
+    ///
+    /// ❌ 8 was the first value, and it is what put the chips INSIDE the corner
+    /// boxes — where a capsule's ~10.5 sat within half a point of the preview's
+    /// own radius, which is the equal-radii case: measured, an 8pt band on the
+    /// straights opening to 11.5 at 45°. Concentric would have fixed it at
+    /// radius 2 and cost the chips their shape. Moving them off the corner costs
+    /// nothing and dissolves the question.
+    ///
+    /// The clearance is therefore a FLOOR, not a preference: whatever the card's
+    /// padding is, furniture on the preview has to start outside an arc whose
+    /// size moves the other way. Tighten the card and the preview gets rounder,
+    /// and its corners reach further in.
+    ///
+    /// `CardShapeSystemTests` asserts it, because it is what the capsule is
+    /// standing on.
+    public static var mediaFurnitureInset: CGFloat {
+        max(contentInset, mediaCornerRadius)
+    }
 
     /// How far the media preview is held off the card's edge — named because
     /// the preview's own radius is derived from it, and the two must move
@@ -631,14 +685,38 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// question about reading a row of numbers rather than about where the card
     /// ends. It does not follow `contentInset`.
     public static let metaSpacing: CGFloat = 14
-    /// What the pills' rounding WOULD be if they followed the card's own rule —
-    /// the preview's curve carried inward by the inset between them. They do
-    /// not: they are capsules. Kept because the number is the thing a reader
-    /// will otherwise re-derive and apply, and `PostMetaPillView` explains at
-    /// length why 2 is arithmetically right and visually wrong.
-    public static var concentricFurnitureCornerRadius: CGFloat {
-        mediaCornerRadius - mediaFurnitureInset
-    }
+    // MARK: - The card's shape system
+    //
+    // Every radius on a card, in one place, because four radii chosen
+    // separately is how a card stops looking like one object.
+    //
+    // ```
+    //   card      26        the container, and the platform's own answer
+    //   preview   14        concentric: 26 - 12, corners ON the card's corners
+    //   chips     capsule   clear of the preview's corners, so unconstrained
+    //   avatar    circle    a portrait, exempt — see below
+    // ```
+    //
+    // Two rules produce all of it, and the second is the one that is usually
+    // missing:
+    //
+    // 1. **A child whose corners sit at its parent's is concentric with it** —
+    //    radius = parent's less the inset. The preview.
+    // 2. **A child clear of its parent's corners has no radius obligation at
+    //    all** — it meets only straight edge. The chips.
+    //
+    // An avatar is neither: it is a picture of a person, and every surface in
+    // this app draws one as a circle. A circle near a rounded corner has never
+    // read as a disagreement, because it is not perceived as a container — it
+    // is perceived as a face. Rounding it to 10 for consistency's sake would
+    // make the card MORE uniform and less legible, which is the trade a shape
+    // system exists to avoid making by accident.
+    //
+    // ❌ Making the chips concentric was tried and is the reason this note
+    // exists: at 8pt in from the preview's edges the arithmetic gave 2, and a
+    // chip at radius 2 is a rectangle. The choice looked like "correct shape or
+    // correct radius" until the third option turned up — move the chip off the
+    // corner, where neither answer is required.
     /// How many lines of caption a card previews before it offers the rest.
     ///
     /// A card is a PREVIEW and the post is where the text is read, so the cap
@@ -824,9 +902,16 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         playBadge.layer.shadowOpacity = 0.55
         playBadge.layer.shadowRadius = 4
         playBadge.layer.shadowOffset = .zero
+        // The same inset as the chips at the other end, and as everything on the
+        // card above it — furniture on the preview is held off it exactly as the
+        // preview is held off the card.
         playBadge.constrain(in: mediaView) { parent in
-            playBadge.topAnchor.constraint(equalTo: parent.topAnchor, constant: 10)
-            playBadge.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -10)
+            playBadge.topAnchor.constraint(
+                equalTo: parent.topAnchor, constant: Self.mediaFurnitureInset
+            )
+            playBadge.trailingAnchor.constraint(
+                equalTo: parent.trailingAnchor, constant: -Self.mediaFurnitureInset
+            )
         }
         buildMediaMetaPills()
 
@@ -880,6 +965,10 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     ///
     /// The bottom edge, and not the top: the play badge already owns the top
     /// trailing corner, and a video row would have had the age underneath it.
+    ///
+    /// Held off both edges by `mediaFurnitureInset`, which is what puts them
+    /// clear of the preview's corner arcs and lets them be capsules — see that
+    /// property for the geometry.
     private func buildMediaMetaPills() {
         overlayAge.font = PostMetaPillView.font
         overlayAge.textColor = PostMetaPillView.foreground

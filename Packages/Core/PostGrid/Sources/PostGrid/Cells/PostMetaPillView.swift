@@ -52,23 +52,16 @@ public final class PostMetaPillView: UIVisualEffectView {
         self.contents = contents
         super.init(effect: nil)
         // A capsule, and `.capsule()` rather than a number: the ends have to
-        // stay circular at whatever height Dynamic Type resolves to, and a
-        // fixed radius stops being half of that at the first step.
+        // stay circular at whatever height Dynamic Type resolves to, and a fixed
+        // radius stops being half of that at the first step.
         //
-        // ❌ The alternative was the concentric radius — the preview's own
-        // curve carried inward by the inset between them, `10 - 8 = 2`. That is
-        // the arithmetic every other curve in this card follows, and it is
-        // refused here on purpose: at radius 2 a chip is a rectangle, and
-        // reading as a pill is what this view is for.
-        //
-        // The cost is real and worth naming rather than hiding. A chip is ~21pt
-        // tall, so its capsule is ~10.5 — within half a point of the 10pt
-        // preview it sits inside, and two curves of equal radius offset by a
-        // margin are exactly the case where the band between them swells
-        // through the turn instead of holding. It is the 32-against-32 finding,
-        // one level further in, accepted this time because the shape at stake
-        // is 21pt of furniture rather than the card the whole screen is made
-        // of.
+        // It is allowed to be a capsule because of where its HOST puts it, not
+        // because capsules were preferred. A chip inside its parent's corner arc
+        // owes that corner a concentric radius, and inside a 10pt preview arc
+        // the arithmetic answers 2 — a rectangle. A chip held clear of the arc
+        // meets straight edge on both sides, has no band to hold, and is free.
+        // `PostGridListRowCell.mediaFurnitureInset` is what buys that clearance,
+        // and a test asserts it, because this shape is standing on it.
         cornerConfiguration = .capsule()
         // Furniture, never a target. The card's own tap opens the post, and a
         // chip that swallowed touches would put two dead corners on the preview.
