@@ -77,7 +77,7 @@ enum TextRevealInstaller {
             anchorFrame: { [weak feed] space in
                 (feed as? SnapFeedViewController)?.revealCaptionAnchor(in: space)
             },
-            setSourceBandOpacity: origin.setBandOpacity,
+            setSourceConcealed: origin.setConcealed,
             depthView: origin.depthView,
             presentationDidEnd: origin.presentationDidEnd,
             willStageDismissal: origin.willStageDismissal,

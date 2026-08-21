@@ -616,13 +616,6 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     /// Brings the landed row's own furniture in gently — see
     /// `PostGridListRowCell.fadeInRevealedFurniture`. A no-op for a row that is
     /// not realized, which is the honest answer: nothing is on screen to fade.
-    /// The author band's opacity while a flight is in the air. A profile
-    /// gallery's posts carry no author, so the band is absent here and this is
-    /// a no-op — kept so both grids answer the same questions.
-    func setAuthorBandOpacity(_ alpha: CGFloat, for postID: PostID) {
-        (cell(for: postID) as? PostGridListRowCell)?.setAuthorBandOpacity(alpha)
-    }
-
     func fadeInRevealedFurniture(for postID: PostID) {
         (cell(for: postID) as? PostGridListRowCell)?.fadeInRevealedFurniture()
     }
@@ -636,7 +629,9 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
               let cell = collectionView.cellForItem(at: IndexPath(item: index, section: 0))
         else { return }
         if let row = cell as? PostGridListRowCell {
-            row.setHeroMediaConcealed(concealed)
+            // The ROW decides what its flight carries — a preview for a media
+            // row, the whole card for a text one. Same rule as For You's.
+            row.setHeroConcealed(concealed)
         } else {
             cell.isHidden = concealed
         }

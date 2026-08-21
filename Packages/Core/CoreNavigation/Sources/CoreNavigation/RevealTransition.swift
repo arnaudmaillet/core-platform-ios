@@ -86,19 +86,22 @@ public struct RevealGeometry {
     /// Matched mode aligns this with the source rect at t=0; `nil` (or plain
     /// mode) leaves the page unmoved and the window simply opens over it.
     public let anchorFrame: (UICoordinateSpace) -> CGRect?
-    /// The SOURCE row's own furniture that the destination has no counterpart
-    /// for — an author band above the caption, which a page carries in its nav
-    /// pill instead.
+    /// Hide the row the window was taken FROM, for as long as it is in the air.
     ///
-    /// The window departs from below it (see the source's own `revealBand`), so
-    /// for most of a flight the band is simply behind the page. It is the first
-    /// and last moments that need a channel: without one the band sits crisp
-    /// and undimmed beside a window that has already started moving, which
-    /// reads as the card being torn in half rather than leaving.
+    /// The reveal can leave the row in place while the window sits exactly on
+    /// it, because the two are showing the same thing — which is how this
+    /// shipped, and why nobody noticed. A GRAB moves the window off that spot,
+    /// and then the row underneath is a second copy of the post the viewer
+    /// believes they are holding. What should read as picking a card up reads
+    /// as photocopying it.
     ///
-    /// Driven like the departing chrome and for the same reason — one clock for
-    /// everything the grid does while a page is on its way.
-    public let setSourceBandOpacity: (CGFloat) -> Void
+    /// So the source is concealed for the flight's whole length and restored
+    /// when it lands — the same bargain the hero strikes with
+    /// `ZoomTransitionSource.setZoomSourceHidden`, and for the same reason.
+    /// Restored a beat BEFORE the window is retired, never after: the two are
+    /// identical at the landing rect, so swapping them inside one transaction
+    /// is invisible, while doing it in two is a flash of empty grid.
+    public let setSourceConcealed: (Bool) -> Void
     /// The view the depth cue recedes: the content, not the chrome around it.
     /// Same rule (and same reason) as `ZoomTransitionSource.zoomPresenterDepthView`.
     public let depthView: () -> UIView?
@@ -141,7 +144,7 @@ public struct RevealGeometry {
         setDestinationVeilOpacity: @escaping (CGFloat) -> Void = { _ in },
         setDestinationGround: @escaping (UIColor?) -> Void = { _ in },
         anchorFrame: @escaping (UICoordinateSpace) -> CGRect? = { _ in nil },
-        setSourceBandOpacity: @escaping (CGFloat) -> Void = { _ in },
+        setSourceConcealed: @escaping (Bool) -> Void = { _ in },
         depthView: @escaping () -> UIView? = { nil },
         presentationDidEnd: @escaping (Bool) -> Void = { _ in },
         willStageDismissal: @escaping () -> Void = {},
@@ -156,7 +159,7 @@ public struct RevealGeometry {
         self.setDestinationVeilOpacity = setDestinationVeilOpacity
         self.setDestinationGround = setDestinationGround
         self.anchorFrame = anchorFrame
-        self.setSourceBandOpacity = setSourceBandOpacity
+        self.setSourceConcealed = setSourceConcealed
         self.depthView = depthView
         self.presentationDidEnd = presentationDidEnd
         self.willStageDismissal = willStageDismissal
@@ -496,6 +499,10 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
         // The grid recedes behind the opening mask — the same depth cue a hero
         // applies, on the content only, so the screen's own chrome stays
         // grounded.
+        // The row goes the moment the window takes its place. Invisible at
+        // frame 0 — the window is sitting exactly on it — and the whole point
+        // everywhere after.
+        geometry.setSourceConcealed(true)
         let presenting = geometry.depthView() ?? context.viewController(forKey: .from)?.view
         let screenRadius = ScreenGeometry.cornerRadius(behind: container)
         ZoomFlight.applyRecededChrome(to: presenting, radius: screenRadius)
@@ -517,8 +524,6 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
         let chrome = departingChrome
         UIView.animate(withDuration: duration * 0.6, delay: 0, options: [.curveEaseIn]) {
             chrome?.alpha = 0
-            // The band leaves WITH the card it belongs to, not a frame later.
-            self.geometry.setSourceBandOpacity(0)
         } completion: { _ in
             #if DEBUG
             RevealStage.log("present", "chrome faded to \(chrome?.alpha ?? -1)")
@@ -541,6 +546,11 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             )
         } completion: { _ in
             let cancelled = context.transitionWasCancelled
+            // A reversed opening never showed the page, so the row it was taken
+            // from has to come back — before the window goes, so the two are
+            // never both absent. A landed one keeps it hidden: the page is over
+            // it, and the dismissal is what puts it back.
+            if cancelled { self.geometry.setSourceConcealed(false) }
             // Idempotent close-out: the ground is already back by now, this
             // only guarantees it if the animation was interrupted.
             self.geometry.setDestinationGround(nil)
@@ -705,10 +715,15 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             dim.alpha = 0
             presenting.transform = .identity
             chrome?.alpha = chromeAlpha
-            self.geometry.setSourceBandOpacity(1)
         }
         animator.addCompletion { _ in
             let cancelled = context.transitionWasCancelled
+            // FIRST, and the order is the whole of it: the row and the window
+            // are identical at the landing rect, so swapping them inside one
+            // transaction is invisible — while restoring after the unwrap is a
+            // frame of empty grid where the card should be. A cancelled close
+            // leaves the page up, and the row stays hidden under it.
+            self.geometry.setSourceConcealed(cancelled)
             RevealStage.unwrap(fromView, from: host, to: container, frame: pageFrame)
             dim.removeFromSuperview()
             presenting.transform = .identity
@@ -723,9 +738,6 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             self.geometry.setDestinationGround(nil)
             self.geometry.installDestinationVeil(nil, nil)
             chrome?.alpha = cancelled ? 0 : chromeAlpha
-            // A cancelled close leaves the page up, so the band stays gone
-            // under it; a committed one has just landed beside it.
-            self.geometry.setSourceBandOpacity(cancelled ? 0 : 1)
             self.geometry.dismissalDidEnd(!cancelled)
             context.completeTransition(!cancelled)
         }

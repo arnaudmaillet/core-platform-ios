@@ -93,17 +93,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         )
     }
 
-    /// The band's opacity, driven by a flight in progress.
-    ///
-    /// The window opens from just below the band and grows over it, so for most
-    /// of a flight the band is simply behind the page. It is the FIRST and LAST
-    /// moments that need this: at frame 0 the band sits crisp and undimmed
-    /// against a window that has already started moving, and on a close it is
-    /// uncovered again a beat before the dim clears. Riding the flight's own
-    /// progress puts it on the same clock as everything else the grid is doing.
-    public func setAuthorBandOpacity(_ alpha: CGFloat) {
-        authorBand.alpha = alpha
-    }
+
 
     /// The caption's own bottom in the card's space.
     ///
@@ -521,6 +511,26 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         playBadge.alpha = concealed ? 0 : 1
     }
 
+    /// Hides whatever THIS row's flight is carrying, for as long as it is in
+    /// the air — and the routing lives here because only the row knows.
+    ///
+    /// A media row flies its preview and keeps the rest: caption, counters and
+    /// author stay put, because none of them left. A TEXT row has no preview,
+    /// and what a reveal carries away is the card itself — so the card is what
+    /// goes.
+    ///
+    /// Without this a dragged window and the row it came from show the same
+    /// post twice, side by side, which is not a hero picking a card up; it is a
+    /// copy being made. The grid keeps the row's SLOT either way, so nothing
+    /// reflows underneath while the viewer is holding it.
+    public func setHeroConcealed(_ concealed: Bool) {
+        if mediaView.isHidden {
+            card.alpha = concealed ? 0 : 1
+        } else {
+            setHeroMediaConcealed(concealed)
+        }
+    }
+
 
     /// The card's own rounding and fill, so a flight impersonating this row
     /// is its twin rather than an approximation of it. Restating either as a
@@ -894,8 +904,9 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         avatarImage.image = nil
         avatarImage.isHidden = true
         onFollowTapped = nil
-        // The band's own opacity is per-FLIGHT too — see `setAuthorBandOpacity`.
-        authorBand.alpha = 1
+        // Concealment is per-FLIGHT state and must not ride a recycled cell to
+        // whatever post it is bound to next — see `setHeroConcealed`.
+        card.alpha = 1
     }
 
     private func revealTapped() {

@@ -825,8 +825,11 @@ final class ForYouViewController: UIViewController {
                 // the same view the hero's depth cue rides, for the same
                 // reason.
                 depthView: { [weak self] in self?.pager },
-                setBandOpacity: { [weak page] alpha in
-                    page?.setAuthorBandOpacity(alpha, for: postID)
+                // Through the grid's OWN hero concealment, not a second
+                // mechanism: `setHeroHidden` also re-applies on every dequeue,
+                // so a row that recycles mid-flight comes back still hidden.
+                setConcealed: { [weak page] concealed in
+                    page?.setHeroHidden(concealed, for: postID)
                 },
                 presentationDidEnd: { [weak self] landed in
                     // The flight faded the bar to nothing; take it down for

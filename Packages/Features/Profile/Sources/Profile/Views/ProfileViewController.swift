@@ -500,11 +500,11 @@ final class ProfileViewController: UIViewController {
                     // out cannot answer.
                     captionEnd: galleryPager.textRowCaptionEnd(for: post.id),
                     depthView: { [weak self] in self?.galleryPager },
-                    // A profile's posts carry no author, so there is no band
-                    // here — answered anyway so the two surfaces stay the same
-                    // shape and a band arriving later needs no second wiring.
-                    setBandOpacity: { [weak self] alpha in
-                        self?.galleryPager.setAuthorBandOpacity(alpha, for: post.id)
+                    // The gallery's own concealment, which the media hero
+                    // beside this already drives — one mechanism, two kinds of
+                    // flight.
+                    setConcealed: { [weak self] concealed in
+                        self?.galleryPager.setHeroConcealed(concealed, for: post.id)
                     },
                     // No inset to pin, unlike For You's grid: these pages run
                     // `contentInsetAdjustmentBehavior = .never` for their whole

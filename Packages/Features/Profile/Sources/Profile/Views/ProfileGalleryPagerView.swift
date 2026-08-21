@@ -197,10 +197,6 @@ final class ProfileGalleryPagerView: UIView {
         pages[activeIndex].fadeInRevealedFurniture(for: postID)
     }
 
-    func setAuthorBandOpacity(_ alpha: CGFloat, for postID: PostID) {
-        guard pages.indices.contains(activeIndex) else { return }
-        pages[activeIndex].setAuthorBandOpacity(alpha, for: postID)
-    }
 
     func setHeroConcealed(_ concealed: Bool, for postID: PostID) {
         guard pages.indices.contains(activeIndex) else { return }

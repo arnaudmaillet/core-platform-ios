@@ -45,11 +45,12 @@ public struct TextRevealOrigin {
     public let captionEnd: CGFloat?
     /// The view the depth cue recedes — the content, not the chrome around it.
     public let depthView: () -> UIView?
-    /// The row's own furniture that the page has no counterpart for — an author
-    /// band above the caption. Driven by the flight so it leaves with the card
-    /// it belongs to rather than a frame later; see
-    /// `RevealGeometry.setSourceBandOpacity`.
-    public let setBandOpacity: (CGFloat) -> Void
+    /// Hide the row while the window taken from it is in the air, and put it
+    /// back when it lands — the same bargain the flight fields above strike
+    /// with `setConcealed`, for the same reason: a grab moves the window off
+    /// the row, and a row left in place is then a second copy of the post the
+    /// viewer believes they are holding. See `RevealGeometry.setSourceConcealed`.
+    public let setConcealed: (Bool) -> Void
     /// The opening is over: `true` landed, `false` reversed mid-air. For chrome
     /// the opening FADED rather than dismissed.
     public let presentationDidEnd: (Bool) -> Void
@@ -64,7 +65,7 @@ public struct TextRevealOrigin {
         rowFrame: @escaping (UICoordinateSpace) -> CGRect?,
         captionEnd: CGFloat?,
         depthView: @escaping () -> UIView? = { nil },
-        setBandOpacity: @escaping (CGFloat) -> Void = { _ in },
+        setConcealed: @escaping (Bool) -> Void = { _ in },
         presentationDidEnd: @escaping (Bool) -> Void = { _ in },
         willStageDismissal: @escaping () -> Void = {},
         dismissalDidEnd: @escaping (Bool) -> Void = { _ in }
@@ -72,7 +73,7 @@ public struct TextRevealOrigin {
         self.rowFrame = rowFrame
         self.captionEnd = captionEnd
         self.depthView = depthView
-        self.setBandOpacity = setBandOpacity
+        self.setConcealed = setConcealed
         self.presentationDidEnd = presentationDidEnd
         self.willStageDismissal = willStageDismissal
         self.dismissalDidEnd = dismissalDidEnd

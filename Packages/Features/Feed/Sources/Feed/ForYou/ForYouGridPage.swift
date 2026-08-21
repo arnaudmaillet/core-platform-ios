@@ -1093,12 +1093,6 @@ final class ForYouGridPage: UIView {
     /// `PostGridListRowCell.fadeInRevealedFurniture`. A no-op for a row that
     /// is not realized, which is the honest answer: nothing is on screen to
     /// fade.
-    /// The author band's opacity while a flight is in the air — see
-    /// `PostGridListRowCell.setAuthorBandOpacity`.
-    func setAuthorBandOpacity(_ alpha: CGFloat, for postID: PostID) {
-        (cell(for: postID) as? PostGridListRowCell)?.setAuthorBandOpacity(alpha)
-    }
-
     func fadeInRevealedFurniture(for postID: PostID) {
         let row = cell(for: postID) as? PostGridListRowCell
         #if DEBUG
@@ -1356,11 +1350,13 @@ final class ForYouGridPage: UIView {
     /// tile.
     static func applyHeroConcealment(_ concealed: Bool, to cell: UICollectionViewCell?) {
         switch cell {
-        // A row keeps everything the flight is not carrying. Only media rows
-        // ever fly, and what flies is their preview.
+        // A row keeps everything the flight is not carrying — and which part
+        // that is depends on the row, so the row is asked. It used to be
+        // assumed: only media rows flew, so the preview was hard-coded here.
+        // A text row flies too now, and what it carries away is the whole card.
         case let row as PostGridListRowCell:
             row.isHidden = false
-            row.setHeroMediaConcealed(concealed)
+            row.setHeroConcealed(concealed)
         case let other?:
             other.isHidden = concealed
         case nil:

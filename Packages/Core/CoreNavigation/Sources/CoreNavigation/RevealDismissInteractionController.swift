@@ -147,7 +147,6 @@ final class RevealDismissInteractionController: NSObject,
             scaleX: ZoomFlight.presenterDepthScale, y: ZoomFlight.presenterDepthScale
         )
         returningChrome?.alpha = 0
-        geometry.setSourceBandOpacity(0)
 
         self.context = context
         self.host = host
@@ -227,9 +226,6 @@ final class RevealDismissInteractionController: NSObject,
         // And the source's own chrome arrives on the mirror of it, revealed by
         // the hand rather than switched on after the landing.
         returningChrome?.alpha = pose.progress
-        // The row's own band arrives on the same channel: the further home the
-        // window is, the more of the card it is landing beside.
-        geometry.setSourceBandOpacity(pose.progress)
         let depth = ZoomFlight.presenterDepthScale
             + (1 - ZoomFlight.presenterDepthScale) * pose.progress
         presentingView?.transform = CGAffineTransform(scaleX: depth, y: depth)
@@ -296,7 +292,6 @@ final class RevealDismissInteractionController: NSObject,
             RevealStage.apply(target, mask: windowMask, page: page)
             dim?.alpha = commit ? 0 : 1
             chrome?.alpha = commit ? 1 : 0
-            self.geometry.setSourceBandOpacity(commit ? 1 : 0)
             self.geometry.setDestinationVeilOpacity(commit ? 1 : 0)
             // Into the card's tone on the way home, so the last frame of the
             // close and the row underneath are one colour; back to the page's
@@ -319,6 +314,11 @@ final class RevealDismissInteractionController: NSObject,
         #if DEBUG
         RevealStage.log("grab", "finish cancelled=\(cancelled)")
         #endif
+        // FIRST, and the order is the whole of it: the row and the window are
+        // identical at the landing rect, so swapping them inside one
+        // transaction is invisible — while restoring after the unwrap is a
+        // frame of empty grid where the card should be.
+        geometry.setSourceConcealed(cancelled)
         if let page, let host, let container = context?.containerView {
             RevealStage.unwrap(page, from: host, to: container, frame: pageFrame)
         }
@@ -334,7 +334,6 @@ final class RevealDismissInteractionController: NSObject,
         geometry.setDestinationGround(nil)
         geometry.installDestinationVeil(nil, nil)
         returningChrome?.alpha = cancelled ? 0 : 1
-        geometry.setSourceBandOpacity(cancelled ? 0 : 1)
         geometry.dismissalDidEnd(!cancelled)
         context?.completeTransition(!cancelled)
         context = nil
