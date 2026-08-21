@@ -4,6 +4,7 @@ import CoreModels
 import CoreNavigation
 import DesignSystem
 import MediaPlayback
+import PostGrid
 import UIKit
 
 /// The full-screen, page-snapping timeline. Drives the *same* `FeedViewModel`
@@ -136,6 +137,9 @@ final class SnapFeedViewController: UIViewController {
     /// Transition-scoped: covers what a COLLAPSED card has no room for, for
     /// the length of a reveal. See `installRevealVeil`.
     private var revealVeil: RevealVeilView?
+    /// The source row's author band, borrowed for a flight — see
+    /// `installRevealAuthorBand`.
+    private var revealAuthorBand: PostAuthorBandView?
     /// Whether the active engagement is a text page's RESTING interface —
     /// PRE-RENDERED on visibility (as the cell scrolls in, fully formed,
     /// no reveal spring), then LOCKED at settle. The two phases are split
@@ -2520,6 +2524,60 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// on a dismissal.
     public func setRevealVeilOpacity(_ alpha: CGFloat) {
         revealVeil?.alpha = alpha
+    }
+
+    /// **PROTOTYPE** (`-text-reveal`). Puts the SOURCE row's author band into
+    /// this page for the length of a flight, at `top` in this view's own
+    /// coordinates — or takes it away with `nil`.
+    ///
+    /// ## Why the page borrows a header it does not have
+    ///
+    /// A card names its author above its caption; a page names it in the nav
+    /// pill instead, and has nothing in that strip at all. So the window a
+    /// viewer holds showed a blank band where the card shows a header, and the
+    /// card's own header had to fade in at the landing to cover the difference.
+    ///
+    /// A fade is the wrong tool twice over here. It is a fade of something
+    /// against NOTHING, which works — but it is also a fade at exactly the
+    /// moment this transition promises to be invisible, and the strip is the
+    /// one part of the window that never matched.
+    ///
+    /// With the band drawn INTO the page, the window shows what the card shows
+    /// from frame 0, and the swap at the landing is the identity rather than a
+    /// dissolve. It is scenery: no touches, no follow action, gone the moment
+    /// the flight is.
+    ///
+    /// Hosted on this screen's own view rather than on the page cell, for the
+    /// same reason the veil is — and positioned rather than laid out, so the
+    /// page's resting layout never learns it exists.
+    public func installRevealAuthorBand(
+        at top: CGFloat?, model: PostAuthorBandView.Model?, pipeline: ImagePipeline?
+    ) {
+        revealAuthorBand?.removeFromSuperview()
+        revealAuthorBand = nil
+        guard let top, let model else { return }
+        let band = PostAuthorBandView()
+        band.isUserInteractionEnabled = false
+        band.configure(with: model, imagePipeline: pipeline)
+        band.alpha = 0
+        band.translatesAutoresizingMaskIntoConstraints = true
+        band.frame = CGRect(
+            x: PostGridListRowCell.captionInset,
+            y: top,
+            width: view.bounds.width - PostGridListRowCell.captionInset * 2,
+            height: PostAuthorBandView.avatarDiameter
+        )
+        band.autoresizingMask = [.flexibleWidth]
+        // ABOVE the veil: the veil covers what the page has too much of, and
+        // this is the one thing it has too little of.
+        view.addSubview(band)
+        revealAuthorBand = band
+    }
+
+    /// The prop's opacity, driven on the flight's progress — full when the
+    /// window is the card, gone when the page is itself.
+    public func setRevealAuthorBandOpacity(_ alpha: CGFloat) {
+        revealAuthorBand?.alpha = alpha
     }
 
     /// **PROTOTYPE** (`-text-reveal`). Lends the active page a ground for the

@@ -139,7 +139,9 @@ final class RevealDismissInteractionController: NSObject,
 
         geometry.setDestinationGround(nil)
         installVeil(geometry: geometry, anchor: anchor)
+        installAuthorBand(geometry: geometry, anchor: anchor)
         geometry.setDestinationVeilOpacity(0)
+        geometry.setDestinationAuthorBandOpacity(0)
 
         let presenting = geometry.depthView() ?? toView
         ZoomFlight.applyRecededChrome(to: presenting, radius: screenRadius)
@@ -224,6 +226,9 @@ final class RevealDismissInteractionController: NSObject,
         // window is, the less of itself the page may show past what the card
         // shows.
         geometry.setDestinationVeilOpacity(pose.progress)
+        // The borrowed band arrives on the same channel: the closer the window
+        // is to being the card, the more of the card it has to be showing.
+        geometry.setDestinationAuthorBandOpacity(pose.progress)
         // And the source's own chrome arrives on the mirror of it, revealed by
         // the hand rather than switched on after the landing.
         returningChrome?.alpha = pose.progress
@@ -295,6 +300,7 @@ final class RevealDismissInteractionController: NSObject,
             dim?.alpha = commit ? 0 : 1
             chrome?.alpha = commit ? 1 : 0
             self.geometry.setDestinationVeilOpacity(commit ? 1 : 0)
+            self.geometry.setDestinationAuthorBandOpacity(commit ? 1 : 0)
             // Into the card's tone on the way home, so the last frame of the
             // close and the row underneath are one colour; back to the page's
             // own if the grab is abandoned.
@@ -335,6 +341,7 @@ final class RevealDismissInteractionController: NSObject,
         // carry a borrowed colour into its next push.
         geometry.setDestinationGround(nil)
         geometry.installDestinationVeil(nil, nil)
+        geometry.installDestinationAuthorBand(nil)
         returningChrome?.alpha = cancelled ? 0 : 1
         geometry.dismissalDidEnd(!cancelled)
         context?.completeTransition(!cancelled)

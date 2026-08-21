@@ -1,5 +1,6 @@
 import CoreNavigation
 import FeedInterface
+import MediaCore
 import PostGrid
 import UIKit
 
@@ -50,7 +51,7 @@ enum TextRevealInstaller {
     /// The geometry both legs read — forwards on the push, backwards on the
     /// pop. One rect calculation, so the two can never disagree.
     static func geometry(
-        feed: UIViewController, origin: TextRevealOrigin
+        feed: UIViewController, origin: TextRevealOrigin, pipeline: ImagePipeline?
     ) -> RevealGeometry {
         RevealGeometry(
             sourceFrame: origin.rowFrame,
@@ -66,6 +67,27 @@ enum TextRevealInstaller {
             },
             setDestinationVeilOpacity: { [weak feed] alpha in
                 (feed as? SnapFeedViewController)?.setRevealVeilOpacity(alpha)
+            },
+            // Placed HERE rather than in the transition, because turning the
+            // page's caption anchor into the band's y needs the card's own
+            // insets — and those live in PostGrid, which CoreNavigation cannot
+            // see. The band sits where the CARD puts it above its caption, so
+            // that a window landing on the card's rect lands one on the other.
+            installDestinationAuthorBand: { [weak feed] anchor in
+                guard let anchor, let band = origin.authorBand else {
+                    (feed as? SnapFeedViewController)?
+                        .installRevealAuthorBand(at: nil, model: nil, pipeline: nil)
+                    return
+                }
+                (feed as? SnapFeedViewController)?.installRevealAuthorBand(
+                    at: anchor.minY - PostAuthorBandView.captionOffset
+                        + PostGridListRowCell.captionTopInset,
+                    model: band,
+                    pipeline: pipeline
+                )
+            },
+            setDestinationAuthorBandOpacity: { [weak feed] alpha in
+                (feed as? SnapFeedViewController)?.setRevealAuthorBandOpacity(alpha)
             },
             setDestinationGround: { [weak feed] color in
                 (feed as? SnapFeedViewController)?.setRevealGroundTint(color)

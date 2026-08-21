@@ -1120,6 +1120,17 @@ final class ForYouGridPage: UIView {
 
     /// Where the page stops matching the row, in the row's own space — the
     /// reveal's cut line. `nil` when the row is not realized.
+    /// The row's author band, for the destination to borrow during a flight.
+    /// Read from the POST rather than from the cell, so it answers for a row
+    /// that has scrolled out as readily as for one on screen.
+    func textRowAuthorBand(for postID: PostID) -> PostAuthorBandView.Model? {
+        posts.first { $0.id == postID }.flatMap(PostAuthorBandView.Model.init(post:))
+    }
+
+    /// The pipeline this page draws with, so a borrowed band can load the same
+    /// avatar from the same cache rather than fetching its own copy.
+    var bandImagePipeline: ImagePipeline { imagePipeline }
+
     /// How far below the row's top its caption begins — the band's height plus
     /// its gap, or zero. See `PostGridListRowCell.revealCaptionTop`.
     func textRowCaptionTop(for postID: PostID) -> CGFloat {

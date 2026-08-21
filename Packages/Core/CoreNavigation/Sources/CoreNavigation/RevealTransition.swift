@@ -73,6 +73,20 @@ public struct RevealGeometry {
     /// lifts as the page opens and returns as it closes — and scrubs with a
     /// finger on the dismissal.
     public let setDestinationVeilOpacity: (CGFloat) -> Void
+    /// Puts the SOURCE's author band into the destination, given the page's
+    /// caption ANCHOR to place it against — or takes it away with `nil`.
+    ///
+    /// The anchor rather than a y, because turning one into the other needs the
+    /// card's own insets, and those live in PostGrid where this does not.
+    ///
+    /// The strip above a card's caption is the one part of the window that
+    /// never matched: a card names its author there and a page does not. Drawn
+    /// into the page, the window shows what the card shows from frame 0 and the
+    /// landing swap is the identity rather than a dissolve.
+    public let installDestinationAuthorBand: (CGRect?) -> Void
+    /// The band's opacity, on the same channel as the veil's — full when the
+    /// window is the card, gone when the page is itself.
+    public let setDestinationAuthorBandOpacity: (CGFloat) -> Void
     /// Lends the destination a ground, or hands its own back with `nil`.
     ///
     /// Driven rather than composited, and that is deliberate: an overlay in
@@ -146,6 +160,8 @@ public struct RevealGeometry {
         sourceCaptionEnd: CGFloat? = nil,
         installDestinationVeil: @escaping (CGFloat?, UIColor?) -> Void = { _, _ in },
         setDestinationVeilOpacity: @escaping (CGFloat) -> Void = { _ in },
+        installDestinationAuthorBand: @escaping (CGRect?) -> Void = { _ in },
+        setDestinationAuthorBandOpacity: @escaping (CGFloat) -> Void = { _ in },
         setDestinationGround: @escaping (UIColor?) -> Void = { _ in },
         anchorFrame: @escaping (UICoordinateSpace) -> CGRect? = { _ in nil },
         sourceCaptionTop: CGFloat = 0,
@@ -162,6 +178,8 @@ public struct RevealGeometry {
         self.sourceCaptionEnd = sourceCaptionEnd
         self.installDestinationVeil = installDestinationVeil
         self.setDestinationVeilOpacity = setDestinationVeilOpacity
+        self.installDestinationAuthorBand = installDestinationAuthorBand
+        self.setDestinationAuthorBandOpacity = setDestinationAuthorBandOpacity
         self.setDestinationGround = setDestinationGround
         self.anchorFrame = anchorFrame
         self.sourceCaptionTop = sourceCaptionTop
@@ -390,6 +408,20 @@ enum RevealStage {
 /// Nothing to do when the source shows its whole caption (`sourceCaptionEnd`
 /// nil) or when there is no anchor to measure from — a plain reveal has no
 /// overflow to hide, and veiling one would only dim a page that matches.
+/// Puts the source's author band into the destination, where the page has
+/// nothing — see `RevealGeometry.installDestinationAuthorBand`.
+///
+/// Nothing to place when the source has no band of its own — every profile
+/// gallery, and every card whose post carries no identity.
+@MainActor
+func installAuthorBand(geometry: RevealGeometry, anchor: CGRect?) {
+    guard geometry.sourceCaptionTop > 0 else {
+        geometry.installDestinationAuthorBand(nil)
+        return
+    }
+    geometry.installDestinationAuthorBand(anchor)
+}
+
 @MainActor
 func installVeil(geometry: RevealGeometry, anchor: CGRect?) {
     guard let end = geometry.sourceCaptionEnd, let anchor else {
@@ -510,7 +542,9 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
         // from the SOURCE's top, and the two tops are aligned by `closed`, so
         // it lands in the destination at the anchor's top plus that offset.
         installVeil(geometry: geometry, anchor: anchor)
+        installAuthorBand(geometry: geometry, anchor: anchor)
         geometry.setDestinationVeilOpacity(1)
+        geometry.setDestinationAuthorBandOpacity(1)
 
         #if DEBUG
         RevealStage.log("present", "source=\(NSCoder.string(for: sourceRect))"
@@ -563,6 +597,7 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             // page a beat before or after it becomes the screen.
             self.geometry.setDestinationGround(nil)
             self.geometry.setDestinationVeilOpacity(0)
+            self.geometry.setDestinationAuthorBandOpacity(0)
             presenting?.transform = CGAffineTransform(
                 scaleX: ZoomFlight.presenterDepthScale, y: ZoomFlight.presenterDepthScale
             )
@@ -577,6 +612,7 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             // only guarantees it if the animation was interrupted.
             self.geometry.setDestinationGround(nil)
             self.geometry.installDestinationVeil(nil, nil)
+            self.geometry.installDestinationAuthorBand(nil)
             RevealStage.unwrap(toView, from: host, to: container, frame: pageFrame)
             dim.removeFromSuperview()
             // Cleared under the opaque page, where the reset cannot be seen.
@@ -709,7 +745,9 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         RevealStage.apply(open, mask: mask, page: fromView)
         geometry.setDestinationGround(nil)
         installVeil(geometry: geometry, anchor: anchor)
+        installAuthorBand(geometry: geometry, anchor: anchor)
         geometry.setDestinationVeilOpacity(0)
+        geometry.setDestinationAuthorBandOpacity(0)
 
         #if DEBUG
         RevealStage.log("pop", "landing=\(NSCoder.string(for: sourceRect))"
@@ -735,6 +773,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             // …and back to showing only what the card shows, so the mask never
             // slices a sentence on its way home.
             self.geometry.setDestinationVeilOpacity(1)
+            self.geometry.setDestinationAuthorBandOpacity(1)
             dim.alpha = 0
             presenting.transform = .identity
             chrome?.alpha = chromeAlpha
@@ -760,6 +799,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             // must not carry a borrowed colour into its next push.
             self.geometry.setDestinationGround(nil)
             self.geometry.installDestinationVeil(nil, nil)
+            self.geometry.installDestinationAuthorBand(nil)
             chrome?.alpha = cancelled ? 0 : chromeAlpha
             self.geometry.dismissalDidEnd(!cancelled)
             context.completeTransition(!cancelled)

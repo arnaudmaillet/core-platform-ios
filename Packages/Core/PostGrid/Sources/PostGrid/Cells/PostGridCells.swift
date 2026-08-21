@@ -74,8 +74,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// seamless. The window has to be the card, and the offset has to be
     /// carried instead of avoided.
     public var revealCaptionTop: CGFloat {
-        guard showsAuthorBand else { return 0 }
-        return Self.authorAvatarDiameter + Self.authorFollowGap
+        showsAuthorBand ? PostAuthorBandView.captionOffset : 0
     }
 
     /// The caption's own height plus the inset above it, in the register the
@@ -451,16 +450,12 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // carries the same metric line at the same offset, unveiled, for the
         // entire flight — fading it in here would blink something that was
         // already on screen.
-        // The BAND always fades, truncated or not: the page has no author band
-        // at all, so whatever the window was showing in that strip, it was not
-        // this. It arrives into empty space, which is the only kind of arrival
-        // a fade improves.
-        if showsAuthorBand {
-            authorBand.alpha = 0
-            UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseOut]) {
-                self.authorBand.alpha = 1
-            }
-        }
+        // The BAND is deliberately absent from this, and its absence replaced a
+        // fade that was here for one commit. The destination now BORROWS this
+        // row's band for the flight (see `installRevealAuthorBand`), so the
+        // window already shows a header identical to this one — the swap at the
+        // landing is the identity, and fading this one in from zero would blink
+        // something the viewer was already looking at.
         guard showMoreRange != nil else { return }
         metaRow.alpha = 0
         UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseOut]) {
@@ -548,11 +543,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The gap between the caption and whatever follows it — the metric line,
     /// the media preview, or the reveal affordance.
     public static let captionFollowGap: CGFloat = 12
-    /// The author band's disc: two lines tall, because that is what it sits
-    /// beside — the display name over the handle.
-    public static let authorAvatarDiameter: CGFloat = 40
-    /// The gap between the author band and the caption under it.
-    public static let authorFollowGap: CGFloat = 12
+    /// The author band's measurements, restated as this cell's own names only
+    /// so call sites read naturally — the values live with the view that draws
+    /// them, because the reveal's prop draws the same band.
+    public static var authorAvatarDiameter: CGFloat { PostAuthorBandView.avatarDiameter }
+    public static var authorFollowGap: CGFloat { PostAuthorBandView.captionGap }
 
     /// Fired when the viewer asks for the rest of a truncated caption. The HOST
     /// owns the answer, not this cell: a cell is recycled and the expansion has
@@ -566,26 +561,23 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     public var onFollowTapped: (() -> Void)?
 
     private let card = UIView()
-    /// The author band: disc, name over handle, follow control — shown only
-    /// where the row's post actually carries an identity.
+    /// The author band — shown only where the row's post actually carries an
+    /// identity.
     ///
     /// A profile gallery's posts do not: that surface is already scoped to one
     /// author, so `GalleryPost`'s author fields are left nil there and the band
     /// disappears without anyone passing a flag. The band is therefore a
     /// function of the DATA rather than of the screen, which is the only
     /// version of this that cannot be wired up wrong.
-    private let authorBand = UIView()
-    private let avatar = MonogramAvatarView(diameter: PostGridListRowCell.authorAvatarDiameter)
-    private let avatarImage = AvatarImageView()
-    private let authorNameLabel = UILabel()
-    private let authorHandleLabel = UILabel()
-    private let followButton = UIButton(type: .system)
+    ///
+    /// The VIEW is shared with the reveal's transition prop — see
+    /// `PostAuthorBandView` for why that matters.
+    private let authorBand = PostAuthorBandView()
     private var showsAuthorBand = false
     /// The caption hangs off the band when there is one and off the card's own
     /// top edge when there is not — swapped per configure.
     private var captionFollowsBand: NSLayoutConstraint!
     private var captionAtCardTop: NSLayoutConstraint!
-    private var avatarTask: Task<Void, Never>?
     private let captionLabel = UILabel()
     private var isCaptionExpanded = false
     /// The caption as the post carries it. The label shows a SHORTENED version
@@ -715,67 +707,8 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         ]
     }
 
-    /// The band: disc leading, name over handle beside it, follow control
-    /// trailing and centred on the pair.
     private func buildAuthorBand() {
-        authorNameLabel.font = .preferredFont(forTextStyle: .subheadline)
-        authorNameLabel.font = UIFont.systemFont(
-            ofSize: authorNameLabel.font.pointSize, weight: .semibold
-        )
-        authorNameLabel.adjustsFontForContentSizeCategory = true
-        authorNameLabel.textColor = .label
-        authorNameLabel.lineBreakMode = .byTruncatingTail
-
-        authorHandleLabel.font = .preferredFont(forTextStyle: .footnote)
-        authorHandleLabel.adjustsFontForContentSizeCategory = true
-        authorHandleLabel.textColor = .secondaryLabel
-        authorHandleLabel.lineBreakMode = .byTruncatingTail
-
-        let identity = UIStackView(arrangedSubviews: [authorNameLabel, authorHandleLabel])
-        identity.axis = .vertical
-        identity.alignment = .leading
-        identity.spacing = 1
-
-        followButton.titleLabel?.font = UIFont.systemFont(
-            ofSize: UIFont.preferredFont(forTextStyle: .subheadline).pointSize, weight: .semibold
-        )
-        followButton.titleLabel?.adjustsFontForContentSizeCategory = true
-        // Compression: the identity yields first. A long display name should
-        // truncate before a two-word control does, because the control's words
-        // are the ones a reader has to be able to act on.
-        followButton.setContentCompressionResistancePriority(.required, for: .horizontal)
-        followButton.setContentHuggingPriority(.required, for: .horizontal)
-        followButton.addTarget(self, action: #selector(followPressed), for: .touchUpInside)
-
-        // The disc, with the picture laid OVER the monogram rather than
-        // replacing it — the app's avatar contract: initials are the rendered
-        // state and a photograph hydrates behind nothing.
-        avatarImage.pin(to: avatar)
-        avatarImage.isHidden = true
-
-        authorBand.addSubview(avatar)
-        authorBand.addSubview(identity)
-        authorBand.addSubview(followButton)
-        avatar.translatesAutoresizingMaskIntoConstraints = false
-        identity.translatesAutoresizingMaskIntoConstraints = false
-        followButton.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            avatar.leadingAnchor.constraint(equalTo: authorBand.leadingAnchor),
-            avatar.topAnchor.constraint(equalTo: authorBand.topAnchor),
-            avatar.bottomAnchor.constraint(equalTo: authorBand.bottomAnchor),
-
-            identity.leadingAnchor.constraint(equalTo: avatar.trailingAnchor, constant: Spacing.sm),
-            identity.centerYAnchor.constraint(equalTo: avatar.centerYAnchor),
-            identity.trailingAnchor.constraint(
-                lessThanOrEqualTo: followButton.leadingAnchor, constant: -Spacing.sm
-            ),
-
-            followButton.trailingAnchor.constraint(equalTo: authorBand.trailingAnchor),
-            // CENTRED on the disc, which is the pair's own height — the
-            // control belongs to the identity beside it, not to the band's box.
-            followButton.centerYAnchor.constraint(equalTo: avatar.centerYAnchor)
-        ])
-
+        authorBand.onFollowTapped = { [weak self] in self?.onFollowTapped?() }
         authorBand.constrain(in: card) { parent in
             authorBand.topAnchor.constraint(
                 equalTo: parent.topAnchor, constant: Self.captionTopInset
@@ -790,79 +723,24 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     }
 
     private func bindAuthorBand(to post: GalleryPost, imagePipeline: ImagePipeline) {
-        avatarTask?.cancel()
-        avatarTask = nil
-        avatarImage.image = nil
-        avatarImage.isHidden = true
-
-        let name = post.authorName?.trimmingCharacters(in: .whitespaces) ?? ""
-        let handle = post.authorHandle?.trimmingCharacters(in: .whitespaces) ?? ""
-        // Either half is enough to draw an identity, and neither is enough to
-        // draw one without the other's absence showing — so the band is shown
-        // for a post that has ANY of them and each label simply carries what
-        // it has.
-        showsAuthorBand = !name.isEmpty || !handle.isEmpty
+        let model = PostAuthorBandView.Model(post: post)
+        showsAuthorBand = model != nil
         authorBand.isHidden = !showsAuthorBand
         captionAtCardTop.isActive = !showsAuthorBand
         captionFollowsBand.isActive = showsAuthorBand
-        guard showsAuthorBand else { return }
-
-        authorNameLabel.text = name.isEmpty ? handle : name
-        authorHandleLabel.text = handle.isEmpty ? nil : "@" + handle
-        authorHandleLabel.isHidden = handle.isEmpty
-        avatar.setMonogram(Self.monogram(name: name, handle: handle))
-        setFollowing(false)
-
-        guard let url = post.authorAvatarURL else { return }
-        if let cached = imagePipeline.cachedImage(for: url) {
-            avatarImage.image = cached
-            avatarImage.isHidden = false
+        guard let model else {
+            authorBand.cancelPendingWork()
             return
         }
-        // Reuse is handled by CANCELLATION, as the cover's load is: the task is
-        // dropped in `prepareForReuse`, so a picture cannot arrive for a post
-        // this cell has stopped representing.
-        avatarTask = Task { [weak self] in
-            guard let image = try? await imagePipeline.image(for: url),
-                  !Task.isCancelled, let self
-            else { return }
-            self.avatarImage.image = image
-            self.avatarImage.isHidden = false
-        }
+        authorBand.configure(with: model, imagePipeline: imagePipeline)
+        authorBand.setFollowing(false)
     }
 
-    /// Initials, on the app's rule: the display name when there is one, the
-    /// handle when there is not.
-    private static func monogram(name: String, handle: String) -> String {
-        let source = name.isEmpty ? handle : name
-        let initials = source
-            .split(separator: " ")
-            .prefix(2)
-            .compactMap { $0.first.map { String($0).uppercased() } }
-        return initials.isEmpty ? "?" : initials.joined()
-    }
-
-    @objc private func followPressed() {
-        onFollowTapped?()
-    }
-
-    /// How the control reads. Two states, and the FOLLOWED one is the quiet
-    /// side: an action already taken should not keep shouting for the tap that
-    /// took it.
+    /// How the row's follow control reads. Forwarded to the band it belongs to.
     public func setFollowing(_ following: Bool) {
-        var configuration = UIButton.Configuration.plain()
-        configuration.title = following ? "Following" : "Follow"
-        configuration.contentInsets = NSDirectionalEdgeInsets(
-            top: 4, leading: 10, bottom: 4, trailing: 10
-        )
-        configuration.baseForegroundColor = following ? .secondaryLabel : .tintColor
-        configuration.background.backgroundColor = following
-            ? .clear : UIColor.tintColor.withAlphaComponent(0.12)
-        configuration.background.cornerRadius = 14
-        followButton.configuration = configuration
-        followButton.accessibilityLabel = following
-            ? "Following this author" : "Follow this author"
+        authorBand.setFollowing(following)
     }
+
 
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -893,10 +771,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // A landing's fade is per-flight state and must not ride a recycled
         // cell to whatever post it is bound to next.
         metaRow.alpha = 1
-        avatarTask?.cancel()
-        avatarTask = nil
-        avatarImage.image = nil
-        avatarImage.isHidden = true
+        authorBand.cancelPendingWork()
         onFollowTapped = nil
         // Concealment is per-FLIGHT state and must not ride a recycled cell to
         // whatever post it is bound to next — see `setHeroConcealed`.

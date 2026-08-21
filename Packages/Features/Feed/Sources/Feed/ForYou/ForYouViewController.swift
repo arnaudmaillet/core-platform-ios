@@ -826,6 +826,9 @@ final class ForYouViewController: UIViewController {
                 // reason.
                 depthView: { [weak self] in self?.pager },
                 captionTop: page.textRowCaptionTop(for: postID),
+                // Borrowed by the destination for the flight, so the window
+                // shows the header the card does instead of a blank strip.
+                authorBand: page.textRowAuthorBand(for: postID),
                 // The reveal's OWN concealment slot, not the hero's — see
                 // `ForYouGridPage.revealConcealedPostID`. Applied on every
                 // dequeue too, so a row that recycles mid-flight comes back
@@ -877,7 +880,8 @@ final class ForYouViewController: UIViewController {
                     guard !committed else { return }
                     self?.tabBarController?.setTabBarHidden(true, animated: false)
                 }
-            )
+            ),
+            pipeline: page.bandImagePipeline
         )
         return true
         #else

@@ -468,7 +468,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             }
             dismissal.revealGeometry = TextRevealInstaller.geometry(
                 feed: destination,
-                origin: Self.withDockChoreography(reveal, on: nav)
+                origin: Self.withDockChoreography(reveal, on: nav),
+                pipeline: imagePipeline
             )
         } else {
             // Hidden BY HAND for the same reason the flight path states at

@@ -50,6 +50,10 @@ public struct TextRevealOrigin {
     /// names its author. The window is the WHOLE row, so the destination's
     /// caption has to be told where the row's own sits.
     public let captionTop: CGFloat
+    /// The row's author band, so the destination can borrow it for the flight —
+    /// see `RevealGeometry.installDestinationAuthorBand`. `nil` for a row that
+    /// names no author, which is every profile gallery's.
+    public let authorBand: PostAuthorBandView.Model?
     /// Hide the row while the window taken from it is in the air, and put it
     /// back when it lands — the same bargain the flight fields above strike
     /// with `setConcealed`, for the same reason: a grab moves the window off
@@ -71,6 +75,7 @@ public struct TextRevealOrigin {
         captionEnd: CGFloat?,
         depthView: @escaping () -> UIView? = { nil },
         captionTop: CGFloat = 0,
+        authorBand: PostAuthorBandView.Model? = nil,
         setConcealed: @escaping (Bool) -> Void = { _ in },
         presentationDidEnd: @escaping (Bool) -> Void = { _ in },
         willStageDismissal: @escaping () -> Void = {},
@@ -80,6 +85,7 @@ public struct TextRevealOrigin {
         self.captionEnd = captionEnd
         self.depthView = depthView
         self.captionTop = captionTop
+        self.authorBand = authorBand
         self.setConcealed = setConcealed
         self.presentationDidEnd = presentationDidEnd
         self.willStageDismissal = willStageDismissal
