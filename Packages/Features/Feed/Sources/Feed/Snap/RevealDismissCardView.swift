@@ -32,8 +32,8 @@ import UIKit
 ///
 /// ## What it draws
 ///
-/// The card at its own natural size, pinned to the top of the window, on the
-/// card's own fill. The window is larger than the card for most of a flight and
+/// The card at its own natural size, CENTRED in the window, on the card's
+/// own fill. The window is larger than the card for most of a flight and
 /// the fill covers the difference — the same silhouette the veil used to make,
 /// which is why the swap reads as nothing changing when the page is unscrolled:
 /// the caption is the same words in the same place. The correction only shows
@@ -71,7 +71,14 @@ final class RevealDismissCardView: UIView, RevealStandInShaping {
             // the card to meet it would re-wrap the caption. Centred, the extra
             // width is fill on fill and cannot be seen.
             card.centerXAnchor.constraint(equalTo: centerXAnchor),
-            card.topAnchor.constraint(equalTo: topAnchor),
+            // CENTRED vertically too, and that is not symmetry for its own
+            // sake. Pinned to the top, the card appeared at the top of a
+            // full-screen window while the page kept showing underneath it —
+            // two things in one window, one of them nowhere near where the
+            // viewer was looking. Centred, it materialises under the finger and
+            // the window closes onto it; at the landing the window IS the card
+            // and centred and pinned are the same thing.
+            card.centerYAnchor.constraint(equalTo: centerYAnchor),
             card.widthAnchor.constraint(equalToConstant: width),
             card.heightAnchor.constraint(equalToConstant: fitted.frame.height)
         ])

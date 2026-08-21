@@ -762,23 +762,31 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             around: fromView, in: container, pageFrame: pageFrame
         )
         let open = RevealStage.open(container: container)
-        let closed = RevealStage.closed(
-            sourceRect: sourceRect,
-            radius: geometry.sourceCornerRadius,
-            anchor: anchor,
-            matchesAnchor: geometry.matchesAnchor,
-            captionTop: geometry.sourceCaptionTop
-        )
         // The stand-in: the card, drawn fresh, above the page inside the same
         // window. It fades in over the flight while the page fades out under
         // it, so a page that was scrolled stops mattering the moment the
         // dismissal starts. Unscrolled, the two agree and the cross-fade is
         // the identity.
+        //
+        // Built BEFORE the closed pose, because whether there is one decides
+        // what that pose says: a stand-in makes the page's alignment
+        // meaningless, and registering the page while a card fades in over it
+        // is the "scroll" artifact — the comments sliding under the stand-in
+        // for the length of the grab, chasing a caption the window is no longer
+        // going to show. Nothing behind it needs to move; it only has to hold
+        // still and fade.
         let standIn = geometry.makeDismissStandIn()
         if let standIn {
             standIn.alpha = 0
             host.addSubview(standIn)
         }
+        let closed = RevealStage.closed(
+            sourceRect: sourceRect,
+            radius: geometry.sourceCornerRadius,
+            anchor: anchor,
+            matchesAnchor: geometry.matchesAnchor && standIn == nil,
+            captionTop: geometry.sourceCaptionTop
+        )
         RevealStage.apply(open, mask: mask, page: fromView, standIn: standIn)
         geometry.setDestinationGround(nil)
         installVeil(geometry: geometry, anchor: anchor)

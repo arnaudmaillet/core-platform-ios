@@ -213,9 +213,15 @@ final class RevealDismissInteractionController: NSObject,
         let staged = RevealStage.Pose(
             mask: rect,
             maskRadius: radius,
+            // A STAND-IN MAKES THE PAGE'S ALIGNMENT MEANINGLESS, so it stops
+            // being asked for. Registering the page while a card is fading in
+            // over it was the whole of the "scroll" artifact: the comments slid
+            // under the stand-in for the length of the grab, chasing a caption
+            // the window was no longer going to show. Nothing behind the
+            // stand-in needs to move; it only needs to hold still and fade.
             pageTranslation: RevealStage.pageTranslation(
                 carrying: rect,
-                anchor: geometry.matchesAnchor ? anchor : nil,
+                anchor: (geometry.matchesAnchor && standIn == nil) ? anchor : nil,
                 progress: progress,
                 captionTop: geometry.sourceCaptionTop
             )
@@ -278,7 +284,7 @@ final class RevealDismissInteractionController: NSObject,
             sourceRect: landing,
             radius: geometry.sourceCornerRadius,
             anchor: anchor,
-            matchesAnchor: geometry.matchesAnchor,
+            matchesAnchor: geometry.matchesAnchor && standIn == nil,
             captionTop: geometry.sourceCaptionTop
         )
         let target = commit
