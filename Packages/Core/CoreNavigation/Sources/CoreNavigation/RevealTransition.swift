@@ -1,6 +1,6 @@
 import UIKit
 
-/// **PROTOTYPE** (`-text-reveal`). A hero for a page that has no media to fly.
+/// **THE TEXT REVEAL**. A hero for a page that has no media to fly.
 ///
 /// Every previous attempt at a text hero flew a *replica* of the row and made
 /// it impersonate the destination, and all five of them died of the same

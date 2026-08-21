@@ -759,7 +759,7 @@ final class ForYouViewController: UIViewController {
         return feed
     }
 
-    /// **PROTOTYPE** `-text-reveal`: opens a text post with a clip-window
+    /// **THE TEXT REVEAL**: opens a text post with a clip-window
     /// reveal instead of UIKit's slide. `-text-reveal-plain` compares the
     /// unmatched variant (the window opens over a page that never moves);
     /// `-text-reveal-log` prints the rects both legs measured.

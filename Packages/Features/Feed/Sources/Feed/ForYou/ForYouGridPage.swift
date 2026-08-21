@@ -1069,7 +1069,7 @@ final class ForYouGridPage: UIView {
         }
     }
 
-    /// **PROTOTYPE** (`-text-reveal`). The whole card of a TEXT row, in
+    /// **THE TEXT REVEAL**. The whole card of a TEXT row, in
     /// `space` — the rect a clip-window reveal opens from and closes onto.
     ///
     /// Deliberately NOT `hero(for:in:)`'s rect, and the difference is the

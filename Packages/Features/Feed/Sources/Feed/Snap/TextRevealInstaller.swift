@@ -21,19 +21,25 @@ import UIKit
 /// choreography: which chrome comes back with the return, and what has to
 /// settle before a landing is measured. Those arrive as a `TextRevealOrigin`.
 ///
-/// ## The prototype gate
+/// ## No longer a prototype
 ///
-/// `-text-reveal`, and DEBUG only, exactly as it has been. Wiring a second
-/// surface does not promote the prototype — it means the one flag now turns the
-/// transition on everywhere it applies, instead of on one screen out of two.
+/// It shipped behind `-text-reveal`, DEBUG only, for as long as it was one
+/// screen's experiment. It is now how a text post opens, everywhere it applies
+/// and in every build: a text post had no media to fly and so opened with a
+/// plain slide while every other post got a hero, and that gap is what this
+/// closes. Leaving it behind a flag meant the app shipped the gap.
+///
+/// `-no-text-reveal` remains, DEBUG only, as the way back — the A/B side for
+/// anything that needs to compare against the plain push.
 @MainActor
 enum TextRevealInstaller {
-    /// Whether the prototype is on for this launch.
+    /// Whether the reveal is on for this launch. On unless a debug build asks
+    /// for the old plain push.
     static var isEnabled: Bool {
         #if DEBUG
-        ProcessInfo.processInfo.arguments.contains("-text-reveal")
+        !ProcessInfo.processInfo.arguments.contains("-no-text-reveal")
         #else
-        false
+        true
         #endif
     }
 

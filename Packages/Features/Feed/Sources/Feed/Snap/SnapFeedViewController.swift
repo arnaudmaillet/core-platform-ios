@@ -2481,7 +2481,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         viewModel.seed(models)
     }
 
-    /// **PROTOTYPE** (`-text-reveal`). Where the active TEXT page draws its
+    /// **THE TEXT REVEAL**. Where the active TEXT page draws its
     /// caption bubble, in `space` — the anchor a clip-window reveal matches to
     /// the row it opened from.
     ///
@@ -2495,7 +2495,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         (commentsContentVC as? PostDetailViewController)?.revealCaptionAnchor(in: space)
     }
 
-    /// **PROTOTYPE** (`-text-reveal`). Covers everything below `cut` for the
+    /// **THE TEXT REVEAL**. Covers everything below `cut` for the
     /// length of a reveal, so a page opened from a COLLAPSED card shows no
     /// more of itself than the card did — see `RevealVeilView`.
     ///
@@ -2526,7 +2526,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         revealVeil?.alpha = alpha
     }
 
-    /// **PROTOTYPE** (`-text-reveal`). Puts the SOURCE row's author band into
+    /// **THE TEXT REVEAL**. Puts the SOURCE row's author band into
     /// this page for the length of a flight, at `top` in this view's own
     /// coordinates — or takes it away with `nil`.
     ///
@@ -2586,7 +2586,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         revealAuthorBand?.alpha = alpha
     }
 
-    /// **PROTOTYPE** (`-text-reveal`). Lends the active page a ground for the
+    /// **THE TEXT REVEAL**. Lends the active page a ground for the
     /// length of a reveal — see `SnapFeedCell.setRevealGroundTint`.
     ///
     /// Aimed at the ACTIVE cell only. A reveal opens onto one page, and the
