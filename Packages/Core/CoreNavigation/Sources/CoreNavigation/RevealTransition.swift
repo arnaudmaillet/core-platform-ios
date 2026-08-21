@@ -421,8 +421,8 @@ enum RevealStage {
     /// it sets every other value, and the empty state lands in the middle of
     /// the gesture where the viewer has already decided to leave.
     static func swapFractions(at progress: CGFloat) -> (fill: CGFloat, content: CGFloat) {
-        (fill: ramp(progress, from: pageFadeStart, to: pageFadeEnd),
-         content: ramp(progress, from: cardFadeStart, to: cardFadeEnd))
+        (fill: easeIn(ramp(progress, from: pageFadeStart, to: pageFadeEnd)),
+         content: easeOut(ramp(progress, from: cardFadeStart, to: cardFadeEnd)))
     }
 
     private static func ramp(_ value: CGFloat, from start: CGFloat, to end: CGFloat) -> CGFloat {
@@ -430,14 +430,36 @@ enum RevealStage {
         return min(max((value - start) / (end - start), 0), 1)
     }
 
+    /// Both curves ACCELERATE AWAY FROM TRANSPARENT, which is the end that
+    /// costs something to dwell at.
+    ///
+    /// Linear opacity spends as long being barely-there as being nearly-solid,
+    /// and the two are not worth the same: a shape at 5% reads as a smudge
+    /// rather than as a thing arriving or leaving. So the fill leaves zero
+    /// slowly and slams into one — the page holds its ground and then goes —
+    /// and the card leaves zero fast and eases into one, so it is legible
+    /// almost as soon as it exists.
+    private static func easeIn(_ t: CGFloat) -> CGFloat { t * t }
+    private static func easeOut(_ t: CGFloat) -> CGFloat { 1 - (1 - t) * (1 - t) }
+
     /// The page dissolving into the card's fill.
     static let pageFadeStart: CGFloat = 0.10
     static let pageFadeEnd: CGFloat = 0.45
-    /// The card arriving into it. The gap between `pageFadeEnd` and this is the
-    /// EMPTY BEAT — the window card-coloured and holding nothing — and it is
-    /// what keeps the two fades from ever having text on both sides.
-    static let cardFadeStart: CGFloat = 0.55
-    static let cardFadeEnd: CGFloat = 0.85
+    /// The card arriving into it — starting EXACTLY where the fill finishes.
+    ///
+    /// There was a beat between them, and it is gone. It was there to keep the
+    /// two fades from ever having text on both sides, which is the mistake this
+    /// transition paid for four times over — but it was belt on top of braces:
+    /// the fill is opaque, so at `pageFadeEnd` the page is not dimmed, it is
+    /// COVERED. Nothing can show through it, beat or no beat.
+    ///
+    /// What the beat did instead was hold a card-coloured window with nothing
+    /// in it for a tenth of the gesture, which reads as a hole rather than as a
+    /// hand-off. Starting the card where the fill lands means the window is
+    /// never empty for any measurable time — and the invariant that mattered
+    /// still holds, because it was never the gap that held it.
+    static let cardFadeStart: CGFloat = 0.45
+    static let cardFadeEnd: CGFloat = 0.80
 
     /// The page RIDING the window: it moves with it, rigidly, and nothing
     /// inside it moves relative to anything else.
@@ -933,19 +955,28 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // the spring's own clock — the same schedule, the same empty beat, one
         // animation rather than two that could overlap.
         if let standIn {
+            // The same schedule and the same curves the drag uses, on the
+            // spring's clock. Two plain animations rather than keyframes,
+            // because keyframes are linear between stops and the curves are
+            // half the point — see `easeIn`/`easeOut`. This leg runs in an
+            // ordinary animation context, so the blocks animate; the trap that
+            // ate a timed fade before is specific to an interactive
+            // transition's start.
             let shaping = standIn as? RevealStandInShaping
-            UIView.animateKeyframes(
-                withDuration: transitionDuration(using: context), delay: 0,
-                options: [.calculationModeLinear]
+            let total = transitionDuration(using: context)
+            UIView.animate(
+                withDuration: total * (RevealStage.pageFadeEnd - RevealStage.pageFadeStart),
+                delay: total * RevealStage.pageFadeStart,
+                options: [.curveEaseIn]
             ) {
-                UIView.addKeyframe(
-                    withRelativeStartTime: RevealStage.pageFadeStart,
-                    relativeDuration: RevealStage.pageFadeEnd - RevealStage.pageFadeStart
-                ) { standIn.alpha = 1 }
-                UIView.addKeyframe(
-                    withRelativeStartTime: RevealStage.cardFadeStart,
-                    relativeDuration: RevealStage.cardFadeEnd - RevealStage.cardFadeStart
-                ) { shaping?.setContentOpacity(1) }
+                standIn.alpha = 1
+            }
+            UIView.animate(
+                withDuration: total * (RevealStage.cardFadeEnd - RevealStage.cardFadeStart),
+                delay: total * RevealStage.cardFadeStart,
+                options: [.curveEaseOut]
+            ) {
+                shaping?.setContentOpacity(1)
             }
         }
         animator.addAnimations {

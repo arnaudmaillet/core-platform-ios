@@ -133,17 +133,23 @@ struct RevealRegistrationTests {
     ///
     /// The design exists because blending two runs of text draws both of them,
     /// which this transition established four times over.
-    @Test func thereIsAFractionWhereTheWindowHoldsNothing() {
-        // Anywhere in the beat: the fill is up, the card is not.
-        let beat = RevealStage.swapFractions(at: 0.5)
-        #expect(beat.fill == 1)
-        #expect(beat.content == 0)
+    @Test func theWindowIsNeverEmptyForAnyMeasurableTime() {
+        // The card starts exactly where the fill lands, so the empty region has
+        // no width. It used to be a tenth of the gesture wide, which read as a
+        // hole rather than as a hand-off.
+        #expect(RevealStage.cardFadeStart == RevealStage.pageFadeEnd)
+        // A hair past the hand-off, the card is already there — and visibly so,
+        // because it leaves zero fast. Linear, it would still be at 3%.
+        #expect(RevealStage.swapFractions(at: RevealStage.pageFadeEnd + 0.01).content > 0.05)
     }
 
     /// The two fades never overlap — the card cannot begin before the page has
     /// finished, at any progress at all.
     @Test func theTwoFadesNeverOverlap() {
-        #expect(RevealStage.cardFadeStart > RevealStage.pageFadeEnd)
+        // The card may not begin before the page is COVERED — which is what
+        // the fill reaching 1 means, the fill being opaque. Equal is enough;
+        // it never needed a gap.
+        #expect(RevealStage.cardFadeStart >= RevealStage.pageFadeEnd)
         for step in 0...100 {
             let swap = RevealStage.swapFractions(at: CGFloat(step) / 100)
             // Partway through one means the other is finished or not started.
