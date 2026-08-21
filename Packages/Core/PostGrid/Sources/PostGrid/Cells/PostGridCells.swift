@@ -17,7 +17,7 @@ import UIKit
 ///
 /// * **Text row** — a quiet line closing the card, counters leading and the age
 ///   trailing, `.secondaryLabel` against the card's own fill.
-/// * **Media row** — the same four values ON the preview, as two pills of glass
+/// * **Media row** — the same four values ON the preview, as two material chips
 ///   resting on its bottom edge (counters leading, age trailing). The card then
 ///   ENDS at the preview, so the line below it is gone rather than duplicated.
 ///

@@ -173,6 +173,26 @@ struct MediaMetaPillContentTests {
 
         #expect(pill.effect == nil)
     }
+
+    /// ⚠️ The chip's ground follows the DEVICE, never the photo under it.
+    ///
+    /// `UIGlassEffect` is what this app floats every other piece of chrome on,
+    /// so "make the chip match the rest of the app" is a change someone will
+    /// reach for. It resolves its own luminance against its backdrop, which is
+    /// right for chrome over a page and wrong for a chip on a photograph: the
+    /// two chips on one card resolve independently, so a bright sky and a dark
+    /// cliff put a light chip and a dark chip on the same image, and a chip
+    /// flips side as the photo loads or a video starts. It reads as the app
+    /// changing theme by itself.
+    ///
+    /// Asserted on the effect VALUE, which is why `makeBackdrop` exists —
+    /// attaching one off-screen is what hangs a headless simulator.
+    @Test func theChipsGroundFollowsTheInterfaceStyleAndNotTheBackdrop() {
+        let backdrop = PostMetaPillView.makeBackdrop()
+
+        #expect(backdrop is UIBlurEffect)
+        #expect((backdrop is UIGlassEffect) == false)
+    }
 }
 
 /// A card's shape system: which curve owes which other curve a radius, and
@@ -249,6 +269,14 @@ struct CardShapeSystemTests {
         )
 
         #expect(abs(pill.effectiveRadius(corner: .allCorners) - pill.bounds.height / 2) < 0.5)
+        // ⚠️ The second half, and the assertion above is worth little without
+        // it. A resolved radius says the shape was CONFIGURED, not that it was
+        // drawn: `UIGlassEffect` draws its own shape, a `UIBlurEffect` backdrop
+        // fills the bounds and is clipped by the layer or not at all. Swapping
+        // one for the other turned every capsule back into a rectangle while
+        // this test stayed green — caught in a 3x crop of a screenshot, not
+        // here.
+        #expect(pill.clipsToBounds)
     }
 
 }
