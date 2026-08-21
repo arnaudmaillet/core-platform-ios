@@ -671,7 +671,11 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
             // stand-in built without it lands a truncated card on an expanded
             // row.
             captionExpanded: captionExpansion.isExpanded(postID),
-            showsAuthorMenu: showsAuthorMenu(for: post)
+            showsAuthorMenu: showsAuthorMenu(for: post),
+            // The ROW's own height when it is realized — the card is centred
+            // in the window, so a height that disagrees with the row's puts
+            // every line inside it half the difference out.
+            height: cell(for: postID)?.bounds.height
         )
     }
 

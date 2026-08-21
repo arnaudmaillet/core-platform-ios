@@ -210,6 +210,26 @@ struct RevealDismissCardTests {
         }
     }
 
+    /// The card is CENTRED, so a height that disagrees with the row's puts
+    /// every line inside it half the difference out — uniformly, which is what
+    /// a jump at the swap looks like. Told the row's height, it obeys.
+    @Test func theRowsHeightOverridesTheFittedOne() {
+        let imposed: CGFloat = 190
+        let view = RevealDismissCardView(
+            post: post(caption: longCaption),
+            width: 343,
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            height: imposed
+        )
+        view.frame = CGRect(x: 0, y: 0, width: 402, height: imposed)
+        view.layoutIfNeeded()
+
+        let card = view.subviews.first
+        #expect(card?.bounds.height == imposed)
+        // And centred in it, which at the landing means filling it exactly.
+        #expect(abs((card?.center.y ?? 0) - imposed / 2) < 0.5)
+    }
+
     /// It takes no touches — it is scenery flying over a live screen.
     @Test func itIsInert() {
         #expect(standIn(width: 343).isUserInteractionEnabled == false)

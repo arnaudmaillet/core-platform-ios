@@ -1153,7 +1153,10 @@ final class ForYouGridPage: UIView {
             // flies a truncated card home, "Show more" and all, onto a row that
             // is showing the whole thing.
             captionExpanded: captionExpansion.isExpanded(postID),
-            showsAuthorMenu: showsAuthorMenu(for: post)
+            showsAuthorMenu: showsAuthorMenu(for: post),
+            // The ROW's own height when it is realized — see the profile's
+            // twin, and `RevealDismissCardView.init`.
+            height: cell(for: postID)?.bounds.height
         )
     }
 

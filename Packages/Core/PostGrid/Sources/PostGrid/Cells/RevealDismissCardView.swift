@@ -60,12 +60,27 @@ public final class RevealDismissCardView: UIView, RevealStandInShaping {
     /// frame: absent here it pops in, present here it pops out, and the second
     /// is what shipped (a viewer's own post has no menu, so every dismissal on
     /// your own profile ended with a control vanishing).
+    /// `height` is the ROW's own, when the caller has a realized one to ask.
+    ///
+    /// ⚠️ This is what keeps the card's CONTENT where the row's content is, and
+    /// the reason is the centring below. The card is centred in the window, and
+    /// the window lands on the row's rect — so if the card's height and the
+    /// row's disagree by `d`, every line inside it lands `d/2` off, uniformly.
+    /// The window can travel its whole trajectory and settle to the point (it
+    /// does: measured, 331 frames, 0.0pt short) and the swap still jumps.
+    ///
+    /// Measuring the card independently invites that disagreement:
+    /// `preferredLayoutAttributesFitting` answers for a freshly built cell,
+    /// while the row's height is whatever the collection view's layout settled
+    /// on. Asking the row removes the question. `nil` falls back to the fitted
+    /// height, which is all a caller with no realized row can offer.
     public init(
         post: GalleryPost,
         width: CGFloat,
         imagePipeline: ImagePipeline,
         captionExpanded: Bool = false,
-        showsAuthorMenu: Bool = true
+        showsAuthorMenu: Bool = true,
+        height: CGFloat? = nil
     ) {
         card = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: width, height: 200))
         super.init(frame: .zero)
@@ -87,12 +102,15 @@ public final class RevealDismissCardView: UIView, RevealStandInShaping {
         // left as built keeps its construction size, and every rect read off it
         // is that size rather than the row's.
         let fitted = card.preferredLayoutAttributesFitting(attributes)
-        card.bounds.size = CGSize(width: width, height: fitted.frame.height)
+        // The ROW's height wins whenever there is one to ask.
+        let cardHeight = height ?? fitted.frame.height
+        card.bounds.size = CGSize(width: width, height: cardHeight)
         card.layoutIfNeeded()
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-text-reveal-log") {
             print("[text-reveal] standIn post=\(post.id.rawValue) w=\(width)"
-                + " fittedH=\(fitted.frame.height) expanded=\(captionExpanded)")
+                + " rowH=\(height.map { "\($0)" } ?? "-") fittedH=\(fitted.frame.height)"
+                + " used=\(cardHeight) expanded=\(captionExpanded)")
         }
         #endif
 
@@ -113,7 +131,7 @@ public final class RevealDismissCardView: UIView, RevealStandInShaping {
             // and centred and pinned are the same thing.
             card.centerYAnchor.constraint(equalTo: centerYAnchor),
             card.widthAnchor.constraint(equalToConstant: width),
-            card.heightAnchor.constraint(equalToConstant: fitted.frame.height)
+            card.heightAnchor.constraint(equalToConstant: cardHeight)
         ])
     }
 

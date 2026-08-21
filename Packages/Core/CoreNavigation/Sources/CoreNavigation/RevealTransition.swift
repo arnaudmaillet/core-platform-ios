@@ -914,6 +914,67 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
     }
 }
 
+#if DEBUG
+/// Samples a leg's PRESENTATION values every frame, for the one question a
+/// completion handler cannot answer.
+///
+/// ⚠️ Reading `layer.presentation()` when the transition completes proves
+/// nothing: the animation has just been removed, so presentation returns the
+/// model value and always equals the target. The question — does the window
+/// travel all the way, or is it cut off and the row swapped in — is about the
+/// frames BEFORE that, and only a display link sees them.
+///
+/// Prints one line per sample under `-text-reveal-log`, then a verdict: how far
+/// short of the target the last sampled frame was.
+@MainActor
+final class RevealTrajectoryProbe {
+    private var link: CADisplayLink?
+    private weak var tracked: UIView?
+    private let target: CGRect
+    private let leg: String
+    private let start = CACurrentMediaTime()
+    private var samples: [(t: CFTimeInterval, rect: CGRect)] = []
+
+    static func begin(_ leg: String, tracking view: UIView, to target: CGRect)
+        -> RevealTrajectoryProbe? {
+        guard ProcessInfo.processInfo.arguments.contains("-text-reveal-log") else { return nil }
+        return RevealTrajectoryProbe(leg: leg, tracked: view, target: target)
+    }
+
+    private init(leg: String, tracked: UIView, target: CGRect) {
+        self.leg = leg
+        self.tracked = tracked
+        self.target = target
+        let link = CADisplayLink(target: self, selector: #selector(sample))
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
+    @objc private func sample() {
+        guard let rect = tracked?.layer.presentation()?.frame else { return }
+        samples.append((CACurrentMediaTime() - start, rect))
+    }
+
+    /// Call from the leg's completion, BEFORE anything is torn down.
+    func finish() {
+        link?.invalidate()
+        link = nil
+        guard let last = samples.last else {
+            print("[text-reveal] \(leg) trajectory: no samples")
+            return
+        }
+        for sample in samples {
+            print(String(format: "[text-reveal] %@ t=%.3f y=%.1f h=%.1f",
+                         leg, sample.t, sample.rect.minY, sample.rect.height))
+        }
+        print(String(format: "[text-reveal] %@ trajectory ended %.1fpt short in y,"
+                     + " %.1fpt short in height, over %d frames",
+                     leg, last.rect.minY - target.minY,
+                     last.rect.height - target.height, samples.count))
+    }
+}
+#endif
+
 // MARK: - Pop
 
 /// The window closes. Linear on purpose: this leg is what a finger scrubs, and
@@ -1119,13 +1180,22 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             presenting.transform = .identity
             chrome?.alpha = chromeAlpha
         }
+        #if DEBUG
+        // The WINDOW's own trajectory, sampled every frame — see
+        // `RevealTrajectoryProbe` for why a reading taken at completion cannot
+        // answer this.
+        let probe = RevealTrajectoryProbe.begin("pop", tracking: mask, to: closed.mask)
+        // And the STAND-IN's own, because that is the thing on screen: the
+        // window can land perfectly while the card inside it does not.
+        let cardProbe = standIn.flatMap {
+            RevealTrajectoryProbe.begin("pop-card", tracking: $0, to: closed.mask)
+        }
+        #endif
         animator.addCompletion { _ in
             #if DEBUG
-            // Where the window ACTUALLY finished against where it was aimed.
-            // A gap here is the transition being torn down before the spring
-            // has settled; no gap means the landing rect itself is wrong.
+            probe?.finish()
+            cardProbe?.finish()
             RevealStage.log("pop", "settled mask=\(NSCoder.string(for: mask.frame))"
-                + " presented=\(mask.layer.presentation().map { NSCoder.string(for: $0.frame) } ?? "nil")"
                 + " target=\(NSCoder.string(for: closed.mask))")
             #endif
             let cancelled = context.transitionWasCancelled
