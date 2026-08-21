@@ -7,10 +7,26 @@ import UIKit
 
 /// One full-width row of the Activity/Short timelines: the caption with
 /// reading padding on a soft card, plus — when the post carries media — a
-/// rounded full-width preview under the text (play badge for videos), and a
-/// quiet metadata line closing the card: views, reactions, comments on the
-/// leading side, the post's compact age trailing. Short pages never have
-/// media, so their rows are text + metadata.
+/// rounded full-width preview under the text (play badge for videos). Short
+/// pages never have media, so their rows are text + metadata.
+///
+/// ## Where the metadata sits
+///
+/// Views, reactions, comments and the post's compact age, and there are two
+/// placements because there are two shapes of card:
+///
+/// * **Text row** — a quiet line closing the card, counters leading and the age
+///   trailing, `.secondaryLabel` against the card's own fill.
+/// * **Media row** — the same four values ON the preview, as two pills of glass
+///   resting on its bottom edge (counters leading, age trailing). The card then
+///   ENDS at the preview, so the line below it is gone rather than duplicated.
+///
+/// The second is not decoration. A card with a preview closed on a strip of
+/// card-coloured furniture below the image, which is the widest thing on the
+/// row and the least worth reading; moving it onto the media buys back roughly
+/// 28pt per media row and lets the preview finish the card. See
+/// `PostMetaPillView` for the ground the pills stand on, and `contentInset` for
+/// why the preview's edges fall on the caption's.
 public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognizerDelegate {
     public static let reuseID = "PostGridListRowCell"
     /// The inner preview's rounding — the radius a hero flying from this row
@@ -507,6 +523,18 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// reports nil for a hidden preview, so hiding it would make the row
     /// unable to answer where its own media is — which is the rect the
     /// DISMISSAL flies home to.
+    ///
+    /// The metadata pills go with it, and they get there for free: they are
+    /// subviews OF the preview, so the one alpha carries them. That is why they
+    /// were built inside it rather than over it in the card — a chip left
+    /// floating on an empty rounded box for the length of a flight is the same
+    /// defect as a caption that vanishes, on a smaller scale, and the way not
+    /// to have it is to have no second channel to keep in step.
+    ///
+    /// (The `playBadge` line below is that second channel, and it is redundant
+    /// for exactly this reason — the badge is inside the preview too. Kept,
+    /// because a reader checking whether the badge is concealed should find an
+    /// answer rather than infer one.)
     public func setHeroMediaConcealed(_ concealed: Bool) {
         mediaView.alpha = concealed ? 0 : 1
         playBadge.alpha = concealed ? 0 : 1
@@ -559,18 +587,58 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// was the wrong target — the card is on screen all the time, and it should
     /// look like the platform.
     public static let cardCornerRadius: CGFloat = 26
+
+    /// How far every child of a card is held off its edges: the caption, the
+    /// author band, the closing metric line, and the media preview, which is
+    /// the point — text and image share one pair of vertical lines rather than
+    /// each having its own.
+    ///
+    /// 16, which is the caption's reading padding and always was. It is the
+    /// TEXT that fixes it: a card is mostly words, and the preview aligning to
+    /// them costs the preview nothing.
+    ///
+    /// ❌ 8 was tried, to make one number govern every curve in the card
+    /// (26 → 18 → 10, a constant band at all three levels, pills landing within
+    /// half a point of their own capsule). It reads as cramped, and it does not
+    /// stop at the card: `captionInset` is shared with the post's own page —
+    /// structurally, because a reveal has to land the window's caption on the
+    /// card's — so it put a full page of prose 8pt from the screen's edge too.
+    public static let contentInset: CGFloat = 16
+
+    /// How far the preview's own furniture — the metadata pills — is held off
+    /// its edges.
+    ///
+    /// NOT `contentInset`, and it cannot be: the preview's curve is only
+    /// `cardCornerRadius - contentInset` = 10pt round, so a child concentric
+    /// inside it at 16 would need a radius of −6. 8 is what leaves the pills a
+    /// positive one at all.
+    public static let mediaFurnitureInset: CGFloat = 8
+
     /// How far the media preview is held off the card's edge — named because
     /// the preview's own radius is derived from it, and the two must move
     /// together or the curves stop being parallel.
-    public static let mediaInset: CGFloat = 16
+    public static var mediaInset: CGFloat { contentInset }
     public static let cardFillColor: UIColor = .secondarySystemBackground
-    /// The caption's type and inset, for the same reason.
-    public static let captionInset: CGFloat = 16
-    public static let captionTopInset: CGFloat = 16
+    /// The caption's inset, which is the preview's, which is the card's — see
+    /// `contentInset`. Public because the post's own page reproduces this exact
+    /// register so a reveal's window lands its caption on the card's own.
+    public static var captionInset: CGFloat { contentInset }
+    public static var captionTopInset: CGFloat { contentInset }
     /// The closing metric line's placement, shared with the flight card that
     /// stands in for a text row.
     public static let metaBottomInset: CGFloat = 14
+    /// NOT an inset — the gap between two counters inside the line, which is a
+    /// question about reading a row of numbers rather than about where the card
+    /// ends. It does not follow `contentInset`.
     public static let metaSpacing: CGFloat = 14
+    /// What the pills' rounding WOULD be if they followed the card's own rule —
+    /// the preview's curve carried inward by the inset between them. They do
+    /// not: they are capsules. Kept because the number is the thing a reader
+    /// will otherwise re-derive and apply, and `PostMetaPillView` explains at
+    /// length why 2 is arithmetically right and visually wrong.
+    public static var concentricFurnitureCornerRadius: CGFloat {
+        mediaCornerRadius - mediaFurnitureInset
+    }
     /// How many lines of caption a card previews before it offers the rest.
     ///
     /// A card is a PREVIEW and the post is where the text is read, so the cap
@@ -657,10 +725,38 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     private let comments = PostMetricLabel(symbol: "bubble.right", font: metaFont, color: .secondaryLabel)
     private let views = PostMetricLabel(symbol: "eye", font: metaFont, color: .secondaryLabel)
     private let ageLabel = UILabel()
+
+    /// The media row's metadata, which is the same four values as the line
+    /// above wearing the overlay's type and colour.
+    ///
+    /// SEPARATE INSTANCES rather than the line's own views moved into the
+    /// pills, and the duplication is the cheaper of the two: the two placements
+    /// differ in font, weight, symbol variant and colour, all of which
+    /// `PostMetricLabel` fixes at init, so re-parenting would have meant making
+    /// every one of them mutable and re-applying the whole set on each
+    /// `configure` — on the recycling path, for a saving of four views.
+    private let overlayViews = PostMetricLabel(
+        symbol: "eye.fill", font: PostMetaPillView.font, color: PostMetaPillView.foreground
+    )
+    private let overlayReactions = PostMetricLabel(
+        symbol: "heart.fill", font: PostMetaPillView.font, color: PostMetaPillView.foreground
+    )
+    private let overlayComments = PostMetricLabel(
+        symbol: "bubble.right.fill", font: PostMetaPillView.font, color: PostMetaPillView.foreground
+    )
+    private let overlayAge = UILabel()
+    private var countersPill: PostMetaPillView!
+    private var agePill: PostMetaPillView!
+
     private var loadTask: Task<Void, Never>?
-    /// Swapped per configure: the metadata line hangs off the caption for
-    /// text-only rows; media rows interpose the preview.
+    /// The metadata line always hangs off the caption; what changes per
+    /// configure is whether it CLOSES the card. A media row's line is hidden
+    /// under the preview, laid out but drawing nothing, which is what keeps it
+    /// out of the height without leaving it unconstrained.
     private var metaFollowsCaption: NSLayoutConstraint!
+    /// Active for text rows only: the line is the card's last thing. A media
+    /// row ends at the preview instead — see `mediaClosesCard`.
+    private var metaClosesCard: NSLayoutConstraint!
     private var mediaConstraints: [NSLayoutConstraint] = []
 
     override public init(frame: CGRect) {
@@ -732,6 +828,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             playBadge.topAnchor.constraint(equalTo: parent.topAnchor, constant: 10)
             playBadge.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -10)
         }
+        buildMediaMetaPills()
 
         ageLabel.font = Self.metaFont
         ageLabel.textColor = .secondaryLabel
@@ -750,12 +847,15 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         metaRow.constrain(in: card) { parent in
             metaRow.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Self.captionInset)
             metaRow.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Self.captionInset)
-            metaRow.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Self.metaBottomInset)
         }
         metaFollowsCaption = metaRow.topAnchor.constraint(
             equalTo: captionLabel.bottomAnchor, constant: Self.captionFollowGap
         )
         metaFollowsCaption.isActive = true
+        metaClosesCard = metaRow.bottomAnchor.constraint(
+            equalTo: card.bottomAnchor, constant: -Self.metaBottomInset
+        )
+        metaClosesCard.isActive = true
         mediaConstraints = [
             mediaView.topAnchor.constraint(
                 equalTo: captionLabel.bottomAnchor, constant: Self.captionFollowGap
@@ -763,8 +863,62 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             mediaView.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Self.mediaInset),
             mediaView.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Self.mediaInset),
             mediaView.heightAnchor.constraint(equalToConstant: 180),
-            metaRow.topAnchor.constraint(equalTo: mediaView.bottomAnchor, constant: 12)
+            // The preview CLOSES a media card, at the same inset it is held off
+            // the sides by — the metadata that used to sit under it is on the
+            // preview now. Concentric all the way round, and the card is 28pt
+            // shorter for it.
+            mediaView.bottomAnchor.constraint(
+                equalTo: card.bottomAnchor, constant: -Self.mediaInset
+            )
         ]
+    }
+
+    /// The two chips that carry a media row's metadata, resting on the
+    /// preview's bottom edge — counters leading, age trailing, both inside the
+    /// preview so that ONE alpha conceals the lot while a flight is in the air
+    /// (see `setHeroMediaConcealed`).
+    ///
+    /// The bottom edge, and not the top: the play badge already owns the top
+    /// trailing corner, and a video row would have had the age underneath it.
+    private func buildMediaMetaPills() {
+        overlayAge.font = PostMetaPillView.font
+        overlayAge.textColor = PostMetaPillView.foreground
+        overlayAge.adjustsFontForContentSizeCategory = true
+        overlayAge.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        // Views lead, reactions and comments follow — the same reach-first
+        // order the closing line and the media tiles both use.
+        countersPill = PostMetaPillView(
+            contents: [overlayViews, overlayReactions, overlayComments]
+        )
+        agePill = PostMetaPillView(contents: [overlayAge])
+
+        countersPill.constrain(in: mediaView) { parent in
+            countersPill.leadingAnchor.constraint(
+                equalTo: parent.leadingAnchor, constant: Self.mediaFurnitureInset
+            )
+            countersPill.bottomAnchor.constraint(
+                equalTo: parent.bottomAnchor, constant: -Self.mediaFurnitureInset
+            )
+        }
+        agePill.constrain(in: mediaView) { parent in
+            agePill.trailingAnchor.constraint(
+                equalTo: parent.trailingAnchor, constant: -Self.mediaFurnitureInset
+            )
+            agePill.bottomAnchor.constraint(
+                equalTo: parent.bottomAnchor, constant: -Self.mediaFurnitureInset
+            )
+        }
+        // Keeps the two apart when the type grows, and deliberately BREAKABLE:
+        // at the largest accessibility sizes three counters and a date do not
+        // both fit across a preview, and the choice there is between two chips
+        // that touch and a run of unsatisfiable-constraint logs. Neither pill
+        // may be truncated — a clipped count is a wrong count.
+        let clearance = agePill.leadingAnchor.constraint(
+            greaterThanOrEqualTo: countersPill.trailingAnchor, constant: 8
+        )
+        clearance.priority = .defaultHigh
+        clearance.isActive = true
     }
 
     private func buildAuthorBand() {
@@ -916,14 +1070,28 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         let hasMedia = post.kind != .text
         mediaView.isHidden = !hasMedia
         playBadge.isHidden = post.kind != .video
-        metaFollowsCaption.isActive = !hasMedia
+        // The line and the pills are the same four values in two placements, so
+        // exactly one of them is on screen. The line is hidden rather than
+        // unconstrained: it keeps hanging off the caption under the preview,
+        // drawing nothing, which is what stops a media row's layout from being
+        // ambiguous while keeping the line out of the card's height.
+        metaRow.isHidden = hasMedia
+        metaClosesCard.isActive = !hasMedia
         NSLayoutConstraint.deactivate(hasMedia ? [] : mediaConstraints)
         NSLayoutConstraint.activate(hasMedia ? mediaConstraints : [])
 
         reactions.set(post.reactionCount)
         comments.set(post.commentCount)
         views.set(post.viewCount)
-        ageLabel.text = PostMetadata.compactAge(ofMillis: post.publishedAtMS)
+        overlayReactions.set(post.reactionCount)
+        overlayComments.set(post.commentCount)
+        overlayViews.set(post.viewCount)
+        let age = PostMetadata.compactAge(ofMillis: post.publishedAtMS)
+        ageLabel.text = age
+        overlayAge.text = age
+        // A post with no counters at all leaves nothing to put in the leading
+        // pill, and an empty capsule on the photo is worse than no capsule.
+        countersPill.syncVisibilityToContents()
 
         mediaView.image = nil
         mediaView.backgroundColor = post.kind == .video ? .darkGray : .tertiarySystemFill
