@@ -89,6 +89,12 @@ public final class RevealDismissCardView: UIView, RevealStandInShaping {
         let fitted = card.preferredLayoutAttributesFitting(attributes)
         card.bounds.size = CGSize(width: width, height: fitted.frame.height)
         card.layoutIfNeeded()
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-text-reveal-log") {
+            print("[text-reveal] standIn post=\(post.id.rawValue) w=\(width)"
+                + " fittedH=\(fitted.frame.height) expanded=\(captionExpanded)")
+        }
+        #endif
 
         card.translatesAutoresizingMaskIntoConstraints = false
         addSubview(card)

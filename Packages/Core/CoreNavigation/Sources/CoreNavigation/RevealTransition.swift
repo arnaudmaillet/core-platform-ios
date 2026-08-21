@@ -1120,6 +1120,14 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             chrome?.alpha = chromeAlpha
         }
         animator.addCompletion { _ in
+            #if DEBUG
+            // Where the window ACTUALLY finished against where it was aimed.
+            // A gap here is the transition being torn down before the spring
+            // has settled; no gap means the landing rect itself is wrong.
+            RevealStage.log("pop", "settled mask=\(NSCoder.string(for: mask.frame))"
+                + " presented=\(mask.layer.presentation().map { NSCoder.string(for: $0.frame) } ?? "nil")"
+                + " target=\(NSCoder.string(for: closed.mask))")
+            #endif
             let cancelled = context.transitionWasCancelled
             // FIRST, and the order is the whole of it: the row and the window
             // are identical at the landing rect, so swapping them inside one

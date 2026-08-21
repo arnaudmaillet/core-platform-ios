@@ -153,6 +153,63 @@ struct RevealDismissCardTests {
         return search(view)
     }
 
+    /// THE INVARIANT THE WHOLE STAND-IN EXISTS FOR: its content sits exactly
+    /// where the row's content sits.
+    ///
+    /// The window lands on the row's rect — measured, model and presentation
+    /// frames both equal to the target — so any remaining jump at the swap is
+    /// inside it: the same card, laid out twice, disagreeing about where its
+    /// caption goes. That is invisible in a still and unmissable in motion.
+    @Test func theStandInLaysItsContentWhereTheRowDoes() throws {
+        let width: CGFloat = 370
+        let pipeline = ImagePipeline(fetcher: PlaceholderImageFetcher())
+
+        // The row, sized the way a collection view sizes a self-sizing cell.
+        let row = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: width, height: 200))
+        row.configure(with: post(), imagePipeline: pipeline)
+        let attributes = UICollectionViewLayoutAttributes(
+            forCellWith: IndexPath(item: 0, section: 0)
+        )
+        attributes.frame = CGRect(x: 0, y: 0, width: width, height: 200)
+        let fitted = row.preferredLayoutAttributesFitting(attributes)
+        row.frame = CGRect(origin: .zero, size: fitted.frame.size)
+        row.layoutIfNeeded()
+
+        // The stand-in, in a window of exactly the row's rect — the landing.
+        let view = standIn(width: width)
+        view.frame = CGRect(origin: .zero, size: fitted.frame.size)
+        view.layoutIfNeeded()
+        let card = try #require(view.subviews.first)
+
+        for (label, rowRect, standInRect) in captionRects(row: row, card: card) {
+            #expect(abs(rowRect.minY - standInRect.minY) < 0.5,
+                    "\(label) is \(standInRect.minY - rowRect.minY)pt out")
+        }
+    }
+
+    /// The y of each text run in both, paired by position in the tree.
+    private func captionRects(
+        row: PostGridListRowCell, card: UIView
+    ) -> [(String, CGRect, CGRect)] {
+        func labels(_ view: UIView, into found: inout [UILabel]) {
+            for child in view.subviews {
+                if let label = child as? UILabel, !(label.text ?? "").isEmpty {
+                    found.append(label)
+                }
+                labels(child, into: &found)
+            }
+        }
+        var rowLabels: [UILabel] = []
+        var cardLabels: [UILabel] = []
+        labels(row, into: &rowLabels)
+        labels(card, into: &cardLabels)
+        return zip(rowLabels, cardLabels).map { rowLabel, cardLabel in
+            (rowLabel.text ?? "?",
+             rowLabel.convert(rowLabel.bounds, to: row),
+             cardLabel.convert(cardLabel.bounds, to: card))
+        }
+    }
+
     /// It takes no touches — it is scenery flying over a live screen.
     @Test func itIsInert() {
         #expect(standIn(width: 343).isUserInteractionEnabled == false)

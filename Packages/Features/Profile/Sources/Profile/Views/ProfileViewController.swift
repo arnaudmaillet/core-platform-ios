@@ -542,6 +542,17 @@ final class ProfileViewController: UIViewController {
                         guard committed else { return }
                         DispatchQueue.main.async {
                             self?.galleryPager.fadeInRevealedFurniture(for: post.id)
+                            #if DEBUG
+                            // Where the row ACTUALLY is once everything has
+                            // settled, against the rect the close was aimed at.
+                            if ProcessInfo.processInfo.arguments.contains("-text-reveal-log"),
+                               let self,
+                               let rect = self.galleryPager.textRowFrame(
+                                   for: post.id, in: self.view
+                               ) {
+                                print("[text-reveal] rowAfterPop \(NSCoder.string(for: rect))")
+                            }
+                            #endif
                         }
                     }
                 )
