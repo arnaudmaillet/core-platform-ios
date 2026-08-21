@@ -2551,22 +2551,24 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// same reason the veil is — and positioned rather than laid out, so the
     /// page's resting layout never learns it exists.
     public func installRevealAuthorBand(
-        at top: CGFloat?, model: PostAuthorBandView.Model?, pipeline: ImagePipeline?
+        in rect: CGRect?, model: PostAuthorBandView.Model?, pipeline: ImagePipeline?
     ) {
         revealAuthorBand?.removeFromSuperview()
         revealAuthorBand = nil
-        guard let top, let model else { return }
+        guard let rect, let model else { return }
         let band = PostAuthorBandView()
         band.isUserInteractionEnabled = false
         band.configure(with: model, imagePipeline: pipeline)
         band.alpha = 0
         band.translatesAutoresizingMaskIntoConstraints = true
-        band.frame = CGRect(
-            x: PostGridListRowCell.captionInset,
-            y: top,
-            width: view.bounds.width - PostGridListRowCell.captionInset * 2,
-            height: PostAuthorBandView.avatarDiameter
-        )
+        // The rect comes from the CAPTION ROW, already inset from the page's
+        // edge, and the band takes the caption's own inset inside it — which is
+        // exactly what the card does. Measuring from this view instead was the
+        // first version, and it put the band 16pt wider on each side than the
+        // card's: the page's caption is inset TWICE, once by the stream's
+        // section and once by the row, and only the second of those is the
+        // card's own.
+        band.frame = rect
         band.autoresizingMask = [.flexibleWidth]
         // ABOVE the veil: the veil covers what the page has too much of, and
         // this is the one thing it has too little of.

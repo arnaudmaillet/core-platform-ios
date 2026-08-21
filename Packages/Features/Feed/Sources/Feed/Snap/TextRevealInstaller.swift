@@ -48,6 +48,30 @@ enum TextRevealInstaller {
         #endif
     }
 
+    /// Where the borrowed band goes, given the page's caption ROW.
+    ///
+    /// Pure, and separated out because it is arithmetic that was wrong once and
+    /// looked right: the first version measured from the page's own edge and
+    /// put the band 16pt wider on each side than the card's. The page's caption
+    /// is inset TWICE — once by the stream's section, once by the row — and
+    /// only the second of those is the card's own. Anchoring to the row rather
+    /// than to the view is what makes the two agree.
+    ///
+    /// Vertically it sits where the CARD puts its band above its caption, so a
+    /// window landing on the card's rect lands one band on the other:
+    /// `captionOffset` up from the caption, then back down by the inset the
+    /// card keeps above it.
+    static func bandRect(anchoredTo anchor: CGRect) -> CGRect {
+        let inset = PostGridListRowCell.captionInset
+        return CGRect(
+            x: anchor.minX + inset,
+            y: anchor.minY - PostAuthorBandView.captionOffset
+                + PostGridListRowCell.captionTopInset,
+            width: max(0, anchor.width - inset * 2),
+            height: PostAuthorBandView.avatarDiameter
+        )
+    }
+
     /// The geometry both legs read — forwards on the push, backwards on the
     /// pop. One rect calculation, so the two can never disagree.
     static func geometry(
@@ -76,12 +100,11 @@ enum TextRevealInstaller {
             installDestinationAuthorBand: { [weak feed] anchor in
                 guard let anchor, let band = origin.authorBand else {
                     (feed as? SnapFeedViewController)?
-                        .installRevealAuthorBand(at: nil, model: nil, pipeline: nil)
+                        .installRevealAuthorBand(in: nil, model: nil, pipeline: nil)
                     return
                 }
                 (feed as? SnapFeedViewController)?.installRevealAuthorBand(
-                    at: anchor.minY - PostAuthorBandView.captionOffset
-                        + PostGridListRowCell.captionTopInset,
+                    in: bandRect(anchoredTo: anchor),
                     model: band,
                     pipeline: pipeline
                 )
