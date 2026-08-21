@@ -554,11 +554,29 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// to survive that, so the set of expanded posts lives in
     /// `CaptionExpansion` and comes back through `configure`.
     public var onRevealFullCaption: (() -> Void)?
-    /// Fired when the viewer presses the band's follow control. The HOST owns
-    /// the answer for the same reason it owns caption expansion: a cell is
-    /// recycled, so the followed set lives outside it and comes back through
-    /// `configure`.
-    public var onFollowTapped: (() -> Void)?
+    /// Fired when the viewer taps the band's identity. The HOST navigates —
+    /// a cell cannot reach a navigation controller and should not try.
+    public var onAuthorTapped: (() -> Void)? {
+        get { authorBand.onAuthorTapped }
+        set { authorBand.onAuthorTapped = newValue }
+    }
+
+    /// The rows the band's "..." offers, asked for when it is pressed. Nil
+    /// hides the control — see `PostAuthorBandView.menuActions`.
+    public var authorMenuActions: (() -> [PostCardMenuAction])? {
+        get { authorBand.menuActions }
+        set { authorBand.menuActions = newValue }
+    }
+
+    /// What a popover-shaped sheet raised from the menu should point at.
+    public var authorMenuAnchor: UIView { authorBand.menuAnchor }
+
+    /// Draws the band's "..." without wiring it — for a transition's stand-in
+    /// card, which must look like the row it stands in for. See
+    /// `PostAuthorBandView.showMenuControlAsScenery`.
+    public func showAuthorMenuControlAsScenery() {
+        authorBand.showMenuControlAsScenery()
+    }
 
     private let card = UIView()
     /// The author band — shown only where the row's post actually carries an
@@ -708,7 +726,6 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     }
 
     private func buildAuthorBand() {
-        authorBand.onFollowTapped = { [weak self] in self?.onFollowTapped?() }
         authorBand.constrain(in: card) { parent in
             authorBand.topAnchor.constraint(
                 equalTo: parent.topAnchor, constant: Self.captionTopInset
@@ -733,14 +750,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             return
         }
         authorBand.configure(with: model, imagePipeline: imagePipeline)
-        authorBand.setFollowing(false)
     }
-
-    /// How the row's follow control reads. Forwarded to the band it belongs to.
-    public func setFollowing(_ following: Bool) {
-        authorBand.setFollowing(following)
-    }
-
 
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -772,7 +782,12 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // cell to whatever post it is bound to next.
         metaRow.alpha = 1
         authorBand.cancelPendingWork()
-        onFollowTapped = nil
+        // Both band handlers capture the POST they were built for, so a
+        // recycled row must not keep them: the "..." would offer to unfollow
+        // the previous post's author, and the identity would push their
+        // profile.
+        onAuthorTapped = nil
+        authorMenuActions = nil
         // Concealment is per-FLIGHT state and must not ride a recycled cell to
         // whatever post it is bound to next — see `setHeroConcealed`.
         card.alpha = 1

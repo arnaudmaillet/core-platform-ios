@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNavigation
 import Foundation
+import PostGrid
 import Testing
 @testable import Profile
 
@@ -466,8 +467,32 @@ struct ProfileViewModelTests {
 
         let filed = await reporter.reports
         #expect(filed.count == 1)
-        #expect(filed.first?.id == ProfileID("prof-1"))
+        #expect(filed.first?.subject == .profile(ProfileID("prof-1")))
         #expect(filed.first?.reason == .harassment)
+        // The surface is what tells the moderation queue where this came from,
+        // and the profile screen and a gallery row are different places.
+        #expect(filed.first?.surface == "ios.profile")
+        #expect(results() == [.reported])
+    }
+
+    /// A gallery row's Report files against the POST, not against the author
+    /// whose band the "..." sits in — the menu belongs to the card.
+    @Test func galleryReportFilesAgainstThePost() async {
+        let reporter = StubReporter()
+        let viewModel = ProfileViewModel(
+            repository: StubProfileProvider(.success(sampleProfile())), reporting: reporter
+        )
+        let results = actionRecorder(viewModel)
+
+        viewModel.viewDidLoad()
+        await settle()
+        viewModel.reportPost(PostID("post-7"), reason: .spam)
+        await settle()
+
+        let filed = await reporter.reports
+        #expect(filed.count == 1)
+        #expect(filed.first?.subject == .post(PostID("post-7")))
+        #expect(filed.first?.surface == "ios.profile.gallery")
         #expect(results() == [.reported])
     }
 
@@ -501,14 +526,14 @@ struct ProfileViewModelTests {
     }
 }
 
-private actor StubReporter: ProfileReporting {
+private actor StubReporter: ContentReporting {
     private let error: Error?
-    private(set) var reports: [(id: ProfileID, reason: ProfileReportReason)] = []
+    private(set) var reports: [(subject: ReportSubject, reason: ReportReason, surface: String)] = []
 
     init(error: Error? = nil) { self.error = error }
 
-    func reportProfile(_ profileID: ProfileID, reason: ProfileReportReason) async throws {
-        reports.append((profileID, reason))
+    func report(_ subject: ReportSubject, reason: ReportReason, surface: String) async throws {
+        reports.append((subject, reason, surface))
         if let error { throw error }
     }
 }
@@ -567,5 +592,94 @@ struct ProfileGalleryOpensUnifiedFeedTests {
         viewModel(router: router).galleryItemTapped(PostID("solo"))
 
         #expect(router.routes == [.postStream([PostID("solo")])])
+    }
+
+    /// Waits for the profile to actually be loaded, rather than sleeping for a
+    /// duration and hoping — this package's suites run in parallel, and a
+    /// wall-clock bet is what reddened them wholesale before.
+    private func loaded(_ model: ProfileViewModel) async {
+        model.viewDidLoad()
+        for _ in 0..<60 {
+            await Task.yield()
+            if model.handle != nil { return }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
+    private func post(by authorID: String) -> GalleryPost {
+        GalleryPost(
+            id: PostID("p1"),
+            kind: .text,
+            isRepost: false,
+            thumbnailURL: nil,
+            caption: "note",
+            publishedAtMS: 0,
+            authorID: ProfileID(authorID),
+            authorName: "Ada Lovelace",
+            authorHandle: "ada"
+        )
+    }
+
+    /// A row on the Tagged tab is someone else's post, and its author is a
+    /// place to go.
+    @Test func anotherAuthorPushesTheirProfile() async {
+        let router = SpyRouter()
+        let model = viewModel(router: router)
+        await loaded(model)
+
+        model.galleryAuthorTapped(post(by: "prof-9"))
+
+        #expect(router.routes == [
+            .profile(ProfileID("prof-9"),
+                     stub: ProfileIdentityStub(handle: "ada", displayName: "Ada Lovelace"))
+        ])
+    }
+
+    /// Most of this gallery is the profile's OWN posts, and pushing a copy of
+    /// the screen the viewer is already reading is not navigation.
+    @Test func theProfilesOwnAuthorGoesNowhere() async {
+        let router = SpyRouter()
+        let model = viewModel(router: router)
+        await loaded(model)
+
+        model.galleryAuthorTapped(post(by: "prof-1"))
+
+        #expect(router.routes.isEmpty)
+    }
+
+    // MARK: - Who may be reported
+
+    private func ownProfile(reporting: ContentReporting?) -> ProfileViewModel {
+        ProfileViewModel(
+            repository: StubProfileProvider(.success(sampleProfile()), relationship: .me),
+            reporting: reporting
+        )
+    }
+
+    /// A report is a complaint about someone else's content. On your own
+    /// profile your own rows offer nothing — and since Report is the menu's
+    /// only row there, the whole "..." goes with it.
+    @Test func yourOwnPostCannotBeReported() async {
+        let model = ownProfile(reporting: StubReporter())
+        await loaded(model)
+
+        #expect(model.canReportPost(by: ProfileID("prof-1")) == false)
+    }
+
+    /// The Tagged tab is the reason this is a per-post question: those rows sit
+    /// on your profile and belong to other people.
+    @Test func someoneElsesPostOnYourOwnProfileCanBe() async {
+        let model = ownProfile(reporting: StubReporter())
+        await loaded(model)
+
+        #expect(model.canReportPost(by: ProfileID("prof-9")))
+    }
+
+    /// No seam, no row — never an action that cannot act.
+    @Test func withoutAReportingSeamNothingCanBeReported() async {
+        let model = ownProfile(reporting: nil)
+        await loaded(model)
+
+        #expect(model.canReportPost(by: ProfileID("prof-9")) == false)
     }
 }

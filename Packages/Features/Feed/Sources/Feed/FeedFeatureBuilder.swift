@@ -37,6 +37,16 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// map's badge presents, and the two must never diverge). Nil leaves
     /// the feed's badge display-only, the pre-sheet behaviour.
     private let makeWalletSheet: (@MainActor () -> UIViewController)?
+    /// Files moderation reports raised from a post card's "..." menu. Nil
+    /// withholds the Report row.
+    private let reporting: (any ContentReporting)?
+    /// Unfollows an author from that same menu. Nil withholds the Unfollow row.
+    ///
+    /// Both are the general seams from `CoreModels`, not this feature's own:
+    /// the concrete implementations live where the moderation and social-graph
+    /// clients are already wired, and the composition root hands the same
+    /// instances to whoever needs them.
+    private let socialGraph: (any SocialGraphWriting)?
 
     public init(
         repository: any FeedProviding,
@@ -49,8 +59,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         videoPlayback: VideoPlaybackController? = nil,
         makeProfileSwitcher: (@MainActor () -> (any ProfileSwitcherPresenting)?)? = nil,
         wallet: WalletStore? = nil,
-        makeWalletSheet: (@MainActor () -> UIViewController)? = nil
+        makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
+        reporting: (any ContentReporting)? = nil,
+        socialGraph: (any SocialGraphWriting)? = nil
     ) {
+        self.reporting = reporting
+        self.socialGraph = socialGraph
         self.makeProfileSwitcher = makeProfileSwitcher
         self.repository = repository
         self.engagementProvider = engagementProvider
@@ -112,7 +126,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             },
             // For the `+` item, which routes to the composer rather than
             // building one.
-            router: router
+            router: router,
+            // For a row's "...". Both are optional and both gate their own menu
+            // row, so a composition root that supplies neither gets a grid with
+            // no overflow control rather than one that offers dead actions.
+            reporting: reporting,
+            socialGraph: socialGraph
         )
         forYou.onTabPresentationChange = onTabPresentationChange
         return forYou

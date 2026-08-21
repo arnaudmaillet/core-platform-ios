@@ -52,6 +52,11 @@ final class RevealDismissCardView: UIView, RevealStandInShaping {
         isUserInteractionEnabled = false
 
         card.configure(with: post, imagePipeline: imagePipeline)
+        // The "..." is drawn but not wired. A stand-in with no handlers would
+        // hide the control, and the row it lands on has one — a glyph appearing
+        // in the last frame of a transition whose entire job is that the last
+        // frame is unremarkable.
+        card.showAuthorMenuControlAsScenery()
         let attributes = UICollectionViewLayoutAttributes(
             forCellWith: IndexPath(item: 0, section: 0)
         )

@@ -250,7 +250,10 @@ public protocol ProfileSwitching: Sendable {
 /// counting `social_graph.v1` edges so real counts still render today; the fast
 /// path takes over automatically once the backend projects. See
 /// `dev/BACKEND_GAPS.md` §7.
-public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileViewerResolving {
+// `SocialGraphWriting` is satisfied by `ProfileProviding.setFollowing` — the
+// same method, declared again in CoreModels so a feed row's "..." menu can
+// unfollow without importing this package.
+public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileViewerResolving, SocialGraphWriting {
     private let profileClient: any Profile_V1_ProfileServiceClientInterface
     private let counterClient: any Counter_V1_CounterServiceClientInterface
     private let socialGraphClient: any SocialGraph_V1_SocialGraphServiceClientInterface

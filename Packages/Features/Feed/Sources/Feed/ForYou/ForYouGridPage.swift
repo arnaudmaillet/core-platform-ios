@@ -34,6 +34,23 @@ final class ForYouGridPage: UIView {
     /// The page scrolled near its end and wants another page.
     var onNearEnd: (() -> Void)?
     var onRefresh: (() -> Void)?
+    /// A row's author was tapped — its disc, its name or its handle.
+    var onAuthorTapped: ((GalleryPost) -> Void)?
+    /// What a row's "..." should offer. Asked at press time, per row.
+    ///
+    /// The page holds no opinion about the answer: which rows exist depends on
+    /// what the SCREEN can service (a reporting seam, a social graph), and this
+    /// view has neither. It supplies the context and renders whatever comes
+    /// back — including nothing, which hides the control.
+    var authorMenuActions: ((AuthorMenuContext) -> [PostCardMenuAction])?
+
+    /// Everything a host needs to build one row's menu.
+    struct AuthorMenuContext {
+        let post: GalleryPost
+        let authorID: ProfileID
+        /// The control that was pressed, for a popover-shaped follow-up sheet.
+        let anchor: UIView
+    }
 
     /// Display order — the mosaic's arrangement of `rawPosts`. What the cells,
     /// the hero, and a tile tap all read.
@@ -257,9 +274,6 @@ final class ForYouGridPage: UIView {
     /// Which captions the viewer has opened out. Owned here rather than by the
     /// rows, which are recycled — see `CaptionExpansion`.
     private let captionExpansion = CaptionExpansion()
-    /// The viewer's followed authors — see `AuthorFollowStore` for why this is
-    /// on the device and not on the service.
-    private let authorFollows = AuthorFollowStore()
     /// The row a REVEAL is currently holding, hidden until its window lands.
     ///
     /// Its own slot, deliberately not `heroHiddenPostID`. Sharing that one was
@@ -1699,14 +1713,19 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             // a cover arriving is the only event that can re-open the gate for
             // a row that came up faceless while the timeline sat still.
             cell.onCoverLoaded = { [weak self] in self?.updateAutoplay() }
-            // The band's control, if the post carries an author to follow.
-            // Captured by AUTHOR for the same reason the caption's handler is
-            // captured by post: the row that asked can have moved.
+            // The band's identity and its "...", if the post carries an author.
+            // Captured by AUTHOR and by POST for the same reason the caption's
+            // handler is captured by post: the row that asked can have moved by
+            // the time the answer is applied.
             if let authorID = post.authorID {
-                let follows = authorFollows
-                cell.setFollowing(follows.isFollowing(authorID))
-                cell.onFollowTapped = { [weak cell] in
-                    cell?.setFollowing(follows.toggle(authorID))
+                cell.onAuthorTapped = { [weak self] in self?.onAuthorTapped?(post) }
+                cell.authorMenuActions = { [weak self, weak cell] in
+                    guard let self, let cell else { return [] }
+                    return authorMenuActions?(
+                        AuthorMenuContext(
+                            post: post, authorID: authorID, anchor: cell.authorMenuAnchor
+                        )
+                    ) ?? []
                 }
             }
             Self.applyHeroConcealment(isFlying, to: cell)

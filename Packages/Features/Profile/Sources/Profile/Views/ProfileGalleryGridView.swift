@@ -51,6 +51,19 @@ final class ProfileGalleryGridView: UIView {
     private var pendingRevealPostID: PostID?
     /// Fired when a drag ends, with how far the page was pulled past its top.
     var onPullReleased: ((CGFloat) -> Void)?
+    /// A row's author was tapped — its disc, its name or its handle.
+    var onAuthorTapped: ((GalleryPost) -> Void)?
+    /// What a row's "..." offers. Asked at press time, per row; the screen
+    /// decides, because this view knows nothing about what can be serviced.
+    var authorMenuActions: ((AuthorMenuContext) -> [PostCardMenuAction])?
+
+    /// Everything a host needs to build one row's menu.
+    struct AuthorMenuContext {
+        let post: GalleryPost
+        let authorID: ProfileID
+        /// The control that was pressed, for a popover-shaped follow-up sheet.
+        let anchor: UIView
+    }
 
     /// Clearance the owner asked for — the tab bar, the tray.
     private var baseBottomInset: CGFloat = 0
@@ -384,6 +397,21 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
             // event that can re-open the gate for an item that came up
             // faceless while the page sat still.
             cell.onCoverLoaded = { [weak self] in self?.reconcileAutoplay() }
+            // The band's identity and its "...". A profile gallery's rows carry
+            // an author like any other — the repository decorates them (the
+            // Tagged tab is other people's posts, so the name is not always the
+            // profile's own).
+            if let authorID = post.authorID {
+                cell.onAuthorTapped = { [weak self] in self?.onAuthorTapped?(post) }
+                cell.authorMenuActions = { [weak self, weak cell] in
+                    guard let self, let cell else { return [] }
+                    return authorMenuActions?(
+                        AuthorMenuContext(
+                            post: post, authorID: authorID, anchor: cell.authorMenuAnchor
+                        )
+                    ) ?? []
+                }
+            }
             return cell
         case .grid:
             let cell = collectionView.dequeueReusableCell(

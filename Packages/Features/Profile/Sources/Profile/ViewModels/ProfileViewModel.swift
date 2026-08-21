@@ -146,7 +146,7 @@ public final class ProfileViewModel {
     /// wire Maps — the button is then simply not offered, which is the honest
     /// state rather than a button that cannot do anything.
     private let mapPinning: (any MapProfilePinning)?
-    private let reporting: (any ProfileReporting)?
+    private let reporting: (any ContentReporting)?
     private let gallery: (any ProfileGalleryProviding)?
     /// The global gallery-filter preference. nil (tests, minimal setups)
     /// means "session-local": the filter starts at the default and isn't
@@ -244,7 +244,7 @@ public final class ProfileViewModel {
     public init(
         repository: any ProfileProviding,
         mapPinning: (any MapProfilePinning)? = nil,
-        reporting: (any ProfileReporting)? = nil,
+        reporting: (any ContentReporting)? = nil,
         gallery: (any ProfileGalleryProviding)? = nil,
         galleryPreferences: GalleryPreferences? = nil,
         bookmarks: PostBookmarkStore? = nil,
@@ -563,7 +563,7 @@ public final class ProfileViewModel {
     /// File a moderation report against this profile. Reports are fire-and-
     /// confirm: the result is reported either way, because a report the user
     /// believes was filed but wasn't is the worst outcome here.
-    public func report(_ reason: ProfileReportReason) {
+    public func report(_ reason: ReportReason) {
         guard let profile, canModerate, !reportInFlight else { return }
         guard let reporting else {
             onActionResult?(.failed(message: "Reporting isn't available right now."))
@@ -574,7 +574,12 @@ public final class ProfileViewModel {
         Task { [weak self] in
             guard let self else { return }
             do {
-                try await reporting.reportProfile(profile.id, reason: reason)
+                // The surface is a triage signal: the same profile reported
+                // from its own screen and from a post card are different
+                // reports.
+                try await reporting.report(
+                    .profile(profile.id), reason: reason, surface: "ios.profile"
+                )
                 self.onActionResult?(.reported)
             } catch {
                 self.onActionResult?(.failed(message: "Couldn't send this report. Try again."))
@@ -605,6 +610,57 @@ public final class ProfileViewModel {
     /// bar over them; see `ProfileViewController.onItemTapped`.
     public func galleryItemTapped(_ postID: PostID, stream: [PostID] = []) {
         router?.route(to: .postStream(stream.isEmpty ? [postID] : stream))
+    }
+
+    /// A gallery row's author was tapped.
+    ///
+    /// Routed like any other author tap — an ordinary push onto the current
+    /// stack — EXCEPT when it names the profile already on screen, which is
+    /// most of this gallery: pushing a copy of the screen the viewer is looking
+    /// at is not navigation. The Tagged tab is the case this exists for, where
+    /// the rows are other people's posts.
+    public func galleryAuthorTapped(_ post: GalleryPost) {
+        guard let authorID = post.authorID, authorID != profile?.id else { return }
+        // The stub is what the row already drew — the destination titles itself
+        // in the push's own frame rather than after its own round trip.
+        router?.route(to: .profile(authorID, stub: post.authorIdentityStub))
+    }
+
+    /// Whether a gallery row may offer Report.
+    ///
+    /// No seam, no row — a screen that cannot file withholds the action rather
+    /// than showing one that cannot act.
+    ///
+    /// And never for the viewer's OWN post. A report is a complaint about
+    /// someone else's content; offered on your own it reads as a bug, and it is
+    /// the only row this menu has, so the whole "..." disappears with it. The
+    /// Tagged tab is why this is a per-POST question rather than a per-screen
+    /// one: those rows are other people's posts on your own profile.
+    public func canReportPost(by authorID: ProfileID?) -> Bool {
+        guard reporting != nil else { return false }
+        // `canModerate` is false exactly on the viewer's own profile, and there
+        // an author matching the profile IS the viewer.
+        return canModerate || authorID != profile?.id
+    }
+
+    /// File a moderation report against one of the gallery's posts. Same
+    /// fire-and-confirm contract as `report(_:)`, and the same reason: a report
+    /// the user believes was filed but wasn't is the worst outcome here.
+    public func reportPost(_ postID: PostID, reason: ReportReason) {
+        guard let reporting else {
+            onActionResult?(.failed(message: "Reporting isn't available right now."))
+            return
+        }
+        Task { [weak self] in
+            do {
+                try await reporting.report(
+                    .post(postID), reason: reason, surface: "ios.profile.gallery"
+                )
+                self?.onActionResult?(.reported)
+            } catch {
+                self?.onActionResult?(.failed(message: "Couldn't send this report. Try again."))
+            }
+        }
     }
 
     /// Where the user is — set by a tab tap or a settled swipe. Pure state

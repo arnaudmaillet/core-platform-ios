@@ -17,7 +17,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// Files moderation reports from the profile's overflow menu. Optional:
     /// nil hides nothing, but a Report tap then reports the feature as
     /// unavailable rather than silently succeeding.
-    private let reporting: (any ProfileReporting)?
+    private let reporting: (any ContentReporting)?
     /// Supplies the share sheet's quick-send row. Nil simply hides the row.
     private let shareTargeting: (any ProfileShareTargeting)?
     private let gallery: (any ProfileGalleryProviding)?
@@ -44,7 +44,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
 
     public init(
         repository: any ProfileProviding,
-        reporting: (any ProfileReporting)? = nil,
+        reporting: (any ContentReporting)? = nil,
         shareTargeting: (any ProfileShareTargeting)? = nil,
         gallery: (any ProfileGalleryProviding)? = nil,
         relationships: (any ProfileRelationshipsProviding)? = nil,

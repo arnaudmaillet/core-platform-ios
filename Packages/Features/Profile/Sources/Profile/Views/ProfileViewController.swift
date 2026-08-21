@@ -418,6 +418,9 @@ final class ProfileViewController: UIViewController {
         viewModel.onLoadSettled = { [weak self] in self?.isSwitchingProfile = false }
         viewModel.onGalleryChange = { [weak self] snapshot in
             self?.galleryPager.render(snapshot)
+            #if DEBUG
+            self?.auditPostMenu(snapshot)
+            #endif
         }
         galleryPager.onItemTapped = { [weak self] post, stream in
             guard let self else { return }
@@ -529,6 +532,12 @@ final class ProfileViewController: UIViewController {
                 )
             )
             feedHero(window.map(\.id), self, origin)
+        }
+        galleryPager.onAuthorTapped = { [weak self] post in
+            self?.viewModel.galleryAuthorTapped(post)
+        }
+        galleryPager.authorMenuActions = { [weak self] context in
+            self?.galleryMenuActions(for: context) ?? []
         }
         // Swipe ↔ tabs: a settled swipe adopts the tab and mirrors the
         // selectors; a tab tap records it and pages.
@@ -1373,21 +1382,74 @@ final class ProfileViewController: UIViewController {
     /// `moderation.v1.OpenCase` carries a policy category, so the report asks
     /// for one rather than filing everything as "other" — a category-less
     /// report is near-useless to the moderation queue.
-    private func presentReportReasons() {
-        let handle = viewModel.handle ?? "this profile"
-        let sheet = UIAlertController(
-            title: "Report \(handle)",
-            message: "Why are you reporting this profile?",
-            preferredStyle: .actionSheet
+    ///
+    /// The picker itself now lives in `PostGrid`, beside the post card's "..."
+    /// that raises the same question: two screens asking a viewer to classify
+    /// a report must ask it in the same words, and the second copy would have
+    /// been written the day the card grew a Report row.
+    /// Report only.
+    ///
+    /// Unfollow is deliberately absent: this screen already centralises the
+    /// relationship on the header's one control, and a second way to change it
+    /// — sitting on a row, worded differently, reachable while the header says
+    /// the opposite — is how two truths about one relationship end up on screen
+    /// at once.
+    private func galleryMenuActions(
+        for context: ProfileGalleryGridView.AuthorMenuContext
+    ) -> [PostCardMenuAction] {
+        guard viewModel.canReportPost(by: context.authorID) else { return [] }
+        return [.report { [weak self] in
+            self?.presentPostReportReasons(for: context)
+        }]
+    }
+
+    #if DEBUG
+    /// `-post-menu-audit`: prints the rows a gallery card's "..." offers here.
+    ///
+    /// The interesting assertion is a NEGATIVE one — that Unfollow is absent —
+    /// and a screenshot of a closed menu cannot make it. Runs the REAL
+    /// composition rather than restating it, so an audit that agrees with the
+    /// screen is evidence rather than a second opinion. See the For You side,
+    /// which prints the same line for the surface that does offer Unfollow.
+    private func auditPostMenu(_ snapshot: ProfileViewModel.GallerySnapshot) {
+        guard ProcessInfo.processInfo.arguments.contains("-post-menu-audit"),
+              case .content(let posts) = snapshot.activity,
+              let post = posts.first(where: { $0.authorID != nil }),
+              let authorID = post.authorID
+        else { return }
+        // Prints the author too, because the answer now depends on WHOSE post
+        // it is — an empty row list on your own profile is the rule working,
+        // not the wiring missing.
+        let rows = galleryMenuActions(
+            for: ProfileGalleryGridView.AuthorMenuContext(
+                post: post, authorID: authorID, anchor: UIView()
+            )
         )
-        for reason in ProfileReportReason.allCases {
-            sheet.addAction(UIAlertAction(title: reason.title, style: .default) { [weak self] _ in
-                self?.viewModel.report(reason)
-            })
+        print("[post-menu-audit] profile author=\(authorID.rawValue) rows=\(rows.map(\.title))")
+    }
+    #endif
+
+    /// The same question, asked of a post instead of the profile — and asked by
+    /// the same picker, anchored on the row's own "..." rather than on the
+    /// header's.
+    private func presentPostReportReasons(
+        for context: ProfileGalleryGridView.AuthorMenuContext
+    ) {
+        ReportReasonSheet.present(
+            from: self, subject: "this post", sourceView: context.anchor
+        ) { [weak self] reason in
+            self?.viewModel.reportPost(context.post.id, reason: reason)
         }
-        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        sheet.popoverPresentationController?.sourceView = headerView.moreButtonAnchor
-        present(sheet, animated: true)
+    }
+
+    private func presentReportReasons() {
+        ReportReasonSheet.present(
+            from: self,
+            subject: viewModel.handle ?? "this profile",
+            sourceView: headerView.moreButtonAnchor
+        ) { [weak self] reason in
+            self?.viewModel.report(reason)
+        }
     }
 
     /// Reports the outcome of a menu command. Confirmations are toasts (the

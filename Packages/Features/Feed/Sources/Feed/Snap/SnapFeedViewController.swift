@@ -2559,6 +2559,10 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         let band = PostAuthorBandView()
         band.isUserInteractionEnabled = false
         band.configure(with: model, imagePipeline: pipeline)
+        // Scenery, but scenery that has to match: the card this lands on wears
+        // a "...", and a control that pops in at the landing is the one frame
+        // the reveal exists to make invisible.
+        band.showMenuControlAsScenery()
         band.alpha = 0
         band.translatesAutoresizingMaskIntoConstraints = true
         // The rect comes from the CAPTION ROW, already inset from the page's

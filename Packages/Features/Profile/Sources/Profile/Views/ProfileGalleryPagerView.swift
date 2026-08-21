@@ -46,6 +46,10 @@ final class ProfileGalleryPagerView: UIView {
     var onPullToRefresh: (() -> Void)?
     /// A drag on the active page ended, with its overscroll distance.
     var onPullReleased: ((CGFloat) -> Void)?
+    /// A row's author was tapped, on whichever page is showing.
+    var onAuthorTapped: ((GalleryPost) -> Void)?
+    /// What a row's "..." offers — see `ProfileGalleryGridView.authorMenuActions`.
+    var authorMenuActions: ((ProfileGalleryGridView.AuthorMenuContext) -> [PostCardMenuAction])?
 
     /// The pan that pages; exposed so the owner can subordinate it to the
     /// navigation stack's edge-swipe pop.
@@ -112,6 +116,10 @@ final class ProfileGalleryPagerView: UIView {
                 onVerticalScroll?(offset)
             }
             page.onPullToRefresh = { [weak self] in self?.onPullToRefresh?() }
+            page.onAuthorTapped = { [weak self] post in self?.onAuthorTapped?(post) }
+            page.authorMenuActions = { [weak self] context in
+                self?.authorMenuActions?(context) ?? []
+            }
             page.onPullReleased = { [weak self] distance in
                 guard let self, page === pages[activeIndex] else { return }
                 onPullReleased?(distance)

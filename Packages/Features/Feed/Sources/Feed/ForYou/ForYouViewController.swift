@@ -44,6 +44,16 @@ final class ForYouViewController: UIViewController {
     /// How this screen leaves itself. Weak, and held by the composition root —
     /// the screen never builds a destination, it names one.
     private weak var router: (any Router)?
+    /// Files a row's Report. Nil withholds the row entirely: an action that
+    /// cannot act is not offered.
+    private let reporting: (any ContentReporting)?
+    /// Unfollows a row's author. Nil withholds that row for the same reason.
+    ///
+    /// ⚠️ Both tabs here are served by `timeline.v1.GetFollowingFeed` — there
+    /// is no discovery corpus (see `DiscoverySource`) — so every author on this
+    /// screen is one the viewer follows, which is what makes UNFOLLOW the
+    /// honest verb rather than a toggle that has to ask first.
+    private let socialGraph: (any SocialGraphWriting)?
 
     /// The tab titles, in `ForYouPagerView.pageOrder` order: Discover (the
     /// media grid) then Following (the unfiltered page).
@@ -388,13 +398,17 @@ final class ForYouViewController: UIViewController {
         makeSnapFeed: @escaping ([PostID]) -> UIViewController,
         prewarm: @escaping ([PostID]) async -> Void,
         prefetchTopComments: ((PostID) async -> Void)? = nil,
-        router: (any Router)? = nil
+        router: (any Router)? = nil,
+        reporting: (any ContentReporting)? = nil,
+        socialGraph: (any SocialGraphWriting)? = nil
     ) {
         self.viewModel = viewModel
         self.makeSnapFeed = makeSnapFeed
         self.prewarm = prewarm
         self.prefetchTopComments = prefetchTopComments
         self.router = router
+        self.reporting = reporting
+        self.socialGraph = socialGraph
         pager = ForYouPagerView(imagePipeline: imagePipeline, videoPlayback: videoPlayback)
         super.init(nibName: nil, bundle: nil)
         // NOT hidesBottomBarWhenPushed: this is a tab root, and the bar is how
@@ -458,11 +472,27 @@ final class ForYouViewController: UIViewController {
         }
         pager.onNearEnd = { [weak self] in self?.viewModel.loadNextPageIfNeeded() }
         pager.onRefresh = { [weak self] in self?.viewModel.refresh() }
+        // An ordinary push onto whatever stack this screen is on — the app's
+        // one profile destination, reached the way every other author tap
+        // reaches it. The screen names the route; it never builds the profile.
+        pager.onAuthorTapped = { [weak self] post in
+            guard let id = post.authorID else { return }
+            // The stub is what the row already drew, handed forward so the
+            // pushed screen titles itself in the push's own frame instead of
+            // after its own round trip.
+            self?.router?.route(to: .profile(id, stub: post.authorIdentityStub))
+        }
+        pager.authorMenuActions = { [weak self] context in
+            self?.authorMenuActions(for: context) ?? []
+        }
 
         viewModel.onSnapshotChange = { [weak self] snapshot in
             guard let self else { return }
             pager.render(snapshot)
             prewarmVisible()
+            #if DEBUG
+            auditPostMenu()
+            #endif
         }
         viewModel.onCorpusReset = { [weak self] in self?.pager.invalidateIncrementalUpdates() }
         viewModel.onLoadSettled = { [weak self] in self?.pager.endRefreshing() }
@@ -892,6 +922,111 @@ final class ForYouViewController: UIViewController {
         #else
         return false
         #endif
+    }
+
+    // MARK: - The row's "..."
+
+    /// The rows this screen can service, in the order they read.
+    ///
+    /// Each is gated on the seam that performs it, so a build wired without a
+    /// social graph shows a Report-only menu rather than an Unfollow that
+    /// silently does nothing — and a build wired with neither shows no control
+    /// at all, because `PostAuthorBandView` hides it on an empty answer.
+    private func authorMenuActions(
+        for context: ForYouGridPage.AuthorMenuContext
+    ) -> [PostCardMenuAction] {
+        var actions: [PostCardMenuAction] = []
+        if socialGraph != nil {
+            let handle = context.post.authorHandle ?? ""
+            actions.append(.unfollow { [weak self] in
+                // The handle is not in the ROW (the card names its author right
+                // above it) but it is in the confirmation, where the card may
+                // already be gone from under the viewer's thumb.
+                self?.unfollow(context.authorID, handle: handle)
+            })
+        }
+        if reporting != nil {
+            actions.append(.report { [weak self] in
+                self?.presentReportReasons(for: context)
+            })
+        }
+        return actions
+    }
+
+    /// Unfollows, and says so.
+    ///
+    /// The corpus is deliberately left alone. Pulling the author's posts out
+    /// from under the viewer would rewrite the list they are reading at the
+    /// moment they touched it — the next refresh is soon enough, and it is the
+    /// server's answer rather than the client's guess at one.
+    private func unfollow(_ id: ProfileID, handle: String) {
+        guard let socialGraph else { return }
+        Task { [weak self] in
+            do {
+                try await socialGraph.setFollowing(false, for: id)
+                guard let self else { return }
+                let name = handle.isEmpty ? "this author" : "@\(handle)"
+                ToastView.present("Unfollowed \(name)", symbol: "person.badge.minus", in: view)
+            } catch {
+                self?.presentFailure("Couldn't unfollow. Try again.")
+            }
+        }
+    }
+
+    private func presentReportReasons(for context: ForYouGridPage.AuthorMenuContext) {
+        ReportReasonSheet.present(
+            from: self, subject: "this post", sourceView: context.anchor
+        ) { [weak self] reason in
+            self?.report(context.post.id, reason: reason)
+        }
+    }
+
+    /// Files the report and reports the outcome EITHER WAY — a report the user
+    /// believes was filed but wasn't is the worst outcome here.
+    private func report(_ postID: PostID, reason: ReportReason) {
+        guard let reporting else { return }
+        Task { [weak self] in
+            do {
+                // The surface names WHERE this was raised, which is a triage
+                // signal in its own right: the same post reported from a feed
+                // and from a profile are different reports.
+                try await reporting.report(.post(postID), reason: reason, surface: "ios.foryou")
+                guard let self else { return }
+                ToastView.present("Report sent", symbol: "flag.fill", in: view)
+            } catch {
+                self?.presentFailure("Couldn't send this report. Try again.")
+            }
+        }
+    }
+
+    #if DEBUG
+    /// `-post-menu-audit`: prints the rows a card's "..." would offer here.
+    ///
+    /// The composition is the thing worth checking and the thing a screenshot
+    /// cannot show: a menu is a system surface, and whether a row exists
+    /// depends on wiring three packages away. Printing it proves the seams
+    /// reached this screen — a missing Unfollow means the composition root
+    /// handed over no social graph, not that the menu is broken.
+    func auditPostMenu() {
+        guard ProcessInfo.processInfo.arguments.contains("-post-menu-audit"),
+              let post = pager.posts(for: .activity).first(where: { $0.authorID != nil }),
+              let authorID = post.authorID
+        else { return }
+        let rows = authorMenuActions(
+            for: ForYouGridPage.AuthorMenuContext(
+                post: post, authorID: authorID, anchor: UIView()
+            )
+        )
+        print("[post-menu-audit] foryou rows=\(rows.map(\.title))")
+    }
+    #endif
+
+    /// Failures are alerts, not toasts: a report or an unfollow that did not
+    /// happen is something the viewer has to know in order to retry.
+    private func presentFailure(_ message: String) {
+        let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
     }
 
     private func openFeed(from format: GalleryFilter.Format, at index: Int) {

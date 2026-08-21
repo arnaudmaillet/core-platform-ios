@@ -219,7 +219,14 @@ final class AppContainer {
         wallet: walletStore,
         // The SAME sheet the map's badge presents — one claim surface,
         // reachable from wherever the balance is showing.
-        makeWalletSheet: { [unowned self] in WalletClaimViewController(wallet: self.walletStore) }
+        makeWalletSheet: { [unowned self] in WalletClaimViewController(wallet: self.walletStore) },
+        // A post card's "..." raises moderation cases and unfollows through the
+        // SAME two repositories the profile screen uses. Feed sees only the
+        // `CoreModels` protocols; which class satisfies them is the composition
+        // root's business, which is what lets a feed row report a post without
+        // the Feed package knowing the Profile package exists.
+        reporting: profileReportRepository,
+        socialGraph: profileRepository
     )
 
     // MARK: - Maps

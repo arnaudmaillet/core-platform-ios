@@ -4,8 +4,8 @@ import MediaCore
 import UIKit
 
 /// The author band a list row wears above its caption: the disc on the left at
-/// two lines tall, the display name over the handle beside it, a follow control
-/// trailing and centred on the pair.
+/// two lines tall, the display name over the handle beside it, an overflow
+/// control trailing and centred on the pair.
 ///
 /// ## Why it is a view and not a method on the cell
 ///
@@ -70,16 +70,40 @@ public final class PostAuthorBandView: UIView {
         }
     }
 
-    /// Fired when the viewer presses the follow control. `nil` on the reveal's
-    /// prop, which is scenery and takes no touches.
-    public var onFollowTapped: (() -> Void)?
+    /// Fired when the viewer taps the identity — the disc, the name or the
+    /// handle. `nil` on the reveal's prop, which is scenery and takes no
+    /// touches.
+    public var onAuthorTapped: (() -> Void)?
+
+    /// The rows the "..." offers, asked for at the moment it is pressed.
+    ///
+    /// A PROVIDER rather than a stored menu, because what a row can offer
+    /// depends on state the cell does not own and that can move under it — a
+    /// follow that was just undone, a reporting seam that resolved late.
+    ///
+    /// ⚠️ It is asked TWICE, and the first time is the whole reason the control
+    /// is ever hidden. Whether a provider EXISTS says nothing: a surface hands
+    /// one to every row that has an author, and it is the ANSWER that turns out
+    /// to be empty — the viewer's own post, which nobody may report and nobody
+    /// may unfollow. Visibility that tracked the provider left a "..." that
+    /// opened an empty sheet. So the rows are asked for once here, to decide
+    /// whether the control is drawn at all, and again when it is pressed, for
+    /// what it says.
+    public var menuActions: (() -> [PostCardMenuAction])? {
+        didSet { menuButton.isHidden = menuActions?().isEmpty ?? true }
+    }
 
     private let avatar = MonogramAvatarView(diameter: PostAuthorBandView.avatarDiameter)
     private let avatarImage = AvatarImageView()
     private let nameLabel = UILabel()
     private let handleLabel = UILabel()
-    private let followButton = UIButton(type: .system)
+    private let menuButton = UIButton(type: .system)
+    private let identityControl = UIControl()
     private var avatarTask: Task<Void, Never>?
+
+    /// What a popover-shaped presentation should point at — the control the
+    /// viewer actually pressed.
+    public var menuAnchor: UIView { menuButton }
 
     public init() {
         super.init(frame: .zero)
@@ -100,14 +124,54 @@ public final class PostAuthorBandView: UIView {
         identity.axis = .vertical
         identity.alignment = .leading
         identity.spacing = 1
+        // A CONTROL around the disc and the two labels, not a tap gesture on
+        // them.
+        //
+        // The band lives inside a collection view cell whose whole face opens
+        // the post. A `UITapGestureRecognizer` on a subview does not reliably
+        // stop that — the collection view's selection is driven by its own
+        // touch handling, and both would fire, opening the post *and* pushing
+        // the profile. A `UIControl` consumes the touch, which is the same
+        // reason an ordinary button inside a cell has never selected its row.
+        identityControl.addTarget(self, action: #selector(authorPressed), for: .touchUpInside)
+        // The contents are made INERT so the control itself is the hit view.
+        //
+        // Forwarding up the responder chain from a hit subview is not enough
+        // here: the band sits inside a collection view, and a scroll view
+        // decides whether to delay and whether to cancel a touch by asking what
+        // the hit view IS — a control gets the touch immediately, anything else
+        // is held and can be cancelled out from under it. This is the same
+        // reason `UIButton` disables interaction on its own image and title.
+        avatar.isUserInteractionEnabled = false
+        identity.isUserInteractionEnabled = false
+        nameLabel.isUserInteractionEnabled = false
+        handleLabel.isUserInteractionEnabled = false
 
-        followButton.titleLabel?.adjustsFontForContentSizeCategory = true
-        // The identity yields first: a long display name should truncate before
-        // a two-word control does, because the control's words are the ones a
-        // reader has to be able to act on.
-        followButton.setContentCompressionResistancePriority(.required, for: .horizontal)
-        followButton.setContentHuggingPriority(.required, for: .horizontal)
-        followButton.addTarget(self, action: #selector(followPressed), for: .touchUpInside)
+        var configuration = UIButton.Configuration.plain()
+        configuration.image = UIImage(systemName: "ellipsis")
+        configuration.baseForegroundColor = .secondaryLabel
+        // Zero insets and an explicit square below, rather than padding a glyph
+        // out to size: the control is centred on the disc, so a tap target
+        // grown by insets grows the band with it and pushes the caption down.
+        configuration.contentInsets = .zero
+        menuButton.configuration = configuration
+        menuButton.accessibilityLabel = "More actions"
+        // The menu IS the button's action — no touch-up handler, so there is no
+        // frame in which the control is pressed and nothing has appeared.
+        menuButton.showsMenuAsPrimaryAction = true
+        // UNCACHED and deferred: the rows are asked for when the menu opens,
+        // not when the cell is configured. A cached menu would offer to
+        // unfollow someone the viewer unfollowed a moment ago from the same
+        // row — the same reason the profile's "..." defers its own moderation
+        // group.
+        menuButton.menu = UIMenu(children: [
+            UIDeferredMenuElement.uncached { [weak self] completion in
+                guard let actions = self?.menuActions?() else { return completion([]) }
+                completion(actions.map(\.element))
+            }
+        ])
+        menuButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+        menuButton.setContentHuggingPriority(.required, for: .horizontal)
 
         // The picture is laid OVER the monogram rather than replacing it — the
         // app's avatar contract: initials are the rendered state and a
@@ -115,36 +179,50 @@ public final class PostAuthorBandView: UIView {
         avatarImage.pin(to: avatar)
         avatarImage.isHidden = true
 
-        addSubview(avatar)
-        addSubview(identity)
-        addSubview(followButton)
+        identityControl.addSubview(avatar)
+        identityControl.addSubview(identity)
+        addSubview(identityControl)
+        addSubview(menuButton)
         avatar.translatesAutoresizingMaskIntoConstraints = false
         identity.translatesAutoresizingMaskIntoConstraints = false
-        followButton.translatesAutoresizingMaskIntoConstraints = false
+        identityControl.translatesAutoresizingMaskIntoConstraints = false
+        menuButton.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            avatar.leadingAnchor.constraint(equalTo: leadingAnchor),
-            avatar.topAnchor.constraint(equalTo: topAnchor),
-            avatar.bottomAnchor.constraint(equalTo: bottomAnchor),
+            identityControl.leadingAnchor.constraint(equalTo: leadingAnchor),
+            identityControl.topAnchor.constraint(equalTo: topAnchor),
+            identityControl.bottomAnchor.constraint(equalTo: bottomAnchor),
+            // The control ends where the IDENTITY ends, not where the band
+            // does: the tappable region is the person, and the empty run
+            // between a short name and the "..." belongs to the card.
+            identityControl.trailingAnchor.constraint(
+                lessThanOrEqualTo: menuButton.leadingAnchor, constant: -Spacing.sm
+            ),
+
+            avatar.leadingAnchor.constraint(equalTo: identityControl.leadingAnchor),
+            avatar.topAnchor.constraint(equalTo: identityControl.topAnchor),
+            avatar.bottomAnchor.constraint(equalTo: identityControl.bottomAnchor),
 
             identity.leadingAnchor.constraint(equalTo: avatar.trailingAnchor, constant: Spacing.sm),
             identity.centerYAnchor.constraint(equalTo: avatar.centerYAnchor),
-            identity.trailingAnchor.constraint(
-                lessThanOrEqualTo: followButton.leadingAnchor, constant: -Spacing.sm
-            ),
+            identity.trailingAnchor.constraint(equalTo: identityControl.trailingAnchor),
 
-            followButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+            menuButton.trailingAnchor.constraint(equalTo: trailingAnchor),
             // CENTRED on the disc, which is the pair's own height — the control
             // belongs to the identity beside it, not to the band's box.
-            followButton.centerYAnchor.constraint(equalTo: avatar.centerYAnchor)
+            menuButton.centerYAnchor.constraint(equalTo: avatar.centerYAnchor),
+            // A square the size of the disc: as much tap target as the band can
+            // give without growing, and the glyph floats in the middle of it.
+            menuButton.widthAnchor.constraint(equalToConstant: Self.avatarDiameter),
+            menuButton.heightAnchor.constraint(equalToConstant: Self.avatarDiameter)
         ])
-        setFollowing(false)
+        menuButton.isHidden = true
     }
 
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    @objc private func followPressed() {
-        onFollowTapped?()
+    @objc private func authorPressed() {
+        onAuthorTapped?()
     }
 
     public func configure(with model: Model, imagePipeline: ImagePipeline?) {
@@ -176,6 +254,17 @@ public final class PostAuthorBandView: UIView {
         }
     }
 
+    /// Draws the "..." without wiring it.
+    ///
+    /// For the reveal's PROPS — the destination's borrowed band and the
+    /// dismissal's stand-in card. They are scenery: interaction is off, so
+    /// nothing can be pressed, but they must show what the card shows or the
+    /// control pops in at the landing, which is the one frame the whole
+    /// transition exists to make invisible.
+    public func showMenuControlAsScenery() {
+        menuButton.isHidden = false
+    }
+
     /// Drops any in-flight picture load. Called from the row's reuse.
     public func cancelPendingWork() {
         avatarTask?.cancel()
@@ -184,21 +273,4 @@ public final class PostAuthorBandView: UIView {
         avatarImage.isHidden = true
     }
 
-    /// How the control reads. Two states, and the FOLLOWED one is the quiet
-    /// side: an action already taken should not keep shouting for the tap that
-    /// took it.
-    public func setFollowing(_ following: Bool) {
-        var configuration = UIButton.Configuration.plain()
-        configuration.title = following ? "Following" : "Follow"
-        configuration.contentInsets = NSDirectionalEdgeInsets(
-            top: 4, leading: 10, bottom: 4, trailing: 10
-        )
-        configuration.baseForegroundColor = following ? .secondaryLabel : .tintColor
-        configuration.background.backgroundColor = following
-            ? .clear : UIColor.tintColor.withAlphaComponent(0.12)
-        configuration.background.cornerRadius = 14
-        followButton.configuration = configuration
-        followButton.accessibilityLabel = following
-            ? "Following this author" : "Follow this author"
-    }
 }
