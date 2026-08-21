@@ -60,6 +60,26 @@ public final class InteractiveSlideDismissal: NSObject {
     /// follows lands one screen deeper than the stack said a moment ago.
     public var onWillBeginPop: (() -> Void)?
 
+    /// **PROTOTYPE** (`-text-reveal`): swaps the slide for a clip-window
+    /// reveal on BOTH legs — see `RevealGeometry`.
+    ///
+    /// An optional value rather than a pair of animator factories, because the
+    /// two legs must never disagree about the geometry: one rect calculation,
+    /// read forwards on the push and backwards on the pop. Left `nil` this
+    /// class behaves exactly as it always has — native push, slide pop — which
+    /// is what the timeline and the shipped text path keep getting.
+    ///
+    /// The gesture, the axes, the release contract, the delegate hand-back and
+    /// the `onFeedPopped` bookkeeping are all unchanged and shared: a reveal is
+    /// a different ANIMATION of the same dismissal, not a second dismissal.
+    public var revealGeometry: RevealGeometry?
+
+    /// Source chrome the reveal drives on BOTH legs — the app's tab bar: faded
+    /// out as the page opens over it, faded back in as the page closes. Only
+    /// consulted while `revealGeometry` is set; the slide leaves the bar to the
+    /// owner's `onFeedPopped`, as before.
+    public weak var revealReturningChrome: UIView?
+
     /// An extra veto the owner can impose, asked at begin-time.
     ///
     /// Exists for surfaces where a full-width swipe means something else some
@@ -85,6 +105,14 @@ public final class InteractiveSlideDismissal: NSObject {
     /// hero does, so the two page kinds feel the same in the hand.
     private var axes: Set<ZoomDismissAxis> = [.horizontal]
     private var activeAxis: ZoomDismissAxis = .horizontal
+
+    /// The reveal's own driver, live only while `revealGeometry` is set.
+    ///
+    /// Mutually exclusive with `interaction`: a percent driver scrubs one
+    /// pre-baked animation, which is a rail, and the whole point of this one is
+    /// that the window comes off the rail. See
+    /// `RevealDismissInteractionController`.
+    private var revealGrab: RevealDismissInteractionController?
 
     /// Installs the pan on the feed's view. Called once; the retained feed
     /// keeps its recognizer across pushes.
@@ -149,10 +177,14 @@ public final class InteractiveSlideDismissal: NSObject {
             // immediately so the screen is under the finger at frame 0.
             beginSwipe()
         case .changed:
-            interaction?.update(ZoomTransitionGeometry.dismissProgress(
-                translation: activeAxis.along(translation),
-                span: activeAxis.span(of: view.bounds.size)
-            ))
+            if let revealGrab {
+                revealGrab.update(translation: translation, in: view)
+            } else {
+                interaction?.update(ZoomTransitionGeometry.dismissProgress(
+                    translation: activeAxis.along(translation),
+                    span: activeAxis.span(of: view.bounds.size)
+                ))
+            }
         case .ended, .cancelled:
             releaseSwipe(
                 translation: translation,
@@ -166,14 +198,25 @@ public final class InteractiveSlideDismissal: NSObject {
     }
 
     private func beginSwipe() {
-        guard interaction == nil,
+        guard interaction == nil, revealGrab == nil,
               let nav = navigationController,
               let feed = feedViewController, nav.topViewController === feed else { return }
         // Freeze the pager so a diagonal drag can't page mid-pop.
         (feed as? any ZoomTransitionDestination)?.setContentScrollEnabled(false)
-        let interaction = UIPercentDrivenInteractiveTransition()
-        interaction.completionCurve = .easeOut
-        self.interaction = interaction
+        if let revealGeometry {
+            // A reveal is GRABBED, not scrubbed — the window floats free under
+            // the finger the way a media hero's card does, and a percent driver
+            // cannot express that.
+            revealGrab = RevealDismissInteractionController(
+                geometry: revealGeometry,
+                returningChrome: revealReturningChrome,
+                axis: activeAxis
+            )
+        } else {
+            let interaction = UIPercentDrivenInteractiveTransition()
+            interaction.completionCurve = .easeOut
+            self.interaction = interaction
+        }
         // The restaging window — see `onWillBeginPop`. Before the pop, so a
         // stack edit here is a plain transaction, not a mid-transition one.
         onWillBeginPop?()
@@ -183,10 +226,22 @@ public final class InteractiveSlideDismissal: NSObject {
     }
 
     private func releaseSwipe(translation: CGPoint, velocity: CGPoint, ended: Bool, in view: UIView) {
+        // The retained feed outlives every pop — always thaw its scrolling.
+        defer {
+            (feedViewController as? any ZoomTransitionDestination)?.setContentScrollEnabled(true)
+        }
+        if let grab = revealGrab {
+            revealGrab = nil
+            // The grab owns its own threshold call: it is holding the pose the
+            // spring starts from, so the decision and the animation belong
+            // together rather than being taken here and posted across.
+            grab.release(
+                translation: translation, velocity: velocity, ended: ended, in: view
+            )
+            return
+        }
         guard let interaction else { return }
         self.interaction = nil
-        // The retained feed outlives every pop — always thaw its scrolling.
-        (feedViewController as? any ZoomTransitionDestination)?.setContentScrollEnabled(true)
 
         let progress = ZoomTransitionGeometry.dismissProgress(
             translation: activeAxis.along(translation),
@@ -229,9 +284,15 @@ public final class InteractiveSlideDismissal: NSObject {
         for step in 1...steps {
             try? await Task.sleep(nanoseconds: 16_000_000)
             let t = CGFloat(step) / CGFloat(steps)
-            interaction?.update(ZoomTransitionGeometry.dismissProgress(
-                translation: peak * t, span: view.bounds.width
-            ))
+            if let revealGrab {
+                revealGrab.update(
+                    translation: CGPoint(x: peak * t, y: 0), in: view
+                )
+            } else {
+                interaction?.update(ZoomTransitionGeometry.dismissProgress(
+                    translation: peak * t, span: view.bounds.width
+                ))
+            }
         }
         try? await Task.sleep(nanoseconds: 250_000_000)
         releaseSwipe(
@@ -258,7 +319,23 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
         // back-button pop, while the same restore call held after custom
         // pops). The feed's push, and everything else on this stack, stay
         // native.
+        // PROTOTYPE: the reveal is the only thing here that customizes a PUSH.
+        // The slide never did — a text post arrived on UIKit's own slide —
+        // which is exactly the gap this is measuring.
+        if operation == .push, toVC === feedViewController, let revealGeometry {
+            return RevealPresentAnimator(
+                geometry: revealGeometry, departingChrome: revealReturningChrome
+            )
+        }
         guard operation == .pop, fromVC === feedViewController else { return nil }
+        // A live grab is the animation; anything with geometry in it would
+        // stage a second flight over the same page. See `RevealGrabAnimator`.
+        if revealGrab != nil { return RevealGrabAnimator() }
+        if let revealGeometry {
+            return RevealPopAnimator(
+                geometry: revealGeometry, returningChrome: revealReturningChrome
+            )
+        }
         // The axis is the live swipe's; a back-button pop (no interaction)
         // exits horizontally, the platform's own direction.
         return TimelineSlidePopAnimator(axis: interaction != nil ? activeAxis : .horizontal)
@@ -268,7 +345,7 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
         _ navigationController: UINavigationController,
         interactionControllerFor animationController: any UIViewControllerAnimatedTransitioning
     ) -> (any UIViewControllerInteractiveTransitioning)? {
-        interaction
+        revealGrab ?? interaction
     }
 
     public func navigationController(

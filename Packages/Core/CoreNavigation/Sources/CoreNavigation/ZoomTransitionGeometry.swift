@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 
 /// Pure geometry for interactive dismissals, split out so the frame math is
 /// unit-tested without a live map or view hierarchy.
@@ -64,6 +65,42 @@ public enum ZoomTransitionGeometry {
         flickVelocity: CGFloat = flickVelocity
     ) -> Bool {
         progress >= progressThreshold || velocity >= flickVelocity
+    }
+
+    /// How far a held grab may travel along its dismiss axis, however hard it
+    /// is thrown. Asymptotic rather than a clamp — see `rubberBand` — so the
+    /// thing in the hand keeps answering the finger the whole way instead of
+    /// sticking at a wall.
+    ///
+    /// Generous next to the other two because this is the INTENDED direction:
+    /// free for the first part of the gesture, firming up well past the commit
+    /// threshold where more travel means nothing anyway. It still resists at
+    /// all because a hard throw used to put the card most of the way off screen
+    /// while the finger was still down — motion promising a departure the
+    /// gesture could still abandon.
+    ///
+    /// Shared for the reason the thresholds above are shared: a media hero and
+    /// a text reveal are two ANIMATIONS of one dismissal, and a hand that has
+    /// learnt the resistance of one should find the other already familiar.
+    public static let forwardDragLimit: CGFloat = 320
+    /// Tight against dragging backwards past the origin.
+    public static let backDragLimit: CGFloat = 60
+    /// Generous across the travel axis — the float — so the grab follows the
+    /// hand while resisting leaving the dismissal axis.
+    public static let crossDriftLimit: CGFloat = 140
+
+    /// UIKit's spring velocity is normalized to "distances to target per
+    /// second": project the hand's speed onto the remaining travel, clamped so
+    /// a wild flick cannot detonate the spring.
+    ///
+    /// Shared so a released grab is caught with the same physics whatever it
+    /// was holding.
+    public static func springVelocity(
+        of velocity: CGPoint, from current: CGPoint, to target: CGPoint
+    ) -> CGFloat {
+        let distance = hypot(target.x - current.x, target.y - current.y)
+        guard distance > 1 else { return 0 }
+        return min(hypot(velocity.x, velocity.y) / distance, 3)
     }
 
     /// How far along its flight a caught transition must have been for a bare

@@ -254,6 +254,25 @@ final class ForYouGridPage: UIView {
     /// while the post is open — a page can land, or a lens can re-derive the
     /// whole list — and an index would then name a different post.
     private var pendingRevealPostID: PostID?
+    /// Which captions the viewer has opened out. Owned here rather than by the
+    /// rows, which are recycled — see `CaptionExpansion`.
+    private let captionExpansion = CaptionExpansion()
+    /// The viewer's followed authors — see `AuthorFollowStore` for why this is
+    /// on the device and not on the service.
+    private let authorFollows = AuthorFollowStore()
+    /// The row a REVEAL is currently holding, hidden until its window lands.
+    ///
+    /// Its own slot, deliberately not `heroHiddenPostID`. Sharing that one was
+    /// the first attempt and the frames caught it: a media flight ending
+    /// anywhere on this grid calls `setHeroHidden(false, …)`, which nulls the
+    /// flag for WHATEVER post it names and then sweeps every visible cell —
+    /// and the sweep only knows how to un-hide a preview. So a reveal's row
+    /// came back mid-grab, and the viewer held a window with a second copy of
+    /// the same post sitting underneath it.
+    ///
+    /// Two flights, two kinds of concealment, two slots. They are OR-ed at the
+    /// one place that applies them, so neither can clear the other.
+    private var revealConcealedPostID: PostID?
     /// Throttle state for the during-scroll autoplay reconcile.
     private var lastReconcileTime: CFTimeInterval = 0
     private var lastReconcileOffset: CGFloat = 0
@@ -742,6 +761,19 @@ final class ForYouGridPage: UIView {
 
     var debugViewportHeight: CGFloat { collectionView.bounds.height }
 
+    /// The three numbers that decide where a cell is on screen, for tracing a
+    /// landing that missed. A rect alone cannot say WHY it moved; these can.
+    var debugInsetState: String {
+        String(
+            format: "offset=%.1f adjInset=(t%.1f b%.1f) frozen=%@ h=%.1f",
+            collectionView.contentOffset.y,
+            collectionView.adjustedContentInset.top,
+            collectionView.adjustedContentInset.bottom,
+            frozenContentInset == nil ? "N" : "Y",
+            collectionView.bounds.height
+        )
+    }
+
     /// The posts on screen that COULD play, with the same centre distance the
     /// ranking uses — the independent check on what the coordinator chose.
     var debugVisibleVideoRanking: [(id: String, distance: Int)] {
@@ -1023,6 +1055,104 @@ final class ForYouGridPage: UIView {
         }
     }
 
+    /// **PROTOTYPE** (`-text-reveal`). The whole card of a TEXT row, in
+    /// `space` — the rect a clip-window reveal opens from and closes onto.
+    ///
+    /// Deliberately NOT `hero(for:in:)`'s rect, and the difference is the
+    /// point. A media row flies its PREVIEW, because the preview is the one
+    /// object that exists at both ends; a text row has no such object, so what
+    /// opens is the card itself — caption, metrics and all. The card fills the
+    /// cell (`PostGridListRowCell` pins it to `contentView`), so the cell's
+    /// own bounds are the card's.
+    ///
+    /// Answers nil for anything that is not a realized text row: a media row,
+    /// a tile, or a post scrolled out of the viewport. The reveal then falls
+    /// back to a centred window, exactly as a hero falls back to a centred
+    /// collapse.
+    func textRowFrame(for postID: PostID, in space: UICoordinateSpace) -> CGRect? {
+        guard let row = cell(for: postID) as? PostGridListRowCell,
+              row.mediaHeroRect == nil
+        else { return nil }
+        // The WHOLE card. Departing from below the author band was the first
+        // attempt and the frames killed it: a window that stops short of the
+        // card's top leaves the band outside the transition, so the card gains
+        // it in one frame at the landing. The offset is carried instead — see
+        // `PostGridListRowCell.revealCaptionTop`.
+        return row.convert(row.bounds, to: space)
+    }
+
+    #if DEBUG
+    /// `-foryou-expand <index>`: presses the row's "Show more". Returns false
+    /// when the row is not realized or its caption fits, so a harness can tell
+    /// "did not expand" from "had nothing to expand".
+    @discardableResult
+    func debugTapShowMore(atIndex index: Int) -> Bool {
+        guard posts.indices.contains(index) else { return false }
+        let path = indexPath(for: index)
+        // Scroll ONLY if the row is not already realized. Scrolling anyway is
+        // what the first version did, and it made the expansion impossible to
+        // film: every frame of the capture was the list travelling, with the
+        // growth buried inside it.
+        if collectionView.cellForItem(at: path) == nil {
+            collectionView.scrollToItem(at: path, at: .centeredVertically, animated: false)
+            collectionView.layoutIfNeeded()
+        }
+        guard let row = collectionView.cellForItem(at: path) as? PostGridListRowCell
+        else { return false }
+        return row.debugTapShowMore()
+    }
+    #endif
+
+    /// Brings the landed row's own furniture in gently — see
+    /// `PostGridListRowCell.fadeInRevealedFurniture`. A no-op for a row that
+    /// is not realized, which is the honest answer: nothing is on screen to
+    /// fade.
+    func fadeInRevealedFurniture(for postID: PostID) {
+        let row = cell(for: postID) as? PostGridListRowCell
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-text-reveal-log") {
+            print("[text-reveal] landing fade: row=\(row == nil ? "MISSING" : "found")"
+                  + " window=\(row?.window == nil ? "no" : "yes")")
+        }
+        #endif
+        row?.fadeInRevealedFurniture()
+    }
+
+    /// Where the page stops matching the row, in the row's own space — the
+    /// reveal's cut line. `nil` when the row is not realized.
+    /// The card a dismissal carries home, drawn at the ROW's own width so its
+    /// caption wraps and truncates exactly as the row's does.
+    func makeDismissStandIn(for postID: PostID) -> UIView? {
+        guard let post = posts.first(where: { $0.id == postID }) else { return nil }
+        // The realized row's width when there is one, the list's own otherwise:
+        // a row scrolled out still has to produce a card, and the width is a
+        // property of the LIST rather than of any particular cell.
+        let width = cell(for: postID)?.bounds.width ?? collectionView.bounds.width
+        guard width > 0 else { return nil }
+        return RevealDismissCardView(post: post, width: width, imagePipeline: imagePipeline)
+    }
+
+    /// The row's author band, for the destination to borrow during a flight.
+    /// Read from the POST rather than from the cell, so it answers for a row
+    /// that has scrolled out as readily as for one on screen.
+    func textRowAuthorBand(for postID: PostID) -> PostAuthorBandView.Model? {
+        posts.first { $0.id == postID }.flatMap(PostAuthorBandView.Model.init(post:))
+    }
+
+    /// The pipeline this page draws with, so a borrowed band can load the same
+    /// avatar from the same cache rather than fetching its own copy.
+    var bandImagePipeline: ImagePipeline { imagePipeline }
+
+    /// How far below the row's top its caption begins — the band's height plus
+    /// its gap, or zero. See `PostGridListRowCell.revealCaptionTop`.
+    func textRowCaptionTop(for postID: PostID) -> CGFloat {
+        (cell(for: postID) as? PostGridListRowCell)?.revealCaptionTop ?? 0
+    }
+
+    func textRowCaptionEnd(for postID: PostID) -> CGFloat? {
+        (cell(for: postID) as? PostGridListRowCell)?.revealCut
+    }
+
     /// Whether a realized cell for the post is currently within the viewport —
     /// the hero falls back to a centered collapse when it isn't.
     func isPostVisible(_ postID: PostID) -> Bool {
@@ -1047,22 +1177,47 @@ final class ForYouGridPage: UIView {
     /// only after forcing a layout with the tab bar restored, so the value
     /// captured is the RESTING one — the same inset the grid will still have
     /// when the pop finishes, which is why thawing cannot move anything either.
+    /// The OFFSET is preserved across the switch, and that is not belt and
+    /// braces — it is the difference between freezing the grid and scrolling
+    /// it.
+    ///
+    /// `contentInsetAdjustmentBehavior = .never` lands one assignment before
+    /// `contentInset = resolved`, and in that instant the adjusted inset
+    /// collapses to whatever `contentInset` still holds (zero, for this grid).
+    /// UIKit re-clamps `contentOffset` against it immediately, so a grid
+    /// resting at the TOP — where `offset.y == -adjustedInset.top` — is
+    /// yanked to 0 and every cell moves up by the whole top inset. Measured
+    /// on this screen: `offset=-116 → offset=0`, which put a landing rect
+    /// 116pt above the row it departed from.
+    ///
+    /// It only shows when the grid is scrolled to its very top, because that
+    /// is the only place where the offset is pinned to the inset it is about
+    /// to lose — which is why a freeze that has been correct for every
+    /// mid-scroll flight still had this in it.
     func beginHeroFreeze() {
         guard frozenContentInset == nil else { return }
+        let offset = collectionView.contentOffset
         frozenContentInset = collectionView.contentInset
         let resolved = collectionView.adjustedContentInset
         collectionView.contentInsetAdjustmentBehavior = .never
         collectionView.contentInset = resolved
+        collectionView.contentOffset = offset
     }
 
+    /// Symmetrical with the freeze, and for the same reason: the two
+    /// assignments below each re-clamp `contentOffset` against an inset that
+    /// is momentarily wrong, so the offset is carried across by hand rather
+    /// than left to survive them.
     func endHeroFreeze() {
         guard let frozenContentInset else { return }
+        let offset = collectionView.contentOffset
         self.frozenContentInset = nil
         // A hosted page manages its insets manually for its whole life — the
         // pre-freeze behaviour to restore is `.never` there, not the default.
         collectionView.contentInsetAdjustmentBehavior =
             hostedTopInset == nil ? .automatic : .never
         collectionView.contentInset = frozenContentInset
+        collectionView.contentOffset = offset
         // The footer may have opened or closed while the inset was pinned, and
         // those writes were dropped. Re-apply now that it is ours again.
         applyBottomInset()
@@ -1238,16 +1393,26 @@ final class ForYouGridPage: UIView {
     /// tile.
     static func applyHeroConcealment(_ concealed: Bool, to cell: UICollectionViewCell?) {
         switch cell {
-        // A row keeps everything the flight is not carrying. Only media rows
-        // ever fly, and what flies is their preview.
+        // A row keeps everything the flight is not carrying — and which part
+        // that is depends on the row, so the row is asked. It used to be
+        // assumed: only media rows flew, so the preview was hard-coded here.
+        // A text row flies too now, and what it carries away is the whole card.
         case let row as PostGridListRowCell:
             row.isHidden = false
-            row.setHeroMediaConcealed(concealed)
+            row.setHeroConcealed(concealed)
         case let other?:
             other.isHidden = concealed
         case nil:
             break
         }
+    }
+
+    /// Hides the row a reveal's window was taken from, for the flight's length.
+    /// See `revealConcealedPostID` for why this does not go through
+    /// `setHeroHidden`.
+    func setRevealConcealed(_ concealed: Bool, for postID: PostID) {
+        revealConcealedPostID = concealed ? postID : nil
+        (cell(for: postID) as? PostGridListRowCell)?.setHeroConcealed(concealed)
     }
 
     func setHeroHidden(_ hidden: Bool, for postID: PostID, conceals: Bool = true) {
@@ -1270,7 +1435,13 @@ final class ForYouGridPage: UIView {
             // is nil, so nothing on screen may legitimately be invisible.
             for visible in collectionView.visibleCells {
                 if visible.isHidden { visible.isHidden = false }
-                (visible as? PostGridListRowCell)?.setHeroMediaConcealed(false)
+                // Skip a row a REVEAL is holding: this broom is for a media
+                // flight's leftovers, and sweeping the other flight's row back
+                // into view mid-grab is exactly what it must not do.
+                if let row = visible as? PostGridListRowCell,
+                   revealConcealedPostID == nil || cell(for: revealConcealedPostID!) !== row {
+                    row.setHeroConcealed(false)
+                }
             }
         }
         // Unhiding is the end of a flight. The tile is excluded from
@@ -1505,17 +1676,39 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // Set on EVERY dequeue, both ways: the flight's stand-in stays hidden
         // across reloads, and a recycled cell can never carry a stale hide to
         // another tile.
-        let isFlying = post.id == heroHiddenPostID
+        // Either flight hides it, and neither knows about the other.
+        let isFlying = post.id == heroHiddenPostID || post.id == revealConcealedPostID
         switch style {
         case .list:
             let cell = collectionView.dequeueReusableCell(
                 withReuseIdentifier: PostGridListRowCell.reuseID, for: indexPath
             ) as! PostGridListRowCell
-            cell.configure(with: post, imagePipeline: imagePipeline)
+            cell.configure(
+                with: post,
+                imagePipeline: imagePipeline,
+                captionExpanded: captionExpansion.isExpanded(post.id)
+            )
+            // Captured by POST, never by index path: the row that asked can
+            // have moved by the time the answer is applied, and an index path
+            // held across a reload names a different post.
+            cell.onRevealFullCaption = { [weak self] in
+                guard let self else { return }
+                captionExpansion.expand(post.id, in: collectionView)
+            }
             // Same reason as the tile below: autoplay is gated on the cover, so
             // a cover arriving is the only event that can re-open the gate for
             // a row that came up faceless while the timeline sat still.
             cell.onCoverLoaded = { [weak self] in self?.updateAutoplay() }
+            // The band's control, if the post carries an author to follow.
+            // Captured by AUTHOR for the same reason the caption's handler is
+            // captured by post: the row that asked can have moved.
+            if let authorID = post.authorID {
+                let follows = authorFollows
+                cell.setFollowing(follows.isFollowing(authorID))
+                cell.onFollowTapped = { [weak cell] in
+                    cell?.setFollowing(follows.toggle(authorID))
+                }
+            }
             Self.applyHeroConcealment(isFlying, to: cell)
             return cell
         case .grid:

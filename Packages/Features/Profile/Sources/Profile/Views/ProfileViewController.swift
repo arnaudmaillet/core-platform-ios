@@ -476,7 +476,57 @@ final class ProfileViewController: UIViewController {
                 setConcealed: { [weak self] concealed in
                     self?.galleryPager.setHeroConcealed(concealed, for: post.id)
                 },
-                depthView: { [weak self] in self?.galleryPager }
+                depthView: { [weak self] in self?.galleryPager },
+                // A text-only post has no media to fly, and until now that
+                // meant a plain push here while For You opened the same post
+                // as a window. One post, one screen, two transitions depending
+                // on where the viewer tapped it. This is the description that
+                // ends that; everything it does not mention — the rounding,
+                // the fill, the veil, the cut — is the installer's, so the two
+                // surfaces cannot drift apart.
+                //
+                // Offered for EVERY post, not only text ones. `hasHero`
+                // decides which presentation runs, and a media post never
+                // reaches the reveal; a row that turns out not to be a text
+                // row answers nil from `textRowFrame` anyway.
+                textReveal: TextRevealOrigin(
+                    rowFrame: { [weak self] space in
+                        self?.galleryPager.textRowFrame(for: post.id, in: space)
+                    },
+                    // Read ONCE, at tap, for the reason the geometry above is:
+                    // the viewer just touched this cell, so it is realized by
+                    // definition. `applyPendingReveal` may scroll it clear of
+                    // the header while the post is up, and a row that scrolled
+                    // out cannot answer.
+                    captionEnd: galleryPager.textRowCaptionEnd(for: post.id),
+                    depthView: { [weak self] in self?.galleryPager },
+                    captionTop: galleryPager.textRowCaptionTop(for: post.id),
+                    // The gallery's own concealment, which the media hero
+                    // beside this already drives — one mechanism, two kinds of
+                    // flight.
+                    setConcealed: { [weak self] concealed in
+                        self?.galleryPager.setHeroConcealed(concealed, for: post.id)
+                    },
+                    // No inset to pin, unlike For You's grid: these pages run
+                    // `contentInsetAdjustmentBehavior = .never` for their whole
+                    // life because the header floats over them, so the value
+                    // the landing is measured against cannot drift under the
+                    // transition. And the row has already settled — the pager
+                    // applies its pending reveal on `viewDidDisappear`, which
+                    // is before any of this is asked.
+                    dismissalDidEnd: { [weak self] committed in
+                        // The card is alone again: bring in the two things it
+                        // has and the page never did — its metric line and its
+                        // affordance. Deferred by a turn, because this fires
+                        // immediately before `completeTransition` re-parents
+                        // the grid and cancels animations just started on its
+                        // cells.
+                        guard committed else { return }
+                        DispatchQueue.main.async {
+                            self?.galleryPager.fadeInRevealedFurniture(for: post.id)
+                        }
+                    }
+                )
             )
             feedHero(window.map(\.id), self, origin)
         }

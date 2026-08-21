@@ -729,6 +729,171 @@ final class ForYouViewController: UIViewController {
         return feed
     }
 
+    /// **PROTOTYPE** `-text-reveal`: opens a text post with a clip-window
+    /// reveal instead of UIKit's slide. `-text-reveal-plain` compares the
+    /// unmatched variant (the window opens over a page that never moves);
+    /// `-text-reveal-log` prints the rects both legs measured.
+    ///
+    /// ASSIGNED ON EVERY TEXT PUSH, including with `nil`, and that is not
+    /// defensive — `textSlideDismissal` is one retained instance shared by
+    /// every plain push this screen makes, and the branch it lives in is taken
+    /// by more than text rows (a media row scrolled out of the viewport lands
+    /// here too). A geometry left over from the previous tap would aim the
+    /// next post's reveal at a row that has nothing to do with it.
+    ///
+    /// Whether a row can be revealed is asked of the GRID, not of the post's
+    /// kind: `textRowFrame` answers only for a realized, on-screen text row,
+    /// which is the same question the reveal has to answer again at dismissal.
+    /// One predicate, so the two legs cannot disagree about whether this
+    /// transition exists.
+    /// Returns whether the reveal is armed — the caller uses it to leave the
+    /// tab bar alone, because a reveal takes the bar down ITSELF.
+    ///
+    /// The bar FLOATS: it draws over the grid without insetting it (measured on
+    /// an iPhone 17 Pro — bar at y 791 height 83, while the grid reserves 34),
+    /// so it covers the bottom 26pt of the very row a reveal departs from.
+    /// Hidden before the push, as every plain push does it, that 26pt is the
+    /// card's whole metric line snapping into existence one frame after the
+    /// mask opens: the card the viewer tapped is not the card that starts
+    /// growing. Driven by the flight instead, the bar is fully in place on
+    /// frame 0 and dissolves as the page grows past it.
+    @discardableResult
+    private func installTextReveal(
+        feed: UIViewController, format: GalleryFilter.Format, postID: PostID
+    ) -> Bool {
+        textSlideDismissal.revealGeometry = nil
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        guard TextRevealInstaller.isEnabled,
+              let page = pager.page(for: format),
+              page.textRowFrame(for: postID, in: view) != nil
+        else { return false }
+        // The grid's inset state at each stage of a round trip. It exists
+        // because a rect alone cannot say why a landing missed, and the first
+        // run's did: departure y=741, landing y=625.
+        let trace = arguments.contains("-text-reveal-log")
+        func log(_ stage: String) {
+            guard trace else { return }
+            print("[text-reveal] \(stage) \(page.debugInsetState)")
+        }
+        log("atTap        ")
+        if trace, let rect = page.textRowFrame(for: postID, in: view) {
+            // The row's rect BEFORE the push hides the tab bar. Compared with
+            // the animator's `source=`, this says whether the grid moved
+            // between the tap and the opening — which is what a pre-opening
+            // jump would be.
+            print("[text-reveal] atTap  row=\(NSCoder.string(for: rect))")
+        }
+        // THE LANDING SETTLES BEFORE THE POP DOES, and the first run without
+        // this is why the line exists: the close measured its landing at
+        // y=625 for a row that had departed from y=741 — 116pt out, which is
+        // this grid's own `adjustedContentInset.top`.
+        //
+        // The grid's cells live inside the tab bar's safe area. The bar is
+        // hidden while the post is up, so the row's rect only returns to what
+        // it will actually be once the bar is back — and putting it back at
+        // alpha 0 BEFORE the pop is triggered settles the layout while
+        // nothing is in flight. Inside the transition instead, the bar comes
+        // back as a row of empty glass capsules that never paint (measured on
+        // the hero path, which restores it at grab-begin for this exact
+        // reason). The pop then drives its alpha from 0, so it fades in with
+        // the grid rather than switching on after it.
+        textSlideDismissal.onWillBeginPop = { [weak self] in
+            log("beginPop  pre")
+            self?.showTabBar(alpha: 0)
+            log("beginPop post")
+        }
+        textSlideDismissal.revealReturningChrome = tabBarController?.tabBar
+        // The GEOMETRY is not built here — see `TextRevealInstaller`. A
+        // profile draws the same row and must open it the same way, and two
+        // hand-written copies of thirteen fields agree only on the day they
+        // are written. What stays is what genuinely differs between the two
+        // screens: which chrome comes back, and what has to settle first.
+        textSlideDismissal.revealGeometry = TextRevealInstaller.geometry(
+            feed: feed,
+            origin: TextRevealOrigin(
+                rowFrame: { [weak page] space in
+                    page?.textRowFrame(for: postID, in: space)
+                },
+                // Read ONCE, at staging, and deliberately not re-asked at
+                // dismissal: `applyPendingReveal` may have scrolled the row,
+                // and a row that scrolled out is not realized to answer. The
+                // cut is a property of the caption, not of where the row
+                // happens to be.
+                captionEnd: page.textRowCaptionEnd(for: postID),
+                // The gallery recedes; the tray and the title stay grounded —
+                // the same view the hero's depth cue rides, for the same
+                // reason.
+                depthView: { [weak self] in self?.pager },
+                captionTop: page.textRowCaptionTop(for: postID),
+                // Borrowed by the destination for the flight, so the window
+                // shows the header the card does instead of a blank strip.
+                authorBand: page.textRowAuthorBand(for: postID),
+                // What the CLOSE carries home. Built from the post rather than
+                // read off the page, so a viewer who scrolled the comments
+                // still lands on the card they came from — see
+                // `RevealDismissCardView`.
+                makeDismissStandIn: { [weak page] in page?.makeDismissStandIn(for: postID) },
+                // The reveal's OWN concealment slot, not the hero's — see
+                // `ForYouGridPage.revealConcealedPostID`. Applied on every
+                // dequeue too, so a row that recycles mid-flight comes back
+                // still hidden.
+                setConcealed: { [weak page] concealed in
+                    page?.setRevealConcealed(concealed, for: postID)
+                },
+                presentationDidEnd: { [weak self] landed in
+                    // The flight faded the bar to nothing; take it down for
+                    // real now, under the landed page where the frame change
+                    // cannot be seen. A REVERSED opening never showed the
+                    // page, so the bar goes back to being the grid's.
+                    self?.tabBarController?.setTabBarHidden(landed, animated: false)
+                    self?.tabBarController?.tabBar.alpha = 1
+                },
+                // Pin the grid's inset before the landing rect is read. The pop
+                // animates the safe area and this collection view adds it to
+                // its own inset, so an unpinned grid keeps drifting under a
+                // close that has already measured where it is going.
+                willStageDismissal: { [weak page] in
+                    log("freeze    pre")
+                    page?.beginHeroFreeze()
+                    log("freeze   post")
+                },
+                dismissalDidEnd: { [weak self, weak page] committed in
+                    page?.endHeroFreeze()
+                    // The card is alone again: bring in the two things it has
+                    // and the page never did — its metric line and its
+                    // affordance — rather than letting them arrive in one
+                    // frame. Committed pops only; a cancelled swipe leaves the
+                    // page up, and the card stays covered.
+                    //
+                    // DEFERRED BY A TURN, and it has to be: this fires from the
+                    // close's completion, which is immediately followed by
+                    // `completeTransition` — and that re-parents the grid out
+                    // of the transition container, which cancels any animation
+                    // just started on its cells. Measured: the dissolve simply
+                    // did not appear, the card arriving whole in a single frame
+                    // exactly as before. Run after the turn, the hierarchy is
+                    // settled and the animation survives.
+                    if committed {
+                        DispatchQueue.main.async { page?.fadeInRevealedFurniture(for: postID) }
+                    }
+                    // A cancelled swipe leaves the post on screen, so the bar
+                    // restored at grab-begin has to go back down — unanimated
+                    // and behind the page that sprang back, where nothing
+                    // renders the change. Committed pops leave it up;
+                    // `onFeedPopped` takes it from there.
+                    guard !committed else { return }
+                    self?.tabBarController?.setTabBarHidden(true, animated: false)
+                }
+            ),
+            pipeline: page.bandImagePipeline
+        )
+        return true
+        #else
+        return false
+        #endif
+    }
+
     private func openFeed(from format: GalleryFilter.Format, at index: Int) {
         // One flight at a time: a second tap while a card is in the air would
         // stage a transition over a live one. Same guard as the map's.
@@ -776,7 +941,18 @@ final class ForYouViewController: UIViewController {
         // Worth recording what it got right, because it is the half this
         // screen had wrong: cancel and commit both settled correctly by
         // themselves. Only the mid-drag frames were unusable.
-        tabBarController?.setTabBarHidden(true, animated: true)
+        // ARMED FIRST, because the next line is the one it changes: a reveal
+        // drives the bar down on its own curve (`RevealPresentAnimator`), and
+        // hiding it here would take it away before the opening starts — which
+        // is the 26pt of card that used to pop into existence one frame in.
+        //
+        // Hiding it and putting it back was tried and is worse: UIKit runs its
+        // own show/hide animation on the bar, and a second one fighting it left
+        // the bar sitting fully opaque OVER the landed page for ~0.25s.
+        let revealing = installTextReveal(feed: feed, format: format, postID: tapped.id)
+        if !revealing {
+            tabBarController?.setTabBarHidden(true, animated: true)
+        }
 
         guard let page = pager.page(for: format),
               let destination = feed as? any ZoomTransitionDestination,
@@ -1652,6 +1828,36 @@ final class ForYouViewController: UIViewController {
         if let position = arguments.firstIndex(of: "-foryou-scroll-demo"),
            position + 1 < arguments.count, let steps = Int(arguments[position + 1]) {
             scheduleScrollDemo(steps: steps)
+        }
+        // `-foryou-expand <index> [delay]`: presses a row's "Show more". Polls
+        // for content rather than firing on a delay, for the same reason
+        // `-foryou-open` does — a fixed wait silently no-ops under
+        // `-mock-latency`.
+        //
+        // The optional delay is for FILMING it. A capture has to be started
+        // after the app has settled or it is mostly launch, and by then the
+        // default one-second press has already happened: three recordings in a
+        // row caught nothing but the expanded end state.
+        if let position = arguments.firstIndex(of: "-foryou-expand"),
+           position + 1 < arguments.count, let index = Int(arguments[position + 1]) {
+            let delay = position + 2 < arguments.count
+                ? (Double(arguments[position + 2]) ?? 1.0)
+                : 1.0
+            var attempts = 0
+            func attempt() {
+                attempts += 1
+                let page = pager.page(for: viewModel.format)
+                if page?.debugTapShowMore(atIndex: index) == true {
+                    print("[foryou-expand] expanded row \(index)")
+                    return
+                }
+                if attempts < 60 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: attempt)
+                } else {
+                    print("[foryou-expand] NOTHING TO EXPAND at row \(index)")
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: attempt)
         }
         guard let position = arguments.firstIndex(of: "-foryou-open"), position + 1 < arguments.count,
               let index = Int(arguments[position + 1])

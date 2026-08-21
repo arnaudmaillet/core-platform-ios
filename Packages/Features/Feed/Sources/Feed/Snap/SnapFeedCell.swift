@@ -382,6 +382,31 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         chrome.setCommentsEngagedProgress(t)
     }
 
+    /// The ground this page owns, remembered so a transition-scoped tint can
+    /// be handed back without re-deriving the format.
+    private var restingGround: UIColor = .systemBackground
+    /// A ground borrowed for the length of a reveal — the gallery card's own
+    /// fill, so the page the mask opens onto starts as the card the viewer
+    /// tapped rather than as a lighter rectangle where the card used to be.
+    ///
+    /// Set through `setRevealGroundTint` and cleared by handing back `nil`.
+    /// Applied to `contentView`, which is the surface `configure` paints, so
+    /// there is exactly one writer of this colour and the resting value is
+    /// never lost.
+    private var revealGroundTint: UIColor?
+
+    /// Wears `color` as the page's ground, or hands the page's own back.
+    ///
+    /// `backgroundColor` is animatable, so calling this inside an animation
+    /// block CROSS-FADES — which is the whole mechanism: the card's fill at
+    /// the handshake, the page's own by the landing, on the same spring as
+    /// the mask. It also scrubs, so a dismissal driven by a finger carries the
+    /// tint back at the speed of the hand.
+    func setRevealGroundTint(_ color: UIColor?) {
+        revealGroundTint = color
+        contentView.backgroundColor = color ?? restingGround
+    }
+
     /// The readability wash's opacity for THIS page at engagement progress
     /// `t` — the single answer both the interactive drive and the re-assert
     /// path must use, because the wash has two callers and they disagreed
@@ -531,7 +556,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // letterboxing should be — the surface exists to disappear behind a
         // photo. A TEXT page has nothing to disappear behind, so its ground
         // is the page itself and it follows the system appearance.
-        contentView.backgroundColor = hasMedia ? .black : .systemBackground
+        restingGround = hasMedia ? .black : .systemBackground
+        contentView.backgroundColor = revealGroundTint ?? restingGround
         // …and the page's THEME, applied once at the root of everything the
         // cell owns: the frost band, and the whole comment panel hosted
         // inside it. Both inherit from here rather than deciding for

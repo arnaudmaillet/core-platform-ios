@@ -60,6 +60,9 @@ final class ProfileGalleryGridView: UIView {
     private var statusTopConstraint: NSLayoutConstraint?
 
     private let imagePipeline: ImagePipeline
+    /// Which captions the viewer has opened out — owned here because the rows
+    /// that show them are recycled (see `CaptionExpansion`).
+    private let captionExpansion = CaptionExpansion()
     private let style: Style
     private var posts: [GalleryPost] = []
     /// Autoplay for this page's video media. Absent only where the host
@@ -366,7 +369,17 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
             let cell = collectionView.dequeueReusableCell(
                 withReuseIdentifier: PostGridListRowCell.reuseID, for: indexPath
             ) as! PostGridListRowCell
-            cell.configure(with: post, imagePipeline: imagePipeline)
+            cell.configure(
+                with: post,
+                imagePipeline: imagePipeline,
+                captionExpanded: captionExpansion.isExpanded(post.id)
+            )
+            // Captured by POST, never by index path: the row that asked can
+            // have moved by the time the answer is applied.
+            cell.onRevealFullCaption = { [weak self] in
+                guard let self else { return }
+                captionExpansion.expand(post.id, in: collectionView)
+            }
             // Autoplay is gated on the cover, so a cover arriving is the only
             // event that can re-open the gate for an item that came up
             // faceless while the page sat still.
@@ -565,6 +578,55 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         )
     }
 
+    /// The realized cell for a post, or nil — the lookup every question below
+    /// starts from.
+    private func cell(for postID: PostID) -> UICollectionViewCell? {
+        guard let index = posts.firstIndex(where: { $0.id == postID }) else { return nil }
+        return collectionView.cellForItem(at: IndexPath(item: index, section: 0))
+    }
+
+    /// The whole CARD of a text-only row, which is what a reveal's window opens
+    /// from — see `TextRevealOrigin`.
+    ///
+    /// The mirror of `heroGeometry` above, and the pair says the transition
+    /// policy out loud: that one answers with the MEDIA's rect and goes nil for
+    /// a text row, which is what sends it down this path; this one answers only
+    /// FOR a text row, with the card's own bounds.
+    ///
+    /// Nil for anything that is not a realized text row — a media row, a tile,
+    /// or a post scrolled out of the viewport. The reveal then falls back to a
+    /// centred window, exactly as a hero falls back to a centred collapse.
+    func textRowFrame(for postID: PostID, in space: UICoordinateSpace) -> CGRect? {
+        guard let row = cell(for: postID) as? PostGridListRowCell,
+              row.mediaHeroRect == nil
+        else { return nil }
+        // The WHOLE card. Departing from below the author band was the first
+        // attempt and the frames killed it: a window that stops short of the
+        // card's top leaves the band outside the transition, so the card gains
+        // it in one frame at the landing. The offset is carried instead — see
+        // `PostGridListRowCell.revealCaptionTop`.
+        return row.convert(row.bounds, to: space)
+    }
+
+    /// Where the page stops matching the row, in the row's own space — the
+    /// reveal's cut line. Nil when the row is not realized.
+    /// How far below the row's top its caption begins — the band's height plus
+    /// its gap, or zero. See `PostGridListRowCell.revealCaptionTop`.
+    func textRowCaptionTop(for postID: PostID) -> CGFloat {
+        (cell(for: postID) as? PostGridListRowCell)?.revealCaptionTop ?? 0
+    }
+
+    func textRowCaptionEnd(for postID: PostID) -> CGFloat? {
+        (cell(for: postID) as? PostGridListRowCell)?.revealCut
+    }
+
+    /// Brings the landed row's own furniture in gently — see
+    /// `PostGridListRowCell.fadeInRevealedFurniture`. A no-op for a row that is
+    /// not realized, which is the honest answer: nothing is on screen to fade.
+    func fadeInRevealedFurniture(for postID: PostID) {
+        (cell(for: postID) as? PostGridListRowCell)?.fadeInRevealedFurniture()
+    }
+
     /// Hides just what the flight is carrying: a tile goes whole, a row loses
     /// only its preview. Same invariant the For You grid keeps.
     func setHeroConcealed(_ concealed: Bool, for postID: PostID) {
@@ -574,7 +636,9 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
               let cell = collectionView.cellForItem(at: IndexPath(item: index, section: 0))
         else { return }
         if let row = cell as? PostGridListRowCell {
-            row.setHeroMediaConcealed(concealed)
+            // The ROW decides what its flight carries — a preview for a media
+            // row, the whole card for a text one. Same rule as For You's.
+            row.setHeroConcealed(concealed)
         } else {
             cell.isHidden = concealed
         }
@@ -591,7 +655,24 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     /// exercises. Same reason `ForYouGridPage` grew one.
     func debugSelectItem(at index: Int) -> Bool {
         guard posts.indices.contains(index) else { return false }
-        collectionView(collectionView, didSelectItemAt: IndexPath(item: index, section: 0))
+        let path = IndexPath(item: index, section: 0)
+        // REALIZED FIRST, and it is not a convenience. A finger can only tap a
+        // row that is on screen, and this page shows very few at rest — the
+        // header takes most of the screen, so an Activity list of nine posts
+        // had exactly one realized cell. Selecting straight through opened a
+        // post whose cell had never existed, and every rect the transition then
+        // asked for came back nil: the reveal departed from its centred
+        // fallback and the capture read as a broken transition rather than as a
+        // harness tapping through the floor.
+        //
+        // Scrolls ONLY when the row is not already realized, so a run that
+        // could have happened under a thumb is not turned into a travelling
+        // list.
+        if collectionView.cellForItem(at: path) == nil {
+            collectionView.scrollToItem(at: path, at: .centeredVertically, animated: false)
+            collectionView.layoutIfNeeded()
+        }
+        collectionView(collectionView, didSelectItemAt: path)
         return true
     }
     #endif

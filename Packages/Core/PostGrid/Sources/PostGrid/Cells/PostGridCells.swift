@@ -11,14 +11,102 @@ import UIKit
 /// quiet metadata line closing the card: views, reactions, comments on the
 /// leading side, the post's compact age trailing. Short pages never have
 /// media, so their rows are text + metadata.
-public final class PostGridListRowCell: UICollectionViewCell {
+public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognizerDelegate {
     public static let reuseID = "PostGridListRowCell"
     /// The inner preview's rounding — the radius a hero flying from this row
     /// must start at, so the card is the preview's twin rather than its
     /// approximation.
     public static let mediaCornerRadius: CGFloat = 12
 
-    /// The preview's rect in this cell's own space, or nil for a text-only row
+    /// Where the page STOPS MATCHING this card, in the card's own space — the
+    /// reveal's cut line. Below it the destination is veiled for the length of
+    /// a flight, so the window shows no more of itself than the card does.
+    ///
+    /// ## Two answers, one rule
+    ///
+    /// The rule is not about truncation, though it was written as if it were.
+    /// A card shows a caption and a metric line; the page shows the same
+    /// caption, the same metric line, and then its comments and its composer.
+    /// The cut is wherever the two part company:
+    ///
+    /// * **Truncated caption** — they part at the card's fourth line, because
+    ///   the page has a fifth. Measured on an iPhone SE, that is 103pt into a
+    ///   145pt card, and 154pt of the page below it has no counterpart at all.
+    /// * **Whole caption** — the caption matches AND the metric line matches
+    ///   (the page's caption row borrows this cell's own constants, so the two
+    ///   are the same layout at the same offsets — measured, a 101pt row
+    ///   against a 101pt anchor). They part below the card's own bottom, where
+    ///   the page keeps going into its comments.
+    ///
+    /// Answering `nil` for the second case is what this used to do, and it left
+    /// a short post's comments on screen for the whole flight only to have them
+    /// vanish in the final frame. There is no post for which the page and the
+    /// card agree all the way down: the page always has a comment stream.
+    ///
+    /// MEASURED, never read off a subview's frame — see the note in
+    /// `captionEnd` below, and `CaptionTruncationTests`.
+    public var revealCut: CGFloat? {
+        guard bounds.width > 0, bounds.height > 0 else { return nil }
+        // PAGE-relative, not card-relative, and the distinction matters now
+        // that a card can carry a band the page has no counterpart for. The
+        // veil is hung at `anchor.minY + cut` inside the DESTINATION, whose
+        // caption sits at `captionTopInset` from its row's top — so the cut is
+        // measured from where the caption starts, never from the card's edge.
+        //
+        // The whole caption is shown: the difference starts below everything
+        // the card has, which is its height less the band above the caption.
+        guard showMoreRange != nil else { return bounds.height - revealCaptionTop }
+        return captionEnd
+    }
+
+    /// How far below this card's top its CAPTION begins.
+    ///
+    /// Zero without an author band, and the band plus its gap with one. It is
+    /// the number a reveal needs in order to depart from the whole card while
+    /// still landing its caption on the card's own.
+    ///
+    /// The first attempt avoided needing it: the flight departed from below the
+    /// band instead, which kept the caption at `captionTopInset` inside the
+    /// window at both ends and left the registration untouched. The frames
+    /// killed it. A window that stops short of the card's top edge leaves the
+    /// band outside the transition entirely, so the card gains it in one frame
+    /// at the landing — a cut exactly where this transition is supposed to be
+    /// seamless. The window has to be the card, and the offset has to be
+    /// carried instead of avoided.
+    public var revealCaptionTop: CGFloat {
+        showsAuthorBand ? PostAuthorBandView.captionOffset : 0
+    }
+
+    /// The caption's own height plus the inset above it, in the register the
+    /// DESTINATION uses — which is why it does not include the author band.
+    ///
+    /// MEASURED, never read off the label's frame, and that distinction is the
+    /// whole of this property.
+    ///
+    /// A self-sizing cell gets its height from the collection view's
+    /// attributes, but its subtree keeps the geometry of whatever pass last ran
+    /// over it. Arm a reveal in that window and they disagree in a way that
+    /// looks like nothing is wrong: measured on an iPhone SE, `bounds` was a
+    /// correct 343x145 while the card underneath was still 343x88 and the label
+    /// inside it 311x30 — for text that measures 86.5. `setNeedsLayout` +
+    /// `layoutIfNeeded` did NOT reconcile them.
+    ///
+    /// The veil built on 46pt instead of 103 cut the page three lines too high,
+    /// so the flight carried a greyed slab where the card's own four lines
+    /// belonged. So the two inputs here are the ones that are always right:
+    /// `bounds`, which comes from the attributes, and the label's own opinion
+    /// of its text. `ceil` for the reason `preferredLayoutAttributesFitting`
+    /// ceils — half a point short is a clipped descender.
+    private var captionEnd: CGFloat? {
+        let available = bounds.width - Self.captionInset * 2
+        guard available > 0 else { return nil }
+        let text = captionLabel.sizeThatFits(
+            CGSize(width: available, height: .greatestFiniteMagnitude)
+        )
+        return Self.captionTopInset + ceil(text.height)
+    }
+
+    /// The preview's rect in this cell's own space, or nil for a text-only row    /// The preview's rect in this cell's own space, or nil for a text-only row
     /// (which has no media to fly). A hero source reads this to decide whether
     /// a row can host a flight at all.
     public var mediaHeroRect: CGRect? {
@@ -130,6 +218,266 @@ public final class PostGridListRowCell: UICollectionViewCell {
     /// takes its player back before the cell is bound to another post.
     public var onReuse: (() -> Void)?
 
+    /// Decides whether the caption OVERFLOWS, at the width the layout is
+    /// actually going to give this row.
+    ///
+    /// It cannot be decided in `configure`: a self-sizing cell is configured
+    /// before it is sized, so the width there is whatever the recycled cell
+    /// happened to be carrying, and a caption measured against the wrong width
+    /// answers the wrong question — three lines at one width is five at
+    /// another. The attributes are authoritative, which is the same reason
+    /// `CaptionBubbleCell` measures here rather than there.
+    ///
+    /// The measurement is the honest one: how tall the caption WANTS to be
+    /// against how tall the cap allows. Asking `UILabel` whether it truncated
+    /// would be reading a result of the layout pass that is being computed.
+    override public func preferredLayoutAttributesFitting(
+        _ layoutAttributes: UICollectionViewLayoutAttributes
+    ) -> UICollectionViewLayoutAttributes {
+        let targetWidth = layoutAttributes.frame.width
+        guard targetWidth > 0 else {
+            return super.preferredLayoutAttributesFitting(layoutAttributes)
+        }
+        if abs(bounds.width - targetWidth) > 0.5 {
+            bounds.size.width = targetWidth
+        }
+        composeCaption(atWidth: targetWidth)
+        contentView.setNeedsLayout()
+        contentView.layoutIfNeeded()
+        let fitted = contentView.systemLayoutSizeFitting(
+            CGSize(width: targetWidth, height: 0),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        // Ceil, not round: half a point short of the caption is a clipped
+        // descender on the last line.
+        layoutAttributes.frame.size.height = ceil(fitted.height)
+        return layoutAttributes
+    }
+
+    /// The ellipsis and the affordance, written INTO the caption so they sit at
+    /// the end of the truncated text rather than under it.
+    ///
+    /// A label cannot do this for itself: `.byTruncatingTail` puts its ellipsis
+    /// at the very end of the last line and leaves nowhere to put anything
+    /// after it. So the text is shortened here, by hand, to the longest
+    /// word-boundary prefix that still leaves room for "… Show more" on the
+    /// last line — which is what makes the affordance read as part of the
+    /// sentence it interrupts.
+    private func composeCaption(atWidth width: CGFloat) {
+        let font = captionLabel.font ?? .preferredFont(forTextStyle: .body)
+        let available = width - Self.captionInset * 2
+        guard !isCaptionExpanded, !fullCaption.isEmpty, available > 0 else {
+            showMoreRange = nil
+            captionLabel.attributedText = Self.plain(fullCaption, font: font)
+            return
+        }
+        // Measured in LINES, from the font's own metrics — never a hardcoded
+        // height, or a Dynamic Type step silently changes which captions are
+        // considered long.
+        let whole = Self.plain(fullCaption, font: font)
+        guard Self.lineCount(whole, width: available) > Self.captionLineLimit else {
+            showMoreRange = nil
+            captionLabel.attributedText = whole
+            return
+        }
+        let composed = Self.truncated(
+            fullCaption, font: font, width: available, capLines: Self.captionLineLimit
+        )
+        captionLabel.attributedText = composed.text
+        showMoreRange = composed.showMore
+    }
+
+    private static let showMoreTitle = "Show more"
+    private static let ellipsis = "\u{2026} "
+
+    private static func plain(_ text: String, font: UIFont?) -> NSAttributedString {
+        NSAttributedString(string: text, attributes: [
+            .font: font ?? UIFont.preferredFont(forTextStyle: .body),
+            .foregroundColor: UIColor.label
+        ])
+    }
+
+    /// How many lines `text` occupies at `width`, counted as LINE FRAGMENTS.
+    ///
+    /// Not `height / font.lineHeight`, which is what this did first and is
+    /// wrong in a way that hides: `boundingRect` returns the laid-out height
+    /// including leading, which for four lines of body text measured 88pt
+    /// against a 20.5pt line height — 4.29, not 4. Rounding rescues small
+    /// counts and drifts into over-reporting as they grow, so the error only
+    /// appears at large Dynamic Type sizes or long captions.
+    private static func lineCount(_ text: NSAttributedString, width: CGFloat) -> Int {
+        guard text.length > 0 else { return 0 }
+        let storage = NSTextStorage(attributedString: text)
+        let manager = NSLayoutManager()
+        let container = NSTextContainer(
+            size: CGSize(width: width, height: .greatestFiniteMagnitude)
+        )
+        container.lineFragmentPadding = 0
+        storage.addLayoutManager(manager)
+        manager.addTextContainer(container)
+        manager.ensureLayout(for: container)
+
+        var count = 0
+        var index = 0
+        while index < manager.numberOfGlyphs {
+            var effective = NSRange()
+            _ = manager.lineFragmentRect(forGlyphAt: index, effectiveRange: &effective)
+            count += 1
+            index = NSMaxRange(effective)
+        }
+        return count
+    }
+
+    /// The longest word-boundary prefix of `text` whose last line still has
+    /// room for "… Show more" AFTER it, plus the range that affordance
+    /// occupies.
+    ///
+    /// Two steps, because the property wanted is not monotone and a single
+    /// search cannot find it:
+    ///
+    /// 1. binary search for the longest prefix that fills at most `capLines` on
+    ///    its own — this part IS monotone;
+    /// 2. walk back a word at a time until the affordance fits on the same line
+    ///    the prefix ends on.
+    ///
+    /// Searching in one step on "does the composition fit in `capLines`"
+    /// instead — which is what this did first — maximises the wrong thing: a
+    /// prefix filling three lines with the affordance wrapped alone onto a
+    /// fourth satisfies it perfectly, and puts the affordance back on its own
+    /// line, which is exactly what it exists to avoid. Caught by a test that
+    /// counted the prefix's lines rather than the composition's.
+    ///
+    /// Word boundaries rather than characters: a caption cut mid-word reads as
+    /// a rendering fault rather than as an interruption, and there are far
+    /// fewer of them to search.
+    private static func truncated(
+        _ text: String, font: UIFont, width: CGFloat, capLines: Int
+    ) -> (text: NSAttributedString, showMore: NSRange) {
+        let ns = text as NSString
+        var boundaries: [Int] = []
+        ns.enumerateSubstrings(in: NSRange(location: 0, length: ns.length),
+                               options: [.byWords, .substringNotRequired]) { _, range, _, _ in
+            boundaries.append(range.location + range.length)
+        }
+        if boundaries.isEmpty { boundaries = [ns.length] }
+
+        func prefix(upTo end: Int) -> String {
+            ns.substring(to: min(end, ns.length))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        func compose(_ prefix: String) -> NSAttributedString {
+            let composed = NSMutableAttributedString(
+                attributedString: plain(prefix + ellipsis, font: font)
+            )
+            composed.append(NSAttributedString(string: showMoreTitle, attributes: [
+                .font: font,
+                .foregroundColor: UIColor.tintColor
+            ]))
+            return composed
+        }
+
+        // 1. The longest prefix that fills at most `capLines` by itself.
+        var low = 0
+        var high = boundaries.count - 1
+        var fullest = 0
+        while low <= high {
+            let mid = (low + high) / 2
+            let candidate = plain(prefix(upTo: boundaries[mid]), font: font)
+            if lineCount(candidate, width: width) <= capLines {
+                fullest = mid
+                low = mid + 1
+            } else {
+                high = mid - 1
+            }
+        }
+
+        // 2. Back off until the affordance shares the prefix's last line.
+        var index = fullest
+        while index >= 0 {
+            let body = prefix(upTo: boundaries[index])
+            let composed = compose(body)
+            let bodyLines = lineCount(plain(body, font: font), width: width)
+            let composedLines = lineCount(composed, width: width)
+            if composedLines == bodyLines, composedLines <= capLines {
+                return (composed, showMoreRange(in: composed))
+            }
+            index -= 1
+        }
+        // Nothing fits beside it — a first word wider than the row. Show the
+        // affordance alone rather than nothing at all.
+        let composed = compose(prefix(upTo: boundaries[0]))
+        return (composed, showMoreRange(in: composed))
+    }
+
+    private static func showMoreRange(in composed: NSAttributedString) -> NSRange {
+        NSRange(
+            location: composed.length - (showMoreTitle as NSString).length,
+            length: (showMoreTitle as NSString).length
+        )
+    }
+
+    /// Brings in the closing metric line, which the page never had, instead of
+    /// letting it appear in a single frame.
+    ///
+    /// It runs at the LANDING — once the page is gone and the card is alone —
+    /// and not during the flight, because the page is veiled over exactly that
+    /// band: anything faded underneath an opaque cover arrives at full opacity
+    /// anyway.
+    ///
+    /// ## Why the caption is NOT faded with it
+    ///
+    /// The card and the page differ on one more thing: the tail of the last
+    /// line, where the affordance displaced the words the page still shows —
+    /// "…a migration that… Show more" against "…a migration that had been".
+    /// Cross-fading that was tried twice, once by dissolving the whole page
+    /// against the card and once by dissolving this label against a copy of
+    /// the page's version. Both showed the same artifact, because it is not a
+    /// property of the mechanism: blending two DIFFERENT runs of text draws
+    /// both of them, and the result reads as "that.had beenmore" rather than
+    /// as a substitution.
+    ///
+    /// A fade only works against nothing, which is why the metric line takes
+    /// one and the caption does not. Removing that last pop needs the two
+    /// sides to stop differing — either the page truncating its own line four
+    /// for the flight, or the veil hiding it so the card's can arrive into
+    /// empty space — and both are structural rather than a fade.
+    public func fadeInRevealedFurniture(duration: TimeInterval = 0.22) {
+        // ONLY when the caption was truncated, and the symmetry with
+        // `revealCut` is the reason. A truncated card's metric line arrives
+        // into a band the page was filling with words, so it has to be brought
+        // in rather than switched on. A whole caption's does not: the page
+        // carries the same metric line at the same offset, unveiled, for the
+        // entire flight — fading it in here would blink something that was
+        // already on screen.
+        // The BAND is deliberately absent from this, and its absence replaced a
+        // fade that was here for one commit. The destination now BORROWS this
+        // row's band for the flight (see `installRevealAuthorBand`), so the
+        // window already shows a header identical to this one — the swap at the
+        // landing is the identity, and fading this one in from zero would blink
+        // something the viewer was already looking at.
+        guard showMoreRange != nil else { return }
+        metaRow.alpha = 0
+        UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseOut]) {
+            self.metaRow.alpha = 1
+        }
+    }
+
+    #if DEBUG
+    /// Presses "Show more". Returns false when there was nothing to reveal,
+    /// which is the answer a harness must not mistake for success.
+    ///
+    /// The simulator injects no touches, so this is the only way this control
+    /// is reachable in an automated run.
+    ///
+    @discardableResult
+    public func debugTapShowMore() -> Bool {
+        guard showMoreRange != nil else { return false }
+        revealTapped()
+        return true
+    }
+    #endif
+
     /// Hides ONLY the preview while its twin is in the air.
     ///
     /// A row is a card of which the media is one part, and the flight carries
@@ -152,6 +500,26 @@ public final class PostGridListRowCell: UICollectionViewCell {
         playBadge.alpha = concealed ? 0 : 1
     }
 
+    /// Hides whatever THIS row's flight is carrying, for as long as it is in
+    /// the air — and the routing lives here because only the row knows.
+    ///
+    /// A media row flies its preview and keeps the rest: caption, counters and
+    /// author stay put, because none of them left. A TEXT row has no preview,
+    /// and what a reveal carries away is the card itself — so the card is what
+    /// goes.
+    ///
+    /// Without this a dragged window and the row it came from show the same
+    /// post twice, side by side, which is not a hero picking a card up; it is a
+    /// copy being made. The grid keeps the row's SLOT either way, so nothing
+    /// reflows underneath while the viewer is holding it.
+    public func setHeroConcealed(_ concealed: Bool) {
+        if mediaView.isHidden {
+            card.alpha = concealed ? 0 : 1
+        } else {
+            setHeroMediaConcealed(concealed)
+        }
+    }
+
 
     /// The card's own rounding and fill, so a flight impersonating this row
     /// is its twin rather than an approximation of it. Restating either as a
@@ -165,9 +533,67 @@ public final class PostGridListRowCell: UICollectionViewCell {
     /// stands in for a text row.
     public static let metaBottomInset: CGFloat = 14
     public static let metaSpacing: CGFloat = 14
+    /// How many lines of caption a card previews before it offers the rest.
+    ///
+    /// A card is a PREVIEW and the post is where the text is read, so the cap
+    /// is set where a long caption still reads as a paragraph rather than as a
+    /// wall — four lines. Only the card truncates: `PostCaptionRowView`, which
+    /// wears the same face on the post's own page, deliberately does not.
+    public static let captionLineLimit = 4
+    /// The gap between the caption and whatever follows it — the metric line,
+    /// the media preview, or the reveal affordance.
+    public static let captionFollowGap: CGFloat = 12
+    /// The author band's measurements, restated as this cell's own names only
+    /// so call sites read naturally — the values live with the view that draws
+    /// them, because the reveal's prop draws the same band.
+    public static var authorAvatarDiameter: CGFloat { PostAuthorBandView.avatarDiameter }
+    public static var authorFollowGap: CGFloat { PostAuthorBandView.captionGap }
+
+    /// Fired when the viewer asks for the rest of a truncated caption. The HOST
+    /// owns the answer, not this cell: a cell is recycled and the expansion has
+    /// to survive that, so the set of expanded posts lives in
+    /// `CaptionExpansion` and comes back through `configure`.
+    public var onRevealFullCaption: (() -> Void)?
+    /// Fired when the viewer presses the band's follow control. The HOST owns
+    /// the answer for the same reason it owns caption expansion: a cell is
+    /// recycled, so the followed set lives outside it and comes back through
+    /// `configure`.
+    public var onFollowTapped: (() -> Void)?
 
     private let card = UIView()
+    /// The author band — shown only where the row's post actually carries an
+    /// identity.
+    ///
+    /// A profile gallery's posts do not: that surface is already scoped to one
+    /// author, so `GalleryPost`'s author fields are left nil there and the band
+    /// disappears without anyone passing a flag. The band is therefore a
+    /// function of the DATA rather than of the screen, which is the only
+    /// version of this that cannot be wired up wrong.
+    ///
+    /// The VIEW is shared with the reveal's transition prop — see
+    /// `PostAuthorBandView` for why that matters.
+    private let authorBand = PostAuthorBandView()
+    private var showsAuthorBand = false
+    /// The caption hangs off the band when there is one and off the card's own
+    /// top edge when there is not — swapped per configure.
+    private var captionFollowsBand: NSLayoutConstraint!
+    private var captionAtCardTop: NSLayoutConstraint!
     private let captionLabel = UILabel()
+    private var isCaptionExpanded = false
+    /// The caption as the post carries it. The label shows a SHORTENED version
+    /// while truncated, so the label's own text is not a copy of this and
+    /// cannot be used in its place.
+    private var fullCaption = ""
+    /// The closing metric line, held so a landing can bring it in gently —
+    /// see `fadeInRevealedFurniture`.
+    private var metaRow: UIStackView!
+    /// Where "Show more" sits inside the label's current attributed text, or
+    /// nil when the caption fits and there is no affordance at all.
+    ///
+    /// It is the tap target: a range, not a view, because the affordance is a
+    /// run of glyphs inside the caption's own layout now — see
+    /// `captionTapped`.
+    private var showMoreRange: NSRange?
     private let mediaView = UIImageView()
     private let playBadge = UIImageView(image: UIImage(systemName: "play.fill"))
     private static let metaFont = UIFont.preferredFont(forTextStyle: .footnote)
@@ -191,12 +617,44 @@ public final class PostGridListRowCell: UICollectionViewCell {
         captionLabel.font = .preferredFont(forTextStyle: .body)
         captionLabel.adjustsFontForContentSizeCategory = true
         captionLabel.textColor = .label
-        captionLabel.numberOfLines = 0
+        captionLabel.numberOfLines = Self.captionLineLimit
+        // WORD WRAPPING, not tail truncation, and that is not a detail: the
+        // ellipsis is written into the text here rather than drawn by the
+        // label, because it has to be followed by "Show more" ON THE SAME
+        // LINE. A label that truncates for itself puts the ellipsis at the
+        // very end of the last line and leaves nowhere to put anything after
+        // it.
+        captionLabel.lineBreakMode = .byWordWrapping
+        // TOP-ANCHORED DRAWING, and this is what makes the expansion read as a
+        // reveal rather than as a jump.
+        //
+        // A label centres its text block inside its own bounds. Expanding sets
+        // the whole caption on a label whose frame is still four lines tall and
+        // then animates that frame open — so for the length of the animation
+        // the text is taller than the box holding it, and centred means the
+        // lines already on screen slide UP and out before drifting back down.
+        // Anchored to the top they simply stay where they are while the rest
+        // arrives underneath.
+        captionLabel.contentMode = .top
+        // The affordance is a run of glyphs inside this label, so the label is
+        // what receives its tap.
+        captionLabel.isUserInteractionEnabled = true
+        let tap = UITapGestureRecognizer(target: self, action: #selector(captionTapped))
+        tap.delegate = self
+        captionLabel.addGestureRecognizer(tap)
+        buildAuthorBand()
+
         captionLabel.constrain(in: card) { parent in
-            captionLabel.topAnchor.constraint(equalTo: parent.topAnchor, constant: Self.captionTopInset)
             captionLabel.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Self.captionInset)
             captionLabel.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Self.captionInset)
         }
+        captionAtCardTop = captionLabel.topAnchor.constraint(
+            equalTo: card.topAnchor, constant: Self.captionTopInset
+        )
+        captionFollowsBand = captionLabel.topAnchor.constraint(
+            equalTo: authorBand.bottomAnchor, constant: Self.authorFollowGap
+        )
+        captionAtCardTop.isActive = true
 
         mediaView.contentMode = .scaleAspectFill
         mediaView.clipsToBounds = true
@@ -225,6 +683,7 @@ public final class PostGridListRowCell: UICollectionViewCell {
         // Views lead, reactions and comments follow — the same reach-first
         // order as the media tiles' counter pair.
         let metaRow = UIStackView(arrangedSubviews: [views, reactions, comments, spacer, ageLabel])
+        self.metaRow = metaRow
         metaRow.axis = .horizontal
         metaRow.alignment = .center
         metaRow.spacing = Self.metaSpacing
@@ -233,16 +692,55 @@ public final class PostGridListRowCell: UICollectionViewCell {
             metaRow.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Self.captionInset)
             metaRow.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Self.metaBottomInset)
         }
-        metaFollowsCaption = metaRow.topAnchor.constraint(equalTo: captionLabel.bottomAnchor, constant: 12)
+        metaFollowsCaption = metaRow.topAnchor.constraint(
+            equalTo: captionLabel.bottomAnchor, constant: Self.captionFollowGap
+        )
         metaFollowsCaption.isActive = true
         mediaConstraints = [
-            mediaView.topAnchor.constraint(equalTo: captionLabel.bottomAnchor, constant: 12),
+            mediaView.topAnchor.constraint(
+                equalTo: captionLabel.bottomAnchor, constant: Self.captionFollowGap
+            ),
             mediaView.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
             mediaView.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
             mediaView.heightAnchor.constraint(equalToConstant: 180),
             metaRow.topAnchor.constraint(equalTo: mediaView.bottomAnchor, constant: 12)
         ]
     }
+
+    private func buildAuthorBand() {
+        authorBand.onFollowTapped = { [weak self] in self?.onFollowTapped?() }
+        authorBand.constrain(in: card) { parent in
+            authorBand.topAnchor.constraint(
+                equalTo: parent.topAnchor, constant: Self.captionTopInset
+            )
+            authorBand.leadingAnchor.constraint(
+                equalTo: parent.leadingAnchor, constant: Self.captionInset
+            )
+            authorBand.trailingAnchor.constraint(
+                equalTo: parent.trailingAnchor, constant: -Self.captionInset
+            )
+        }
+    }
+
+    private func bindAuthorBand(to post: GalleryPost, imagePipeline: ImagePipeline) {
+        let model = PostAuthorBandView.Model(post: post)
+        showsAuthorBand = model != nil
+        authorBand.isHidden = !showsAuthorBand
+        captionAtCardTop.isActive = !showsAuthorBand
+        captionFollowsBand.isActive = showsAuthorBand
+        guard let model else {
+            authorBand.cancelPendingWork()
+            return
+        }
+        authorBand.configure(with: model, imagePipeline: imagePipeline)
+        authorBand.setFollowing(false)
+    }
+
+    /// How the row's follow control reads. Forwarded to the band it belongs to.
+    public func setFollowing(_ following: Bool) {
+        authorBand.setFollowing(following)
+    }
+
 
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -263,10 +761,101 @@ public final class PostGridListRowCell: UICollectionViewCell {
         loadTask?.cancel()
         loadTask = nil
         mediaView.image = nil
+        onRevealFullCaption = nil
+        // Back to truncated. A recycled row must not inherit the previous
+        // post's expansion — `configure` re-applies the host's answer for the
+        // post it is actually bound to.
+        isCaptionExpanded = false
+        captionLabel.numberOfLines = Self.captionLineLimit
+        showMoreRange = nil
+        // A landing's fade is per-flight state and must not ride a recycled
+        // cell to whatever post it is bound to next.
+        metaRow.alpha = 1
+        authorBand.cancelPendingWork()
+        onFollowTapped = nil
+        // Concealment is per-FLIGHT state and must not ride a recycled cell to
+        // whatever post it is bound to next — see `setHeroConcealed`.
+        card.alpha = 1
+        authorBand.alpha = 1
     }
 
-    public func configure(with post: GalleryPost, imagePipeline: ImagePipeline) {
-        captionLabel.text = post.caption
+    private func revealTapped() {
+        guard !isCaptionExpanded else { return }
+        isCaptionExpanded = true
+        captionLabel.numberOfLines = 0
+        showMoreRange = nil
+        captionLabel.attributedText = Self.plain(fullCaption, font: captionLabel.font)
+        onRevealFullCaption?()
+    }
+
+    @objc private func captionTapped() {
+        revealTapped()
+    }
+
+    /// ⚠️ The recognizer must REFUSE every touch that is not on the affordance,
+    /// not merely ignore it.
+    ///
+    /// A gesture recognizer on the label consumes taps on the label whether or
+    /// not its action does anything, so a recognizer that simply returned early
+    /// for a miss would make the caption — the largest thing on the card —
+    /// stop opening the post. Refusing at `shouldBegin` leaves the touch to the
+    /// collection view's own selection.
+    public override func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
+        guard let range = showMoreRange, !isCaptionExpanded else { return false }
+        return Self.characterIndex(
+            at: gesture.location(in: captionLabel), in: captionLabel
+        ).map { NSLocationInRange($0, range) } ?? false
+    }
+
+    /// Which character of the label's text is under `point`, laid out exactly
+    /// as the label lays it out.
+    ///
+    /// TextKit rather than arithmetic on line heights: the affordance is the
+    /// tail of a wrapped line, so its position depends on where the line broke,
+    /// which only a real layout knows. The container is configured to match the
+    /// label — zero padding, the label's line-break mode and line cap — because
+    /// a container that differs in any of those breaks the text somewhere else
+    /// and hit-tests a different string.
+    ///
+    /// Returns nil when the point is outside the laid-out glyphs, so a tap in
+    /// the empty tail of the last line is a miss rather than the nearest
+    /// character.
+    private static func characterIndex(at point: CGPoint, in label: UILabel) -> Int? {
+        guard let attributed = label.attributedText, attributed.length > 0 else { return nil }
+        let storage = NSTextStorage(attributedString: attributed)
+        let manager = NSLayoutManager()
+        let container = NSTextContainer(size: label.bounds.size)
+        container.lineFragmentPadding = 0
+        container.lineBreakMode = label.lineBreakMode
+        container.maximumNumberOfLines = label.numberOfLines
+        storage.addLayoutManager(manager)
+        manager.addTextContainer(container)
+        manager.ensureLayout(for: container)
+
+        let index = manager.glyphIndex(for: point, in: container, fractionOfDistanceThroughGlyph: nil)
+        // `glyphIndex(for:)` clamps to the nearest glyph, so a point past the
+        // end of a line answers with that line's last character. Rejecting a
+        // point outside the glyph's own rect is what turns that clamp back into
+        // a miss.
+        let glyphRect = manager.boundingRect(
+            forGlyphRange: NSRange(location: index, length: 1), in: container
+        )
+        guard glyphRect.contains(point) else { return nil }
+        return manager.characterIndexForGlyph(at: index)
+    }
+
+    public func configure(
+        with post: GalleryPost, imagePipeline: ImagePipeline, captionExpanded: Bool = false
+    ) {
+        isCaptionExpanded = captionExpanded
+        captionLabel.numberOfLines = captionExpanded ? 0 : Self.captionLineLimit
+        fullCaption = post.caption
+        bindAuthorBand(to: post, imagePipeline: imagePipeline)
+        showMoreRange = nil
+        // Provisional: the real composition needs the row's final width, which
+        // only `preferredLayoutAttributesFitting` knows. Set here so a cell
+        // that is never sized (a measuring instance) still reads correctly.
+        captionLabel.attributedText = Self.plain(post.caption, font: captionLabel.font)
         let hasMedia = post.kind != .text
         mediaView.isHidden = !hasMedia
         playBadge.isHidden = post.kind != .video

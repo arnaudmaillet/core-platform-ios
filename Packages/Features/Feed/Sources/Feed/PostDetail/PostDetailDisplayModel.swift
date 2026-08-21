@@ -1,5 +1,6 @@
 import CoreModels
 import Foundation
+import PostGrid
 
 /// View-ready projection of a `FeedEntry` for the detail screen. Engagement
 /// (like count / liked) is tracked separately, like the feed cell.
@@ -46,16 +47,21 @@ public struct PostDetailDisplayModel: Sendable, Equatable {
         return initials.isEmpty ? "?" : initials.joined()
     }
 
+    /// THE CARD'S register, not one of this screen's own.
+    ///
+    /// A text page is arrived at by a reveal that opens the gallery row INTO
+    /// the page, so the row's closing line and the page's first line are the
+    /// same line seen twice — and they were spelling the same instant three
+    /// different ways. The card said "28 May", this said "28 May 2026" (a
+    /// medium date), and the seeded projection said "12 weeks". The last frame
+    /// of every close swapped one for another.
+    ///
+    /// Both producers now defer to `PostMetadata.compactAge`, which matters as
+    /// much as which one won: seeded and hydrated have to agree with each
+    /// other too, or the row rewrites itself the moment its entry lands.
     private static func timestamp(_ date: Date, now: Date) -> String {
-        let formatter = DateFormatter()
-        // Same-day posts read as a time; older ones as a medium date.
-        if Calendar.current.isDate(date, inSameDayAs: now) {
-            formatter.dateStyle = .none
-            formatter.timeStyle = .short
-        } else {
-            formatter.dateStyle = .medium
-            formatter.timeStyle = .none
-        }
-        return formatter.string(from: date)
+        PostMetadata.compactAge(
+            ofMillis: Int64(date.timeIntervalSince1970 * 1000), now: now
+        )
     }
 }
