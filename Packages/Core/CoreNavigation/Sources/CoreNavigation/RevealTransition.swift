@@ -377,7 +377,7 @@ enum RevealStage {
     }
 
     /// How the window stops being the page and becomes the card, WITHOUT ever
-    /// being both.
+    /// being both — as a pure function of how far the dismissal has gone.
     ///
     /// The obvious version cross-fades one into the other, and it is the
     /// mistake this transition has already paid for four times over: blending
@@ -386,49 +386,58 @@ enum RevealStage {
     /// the general one — a fade only works against NOTHING.
     ///
     /// So there is a nothing. The stand-in is the card's fill and the card is
-    /// what it holds, and the two fade separately with a beat between:
+    /// what it holds, and the two fade at different times with a beat between:
     ///
     /// ```
-    ///   page  ──fade──►  card-coloured, empty  ──fade──►  card
-    ///        (text vs a flat colour)          (a card vs nothing)
+    ///   0        .10        .45   .55        .85         1
+    ///   │ page    │ fill in  │ EMPTY │ card in │  card    │
+    ///   └─────────┴──────────┴───────┴─────────┴──────────┘
+    ///             text vs a    the    a card vs
+    ///             flat colour  beat   nothing
     /// ```
     ///
-    /// Neither fade ever has text on both sides. The first dissolves the page
-    /// against a plain fill, which is a clean dissolve; the second brings the
-    /// card into an empty window, which is the only kind of arrival a fade
-    /// improves.
+    /// Neither fade ever has text on both sides.
     ///
-    /// On a FIXED clock, not on the drag's progress, and that is deliberate: a
-    /// finger can hold at any fraction, and a progress-driven swap would park
-    /// the viewer mid-blend for as long as they liked. Timed, it is over before
-    /// the hand has travelled and the flight itself is a pure geometric move —
-    /// the same reason the hero's detach dip is timed rather than scrubbed.
-    static func swapToStandIn(_ standIn: UIView) {
-        let shaping = standIn as? RevealStandInShaping
-        shaping?.setContentOpacity(0)
-        standIn.alpha = 0
-        UIView.animate(
-            withDuration: fillFadeDuration, delay: 0,
-            options: [.curveEaseOut, .allowUserInteraction]
-        ) {
-            standIn.alpha = 1
-        }
-        UIView.animate(
-            withDuration: contentFadeDuration, delay: fillFadeDuration + emptyBeat,
-            options: [.curveEaseIn, .allowUserInteraction]
-        ) {
-            shaping?.setContentOpacity(1)
-        }
+    /// ## Why on progress, and why in the MIDDLE
+    ///
+    /// The first version ran this on a fixed clock at grab-begin, on the
+    /// reasoning that a held finger should not be able to park the viewer
+    /// mid-blend. Two things were wrong with it. The blend it was protecting
+    /// against no longer exists — there is a beat now, so the worst a held
+    /// finger can do is hold on an empty card-coloured window, which is a
+    /// state rather than a smear. And a timed swap at grab-begin empties the
+    /// window while the viewer is still looking at what they were reading,
+    /// which is abrupt at the one moment nothing has happened yet.
+    ///
+    /// Worse, it did not work: an interactive transition's start runs inside
+    /// navigation setup machinery where `UIView.animate` applies WITHOUT
+    /// animating (the trap `ZoomDismissInteractionController` documents for its
+    /// detach dip), so the delayed half never ran and nothing else set the
+    /// card's opacity on a committed grab. The card stayed invisible for the
+    /// whole flight and appeared when the stand-in was retired — the abrupt
+    /// last frame.
+    ///
+    /// On progress there is no clock to lose. The drag sets these directly, as
+    /// it sets every other value, and the empty state lands in the middle of
+    /// the gesture where the viewer has already decided to leave.
+    static func swapFractions(at progress: CGFloat) -> (fill: CGFloat, content: CGFloat) {
+        (fill: ramp(progress, from: pageFadeStart, to: pageFadeEnd),
+         content: ramp(progress, from: cardFadeStart, to: cardFadeEnd))
+    }
+
+    private static func ramp(_ value: CGFloat, from start: CGFloat, to end: CGFloat) -> CGFloat {
+        guard end > start else { return value >= end ? 1 : 0 }
+        return min(max((value - start) / (end - start), 0), 1)
     }
 
     /// The page dissolving into the card's fill.
-    static let fillFadeDuration: TimeInterval = 0.10
-    /// The window holding nothing. Short — it is a beat, not a pause — but not
-    /// zero, which would put the two fades back-to-back and let the tail of one
-    /// overlap the head of the other.
-    static let emptyBeat: TimeInterval = 0.04
-    /// The card arriving into it.
-    static let contentFadeDuration: TimeInterval = 0.12
+    static let pageFadeStart: CGFloat = 0.10
+    static let pageFadeEnd: CGFloat = 0.45
+    /// The card arriving into it. The gap between `pageFadeEnd` and this is the
+    /// EMPTY BEAT — the window card-coloured and holding nothing — and it is
+    /// what keeps the two fades from ever having text on both sides.
+    static let cardFadeStart: CGFloat = 0.55
+    static let cardFadeEnd: CGFloat = 0.85
 
     /// The page RIDING the window: it moves with it, rigidly, and nothing
     /// inside it moves relative to anything else.
@@ -869,7 +878,8 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let standIn = geometry.makeDismissStandIn()
         if let standIn {
             host.addSubview(standIn)
-            RevealStage.swapToStandIn(standIn)
+            standIn.alpha = 0
+            (standIn as? RevealStandInShaping)?.setContentOpacity(0)
         }
         let closed = RevealStage.closed(
             sourceRect: sourceRect,
@@ -902,6 +912,25 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let chromeAlpha: CGFloat = 1
         chrome?.alpha = 0
 
+        // The chevron has no finger, so the swap's fractions become keyframes on
+        // the spring's own clock — the same schedule, the same empty beat, one
+        // animation rather than two that could overlap.
+        if let standIn {
+            let shaping = standIn as? RevealStandInShaping
+            UIView.animateKeyframes(
+                withDuration: transitionDuration(using: context), delay: 0,
+                options: [.calculationModeLinear]
+            ) {
+                UIView.addKeyframe(
+                    withRelativeStartTime: RevealStage.pageFadeStart,
+                    relativeDuration: RevealStage.pageFadeEnd - RevealStage.pageFadeStart
+                ) { standIn.alpha = 1 }
+                UIView.addKeyframe(
+                    withRelativeStartTime: RevealStage.cardFadeStart,
+                    relativeDuration: RevealStage.cardFadeEnd - RevealStage.cardFadeStart
+                ) { shaping?.setContentOpacity(1) }
+            }
+        }
         animator.addAnimations {
             RevealStage.apply(closed, mask: mask, page: fromView, standIn: standIn)
             // Back into the card's tone as the mask closes onto it, so the

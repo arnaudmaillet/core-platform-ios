@@ -140,10 +140,8 @@ final class RevealDismissInteractionController: NSObject,
         let standIn = geometry.makeDismissStandIn()
         if let standIn {
             host.addSubview(standIn)
-            // Timed, not scrubbed — see `RevealStage.swapToStandIn`. A finger
-            // can hold at any fraction, and a progress-driven swap would park
-            // the viewer mid-blend for as long as they liked.
-            RevealStage.swapToStandIn(standIn)
+            standIn.alpha = 0
+            (standIn as? RevealStandInShaping)?.setContentOpacity(0)
         }
         self.standIn = standIn
         RevealStage.apply(open, mask: mask, page: fromView, standIn: standIn)
@@ -242,6 +240,16 @@ final class RevealDismissInteractionController: NSObject,
 
         let staged = self.pose(for: translation, in: view)
         RevealStage.apply(staged.pose, mask: windowMask, page: page, standIn: standIn)
+        // The swap, on the finger's own channel and with an empty beat in the
+        // middle of it — see `RevealStage.swapFractions`. Direct sets, like
+        // every other value the drag owns: an interactive transition's start
+        // runs where `UIView.animate` applies without animating, and the timed
+        // version this replaces lost its second half to exactly that.
+        if let standIn {
+            let swap = RevealStage.swapFractions(at: staged.progress)
+            standIn.alpha = swap.fill
+            (standIn as? RevealStandInShaping)?.setContentOpacity(swap.content)
+        }
 
         let pose = staged
         dim?.alpha = 1 - pose.progress
@@ -323,12 +331,16 @@ final class RevealDismissInteractionController: NSObject,
             options: [.beginFromCurrentState, .allowUserInteraction]
         ) {
             RevealStage.apply(target, mask: windowMask, page: page, standIn: self.standIn)
-            // An abandoned grab hands the page back: the stand-in goes, fill
-            // and card together, and what is underneath was never touched.
-            if !commit {
-                self.standIn?.alpha = 0
-                (self.standIn as? RevealStandInShaping)?.setContentOpacity(0)
-            }
+            // The release finishes whatever fraction the drag reached: a
+            // committed grab lands on the card whole, an abandoned one hands
+            // the page back and the stand-in goes, fill and card together.
+            //
+            // ⚠️ The COMMITTED branch is not optional. Leaving it out was the
+            // abrupt last frame: nothing set the card's opacity on a commit, so
+            // it stayed at whatever the drag had reached — often zero — and the
+            // card appeared only when the stand-in was retired.
+            self.standIn?.alpha = commit ? 1 : 0
+            (self.standIn as? RevealStandInShaping)?.setContentOpacity(commit ? 1 : 0)
             dim?.alpha = commit ? 0 : 1
             chrome?.alpha = commit ? 1 : 0
             self.geometry.setDestinationVeilOpacity(commit ? 1 : 0)

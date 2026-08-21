@@ -128,28 +128,40 @@ struct RevealRegistrationTests {
     }
 
     /// The window stops being the page and becomes the card WITHOUT ever being
-    /// both — see `RevealStage.swapToStandIn`. These pin the two facts that
-    /// make that true, neither of which is visible from reading the timings.
+    /// both — see `RevealStage.swapFractions`. These pin what reading the
+    /// numbers will not tell you.
     ///
     /// The design exists because blending two runs of text draws both of them,
-    /// which this transition established four times over. A zero beat would put
-    /// the fades back-to-back and let the tail of one overlap the head of the
-    /// other, which is the thing itself creeping back in.
+    /// which this transition established four times over.
+    @Test func thereIsAFractionWhereTheWindowHoldsNothing() {
+        // Anywhere in the beat: the fill is up, the card is not.
+        let beat = RevealStage.swapFractions(at: 0.5)
+        #expect(beat.fill == 1)
+        #expect(beat.content == 0)
+    }
+
+    /// The two fades never overlap — the card cannot begin before the page has
+    /// finished, at any progress at all.
     @Test func theTwoFadesNeverOverlap() {
-        #expect(RevealStage.emptyBeat > 0)
+        #expect(RevealStage.cardFadeStart > RevealStage.pageFadeEnd)
+        for step in 0...100 {
+            let swap = RevealStage.swapFractions(at: CGFloat(step) / 100)
+            // Partway through one means the other is finished or not started.
+            if swap.fill > 0, swap.fill < 1 { #expect(swap.content == 0) }
+            if swap.content > 0 { #expect(swap.fill == 1) }
+        }
     }
 
-    /// And the whole swap finishes inside the flight it belongs to. Longer than
-    /// the spring and the card would still be arriving as the window lands on
-    /// the row — a fade finishing after its own transition.
-    @Test func theSwapFinishesBeforeTheFlightDoes() {
-        let swap = RevealStage.fillFadeDuration
-            + RevealStage.emptyBeat
-            + RevealStage.contentFadeDuration
-        #expect(swap < ZoomFlight.springDuration)
+    /// And it is over before the drag is: a swap still running at the release
+    /// would land a half-drawn card on the row.
+    @Test func theSwapFinishesBeforeTheDragCan() {
+        let done = RevealStage.swapFractions(at: 1)
+        #expect(done.fill == 1)
+        #expect(done.content == 1)
+        #expect(RevealStage.cardFadeEnd < 1)
     }
 
-    /// A page under a flight moves one of three ways, and the three are not
+    /// A page under a flight moves one of three ways    /// A page under a flight moves one of three ways, and the three are not
     /// interchangeable. These pin the one a stand-in selects.
     ///
     /// * REGISTERED — the page slides so its caption lands on the card's.
