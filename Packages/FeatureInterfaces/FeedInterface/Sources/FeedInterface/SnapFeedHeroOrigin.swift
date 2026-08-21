@@ -98,6 +98,45 @@ public struct TextRevealOrigin {
         self.willStageDismissal = willStageDismissal
         self.dismissalDidEnd = dismissalDidEnd
     }
+
+    /// A copy with the two chrome callbacks swapped, and EVERYTHING ELSE
+    /// carried across.
+    ///
+    /// ⚠️ This exists so that wrapping cannot drop anything, and it exists
+    /// because wrapping dropped four things. A host that pushes the post owns
+    /// the tab bar and has to wrap `presentationDidEnd` and `dismissalDidEnd`
+    /// around its own dock work; the way to do that was to rebuild the struct
+    /// at the call site, and the rebuild silently omitted `captionTop`,
+    /// `authorBand`, `makeDismissStandIn` and `setConcealed`.
+    ///
+    /// Every field here carries a default, so the omission compiled and ran —
+    /// and gave a profile gallery a reveal with no stand-in, no borrowed band,
+    /// no source concealment (the row sat visible beside the window it was
+    /// supposedly inside) and a caption offset of zero. Nothing failed; it just
+    /// looked like an older build, which is exactly what it was.
+    ///
+    /// Add a field to this type and it flows through here for free. Rebuild the
+    /// struct by hand instead and you are back to the same defect.
+    ///
+    /// The caller composes with the originals itself, because the two orders
+    /// differ and only the caller knows why.
+    public func replacingChrome(
+        presentationDidEnd: @escaping (Bool) -> Void,
+        dismissalDidEnd: @escaping (Bool) -> Void
+    ) -> TextRevealOrigin {
+        TextRevealOrigin(
+            rowFrame: rowFrame,
+            captionEnd: captionEnd,
+            depthView: depthView,
+            captionTop: captionTop,
+            authorBand: authorBand,
+            makeDismissStandIn: makeDismissStandIn,
+            setConcealed: setConcealed,
+            presentationDidEnd: presentationDidEnd,
+            willStageDismissal: willStageDismissal,
+            dismissalDidEnd: dismissalDidEnd
+        )
+    }
 }
 
 /// Everything the feed needs in order to fly a hero FROM a surface it knows

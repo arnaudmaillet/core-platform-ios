@@ -542,10 +542,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     private static func withDockChoreography(
         _ reveal: TextRevealOrigin, on nav: UINavigationController
     ) -> TextRevealOrigin {
-        TextRevealOrigin(
-            rowFrame: reveal.rowFrame,
-            captionEnd: reveal.captionEnd,
-            depthView: reveal.depthView,
+        // `replacingChrome`, never a rebuilt `TextRevealOrigin`. This method
+        // used to construct one field by field and dropped four of them —
+        // `captionTop`, `authorBand`, `makeDismissStandIn` and `setConcealed` —
+        // which are exactly the pieces a profile gallery's reveal was missing
+        // while For You's, which does not come through here, had them all.
+        reveal.replacingChrome(
             presentationDidEnd: { [weak nav] landed in
                 // The flight faded the bar to nothing; take it down for real
                 // now. A REVERSED opening never showed the page, so the bar
@@ -554,7 +556,6 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 nav?.tabBarController?.tabBar.alpha = 1
                 reveal.presentationDidEnd(landed)
             },
-            willStageDismissal: reveal.willStageDismissal,
             dismissalDidEnd: { [weak nav] committed in
                 reveal.dismissalDidEnd(committed)
                 // A cancelled swipe leaves the post on screen, so the bar
