@@ -211,6 +211,9 @@ public struct RevealGeometry {
 @MainActor
 public protocol RevealStandInShaping: AnyObject {
     func setCornerRadius(_ radius: CGFloat)
+    /// The card's opacity INSIDE the stand-in, separate from the stand-in's
+    /// own — see `RevealStage.swapToStandIn`.
+    func setContentOpacity(_ alpha: CGFloat)
 }
 
 // MARK: - Shared staging
@@ -372,6 +375,60 @@ enum RevealStage {
             y: window.minY - progress * anchor.minY + progress * captionTop
         )
     }
+
+    /// How the window stops being the page and becomes the card, WITHOUT ever
+    /// being both.
+    ///
+    /// The obvious version cross-fades one into the other, and it is the
+    /// mistake this transition has already paid for four times over: blending
+    /// two different runs of text draws BOTH of them. The caption ghost died of
+    /// it four times for four different reasons, and the note that survived is
+    /// the general one — a fade only works against NOTHING.
+    ///
+    /// So there is a nothing. The stand-in is the card's fill and the card is
+    /// what it holds, and the two fade separately with a beat between:
+    ///
+    /// ```
+    ///   page  ──fade──►  card-coloured, empty  ──fade──►  card
+    ///        (text vs a flat colour)          (a card vs nothing)
+    /// ```
+    ///
+    /// Neither fade ever has text on both sides. The first dissolves the page
+    /// against a plain fill, which is a clean dissolve; the second brings the
+    /// card into an empty window, which is the only kind of arrival a fade
+    /// improves.
+    ///
+    /// On a FIXED clock, not on the drag's progress, and that is deliberate: a
+    /// finger can hold at any fraction, and a progress-driven swap would park
+    /// the viewer mid-blend for as long as they liked. Timed, it is over before
+    /// the hand has travelled and the flight itself is a pure geometric move —
+    /// the same reason the hero's detach dip is timed rather than scrubbed.
+    static func swapToStandIn(_ standIn: UIView) {
+        let shaping = standIn as? RevealStandInShaping
+        shaping?.setContentOpacity(0)
+        standIn.alpha = 0
+        UIView.animate(
+            withDuration: fillFadeDuration, delay: 0,
+            options: [.curveEaseOut, .allowUserInteraction]
+        ) {
+            standIn.alpha = 1
+        }
+        UIView.animate(
+            withDuration: contentFadeDuration, delay: fillFadeDuration + emptyBeat,
+            options: [.curveEaseIn, .allowUserInteraction]
+        ) {
+            shaping?.setContentOpacity(1)
+        }
+    }
+
+    /// The page dissolving into the card's fill.
+    static let fillFadeDuration: TimeInterval = 0.10
+    /// The window holding nothing. Short — it is a beat, not a pause — but not
+    /// zero, which would put the two fades back-to-back and let the tail of one
+    /// overlap the head of the other.
+    static let emptyBeat: TimeInterval = 0.04
+    /// The card arriving into it.
+    static let contentFadeDuration: TimeInterval = 0.12
 
     /// The page RIDING the window: it moves with it, rigidly, and nothing
     /// inside it moves relative to anything else.
@@ -811,8 +868,8 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // still and fade.
         let standIn = geometry.makeDismissStandIn()
         if let standIn {
-            standIn.alpha = 0
             host.addSubview(standIn)
+            RevealStage.swapToStandIn(standIn)
         }
         let closed = RevealStage.closed(
             sourceRect: sourceRect,
@@ -847,7 +904,6 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
 
         animator.addAnimations {
             RevealStage.apply(closed, mask: mask, page: fromView, standIn: standIn)
-            standIn?.alpha = 1
             // Back into the card's tone as the mask closes onto it, so the
             // last frame of the close and the row underneath are one colour.
             self.geometry.setDestinationGround(self.geometry.sourceFill)

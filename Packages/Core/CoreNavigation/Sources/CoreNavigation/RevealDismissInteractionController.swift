@@ -139,8 +139,11 @@ final class RevealDismissInteractionController: NSObject,
         // home is the card, not the page it was read from.
         let standIn = geometry.makeDismissStandIn()
         if let standIn {
-            standIn.alpha = 0
             host.addSubview(standIn)
+            // Timed, not scrubbed — see `RevealStage.swapToStandIn`. A finger
+            // can hold at any fraction, and a progress-driven swap would park
+            // the viewer mid-blend for as long as they liked.
+            RevealStage.swapToStandIn(standIn)
         }
         self.standIn = standIn
         RevealStage.apply(open, mask: mask, page: fromView, standIn: standIn)
@@ -239,9 +242,6 @@ final class RevealDismissInteractionController: NSObject,
 
         let staged = self.pose(for: translation, in: view)
         RevealStage.apply(staged.pose, mask: windowMask, page: page, standIn: standIn)
-        // On the finger's own channel: the further home the window is, the more
-        // of it is the card rather than the page.
-        standIn?.alpha = staged.progress
 
         let pose = staged
         dim?.alpha = 1 - pose.progress
@@ -323,7 +323,12 @@ final class RevealDismissInteractionController: NSObject,
             options: [.beginFromCurrentState, .allowUserInteraction]
         ) {
             RevealStage.apply(target, mask: windowMask, page: page, standIn: self.standIn)
-            self.standIn?.alpha = commit ? 1 : 0
+            // An abandoned grab hands the page back: the stand-in goes, fill
+            // and card together, and what is underneath was never touched.
+            if !commit {
+                self.standIn?.alpha = 0
+                (self.standIn as? RevealStandInShaping)?.setContentOpacity(0)
+            }
             dim?.alpha = commit ? 0 : 1
             chrome?.alpha = commit ? 1 : 0
             self.geometry.setDestinationVeilOpacity(commit ? 1 : 0)

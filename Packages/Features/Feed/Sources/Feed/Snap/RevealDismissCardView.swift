@@ -98,4 +98,15 @@ final class RevealDismissCardView: UIView, RevealStandInShaping {
     func setCornerRadius(_ radius: CGFloat) {
         layer.cornerRadius = radius
     }
+
+    /// The CARD's opacity, separate from this view's own — which is what makes
+    /// an empty state possible at all.
+    ///
+    /// The view is the card's FILL and the card is what it holds. Fading the
+    /// two independently gives a third thing neither can give alone: a window
+    /// that is card-coloured and holds nothing. See `RevealStage.swapToStandIn`
+    /// for why that beat matters.
+    func setContentOpacity(_ alpha: CGFloat) {
+        card.alpha = alpha
+    }
 }

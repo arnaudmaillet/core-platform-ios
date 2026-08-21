@@ -127,6 +127,28 @@ struct RevealRegistrationTests {
         #expect(closed.pageTranslation == law)
     }
 
+    /// The window stops being the page and becomes the card WITHOUT ever being
+    /// both — see `RevealStage.swapToStandIn`. These pin the two facts that
+    /// make that true, neither of which is visible from reading the timings.
+    ///
+    /// The design exists because blending two runs of text draws both of them,
+    /// which this transition established four times over. A zero beat would put
+    /// the fades back-to-back and let the tail of one overlap the head of the
+    /// other, which is the thing itself creeping back in.
+    @Test func theTwoFadesNeverOverlap() {
+        #expect(RevealStage.emptyBeat > 0)
+    }
+
+    /// And the whole swap finishes inside the flight it belongs to. Longer than
+    /// the spring and the card would still be arriving as the window lands on
+    /// the row — a fade finishing after its own transition.
+    @Test func theSwapFinishesBeforeTheFlightDoes() {
+        let swap = RevealStage.fillFadeDuration
+            + RevealStage.emptyBeat
+            + RevealStage.contentFadeDuration
+        #expect(swap < ZoomFlight.springDuration)
+    }
+
     /// A page under a flight moves one of three ways, and the three are not
     /// interchangeable. These pin the one a stand-in selects.
     ///
