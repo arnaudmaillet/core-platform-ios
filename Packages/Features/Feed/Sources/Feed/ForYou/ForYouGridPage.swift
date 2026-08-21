@@ -1152,8 +1152,20 @@ final class ForYouGridPage: UIView {
             // it is here to be asked for — and a stand-in that does not ask
             // flies a truncated card home, "Show more" and all, onto a row that
             // is showing the whole thing.
-            captionExpanded: captionExpansion.isExpanded(postID)
+            captionExpanded: captionExpansion.isExpanded(postID),
+            showsAuthorMenu: showsAuthorMenu(for: post)
         )
+    }
+
+    /// Whether the row for `post` draws a "...", asked of the same provider the
+    /// row asks. The stand-in has to match it or the control pops in or out in
+    /// the last frame — see `RevealDismissCardView`.
+    private func showsAuthorMenu(for post: GalleryPost) -> Bool {
+        guard let authorID = post.authorID, let authorMenuActions else { return false }
+        // The anchor only ever places a popover, and nothing is being presented
+        // here: this asks the provider what it WOULD offer.
+        let context = AuthorMenuContext(post: post, authorID: authorID, anchor: UIView())
+        return !authorMenuActions(context).isEmpty
     }
 
     /// The row's author band, for the destination to borrow during a flight.

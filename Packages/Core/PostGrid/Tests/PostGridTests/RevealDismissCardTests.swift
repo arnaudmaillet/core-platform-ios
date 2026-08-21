@@ -114,6 +114,45 @@ struct RevealDismissCardTests {
         #expect(plain.subviews.first?.bounds.height == opened.subviews.first?.bounds.height)
     }
 
+    /// The "..." is drawn exactly when the landing row draws one, and both ways
+    /// of being wrong are a jump in the last frame. This is the one that
+    /// shipped: the stand-in always drew it, and a viewer's own post has no
+    /// menu, so every dismissal on your own profile ended with a control
+    /// vanishing three frames after the window settled.
+    @Test func theOverflowControlMatchesTheRowItLandsOn() {
+        let shown = standIn(width: 343)
+        let absent = RevealDismissCardView(
+            post: post(),
+            width: 343,
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            showsAuthorMenu: false
+        )
+        for view in [shown, absent] {
+            view.frame = CGRect(x: 0, y: 0, width: 402, height: 600)
+            view.layoutIfNeeded()
+        }
+
+        #expect(menuControl(in: shown)?.isHidden == false)
+        #expect(menuControl(in: absent)?.isHidden == true)
+    }
+
+    /// The band's trailing control, found by shape rather than by name: it is
+    /// the only square button the card holds.
+    private func menuControl(in view: RevealDismissCardView) -> UIView? {
+        func search(_ root: UIView) -> UIView? {
+            for child in root.subviews {
+                if let button = child as? UIButton,
+                   abs(button.bounds.width - PostAuthorBandView.avatarDiameter) < 0.5,
+                   abs(button.bounds.height - PostAuthorBandView.avatarDiameter) < 0.5 {
+                    return button
+                }
+                if let found = search(child) { return found }
+            }
+            return nil
+        }
+        return search(view)
+    }
+
     /// It takes no touches — it is scenery flying over a live screen.
     @Test func itIsInert() {
         #expect(standIn(width: 343).isUserInteractionEnabled == false)

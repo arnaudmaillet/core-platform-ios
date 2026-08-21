@@ -53,11 +53,19 @@ public final class RevealDismissCardView: UIView, RevealStandInShaping {
     /// ellipsis and a "Show more"; a stand-in built without that flies a
     /// truncated card home and lands it on an expanded one, which is a jump in
     /// both the text and the height.
+    /// `showsAuthorMenu` is the same kind of answer as `captionExpanded`: what
+    /// the ROW it stands in for is showing. The "..." is drawn but never wired
+    /// — the stand-in takes no touches — and it must be drawn exactly when the
+    /// landing row draws one. Both ways of being wrong are a jump in the last
+    /// frame: absent here it pops in, present here it pops out, and the second
+    /// is what shipped (a viewer's own post has no menu, so every dismissal on
+    /// your own profile ended with a control vanishing).
     public init(
         post: GalleryPost,
         width: CGFloat,
         imagePipeline: ImagePipeline,
-        captionExpanded: Bool = false
+        captionExpanded: Bool = false,
+        showsAuthorMenu: Bool = true
     ) {
         card = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: width, height: 200))
         super.init(frame: .zero)
@@ -65,11 +73,12 @@ public final class RevealDismissCardView: UIView, RevealStandInShaping {
         isUserInteractionEnabled = false
 
         card.configure(with: post, imagePipeline: imagePipeline, captionExpanded: captionExpanded)
-        // The "..." is drawn but not wired. A stand-in with no handlers would
-        // hide the control, and the row it lands on has one — a glyph appearing
-        // in the last frame of a transition whose entire job is that the last
-        // frame is unremarkable.
-        card.showAuthorMenuControlAsScenery()
+        // Drawn but not wired, and only when the row has one — see the note on
+        // the initialiser. A stand-in with no handlers would hide the control
+        // by default, which is the wrong answer for the rows that do have it.
+        if showsAuthorMenu {
+            card.showAuthorMenuControlAsScenery()
+        }
         let attributes = UICollectionViewLayoutAttributes(
             forCellWith: IndexPath(item: 0, section: 0)
         )

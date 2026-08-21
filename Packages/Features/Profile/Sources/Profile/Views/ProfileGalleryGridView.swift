@@ -670,8 +670,26 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
             // See For You's twin: the expansion belongs to the surface, and a
             // stand-in built without it lands a truncated card on an expanded
             // row.
-            captionExpanded: captionExpansion.isExpanded(postID)
+            captionExpanded: captionExpansion.isExpanded(postID),
+            showsAuthorMenu: showsAuthorMenu(for: post)
         )
+    }
+
+    /// Whether the row for `post` draws a "...", asked of the same provider the
+    /// row itself asks.
+    ///
+    /// The stand-in has to match, and on THIS surface the answer is often no: a
+    /// viewer's own post offers nothing, so a stand-in that always drew the
+    /// control ended every dismissal with it vanishing.
+    ///
+    /// The provider rather than the realized cell, because a row that scrolled
+    /// out still has to produce a card and cannot be asked what it is showing.
+    private func showsAuthorMenu(for post: GalleryPost) -> Bool {
+        guard let authorID = post.authorID, let authorMenuActions else { return false }
+        // The anchor is only ever read to place a popover, and nothing is being
+        // presented here — this asks the provider what it WOULD offer.
+        let context = AuthorMenuContext(post: post, authorID: authorID, anchor: UIView())
+        return !authorMenuActions(context).isEmpty
     }
 
     /// The row's author band, for the destination to borrow during a flight, so
