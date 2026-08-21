@@ -486,11 +486,26 @@ enum RevealStage {
     /// because the media hero was never the thing that read flat and must not
     /// move.
     static let springDamping: CGFloat = 0.78
-    /// The push-off, between the flight's 0.6 (which eased away from the
-    /// source) and the 0.9 that came with the 0.70 damping and overshot with
-    /// it. Most of what reads as spring here is this rather than the overshoot,
-    /// since two of the three channels clip theirs — see the animators.
-    static let springVelocity: CGFloat = 0.7
+    /// The push-off — small on purpose now that the DURATION carries the
+    /// character.
+    ///
+    /// A kick off the source is what made this read as abrupt: the window left
+    /// fast and then had to shed all of it, so the fastest and slowest parts of
+    /// the motion were a few frames apart. Starting nearly from rest and taking
+    /// longer gives the same distance a visible acceleration and a visible
+    /// settle, which is what "smooth" is asking for.
+    static let springVelocity: CGFloat = 0.35
+    /// The reveal's own duration, longer than the flight's 0.42.
+    ///
+    /// A media flight moves a card across a screen; a reveal grows a 44pt disc
+    /// into the whole of one, which is a much larger visual change over the
+    /// same time and is why it read as abrupt at the flight's length. The
+    /// distance is the argument for the extra time, not taste.
+    ///
+    /// ⚠️ Everything staged in fractions rides this — see
+    /// `springVisibleFraction` and the hand-off — so it stays a single number
+    /// that the legs are shares of, never a second literal in an animator.
+    static let springDuration: TimeInterval = 0.55
     /// How much of a spring's DURATION its visible travel occupies.
     ///
     /// The hand-off's fractions are shares of the window's journey, and a timed
@@ -676,7 +691,7 @@ func installVeil(geometry: RevealGeometry, anchor: CGRect?) {
 @MainActor
 final class RevealGrabAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     func transitionDuration(using context: (any UIViewControllerContextTransitioning)?) -> TimeInterval {
-        ZoomFlight.springDuration
+        RevealStage.springDuration
     }
 
     /// EMPTY, and it has to be. UIKit routes an interactive pop to the
@@ -718,7 +733,7 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
     }
 
     func transitionDuration(using context: (any UIViewControllerContextTransitioning)?) -> TimeInterval {
-        ZoomFlight.springDuration
+        RevealStage.springDuration
     }
 
     func animateTransition(using context: any UIViewControllerContextTransitioning) {
@@ -919,7 +934,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     }
 
     func transitionDuration(using context: (any UIViewControllerContextTransitioning)?) -> TimeInterval {
-        ZoomFlight.springDuration
+        RevealStage.springDuration
     }
 
     /// ## The close springs, and `scrubsLinearly` is why it can
