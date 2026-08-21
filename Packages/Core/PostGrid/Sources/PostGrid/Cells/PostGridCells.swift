@@ -17,23 +17,19 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// must start at, so the card is the preview's twin rather than its
     /// approximation.
     ///
-    /// The card's own radius, not a curve concentric with it.
+    /// CONCENTRIC with the card: its radius carried inward by the preview's
+    /// own inset, so the two curves stay parallel the whole way round.
     ///
-    /// Concentric — inner = outer − inset, so the two curves stay parallel — is
-    /// the textbook answer and was tried first. At a 32pt card it puts the
-    /// preview on 16, and the preview is the largest rounded shape on the card:
-    /// beside a menu at 32 it read as the thing that had not been updated. The
-    /// ask was that a card MATCH the menu, and on a card that is mostly
-    /// picture, matching means the picture too.
+    /// It resolves to the SAME 32pt the system menu uses, and that is not a
+    /// coincidence — it is the point. The menu and the preview are both inset
+    /// 16pt inside the card (the menu because it aligns to a "..." sitting at
+    /// the card's content margin), so a card that is concentric with one is
+    /// concentric with the other. One family, one band width.
     ///
-    /// What it costs, stated plainly: the gap between the card's edge and the
-    /// preview's is 16pt along the straight runs and pinches at the corners,
-    /// because equal radii at different insets are not parallel curves.
-    ///
-    /// Derived from the card either way, never restated — the hero opens at
-    /// THIS radius, and a literal here would put a flight's first frame at a
-    /// curve the row it left has not had for some time.
-    public static var mediaCornerRadius: CGFloat { cardCornerRadius }
+    /// Derived, never restated: the hero opens at THIS radius, and a literal
+    /// here would put a flight's first frame at a curve the row it left has not
+    /// had for some time.
+    public static var mediaCornerRadius: CGFloat { cardCornerRadius - mediaInset }
 
     /// Where the page STOPS MATCHING this card, in the card's own space — the
     /// reveal's cut line. Below it the destination is veiled for the length of
@@ -541,9 +537,25 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The card's own rounding and fill, so a flight impersonating this row
     /// is its twin rather than an approximation of it. Restating either as a
     /// literal in the flight card is how the two drift.
-    /// The system context menu's own radius, because the two are seen
-    /// together: a card's "..." opens a menu that lands ON the card, and two
-    /// shoulders a few points apart read as a mistake rather than as a choice.
+    /// The system context menu's radius PLUS the margin the menu sits at, so
+    /// the card is the menu's concentric CONTAINER rather than its twin.
+    ///
+    /// This is the correction that matters and it is easy to get backwards. A
+    /// card's "..." opens a menu that lands *inside* the card, and what the eye
+    /// reads there is the BAND between the two edges. Giving the card the
+    /// menu's own 32 made the two curves identical, which means the band is
+    /// 16pt along the straight runs and collapses through the corner — the
+    /// mismatch is most visible exactly where both shapes are turning.
+    ///
+    /// Concentric instead: `menu + inset`. The menu aligns to a control sitting
+    /// at the card's content margin, so it is inset by that margin — measured
+    /// at 16.0pt vertically off a capture (card top 495px, menu top 543px),
+    /// which is `captionInset` exactly. 32 + 16 = 48, and the band is then the
+    /// same width the whole way round.
+    ///
+    /// The media preview falls out of the same rule for free: it is inset 16
+    /// too, so it resolves to 32 — the menu's radius — and the card, the menu
+    /// and the picture become one family of parallel curves.
     ///
     /// **32 is measured, not guessed.** It cannot be read out of UIKit — every
     /// view AND every layer under `_UIContextMenuContainerView` reports a zero
@@ -562,7 +574,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// ~39pt against a hard-edged card's ~20pt at 18 — a ratio that would have
     /// put this near 35. The fit is over the steep part of the curve, where the
     /// shape dominates and the softness does not.
-    public static let cardCornerRadius: CGFloat = 32
+    public static let cardCornerRadius: CGFloat = 48
     /// How far the media preview is held off the card's edge — named because
     /// the preview's own radius is derived from it, and the two must move
     /// together or the curves stop being parallel.
