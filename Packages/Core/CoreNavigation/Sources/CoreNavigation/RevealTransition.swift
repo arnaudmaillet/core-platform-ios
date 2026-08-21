@@ -464,23 +464,33 @@ enum RevealStage {
     /// The page dissolving into the card's fill.
     static let pageFadeStart: CGFloat = 0.10
     static let pageFadeEnd: CGFloat = 0.45
-    /// The reveal's OWN damping, looser than the media flight's.
+    /// The reveal's OWN damping, a little looser than the media flight's.
     ///
-    /// The flight runs at 0.82, which overshoots by about 1% — a number chosen
-    /// for a photograph landing on the same photograph, where any wobble reads
-    /// as the picture failing to sit still. A window has nothing to keep still:
-    /// what is arriving is a rounded rect becoming a screen, and at 0.82 that
-    /// looked like it was being drawn open on rails rather than released.
+    /// Peak overshoot is `exp(-πζ/√(1-ζ²))`, which puts the three values this
+    /// has worn in order:
     ///
-    /// 0.70 overshoots by roughly 5%, which is a shoulder that visibly springs
-    /// past its edge and settles. Its own constant rather than a change to
-    /// `ZoomFlight.springDamping`, because the media hero was never the thing
-    /// that read flat and must not move.
-    static let springDamping: CGFloat = 0.70
-    /// The push-off. Livelier than the flight's for the same reason the damping
-    /// is looser: the window should leave the source rather than ease away from
-    /// it.
-    static let springVelocity: CGFloat = 0.9
+    /// ```
+    ///   0.82  1.1%   the flight's — read as drawn open on rails
+    ///   0.70  4.6%   visibly springy, and too much of it
+    ///   0.78  2.0%   here
+    /// ```
+    ///
+    /// The flight's number was chosen for a photograph landing on the same
+    /// photograph, where any wobble reads as the picture failing to sit still.
+    /// A window has nothing to keep still — what arrives is a rounded rect
+    /// becoming a screen — so it can carry roughly twice the flight's bounce
+    /// and no more: at 4.6% the settle stopped reading as momentum and started
+    /// reading as an effect.
+    ///
+    /// Its own constant rather than a change to `ZoomFlight.springDamping`,
+    /// because the media hero was never the thing that read flat and must not
+    /// move.
+    static let springDamping: CGFloat = 0.78
+    /// The push-off, between the flight's 0.6 (which eased away from the
+    /// source) and the 0.9 that came with the 0.70 damping and overshot with
+    /// it. Most of what reads as spring here is this rather than the overshoot,
+    /// since two of the three channels clip theirs — see the animators.
+    static let springVelocity: CGFloat = 0.7
     /// How much of a spring's DURATION its visible travel occupies.
     ///
     /// The hand-off's fractions are shares of the window's journey, and a timed
