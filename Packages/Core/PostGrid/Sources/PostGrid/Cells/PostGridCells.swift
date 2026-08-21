@@ -17,18 +17,17 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// must start at, so the card is the preview's twin rather than its
     /// approximation.
     ///
-    /// CONCENTRIC with the card: its radius carried inward by the preview's
-    /// own inset, so the two curves stay parallel the whole way round.
+    /// CONCENTRIC with the card: its radius carried inward by the preview's own
+    /// inset, so the two curves stay parallel the whole way round.
     ///
-    /// It resolves to the SAME 32pt the system menu uses, and that is not a
-    /// coincidence — it is the point. The menu and the preview are both inset
-    /// 16pt inside the card (the menu because it aligns to a "..." sitting at
-    /// the card's content margin), so a card that is concentric with one is
-    /// concentric with the other. One family, one band width.
+    /// This is the arithmetic `UICornerRadius.containerConcentric` performs,
+    /// written out rather than delegated — the hero reads a NUMBER to open a
+    /// flight at, and a corner configuration resolved at layout time is not
+    /// something a transition can ask for up front.
     ///
-    /// Derived, never restated: the hero opens at THIS radius, and a literal
-    /// here would put a flight's first frame at a curve the row it left has not
-    /// had for some time.
+    /// Derived, never restated, for the same reason: a literal here would put a
+    /// flight's first frame at a curve the row it left has not had for some
+    /// time.
     public static var mediaCornerRadius: CGFloat { cardCornerRadius - mediaInset }
 
     /// Where the page STOPS MATCHING this card, in the card's own space — the
@@ -537,44 +536,29 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The card's own rounding and fill, so a flight impersonating this row
     /// is its twin rather than an approximation of it. Restating either as a
     /// literal in the flight card is how the two drift.
-    /// The system context menu's radius PLUS the margin the menu sits at, so
-    /// the card is the menu's concentric CONTAINER rather than its twin.
+    /// The platform's own radius for a grouped content card.
     ///
-    /// This is the correction that matters and it is easy to get backwards. A
-    /// card's "..." opens a menu that lands *inside* the card, and what the eye
-    /// reads there is the BAND between the two edges. Giving the card the
-    /// menu's own 32 made the two curves identical, which means the band is
-    /// 16pt along the straight runs and collapses through the corner — the
-    /// mismatch is most visible exactly where both shapes are turning.
+    /// There is no named constant to read: iOS 26's `UICornerRadius` offers
+    /// only `.fixed(_)` and `.containerConcentric(minimum:)`, and a card at the
+    /// root of a scroll view has no rounded container to be concentric with. So
+    /// the default is taken from what UIKit DRAWS — an `.insetGrouped` list
+    /// section, which is the system's own version of this shape.
     ///
-    /// Concentric instead: `menu + inset`. The menu aligns to a control sitting
-    /// at the card's content margin, so it is inset by that margin — measured
-    /// at 16.0pt vertically off a capture (card top 495px, menu top 543px),
-    /// which is `captionInset` exactly. 32 + 16 = 48, and the band is then the
-    /// same width the whole way round.
+    /// Measured off one, on two independent sections, by fitting the corner
+    /// profile `dx = R - sqrt(2·R·dy - dy²)`: **24.8pt (rms 0.28)** and
+    /// **25.3pt (rms 0.16)**. The pipeline is calibrated against known radii and
+    /// runs a couple of percent low, which puts the true value at 25–26.
     ///
-    /// The media preview falls out of the same rule for free: it is inset 16
-    /// too, so it resolves to 32 — the menu's radius — and the card, the menu
-    /// and the picture become one family of parallel curves.
-    ///
-    /// **32 is measured, not guessed.** It cannot be read out of UIKit — every
-    /// view AND every layer under `_UIContextMenuContainerView` reports a zero
-    /// corner radius and no mask (both trees walked), because the glass renders
-    /// its own shape. So it came off a capture, fitted rather than eyeballed:
-    /// the corner's profile is `dx = R - sqrt(2·R·dy - dy²)`, and least squares
-    /// over heights of 3–20pt returns the menu at **31.7pt, rms 0.18**.
-    ///
-    /// That pipeline is CALIBRATED, which is what makes the number evidence
-    /// rather than arithmetic: pointed at cards of known radius it reads 18 as
-    /// 17.8 and 32 as 30.6, so it runs a few percent low. Corrected, the menu
-    /// is 32–33; 32 is the round number inside that interval.
-    ///
-    /// ⚠️ Do NOT measure this by where the arc visually "ends". A menu's glass
-    /// edge is soft and its shadow reaches past it, so the apparent span runs
-    /// ~39pt against a hard-edged card's ~20pt at 18 — a ratio that would have
-    /// put this near 35. The fit is over the steep part of the curve, where the
-    /// shape dominates and the softness does not.
-    public static let cardCornerRadius: CGFloat = 48
+    /// ❌ Two bespoke values were tried against the system context menu first
+    /// and both are recorded here so they are not re-derived: **32**, the
+    /// menu's own radius, which makes the two curves identical and therefore
+    /// makes the band between them swell through the turn (20.0pt on the
+    /// straights, 22.8pt at 45°); and **48**, the menu's radius plus the 16pt
+    /// margin it sits at, which does hold the band flat (15.5–16.3pt at every
+    /// angle) and is simply too round for a card. Matching a transient overlay
+    /// was the wrong target — the card is on screen all the time, and it should
+    /// look like the platform.
+    public static let cardCornerRadius: CGFloat = 26
     /// How far the media preview is held off the card's edge — named because
     /// the preview's own radius is derived from it, and the two must move
     /// together or the curves stop being parallel.
