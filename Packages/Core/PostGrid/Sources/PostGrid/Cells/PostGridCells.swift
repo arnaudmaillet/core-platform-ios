@@ -17,11 +17,23 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// must start at, so the card is the preview's twin rather than its
     /// approximation.
     ///
-    /// Derived, never restated: it is the card's own curve carried inward by
-    /// the preview's inset, so the two stay parallel when either moves. The
-    /// hero reads THIS, and a second literal here would put a flight's opening
-    /// frame at a radius the row it left has not had for some time.
-    public static var mediaCornerRadius: CGFloat { cardCornerRadius - mediaInset }
+    /// The card's own radius, not a curve concentric with it.
+    ///
+    /// Concentric — inner = outer − inset, so the two curves stay parallel — is
+    /// the textbook answer and was tried first. At a 32pt card it puts the
+    /// preview on 16, and the preview is the largest rounded shape on the card:
+    /// beside a menu at 32 it read as the thing that had not been updated. The
+    /// ask was that a card MATCH the menu, and on a card that is mostly
+    /// picture, matching means the picture too.
+    ///
+    /// What it costs, stated plainly: the gap between the card's edge and the
+    /// preview's is 16pt along the straight runs and pinches at the corners,
+    /// because equal radii at different insets are not parallel curves.
+    ///
+    /// Derived from the card either way, never restated — the hero opens at
+    /// THIS radius, and a literal here would put a flight's first frame at a
+    /// curve the row it left has not had for some time.
+    public static var mediaCornerRadius: CGFloat { cardCornerRadius }
 
     /// Where the page STOPS MATCHING this card, in the card's own space — the
     /// reveal's cut line. Below it the destination is veiled for the length of
