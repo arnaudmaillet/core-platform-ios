@@ -78,6 +78,14 @@ public final class GridVideoPlaybackCoordinator {
     private let maxConcurrent: Int
     /// Playing posts → the cell their player is bound to.
     private var playing: [PostID: any GridPlaybackCell] = [:]
+    /// Playing posts → the stream each one is actually playing.
+    ///
+    /// ⚠️ A post is no longer one stream. A mixed carousel has a clip on one
+    /// page and a photograph on the next, so the same id can be asked to play a
+    /// DIFFERENT url as the viewer scrolls — and the reconcile below starts a
+    /// candidate only when nothing is playing for its id, which would have left
+    /// page two's clip running under page three's.
+    private var playingURLs: [PostID: URL] = [:]
     /// Posts whose cap is currently lifted (a tile that went full screen), so a
     /// reconcile doesn't quietly re-cap the item mid-flight.
     private var uncappedIDs: Set<PostID> = []
@@ -122,6 +130,17 @@ public final class GridVideoPlaybackCoordinator {
 
         for (id, cell) in playing where !chosenIDs.contains(id) && id != handoffID {
             stop(id: id, cell: cell)
+        }
+        // A post that is still chosen but on a DIFFERENT stream — the viewer
+        // paged a mixed carousel from one clip to another — is stopped here so
+        // the start below can pick it up. Restarting rather than retargeting
+        // the existing player: the pool binds an item to a render surface, and
+        // the surface has moved to another page too.
+        for candidate in chosen
+        where candidate.id != handoffID
+            && playing[candidate.id] != nil
+            && playingURLs[candidate.id] != candidate.url {
+            stop(id: candidate.id, cell: candidate.cell)
         }
         guard allowingStarts else { return }
         for candidate in chosen where playing[candidate.id] == nil {
@@ -306,6 +325,7 @@ public final class GridVideoPlaybackCoordinator {
         let donated = cell.donateVideoRenderView()
         cell.onReuse = nil
         playing[id] = nil
+        playingURLs[id] = nil
         uncappedIDs.remove(id)
         startTasks.removeValue(forKey: id)?.cancel()
         return donated
@@ -455,6 +475,7 @@ public final class GridVideoPlaybackCoordinator {
             cell.endVideoPreview()
             cell.onReuse = nil
             playing[id] = nil
+        playingURLs[id] = nil
             uncappedIDs.remove(id)
         }
         return parked
@@ -572,6 +593,7 @@ public final class GridVideoPlaybackCoordinator {
         Self.logTransition("start", candidate.id, count: playing.count + 1)
         #endif
         playing[candidate.id] = candidate.cell
+        playingURLs[candidate.id] = candidate.url
         candidate.cell.beginVideoPreview()
         let renderView = candidate.cell.makeVideoRenderViewIfNeeded()
         let id = candidate.id
@@ -617,6 +639,7 @@ public final class GridVideoPlaybackCoordinator {
         cell.endVideoPreview()
         cell.onReuse = nil
         playing[id] = nil
+        playingURLs[id] = nil
         uncappedIDs.remove(id)
     }
 

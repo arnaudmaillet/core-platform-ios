@@ -252,24 +252,47 @@ public struct MockSocialDataset: Sendable {
             // It is also an IMAGE slot (`index % 2 == 1` is video), which a
             // collection has to be.
             //
-            // Photos, not video: `post.v1` distinguishes `carousel` from
-            // `main_video`, and the card's carousel renders covers. Photos also
-            // work under BOTH catalogs, unlike portrait video — Picsum returns
-            // exactly the size asked for.
+            // ⚠️ MIXED: one of these pages is a VIDEO.
+            //
+            // `post.v1` distinguishes `carousel` from `main_video`, and nothing
+            // in the contract says a carousel's pages agree about their type —
+            // each attachment carries its own MIME. The seed was photos-only
+            // while the card's carousel could only draw covers, and that made a
+            // mixed collection unverifiable rather than unsupported: the client
+            // hydrates `MediaPage.videoURL` per page already, off the same MIME
+            // rule, so the only thing missing was a post that exercised it.
+            //
+            // Position ONE, not zero: page one decides the box's aspect and the
+            // post's kind, so a video there would make this a video post that
+            // happens to have pages. The interesting case is a video arriving
+            // mid-scroll, inside a box a photograph chose.
             //
             // Shapes deliberately disagree with page one. A carousel takes its
             // box from the first page and aspect-fills the rest, so a run of
-            // identical ratios would never exercise the crop.
+            // identical ratios would never exercise the crop. The video keeps
+            // its fixture's OWN dimensions under the real catalog — the video
+            // catalog cannot serve an arbitrary size the way Picsum can, and
+            // declaring one it does not have is how a page ends up cropped
+            // against a ratio nothing in the file matches.
             let collectionShapes: [(Int, Int)] = [(1600, 900), (1080, 1080), (900, 1600)]
+            let videoPagePosition = 1
             let extraMedia: [(url: String, width: Int, height: Int)] =
                 index == 4
                 ? collectionShapes.enumerated().map { position, shape in
-                    switch mediaCatalog {
-                    case .synthetic:
+                    switch (mediaCatalog, position == videoPagePosition) {
+                    case (.synthetic, false):
                         ("mock://media/new-4-\(position)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
-                    case .realAssets:
+                    case (.synthetic, true):
+                        // `mock://video/…` is what `MockMediaFixtures.isVideoURL`
+                        // routes on, so the attachment declares a video MIME and
+                        // the client's own rule does the rest.
+                        ("mock://video/new-4-\(position)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
+                    case (.realAssets, false):
                         (MockMediaFixtures.imageURL(index: 40 + position, width: shape.0, height: shape.1),
                          shape.0, shape.1)
+                    case (.realAssets, true):
+                        { let fixture = MockMediaFixtures.videos[1]
+                          return (fixture.url, fixture.width, fixture.height) }()
                     }
                 }
                 : []

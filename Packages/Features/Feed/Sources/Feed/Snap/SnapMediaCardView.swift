@@ -58,6 +58,21 @@ final class SnapMediaCardView: UIView {
     /// has to re-pin rather than just re-add. Ordering matters as much: it goes
     /// back above the photo surface, where it started.
     func restoreRenderView(_ view: VideoRenderView) {
+        // ⚠️ A COLLECTION's surface belongs to a PAGE, and this is the landing
+        // path — the point where a flight hands its live layer back. Re-pinning
+        // it to the card would put a full-bleed video over the carousel, which
+        // is right for a single attachment and wrong for every page of a
+        // collection but the one being watched.
+        if showsCollection {
+            if view !== renderView {
+                renderView.detachForReplacement()
+                renderView.removeFromSuperview()
+                renderView = view
+            }
+            view.transform = .identity
+            hostRenderViewOnCurrentPage()
+            return
+        }
         guard view.superview !== self else { return }
         // A LANDING hands over the other side's surface, not the one this card
         // started with — the view travels tile -> flight card -> page (and back
@@ -151,6 +166,40 @@ final class SnapMediaCardView: UIView {
     /// Which page a collection is showing, for a hero flight and for the chrome
     /// to re-assert after a rebind.
     var currentPage: Int { carousel?.currentPage ?? 0 }
+
+    /// Whether a collection is what this card is drawing.
+    var showsCollection: Bool { !(carousel?.isHidden ?? true) }
+
+    /// The stream the current PAGE carries, nil when it is a still or when this
+    /// card is not drawing a collection at all.
+    var currentPageVideoURL: URL? {
+        showsCollection ? carousel?.currentPageVideoURL : nil
+    }
+
+    /// Moves the playback surface onto the page the viewer is looking at.
+    ///
+    /// ⚠️ The SAME surface, re-parented — never a second one per page.
+    ///
+    /// Everything that makes a hero flight carry live video works by IDENTITY
+    /// on this view: the flight attaches a sibling surface alongside it, a
+    /// dismissal donates it, a landing adopts it, and a cancelled grab reclaims
+    /// it. Give a collection its own render view per page and every one of
+    /// those stops finding the thing it is holding. So the object never
+    /// changes; only which page it hangs in does.
+    func hostRenderViewOnCurrentPage() {
+        guard let carousel, !carousel.isHidden else { return }
+        renderView.translatesAutoresizingMaskIntoConstraints = true
+        renderView.isHidden = false
+        carousel.host(renderView)
+    }
+
+    /// Takes the surface off whatever page holds it. The page a viewer has
+    /// scrolled away from is still on screen in the card's own carousel and,
+    /// full-bleed, is the next thing they will see.
+    func releaseRenderViewFromPages() {
+        carousel?.evictHostedSurface()
+        renderView.isHidden = true
+    }
 
     /// Moves to a page, when the indicator asks. A no-op for a post with no
     /// collection, which is the honest answer rather than a crash.

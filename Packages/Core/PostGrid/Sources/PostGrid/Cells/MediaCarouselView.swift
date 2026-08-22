@@ -101,7 +101,41 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
     /// A carousel's cover is not the post's first attachment once the viewer
     /// has moved.
     public var renderedCover: UIImage? {
-        pageViews.indices.contains(currentPage) ? pageViews[currentPage].image : nil
+        pageViews.indices.contains(currentPage) ? pageViews[currentPage].cover.image : nil
+    }
+
+    /// The CURRENT page's stream, nil when the page the viewer is on is a still.
+    ///
+    /// ⚠️ Not `GalleryPost.videoURL`, which answers for page one for ever. A
+    /// mixed collection changes its answer as the viewer scrolls, and every
+    /// caller that decides whether something plays has to ask here.
+    public var currentPageVideoURL: URL? {
+        pages.indices.contains(currentPage) ? pages[currentPage].videoURL : nil
+    }
+
+    /// Puts a playback surface on the current page, sized to it.
+    ///
+    /// The surface belongs to the HOST — a row cell owns exactly one and the
+    /// coordinator hands its player around — so this only re-parents it. That
+    /// is what lets a mixed carousel play without a second render view per page
+    /// and without the pool learning that pages exist.
+    public func host(_ surface: UIView) {
+        guard pageViews.indices.contains(currentPage) else { return }
+        pageViews[currentPage].host(surface)
+    }
+
+    /// Takes the surface off whatever page is holding it. Called when the
+    /// viewer pages onto a still, and when the row stops playing.
+    ///
+    /// ⚠️ Searches every page rather than trusting `currentPage`: the page
+    /// changes BEFORE anyone is told, so by the time a host reacts the surface
+    /// is on the page the viewer just left.
+    @discardableResult
+    public func evictHostedSurface() -> UIView? {
+        for view in pageViews {
+            if let surface = view.evictHostedSurface() { return surface }
+        }
+        return nil
     }
 
     /// The current page's rect in a given view's space. The flight departs from
@@ -113,7 +147,13 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
     }
 
     private let scrollView = EdgeYieldingScrollView()
-    private var pageViews: [UIImageView] = []
+    /// The pages themselves, in order.
+    ///
+    /// Readable inside the package so a test can ask which PAGE is dimmed.
+    /// Concealment applies to the page, and a walk for image views answers for
+    /// the layers inside one — two of them now, since a playable page carries a
+    /// badge as well as a cover.
+    private(set) var pageViews: [CarouselPageView] = []
     private var loadTasks: [Task<Void, Never>] = []
     private var pages: [GalleryPost.MediaPage] = []
     private var imagePipeline: ImagePipeline?
@@ -179,10 +219,28 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
         self.pages = pages
         self.imagePipeline = imagePipeline
         loadedPages = []
-        pageViews = pages.map { _ in
-            let view = UIImageView()
-            view.contentMode = .scaleAspectFill
-            view.clipsToBounds = true
+        pageViews = pages.map { page in
+            let view = CarouselPageView()
+            // ⚠️ A page knows whether it is PLAYABLE, and it is per page.
+            //
+            // Nothing in `post.v1` says a carousel's attachments agree about
+            // their type — each carries its own MIME, and the client hydrates
+            // `MediaPage.videoURL` from it one page at a time. A carousel that
+            // asked the POST whether it was a video would answer for page one
+            // and be wrong about every other page.
+            view.isPlayable = page.videoURL != nil
+            // ⚠️ Whether the badge SURVIVES playback is a property of the
+            // surface, not of the page.
+            //
+            // On a card the badge is what tells a clip apart from the
+            // photographs either side of it while the viewer scrolls past, so
+            // it stays — the row's own badge follows the same rule over a
+            // playing preview. Full-bleed there is nothing to tell it apart
+            // FROM: the viewer is looking at one thing, it is moving, and a
+            // single-video post shows no badge at all on that screen. Keeping
+            // one there would make two posts of the same kind disagree on the
+            // same page.
+            view.hidesBadgeWhilePlaying = self.style == .page
             switch self.style {
             case .card:
                 view.backgroundColor = .tertiarySystemFill
@@ -226,14 +284,14 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
             guard !loadedPages.contains(index), let url = pages[index].thumbnailURL else { continue }
             loadedPages.insert(index)
             if let cached = imagePipeline.cachedImage(for: url) {
-                pageViews[index].image = cached
+                pageViews[index].cover.image = cached
                 continue
             }
             loadTasks.append(Task { [weak self] in
                 guard let image = try? await imagePipeline.image(for: url),
                       !Task.isCancelled, let self,
                       self.pageViews.indices.contains(index) else { return }
-                let view = self.pageViews[index]
+                let view = self.pageViews[index].cover
                 UIView.transition(
                     with: view, duration: 0.25,
                     options: [.transitionCrossDissolve, .allowUserInteraction]
@@ -412,5 +470,98 @@ private final class EdgeYieldingScrollView: UIScrollView {
             if x - window.bounds.minX <= Self.backEdgeZone { return false }
         }
         return super.gestureRecognizerShouldBegin(gestureRecognizer)
+    }
+}
+
+/// One page of a carousel: a cover, a play badge when the page is playable, and
+/// room for a playback surface between them.
+///
+/// A page used to BE its `UIImageView`, which was right while a collection was
+/// photographs. It cannot be once the pages disagree about their type: a video
+/// page has three layers where a still has one, and the badge has to sit over
+/// whichever of the other two is showing.
+final class CarouselPageView: UIView {
+    let cover = UIImageView()
+
+    /// Whether this page has a stream behind it — the badge follows.
+    var isPlayable = false {
+        didSet { applyBadgeVisibility() }
+    }
+
+    /// Whether a hosted surface takes the badge away. See the note at the
+    /// assignment site: it is the SURFACE that decides, not the page.
+    var hidesBadgeWhilePlaying = false {
+        didSet { applyBadgeVisibility() }
+    }
+
+    private func applyBadgeVisibility() {
+        badge.isHidden = !isPlayable || (hidesBadgeWhilePlaying && surface != nil)
+    }
+
+    /// The host's playback surface while this page is the one playing.
+    private weak var surface: UIView?
+    private let badge = UIImageView(image: UIImage(systemName: "play.fill"))
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        clipsToBounds = true
+        cover.contentMode = .scaleAspectFill
+        cover.clipsToBounds = true
+        addSubview(cover)
+
+        badge.tintColor = .white
+        badge.contentMode = .scaleAspectFit
+        badge.isHidden = true
+        // The same shadow the row's own badge carries: a white glyph over an
+        // arbitrary frame needs its own edge, and a scrim over the media would
+        // be a heavier answer to a smaller problem.
+        badge.layer.shadowColor = UIColor.black.cgColor
+        badge.layer.shadowOpacity = 0.5
+        badge.layer.shadowRadius = 3
+        badge.layer.shadowOffset = .zero
+        addSubview(badge)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Frames, not constraints — the carousel lays its pages out by frame on
+    /// every width change, and a page that mixed the two would fight it.
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        cover.frame = bounds
+        surface?.frame = bounds
+        let side = min(bounds.width, bounds.height) * Self.badgeFraction
+        badge.frame = CGRect(
+            x: (bounds.width - side) / 2, y: (bounds.height - side) / 2,
+            width: side, height: side
+        )
+    }
+
+    /// A twelfth of the page's short side, clamped — the row's badge is sized
+    /// against its preview the same way, so a page and a single-video card
+    /// carry the same mark at the same weight.
+    private static let badgeFraction: CGFloat = 0.12
+
+    func host(_ surface: UIView) {
+        guard surface !== self.surface else { return }
+        self.surface = surface
+        // ⚠️ BELOW the badge, above the cover. The badge is what says the page
+        // is a video, and a surface inserted on top of it takes that away at
+        // the exact moment the viewer needs it least — while the first frame is
+        // still decoding and the page is otherwise a still.
+        insertSubview(surface, belowSubview: badge)
+        applyBadgeVisibility()
+        setNeedsLayout()
+    }
+
+    /// Gives the surface back and reports it, so a caller can hand it on.
+    @discardableResult
+    func evictHostedSurface() -> UIView? {
+        guard let surface else { return nil }
+        surface.removeFromSuperview()
+        self.surface = nil
+        applyBadgeVisibility()
+        return surface
     }
 }

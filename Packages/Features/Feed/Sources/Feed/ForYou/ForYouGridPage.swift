@@ -565,9 +565,9 @@ final class ForYouGridPage: UIView {
             indexPath -> GridVideoPlaybackCoordinator.Candidate? in
             guard !showsSkeleton, posts.indices.contains(flatIndex(for: indexPath)) else { return nil }
             let post = posts[flatIndex(for: indexPath)]
-            guard autoplays(post), let url = post.videoURL,
-                  post.id != heroFlyingPostID, // its twin is in the air
+            guard post.id != heroFlyingPostID, // its twin is in the air
                   let cell = collectionView.cellForItem(at: indexPath) as? any GridPlaybackCell,
+                  let url = playableURL(for: post, in: cell),
                   hasCover(for: post, in: cell)
             else { return nil }
 
@@ -634,6 +634,27 @@ final class ForYouGridPage: UIView {
     /// permanently still for a reason that never applied to them.
     private func autoplays(_ post: GalleryPost) -> Bool {
         style == .grid ? post.autoplaysInGrid : post.hasPlayableVideo
+    }
+
+    /// The stream this cell should be playing right now, or nil for none.
+    ///
+    /// ⚠️ A COLLECTION answers from its current page, and the post cannot answer
+    /// for it.
+    ///
+    /// `GalleryPost.videoURL` is page one's, for ever. Nothing in `post.v1` says
+    /// a carousel's attachments agree about their type, so a post whose first
+    /// page is a photograph is a `.photo` post that still has a clip on page
+    /// two — `autoplays(post)` would refuse it, and `post.videoURL` would be nil
+    /// even if it did not. Both questions move to the page.
+    ///
+    /// A row showing a still page answers nil, which is what stops the clip the
+    /// viewer just scrolled away from.
+    private func playableURL(for post: GalleryPost, in cell: any GridPlaybackCell) -> URL? {
+        if let row = cell as? PostGridListRowCell, post.isCollection {
+            return row.currentPageVideoURL
+        }
+        guard autoplays(post) else { return nil }
+        return post.videoURL
     }
 
     /// Whether a tile has something to show behind its video surface.
@@ -1816,6 +1837,16 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
                 guard let self, let cell,
                       let path = self.collectionView.indexPath(for: cell) else { return }
                 self.collectionView(self.collectionView, didSelectItemAt: path)
+            }
+            // ⚠️ Paging a MIXED collection changes what should be playing, and
+            // nothing else would ask.
+            //
+            // Autoplay is reconciled when the visible SET changes — a scroll, a
+            // surface appearing. A carousel moving inside a stationary row
+            // changes neither, so a clip on page two would keep playing behind
+            // page three, and a clip on page three would never start.
+            cell.onMediaPageChanged = { [weak self] _ in
+                self?.updateAutoplay()
             }
             // The band's identity and its "...", if the post carries an author.
             // Captured by AUTHOR and by POST for the same reason the caption's

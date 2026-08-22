@@ -185,12 +185,18 @@ struct CarouselConcealmentTests {
         return view
     }
 
+    /// ⚠️ The PAGES' alphas, which is not the same as every image view's.
+    ///
+    /// This collected `UIImageView`s and was right while a page WAS one. A page
+    /// is now a container — a cover, and a play badge for a page that carries a
+    /// clip — so the walk returned two views per page, and concealment does not
+    /// touch either of them: it dims the page, and the layers inside inherit it.
+    ///
+    /// Read off the carousel's own page list. The scroll view's subviews are
+    /// NOT it — UIKit keeps its two scroll indicators there, permanently at
+    /// alpha 0, which read as two extra concealed pages.
     private func pageAlphas(_ view: MediaCarouselView) -> [CGFloat] {
-        func images(_ node: UIView) -> [UIImageView] {
-            if let image = node as? UIImageView { return [image] }
-            return node.subviews.flatMap(images)
-        }
-        return images(view).map(\.alpha)
+        view.pageViews.map(\.alpha)
     }
 
     @Test func onlyTheFlownPageIsConcealed() {
@@ -242,6 +248,119 @@ struct CarouselConcealmentTests {
         view.setCurrentPageConcealed(false)
 
         #expect(pageAlphas(view) == [1, 1, 1])
+    }
+}
+
+/// A collection's pages need not agree about their type: `post.v1` gives every
+/// attachment its own MIME, and the client hydrates `MediaPage.videoURL` one
+/// page at a time. These pin the consequences — the parts that answer for the
+/// PAGE where something used to answer for the post.
+@MainActor
+struct MixedCarouselTests {
+    private func mixed() -> MediaCarouselView {
+        let view = MediaCarouselView(style: .card)
+        view.frame = CGRect(x: 0, y: 0, width: 340, height: 200)
+        view.configure(
+            with: [
+                GalleryPost.MediaPage(thumbnailURL: URL(string: "mock://a"), aspectRatio: 1.78),
+                GalleryPost.MediaPage(
+                    thumbnailURL: URL(string: "mock://b"),
+                    videoURL: URL(string: "mock://video/b"), aspectRatio: 1.78
+                ),
+                GalleryPost.MediaPage(thumbnailURL: URL(string: "mock://c"), aspectRatio: 1.78)
+            ],
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        view.layoutIfNeeded()
+        return view
+    }
+
+    /// ⚠️ THE REQUIREMENT: the stream follows the page.
+    ///
+    /// `GalleryPost.videoURL` answers for page one for ever, so a caller that
+    /// used it on a mixed collection would play page one's clip — or nothing at
+    /// all, which is what happened: a post whose first page is a photograph is a
+    /// `.photo` post, and the autoplay gate refused it outright.
+    @Test func theStreamIsTheCurrentPagesAndNotThePosts() {
+        let view = mixed()
+        #expect(view.currentPageVideoURL == nil)
+
+        view.setPage(1, animated: false)
+        #expect(view.currentPageVideoURL == URL(string: "mock://video/b"))
+
+        view.setPage(2, animated: false)
+        #expect(view.currentPageVideoURL == nil)
+    }
+
+    /// The badge is per page too, and it is the only thing that says a page in
+    /// the middle of a run of photographs is a clip — the row's own badge sits
+    /// over the whole preview and has no single answer to give.
+    @Test func onlyAPlayablePageWearsABadge() {
+        let view = mixed()
+
+        #expect(view.pageViews.map(\.isPlayable) == [false, true, false])
+        // And the badge really follows that flag rather than merely agreeing
+        // with it today: a still page draws its cover and nothing else, a
+        // playable one draws the mark as well.
+        let drawn = view.pageViews.map { page in
+            page.subviews.filter { !$0.isHidden }.count
+        }
+        #expect(drawn == [1, 2, 1])
+    }
+
+    /// ⚠️ The badge's fate under playback is decided by the SURFACE, not by the
+    /// page — and the two surfaces disagree on purpose.
+    ///
+    /// On a card the badge is what tells a clip apart from the photographs
+    /// either side of it while the viewer scrolls past. Full-bleed there is
+    /// nothing to tell it apart from, and a single-video post shows no badge on
+    /// that screen at all — keeping one would make two posts of the same kind
+    /// disagree on the same page.
+    @Test func aPlayingPageKeepsItsBadgeOnACardAndLosesItOnAPage() {
+        for style in [MediaCarouselView.Style.card, .page] {
+            let view = MediaCarouselView(style: style)
+            view.frame = CGRect(x: 0, y: 0, width: 340, height: 200)
+            view.configure(
+                with: [GalleryPost.MediaPage(
+                    thumbnailURL: URL(string: "mock://a"),
+                    videoURL: URL(string: "mock://video/a")
+                )],
+                imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            )
+            view.layoutIfNeeded()
+            let page = view.pageViews[0]
+            let restingBadges = page.subviews.filter { !$0.isHidden }.count
+
+            view.host(UIView())
+            let playingBadges = page.subviews.filter { !$0.isHidden }.count
+
+            #expect(restingBadges == 2)
+            // Card: cover, surface, badge. Page: cover and surface only.
+            #expect(playingBadges == (style == .card ? 3 : 2))
+        }
+    }
+
+    /// A surface handed to the carousel lands on the page being looked at, and
+    /// paging away takes it off again.
+    ///
+    /// ⚠️ The eviction searches every page rather than trusting `currentPage`:
+    /// the page changes BEFORE the host is told, so by the time anyone reacts
+    /// the surface is sitting on the page the viewer just left — still on
+    /// screen, peeking, playing a video beside the still they moved to.
+    @Test func theHostedSurfaceMovesWithTheViewer() {
+        let view = mixed()
+        let surface = UIView()
+        view.setPage(1, animated: false)
+        view.host(surface)
+
+        let host = surface.superview
+        #expect(host === view.pageViews[1])
+
+        view.setPage(2, animated: false)
+        let evicted = view.evictHostedSurface()
+        #expect(evicted === surface)
+        let orphaned = surface.superview == nil
+        #expect(orphaned)
     }
 }
 

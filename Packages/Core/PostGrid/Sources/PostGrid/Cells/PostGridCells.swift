@@ -165,7 +165,36 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The preview box — a row's media is one part of its card, so this is the
     /// part visibility is measured against. Falls back to the whole cell only
     /// for a text row, which has no video to measure anyway.
-    public var videoMediaRect: CGRect { mediaHeroRect ?? bounds }
+    public var videoMediaRect: CGRect {
+        // ⚠️ THE PAGE, not the box, once a collection is showing.
+        //
+        // The box is wider than a page by `peek` and holds a slice of a
+        // different attachment. Measuring it asks "is the viewer looking at
+        // this preview" where the question is "at this video" — and on a mixed
+        // carousel those differ by a whole page.
+        if showsCarousel, let page = carousel?.currentPageRect(in: self) { return page }
+        return mediaHeroRect ?? bounds
+    }
+
+    /// True while this row is drawing its collection rather than a single
+    /// preview. Asked in several places, and each of them was a `!(x?.y ?? true)`
+    /// before, which is one negation too many to read at a glance.
+    private var showsCarousel: Bool { !(carousel?.isHidden ?? true) }
+
+    /// The stream the CURRENT page carries, nil when the page is a still.
+    ///
+    /// ⚠️ The reason a caller must not use `GalleryPost.videoURL` for this: that
+    /// answers for page one for ever, and a mixed collection's answer changes as
+    /// the viewer scrolls. A row with a photograph on page one and a clip on
+    /// page two is a `.photo` post whose current page plays.
+    public var currentPageVideoURL: URL? {
+        showsCarousel ? carousel?.currentPageVideoURL : nil
+    }
+
+    /// The viewer moved this row's carousel. Reported OUT because what has to
+    /// happen next — reconciling autoplay against a page that may or may not be
+    /// a video — is the surface's business, not the cell's.
+    public var onMediaPageChanged: ((Int) -> Void)?
 
     // MARK: - Autoplay surface
 
@@ -187,11 +216,32 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         #endif
         view.isHidden = true
         view.isUserInteractionEnabled = false
+        install(view)
+        loadedVideoRenderView = view
+        return view
+    }
+
+    /// Puts the playback surface where the media the viewer is looking at
+    /// actually is: pinned to the preview box for a single attachment, and
+    /// re-parented onto the current PAGE for a collection.
+    ///
+    /// ⚠️ The two use different layout systems on purpose, and that is why this
+    /// exists rather than a branch at each call site. The box is laid out by
+    /// constraints; the carousel places its pages by FRAME on every width
+    /// change, and a surface pinned by constraints inside one of them would
+    /// fight the page it is sitting in. `removeFromSuperview` first, because
+    /// that is what drops the constraints the previous home left on it.
+    private func install(_ view: VideoRenderView) {
+        view.removeFromSuperview()
+        if showsCarousel, let carousel {
+            view.translatesAutoresizingMaskIntoConstraints = true
+            carousel.host(view)
+            return
+        }
+        view.translatesAutoresizingMaskIntoConstraints = false
         mediaView.addSubview(view)
         view.pin(to: mediaView)
         sendVideoSurfaceBelowBadge(view)
-        loadedVideoRenderView = view
-        return view
     }
 
     public private(set) var loadedVideoRenderView: VideoRenderView?
@@ -203,9 +253,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         }
         view.transform = .identity
         view.isHidden = false
-        mediaView.addSubview(view)
-        view.pin(to: mediaView)
-        sendVideoSurfaceBelowBadge(view)
+        install(view)
         loadedVideoRenderView = view
     }
 
@@ -233,7 +281,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// flashing black.
     public func beginVideoPreview() {
         let view = makeVideoRenderViewIfNeeded()
-        view.setPoster(mediaView.image)
+        // `renderedCover`, not `mediaView.image`: on a collection the box's own
+        // image view is empty — the pages hold the pictures — so the poster
+        // would have been nil and the surface would have shown black until the
+        // first frame decoded.
+        view.setPoster(renderedCover)
         view.revealOnFirstFrame()
     }
 
@@ -1337,7 +1389,17 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         if let carousel { return carousel }
         let view = MediaCarouselView()
         view.onPageChanged = { [weak self] page in
-            self?.pageIndicator.setCurrent(page)
+            guard let self else { return }
+            self.pageIndicator.setCurrent(page)
+            // ⚠️ The surface is evicted HERE, before anyone is told.
+            //
+            // A render view left on the page the viewer just scrolled away from
+            // keeps drawing a video beside the still they are now looking at —
+            // in a carousel that page is still on screen, peeking. The host is
+            // then free to decide whether the new page deserves a player at all;
+            // what it must not have to do is clean up the old one.
+            self.loadedVideoRenderView.map { _ in self.carousel?.evictHostedSurface() }
+            self.onMediaPageChanged?(page)
         }
         // The indicator is a control, and the cell is what connects it: neither
         // half reaches the other, which is what keeps the carousel the only
@@ -1532,7 +1594,10 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // with a zero-height preview.
         resolveMediaHeight(atWidth: bounds.width)
         mediaView.isHidden = !hasMedia
-        playBadge.isHidden = post.kind != .video
+        // A COLLECTION's badge belongs to the page, not to the box: with mixed
+        // pages the box has no single answer, and a badge over the whole
+        // preview would sit on a photograph as often as on a clip.
+        playBadge.isHidden = post.kind != .video || post.isCollection
         // The line and the pills are the same four values in two placements, so
         // exactly one of them is on screen. The line is hidden rather than
         // unconstrained: it keeps hanging off the caption under the preview,
