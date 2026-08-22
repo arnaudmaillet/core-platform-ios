@@ -397,6 +397,14 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
             // event that can re-open the gate for an item that came up
             // faceless while the page sat still.
             cell.onCoverLoaded = { [weak self] in self?.reconcileAutoplay() }
+            // See `ForYouGridPage`: a collection row's media is a scroll view,
+            // which swallows the collection view's selection, so the tap needs
+            // its own route into the same handler.
+            cell.onMediaTapped = { [weak self, weak cell] in
+                guard let self, let cell,
+                      let path = self.collectionView.indexPath(for: cell) else { return }
+                self.collectionView(self.collectionView, didSelectItemAt: path)
+            }
             // The band's identity and its "...". A profile gallery's rows carry
             // an author like any other — the repository decorates them (the
             // Tagged tab is other people's posts, so the name is not always the

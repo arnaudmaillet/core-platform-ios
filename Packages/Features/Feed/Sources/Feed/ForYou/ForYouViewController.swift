@@ -1054,6 +1054,25 @@ final class ForYouViewController: UIViewController {
             seedable.seedProjection(GalleryPostProjection.seedModels(
                 from: Array(posts[index...].prefix(Self.seedWindow))
             ))
+            // A COLLECTION opens on the page the card was showing.
+            //
+            // The flight already carries the right photograph — the row's cover
+            // and hero rect are the CURRENT page's — so a destination that
+            // opened at page one would land the flight on a different image
+            // than the one that flew. The card knows the page; nothing
+            // downstream can work it out.
+            if let page = pager.page(for: viewModel.format)?.currentMediaPage(atIndex: index),
+               page > 0 {
+                seedable.openMediaPage(page, for: tapped.id)
+            }
+            // …and the traffic runs the other way too, live. The card behind
+            // follows the post's carousel, which is what makes the dismissal
+            // land on the photograph the viewer is actually looking at rather
+            // than on the one they opened with.
+            let format = viewModel.format
+            seedable.onMediaPageChanged = { [weak self] id, page in
+                self?.pager.page(for: format)?.setMediaPage(page, for: id)
+            }
         }
 
         // The feed owns the whole screen: hide the bar with the push. Managed

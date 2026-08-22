@@ -523,6 +523,29 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The simulator injects no touches, so this is the only way this control
     /// is reachable in an automated run.
     ///
+    /// Fired when the viewer taps the media of a COLLECTION row.
+    ///
+    /// A row with one photograph needs nothing here — the collection view's own
+    /// selection handles it. A carousel is a scroll view, and a scroll view in
+    /// the content path swallows that selection, so the host has to be told
+    /// separately. See `MediaCarouselView.onTapped`.
+    public var onMediaTapped: (() -> Void)?
+
+    /// Moves this row's carousel, e.g. to follow the page an opened post is on.
+    /// Ignored by a row with no collection.
+    public func setMediaPage(_ page: Int, animated: Bool = true) {
+        guard let carousel, !carousel.isHidden else { return }
+        carousel.setPage(page, animated: animated)
+    }
+
+    /// Which page of this row's carousel is showing, or nil for a row with no
+    /// collection. A hero flight departs from this page, so whatever opens the
+    /// post has to land on it.
+    public var currentMediaPage: Int? {
+        guard let carousel, !carousel.isHidden else { return nil }
+        return carousel.currentPage
+    }
+
     /// Scrolls this row's carousel, or false if it has none.
     @discardableResult
     public func debugScrollCarousel(toPage index: Int, animated: Bool = true) -> Bool {
@@ -568,6 +591,19 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// because a reader checking whether the badge is concealed should find an
     /// answer rather than infer one.)
     public func setHeroMediaConcealed(_ concealed: Bool) {
+        // A COLLECTION conceals one PAGE, not the preview.
+        //
+        // The rule is the same one this method's note states — conceal exactly
+        // what the flight reproduces — read one level further in: a flight from
+        // a collection carries the current page, so the box, the neighbour's
+        // peek and the chips all stay. Hiding the box took the peek and the
+        // chips with it and brought the whole strip back in one frame at the
+        // landing, which is the pop this rule exists to prevent, rebuilt inside
+        // the preview it was written for.
+        if let carousel, !carousel.isHidden {
+            carousel.setCurrentPageConcealed(concealed)
+            return
+        }
         mediaView.alpha = concealed ? 0 : 1
         playBadge.alpha = concealed ? 0 : 1
     }
@@ -1155,6 +1191,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         pageIndicator.onPageRequested = { [weak view] page in
             view?.setPage(page)
         }
+        view.onTapped = { [weak self] in self?.onMediaTapped?() }
         mediaView.insertSubview(view, belowSubview: countersPill)
         view.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -1209,7 +1246,14 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // Concealment is per-flight state and must not ride a recycled cell to
         // whatever post it is bound to next — the row equivalent of the tile's
         // `isHidden` reset.
+        //
+        // BOTH channels, because the routing depends on whether a carousel is
+        // showing and that answer changes with the post: a row recycled from a
+        // collection to a single photo would otherwise reset only the page it no
+        // longer has, and keep the preview it now uses at alpha 0.
         setHeroMediaConcealed(false)
+        mediaView.alpha = 1
+        playBadge.alpha = 1
         loadTask?.cancel()
         loadTask = nil
         mediaView.image = nil
@@ -1237,6 +1281,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // profile.
         onAuthorTapped = nil
         authorMenuActions = nil
+        onMediaTapped = nil
         // Concealment is per-FLIGHT state and must not ride a recycled cell to
         // whatever post it is bound to next — see `setHeroConcealed`.
         card.alpha = 1

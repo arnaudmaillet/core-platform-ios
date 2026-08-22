@@ -669,6 +669,14 @@ extension ZoomDismissInteractionController: UIGestureRecognizerDelegate {
            destination?.zoomVerticalDismissalPermitted(at: pan.location(in: view), in: view) == false {
             return false
         }
+        // And the horizontal axis has tenants too, since a post's media became
+        // a carousel: a rightward drag on its pages means "previous photo" and
+        // not "dismiss". Same per-touch question, asked of the same authority —
+        // the destination is the only thing that knows which page it is on.
+        if axis == .horizontal,
+           destination?.zoomHorizontalDismissalPermitted(at: pan.location(in: view), in: view) == false {
+            return false
+        }
         activeAxis = axis
         return true
     }

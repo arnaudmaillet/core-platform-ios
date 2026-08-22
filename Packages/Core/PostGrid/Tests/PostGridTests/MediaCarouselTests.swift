@@ -166,6 +166,85 @@ struct MediaCarouselGeometryTests {
     }
 }
 
+/// CONCEAL EXACTLY WHAT THE FLIGHT REPRODUCES, read one level in.
+///
+/// A flight from a collection carries the current PAGE — its rect and its image
+/// — so the page is what disappears while the flight is out. Concealing the
+/// preview instead took the neighbour's peek and the chips with it, and the
+/// whole strip returned in one frame at the landing: the pop the rule exists to
+/// prevent, rebuilt inside the preview the rule was written for.
+@MainActor
+struct CarouselConcealmentTests {
+    private func carousel(pages: Int) -> MediaCarouselView {
+        let view = MediaCarouselView(frame: CGRect(x: 0, y: 0, width: 348, height: 435))
+        view.configure(
+            with: (0..<pages).map { page("\($0)") },
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        view.layoutIfNeeded()
+        return view
+    }
+
+    private func pageAlphas(_ view: MediaCarouselView) -> [CGFloat] {
+        func images(_ node: UIView) -> [UIImageView] {
+            if let image = node as? UIImageView { return [image] }
+            return node.subviews.flatMap(images)
+        }
+        return images(view).map(\.alpha)
+    }
+
+    @Test func onlyTheFlownPageIsConcealed() {
+        let view = carousel(pages: 4)
+        view.setPage(1, animated: false)
+
+        view.setCurrentPageConcealed(true)
+
+        #expect(pageAlphas(view) == [1, 0, 1, 1])
+    }
+
+    /// The carousel itself stays visible, which is what keeps the peek and the
+    /// chips on screen for the length of the flight.
+    @Test func theCarouselItselfStaysVisible() {
+        let view = carousel(pages: 3)
+        view.setCurrentPageConcealed(true)
+
+        #expect(view.alpha == 1)
+        #expect(view.isHidden == false)
+    }
+
+    /// ⚠️ The concealed page is identified by INDEX, so a page change while a
+    /// flight is out has to move the hole with it — otherwise the wrong page
+    /// stays invisible and the right one is on screen twice.
+    @Test func theHoleFollowsThePage() {
+        let view = carousel(pages: 4)
+        view.setCurrentPageConcealed(true)
+        #expect(pageAlphas(view) == [0, 1, 1, 1])
+
+        view.setPage(2, animated: false)
+
+        #expect(pageAlphas(view) == [1, 1, 0, 1])
+    }
+
+    /// And the rect is still answerable while concealed — it is what the
+    /// dismissal flies home to, which is why this is alpha and not `isHidden`.
+    @Test func aConcealedPageStillReportsItsRect() throws {
+        let view = carousel(pages: 3)
+        let resting = try #require(view.currentPageRect(in: view))
+
+        view.setCurrentPageConcealed(true)
+
+        #expect(view.currentPageRect(in: view) == resting)
+    }
+
+    @Test func unconcealingRestoresEveryPage() {
+        let view = carousel(pages: 3)
+        view.setCurrentPageConcealed(true)
+        view.setCurrentPageConcealed(false)
+
+        #expect(pageAlphas(view) == [1, 1, 1])
+    }
+}
+
 @MainActor
 struct CarouselChipsAreFixedTests {
     private func row(pages: Int, width: CGFloat = 390) -> PostGridListRowCell {
