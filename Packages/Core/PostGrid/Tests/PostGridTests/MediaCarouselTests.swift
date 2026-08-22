@@ -557,6 +557,37 @@ struct RowSurfaceReinstallTests {
         #expect(cell.isRenderingCurrentMedia == false)
     }
 
+    /// ⚠️ ASKING FOR THE SURFACE MUST NOT MOVE IT ONTO A PHOTOGRAPH.
+    ///
+    /// The worst defect of this feature, and the one a recording caught rather
+    /// than any log: at the instant of the tap the card swapped from the
+    /// photograph being read to the video, and the flight carried what it
+    /// found. Nothing had scrolled — the surface had been re-hosted onto the
+    /// CURRENT page, which carries no clip at all.
+    ///
+    /// It came from the previous fix. Re-installing on every ask is right while
+    /// the viewer is on the clip and catastrophic one page over, because the
+    /// flight staging is one of the askers.
+    ///
+    /// So the ask is honoured only for a page that carries a stream, and a
+    /// still page is left exactly as it is.
+    @Test func askingForTheSurfaceOnAStillPageLeavesItWhereItIs() {
+        let cell = row()
+        cell.debugScrollCarousel(toPage: 1, animated: false)
+        let surface = cell.makeVideoRenderViewIfNeeded()
+        let clipPage = surface.superview
+
+        cell.debugScrollCarousel(toPage: 0, animated: false)
+        // What the flight staging does.
+        _ = cell.makeVideoRenderViewIfNeeded()
+
+        let stayed = surface.superview === clipPage
+        #expect(stayed)
+        #expect(cell.drawsVideoOnAStillPage == false)
+        // And the row still knows it is holding that clip.
+        #expect(cell.retainedVideoURL == URL(string: "mock://video/b"))
+    }
+
     /// And a row with a single attachment is NOT re-parented on every ask:
     /// `pin(to:)` discards the concrete frame until the next layout pass, which
     /// resets `AVPlayerLayer.isReadyForDisplay` for ~170ms — measured, and the

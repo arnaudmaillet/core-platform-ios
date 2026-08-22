@@ -267,6 +267,18 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// that is what drops the constraints the previous home left on it.
     private func install(_ view: VideoRenderView) {
         if showsCarousel, let carousel {
+            // ⚠️ ONLY onto a page that carries a clip.
+            //
+            // This hosted on whatever page was current, which is fine while the
+            // viewer is looking at the video and catastrophic one page over: any
+            // caller asking for the surface — and the flight staging is one —
+            // moved it onto the PHOTOGRAPH being read and drew the clip over it.
+            // On screen the card swapped to the video at the instant of the tap,
+            // and the flight then carried what it found.
+            //
+            // A still page is left alone. The surface stays where it belongs,
+            // paused, and comes back when the viewer does.
+            guard carousel.currentPageVideoURL != nil else { return }
             guard !carousel.hostsSurfaceOnCurrentPage(view) else { return }
             view.removeFromSuperview()
             view.translatesAutoresizingMaskIntoConstraints = true
@@ -297,6 +309,22 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     public var isSurfaceDrawable: Bool {
         guard let view = loadedVideoRenderView else { return false }
         return !view.isHidden && view.alpha > 0 && isRenderingCurrentMedia
+    }
+
+    /// ⚠️ The CONVERSE fault: a clip drawing on a page that has none.
+    ///
+    /// The audit's first invariant only asked whether a clip's page was showing
+    /// its clip. It could not see the opposite — a surface hosted on a
+    /// PHOTOGRAPH — and that is the shape the flight defect took: the card swapped
+    /// to the video at the moment of the tap, on a page that carries no video at
+    /// all. Both directions are the same requirement stated once: what is on a
+    /// page is what that page is.
+    public var drawsVideoOnAStillPage: Bool {
+        guard let view = loadedVideoRenderView, !view.isHidden, view.alpha > 0,
+              showsCarousel, let carousel
+        else { return false }
+        return carousel.currentPageVideoURL == nil
+            && carousel.hostsSurfaceOnCurrentPage(view)
     }
 
     public func adoptVideoRenderView(_ view: VideoRenderView) {

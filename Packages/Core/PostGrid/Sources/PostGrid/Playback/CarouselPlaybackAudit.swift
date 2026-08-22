@@ -47,6 +47,26 @@ public enum CarouselPlaybackAudit {
         ))
     }
 
+    /// The converse: a clip drawing on a page that carries none.
+    ///
+    /// ⚠️ The first invariant could not see this, and it is the shape the worst
+    /// defect took — the card swapped to the video at the instant of the tap, on
+    /// a photograph's page, and the flight carried what it found. "The clip's
+    /// page shows its clip" and "a still page shows its still" are the same
+    /// requirement from two sides, and only one of them was being asked.
+    public static func checkStillPage(
+        surface: String, subject: String, page: Int, drawsVideo: Bool
+    ) {
+        guard isEnabled else { return }
+        checks += 1
+        guard drawsVideo else { return }
+        failures += 1
+        print(String(
+            format: "[audit] FAIL #%d %@ %@ page=%d video-on-a-still-page",
+            failures, surface, subject, page
+        ))
+    }
+
     /// Prints a one-line verdict. Called from the harness between cycles so a
     /// long run reads as a sequence rather than as one number at the end.
     public static func report(_ label: String) {

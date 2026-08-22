@@ -623,6 +623,11 @@ final class ForYouGridPage: UIView {
                 hosted: row.isRenderingCurrentMedia,
                 drawable: row.isSurfaceDrawable
             )
+            CarouselPlaybackAudit.checkStillPage(
+                surface: "card", subject: post.id.rawValue,
+                page: row.currentMediaPage ?? -1,
+                drawsVideo: row.drawsVideoOnAStillPage
+            )
         }
     }
     #endif
