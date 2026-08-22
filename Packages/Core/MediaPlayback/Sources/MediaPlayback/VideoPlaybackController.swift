@@ -207,6 +207,16 @@ public final class VideoPlaybackController {
         detach(key: key, view: view)
     }
 
+    /// Whether `view` currently has a player bound to it.
+    ///
+    /// Exists for the carousel audit: "this cell is playing" is a fact the
+    /// coordinator holds, and "this surface can draw" is a fact the pool holds,
+    /// and the whole class of defects this session chased lives in the gap
+    /// between the two.
+    public func hasPlayer(in view: VideoRenderView) -> Bool {
+        activePlayers[ObjectIdentifier(view)] != nil
+    }
+
     /// Pauses or resumes the player rendering in `view`, without releasing it.
     ///
     /// ⚠️ Explicit, not a toggle, because this one is used for RECONCILIATION.

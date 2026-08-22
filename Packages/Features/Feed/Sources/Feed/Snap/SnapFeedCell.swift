@@ -2,6 +2,7 @@ import MediaCore
 import CoreModels
 import DesignSystem
 import MediaPlayback
+import PostGrid
 import UIKit
 
 /// A full-screen snap cell: cover-fit media under a `SnapChromeView` overlay
@@ -116,11 +117,62 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             if ProcessInfo.processInfo.arguments.contains("-media-log") {
                 print(String(format: "[page-play] %.3f resumed", CACurrentMediaTime()))
             }
+            auditPagePlayback()
             #endif
             return
         }
-        mediaCard.setPoster(nil)
-        Task { await videoPlayback.play(url, in: surface) }
+        // ⚠️ The page's own cover, and NOT nil — clearing it is what hid the
+        // surface.
+        //
+        // `play` detaches before it attaches, and detaching hides a surface
+        // that is visible and has no poster: the class does that so a cover
+        // does not sit on screen through the whole buffering window. Handing it
+        // nil first therefore created the exact condition that hides it, and
+        // nothing un-hid it afterwards — the viewer got the page's thumbnail
+        // with a live player behind it, which is the state the audit reports as
+        // `hosted=Y drawable=N`.
+        //
+        // A single-video post never hit this because its poster is loaded at
+        // configure. The collection path is now the same: poster first, and the
+        // first decoded frame retires it.
+        surface.setPoster(mediaCard.currentPageCover)
+        Task { [weak self] in
+            await videoPlayback.play(url, in: surface)
+            self?.auditPagePlayback()
+        }
+    }
+
+    /// The post page's half of the carousel audit.
+    ///
+    /// ⚠️ Asked AFTER the play resolves, not when it is requested. The failure
+    /// this exists to catch is a surface that is hosted and hidden, or hosted
+    /// with no player behind it — states that only exist once everything has
+    /// finished claiming success.
+    private func auditPagePlayback() {
+        #if DEBUG
+        guard CarouselPlaybackAudit.isEnabled, mediaCard.showsCollection else { return }
+        let surface = mediaCard.renderView
+        let hasPlayer = videoPlayback?.hasPlayer(in: surface) ?? false
+        let drawable = !surface.isHidden && surface.alpha > 0 && hasPlayer
+        if !drawable {
+            print(String(
+                format: "[audit] post detail hidden=%@ alpha=%.2f player=%@ deferring=%@",
+                surface.isHidden ? "Y" : "N", surface.alpha,
+                hasPlayer ? "Y" : "N", defersPlaybackForFlight ? "Y" : "N"
+            ))
+        }
+        CarouselPlaybackAudit.check(
+            surface: "post", subject: representedID?.rawValue ?? "-",
+            page: mediaCard.currentPage,
+            playing: isActive, clip: activeVideoURL != nil,
+            hosted: mediaCard.hostsRenderViewOnCurrentPage,
+            drawable: drawable
+        )
+        // ⚠️ A running total, because a silent auditor and a broken one read the
+        // same in a log. A passing run has to be able to say how much it looked
+        // at, or "0 failures" means nothing.
+        CarouselPlaybackAudit.report("post")
+        #endif
     }
     private var videoPlayback: VideoPlaybackController?
     private var imageTasks: [Task<Void, Never>] = []

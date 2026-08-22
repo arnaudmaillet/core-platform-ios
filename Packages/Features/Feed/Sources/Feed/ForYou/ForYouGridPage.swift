@@ -595,7 +595,37 @@ final class ForYouGridPage: UIView {
         }
         playback.update(candidates: candidates, allowingStarts: allowingStarts)
         preloadAutoplayCovers(around: collectionView.indexPathsForVisibleItems)
+        #if DEBUG
+        auditCarouselPlayback()
+        #endif
     }
+
+    #if DEBUG
+    /// Asks every visible collection row the audit's four questions.
+    ///
+    /// Run after the reconcile rather than inside it: what matters is the state
+    /// the VIEWER is left in once everything has had its say, not the state any
+    /// one participant believes it produced.
+    private func auditCarouselPlayback() {
+        guard CarouselPlaybackAudit.isEnabled, let playback else { return }
+        for indexPath in collectionView.indexPathsForVisibleItems {
+            let index = flatIndex(for: indexPath)
+            guard posts.indices.contains(index),
+                  let row = collectionView.cellForItem(at: indexPath) as? PostGridListRowCell
+            else { continue }
+            let post = posts[index]
+            guard post.isCollection else { continue }
+            CarouselPlaybackAudit.check(
+                surface: "card", subject: post.id.rawValue,
+                page: row.currentMediaPage ?? -1,
+                playing: playback.isPlaying(post.id),
+                clip: row.currentPageVideoURL != nil,
+                hosted: row.isRenderingCurrentMedia,
+                drawable: row.isSurfaceDrawable
+            )
+        }
+    }
+    #endif
 
     /// Brings the last-tapped post clear of the chrome, now that nobody is
     /// looking at this page.

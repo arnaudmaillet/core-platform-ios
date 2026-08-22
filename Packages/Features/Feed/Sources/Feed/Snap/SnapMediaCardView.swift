@@ -154,6 +154,11 @@ final class SnapMediaCardView: UIView {
         carousel.configure(with: pages, imagePipeline: imagePipeline)
         imageView.isHidden = true
         renderView.isHidden = true
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-carousel-audit") {
+            print("[audit] hide by showCollection")
+        }
+        #endif
     }
 
     /// Back to a single surface. Called for every non-collection post, because a
@@ -169,6 +174,14 @@ final class SnapMediaCardView: UIView {
 
     /// Whether a collection is what this card is drawing.
     var showsCollection: Bool { !(carousel?.isHidden ?? true) }
+
+    /// The picture the current page is showing — a page's cover, which for a
+    /// clip is its poster.
+    ///
+    /// Handed to the playback surface before a play so the surface has
+    /// something to show while the stream buffers. See the caller: an EMPTY
+    /// poster is what makes `play` hide the surface on its way through.
+    var currentPageCover: UIImage? { carousel?.renderedCover }
 
     /// The stream the current PAGE carries, nil when it is a still or when this
     /// card is not drawing a collection at all.
@@ -206,6 +219,11 @@ final class SnapMediaCardView: UIView {
     func releaseRenderViewFromPages() {
         carousel?.evictHostedSurface()
         renderView.isHidden = true
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-carousel-audit") {
+            print("[audit] hide by releaseRenderViewFromPages")
+        }
+        #endif
     }
 
     /// Moves to a page, when the indicator asks. A no-op for a post with no

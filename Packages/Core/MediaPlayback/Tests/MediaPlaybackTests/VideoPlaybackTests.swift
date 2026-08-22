@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import Testing
+import UIKit
 @testable import MediaPlayback
 
 struct PlaceholderVideoFetcherTests {
@@ -127,6 +128,33 @@ struct VideoPlaybackControllerTests {
         // Stopped, with the surface untouched — exactly the state that used to
         // be mistaken for "paused, ready to resume".
         #expect(controller.setPaused(false, in: view) == false)
+    }
+
+    /// ⚠️ A DETACH HIDES A VISIBLE SURFACE THAT HAS NO POSTER — and `play`
+    /// detaches before it attaches.
+    ///
+    /// The rule is deliberate: it stops a stale cover sitting on screen through
+    /// the whole buffering window. It also means that clearing a poster and
+    /// then playing is a request to be hidden, which is what a carousel page did
+    /// — the viewer got the page's thumbnail with a live player behind it.
+    ///
+    /// Both branches, because the fix is "hand it a poster" and a test that only
+    /// checked the empty case would pass on a version that always hides.
+    @Test func detachingHidesABareSurfaceAndSparesOneWithAPoster() async {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+
+        let bare = VideoRenderView()
+        bare.isHidden = false
+        await controller.play(URL(string: "mock://video/1")!, in: bare)
+        controller.stop(bare)
+        #expect(bare.isHidden)
+
+        let postered = VideoRenderView()
+        postered.isHidden = false
+        postered.setPoster(UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { _ in })
+        await controller.play(URL(string: "mock://video/2")!, in: postered)
+        controller.stop(postered)
+        #expect(postered.isHidden == false)
     }
 
     @Test func recappingAViewWithNoPlayerIsANoOp() {

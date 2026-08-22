@@ -292,6 +292,13 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         return carousel.hostsSurfaceOnCurrentPage(view)
     }
 
+    /// Whether the surface could actually put pixels on screen: on the page
+    /// being looked at, visible, and not sitting at zero alpha behind a flight.
+    public var isSurfaceDrawable: Bool {
+        guard let view = loadedVideoRenderView else { return false }
+        return !view.isHidden && view.alpha > 0 && isRenderingCurrentMedia
+    }
+
     public func adoptVideoRenderView(_ view: VideoRenderView) {
         if let existing = loadedVideoRenderView, existing !== view {
             existing.detachForReplacement()
