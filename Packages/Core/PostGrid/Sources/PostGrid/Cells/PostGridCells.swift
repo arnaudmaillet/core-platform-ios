@@ -7,10 +7,26 @@ import UIKit
 
 /// One full-width row of the Activity/Short timelines: the caption with
 /// reading padding on a soft card, plus — when the post carries media — a
-/// rounded full-width preview under the text (play badge for videos), and a
-/// quiet metadata line closing the card: views, reactions, comments on the
-/// leading side, the post's compact age trailing. Short pages never have
-/// media, so their rows are text + metadata.
+/// rounded full-width preview under the text (play badge for videos). Short
+/// pages never have media, so their rows are text + metadata.
+///
+/// ## Where the metadata sits
+///
+/// Views, reactions, comments and the post's compact age, and there are two
+/// placements because there are two shapes of card:
+///
+/// * **Text row** — a quiet line closing the card, counters leading and the age
+///   trailing, `.secondaryLabel` against the card's own fill.
+/// * **Media row** — the same four values ON the preview, as two material chips
+///   resting on its bottom edge (counters leading, age trailing). The card then
+///   ENDS at the preview, so the line below it is gone rather than duplicated.
+///
+/// The second is not decoration. A card with a preview closed on a strip of
+/// card-coloured furniture below the image, which is the widest thing on the
+/// row and the least worth reading; moving it onto the media buys back roughly
+/// 28pt per media row and lets the preview finish the card. See
+/// `PostMetaPillView` for the ground the pills stand on, and `contentInset` for
+/// why the preview's edges fall on the caption's.
 public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognizerDelegate {
     public static let reuseID = "PostGridListRowCell"
     /// The inner preview's rounding — the radius a hero flying from this row
@@ -124,13 +140,27 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     public var mediaHeroRect: CGRect? {
         guard !mediaView.isHidden else { return nil }
         layoutIfNeeded()
+        // A collection departs from the PAGE, not the box. The box is wider by
+        // the carousel's peek and holds a slice of a second photograph, so a
+        // flight that took it would carry two images and land one.
+        if let carousel, !carousel.isHidden,
+           let page = carousel.currentPageRect(in: self) {
+            return page
+        }
         return mediaView.frame
     }
 
     /// The image the preview is currently showing — the exact pixels the
     /// viewer is looking at, so a flight starts from them rather than from a
     /// cache lookup that could miss.
-    public var renderedCover: UIImage? { mediaView.image }
+    ///
+    /// For a collection that is the page the viewer has scrolled to, not the
+    /// post's first attachment: once they have swiped, the first attachment is
+    /// no longer what they are looking at.
+    public var renderedCover: UIImage? {
+        if let carousel, !carousel.isHidden { return carousel.renderedCover }
+        return mediaView.image
+    }
 
     /// The preview box — a row's media is one part of its card, so this is the
     /// part visibility is measured against. Falls back to the whole cell only
@@ -254,6 +284,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             bounds.size.width = targetWidth
         }
         composeCaption(atWidth: targetWidth)
+        // The preview's height is a function of the row's width, so it belongs
+        // in the same pass and for the same reason: `configure` runs before the
+        // cell is sized, and a height resolved against a recycled cell's old
+        // width is the wrong height.
+        resolveMediaHeight(atWidth: targetWidth)
         contentView.setNeedsLayout()
         contentView.layoutIfNeeded()
         let fitted = contentView.systemLayoutSizeFitting(
@@ -265,6 +300,12 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // descender on the last line.
         layoutAttributes.frame.size.height = ceil(fitted.height)
         return layoutAttributes
+    }
+
+    private func resolveMediaHeight(atWidth width: CGFloat) {
+        mediaHeight.constant = Self.mediaHeight(
+            forCardWidth: width, aspectRatio: mediaAspectRatio
+        )
     }
 
     /// The ellipsis and the affordance, written INTO the caption so they sit at
@@ -482,6 +523,36 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The simulator injects no touches, so this is the only way this control
     /// is reachable in an automated run.
     ///
+    /// Fired when the viewer taps the media of a COLLECTION row.
+    ///
+    /// A row with one photograph needs nothing here — the collection view's own
+    /// selection handles it. A carousel is a scroll view, and a scroll view in
+    /// the content path swallows that selection, so the host has to be told
+    /// separately. See `MediaCarouselView.onTapped`.
+    public var onMediaTapped: (() -> Void)?
+
+    /// Moves this row's carousel, e.g. to follow the page an opened post is on.
+    /// Ignored by a row with no collection.
+    public func setMediaPage(_ page: Int, animated: Bool = true) {
+        guard let carousel, !carousel.isHidden else { return }
+        carousel.setPage(page, animated: animated)
+    }
+
+    /// Which page of this row's carousel is showing, or nil for a row with no
+    /// collection. A hero flight departs from this page, so whatever opens the
+    /// post has to land on it.
+    public var currentMediaPage: Int? {
+        guard let carousel, !carousel.isHidden else { return nil }
+        return carousel.currentPage
+    }
+
+    /// Scrolls this row's carousel, or false if it has none.
+    @discardableResult
+    public func debugScrollCarousel(toPage index: Int, animated: Bool = true) -> Bool {
+        guard let carousel, !carousel.isHidden else { return false }
+        return carousel.debugScroll(toPage: index, animated: animated)
+    }
+
     @discardableResult
     public func debugTapShowMore() -> Bool {
         guard showMoreRange != nil else { return false }
@@ -507,7 +578,32 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// reports nil for a hidden preview, so hiding it would make the row
     /// unable to answer where its own media is — which is the rect the
     /// DISMISSAL flies home to.
+    ///
+    /// The metadata pills go with it, and they get there for free: they are
+    /// subviews OF the preview, so the one alpha carries them. That is why they
+    /// were built inside it rather than over it in the card — a chip left
+    /// floating on an empty rounded box for the length of a flight is the same
+    /// defect as a caption that vanishes, on a smaller scale, and the way not
+    /// to have it is to have no second channel to keep in step.
+    ///
+    /// (The `playBadge` line below is that second channel, and it is redundant
+    /// for exactly this reason — the badge is inside the preview too. Kept,
+    /// because a reader checking whether the badge is concealed should find an
+    /// answer rather than infer one.)
     public func setHeroMediaConcealed(_ concealed: Bool) {
+        // A COLLECTION conceals one PAGE, not the preview.
+        //
+        // The rule is the same one this method's note states — conceal exactly
+        // what the flight reproduces — read one level further in: a flight from
+        // a collection carries the current page, so the box, the neighbour's
+        // peek and the chips all stay. Hiding the box took the peek and the
+        // chips with it and brought the whole strip back in one frame at the
+        // landing, which is the pop this rule exists to prevent, rebuilt inside
+        // the preview it was written for.
+        if let carousel, !carousel.isHidden {
+            carousel.setCurrentPageConcealed(concealed)
+            return
+        }
         mediaView.alpha = concealed ? 0 : 1
         playBadge.alpha = concealed ? 0 : 1
     }
@@ -559,18 +655,177 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// was the wrong target — the card is on screen all the time, and it should
     /// look like the platform.
     public static let cardCornerRadius: CGFloat = 26
+
+    /// How far every child of a card is held off its edges: the caption, the
+    /// author band, the closing metric line, and the media preview, which is
+    /// the point — text and image share one pair of vertical lines rather than
+    /// each having its own.
+    ///
+    /// ## It is not only a margin
+    ///
+    /// It is the card's ONE free number, and it sets four things at once:
+    ///
+    /// * the reading padding of a card,
+    /// * where the preview's edges fall (on the caption's),
+    /// * **the preview's radius**, `cardCornerRadius - contentInset`, and
+    ///   therefore how close the image's roundness is to the card's,
+    /// * the reading padding of the post's own PAGE — `captionInset` is shared
+    ///   with `PostCaptionRowView` structurally, because a reveal has to land
+    ///   the window's caption on the card's.
+    ///
+    /// The third is the one that is easy to miss and the reason this value
+    /// cannot be argued to. A card at 26 with a 16pt padding gives a 10pt
+    /// preview: correct by the concentric rule and a 2.6× drop in roundness
+    /// between the container and the thing inside it, which reads as a hard
+    /// rectangle in a soft card.
+    ///
+    /// **12**, chosen off three builds side by side:
+    ///
+    /// ```
+    ///   padding   preview   drop     page prose
+    ///   16        10        2.6x     16   the loosest, and the widest gap
+    ///   12        14        1.9x     12   ← here
+    ///   10        16        1.6x     10
+    ///    8        18        1.4x      8   ❌ measured cramped, page worse
+    /// ```
+    ///
+    /// ❌ 8 is recorded rather than merely rejected: geometrically it is the
+    /// most homogeneous of the four, and it is still wrong. It was tried whole —
+    /// one number governing every curve in the card (26 → 18 → 10, a constant
+    /// band at all three levels, chips landing within half a point of their own
+    /// capsule) — and the arithmetic being perfect did not save it. The card
+    /// reads cramped, and because the page shares this number, a full column of
+    /// prose ended up 8pt from the screen's edge.
+    public static let contentInset: CGFloat = 12
+
+    /// How far the preview's own furniture — the metadata pills, the play badge
+    /// — is held off its edges. `contentInset` again, and that is the point.
+    ///
+    /// ## Why furniture may be a capsule, and the preview may not
+    ///
+    /// The concentric rule — a child's radius is its parent's less the inset
+    /// between them — is about CORNERS. It exists because two curves turning
+    /// together at a corner have a band between them, and unless the radii
+    /// differ by exactly the inset that band swells through the turn. Along a
+    /// STRAIGHT edge there is no such constraint: the band is the inset, at
+    /// every point, whatever shape the child is.
+    ///
+    /// So the question for a chip resting on the preview is not what radius the
+    /// arithmetic gives it (a rectangle, at any padding worth using) but whether
+    /// it is anywhere near the preview's corners at all. Held off both edges by
+    /// the preview's own radius or more, it is not: a rounded rect's corner arc
+    /// occupies a box of exactly its radius. The chip rests on flat edge, has no
+    /// competing curve to hold a band with, and is free to be the capsule a chip
+    /// should be.
+    ///
+    /// ❌ 8 was the first value, and it is what put the chips INSIDE the corner
+    /// boxes — where a capsule's ~10.5 sat within half a point of the preview's
+    /// own radius, which is the equal-radii case: measured, an 8pt band on the
+    /// straights opening to 11.5 at 45°. Concentric would have fixed it at
+    /// radius 2 and cost the chips their shape. Moving them off the corner costs
+    /// nothing and dissolves the question.
+    ///
+    /// The clearance is therefore a FLOOR, not a preference: whatever the card's
+    /// padding is, furniture on the preview has to start outside an arc whose
+    /// size moves the other way. Tighten the card and the preview gets rounder,
+    /// and its corners reach further in.
+    ///
+    /// `CardShapeSystemTests` asserts it, because it is what the capsule is
+    /// standing on.
+    public static var mediaFurnitureInset: CGFloat {
+        max(contentInset, mediaCornerRadius)
+    }
+
     /// How far the media preview is held off the card's edge — named because
     /// the preview's own radius is derived from it, and the two must move
     /// together or the curves stop being parallel.
-    public static let mediaInset: CGFloat = 16
+    public static var mediaInset: CGFloat { contentInset }
     public static let cardFillColor: UIColor = .secondarySystemBackground
-    /// The caption's type and inset, for the same reason.
-    public static let captionInset: CGFloat = 16
-    public static let captionTopInset: CGFloat = 16
+    /// The caption's inset, which is the preview's, which is the card's — see
+    /// `contentInset`. Public because the post's own page reproduces this exact
+    /// register so a reveal's window lands its caption on the card's own.
+    public static var captionInset: CGFloat { contentInset }
+    public static var captionTopInset: CGFloat { contentInset }
     /// The closing metric line's placement, shared with the flight card that
     /// stands in for a text row.
     public static let metaBottomInset: CGFloat = 14
+    /// NOT an inset — the gap between two counters inside the line, which is a
+    /// question about reading a row of numbers rather than about where the card
+    /// ends. It does not follow `contentInset`.
     public static let metaSpacing: CGFloat = 14
+    // MARK: - The card's shape system
+    //
+    // Every radius on a card, in one place, because four radii chosen
+    // separately is how a card stops looking like one object.
+    //
+    // ```
+    //   card      26        the container, and the platform's own answer
+    //   preview   14        concentric: 26 - 12, corners ON the card's corners
+    //   chips     capsule   clear of the preview's corners, so unconstrained
+    //   avatar    circle    a portrait, exempt — see below
+    // ```
+    //
+    // Two rules produce all of it, and the second is the one that is usually
+    // missing:
+    //
+    // 1. **A child whose corners sit at its parent's is concentric with it** —
+    //    radius = parent's less the inset. The preview.
+    // 2. **A child clear of its parent's corners has no radius obligation at
+    //    all** — it meets only straight edge. The chips.
+    //
+    // An avatar is neither: it is a picture of a person, and every surface in
+    // this app draws one as a circle. A circle near a rounded corner has never
+    // read as a disagreement, because it is not perceived as a container — it
+    // is perceived as a face. Rounding it to 10 for consistency's sake would
+    // make the card MORE uniform and less legible, which is the trade a shape
+    // system exists to avoid making by accident.
+    //
+    // ❌ Making the chips concentric was tried and is the reason this note
+    // exists: at 8pt in from the preview's edges the arithmetic gave 2, and a
+    // chip at radius 2 is a rectangle. The choice looked like "correct shape or
+    // correct radius" until the third option turned up — move the chip off the
+    // corner, where neither answer is required.
+    // MARK: - The preview's height
+
+    /// The widest a preview may be drawn: 16:9. A floor on HEIGHT, and it is
+    /// what stops a 21:9 clip from becoming a slit with a subject in it.
+    public static let widestMediaAspect: CGFloat = 16.0 / 9.0
+    /// The tallest a preview may be drawn: 4:5, the portrait cap Instagram
+    /// settled on and the same one the mock corpus already seeds.
+    ///
+    /// It is the number that decides how much of a screen one card may take.
+    /// Measured on this device (402pt wide, 348pt of preview): 4:5 is 435pt of
+    /// preview and about 63% of the screen with the band, caption and padding
+    /// on top. Uncapped, a 9:16 post would be 619 and **84%** — one post, one
+    /// screen, which is what this exists to prevent.
+    public static let tallestMediaAspect: CGFloat = 5.0 / 4.0
+
+    /// How tall the preview is for a post of a given shape, in a card of a
+    /// given width.
+    ///
+    /// A pure function of the two, deliberately: the height has to come from
+    /// the MODEL and never from the image once it lands. `MediaAttachment`
+    /// already states the rule — heights are computed from `aspectRatio`, never
+    /// by sizing views — because a height that changes when the file arrives
+    /// reflows everything below it in a list the viewer is already scrolling.
+    ///
+    /// ⚠️ `aspectRatio` is 1 for a SQUARE post and 1 for a post the backend
+    /// never stamped with dimensions; `GalleryPost` says so in as many words.
+    /// So an unmeasured post lands here as a square — 348pt rather than the
+    /// 180pt letterbox rows used to draw. That is the fail-open direction and
+    /// it is the right one for a height (a square is a plausible photo; a slit
+    /// is not), but it is a real behaviour change for any surface whose
+    /// payload omits width and height.
+    public static func mediaHeight(forCardWidth cardWidth: CGFloat, aspectRatio: Double) -> CGFloat {
+        let mediaWidth = cardWidth - contentInset * 2
+        guard mediaWidth > 0 else { return 0 }
+        let ratio = aspectRatio > 0 ? CGFloat(aspectRatio) : 1
+        let natural = mediaWidth / ratio
+        let shortest = mediaWidth / widestMediaAspect
+        let tallest = mediaWidth * tallestMediaAspect
+        return (min(max(natural, shortest), tallest)).rounded()
+    }
+
     /// How many lines of caption a card previews before it offers the rest.
     ///
     /// A card is a PREVIEW and the post is where the text is read, so the cap
@@ -657,10 +912,52 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     private let comments = PostMetricLabel(symbol: "bubble.right", font: metaFont, color: .secondaryLabel)
     private let views = PostMetricLabel(symbol: "eye", font: metaFont, color: .secondaryLabel)
     private let ageLabel = UILabel()
+
+    /// The media row's metadata, which is the same four values as the line
+    /// above wearing the overlay's type and colour.
+    ///
+    /// SEPARATE INSTANCES rather than the line's own views moved into the
+    /// pills, and the duplication is the cheaper of the two: the two placements
+    /// differ in font, weight, symbol variant and colour, all of which
+    /// `PostMetricLabel` fixes at init, so re-parenting would have meant making
+    /// every one of them mutable and re-applying the whole set on each
+    /// `configure` — on the recycling path, for a saving of four views.
+    private let overlayViews = PostMetricLabel(
+        symbol: "eye.fill", font: PostMetaPillView.font, color: PostMetaPillView.foreground
+    )
+    private let overlayReactions = PostMetricLabel(
+        symbol: "heart.fill", font: PostMetaPillView.font, color: PostMetaPillView.foreground
+    )
+    private let overlayComments = PostMetricLabel(
+        symbol: "bubble.right.fill", font: PostMetaPillView.font, color: PostMetaPillView.foreground
+    )
+    private let overlayAge = UILabel()
+    private var countersPill: PostMetaPillView!
+    private var agePill: PostMetaPillView!
+    /// Which page of a collection is showing. Always built — it is a chip in the
+    /// same row as the other two and hides itself for a single-media post.
+    private let pageIndicator = MediaPageIndicatorView()
+    /// Built on first use: most posts have one piece of media.
+    private var carousel: MediaCarouselView?
+
     private var loadTask: Task<Void, Never>?
-    /// Swapped per configure: the metadata line hangs off the caption for
-    /// text-only rows; media rows interpose the preview.
+    /// The metadata line always hangs off the caption; what changes per
+    /// configure is whether it CLOSES the card. A media row's line is hidden
+    /// under the preview, laid out but drawing nothing, which is what keeps it
+    /// out of the height without leaving it unconstrained.
+    /// The preview's height, which is the post's OWN aspect ratio clamped —
+    /// see `mediaHeight(forCardWidth:aspectRatio:)`. Held so a width change can
+    /// re-resolve it.
+    private lazy var mediaHeight: NSLayoutConstraint =
+        mediaView.heightAnchor.constraint(equalToConstant: 0)
+    /// The aspect the current post declares, kept because the height depends on
+    /// a width this cell does not know until it is measured.
+    private var mediaAspectRatio: Double = 1
+
     private var metaFollowsCaption: NSLayoutConstraint!
+    /// Active for text rows only: the line is the card's last thing. A media
+    /// row ends at the preview instead — see `mediaClosesCard`.
+    private var metaClosesCard: NSLayoutConstraint!
     private var mediaConstraints: [NSLayoutConstraint] = []
 
     override public init(frame: CGRect) {
@@ -714,6 +1011,15 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
 
         mediaView.contentMode = .scaleAspectFill
         mediaView.clipsToBounds = true
+        // ⚠️ `UIImageView` ships with interaction OFF, and everything inside the
+        // preview inherits that: the carousel's scroll view was unhittable, so a
+        // swipe on the pages reached the tab pager instead and changed tab.
+        //
+        // It survived a unit test on the pager's yielding rule AND the fix to
+        // that rule, because the rule asks what is under the touch — and with
+        // the box refusing hits, what was under the touch was the card. One
+        // default, two symptoms, and only a real drag on the simulator found it.
+        mediaView.isUserInteractionEnabled = true
         // CONCENTRIC with the card, not a constant of its own: the preview is
         // inset from the card's edge, and a curve parallel to the one around it
         // is the inner radius reduced by exactly that inset. It was 12 against
@@ -728,10 +1034,18 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         playBadge.layer.shadowOpacity = 0.55
         playBadge.layer.shadowRadius = 4
         playBadge.layer.shadowOffset = .zero
+        // The same inset as the chips at the other end, and as everything on the
+        // card above it — furniture on the preview is held off it exactly as the
+        // preview is held off the card.
         playBadge.constrain(in: mediaView) { parent in
-            playBadge.topAnchor.constraint(equalTo: parent.topAnchor, constant: 10)
-            playBadge.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -10)
+            playBadge.topAnchor.constraint(
+                equalTo: parent.topAnchor, constant: Self.mediaFurnitureInset
+            )
+            playBadge.trailingAnchor.constraint(
+                equalTo: parent.trailingAnchor, constant: -Self.mediaFurnitureInset
+            )
         }
+        buildMediaMetaPills()
 
         ageLabel.font = Self.metaFont
         ageLabel.textColor = .secondaryLabel
@@ -750,21 +1064,144 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         metaRow.constrain(in: card) { parent in
             metaRow.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Self.captionInset)
             metaRow.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Self.captionInset)
-            metaRow.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Self.metaBottomInset)
         }
         metaFollowsCaption = metaRow.topAnchor.constraint(
             equalTo: captionLabel.bottomAnchor, constant: Self.captionFollowGap
         )
         metaFollowsCaption.isActive = true
+        metaClosesCard = metaRow.bottomAnchor.constraint(
+            equalTo: card.bottomAnchor, constant: -Self.metaBottomInset
+        )
+        metaClosesCard.isActive = true
         mediaConstraints = [
             mediaView.topAnchor.constraint(
                 equalTo: captionLabel.bottomAnchor, constant: Self.captionFollowGap
             ),
             mediaView.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Self.mediaInset),
             mediaView.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Self.mediaInset),
-            mediaView.heightAnchor.constraint(equalToConstant: 180),
-            metaRow.topAnchor.constraint(equalTo: mediaView.bottomAnchor, constant: 12)
+            mediaHeight,
+            // The preview CLOSES a media card, at the same inset it is held off
+            // the sides by — the metadata that used to sit under it is on the
+            // preview now. Concentric all the way round, and the card is 28pt
+            // shorter for it.
+            mediaView.bottomAnchor.constraint(
+                equalTo: card.bottomAnchor, constant: -Self.mediaInset
+            )
         ]
+    }
+
+    /// The two chips that carry a media row's metadata, resting on the
+    /// preview's bottom edge — counters leading, age trailing, both inside the
+    /// preview so that ONE alpha conceals the lot while a flight is in the air
+    /// (see `setHeroMediaConcealed`).
+    ///
+    /// The bottom edge, and not the top: the play badge already owns the top
+    /// trailing corner, and a video row would have had the age underneath it.
+    ///
+    /// Held off both edges by `mediaFurnitureInset`, which is what puts them
+    /// clear of the preview's corner arcs and lets them be capsules — see that
+    /// property for the geometry.
+    private func buildMediaMetaPills() {
+        overlayAge.font = PostMetaPillView.font
+        overlayAge.textColor = PostMetaPillView.foreground
+        overlayAge.adjustsFontForContentSizeCategory = true
+        overlayAge.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        // Views lead, reactions and comments follow — the same reach-first
+        // order the closing line and the media tiles both use.
+        countersPill = PostMetaPillView(
+            contents: [overlayViews, overlayReactions, overlayComments]
+        )
+        agePill = PostMetaPillView(contents: [overlayAge])
+
+        countersPill.constrain(in: mediaView) { parent in
+            countersPill.leadingAnchor.constraint(
+                equalTo: parent.leadingAnchor, constant: Self.mediaFurnitureInset
+            )
+            countersPill.bottomAnchor.constraint(
+                equalTo: parent.bottomAnchor, constant: -Self.mediaFurnitureInset
+            )
+        }
+        agePill.constrain(in: mediaView) { parent in
+            agePill.trailingAnchor.constraint(
+                equalTo: parent.trailingAnchor, constant: -Self.mediaFurnitureInset
+            )
+            agePill.bottomAnchor.constraint(
+                equalTo: parent.bottomAnchor, constant: -Self.mediaFurnitureInset
+            )
+        }
+        // The page indicator sits BETWEEN the two, centred on the preview
+        // rather than on the space left over — the row reads as three chips on
+        // one baseline, and centring on the gap would slide it whenever a
+        // counter gained a digit.
+        // Centred on the age chip's CENTRE, not aligned to its bottom.
+        //
+        // The three chips are different heights — a row of 6pt dots is shorter
+        // than a line of caption2 — so a shared bottom edge puts the short one's
+        // mass below the others. What reads as "one row" is centres on a line,
+        // which is also what survives Dynamic Type moving the text chips and not
+        // the dots.
+        //
+        // Against the AGE chip because it is the one always on screen: a post
+        // with no counters hides the leading chip, and hanging the indicator off
+        // something that can disappear is how it ends up somewhere else.
+        pageIndicator.constrain(in: mediaView) { parent in
+            pageIndicator.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
+            pageIndicator.centerYAnchor.constraint(equalTo: agePill.centerYAnchor)
+        }
+        // Keeps the chips apart when the type grows, and deliberately BREAKABLE:
+        // at the largest accessibility sizes three counters, a date and an
+        // indicator do not fit across a preview, and the choice there is between
+        // chips that touch and a run of unsatisfiable-constraint logs. None of
+        // them may be truncated — a clipped count is a wrong count.
+        for clearance in [
+            pageIndicator.leadingAnchor.constraint(
+                greaterThanOrEqualTo: countersPill.trailingAnchor, constant: 8
+            ),
+            agePill.leadingAnchor.constraint(
+                greaterThanOrEqualTo: pageIndicator.trailingAnchor, constant: 8
+            ),
+            agePill.leadingAnchor.constraint(
+                greaterThanOrEqualTo: countersPill.trailingAnchor, constant: 8
+            )
+        ] {
+            clearance.priority = .defaultHigh
+            clearance.isActive = true
+        }
+    }
+
+    /// The carousel, built on first use — most posts have one piece of media and
+    /// should not pay for a scroll view they will never scroll.
+    ///
+    /// Inserted BELOW the chips, and that is the layout's whole contract with
+    /// them: the chips and the indicator belong to the PREVIEW, not to what is
+    /// inside it. They are pinned to the box, the pages move underneath, and
+    /// nothing about a drag can shift them. Putting them inside the scroll view
+    /// would have been the natural way to write this and would have carried the
+    /// counters off the screen with page two.
+    private func makeCarouselIfNeeded() -> MediaCarouselView {
+        if let carousel { return carousel }
+        let view = MediaCarouselView()
+        view.onPageChanged = { [weak self] page in
+            self?.pageIndicator.setCurrent(page)
+        }
+        // The indicator is a control, and the cell is what connects it: neither
+        // half reaches the other, which is what keeps the carousel the only
+        // thing that decides where the pages are.
+        pageIndicator.onPageRequested = { [weak view] page in
+            view?.setPage(page)
+        }
+        view.onTapped = { [weak self] in self?.onMediaTapped?() }
+        mediaView.insertSubview(view, belowSubview: countersPill)
+        view.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            view.leadingAnchor.constraint(equalTo: mediaView.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: mediaView.trailingAnchor),
+            view.topAnchor.constraint(equalTo: mediaView.topAnchor),
+            view.bottomAnchor.constraint(equalTo: mediaView.bottomAnchor)
+        ])
+        carousel = view
+        return view
     }
 
     private func buildAuthorBand() {
@@ -809,10 +1246,24 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // Concealment is per-flight state and must not ride a recycled cell to
         // whatever post it is bound to next — the row equivalent of the tile's
         // `isHidden` reset.
+        //
+        // BOTH channels, because the routing depends on whether a carousel is
+        // showing and that answer changes with the post: a row recycled from a
+        // collection to a single photo would otherwise reset only the page it no
+        // longer has, and keep the preview it now uses at alpha 0.
         setHeroMediaConcealed(false)
+        mediaView.alpha = 1
+        playBadge.alpha = 1
         loadTask?.cancel()
         loadTask = nil
         mediaView.image = nil
+        // A recycled row must not keep the previous post's pages: the loads are
+        // per-page tasks and the indicator is per-post state, and neither is
+        // touched by `configure` for a post that turns out to have one piece of
+        // media.
+        carousel?.cancelPendingWork()
+        carousel?.isHidden = true
+        pageIndicator.isHidden = true
         onRevealFullCaption = nil
         // Back to truncated. A recycled row must not inherit the previous
         // post's expansion — `configure` re-applies the host's answer for the
@@ -830,6 +1281,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // profile.
         onAuthorTapped = nil
         authorMenuActions = nil
+        onMediaTapped = nil
         // Concealment is per-FLIGHT state and must not ride a recycled cell to
         // whatever post it is bound to next — see `setHeroConcealed`.
         card.alpha = 1
@@ -914,19 +1366,59 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // that is never sized (a measuring instance) still reads correctly.
         captionLabel.attributedText = Self.plain(post.caption, font: captionLabel.font)
         let hasMedia = post.kind != .text
+        mediaAspectRatio = post.aspectRatio
+        // Provisional, on whatever width this cell currently carries — the
+        // authoritative pass is `preferredLayoutAttributesFitting`. Set here so
+        // a cell that is never measured (a stand-in, a preview) is not left
+        // with a zero-height preview.
+        resolveMediaHeight(atWidth: bounds.width)
         mediaView.isHidden = !hasMedia
         playBadge.isHidden = post.kind != .video
-        metaFollowsCaption.isActive = !hasMedia
+        // The line and the pills are the same four values in two placements, so
+        // exactly one of them is on screen. The line is hidden rather than
+        // unconstrained: it keeps hanging off the caption under the preview,
+        // drawing nothing, which is what stops a media row's layout from being
+        // ambiguous while keeping the line out of the card's height.
+        metaRow.isHidden = hasMedia
+        metaClosesCard.isActive = !hasMedia
         NSLayoutConstraint.deactivate(hasMedia ? [] : mediaConstraints)
         NSLayoutConstraint.activate(hasMedia ? mediaConstraints : [])
 
         reactions.set(post.reactionCount)
         comments.set(post.commentCount)
         views.set(post.viewCount)
-        ageLabel.text = PostMetadata.compactAge(ofMillis: post.publishedAtMS)
+        overlayReactions.set(post.reactionCount)
+        overlayComments.set(post.commentCount)
+        overlayViews.set(post.viewCount)
+        let age = PostMetadata.compactAge(ofMillis: post.publishedAtMS)
+        ageLabel.text = age
+        overlayAge.text = age
+        // A post with no counters at all leaves nothing to put in the leading
+        // pill, and an empty capsule on the photo is worse than no capsule.
+        countersPill.syncVisibilityToContents()
 
         mediaView.image = nil
         mediaView.backgroundColor = post.kind == .video ? .darkGray : .tertiarySystemFill
+
+        // A collection hands its pages to the carousel and stops here: the
+        // box's own image view stays empty, which is what keeps a single-media
+        // post on exactly the path it has always taken — same load, same video
+        // surface, same cover.
+        pageIndicator.configure(count: post.pages.count, current: 0)
+        if post.isCollection {
+            // The box behind the pages is the CARD, not the placeholder fill a
+            // single-media row uses: with a gutter between pages and a sliver of
+            // the next one at the edge, that fill is on screen at rest and has
+            // to be the surface the pages are lying on.
+            mediaView.backgroundColor = Self.cardFillColor
+            let carousel = makeCarouselIfNeeded()
+            carousel.isHidden = false
+            carousel.configure(with: post.pages, imagePipeline: imagePipeline)
+            return
+        }
+        carousel?.isHidden = true
+        carousel?.cancelPendingWork()
+
         guard hasMedia, let url = post.thumbnailURL else { return }
         if let cached = imagePipeline.cachedImage(for: url) {
             mediaView.image = cached

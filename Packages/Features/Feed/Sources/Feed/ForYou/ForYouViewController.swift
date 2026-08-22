@@ -1054,6 +1054,25 @@ final class ForYouViewController: UIViewController {
             seedable.seedProjection(GalleryPostProjection.seedModels(
                 from: Array(posts[index...].prefix(Self.seedWindow))
             ))
+            // A COLLECTION opens on the page the card was showing.
+            //
+            // The flight already carries the right photograph — the row's cover
+            // and hero rect are the CURRENT page's — so a destination that
+            // opened at page one would land the flight on a different image
+            // than the one that flew. The card knows the page; nothing
+            // downstream can work it out.
+            if let page = pager.page(for: viewModel.format)?.currentMediaPage(atIndex: index),
+               page > 0 {
+                seedable.openMediaPage(page, for: tapped.id)
+            }
+            // …and the traffic runs the other way too, live. The card behind
+            // follows the post's carousel, which is what makes the dismissal
+            // land on the photograph the viewer is actually looking at rather
+            // than on the one they opened with.
+            let format = viewModel.format
+            seedable.onMediaPageChanged = { [weak self] id, page in
+                self?.pager.page(for: format)?.setMediaPage(page, for: id)
+            }
         }
 
         // The feed owns the whole screen: hide the bar with the push. Managed
@@ -1996,6 +2015,29 @@ final class ForYouViewController: UIViewController {
                 }
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: attempt)
+        }
+        // `-foryou-carousel <row> <page>`: swipes a collection row's pages.
+        // Polls for the same reason `-foryou-expand` does — the row has to be
+        // realized and its pages built, and a fixed delay silently no-ops.
+        if let position = arguments.firstIndex(of: "-foryou-carousel"),
+           position + 2 < arguments.count,
+           let index = Int(arguments[position + 1]),
+           let page = Int(arguments[position + 2]) {
+            var attempts = 0
+            func attempt() {
+                attempts += 1
+                if pager.page(for: viewModel.format)?
+                    .debugScrollCarousel(atIndex: index, toPage: page) == true {
+                    print("[foryou-carousel] row \(index) → page \(page)")
+                    return
+                }
+                if attempts < 60 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: attempt)
+                } else {
+                    print("[foryou-carousel] NO COLLECTION at row \(index)")
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: attempt)
         }
         guard let position = arguments.firstIndex(of: "-foryou-open"), position + 1 < arguments.count,
               let index = Int(arguments[position + 1])

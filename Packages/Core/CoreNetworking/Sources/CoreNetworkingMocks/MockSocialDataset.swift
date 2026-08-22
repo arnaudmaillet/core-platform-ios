@@ -38,7 +38,19 @@ public struct MockSocialDataset: Sendable {
         public let authorProfileID: String
         public let caption: String
         /// (url, width, height); nil for text-only posts.
+        ///
+        /// The FIRST piece, and it stays a scalar because most of the mock
+        /// reads exactly that: the kind is routed off this URL, the map's pins
+        /// take their face from it, and a collection is still one thing in a
+        /// grid. `extraMedia` carries the rest.
         public let media: (url: String, width: Int, height: Int)?
+        /// Pages two and up of a collection post, empty for everything else.
+        ///
+        /// Separate rather than folding `media` into an array: every existing
+        /// reader wants the head, and an array would have made each of them say
+        /// `.first` — which is the exact shape of the bug this feature exists to
+        /// undo, reintroduced one layer down.
+        public var extraMedia: [(url: String, width: Int, height: Int)] = []
         public let publishedAtMS: Int64
         /// Non-empty = this post is a repost of `parentID` (post.v1 lineage:
         /// a repost is the author's own post referencing its source).
@@ -177,7 +189,30 @@ public struct MockSocialDataset: Sendable {
             "Quiet morning, notes and a long walk before anything else.",
             "Golden hour over the harbour."
         ]
-        let shapes: [(Int, Int)] = [(1080, 1350), (1600, 900), (1080, 1080)]
+        // One entry PER ARRIVAL rather than a short roster cycled by modulus,
+        // because with five arrivals and a `% 3` roster only two of the shapes
+        // were ever reachable here: media lands on indices 0, 1, 3 and 4, which
+        // is `{0, 1, 0, 1}` over three. The Following feed therefore had no
+        // story-format post at all while the main corpus did — which is exactly
+        // what "the feed only has landscape media" was.
+        //
+        // Chosen against the slot's KIND, since only indices 1 and 3 are video:
+        //
+        //   0  image  4:5    the portrait CAP, the shape drawn uncropped
+        //   1  video  16:9   the landscape end
+        //   2  —             text-only, so this entry is never read
+        //   3  video  9:16   a vertical VIDEO (synthetic catalog only, below)
+        //   4  image  9:16   a vertical PHOTO, in both catalogs
+        //
+        // ⚠️ Index 3 is vertical only WITHOUT `-rich-media`. Under the real-asset
+        // catalog a video takes its dimensions from the fixture, and every
+        // fixture is landscape: no stable public source vends portrait test
+        // video, and declaring a landscape encode as 9:16 is the pre-layout
+        // defect `MockMediaFixtures` was cleaned up to stop. Vertical photos
+        // work in both catalogs, because Picsum returns exactly the size asked.
+        let shapes: [(Int, Int)] = [
+            (1080, 1350), (1600, 900), (1080, 1080), (900, 1600), (1080, 1920)
+        ]
         return captions.enumerated().map { index, caption in
             // ONE of the five is text-only (index 2), on the corpus's own
             // `index % 3 == 2` rule so the arrivals do not all land in one cell
@@ -205,11 +240,45 @@ public struct MockSocialDataset: Sendable {
                      shape.0, shape.1)
                 }
             }
+            // ARRIVAL 4 IS A COLLECTION — four photos behind the one the card
+            // opens on.
+            //
+            // Index FOUR, not zero, and it is worth stating why: these five are
+            // stamped newest-first (`epochMS - index * 60_000`) but the New
+            // section presents them the other way round, so index 4 is the card
+            // a cold launch opens on and index 0 is the one five scrolls down.
+            // Measured in the simulator, not assumed — the collection was
+            // seeded on index 0 first and could not be seen without scrolling.
+            // It is also an IMAGE slot (`index % 2 == 1` is video), which a
+            // collection has to be.
+            //
+            // Photos, not video: `post.v1` distinguishes `carousel` from
+            // `main_video`, and the card's carousel renders covers. Photos also
+            // work under BOTH catalogs, unlike portrait video — Picsum returns
+            // exactly the size asked for.
+            //
+            // Shapes deliberately disagree with page one. A carousel takes its
+            // box from the first page and aspect-fills the rest, so a run of
+            // identical ratios would never exercise the crop.
+            let collectionShapes: [(Int, Int)] = [(1600, 900), (1080, 1080), (900, 1600)]
+            let extraMedia: [(url: String, width: Int, height: Int)] =
+                index == 4
+                ? collectionShapes.enumerated().map { position, shape in
+                    switch mediaCatalog {
+                    case .synthetic:
+                        ("mock://media/new-4-\(position)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
+                    case .realAssets:
+                        (MockMediaFixtures.imageURL(index: 40 + position, width: shape.0, height: shape.1),
+                         shape.0, shape.1)
+                    }
+                }
+                : []
             return PostRecord(
                 postID: String(format: "post-new-%02d", index),
                 authorProfileID: authors[index % authors.count].profileID,
                 caption: caption,
                 media: media,
+                extraMedia: extraMedia,
                 // Newest first, a minute apart, all of them ahead of the clock.
                 publishedAtMS: epochMS - Int64(index) * 60_000,
                 parentID: ""

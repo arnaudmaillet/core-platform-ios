@@ -1,5 +1,6 @@
-import MediaCore
 import CoreModels
+import MediaCore
+import PostGrid
 import Foundation
 import UIKit
 
@@ -56,6 +57,18 @@ public struct FeedItemDisplayModel: Identifiable, Sendable, Equatable {
     /// and nothing else. Only a grid knows all three, so only a grid-seeded
     /// model can fill this — see `GalleryPostProjection`.
     let cardMetrics: PostCardMetrics?
+    /// Pages two and up of a COLLECTION post, empty for everything else.
+    ///
+    /// The head stays in `mediaURL` / `thumbnailURL` / `mediaKind` above rather
+    /// than folding into an array, because everything on this page that shows
+    /// ONE piece of a post reads those: the video surface, the poster, the hero
+    /// landing, the media toolbar's attribution. An array would have made each
+    /// of them say `.first`, which is the shape of the bug this undoes.
+    ///
+    /// PHOTOS only, which follows the contract's own line between `carousel`
+    /// and `main_video`: a page carries one video surface, and a collection of
+    /// clips would need one per page plus a playback owner per page.
+    let extraMedia: [GalleryPost.MediaPage]
 
     init(
         id: PostID,
@@ -70,7 +83,8 @@ public struct FeedItemDisplayModel: Identifiable, Sendable, Equatable {
         audioText: String?,
         likeCount: Int64 = 0,
         timestampText: String = "",
-        cardMetrics: PostCardMetrics? = nil
+        cardMetrics: PostCardMetrics? = nil,
+        extraMedia: [GalleryPost.MediaPage] = []
     ) {
         self.id = id
         self.authorID = authorID
@@ -85,7 +99,21 @@ public struct FeedItemDisplayModel: Identifiable, Sendable, Equatable {
         self.likeCount = likeCount
         self.timestampText = timestampText
         self.cardMetrics = cardMetrics
+        self.extraMedia = extraMedia
     }
+
+    /// Every page of the post, head included — what a carousel is built from.
+    var mediaPages: [GalleryPost.MediaPage] {
+        guard mediaURL != nil || thumbnailURL != nil else { return [] }
+        return [GalleryPost.MediaPage(
+            thumbnailURL: thumbnailURL ?? mediaURL,
+            videoURL: mediaKind == .video ? mediaURL : nil
+        )] + extraMedia
+    }
+
+    /// Whether this post is a collection — the only question the page's
+    /// carousel asks.
+    var isCollection: Bool { !extraMedia.isEmpty }
 }
 
 /// Builds display models from hydrated feed entries. Pure, deterministic, and
@@ -114,7 +142,16 @@ public struct FeedDisplayModelBuilder: Sendable {
             audioText: (attachment != nil && mediaKind == .video)
                 ? "Original audio · @\(entry.author.handle)" : nil,
             likeCount: entry.likeCount,
-            timestampText: Self.readableTimestamp(from: entry.post.publishedAt, to: now)
+            timestampText: Self.readableTimestamp(from: entry.post.publishedAt, to: now),
+            // Everything after the head. `attachments` is a repeated field and
+            // this builder kept only its first element — the page showed one
+            // photograph of a collection and nothing said there were more.
+            extraMedia: entry.post.attachments.dropFirst().map { attachment in
+                GalleryPost.MediaPage(
+                    thumbnailURL: attachment.thumbnailURL ?? attachment.url,
+                    aspectRatio: attachment.aspectRatio
+                )
+            }
         )
     }
 

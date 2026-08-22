@@ -221,25 +221,95 @@ extension HorizontalPagerView: UIScrollViewDelegate {
     }
 }
 
-// MARK: - Edge-yielding scroll view
+// MARK: - Yielding scroll view
 
-/// The pager's scroll view, with one deviation from stock: its pan REFUSES
-/// touches originating in the screen's leading edge strip, so a navigation
-/// stack's interactive pop owns that zone outright. The inbox is a tab root
-/// today (nothing to pop), but the rule costs nothing and means the container
-/// stays correct the day it is pushed — the same guarantee
-/// `ProfileGalleryPagerView` makes.
-private final class HorizontalPagerScrollView: UIScrollView {
+/// A paging scroll view that knows when a horizontal drag is not its own.
+///
+/// Two rules, both about giving the gesture up:
+///
+/// 1. **The leading edge strip** belongs to a navigation stack's interactive
+///    pop, outright. A tab root has nothing to pop today, but the rule costs
+///    nothing and keeps the container correct the day it is pushed — the same
+///    guarantee `ProfileGalleryPagerView` makes.
+/// 2. **Horizontally scrollable content under the touch** owns the drag.
+///
+/// ⚠️ PUBLIC because this app has more than one pager, and the second one did
+/// not have these rules. The tab-swipe fix was written here first and changed
+/// nothing on the surface it was reported against: the Messages inbox uses this
+/// pager, For You has its own `ForYouPagerView`, and a post card lives in the
+/// latter. Two twins, one defect, one of them fixed — which a real drag on the
+/// simulator caught and a unit test on this class had just called green. Sharing
+/// the class is what stops it happening a third time.
+public final class HorizontalPagerScrollView: UIScrollView {
     /// Matches the system's edge-gesture strip.
     private static let popEdgeZone: CGFloat = 20
 
-    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        if gestureRecognizer === panGestureRecognizer {
-            // Location is in content coordinates; remove the offset to get the
-            // viewport-relative x the edge zone is defined in.
-            let viewportX = gestureRecognizer.location(in: self).x - contentOffset.x
-            if viewportX <= Self.popEdgeZone { return false }
+    override public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        if gestureRecognizer === panGestureRecognizer,
+           shouldYield(at: gestureRecognizer.location(in: self)) {
+            return false
         }
         return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }
+
+    /// Whether a drag beginning at `point` belongs to something other than this
+    /// pager. Split out of the delegate callback so it can be asked directly:
+    /// the callback only fires for the scroll view's OWN recognizer, and a test
+    /// cannot make a real one report a location.
+    ///
+    /// - Parameter point: in this scroll view's content coordinates.
+    public func shouldYield(at point: CGPoint) -> Bool {
+        // Remove the offset to get the viewport-relative x the edge zone is
+        // defined in.
+        if point.x - contentOffset.x <= Self.popEdgeZone { return true }
+        // A horizontal drag that STARTS on horizontally-scrollable content
+        // belongs to that content, not to the tab pager.
+        //
+        // Two `UIScrollView` pans do not recognise simultaneously and UIKit
+        // picks no winner by depth, so without this the pager took every drag
+        // and a post card's carousel could not be swiped at all — it changed
+        // tab instead. Reported exactly that way.
+        //
+        // The inner view owns the gesture for its whole duration, including past
+        // its last page: handing the pager the overflow would mean a drag that
+        // starts as a carousel and finishes as a tab change, and a gesture whose
+        // meaning depends on how far it got is worse than one that ends against
+        // a stop.
+        if let hit = hitTest(point, with: nil), Self.scrollsHorizontally(hit, within: self) {
+            return true
+        }
+        return false
+    }
+
+    /// Whether `view` sits inside something — other than `container` — that owns
+    /// horizontal drags: a scroll view with somewhere to go, or a view that says
+    /// so.
+    ///
+    /// The width test matters: the feed's own vertical collection view is a
+    /// scroll view on this path too, and its content is exactly as wide as it
+    /// is. Without the test the pager would refuse every drag in the list.
+    ///
+    /// The declared case covers what the measured one cannot see — a control
+    /// that scrubs with a pan recognizer rather than by scrolling, which has no
+    /// content size to ask about.
+    private static func scrollsHorizontally(_ view: UIView, within container: UIView) -> Bool {
+        var node: UIView? = view
+        while let current = node, current !== container {
+            if current is HorizontalDragOwning { return true }
+            if let scrollView = current as? UIScrollView,
+               scrollView.contentSize.width > scrollView.bounds.width + 0.5 {
+                return true
+            }
+            node = current.superview
+        }
+        return false
+    }
 }
+
+/// A view that handles horizontal drags itself, without being a scroll view.
+///
+/// `HorizontalPagerScrollView` yields to horizontally scrollable content by
+/// MEASURING it — content wider than its frame. A control that scrubs with a
+/// pan recognizer has nothing to measure, so it declares instead. Conforming is
+/// a statement about gestures only; it adds no requirements.
+public protocol HorizontalDragOwning: UIView {}

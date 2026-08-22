@@ -1,6 +1,7 @@
 import DesignSystem
 import MediaCore
 import MediaPlayback
+import PostGrid
 import UIKit
 
 /// The post's media surface: an image view for photos and a
@@ -114,6 +115,62 @@ final class SnapMediaCardView: UIView {
         logMediaState(image == nil ? "setImage(nil)" : "setImage(image)")
     }
 
+    // MARK: - Collections
+
+    /// Fired as the viewer pages a collection, so the chrome can move its
+    /// indicator. The card knows where the pages are; it does not know where the
+    /// indicator lives.
+    var onPageChanged: ((Int) -> Void)?
+
+    /// Shows a collection's pages instead of the single photo surface.
+    ///
+    /// `.page` style: full-bleed, no peek. The card's carousel peeks because
+    /// nothing else on a card says a post has more than one photograph; here the
+    /// screen IS the photograph, a stripe of the next one down the side would be
+    /// a defect, and the indicator over the comment band carries the message.
+    ///
+    /// The photo surface is hidden rather than removed. It is the Ken Burns
+    /// drift target and the hero landing's surface, and both of those reach for
+    /// it by identity — a collection is a different presentation of the media,
+    /// not a different card.
+    func showCollection(_ pages: [GalleryPost.MediaPage], imagePipeline: ImagePipeline) {
+        let carousel = carousel ?? makeCarousel()
+        carousel.isHidden = false
+        carousel.configure(with: pages, imagePipeline: imagePipeline)
+        imageView.isHidden = true
+        renderView.isHidden = true
+    }
+
+    /// Back to a single surface. Called for every non-collection post, because a
+    /// recycled cell keeps whatever the last one built.
+    func hideCollection() {
+        carousel?.isHidden = true
+        carousel?.cancelPendingWork()
+    }
+
+    /// Which page a collection is showing, for a hero flight and for the chrome
+    /// to re-assert after a rebind.
+    var currentPage: Int { carousel?.currentPage ?? 0 }
+
+    /// Moves to a page, when the indicator asks. A no-op for a post with no
+    /// collection, which is the honest answer rather than a crash.
+    func setPage(_ index: Int, animated: Bool = true) {
+        carousel?.setPage(index, animated: animated)
+    }
+
+    private func makeCarousel() -> MediaCarouselView {
+        let view = MediaCarouselView(style: .page)
+        view.onPageChanged = { [weak self] page in self?.onPageChanged?(page) }
+        // Below nothing — it is the media, and everything else on the page is
+        // layered over the card by the cell.
+        insertSubview(view, aboveSubview: imageView)
+        view.pin(to: self)
+        carousel = view
+        return view
+    }
+
+    private var carousel: MediaCarouselView?
+
     func setPoster(_ image: UIImage?) {
         renderView.setPoster(image)
         logMediaState(image == nil ? "setPoster(nil)" : "setPoster(image)")
@@ -139,7 +196,31 @@ final class SnapMediaCardView: UIView {
     }
     /// Whether the photo surface has something on screen — the landing
     /// trace's readiness signal for an image page.
-    var isImageReady: Bool { imageView.image != nil && !imageView.isHidden }
+    /// Whether the media area has real pixels on screen — the signal the hero
+    /// landing waits on before revealing the page and unmounting the flight
+    /// card.
+    ///
+    /// ⚠️ A COLLECTION answers from the carousel, and forgetting that is the
+    /// most expensive line of the whole feature.
+    ///
+    /// `showCollection` hides `imageView` and never fills it, so the original
+    /// `image != nil && !isHidden` was permanently FALSE for every collection.
+    /// The landing has a timeout behind that check, so it fired instead: the
+    /// flight card stayed on screen for about three seconds, and the page —
+    /// with its comment ticker and its page indicator — appeared only when the
+    /// wait gave up. Measured headless at 3.2s, and reported as "a huge delay
+    /// before the post is fully operational, the comments and the indicator
+    /// arrive well after".
+    ///
+    /// Nothing was late. Everything was built on time behind a view held at
+    /// alpha zero, which is why the two arrived together and why the chip's own
+    /// log showed it configured, unhidden and materialized 1.5s BEFORE the page
+    /// was visible. A readiness signal that a new presentation silently fails
+    /// does not report a problem; it waits.
+    var isImageReady: Bool {
+        if let carousel, !carousel.isHidden { return carousel.renderedCover != nil }
+        return imageView.image != nil && !imageView.isHidden
+    }
 
     // MARK: - No transform. Ever.
     //

@@ -1,5 +1,6 @@
 import CoreModels
 import DesignSystem
+import PostGrid
 import Testing
 import UIKit
 @testable import Feed
@@ -263,7 +264,18 @@ struct SnapShortcutRailViewTests {
         // 100% of the square — width == height == the band's height —
         // sitting ABOVE the rail (a chrome sibling; it never scrolls).
         let compose = try #require(chrome.subviews.compactMap { $0 as? SnapRailBoostButton }.first)
-        #expect(chrome.subviews.compactMap { $0 as? UIVisualEffectView }.isEmpty)
+        // No bare effect view in the overlap zone — the frosted chip that used
+        // to sit there is gone and must not come back.
+        //
+        // The media page indicator is excluded by TYPE rather than by counting:
+        // it is a `UIVisualEffectView` subclass, it lives above the ticker
+        // rather than in the overlap, and it is hidden for every post that is
+        // not a collection. Widening the exclusion to "any effect view" would
+        // have retired the assertion instead of narrowing it.
+        #expect(chrome.subviews
+            .compactMap { $0 as? UIVisualEffectView }
+            .filter { !($0 is MediaPageIndicatorView) }
+            .isEmpty)
         #expect(compose.frame.minY == ticker.frame.minY)
         #expect(abs(compose.frame.maxY - ticker.frame.maxY) < 0.01)
         #expect(abs(compose.frame.maxX - rail.frame.maxX) < 0.01)

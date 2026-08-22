@@ -270,6 +270,19 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// "anywhere": a destination with no vertical tenants has nothing to
     /// refuse.
     func zoomVerticalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool
+
+    /// Whether a HORIZONTAL grab may claim a touch at `location`.
+    ///
+    /// ⚠️ The note above used to end "the horizontal axis has no such tenants
+    /// and is never asked", and it stopped being true the day a post's media
+    /// became a carousel: a rightward drag on the pages means "previous photo"
+    /// to the viewer and "dismiss" to this controller, and only the destination
+    /// knows which page it is on.
+    ///
+    /// Default is "anywhere", so every destination without horizontal tenants
+    /// keeps the behaviour it had.
+    func zoomHorizontalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool
+
     /// Freeze/unfreeze the feed's own scrolling while a grab-to-dismiss drives,
     /// so its rubber-band doesn't fight the shrinking card.
     func setContentScrollEnabled(_ enabled: Bool)
@@ -280,6 +293,7 @@ public extension ZoomTransitionDestination {
     var zoomOwnsInteractiveDismissal: Bool { true }
     var zoomDestinationMediaIsRendering: Bool { true }
     func zoomVerticalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool { true }
+    func zoomHorizontalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool { true }
     func zoomMirrorLiveMedia(onto surface: UIView) -> Bool { false }
     func zoomDonateLiveMediaView() -> UIView? { nil }
     func zoomReclaimLiveMediaView(_ view: UIView) {}

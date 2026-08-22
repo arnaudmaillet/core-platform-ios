@@ -93,7 +93,17 @@ enum GalleryPostProjection {
                 views: post.viewCount,
                 reactions: post.reactionCount,
                 comments: post.commentCount
-            )
+            ),
+            // ⚠️ The collection travels with the seed, and it has to.
+            //
+            // This projection exists so an open is COMPLETE at 0ms rather than
+            // partial — the note above says so for the author capsule. A seed
+            // without the pages opened a collection as a single photograph, and
+            // the carousel plus its indicator appeared only when the real entry
+            // landed, seconds later. Reported as "the indicator arrives well
+            // after". The card already holds every page; dropping them here was
+            // free to fix and expensive to leave.
+            extraMedia: Array(post.pages.dropFirst())
         )
     }
 }

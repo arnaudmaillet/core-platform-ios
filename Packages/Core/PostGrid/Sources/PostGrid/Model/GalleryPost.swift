@@ -32,12 +32,44 @@ public struct GalleryPost: Equatable, Sendable {
     /// that should play.
     static let squareToleranceFraction = 0.12
 
+    /// One piece of media in a post, in the order the author arranged them.
+    ///
+    /// The contract has always been plural — `post.v1.PostView.attachments` is
+    /// a repeated field and `PostKind` has a `carousel` case beside `main_video`
+    /// — and the client collapsed it with `.first` in four projections. This is
+    /// where the collapse stops.
+    public struct MediaPage: Equatable, Sendable {
+        public let thumbnailURL: URL?
+        /// Non-nil only for a playable page — see `GalleryPost.videoURL` for
+        /// why this is the same URL the full-screen viewer opens.
+        public let videoURL: URL?
+        /// This PAGE's own shape. Pages of one post need not agree, which is
+        /// why it lives here rather than on the post.
+        public let aspectRatio: Double
+
+        public init(thumbnailURL: URL?, videoURL: URL? = nil, aspectRatio: Double = 1) {
+            self.thumbnailURL = thumbnailURL
+            self.videoURL = videoURL
+            self.aspectRatio = aspectRatio
+        }
+    }
+
     public let id: PostID
     public let kind: Kind
     /// post.v1 lineage: a non-empty `parent_id` marks the author's post as a
     /// repost of that parent — the grid's Posts/Reposts split.
     public let isRepost: Bool
-    public let thumbnailURL: URL?
+    /// The post's media, in order. Empty for a text post.
+    ///
+    /// The TRUTH, with the single-media accessors below derived from it — the
+    /// other way round would have meant a second source for the same fact, and
+    /// the four projections that used to call `.first` would each have had to
+    /// keep the two in step.
+    public let pages: [MediaPage]
+
+    /// The first page's thumbnail, which is what every surface that shows ONE
+    /// piece of a post shows: a mosaic brick, a map pin, a flight's cover.
+    public var thumbnailURL: URL? { pages.first?.thumbnailURL }
     /// The playable stream for a `.video` post — an HLS manifest where the
     /// backend serves one, else the progressive asset. `nil` for stills, and
     /// for videos the service didn't vend a URL for.
@@ -48,19 +80,25 @@ public struct GalleryPost: Equatable, Sendable {
     /// moved with `preferredPeakBitRate` on that item rather than by swapping
     /// assets. See `dev/issues/BACKEND_MEDIA_PREVIEW_RENDITIONS.md` §0.3 — this
     /// is why the grid does not use `preview_url` while the map does.
-    public let videoURL: URL?
-    /// The media's pixel aspect ratio (width / height).
+    public var videoURL: URL? { pages.first?.videoURL }
+    /// The FIRST page's pixel aspect ratio (width / height), which is what a
+    /// carousel is laid out at: the box takes the shape the viewer sees on
+    /// arrival, and later pages aspect-fill it.
     ///
     /// **1.0 is also what "unknown" looks like**, deliberately.
     /// `CoreModels.MediaAttachment.aspectRatio` already returns 1 when the
     /// contract carried no dimensions, so an attachment the backend never
     /// stamped reads as square — and a square tile does not autoplay. The
     /// restriction is therefore fail-closed: where dimensions are missing the
-    /// grid shows a still rather than guessing. That is the safe direction for
-    /// a rule phrased as a restriction, but it does mean autoplay stays dark on
-    /// any surface whose payload omits width/height. See
-    /// `BACKEND_MEDIA_ASPECT_RATIO_SUPPORT.md` — this is that gap with teeth.
-    public let aspectRatio: Double
+    /// grid shows a still rather than guessing.
+    public var aspectRatio: Double { pages.first?.aspectRatio ?? 1 }
+
+    /// Whether this post is a collection — the only question the card's
+    /// carousel asks. Reads the PAGES rather than the wire's `carousel` kind,
+    /// which the client has never consumed and which the mock sets for any
+    /// non-video media post.
+    public var isCollection: Bool { pages.count > 1 }
+
     public let caption: String
     public let publishedAtMS: Int64
     /// counter.v1 projections; nil when the read-model had no value (the
@@ -104,9 +142,52 @@ public struct GalleryPost: Equatable, Sendable {
         self.id = id
         self.kind = kind
         self.isRepost = isRepost
-        self.thumbnailURL = thumbnailURL
-        self.videoURL = videoURL
-        self.aspectRatio = aspectRatio
+        // A text post has no page at all, and the distinction is load-bearing:
+        // `pages.first` is what the single-media accessors read, so a synthetic
+        // page here would give a text post a thumbnail of nil dressed up as
+        // media it does not have.
+        //
+        // ⚠️ Keyed on the KIND, not on whether a URL arrived. Keying on the URL
+        // was tried and it silently dropped the aspect ratio of any media post
+        // whose thumbnail failed to parse: no URL meant no page, no page meant
+        // `aspectRatio` fell back to 1, and the row drew a square. The kind is
+        // what says whether there is media; a URL says whether it can be shown.
+        self.pages = kind == .text
+            ? []
+            : [MediaPage(thumbnailURL: thumbnailURL, videoURL: videoURL, aspectRatio: aspectRatio)]
+        self.caption = caption
+        self.publishedAtMS = publishedAtMS
+        self.authorID = authorID
+        self.authorName = authorName
+        self.authorHandle = authorHandle
+        self.authorAvatarURL = authorAvatarURL
+        self.reactionCount = reactionCount
+        self.commentCount = commentCount
+        self.viewCount = viewCount
+    }
+
+    /// The collection initializer. The single-media one above stays because
+    /// most builders genuinely have one piece — a map pin, a repost projection,
+    /// a test fixture — and making them all wrap it in an array would be noise.
+    public init(
+        id: PostID,
+        kind: Kind,
+        isRepost: Bool,
+        pages: [MediaPage],
+        caption: String,
+        publishedAtMS: Int64,
+        authorID: ProfileID? = nil,
+        authorName: String? = nil,
+        authorHandle: String? = nil,
+        authorAvatarURL: URL? = nil,
+        reactionCount: Int64? = nil,
+        commentCount: Int64? = nil,
+        viewCount: Int64? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.isRepost = isRepost
+        self.pages = pages
         self.caption = caption
         self.publishedAtMS = publishedAtMS
         self.authorID = authorID

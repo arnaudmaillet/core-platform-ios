@@ -109,18 +109,29 @@ public actor ForYouRepository: ForYouProviding {
                 case .image: .photo
                 case nil: .text
                 }
+                // ALL of them, in the author's order. `post.v1.PostView`
+                // has always carried a repeated `attachments`; this projection
+                // took `.first` and the collection died here rather than on the
+                // wire. The kind above still reads the first page, because a
+                // post is one thing in a filter even when it is five photos.
                 return GalleryPost(
                     id: entry.post.id,
                     kind: kind,
                     isRepost: false,
-                    thumbnailURL: attachment.flatMap { $0.thumbnailURL ?? $0.url },
-                    // `url` is the stream itself, so a tile and the full-screen
-                    // viewer open the same asset — see `GalleryPost.videoURL`.
-                    videoURL: kind == .video ? attachment?.url : nil,
-                    // Already 1 when the contract carried no dimensions, which
-                    // reads as square and so withholds autoplay — see
-                    // `GalleryPost.aspectRatio`.
-                    aspectRatio: attachment?.aspectRatio ?? 1,
+                    pages: entry.post.attachments.map { attachment in
+                        let isVideo = MediaKind(mimeType: attachment.mimeType) == .video
+                        return GalleryPost.MediaPage(
+                            thumbnailURL: attachment.thumbnailURL ?? attachment.url,
+                            // `url` is the stream itself, so a tile and the
+                            // full-screen viewer open the same asset — see
+                            // `GalleryPost.videoURL`.
+                            videoURL: isVideo ? attachment.url : nil,
+                            // Already 1 when the contract carried no dimensions,
+                            // which reads as square and so withholds autoplay —
+                            // see `GalleryPost.aspectRatio`.
+                            aspectRatio: attachment.aspectRatio
+                        )
+                    },
                     caption: entry.post.caption,
                     publishedAtMS: Int64(entry.post.publishedAt.timeIntervalSince1970 * 1000),
                     // Carried so a tile tap can seed the full-screen page with

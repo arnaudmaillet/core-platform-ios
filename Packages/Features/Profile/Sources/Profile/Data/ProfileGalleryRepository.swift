@@ -238,17 +238,26 @@ private struct HydratedPost {
             id: PostID(view.postID),
             kind: kind,
             isRepost: !view.parentID.isEmpty,
-            thumbnailURL: attachment.flatMap {
-                URL(string: $0.thumbnailURL.isEmpty ? $0.cdnURL : $0.thumbnailURL)
+            // Every attachment, in the author's order — `attachments` is a
+            // repeated field and this projection used to keep only its head.
+            pages: view.attachments.map { attachment in
+                GalleryPost.MediaPage(
+                    thumbnailURL: URL(
+                        string: attachment.thumbnailURL.isEmpty
+                            ? attachment.cdnURL : attachment.thumbnailURL
+                    ),
+                    // The stream itself, shared with the full-screen viewer so
+                    // the hero zoom keeps one item — see `GalleryPost.videoURL`.
+                    videoURL: attachment.mimeType.hasPrefix("video/")
+                        ? URL(string: attachment.cdnURL) : nil,
+                    // Missing dimensions fall through to 1 (square), which
+                    // withholds autoplay rather than guessing — see
+                    // `GalleryPost.aspectRatio`.
+                    aspectRatio: attachment.width > 0 && attachment.height > 0
+                        ? Double(attachment.width) / Double(attachment.height)
+                        : 1
+                )
             },
-            // The stream itself, shared with the full-screen viewer so the hero
-            // zoom keeps one item — see `GalleryPost.videoURL`.
-            videoURL: kind == .video ? attachment.flatMap { URL(string: $0.cdnURL) } : nil,
-            // Missing dimensions fall through to 1 (square), which withholds
-            // autoplay rather than guessing — see `GalleryPost.aspectRatio`.
-            aspectRatio: attachment.map {
-                $0.width > 0 && $0.height > 0 ? Double($0.width) / Double($0.height) : 1
-            } ?? 1,
             caption: view.caption,
             publishedAtMS: view.publishedAtMs
         )

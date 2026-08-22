@@ -120,6 +120,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// begin-time gate, exactly the bar's mechanism.
     private let cardSwipeRecognizer = UIPanGestureRecognizer()
 
+    /// The viewer paged this post's collection. The screen forwards it to
+    /// whatever opened the feed, so the card behind can follow.
+    var onMediaPageChanged: ((Int) -> Void)?
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         contentView.backgroundColor = .black
@@ -161,6 +165,17 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         addGestureRecognizer(cardSwipeRecognizer)
 
         buildLayout()
+
+        // The two halves of the collection readout meet here and nowhere else:
+        // the card owns the pages, the chrome owns the indicator, and neither
+        // reaches for the other.
+        mediaCard.onPageChanged = { [weak self] page in
+            self?.chrome.setMediaPage(page)
+            self?.onMediaPageChanged?(page)
+        }
+        chrome.onMediaPageRequested = { [weak self] page in
+            self?.mediaCard.setPage(page)
+        }
     }
 
     @available(*, unavailable)
@@ -494,7 +509,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func configure(
         with model: FeedItemDisplayModel,
         pipeline: ImagePipeline,
-        videoPlayback: VideoPlaybackController?
+        videoPlayback: VideoPlaybackController?,
+        initialMediaPage: Int? = nil
     ) {
         representedID = model.id
         mediaURL = model.mediaURL
@@ -547,8 +563,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
                       + " kind=\(model.mediaKind) rich=\(rich)"
                       + " caption=\(model.caption?.isEmpty == false ? "yes" : "no")")
             } else {
-                print("[media-audit] \(model.id.rawValue) media kind=\(model.mediaKind)"
-                      + " url=\(model.mediaURL?.absoluteString ?? "-")")
+                print(String(
+                    format: "[media-audit] %.3f %@ media kind=%@ pages=%d url=%@",
+                    CACurrentMediaTime(), model.id.rawValue, "\(model.mediaKind)",
+                    model.mediaPages.count, model.mediaURL?.absoluteString ?? "-"
+                ))
             }
         }
         #endif
@@ -575,6 +594,27 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
         let isVideo = hasMedia && model.mediaKind == .video
         let isImage = hasMedia && model.mediaKind == .image
+
+        // A COLLECTION replaces the single photo surface with its pages, and
+        // returns before the single-media loads below: those fill a surface the
+        // carousel has just hidden, and the work would be a download per page
+        // that nothing draws.
+        if model.isCollection {
+            mediaCard.showCollection(model.mediaPages, imagePipeline: pipeline)
+            // Without animation: this is where the page OPENS, not a move the
+            // viewer made, and an animated jump would read as the carousel
+            // scrolling by itself the moment the flight lands.
+            // AFTER `showCollection`, and only when one was asked for: the
+            // carousel keeps its page across a re-configure with the same pages,
+            // so a second configure carrying no instruction must not be read as
+            // an instruction to go back to the first.
+            if let initialMediaPage { mediaCard.setPage(initialMediaPage, animated: false) }
+            chrome.setMediaPageCount(model.mediaPages.count, current: mediaCard.currentPage)
+            return
+        }
+        mediaCard.hideCollection()
+        chrome.setMediaPageCount(0, current: 0)
+
         if isImage {
             loadImage(model.mediaURL, expecting: model.id, pipeline: pipeline)
         }

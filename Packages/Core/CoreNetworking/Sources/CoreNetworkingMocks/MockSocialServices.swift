@@ -137,7 +137,13 @@ public final class MockSocialServices: @unchecked Sendable {
         view.kind = Self.kind(forMediaURL: record.media?.url)
         view.parentID = record.parentID
         if let media = record.media {
+            // Head plus tail, in the author's order — `attachments` is repeated
+            // on the wire and the mock used to vend exactly one, which is why a
+            // carousel could not be seen even though the contract allowed it.
             view.attachments = [makeAttachment(url: media.url, width: media.width, height: media.height)]
+                + record.extraMedia.map {
+                    makeAttachment(url: $0.url, width: $0.width, height: $0.height)
+                }
         }
         return .success(view)
     }

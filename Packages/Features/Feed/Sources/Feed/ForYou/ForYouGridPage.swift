@@ -1115,7 +1115,39 @@ final class ForYouGridPage: UIView {
         else { return false }
         return row.debugTapShowMore()
     }
+
+    /// Swipes a row's carousel to a page. Same realize-then-act shape as
+    /// `debugTapShowMore(atIndex:)`, and false for a row with no collection.
+    @discardableResult
+    func debugScrollCarousel(atIndex index: Int, toPage page: Int) -> Bool {
+        guard posts.indices.contains(index) else { return false }
+        let path = indexPath(for: index)
+        if collectionView.cellForItem(at: path) == nil {
+            collectionView.scrollToItem(at: path, at: .centeredVertically, animated: false)
+            collectionView.layoutIfNeeded()
+        }
+        guard let row = collectionView.cellForItem(at: path) as? PostGridListRowCell
+        else { return false }
+        return row.debugScrollCarousel(toPage: page)
+    }
     #endif
+
+    /// Moves a row's carousel to `page`, so the card follows the post opened
+    /// from it. A no-op for a row that is not realized — a card that scrolled
+    /// away has no carousel to move, and will be configured fresh when it
+    /// comes back.
+    func setMediaPage(_ page: Int, for id: PostID) {
+        (cell(for: id) as? PostGridListRowCell)?.setMediaPage(page, animated: false)
+    }
+
+    /// Which page of a row's carousel is showing, or nil for a row that has
+    /// none — or one the collection view has not realized, which is the honest
+    /// answer rather than a guess of zero.
+    func currentMediaPage(atIndex index: Int) -> Int? {
+        guard posts.indices.contains(index) else { return nil }
+        let row = collectionView.cellForItem(at: indexPath(for: index)) as? PostGridListRowCell
+        return row?.currentMediaPage
+    }
 
     /// Brings the landed row's own furniture in gently — see
     /// `PostGridListRowCell.fadeInRevealedFurniture`. A no-op for a row that
@@ -1738,6 +1770,16 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             // a cover arriving is the only event that can re-open the gate for
             // a row that came up faceless while the timeline sat still.
             cell.onCoverLoaded = { [weak self] in self?.updateAutoplay() }
+            // A COLLECTION row's media is a scroll view, and a scroll view in
+            // the content path swallows the collection view's own selection —
+            // so a tap on the photograph has to arrive by its own route or the
+            // card simply stops opening. Straight into the SAME handler a tap
+            // anywhere else on the row lands in.
+            cell.onMediaTapped = { [weak self, weak cell] in
+                guard let self, let cell,
+                      let path = self.collectionView.indexPath(for: cell) else { return }
+                self.collectionView(self.collectionView, didSelectItemAt: path)
+            }
             // The band's identity and its "...", if the post carries an author.
             // Captured by AUTHOR and by POST for the same reason the caption's
             // handler is captured by post: the row that asked can have moved by

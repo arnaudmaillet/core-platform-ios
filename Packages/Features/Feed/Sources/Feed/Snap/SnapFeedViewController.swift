@@ -129,6 +129,20 @@ final class SnapFeedViewController: UIViewController {
     /// The post whose comments engagement is active, nil when disengaged.
     /// Owns the paging veto: the pager is frozen while the mutated layout
     /// (a per-cell state) is on screen.
+    /// The viewer paged a post's collection.
+    ///
+    /// Reported OUT so the surface that opened this feed can follow. It is what
+    /// keeps the dismissal honest: the flight home departs from the post's
+    /// CURRENT photograph and lands on the card's media rect, so a card still
+    /// showing page one would land photograph B on photograph A's frame — the
+    /// wrong image swapping for the right one at the last frame, which is the
+    /// same class of defect as a stale stand-in.
+    public var onMediaPageChanged: ((PostID, Int) -> Void)?
+
+    /// The post whose carousel still owes an opening page — see
+    /// `openMediaPage(_:for:)`. Stored on the class because an extension
+    /// cannot hold state, which is where the seam it belongs to lives.
+    private var pendingMediaPage: (id: PostID, page: Int)?
     private var commentsEngagedID: PostID?
     /// The engaged comments UI — a child of THIS controller (thread data,
     /// scroll position, and reply drafts must never live in a recycled
@@ -662,8 +676,19 @@ final class SnapFeedViewController: UIViewController {
                 cell.configure(
                     with: model,
                     pipeline: pipeline,
-                    videoPlayback: self.videoPlayback
+                    videoPlayback: self.videoPlayback,
+                    // A collection opened from a card that had been paged lands
+                    // on that page — the flight is carrying that photograph, and
+                    // a destination on page one would land it on a different
+                    // one. Consumed here, so it applies to this configure and
+                    // no later one.
+                    initialMediaPage: self.consumeInitialMediaPage(for: id)
                 )
+                // Paging this post's collection travels back to whoever opened
+                // the feed — see `onMediaPageChanged`.
+                cell.onMediaPageChanged = { [weak self] page in
+                    self?.onMediaPageChanged?(id, page)
+                }
                 // The post's interaction zone is bounded by the SCREEN's
                 // header/footer thresholds (nav bar bottom, toolbar top),
                 // not by the cell's ambient safe area: this view's insets
@@ -2481,6 +2506,26 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         viewModel.seed(models)
     }
 
+    /// Opens one post's carousel on a page other than its first.
+    ///
+    /// A ONE-SHOT instruction rather than a stored preference, and the
+    /// distinction matters on a feed the viewer scrolls: it applies to the
+    /// first configure of that post and is then forgotten, so paging back to
+    /// the post later — or a cell recycling onto it — starts where a fresh open
+    /// starts. A remembered page would make the same post open differently
+    /// depending on history nobody can see.
+    public func openMediaPage(_ page: Int, for id: PostID) {
+        pendingMediaPage = (id, page)
+    }
+
+    /// Takes the pending page for `id`, if there is one. Reading it clears it —
+    /// see `openMediaPage`.
+    func consumeInitialMediaPage(for id: PostID) -> Int? {
+        guard let pending = pendingMediaPage, pending.id == id else { return nil }
+        pendingMediaPage = nil
+        return pending.page
+    }
+
     /// **THE TEXT REVEAL**. Where the active TEXT page draws its
     /// caption bubble, in `space` — the anchor a clip-window reveal matches to
     /// the row it opened from.
@@ -2887,6 +2932,38 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         }
         return true
     }
+
+    /// The horizontal grab's gate, which exists because a post's media can now
+    /// be a carousel.
+    ///
+    /// Three answers, in order:
+    ///
+    /// 1. **From the screen's leading edge, always yes.** That strip is the
+    ///    system's back gesture and the viewer's muscle memory; a carousel
+    ///    borrowing it would make the one gesture that always means "back" mean
+    ///    something else on exactly the screens that are hardest to leave.
+    /// 2. **On a carousel that has somewhere to go back to, no.** A rightward
+    ///    drag there means "previous photo". The carousel is the tenant and it
+    ///    wins its own territory.
+    /// 3. **On the FIRST page, yes.** The carousel has nothing to the left, so
+    ///    holding the gesture would spend it on a rubber-band. It passes
+    ///    straight through — which is also what makes leaving a gallery feel
+    ///    like leaving anything else once you have paged back to the start.
+    public func zoomHorizontalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool {
+        if location.x - view.bounds.minX <= Self.backEdgeZone { return true }
+        let point = collectionView.convert(location, from: view)
+        guard let hit = collectionView.hitTest(point, with: nil) else { return true }
+        for current in sequence(first: hit, next: { $0.superview }) {
+            if let carousel = current as? MediaCarouselView {
+                return carousel.currentPage == 0
+            }
+        }
+        return true
+    }
+
+    /// The system's back-gesture strip. Matched to `HorizontalPagerScrollView`'s
+    /// own, which yields the same zone to the same gesture for the same reason.
+    private static let backEdgeZone: CGFloat = 20
 
     public func setContentScrollEnabled(_ enabled: Bool) {
         // Through a lock that RESTORES rather than an assignment that enables.
