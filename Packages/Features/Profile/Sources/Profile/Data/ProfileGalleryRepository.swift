@@ -1,6 +1,7 @@
 import Connect
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 import PostGrid
 
@@ -159,27 +160,17 @@ public actor ProfileGalleryRepository: ProfileGalleryProviding {
 
     private func withCounters(_ posts: [GalleryPost]) async -> [GalleryPost] {
         guard !posts.isEmpty else { return posts }
-        var request = Counter_V1_BatchGetCountersRequest()
-        request.entities = posts.map { post in
-            var entity = Counter_V1_EntityRef()
-            entity.entityType = .post
-            entity.id = post.id.rawValue
-            return entity
-        }
-        request.metrics = [.like, .comment, .view]
-        let response = await counterClient.batchGetCounters(request: request, headers: [:])
-        guard let snapshots = response.message?.snapshots else { return posts }
-
-        let byPostID = Dictionary(
-            snapshots.map { ($0.entity.id, $0.values) },
-            uniquingKeysWith: { first, _ in first }
+        // The read itself is `PostCounterReader`, shared with the feed since its
+        // cards started showing reach — one batch shape, not two.
+        let byPostID = await PostCounterReader.counters(
+            forPostIDs: posts.map(\.id.rawValue), using: counterClient
         )
         return posts.map { post in
-            guard let values = byPostID[post.id.rawValue] else { return post }
+            guard let counts = byPostID[post.id.rawValue] else { return post }
             var decorated = post
-            decorated.reactionCount = values.first { $0.metric == .like }?.value
-            decorated.commentCount = values.first { $0.metric == .comment }?.value
-            decorated.viewCount = values.first { $0.metric == .view }?.value
+            decorated.reactionCount = counts.likes
+            decorated.commentCount = counts.comments
+            decorated.viewCount = counts.views
             return decorated
         }
     }

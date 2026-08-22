@@ -1,4 +1,6 @@
+import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 import MediaCore
 import PostGrid
@@ -79,27 +81,70 @@ public protocol ForYouProviding: Sendable {
 /// nothing above it has to.
 public actor ForYouRepository: ForYouProviding {
     private let feed: any FeedProviding
+    /// Reads the numbers the timeline does not carry — see `withCounters`.
+    /// Optional so a composition root without one still gets a working grid,
+    /// with its counters hidden, which is what every card did before this.
+    private let counterClient: (any Counter_V1_CounterServiceClientInterface)?
 
-    public init(feed: any FeedProviding) {
+    public init(
+        feed: any FeedProviding,
+        counterClient: (any Counter_V1_CounterServiceClientInterface)? = nil
+    ) {
         self.feed = feed
+        self.counterClient = counterClient
     }
 
     public func firstPage() async throws -> ForYouPage {
-        Self.map(try await feed.loadFirstPage())
+        await withCounters(Self.map(try await feed.loadFirstPage()))
     }
 
     public func page(after token: String) async throws -> ForYouPage {
-        Self.map(try await feed.loadPage(afterToken: token))
+        await withCounters(Self.map(try await feed.loadPage(afterToken: token)))
+    }
+
+    /// Decorates a page with its `counter.v1` projections.
+    ///
+    /// The timeline read hydrates LIKES only — a `FeedEntry` carries a like
+    /// count and nothing else — so a card had no reach to show, and once its
+    /// counter chip became views alone it showed no chip at all. One batched
+    /// read per page, through `PostCounterReader`, which the profile gallery
+    /// uses for the same three numbers.
+    ///
+    /// Best-effort by construction: an outage answers no snapshots, the counts
+    /// stay nil, and the chip hides rather than asserting a zero.
+    ///
+    /// ⚠️ Likes are taken from the COUNTER when it answers, not merged with the
+    /// timeline's own. Two sources for one number is how a card and the post it
+    /// opens end up disagreeing; the counter is the one the rest of the app
+    /// reads.
+    private func withCounters(_ page: ForYouPage) async -> ForYouPage {
+        guard let counterClient, !page.posts.isEmpty else { return page }
+        let byPostID = await PostCounterReader.counters(
+            forPostIDs: page.posts.map(\.id.rawValue), using: counterClient
+        )
+        guard !byPostID.isEmpty else { return page }
+        return ForYouPage(
+            posts: page.posts.map { post in
+                guard let counts = byPostID[post.id.rawValue] else { return post }
+                var decorated = post
+                decorated.reactionCount = counts.likes ?? post.reactionCount
+                decorated.commentCount = counts.comments
+                decorated.viewCount = counts.views
+                return decorated
+            },
+            nextPageToken: page.nextPageToken
+        )
     }
 
     /// Projects hydrated timeline entries onto grid tiles.
     ///
-    /// Two fields cannot be answered from a `FeedEntry` and are left absent
-    /// rather than asserted: `commentCount`/`viewCount` (the timeline read
-    /// hydrates likes only — the cells hide a counter with no value), and
-    /// `isRepost` (a `FeedEntry` carries no `parent_id` lineage). The
-    /// discovery axis reads none of them, so nothing is lost here; a repost
-    /// split would need the lineage threaded through `FeedEntry` first.
+    /// `commentCount`/`viewCount` are left absent HERE and filled by
+    /// `withCounters` afterwards: a `FeedEntry` carries a like count and nothing
+    /// else, so the numbers come from `counter.v1` in one batched read per page.
+    ///
+    /// `isRepost` is still absent and still asserted nowhere — a `FeedEntry`
+    /// carries no `parent_id` lineage, and a repost split would need it threaded
+    /// through first.
     private static func map(_ page: FeedPage) -> ForYouPage {
         ForYouPage(
             posts: page.entries.map { entry in
