@@ -86,20 +86,39 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             videoPlayback.setPaused(true, in: surface)
             return
         }
-        // Already on this clip's page — the viewer came back to it. Resume; a
-        // re-host would tear the surface out and put it back for nothing.
-        if mediaCard.hostsRenderViewOnCurrentPage {
-            videoPlayback.setPaused(false, in: surface)
-            return
-        }
+        // ⚠️ Hosted is not the same as PLAYABLE, and the difference is a whole
+        // dismissal.
+        //
+        // A page dismissed and reopened keeps its carousel — same pages, so it
+        // is deliberately not rebuilt — and the surface is still hanging in the
+        // clip's page from the previous visit. But `prepareForReuse` stopped the
+        // player, and `showCollection` hid the surface. Resuming on the strength
+        // of "it is hosted" therefore asked a player that no longer existed to
+        // play, left the surface hidden, and showed the page's THUMBNAIL.
+        // Reported as "the player is no longer in the post screen".
+        //
+        // `setPaused` already answers whether there was anything to resume. Two
+        // states looked alike from outside and the return value is what tells
+        // them apart, so it is read rather than discarded.
+        let wasHosted = mediaCard.hostsRenderViewOnCurrentPage
+        // Idempotent, and it is also what un-hides the surface.
+        mediaCard.hostRenderViewOnCurrentPage()
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-media-log") {
-            print(String(format: "[page-play] %.3f page=%d active=%@ url=%@",
+            print(String(format: "[page-play] %.3f page=%d hosted=%@ url=%@",
                          CACurrentMediaTime(), mediaCard.currentPage,
-                         isActive ? "Y" : "N", activeVideoURL?.lastPathComponent ?? "nil"))
+                         wasHosted ? "Y" : "N",
+                         activeVideoURL?.lastPathComponent ?? "nil"))
         }
         #endif
-        mediaCard.hostRenderViewOnCurrentPage()
+        if wasHosted, videoPlayback.setPaused(false, in: surface) {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-media-log") {
+                print(String(format: "[page-play] %.3f resumed", CACurrentMediaTime()))
+            }
+            #endif
+            return
+        }
         mediaCard.setPoster(nil)
         Task { await videoPlayback.play(url, in: surface) }
     }

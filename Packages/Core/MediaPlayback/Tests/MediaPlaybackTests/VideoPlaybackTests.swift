@@ -104,6 +104,31 @@ struct VideoPlaybackControllerTests {
         #expect(controller.currentItem(in: view) === item)
     }
 
+    /// ⚠️ THE RETURN VALUE IS THE POINT: it says whether there was anything to
+    /// resume, and two states look identical from outside.
+    ///
+    /// A surface can be hosted on the page the viewer is looking at and have no
+    /// player behind it — a post dismissed and reopened keeps its carousel, so
+    /// the surface is still hanging where it was, while the player went back to
+    /// the pool on the way out. A caller that treated "hosted" as "resumable"
+    /// asked a player that no longer existed to play, and showed the page's
+    /// thumbnail instead of the video.
+    @Test func resumingAViewWithNoPlayerReportsThatItDidNothing() async {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        let view = VideoRenderView()
+
+        #expect(controller.setPaused(false, in: view) == false)
+
+        await controller.play(URL(string: "mock://video/1")!, in: view)
+        #expect(controller.setPaused(true, in: view))
+        #expect(controller.setPaused(false, in: view))
+
+        controller.stop(view)
+        // Stopped, with the surface untouched — exactly the state that used to
+        // be mistaken for "paused, ready to resume".
+        #expect(controller.setPaused(false, in: view) == false)
+    }
+
     @Test func recappingAViewWithNoPlayerIsANoOp() {
         let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
         controller.setPeakBitRate(0, in: VideoRenderView()) // must not trap
