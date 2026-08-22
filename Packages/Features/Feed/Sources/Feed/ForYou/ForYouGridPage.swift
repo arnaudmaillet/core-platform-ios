@@ -895,9 +895,14 @@ final class ForYouGridPage: UIView {
     /// back. Returns nil when the tile is not playing, which is the same
     /// contract the donate path had.
     func liveFlightSurface(for postID: PostID) -> VideoRenderView? {
+        // ⚠️ The CURRENT PAGE's stream where there is one. `post.videoURL` is
+        // page one's for ever, so a collection opened from a clip on page three
+        // asked for the wrong asset — and a collection whose head is a
+        // photograph asked for nil and never flew live at all.
+        let row = cell(for: postID) as? PostGridListRowCell
         guard let playback,
               let index = posts.firstIndex(where: { $0.id == postID }),
-              let url = posts[index].videoURL
+              let url = row?.currentPageVideoURL ?? posts[index].videoURL
         else { return nil }
         let made = playback.makeAttachedSurface(for: postID, url: url)
         #if DEBUG

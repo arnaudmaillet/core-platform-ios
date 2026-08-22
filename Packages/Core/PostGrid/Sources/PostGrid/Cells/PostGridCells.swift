@@ -283,6 +283,15 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
 
     public private(set) var loadedVideoRenderView: VideoRenderView?
 
+    /// For a collection: only while the surface hangs in the page being looked
+    /// at. A paused clip one page over is rendering, and is not what the viewer
+    /// is looking at.
+    public var isRenderingCurrentMedia: Bool {
+        guard let view = loadedVideoRenderView else { return false }
+        guard showsCarousel, let carousel else { return true }
+        return carousel.hostsSurfaceOnCurrentPage(view)
+    }
+
     public func adoptVideoRenderView(_ view: VideoRenderView) {
         if let existing = loadedVideoRenderView, existing !== view {
             existing.detachForReplacement()
@@ -1745,6 +1754,10 @@ public final class PostGridTileCell: UICollectionViewCell {
     /// A tile IS its media, edge to edge, so the whole cell is the rect
     /// visibility is measured against.
     public var videoMediaRect: CGRect { bounds }
+
+    /// A tile IS its media: if a surface exists it is showing the only thing
+    /// this cell has.
+    public var isRenderingCurrentMedia: Bool { loadedVideoRenderView != nil }
 
     /// The surface an autoplaying tile renders into, built on first use so a
     /// grid of stills never allocates a player layer it will not use.

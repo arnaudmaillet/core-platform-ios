@@ -344,7 +344,25 @@ public final class GridVideoPlaybackCoordinator {
     /// readiness gap. Returns the donated view, or nil when the tile is not
     /// playing.
     public func donateLiveSurface(of id: PostID) -> VideoRenderView? {
-        guard let cell = playing[id], let renderView = cell.loadedVideoRenderView,
+        // ⚠️ Only when the surface is showing what the viewer is looking at.
+        //
+        // "Playing" no longer means "this cell's picture is moving": a row keeps
+        // its player while the viewer pages onto a still of the same collection.
+        // Donating it there flew a clip the viewer had already paged past —
+        // reported as the hero animation taking the video as its window after a
+        // swipe. Declining falls through to the card's own cover, which is the
+        // current page's.
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            let cell = playing[id]
+            print(String(format: "[zoom-live] %.3f grid donate ask %@ playing=%@ current=%@",
+                         CACurrentMediaTime(), id.rawValue,
+                         cell == nil ? "N" : "Y",
+                         (cell?.isRenderingCurrentMedia ?? false) ? "Y" : "N"))
+        }
+        #endif
+        guard let cell = playing[id], cell.isRenderingCurrentMedia,
+              let renderView = cell.loadedVideoRenderView,
               pool.parkPlayback(from: renderView, keepingSurfaceAttached: true)
         else { return nil }
         let donated = cell.donateVideoRenderView()
@@ -365,6 +383,17 @@ public final class GridVideoPlaybackCoordinator {
     /// some surface is waiting on a decode round-trip, because no binding
     /// changed. Returns nil when the tile is not playing.
     public func makeAttachedSurface(for id: PostID, url: URL) -> VideoRenderView? {
+        // Same rule as `donateLiveSurface`, for the same reason: a surface that
+        // is not showing the viewer's media must not be flown.
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] %.3f grid attach ask %@ playing=%@ current=%@",
+                         CACurrentMediaTime(), id.rawValue,
+                         playing[id] == nil ? "N" : "Y",
+                         (playing[id]?.isRenderingCurrentMedia ?? false) ? "Y" : "N"))
+        }
+        #endif
+        guard playing[id]?.isRenderingCurrentMedia ?? false else { return nil }
         // Sweep before minting, not only at `endHandoff`. A flight can end
         // without the scope closing cleanly, and this way each new flight
         // cannot inherit more than the previous one's leftovers — the count is

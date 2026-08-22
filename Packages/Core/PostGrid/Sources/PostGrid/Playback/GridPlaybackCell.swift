@@ -56,6 +56,23 @@ public protocol GridPlaybackCell: UIView {
     /// The surface if one was ever built, else nil — never allocates.
     var loadedVideoRenderView: VideoRenderView? { get }
 
+    /// Whether the playback surface is showing the media the viewer is looking
+    /// at RIGHT NOW.
+    ///
+    /// ⚠️ It exists for the hero flight, and it exists because "this cell is
+    /// playing" stopped meaning "this cell's picture is moving".
+    ///
+    /// A row holds its player while the viewer pages onto a still of the same
+    /// collection — the clip keeps its last frame on its own page, which is
+    /// still on screen peeking. A flight that took that surface would carry a
+    /// photograph the viewer is not looking at into the transition: reported as
+    /// "the hero animation uses the video as its window even though I had paged
+    /// past it".
+    ///
+    /// A tile and a single-attachment row have one piece of media, so their
+    /// answer is simply whether a surface exists.
+    var isRenderingCurrentMedia: Bool { get }
+
     /// Installs a flight card's live surface as this cell's own, at landing.
     func adoptVideoRenderView(_ view: VideoRenderView)
 

@@ -517,6 +517,46 @@ struct RowSurfaceReinstallTests {
         #expect(cell.retainedVideoURL == URL(string: "mock://video/b"))
     }
 
+    /// ⚠️ THE FLIGHT MUST NOT CARRY A CLIP THE VIEWER HAS PAGED PAST.
+    ///
+    /// This is the defect the recording showed: the card was on a photograph,
+    /// the hero animation opened on the VIDEO, and the post arrived on the
+    /// photograph — a window showing something that was nowhere on screen.
+    ///
+    /// It followed directly from keeping the player alive across a page change.
+    /// "This row is playing" stopped meaning "this row's picture is moving", and
+    /// the flight asked the first question while needing the second. So the cell
+    /// answers the second one now, and the coordinator asks it before donating.
+    ///
+    /// Both directions are asserted. A guard that answered "no" always would
+    /// pass a one-sided version of this test and quietly kill live flights.
+    @Test func aPausedClipOnAnotherPageIsNotTheCurrentMedia() {
+        let cell = row()
+        cell.debugScrollCarousel(toPage: 1, animated: false)
+        _ = cell.makeVideoRenderViewIfNeeded()
+        #expect(cell.isRenderingCurrentMedia)
+
+        cell.debugScrollCarousel(toPage: 0, animated: false)
+
+        // Still holding the player — the frame stays on its page…
+        #expect(cell.retainedVideoURL == URL(string: "mock://video/b"))
+        // …and still NOT what the viewer is looking at.
+        #expect(cell.isRenderingCurrentMedia == false)
+
+        cell.debugScrollCarousel(toPage: 1, animated: false)
+        _ = cell.makeVideoRenderViewIfNeeded()
+        #expect(cell.isRenderingCurrentMedia)
+    }
+
+    /// A row with no surface at all is not rendering anything, whatever its
+    /// pages say — the case a flight from a still row hits on every tap.
+    @Test func aRowWithNoSurfaceIsNotRenderingCurrentMedia() {
+        let cell = row()
+        cell.debugScrollCarousel(toPage: 1, animated: false)
+
+        #expect(cell.isRenderingCurrentMedia == false)
+    }
+
     /// And a row with a single attachment is NOT re-parented on every ask:
     /// `pin(to:)` discards the concrete frame until the next layout pass, which
     /// resets `AVPlayerLayer.isReadyForDisplay` for ~170ms — measured, and the
