@@ -41,14 +41,26 @@ import UIKit
 /// the same row and must stand on the same ground. Anything else that needs this
 /// material should hold one rather than inherit it.
 public class PostMetaPillView: UIVisualEffectView {
-    /// The overlay type, shared with the media tiles' counters: a card's
-    /// counters are footnote against the card and caption2 semibold over media,
-    /// and this is the second of those two. `PostMetricLabel` names both.
+    /// FOOTNOTE semibold, sized as a control rather than as a caption.
+    ///
+    /// ⚠️ It was caption2, matching the media tiles' counters, and that was the
+    /// right register for a readout. These chips are becoming BUTTONS — a like
+    /// you can press, a comment count that opens the thread — and 11pt type in
+    /// 4pt of padding made a 21pt chip: half the 44pt a control owes a finger,
+    /// and small enough to read as a label rather than as something to press.
+    ///
+    /// The tiles' counters stay caption2 deliberately. They are still readouts
+    /// on a thumbnail nobody presses, so the two registers now say something —
+    /// caption2 for what you read, footnote for what you touch.
     public static var font: UIFont {
         UIFont.postGridSystemFont(
-            matching: .preferredFont(forTextStyle: .caption2), weight: .semibold
+            matching: .preferredFont(forTextStyle: .footnote), weight: .semibold
         )
     }
+
+    /// The smallest square a control may be touched at. Apple's number, and the
+    /// reason the padding below is what it is.
+    public static let minimumTouchTarget: CGFloat = 44
 
     /// `.label`, which resolves against the INTERFACE STYLE — the same authority
     /// the material now answers to, so the two can never disagree about which
@@ -64,13 +76,56 @@ public class PostMetaPillView: UIVisualEffectView {
     /// layer up.
     public static let foreground: UIColor = .label
 
-    /// The pill's inner padding — tight, because it rests on a preview and is
-    /// furniture rather than content.
-    public static let insets = NSDirectionalEdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
+    /// And `.secondaryLabel` for a GLYPH, which is the answer to "why is the
+    /// header's pill a different colour from the ones at the bottom".
+    ///
+    /// It was, and the fix is not to make them agree on one ink. Inside a chip
+    /// the number is the DATUM and the glyph NAMES it — a heart is a label for
+    /// "160", not a second fact — so the pair reads correctly only when the two
+    /// are ranked. Once they are, the band's control cluster, which is glyphs
+    /// and nothing else, sits at exactly the same level as every other glyph on
+    /// the card, and the card has one rule instead of two accidents: text
+    /// carries the value, symbols stay quiet.
+    ///
+    /// It also protects the hierarchy the alternative would have broken —
+    /// promoting the cluster to `.label` would have put three near-black marks
+    /// beside a `.label` author name.
+    public static let glyphForeground: UIColor = .secondaryLabel
+
+    /// The pill's inner padding.
+    ///
+    /// Sized so a chip lands around 32pt tall — big enough to read as a control
+    /// and to be hit comfortably, without four 44pt slabs lying across a
+    /// photograph. The last 12pt to the touch target come from `point(inside:)`
+    /// below rather than from more chrome.
+    public static let insets = NSDirectionalEdgeInsets(top: 7, leading: 12, bottom: 7, trailing: 12)
+
+    /// ⚠️ THE ONE HEIGHT EVERY PILL ON A CARD IS.
+    ///
+    /// The card wears pills of two kinds now — counters and a date sized by
+    /// their text, and the band's control cluster sized by three glyphs — and
+    /// "the same height" has to be a fact rather than a coincidence of what
+    /// happens to be inside them. So the height is DECLARED here, from the
+    /// type's own line height, and every pill is constrained to it.
+    ///
+    /// Derived from the font rather than written as a number so Dynamic Type
+    /// moves all of them together; `ceil` so the whole row lands on the same
+    /// fraction of a point instead of two that differ by a rounding.
+    public static var height: CGFloat {
+        ceil(font.lineHeight) + insets.top + insets.bottom
+    }
 
     private let contents: [UIView]
 
-    public init(contents: [UIView], spacing: CGFloat = 8) {
+    /// - Parameter insets: the inner padding, defaulting to the text pills'.
+    ///   A pill of ICONS overrides it: 12pt of padding is what a word needs to
+    ///   sit off a capsule's ends, and a glyph button already carries its own,
+    ///   so reusing it would push the cluster apart and swell the capsule past
+    ///   the identity beside it.
+    public init(
+        contents: [UIView], spacing: CGFloat = 8,
+        insets: NSDirectionalEdgeInsets = PostMetaPillView.insets
+    ) {
         self.contents = contents
         super.init(effect: nil)
         // A capsule, and `.capsule()` rather than a number: the ends have to
@@ -106,11 +161,32 @@ public class PostMetaPillView: UIVisualEffectView {
         row.axis = .horizontal
         row.alignment = .center
         row.spacing = spacing
-        row.pin(to: contentView, insets: Self.insets)
+        row.pin(to: contentView, insets: insets)
+        // 999, not required: the pin above is required, so a content taller than
+        // the declared height would be an unsatisfiable pair. This way the row
+        // sizes to its contents in that case and logs nothing — the shape
+        // degrades, the layout does not break.
+        let uniform = heightAnchor.constraint(equalToConstant: Self.height)
+        uniform.priority = .init(999)
+        uniform.isActive = true
     }
 
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Extends the touch area to `minimumTouchTarget` without growing the chip.
+    ///
+    /// A 32pt chip is the right SIZE on a photograph and the wrong TARGET for a
+    /// finger. Apple's own controls resolve that the same way: the drawn shape
+    /// stays small and the hit region is grown around it. Inert while
+    /// `isUserInteractionEnabled` is false — hit-testing never asks a view that
+    /// takes no touches — so the counters carry it dormant until they become
+    /// the buttons they are being sized for.
+    override public func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        let slopX = max((Self.minimumTouchTarget - bounds.width) / 2, 0)
+        let slopY = max((Self.minimumTouchTarget - bounds.height) / 2, 0)
+        return bounds.insetBy(dx: -slopX, dy: -slopY).contains(point)
+    }
 
     /// Hides the pill when every one of its contents is hidden.
     ///
@@ -132,7 +208,26 @@ public class PostMetaPillView: UIVisualEffectView {
     override public func didMoveToWindow() {
         super.didMoveToWindow()
         guard window != nil, effect == nil else { return }
-        effect = Self.makeBackdrop()
+        effect = makeGround()
+    }
+
+    /// The pill's ground, chosen by the pill.
+    ///
+    /// ⚠️ A MATERIAL IS ONLY A GROUND WHERE THERE IS SOMETHING UNDER IT.
+    ///
+    /// `.systemMaterial` over a photograph is a light chip on a dark sea. Over
+    /// the CARD's own fill it resolves to very nearly that fill — the capsule is
+    /// drawn, correctly, in the colour of what it is standing on, and is
+    /// invisible. Which is not a bug in the material: it is the rule this class
+    /// was built on, read the other way. Chrome over MEDIA follows the device;
+    /// chrome over CONTENT follows the content, and on a card that means a
+    /// system FILL, not a blur of a flat colour.
+    ///
+    /// So a pill that stands on the card returns nil here and paints itself.
+    /// Overridable rather than a stored parameter because the choice is a
+    /// property of WHERE the pill is, which its class already says.
+    func makeGround() -> UIVisualEffect? {
+        Self.makeBackdrop()
     }
 
     /// The chip's ground, as a value rather than inline, so a test can ask what
@@ -147,4 +242,88 @@ public class PostMetaPillView: UIVisualEffectView {
     static func makeBackdrop() -> UIVisualEffect {
         UIBlurEffect(style: .systemMaterial)
     }
+}
+
+/// A pill that stands on the CARD's own fill rather than on media.
+///
+/// ⚠️ Same shape, same height, DIFFERENT GROUND — and the difference is not a
+/// preference.
+///
+/// `PostMetaPillView`'s material resolves against what is behind it, which is
+/// what makes it a floor over a photograph and what makes it nothing over a
+/// flat colour: laid on the card it resolves to the card and the capsule is
+/// drawn, correctly, invisible. A system FILL is a translucent overlay instead,
+/// so it stands off the card by the same amount in either appearance.
+///
+/// ⚠️ `.tertiarySystemFill`, and the step was walked in both directions.
+///
+/// Measured on a real card, whose fill reads 242 in light mode:
+///
+/// | fill        | capsule | delta |
+/// |-------------|---------|-------|
+/// | secondary   |   222   |  20   |
+/// | tertiary    |   227   |  15   |
+/// | quaternary  |   232   |  10   |
+///
+/// Secondary was chosen first and was right at the time: the card carried ONE
+/// filled capsule — the band's control cluster — and a lone container has to
+/// assert itself. The closing line then gained two more, and three capsules of
+/// the same fill weigh more than one of them did, so the same delta that read
+/// as "a container" started reading as three grey slabs on a quiet card.
+///
+/// Quaternary is a step too far in the other direction: at a delta of 10 the
+/// capsule stops being a shape and becomes a smudge behind a number.
+///
+/// The number that matters is the DELTA, not the token — which is why it is
+/// recorded here. Change the card's fill and this choice needs re-measuring,
+/// not re-reading.
+///
+/// ❌ Painting an opaque white behind the material so it has something to blur
+/// was tried and rejected. It works, but a material over an opaque layer you
+/// control is just a colour — it reduces to `.systemBackground`, which is white
+/// on the card in light mode and BLACK on it in dark, so the contrast flips
+/// direction between appearances.
+public class PostCardPillView: PostMetaPillView {
+    override public init(
+        contents: [UIView], spacing: CGFloat = 8,
+        insets: NSDirectionalEdgeInsets = PostMetaPillView.insets
+    ) {
+        super.init(contents: contents, spacing: spacing, insets: insets)
+        contentView.backgroundColor = .tertiarySystemFill
+    }
+
+    @available(*, unavailable)
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Nothing to resolve: the ground above is painted, not sampled.
+    override func makeGround() -> UIVisualEffect? { nil }
+}
+
+/// A chip's BOX without a chip's ground.
+///
+/// The preview's date sits in the same slot as the capsules beside it — same
+/// height, same inner padding, so the row keeps one rhythm and every constraint
+/// that measured against the date still measures the same thing — but draws no
+/// capsule of its own. A capsule is a claim that what is inside it can be
+/// pressed, and of the four things on that row the date is the one that never
+/// will be.
+///
+/// Its floor comes from `ProgressiveMaterialView` behind it instead: the same
+/// material, with no edge.
+public final class PostChipSlotView: UIView {
+    public init(contents: [UIView], spacing: CGFloat = 8) {
+        super.init(frame: .zero)
+        isUserInteractionEnabled = false
+        let row = UIStackView(arrangedSubviews: contents)
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = spacing
+        row.pin(to: self, insets: PostMetaPillView.insets)
+        let uniform = heightAnchor.constraint(equalToConstant: PostMetaPillView.height)
+        uniform.priority = .init(999)
+        uniform.isActive = true
+    }
+
+    @available(*, unavailable)
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }

@@ -698,6 +698,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// prose ended up 8pt from the screen's edge.
     public static let contentInset: CGFloat = 12
 
+    /// The gap between two chips of the preview's bottom row. Smaller than the
+    /// inset that holds the row off the preview's edges: chips in one row belong
+    /// together more closely than the row belongs to the frame.
+    public static let chipGap: CGFloat = 6
+
     /// How far the preview's own furniture — the metadata pills, the play badge
     /// — is held off its edges. `contentInset` again, and that is the point.
     ///
@@ -864,6 +869,26 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// What a popover-shaped sheet raised from the menu should point at.
     public var authorMenuAnchor: UIView { authorBand.menuAnchor }
 
+    /// The band's repost control. Nil HIDES it — visibility tracks the answer,
+    /// not the presence of a provider.
+    public var onRepostTapped: (() -> Void)? {
+        get { authorBand.onRepostTapped }
+        set { authorBand.onRepostTapped = newValue }
+    }
+
+    /// The band's save control. Nil hides it.
+    public var onBookmarkTapped: (() -> Void)? {
+        get { authorBand.onBookmarkTapped }
+        set { authorBand.onBookmarkTapped = newValue }
+    }
+
+    /// Whether this post is saved. Set by the host from whatever owns the pile;
+    /// the control never decides for itself.
+    public var isBookmarked: Bool {
+        get { authorBand.isBookmarked }
+        set { authorBand.isBookmarked = newValue }
+    }
+
     /// Draws the band's "..." without wiring it — for a transition's stand-in
     /// card, which must look like the row it stands in for. See
     /// `PostAuthorBandView.showMenuControlAsScenery`.
@@ -908,32 +933,52 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     private let mediaView = UIImageView()
     private let playBadge = UIImageView(image: UIImage(systemName: "play.fill"))
     private static let metaFont = UIFont.preferredFont(forTextStyle: .footnote)
-    private let reactions = PostMetricLabel(symbol: "heart", font: metaFont, color: .secondaryLabel)
-    private let comments = PostMetricLabel(symbol: "bubble.right", font: metaFont, color: .secondaryLabel)
+    /// The closing line's counters — same type, colour and glyph as the two a
+    /// media card wears, because they are the same two numbers and will be the
+    /// same two buttons.
+    private let reactions = PostMetricLabel(
+        symbol: "heart", font: PostMetaPillView.font,
+        color: PostMetaPillView.foreground, iconColor: PostMetaPillView.glyphForeground
+    )
+    private let comments = PostMetricLabel(
+        symbol: "bubble.right", font: PostMetaPillView.font,
+        color: PostMetaPillView.foreground, iconColor: PostMetaPillView.glyphForeground
+    )
     private let views = PostMetricLabel(symbol: "eye", font: metaFont, color: .secondaryLabel)
     private let ageLabel = UILabel()
+    private var closingLikesPill: PostCardPillView!
+    private var closingCommentsPill: PostCardPillView!
 
-    /// The media row's metadata, which is the same four values as the line
-    /// above wearing the overlay's type and colour.
+    /// The media row's metadata, wearing the overlay's type and colour.
     ///
-    /// SEPARATE INSTANCES rather than the line's own views moved into the
-    /// pills, and the duplication is the cheaper of the two: the two placements
-    /// differ in font, weight, symbol variant and colour, all of which
-    /// `PostMetricLabel` fixes at init, so re-parenting would have meant making
-    /// every one of them mutable and re-applying the whole set on each
-    /// `configure` — on the recycling path, for a saving of four views.
-    private let overlayViews = PostMetricLabel(
-        symbol: "eye.fill", font: PostMetaPillView.font, color: PostMetaPillView.foreground
-    )
+    /// A SEPARATE INSTANCE rather than the closing line's own label moved onto
+    /// the preview: the two placements differ in font, weight, symbol variant
+    /// and colour, all of which `PostMetricLabel` fixes at init, so re-parenting
+    /// would have meant making every one of them mutable and re-applying the
+    /// set on each `configure` — on the recycling path, to save one view.
+    ///
+    /// LIKES and COMMENTS, one chip each — the two numbers a viewer acts on.
+    /// Views are carried by the model and rendered nowhere on a card.
+    /// ⚠️ OUTLINE, and the filled variants are deliberately NOT used here.
+    ///
+    /// These were `heart.fill` and `bubble.right.fill` while the closing line's
+    /// were outline, so the same post showed a filled heart on a photograph and
+    /// a hollow one on text — the outline/fill pair spent on CONTEXT. It is the
+    /// channel that carries STATE, the way the band's bookmark already uses it,
+    /// and these two are about to become buttons that need it: filled means the
+    /// viewer liked it, not that the post has a picture.
     private let overlayReactions = PostMetricLabel(
-        symbol: "heart.fill", font: PostMetaPillView.font, color: PostMetaPillView.foreground
+        symbol: "heart", font: PostMetaPillView.font,
+        color: PostMetaPillView.foreground, iconColor: PostMetaPillView.glyphForeground
     )
     private let overlayComments = PostMetricLabel(
-        symbol: "bubble.right.fill", font: PostMetaPillView.font, color: PostMetaPillView.foreground
+        symbol: "bubble.right", font: PostMetaPillView.font,
+        color: PostMetaPillView.foreground, iconColor: PostMetaPillView.glyphForeground
     )
     private let overlayAge = UILabel()
-    private var countersPill: PostMetaPillView!
-    private var agePill: PostMetaPillView!
+    private var likesPill: PostMetaPillView!
+    private var commentsPill: PostMetaPillView!
+    private var agePill: PostChipSlotView!
     /// Which page of a collection is showing. Always built — it is a chip in the
     /// same row as the other two and hides itself for a single-media post.
     private let pageIndicator = MediaPageIndicatorView()
@@ -1054,16 +1099,57 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
 
         let spacer = UIView()
         spacer.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
-        // Views lead, reactions and comments follow — the same reach-first
-        // order as the media tiles' counter pair.
-        let metaRow = UIStackView(arrangedSubviews: [views, reactions, comments, spacer, ageLabel])
+        // ⚠️ THE SAME TWO CHIPS A MEDIA CARD WEARS — the same numbers, the same
+        // order, the same capsule, so the two card shapes offer one affordance.
+        //
+        // They were a bare pair of grey labels, which was right while the media
+        // card's were a legibility device and nothing more. They are becoming
+        // BUTTONS, and an affordance that appears only when the post happens to
+        // carry a photograph is not an affordance at all.
+        //
+        // A card pill, not a media one: what is behind them here is the card's
+        // flat fill, which a material would resolve to and vanish into.
+        closingLikesPill = PostCardPillView(contents: [reactions])
+        closingCommentsPill = PostCardPillView(contents: [comments])
+        // ⚠️ The DATE stays a bare label, and that asymmetry is deliberate.
+        //
+        // On the preview it wears a capsule because a word over a photograph has
+        // no floor. Here it has one, and a capsule on this card would be read as
+        // a control — the very thing the two beside it are about to become. So
+        // the card says it plainly: what is in a capsule can be pressed.
+        let metaRow = UIStackView(
+            arrangedSubviews: [closingLikesPill, closingCommentsPill, spacer, ageLabel]
+        )
         self.metaRow = metaRow
         metaRow.axis = .horizontal
         metaRow.alignment = .center
-        metaRow.spacing = Self.metaSpacing
+        // The chips' own gap, not the line's: two capsules side by side belong
+        // together more closely than a run of loose labels did. The spacer takes
+        // up everything else.
+        metaRow.spacing = Self.chipGap
         metaRow.constrain(in: card) { parent in
-            metaRow.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Self.captionInset)
-            metaRow.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Self.captionInset)
+            metaRow.leadingAnchor.constraint(
+                equalTo: parent.leadingAnchor, constant: Self.captionInset
+            )
+            // ⚠️ The DATE is inset by a pill's padding on top of the row's, so
+            // the row's INK is symmetric.
+            //
+            // The row is pinned at `captionInset` on both sides, which aligns
+            // the two capsules' EDGES with the caption above and looks correct
+            // stated as a constraint. On screen it is lopsided: the leading
+            // number starts 12 inside its capsule, so the row's ink runs from 24
+            // on the left to 12 on the right and the date appears shoved against
+            // the card.
+            //
+            // Adding the pill's own padding puts the date where it would sit if
+            // it wore one — which is what a reader compares it to, the two
+            // capsules beside it. Its ink then lands ~24 from the trailing edge
+            // and ~21 from the bottom, the same corner the leading chip's number
+            // makes on the other side.
+            metaRow.trailingAnchor.constraint(
+                equalTo: parent.trailingAnchor,
+                constant: -(Self.captionInset + PostMetaPillView.insets.trailing)
+            )
         }
         metaFollowsCaption = metaRow.topAnchor.constraint(
             equalTo: captionLabel.bottomAnchor, constant: Self.captionFollowGap
@@ -1105,20 +1191,49 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         overlayAge.font = PostMetaPillView.font
         overlayAge.textColor = PostMetaPillView.foreground
         overlayAge.adjustsFontForContentSizeCategory = true
-        overlayAge.setContentCompressionResistancePriority(.required, for: .horizontal)
+        // 999, not required: the same rung as the counts (see the chip row's
+        // priority ladder below), so the date and the numbers hold the row
+        // together and the indicator is what yields.
+        overlayAge.setContentCompressionResistancePriority(.init(999), for: .horizontal)
+        // ⚠️ Not `.label`, and not sampled from the picture either — see
+        // `MediaDateInk`, which records why the sampling version was dropped.
+        // A bare word on a photograph is held up by its halo, so the two are
+        // set together and neither is meaningful alone.
+        overlayAge.textColor = MediaDateInk.colour
+        overlayAge.layer.shadowColor = MediaDateInk.halo.cgColor
+        overlayAge.layer.shadowOffset = .zero
+        overlayAge.layer.shadowRadius = MediaDateInk.haloRadius
+        overlayAge.layer.shadowOpacity = MediaDateInk.haloOpacity
 
-        // Views lead, reactions and comments follow — the same reach-first
-        // order the closing line and the media tiles both use.
-        countersPill = PostMetaPillView(
-            contents: [overlayViews, overlayReactions, overlayComments]
-        )
-        agePill = PostMetaPillView(contents: [overlayAge])
+        // ONE NUMBER PER CHIP, not one chip with two numbers.
+        //
+        // Likes and comments are separate verbs — how many liked it, how many
+        // said something — and a single capsule reading "♥ 160 💬 12" makes them
+        // one fact about the post. Two chips also let the row breathe at the
+        // leading edge the way the trailing date does.
+        likesPill = PostMetaPillView(contents: [overlayReactions])
+        commentsPill = PostMetaPillView(contents: [overlayComments])
+        // ⚠️ A SLOT, not a pill: the date is bare text on a fading material.
+        //
+        // It keeps the row's rhythm and loses the capsule, because a capsule is
+        // a claim that what is inside it can be pressed — true of the two
+        // counters, never of a date. Everything that measured against this chip
+        // still measures the same box.
+        agePill = PostChipSlotView(contents: [overlayAge])
 
-        countersPill.constrain(in: mediaView) { parent in
-            countersPill.leadingAnchor.constraint(
+        likesPill.constrain(in: mediaView) { parent in
+            likesPill.leadingAnchor.constraint(
                 equalTo: parent.leadingAnchor, constant: Self.mediaFurnitureInset
             )
-            countersPill.bottomAnchor.constraint(
+            likesPill.bottomAnchor.constraint(
+                equalTo: parent.bottomAnchor, constant: -Self.mediaFurnitureInset
+            )
+        }
+        commentsPill.constrain(in: mediaView) { parent in
+            commentsPill.leadingAnchor.constraint(
+                equalTo: likesPill.trailingAnchor, constant: Self.chipGap
+            )
+            commentsPill.bottomAnchor.constraint(
                 equalTo: parent.bottomAnchor, constant: -Self.mediaFurnitureInset
             )
         }
@@ -1146,28 +1261,67 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // with no counters hides the leading chip, and hanging the indicator off
         // something that can disappear is how it ends up somewhere else.
         pageIndicator.constrain(in: mediaView) { parent in
-            pageIndicator.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
             pageIndicator.centerYAnchor.constraint(equalTo: agePill.centerYAnchor)
+            // ⚠️ The SAME HEIGHT as the text chips, not its own.
+            //
+            // A row of 6pt dots is shorter than a line of caption2, so a chip
+            // sized by its contents came out visibly smaller than the three
+            // beside it and the row stopped reading as a row. Tied to the date's
+            // height rather than to a constant, so Dynamic Type moves all four
+            // together.
+            pageIndicator.heightAnchor.constraint(equalTo: agePill.heightAnchor)
         }
-        // Keeps the chips apart when the type grows, and deliberately BREAKABLE:
-        // at the largest accessibility sizes three counters, a date and an
-        // indicator do not fit across a preview, and the choice there is between
-        // chips that touch and a run of unsatisfiable-constraint logs. None of
-        // them may be truncated — a clipped count is a wrong count.
-        for clearance in [
-            pageIndicator.leadingAnchor.constraint(
-                greaterThanOrEqualTo: countersPill.trailingAnchor, constant: 8
-            ),
+        // ⚠️ Centred BETWEEN the two groups, not on the preview.
+        //
+        // Centring on the preview looked like the same thing and is not: it
+        // fixes the indicator's leading edge, which caps the room left of it at
+        // half the preview regardless of what the counters need. Measured, with
+        // the chips at control size: the comments count truncated to "…" while
+        // 60pt of preview sat empty to the right of the dots.
+        //
+        // Two guides of equal width give the row the shape it was asked for —
+        // counters, dynamic space, indicator, dynamic space, date. The SPACES
+        // absorb the difference, so the counters take the width they need and
+        // the indicator floats in what is left.
+        let leadingSpace = UILayoutGuide()
+        let trailingSpace = UILayoutGuide()
+        mediaView.addLayoutGuide(leadingSpace)
+        mediaView.addLayoutGuide(trailingSpace)
+        NSLayoutConstraint.activate([
+            leadingSpace.leadingAnchor.constraint(equalTo: commentsPill.trailingAnchor),
+            leadingSpace.trailingAnchor.constraint(equalTo: pageIndicator.leadingAnchor),
+            trailingSpace.leadingAnchor.constraint(equalTo: pageIndicator.trailingAnchor),
+            trailingSpace.trailingAnchor.constraint(equalTo: agePill.leadingAnchor),
+            // ⚠️ REQUIRED: the gaps are what keep the chips from overlapping, and
+            // two capsules touching on a photograph reads as one broken shape.
+            leadingSpace.widthAnchor.constraint(greaterThanOrEqualToConstant: Self.chipGap),
+            trailingSpace.widthAnchor.constraint(greaterThanOrEqualToConstant: Self.chipGap),
+            // And when there is no indicator at all, the counters still have to
+            // stay off the date.
             agePill.leadingAnchor.constraint(
-                greaterThanOrEqualTo: pageIndicator.trailingAnchor, constant: 8
-            ),
-            agePill.leadingAnchor.constraint(
-                greaterThanOrEqualTo: countersPill.trailingAnchor, constant: 8
+                greaterThanOrEqualTo: commentsPill.trailingAnchor, constant: Self.chipGap
             )
-        ] {
-            clearance.priority = .defaultHigh
-            clearance.isActive = true
-        }
+        ])
+        // A ladder, because at the largest accessibility sizes four chips do not
+        // fit across a preview and SOMETHING has to give. In order of what may
+        // break first:
+        //
+        //   749  the indicator's two-dot floor — a shorter run of dots still
+        //        says "there is more, you are here"
+        //   900  the two spaces being equal — an off-centre indicator is a
+        //        cosmetic loss, and it buys the counters real width
+        //   999  the counts and the date themselves (set on the labels), which
+        //        must never truncate: a clipped count is a WRONG count
+        //
+        // The gaps above sit above all three at required, so the failure mode is
+        // always an indicator that gave way, never chips that overlap.
+        let centred = leadingSpace.widthAnchor.constraint(equalTo: trailingSpace.widthAnchor)
+        centred.priority = UILayoutPriority(900)
+        let dotFloor = pageIndicator.widthAnchor.constraint(
+            greaterThanOrEqualToConstant: pageIndicator.minimumChipWidth
+        )
+        dotFloor.priority = UILayoutPriority(749)
+        NSLayoutConstraint.activate([centred, dotFloor])
     }
 
     /// The carousel, built on first use — most posts have one piece of media and
@@ -1192,7 +1346,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             view?.setPage(page)
         }
         view.onTapped = { [weak self] in self?.onMediaTapped?() }
-        mediaView.insertSubview(view, belowSubview: countersPill)
+        mediaView.insertSubview(view, belowSubview: likesPill)
         view.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             view.leadingAnchor.constraint(equalTo: mediaView.leadingAnchor),
@@ -1282,6 +1436,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         onAuthorTapped = nil
         authorMenuActions = nil
         onMediaTapped = nil
+        // Both capture the POST they were built for, like the two above: a
+        // recycled row would otherwise save someone else's post.
+        onRepostTapped = nil
+        onBookmarkTapped = nil
+        isBookmarked = false
         // Concealment is per-FLIGHT state and must not ride a recycled cell to
         // whatever post it is bound to next — see `setHeroConcealed`.
         card.alpha = 1
@@ -1386,16 +1545,20 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
 
         reactions.set(post.reactionCount)
         comments.set(post.commentCount)
+        // A number the post does not have leaves an empty capsule on the card,
+        // exactly as it would on a photograph.
+        closingLikesPill.syncVisibilityToContents()
+        closingCommentsPill.syncVisibilityToContents()
         views.set(post.viewCount)
         overlayReactions.set(post.reactionCount)
         overlayComments.set(post.commentCount)
-        overlayViews.set(post.viewCount)
         let age = PostMetadata.compactAge(ofMillis: post.publishedAtMS)
         ageLabel.text = age
         overlayAge.text = age
-        // A post with no counters at all leaves nothing to put in the leading
-        // pill, and an empty capsule on the photo is worse than no capsule.
-        countersPill.syncVisibilityToContents()
+        // A number the post does not have leaves an empty capsule on the photo,
+        // which is worse than no capsule — each chip answers for its own.
+        likesPill.syncVisibilityToContents()
+        commentsPill.syncVisibilityToContents()
 
         mediaView.image = nil
         mediaView.backgroundColor = post.kind == .video ? .darkGray : .tertiarySystemFill

@@ -247,13 +247,19 @@ struct CarouselConcealmentTests {
 
 @MainActor
 struct CarouselChipsAreFixedTests {
-    private func row(pages: Int, width: CGFloat = 390) -> PostGridListRowCell {
+    private func row(
+        pages: Int, width: CGFloat = 390,
+        reactions: Int64 = 160, comments: Int64 = 12, publishedAtMS: Int64 = 0
+    ) -> PostGridListRowCell {
         let cell = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: width, height: 500))
         cell.configure(
             with: GalleryPost(
                 id: PostID("p"), kind: .photo, isRepost: false,
                 pages: (0..<pages).map { page("\($0)", aspect: 0.8) },
-                caption: "Short.", publishedAtMS: 0, reactionCount: 160
+                // LIKES and COMMENTS: one chip each on the preview, and a
+                // number the post does not have draws no chip at all.
+                caption: "Short.", publishedAtMS: publishedAtMS,
+                reactionCount: reactions, commentCount: comments
             ),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
         )
@@ -265,14 +271,55 @@ struct CarouselChipsAreFixedTests {
     }
 
     private func chipFrames(in cell: PostGridListRowCell) -> [CGRect] {
-        func pills(_ view: UIView) -> [PostMetaPillView] {
-            if let pill = view as? PostMetaPillView { return [pill] }
+        func pills(_ view: UIView) -> [UIView] {
+            if isChip(view) { return [view] }
             return view.subviews.flatMap(pills)
         }
+        // ⚠️ ON SCREEN, which is a question about a chip's ANCESTORS and not
+        // about the chip.
+        //
+        // This filtered on the pill's own `isHidden` and was right for exactly
+        // as long as a media row was the only row with pills in it. A card now
+        // builds BOTH shapes and hides one — the closing line by hiding its
+        // stack, the preview's chips by hiding the preview — so a chip of the
+        // shape that is not being drawn still answers `isHidden == false`, and
+        // every count here silently gained two.
+        func isOnScreen(_ view: UIView) -> Bool {
+            sequence(first: view, next: \.superview)
+                .prefix { $0 !== cell.contentView.superview }
+                .allSatisfy { !$0.isHidden && $0.alpha > 0 }
+        }
         return pills(cell.contentView)
-            .filter { !$0.isHidden }
+            .filter(isOnScreen)
             .map { $0.convert($0.bounds, to: cell.contentView) }
             .sorted { $0.minX < $1.minX }
+    }
+
+    /// ⚠️ A CHIP IS A BOX ON THE ROW, not a capsule.
+    ///
+    /// Three of the four wear one; the date lost its capsule and kept the box,
+    /// so a check for `PostMetaPillView` alone silently stopped counting it —
+    /// and the tests that read `frames[3]` crashed rather than failed, which is
+    /// the loudest possible version of a good outcome.
+    private func isChip(_ view: UIView) -> Bool {
+        view is PostMetaPillView || view is PostChipSlotView
+    }
+
+    /// The chips actually being drawn, in reading order — same rule as
+    /// `chipFrames`, for the tests that need the views and not their frames.
+    private func onScreenPills(in cell: PostGridListRowCell) -> [UIView] {
+        func pills(_ view: UIView) -> [UIView] {
+            if isChip(view) { return [view] }
+            return view.subviews.flatMap(pills)
+        }
+        func isOnScreen(_ view: UIView) -> Bool {
+            sequence(first: view, next: \.superview)
+                .prefix { $0 !== cell.contentView.superview }
+                .allSatisfy { !$0.isHidden && $0.alpha > 0 }
+        }
+        return pills(cell.contentView).filter(isOnScreen).sorted {
+            $0.convert($0.bounds, to: cell).minX < $1.convert($1.bounds, to: cell).minX
+        }
     }
 
     /// ⚠️ THE REQUIREMENT: the chips and the indicator belong to the PREVIEW,
@@ -285,7 +332,8 @@ struct CarouselChipsAreFixedTests {
     @Test func theChipsDoNotTravelWithThePages() {
         let cell = row(pages: 4)
         let before = chipFrames(in: cell)
-        #expect(before.count == 3)
+        // likes, comments, indicator, age.
+        #expect(before.count == 4)
 
         #expect(cell.debugScrollCarousel(toPage: 3, animated: false))
         cell.layoutIfNeeded()
@@ -302,8 +350,10 @@ struct CarouselChipsAreFixedTests {
     /// single-media post. An indicator for one page is furniture answering a
     /// question nobody asked.
     @Test func onlyACollectionWearsAnIndicator() {
-        #expect(chipFrames(in: row(pages: 1)).count == 2)
-        #expect(chipFrames(in: row(pages: 4)).count == 3)
+        // Likes, comments, age — and a fourth only when there are pages to
+        // indicate.
+        #expect(chipFrames(in: row(pages: 1)).count == 3)
+        #expect(chipFrames(in: row(pages: 4)).count == 4)
     }
 
     /// It sits BETWEEN the other two, which is the placement asked for and the
@@ -314,19 +364,23 @@ struct CarouselChipsAreFixedTests {
     /// different heights — a row of 6pt dots against a line of caption2 — so a
     /// shared bottom puts the short one's mass below the others, and the row
     /// stops reading as a row.
-    @Test func theIndicatorSitsBetweenTheCounterAndTheDate() throws {
+    @Test func theIndicatorSitsBetweenTheCountersAndTheDate() throws {
         let cell = row(pages: 4)
         let frames = chipFrames(in: cell)
-        #expect(frames.count == 3)
+        // likes, comments, indicator, age.
+        #expect(frames.count == 4)
 
-        #expect(frames[0].maxX <= frames[1].minX)
-        #expect(frames[1].maxX <= frames[2].minX)
-        for frame in frames {
-            #expect(abs(frame.midY - frames[0].midY) < 0.5)
+        for (left, right) in zip(frames, frames.dropFirst()) {
+            #expect(left.maxX <= right.minX)
+            #expect(abs(left.midY - right.midY) < 0.5)
         }
-        // And it really is shorter, so the assertion above is not the same as a
-        // bottom-edge one by accident.
-        #expect(frames[1].height < frames[2].height)
+        // ⚠️ And every chip is the SAME HEIGHT. A row of 6pt dots is shorter
+        // than a line of caption2, so an indicator sized by its contents came
+        // out visibly smaller than the three beside it — which is what stopped
+        // the four reading as one row.
+        for frame in frames {
+            #expect(abs(frame.height - frames[0].height) < 0.5)
+        }
     }
 
     /// The indicator is a CONTROL: a tap or a drag across it asks for a page.
@@ -363,20 +417,80 @@ struct CarouselChipsAreFixedTests {
     /// have cleared it.
     @Test func aRecycledRowDropsThePreviousCollection() {
         let cell = row(pages: 4)
-        #expect(chipFrames(in: cell).count == 3)
+        #expect(chipFrames(in: cell).count == 4)
 
         cell.prepareForReuse()
         cell.configure(
             with: GalleryPost(
                 id: PostID("q"), kind: .photo, isRepost: false,
                 thumbnailURL: URL(string: "mock://solo"), aspectRatio: 0.8,
-                caption: "Short.", publishedAtMS: 0, reactionCount: 12
+                caption: "Short.", publishedAtMS: 0, reactionCount: 12, commentCount: 3
             ),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
         )
         cell.layoutIfNeeded()
 
-        #expect(chipFrames(in: cell).count == 2)
+        #expect(chipFrames(in: cell).count == 3)
         #expect(cell.debugScrollCarousel(toPage: 1, animated: false) == false)
+    }
+
+    /// A row whose chips have room to move, so a layout that mispositions them
+    /// shows up as a measurement rather than as a coincidence.
+    ///
+    /// ⚠️ Three fixture choices, each load-bearing:
+    ///
+    /// - **Six-figure counts.** Whether the counters get squeezed depends on how
+    ///   wide they are; "160" and "12" fit inside almost anything.
+    /// - **A RECENT date**, so the age chip is "1h" rather than "Jan 1 1970" —
+    ///   a 123pt date chip filled the row on its own and clamped every gap to
+    ///   the minimum, which made the two spaces trivially equal and the whole
+    ///   assertion vacuous. It passed under the broken layout.
+    /// - **Ninety minutes**, not sixty: an hour on the nose sits on the boundary
+    ///   the formatter rounds at.
+    private func spaciousRow() -> PostGridListRowCell {
+        let ninetyMinutesAgo = Int64(Date().timeIntervalSince1970 * 1000) - 90 * 60 * 1000
+        return row(
+            pages: 6, reactions: 1_600_000, comments: 128_000,
+            publishedAtMS: ninetyMinutesAgo
+        )
+    }
+
+    /// ⚠️ A COUNT IS NEVER CLIPPED TO MAKE ROOM FOR THE INDICATOR.
+    ///
+    /// The regression this pins: the indicator was centred on the PREVIEW, which
+    /// fixes its leading edge at half the width and caps what is left for the
+    /// counters — so the comments chip rendered "💬 …" while empty preview sat
+    /// on the other side of the dots. Clipped, it reads as a number the post
+    /// has, and it is not one.
+    ///
+    /// Measuring each chip against what it asks for UNCONSTRAINED is the part
+    /// that matters: a frame-order or gap assertion passes just as happily on a
+    /// row of ellipses.
+    @Test func theCountersAreNeverSqueezedByTheIndicator() {
+        let cell = spaciousRow()
+        let ordered = onScreenPills(in: cell)
+        #expect(ordered.count == 4)
+
+        // Likes, comments and the date at their unconstrained width. The
+        // indicator is excluded on purpose — yielding is its job.
+        for chip in [ordered[0], ordered[1], ordered[3]] {
+            let wanted = chip.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+            #expect(chip.bounds.width >= wanted - 0.5)
+        }
+    }
+
+    /// And the indicator sits centred BETWEEN the two groups rather than on the
+    /// preview: the two dynamic spaces are equal, whatever the counters took.
+    @Test func theIndicatorFloatsBetweenTheGroups() {
+        let chips = chipFrames(in: spaciousRow())
+        #expect(chips.count == 4)
+
+        let leading = chips[2].minX - chips[1].maxX
+        let trailing = chips[3].minX - chips[2].maxX
+        #expect(abs(leading - trailing) < 0.5)
+        // And there is genuine slack here, so the equality above is a measured
+        // result and not two gaps clamped at the same minimum.
+        #expect(leading > PostGridListRowCell.chipGap + 1)
+        #expect(leading >= PostGridListRowCell.chipGap - 0.5)
     }
 }

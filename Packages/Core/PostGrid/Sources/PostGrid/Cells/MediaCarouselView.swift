@@ -403,8 +403,12 @@ private final class EdgeYieldingScrollView: UIScrollView {
     private static let backEdgeZone: CGFloat = 20
 
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        if gestureRecognizer === panGestureRecognizer, let window {
-            let x = gestureRecognizer.location(in: window).x
+        if let pan = gestureRecognizer as? UIPanGestureRecognizer,
+           pan === panGestureRecognizer, let window {
+            // The gesture's ORIGIN, not where the finger is now: a pan is only
+            // asked once it has travelled its slop, so reading the live location
+            // puts a drag that started on the edge tens of points inside it.
+            let x = pan.location(in: window).x - pan.translation(in: window).x
             if x - window.bounds.minX <= Self.backEdgeZone { return false }
         }
         return super.gestureRecognizerShouldBegin(gestureRecognizer)

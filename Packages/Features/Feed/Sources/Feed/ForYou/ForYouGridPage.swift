@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import MediaCore
 import MediaPlayback
@@ -23,6 +24,15 @@ private final class WeakPageBox {
 }
 
 final class ForYouGridPage: UIView {
+    /// The saved-posts pile, shared with the post page and the profile's Saved
+    /// tab through `UserDefaults` — see `PostBookmarkStore`.
+    private let bookmarks = PostBookmarkStore()
+
+    /// The viewer asked to repost. UNSET today — see the note at the wiring
+    /// site: the control is drawn because the card's design calls for it, and
+    /// there is no client path that publishes a repost yet.
+    var onRepostRequested: ((GalleryPost) -> Void)?
+
     /// The page's fixed shape, chosen by its format at init.
     enum Style {
         case grid
@@ -1775,6 +1785,33 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             // so a tap on the photograph has to arrive by its own route or the
             // card simply stops opening. Straight into the SAME handler a tap
             // anywhere else on the row lands in.
+            // Save, on the row. The pile is the SAME one the post page and the
+            // profile's Saved tab read — a second store here would let a card
+            // and the post it opens disagree about whether a post is saved.
+            //
+            // The control never toggles itself: `isBookmarked` is set from the
+            // store's answer, before and after, so a store that refused would
+            // leave the glyph telling the truth.
+            // ⚠️ REPOST HAS NO ACTION YET, and this closure is what makes the
+            // control visible anyway.
+            //
+            // The band hides a button whose handler is nil — visibility tracks
+            // the answer — so a repost with nothing behind it would simply not
+            // appear. The card's design calls for it, so it is drawn and the
+            // request fans out to `onRepostRequested`, which nothing sets.
+            // Pressing it does nothing today.
+            //
+            // What it needs is a real mutation, not a handler: `CreatePost`
+            // carries `parent_id` on the wire and `GalleryPost.isRepost` already
+            // reads it (the profile's Posts/Reposts split), but `PostComposer`
+            // takes no parent, so there is no client path that publishes one.
+            cell.onRepostTapped = { [weak self] in self?.onRepostRequested?(post) }
+            cell.isBookmarked = bookmarks.isSaved(post.id.rawValue)
+            cell.onBookmarkTapped = { [weak self, weak cell] in
+                guard let self else { return }
+                _ = bookmarks.toggle(post.id.rawValue)
+                cell?.isBookmarked = bookmarks.isSaved(post.id.rawValue)
+            }
             cell.onMediaTapped = { [weak self, weak cell] in
                 guard let self, let cell,
                       let path = self.collectionView.indexPath(for: cell) else { return }

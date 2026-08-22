@@ -50,6 +50,18 @@ private func pills(in view: UIView) -> [PostMetaPillView] {
     return view.subviews.flatMap(pills(in:))
 }
 
+/// ⚠️ A CHIP IS A BOX ON THE ROW; a PILL is a box with a capsule.
+///
+/// Three of the preview's four wear one. The date does not — a capsule claims
+/// its contents can be pressed, and it is the one thing on that row that never
+/// will be — so it keeps the box and stands on a fading material instead.
+/// Tests about PLACEMENT want all four; tests about the capsule want three.
+private func chips(in view: UIView) -> [UIView] {
+    if view is PostMetaPillView || view is PostChipSlotView { return [view] }
+    return view.subviews.flatMap(chips(in:))
+}
+
+
 /// Whether `view` is on screen at all, which is a question about its ANCESTORS
 /// as much as itself: the pills live inside the preview, so a text row hides
 /// them by hiding the preview and never touches the pills themselves.
@@ -89,22 +101,89 @@ struct MediaMetaPillPlacementTests {
         #expect(slack < PostGridListRowCell.metaBottomInset + 20)
     }
 
-    /// A text row is untouched: no preview, so the metadata is still the quiet
-    /// line that closes the card, and no pill is on screen anywhere.
-    @Test func aTextCardKeepsItsClosingLine() {
+    /// ⚠️ A text row wears the SAME TWO CHIPS, at its own card's inset.
+    ///
+    /// It used to close on a bare pair of grey labels, which was right while the
+    /// preview's chips were a legibility device and nothing more. They are
+    /// becoming buttons, and an affordance that appears only when the post
+    /// happens to carry a photograph is not one.
+    ///
+    /// The DATE is the deliberate exception and is asserted as such: it stays a
+    /// bare label, because a capsule on this card reads as a control and the
+    /// date is not one. Two chips, not three.
+    @Test func aTextCardWearsTheSameCountersInItsOwnColumn() {
         let cell = row(kind: .text)
+        let visible = pills(in: cell.contentView).filter { isVisible($0, within: cell.contentView) }
 
         #expect(cell.mediaHeroRect == nil)
-        #expect(pills(in: cell.contentView).allSatisfy { !isVisible($0, within: cell.contentView) })
+        #expect(visible.count == 2)
+        // ⚠️ At the CAPTION's inset, not at the preview's furniture inset.
+        //
+        // Matching the media card's 26 would have been the tidy answer to "they
+        // are misaligned" and is the wrong one: that 26 is 12 to the preview
+        // plus 14 to clear its corner arc — a rule that exists because there is
+        // an arc. On a card with no preview it would only indent the closing
+        // line away from the caption above it, trading a real alignment for an
+        // abstract one.
+        for pill in visible {
+            let frame = pill.convert(pill.bounds, to: cell.contentView)
+            #expect(frame.minX >= PostGridListRowCell.captionInset - 0.5)
+        }
+        let leading = visible
+            .map { $0.convert($0.bounds, to: cell.contentView).minX }
+            .min() ?? 0
+        #expect(abs(leading - PostGridListRowCell.captionInset) < 0.5)
     }
 
-    /// Both pills are on the preview's bottom edge, counters leading and age
-    /// trailing — the closing line's own reading order, kept.
+    /// ⚠️ The closing line's INK is symmetric, which its constraints are not.
+    ///
+    /// Pinning the row at `captionInset` on both sides aligns the capsules'
+    /// EDGES with the caption and reads correctly as code. On screen the leading
+    /// number starts a pill's padding further in, so the ink ran 24 on the left
+    /// against 12 on the right and the date looked shoved against the card.
+    ///
+    /// Measured off the DATE's own frame rather than the row's, because the row
+    /// is exactly the thing that was already symmetric while the card was not.
+    @Test func theClosingLinesDateIsInsetLikeAChipsText() throws {
+        let cell = row(kind: .text)
+        let age = PostMetadata.compactAge(ofMillis: 0)
+
+        func labels(_ view: UIView) -> [UILabel] {
+            if let label = view as? UILabel { return [label] }
+            return view.subviews.flatMap(labels)
+        }
+        // ⚠️ Filtered by VISIBILITY, and it matters: the card builds both shapes
+        // and hides one, so the preview's own age label carries the same string
+        // from inside the hidden preview. Without this the test measured that
+        // one and failed by 101pt — which is the same trap the pill counts hit.
+        let date = try #require(
+            labels(cell.contentView).first {
+                $0.text == age && isVisible($0, within: cell.contentView)
+            }
+        )
+        let frame = date.convert(date.bounds, to: cell.contentView)
+        let trailingGap = cell.contentView.bounds.maxX - frame.maxX
+
+        let chip = try #require(
+            pills(in: cell.contentView).first { isVisible($0, within: cell.contentView) }
+        )
+        let leadingGap = chip.convert(chip.bounds, to: cell.contentView).minX
+            + PostMetaPillView.insets.leading
+
+        #expect(abs(trailingGap - leadingGap) < 1)
+        // And it really moved: the naive pinning would put it at the row's own
+        // inset, which is a pill's padding closer to the edge.
+        #expect(trailingGap > PostGridListRowCell.captionInset + 1)
+    }
+
+    /// Every chip rests on the preview's bottom edge — likes and comments
+    /// leading, age trailing, the closing line's own reading order kept.
     @Test func thePillsRestOnThePreviewsBottomEdge() throws {
         let cell = row(kind: .photo)
         let preview = try #require(cell.mediaHeroRect)
-        let visible = pills(in: cell.contentView).filter { isVisible($0, within: cell.contentView) }
-        #expect(visible.count == 2)
+        let visible = chips(in: cell.contentView).filter { isVisible($0, within: cell.contentView) }
+        // Likes, comments, age. No indicator: this post is one photograph.
+        #expect(visible.count == 3)
 
         let inset = PostGridListRowCell.mediaFurnitureInset
         for pill in visible {
@@ -114,7 +193,9 @@ struct MediaMetaPillPlacementTests {
         let ordered = visible.map { $0.convert($0.bounds, to: cell.contentView) }
             .sorted { $0.minX < $1.minX }
         #expect(abs(ordered[0].minX - preview.minX - inset) < 0.5)
-        #expect(abs(preview.maxX - ordered[1].maxX - inset) < 0.5)
+        #expect(abs(preview.maxX - ordered[2].maxX - inset) < 0.5)
+        // And they never touch: one gap between the two counters.
+        #expect(ordered[1].minX - ordered[0].maxX >= PostGridListRowCell.chipGap - 0.5)
     }
 }
 
@@ -127,22 +208,64 @@ struct MediaMetaPillContentTests {
     /// filled capsule sitting on the photo.
     @Test func aPostWithNoCountersDrawsNoEmptyCapsule() throws {
         let cell = row(kind: .photo, reactions: nil, comments: nil, views: nil)
-        let visible = pills(in: cell.contentView).filter { isVisible($0, within: cell.contentView) }
+        let capsules = pills(in: cell.contentView).filter { isVisible($0, within: cell.contentView) }
+        let boxes = chips(in: cell.contentView).filter { isVisible($0, within: cell.contentView) }
 
-        // The age survives — every post has one — so what is left is the
-        // trailing pill alone, not a leading capsule with nothing in it.
-        #expect(visible.count == 1)
+        // NO capsule at all — and the age still drawn, in its own bare box at
+        // the trailing edge. Counting boxes and capsules separately is the point
+        // of the test: a regression that gave the date a capsule back, or one
+        // that dropped the date with the counters, moves exactly one of them.
+        #expect(capsules.isEmpty)
+        #expect(boxes.count == 1)
         let preview = try #require(cell.mediaHeroRect)
-        let frame = visible[0].convert(visible[0].bounds, to: cell.contentView)
+        let frame = boxes[0].convert(boxes[0].bounds, to: cell.contentView)
         #expect(abs(preview.maxX - frame.maxX - PostGridListRowCell.mediaFurnitureInset) < 0.5)
     }
 
-    /// One counter is enough to earn the capsule.
-    @Test func aSingleCounterStillGetsItsPill() {
-        let cell = row(kind: .photo, reactions: 160, comments: nil, views: nil)
-        let visible = pills(in: cell.contentView).filter { isVisible($0, within: cell.contentView) }
+    /// ⚠️ THE PREVIEW'S DATE IS WHITE ON A BLACK HALO, and the halo is not
+    /// optional decoration — it is the only thing holding the word up.
+    ///
+    /// The date is the one piece of the row with no ground under it. An earlier
+    /// version sampled the picture and chose a side; `MediaDateInk` records why
+    /// that was dropped. What replaced it only works as a PAIR, so both halves
+    /// are asserted here: a white word with the shadow turned off is invisible
+    /// on any bright photograph, and nothing else in the cell would notice.
+    @Test func thePreviewsDateIsWhiteAndCarriesItsOwnHalo() throws {
+        let cell = row(kind: .photo)
+        let age = PostMetadata.compactAge(ofMillis: 0)
+        func labels(_ view: UIView) -> [UILabel] {
+            if let label = view as? UILabel { return [label] }
+            return view.subviews.flatMap(labels)
+        }
+        let date = try #require(
+            labels(cell.contentView).first {
+                $0.text == age && isVisible($0, within: cell.contentView)
+            }
+        )
 
-        #expect(visible.count == 2)
+        #expect(date.textColor == MediaDateInk.colour)
+        #expect(date.layer.shadowColor == MediaDateInk.halo.cgColor)
+        #expect(date.layer.shadowOpacity > 0)
+        #expect(date.layer.shadowRadius > 0)
+        // And the halo really is the other side, whatever the ink becomes.
+        #expect(MediaDateInk.halo != MediaDateInk.colour)
+    }
+
+    /// ⚠️ EACH CHIP ANSWERS FOR ITS OWN NUMBER.
+    ///
+    /// One capsule per verb — how many liked it, how many said something — so a
+    /// post with likes and no comments draws one counter chip, not one chip with
+    /// half its contents missing. Views are carried by the model and rendered on
+    /// no card at all.
+    @Test func eachCounterEarnsItsOwnCapsule() {
+        func shown(_ cell: PostGridListRowCell) -> Int {
+            pills(in: cell.contentView).filter { isVisible($0, within: cell.contentView) }.count
+        }
+
+        // The date is not counted here — it wears no capsule.
+        #expect(shown(row(kind: .photo, reactions: nil, comments: nil, views: 4_200)) == 0)
+        #expect(shown(row(kind: .photo, reactions: 160, comments: nil, views: nil)) == 1)
+        #expect(shown(row(kind: .photo, reactions: 160, comments: 12, views: nil)) == 2)
     }
 
     /// The rule, tested where it lives rather than only through a cell.
@@ -241,8 +364,8 @@ struct CardShapeSystemTests {
         let cell = row(kind: .photo)
         let preview = try #require(cell.mediaHeroRect)
         let arc = PostGridListRowCell.mediaCornerRadius
-        let visible = pills(in: cell.contentView).filter { isVisible($0, within: cell.contentView) }
-        #expect(visible.count == 2)
+        let visible = chips(in: cell.contentView).filter { isVisible($0, within: cell.contentView) }
+        #expect(visible.count == 3)
 
         // Half a point of slack, and it is not decoration: these are differences
         // of converted rects, so an exact `>=` compares 13.999999999999972
@@ -279,6 +402,50 @@ struct CardShapeSystemTests {
         #expect(pill.clipsToBounds)
     }
 
+    /// ⚠️ The band's cluster pill sits IN the card's top-right corner, and its
+    /// curve is the concentric answer to that corner's.
+    ///
+    /// It was centred on the avatar, which put it below the arc where its curve
+    /// answered to nothing. Inset from both edges by `contentInset`, the rule
+    /// says its radius should be the card's less that inset — 26 - 12 = 14 —
+    /// and a capsule this tall resolves to 14.5. It is the right shape already;
+    /// what this pins is that it stays in the place where that is TRUE, because
+    /// nothing about the capsule itself would change if someone re-centred it.
+    @Test func theClusterPillTurnsWithTheCardsCorner() throws {
+        let cell = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: 390, height: 400))
+        cell.configure(
+            with: GalleryPost(
+                id: PostID("p"), kind: .photo, isRepost: false,
+                thumbnailURL: nil, caption: "Short.", publishedAtMS: 0,
+                authorID: ProfileID("a"), authorName: "Sofía Reyes", authorHandle: "sofia.reyes"
+            ),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        cell.onRepostTapped = {}
+        cell.onBookmarkTapped = {}
+        let attributes = UICollectionViewLayoutAttributes(forCellWith: IndexPath(item: 0, section: 0))
+        attributes.frame = cell.frame
+        cell.bounds.size.height = cell.preferredLayoutAttributesFitting(attributes).frame.height
+        cell.layoutIfNeeded()
+
+        // The card is pinned to the content view, so the content view IS the
+        // card's box.
+        // Found by ANCESTRY, not by `superview`: the band nests its cluster, and
+        // a direct-parent check silently stopped finding this pill the moment
+        // the "..." moved out of it and a stack appeared in between.
+        func isInsideBand(_ view: UIView) -> Bool {
+            sequence(first: view, next: \.superview).contains { $0 is PostAuthorBandView }
+        }
+        let cluster = try #require(pills(in: cell.contentView).first(where: isInsideBand))
+        let frame = cluster.convert(cluster.bounds, to: cell.contentView)
+        let inset = PostGridListRowCell.contentInset
+
+        #expect(abs(frame.minY - inset) < 0.5)
+        #expect(abs(cell.contentView.bounds.maxX - frame.maxX - inset) < 0.5)
+        // Concentric within half a point of the rule.
+        let concentric = PostGridListRowCell.cardCornerRadius - inset
+        #expect(abs(cluster.effectiveRadius(corner: .allCorners) - concentric) <= 0.5)
+    }
 }
 
 @MainActor
@@ -296,9 +463,12 @@ struct MediaMetaPillConcealmentTests {
         let cell = row(kind: .photo)
         // The chips ON SCREEN: a single-media row also holds a page indicator,
         // built for every row and hidden unless the post is a collection.
-        let all = pills(in: cell.contentView)
+        // Chips, not capsules: the date wears no capsule and still has to leave
+        // with the picture.
+        let all = chips(in: cell.contentView)
             .filter { isVisible($0, within: cell.contentView) }
-        #expect(all.count == 2)
+        // Likes, comments, age.
+        #expect(all.count == 3)
 
         cell.setHeroMediaConcealed(true)
         #expect(all.allSatisfy { !isVisible($0, within: cell.contentView) })
