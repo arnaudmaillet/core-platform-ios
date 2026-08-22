@@ -36,7 +36,11 @@ import UIKit
 /// The shape is `cornerConfiguration`, never `layer.cornerRadius` — a material
 /// clipped by a layer radius does not know it has been clipped, and its edge is
 /// drawn on the shape it thinks it has.
-public final class PostMetaPillView: UIVisualEffectView {
+///
+/// Subclassable for one reason only: `MediaPageIndicatorView` is a third chip in
+/// the same row and must stand on the same ground. Anything else that needs this
+/// material should hold one rather than inherit it.
+public class PostMetaPillView: UIVisualEffectView {
     /// The overlay type, shared with the media tiles' counters: a card's
     /// counters are footnote against the card and caption2 semibold over media,
     /// and this is the second of those two. `PostMetricLabel` names both.
@@ -72,7 +76,6 @@ public final class PostMetaPillView: UIVisualEffectView {
         // A capsule, and `.capsule()` rather than a number: the ends have to
         // stay circular at whatever height Dynamic Type resolves to, and a fixed
         // radius stops being half of that at the first step.
-        //
         //
         // It is allowed to be a capsule because of where its HOST puts it, not
         // because capsules were preferred. A chip inside its parent's corner arc

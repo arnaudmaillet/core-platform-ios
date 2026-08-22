@@ -38,7 +38,19 @@ public struct MockSocialDataset: Sendable {
         public let authorProfileID: String
         public let caption: String
         /// (url, width, height); nil for text-only posts.
+        ///
+        /// The FIRST piece, and it stays a scalar because most of the mock
+        /// reads exactly that: the kind is routed off this URL, the map's pins
+        /// take their face from it, and a collection is still one thing in a
+        /// grid. `extraMedia` carries the rest.
         public let media: (url: String, width: Int, height: Int)?
+        /// Pages two and up of a collection post, empty for everything else.
+        ///
+        /// Separate rather than folding `media` into an array: every existing
+        /// reader wants the head, and an array would have made each of them say
+        /// `.first` — which is the exact shape of the bug this feature exists to
+        /// undo, reintroduced one layer down.
+        public var extraMedia: [(url: String, width: Int, height: Int)] = []
         public let publishedAtMS: Int64
         /// Non-empty = this post is a repost of `parentID` (post.v1 lineage:
         /// a repost is the author's own post referencing its source).
@@ -228,11 +240,45 @@ public struct MockSocialDataset: Sendable {
                      shape.0, shape.1)
                 }
             }
+            // ARRIVAL 4 IS A COLLECTION — four photos behind the one the card
+            // opens on.
+            //
+            // Index FOUR, not zero, and it is worth stating why: these five are
+            // stamped newest-first (`epochMS - index * 60_000`) but the New
+            // section presents them the other way round, so index 4 is the card
+            // a cold launch opens on and index 0 is the one five scrolls down.
+            // Measured in the simulator, not assumed — the collection was
+            // seeded on index 0 first and could not be seen without scrolling.
+            // It is also an IMAGE slot (`index % 2 == 1` is video), which a
+            // collection has to be.
+            //
+            // Photos, not video: `post.v1` distinguishes `carousel` from
+            // `main_video`, and the card's carousel renders covers. Photos also
+            // work under BOTH catalogs, unlike portrait video — Picsum returns
+            // exactly the size asked for.
+            //
+            // Shapes deliberately disagree with page one. A carousel takes its
+            // box from the first page and aspect-fills the rest, so a run of
+            // identical ratios would never exercise the crop.
+            let collectionShapes: [(Int, Int)] = [(1600, 900), (1080, 1080), (900, 1600)]
+            let extraMedia: [(url: String, width: Int, height: Int)] =
+                index == 4
+                ? collectionShapes.enumerated().map { position, shape in
+                    switch mediaCatalog {
+                    case .synthetic:
+                        ("mock://media/new-4-\(position)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
+                    case .realAssets:
+                        (MockMediaFixtures.imageURL(index: 40 + position, width: shape.0, height: shape.1),
+                         shape.0, shape.1)
+                    }
+                }
+                : []
             return PostRecord(
                 postID: String(format: "post-new-%02d", index),
                 authorProfileID: authors[index % authors.count].profileID,
                 caption: caption,
                 media: media,
+                extraMedia: extraMedia,
                 // Newest first, a minute apart, all of them ahead of the clock.
                 publishedAtMS: epochMS - Int64(index) * 60_000,
                 parentID: ""

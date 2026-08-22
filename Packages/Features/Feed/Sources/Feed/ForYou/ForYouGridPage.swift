@@ -1115,6 +1115,21 @@ final class ForYouGridPage: UIView {
         else { return false }
         return row.debugTapShowMore()
     }
+
+    /// Swipes a row's carousel to a page. Same realize-then-act shape as
+    /// `debugTapShowMore(atIndex:)`, and false for a row with no collection.
+    @discardableResult
+    func debugScrollCarousel(atIndex index: Int, toPage page: Int) -> Bool {
+        guard posts.indices.contains(index) else { return false }
+        let path = indexPath(for: index)
+        if collectionView.cellForItem(at: path) == nil {
+            collectionView.scrollToItem(at: path, at: .centeredVertically, animated: false)
+            collectionView.layoutIfNeeded()
+        }
+        guard let row = collectionView.cellForItem(at: path) as? PostGridListRowCell
+        else { return false }
+        return row.debugScrollCarousel(toPage: page)
+    }
     #endif
 
     /// Brings the landed row's own furniture in gently — see

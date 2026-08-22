@@ -140,13 +140,27 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     public var mediaHeroRect: CGRect? {
         guard !mediaView.isHidden else { return nil }
         layoutIfNeeded()
+        // A collection departs from the PAGE, not the box. The box is wider by
+        // the carousel's peek and holds a slice of a second photograph, so a
+        // flight that took it would carry two images and land one.
+        if let carousel, !carousel.isHidden,
+           let page = carousel.currentPageRect(in: self) {
+            return page
+        }
         return mediaView.frame
     }
 
     /// The image the preview is currently showing — the exact pixels the
     /// viewer is looking at, so a flight starts from them rather than from a
     /// cache lookup that could miss.
-    public var renderedCover: UIImage? { mediaView.image }
+    ///
+    /// For a collection that is the page the viewer has scrolled to, not the
+    /// post's first attachment: once they have swiped, the first attachment is
+    /// no longer what they are looking at.
+    public var renderedCover: UIImage? {
+        if let carousel, !carousel.isHidden { return carousel.renderedCover }
+        return mediaView.image
+    }
 
     /// The preview box — a row's media is one part of its card, so this is the
     /// part visibility is measured against. Falls back to the whole cell only
@@ -509,6 +523,13 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The simulator injects no touches, so this is the only way this control
     /// is reachable in an automated run.
     ///
+    /// Scrolls this row's carousel, or false if it has none.
+    @discardableResult
+    public func debugScrollCarousel(toPage index: Int, animated: Bool = true) -> Bool {
+        guard let carousel, !carousel.isHidden else { return false }
+        return carousel.debugScroll(toPage: index, animated: animated)
+    }
+
     @discardableResult
     public func debugTapShowMore() -> Bool {
         guard showMoreRange != nil else { return false }
@@ -877,6 +898,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     private let overlayAge = UILabel()
     private var countersPill: PostMetaPillView!
     private var agePill: PostMetaPillView!
+    /// Which page of a collection is showing. Always built — it is a chip in the
+    /// same row as the other two and hides itself for a single-media post.
+    private let pageIndicator = MediaPageIndicatorView()
+    /// Built on first use: most posts have one piece of media.
+    private var carousel: MediaCarouselView?
 
     private var loadTask: Task<Void, Never>?
     /// The metadata line always hangs off the caption; what changes per
@@ -949,6 +975,15 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
 
         mediaView.contentMode = .scaleAspectFill
         mediaView.clipsToBounds = true
+        // ⚠️ `UIImageView` ships with interaction OFF, and everything inside the
+        // preview inherits that: the carousel's scroll view was unhittable, so a
+        // swipe on the pages reached the tab pager instead and changed tab.
+        //
+        // It survived a unit test on the pager's yielding rule AND the fix to
+        // that rule, because the rule asks what is under the touch — and with
+        // the box refusing hits, what was under the touch was the card. One
+        // default, two symptoms, and only a real drag on the simulator found it.
+        mediaView.isUserInteractionEnabled = true
         // CONCENTRIC with the card, not a constant of its own: the preview is
         // inset from the card's edge, and a curve parallel to the one around it
         // is the inner radius reduced by exactly that inset. It was 12 against
@@ -1059,16 +1094,77 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
                 equalTo: parent.bottomAnchor, constant: -Self.mediaFurnitureInset
             )
         }
-        // Keeps the two apart when the type grows, and deliberately BREAKABLE:
-        // at the largest accessibility sizes three counters and a date do not
-        // both fit across a preview, and the choice there is between two chips
-        // that touch and a run of unsatisfiable-constraint logs. Neither pill
-        // may be truncated — a clipped count is a wrong count.
-        let clearance = agePill.leadingAnchor.constraint(
-            greaterThanOrEqualTo: countersPill.trailingAnchor, constant: 8
-        )
-        clearance.priority = .defaultHigh
-        clearance.isActive = true
+        // The page indicator sits BETWEEN the two, centred on the preview
+        // rather than on the space left over — the row reads as three chips on
+        // one baseline, and centring on the gap would slide it whenever a
+        // counter gained a digit.
+        // Centred on the age chip's CENTRE, not aligned to its bottom.
+        //
+        // The three chips are different heights — a row of 6pt dots is shorter
+        // than a line of caption2 — so a shared bottom edge puts the short one's
+        // mass below the others. What reads as "one row" is centres on a line,
+        // which is also what survives Dynamic Type moving the text chips and not
+        // the dots.
+        //
+        // Against the AGE chip because it is the one always on screen: a post
+        // with no counters hides the leading chip, and hanging the indicator off
+        // something that can disappear is how it ends up somewhere else.
+        pageIndicator.constrain(in: mediaView) { parent in
+            pageIndicator.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
+            pageIndicator.centerYAnchor.constraint(equalTo: agePill.centerYAnchor)
+        }
+        // Keeps the chips apart when the type grows, and deliberately BREAKABLE:
+        // at the largest accessibility sizes three counters, a date and an
+        // indicator do not fit across a preview, and the choice there is between
+        // chips that touch and a run of unsatisfiable-constraint logs. None of
+        // them may be truncated — a clipped count is a wrong count.
+        for clearance in [
+            pageIndicator.leadingAnchor.constraint(
+                greaterThanOrEqualTo: countersPill.trailingAnchor, constant: 8
+            ),
+            agePill.leadingAnchor.constraint(
+                greaterThanOrEqualTo: pageIndicator.trailingAnchor, constant: 8
+            ),
+            agePill.leadingAnchor.constraint(
+                greaterThanOrEqualTo: countersPill.trailingAnchor, constant: 8
+            )
+        ] {
+            clearance.priority = .defaultHigh
+            clearance.isActive = true
+        }
+    }
+
+    /// The carousel, built on first use — most posts have one piece of media and
+    /// should not pay for a scroll view they will never scroll.
+    ///
+    /// Inserted BELOW the chips, and that is the layout's whole contract with
+    /// them: the chips and the indicator belong to the PREVIEW, not to what is
+    /// inside it. They are pinned to the box, the pages move underneath, and
+    /// nothing about a drag can shift them. Putting them inside the scroll view
+    /// would have been the natural way to write this and would have carried the
+    /// counters off the screen with page two.
+    private func makeCarouselIfNeeded() -> MediaCarouselView {
+        if let carousel { return carousel }
+        let view = MediaCarouselView()
+        view.onPageChanged = { [weak self] page in
+            self?.pageIndicator.setCurrent(page)
+        }
+        // The indicator is a control, and the cell is what connects it: neither
+        // half reaches the other, which is what keeps the carousel the only
+        // thing that decides where the pages are.
+        pageIndicator.onPageRequested = { [weak view] page in
+            view?.setPage(page)
+        }
+        mediaView.insertSubview(view, belowSubview: countersPill)
+        view.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            view.leadingAnchor.constraint(equalTo: mediaView.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: mediaView.trailingAnchor),
+            view.topAnchor.constraint(equalTo: mediaView.topAnchor),
+            view.bottomAnchor.constraint(equalTo: mediaView.bottomAnchor)
+        ])
+        carousel = view
+        return view
     }
 
     private func buildAuthorBand() {
@@ -1117,6 +1213,13 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         loadTask?.cancel()
         loadTask = nil
         mediaView.image = nil
+        // A recycled row must not keep the previous post's pages: the loads are
+        // per-page tasks and the indicator is per-post state, and neither is
+        // touched by `configure` for a post that turns out to have one piece of
+        // media.
+        carousel?.cancelPendingWork()
+        carousel?.isHidden = true
+        pageIndicator.isHidden = true
         onRevealFullCaption = nil
         // Back to truncated. A recycled row must not inherit the previous
         // post's expansion — `configure` re-applies the host's answer for the
@@ -1251,6 +1354,26 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
 
         mediaView.image = nil
         mediaView.backgroundColor = post.kind == .video ? .darkGray : .tertiarySystemFill
+
+        // A collection hands its pages to the carousel and stops here: the
+        // box's own image view stays empty, which is what keeps a single-media
+        // post on exactly the path it has always taken — same load, same video
+        // surface, same cover.
+        pageIndicator.configure(count: post.pages.count, current: 0)
+        if post.isCollection {
+            // The box behind the pages is the CARD, not the placeholder fill a
+            // single-media row uses: with a gutter between pages and a sliver of
+            // the next one at the edge, that fill is on screen at rest and has
+            // to be the surface the pages are lying on.
+            mediaView.backgroundColor = Self.cardFillColor
+            let carousel = makeCarouselIfNeeded()
+            carousel.isHidden = false
+            carousel.configure(with: post.pages, imagePipeline: imagePipeline)
+            return
+        }
+        carousel?.isHidden = true
+        carousel?.cancelPendingWork()
+
         guard hasMedia, let url = post.thumbnailURL else { return }
         if let cached = imagePipeline.cachedImage(for: url) {
             mediaView.image = cached

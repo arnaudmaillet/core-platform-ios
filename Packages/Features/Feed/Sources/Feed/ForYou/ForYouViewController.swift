@@ -1997,6 +1997,29 @@ final class ForYouViewController: UIViewController {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: attempt)
         }
+        // `-foryou-carousel <row> <page>`: swipes a collection row's pages.
+        // Polls for the same reason `-foryou-expand` does — the row has to be
+        // realized and its pages built, and a fixed delay silently no-ops.
+        if let position = arguments.firstIndex(of: "-foryou-carousel"),
+           position + 2 < arguments.count,
+           let index = Int(arguments[position + 1]),
+           let page = Int(arguments[position + 2]) {
+            var attempts = 0
+            func attempt() {
+                attempts += 1
+                if pager.page(for: viewModel.format)?
+                    .debugScrollCarousel(atIndex: index, toPage: page) == true {
+                    print("[foryou-carousel] row \(index) → page \(page)")
+                    return
+                }
+                if attempts < 60 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: attempt)
+                } else {
+                    print("[foryou-carousel] NO COLLECTION at row \(index)")
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: attempt)
+        }
         guard let position = arguments.firstIndex(of: "-foryou-open"), position + 1 < arguments.count,
               let index = Int(arguments[position + 1])
         else { return }

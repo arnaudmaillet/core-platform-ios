@@ -294,7 +294,10 @@ struct MediaMetaPillConcealmentTests {
     /// second channel that could fall out of step.
     @Test func thePillsLeaveWithThePreviewTheyRestOn() {
         let cell = row(kind: .photo)
+        // The chips ON SCREEN: a single-media row also holds a page indicator,
+        // built for every row and hidden unless the post is a collection.
         let all = pills(in: cell.contentView)
+            .filter { isVisible($0, within: cell.contentView) }
         #expect(all.count == 2)
 
         cell.setHeroMediaConcealed(true)

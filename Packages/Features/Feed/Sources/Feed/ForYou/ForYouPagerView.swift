@@ -52,7 +52,16 @@ final class ForYouPagerView: UIView {
     var onNearEnd: (() -> Void)?
     var onRefresh: (() -> Void)?
 
-    private let scrollView = UIScrollView()
+    /// DesignSystem's yielding pager scroll view, not a bare `UIScrollView`.
+    ///
+    /// It gives horizontal drags up to two things: the leading-edge pop strip,
+    /// and any horizontally scrollable content under the touch. The second is
+    /// what lets a post card's media carousel be swiped at all — without it this
+    /// pager took every drag and the tab changed instead.
+    ///
+    /// Shared with `HorizontalPagerView` rather than reimplemented, because the
+    /// first version of that fix went into the other pager and did nothing here.
+    private let scrollView = HorizontalPagerScrollView()
     private let pages: [ForYouGridPage]
     private var activeIndex = 0
     /// The last index handed to `onPageSettled`. Tracked separately from
