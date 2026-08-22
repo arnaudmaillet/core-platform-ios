@@ -87,6 +87,17 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             videoPlayback.setPaused(true, in: surface)
             return
         }
+        // ⚠️ A FLIGHT OWNS THE START while it is in the air.
+        //
+        // `activate` defers to it deliberately — starting here attaches a NEWER
+        // layer to the player the card is flying and blanks the card mid-flight
+        // — and this path, arriving from `configure`, was not honouring the same
+        // rule. The audit caught it as a page holding a hosted, visible surface
+        // with no player behind it, three times in one run.
+        //
+        // `startDeferredPlayback` picks it up at the landing, which is the
+        // handshake that keeps one player and one playhead.
+        guard !defersPlaybackForFlight else { return }
         // ⚠️ Hosted is not the same as PLAYABLE, and the difference is a whole
         // dismissal.
         //
@@ -150,7 +161,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// finished claiming success.
     private func auditPagePlayback() {
         #if DEBUG
-        guard CarouselPlaybackAudit.isEnabled, mediaCard.showsCollection else { return }
+        // ⚠️ Not while a flight is in the air. The card is covering this page,
+        // so what the surface is doing underneath is not what the viewer sees —
+        // and the handoff deliberately leaves the page without a player for the
+        // duration. Judging it here would report the mechanism as the fault.
+        guard CarouselPlaybackAudit.isEnabled, mediaCard.showsCollection,
+              !defersPlaybackForFlight
+        else { return }
         let surface = mediaCard.renderView
         let hasPlayer = videoPlayback?.hasPlayer(in: surface) ?? false
         let drawable = !surface.isHidden && surface.alpha > 0 && hasPlayer
@@ -744,6 +761,16 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // an instruction to go back to the first.
             if let initialMediaPage { mediaCard.setPage(initialMediaPage, animated: false) }
             chrome.setMediaPageCount(model.mediaPages.count, current: mediaCard.currentPage)
+            #if DEBUG
+            // ⚠️ Both halves on one line: what was ASKED and where the carousel
+            // ENDED UP. A sender that says nothing and a receiver that stays are
+            // each behaving correctly on their own — the defect only exists
+            // between them, so only a line that shows both can name it.
+            if CarouselPlaybackAudit.isEnabled {
+                print("[sync] post asked=\(initialMediaPage.map(String.init) ?? "-")"
+                      + " landed=\(mediaCard.currentPage)")
+            }
+            #endif
             // ⚠️ Opening ON a clip is not a page CHANGE, so nothing above would
             // start it. A post opened from a card already showing page three
             // lands on page three; if that page is a video it has to play from

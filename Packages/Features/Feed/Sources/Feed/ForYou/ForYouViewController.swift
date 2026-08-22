@@ -1061,9 +1061,26 @@ final class ForYouViewController: UIViewController {
             // opened at page one would land the flight on a different image
             // than the one that flew. The card knows the page; nothing
             // downstream can work it out.
-            if let page = pager.page(for: viewModel.format)?.currentMediaPage(atIndex: index),
-               page > 0 {
+            // ⚠️ INCLUDING PAGE ZERO, and the `page > 0` this replaces is the
+            // whole of a defect.
+            //
+            // Zero was treated as "no instruction" on the reasoning that a
+            // destination opens at its first page anyway. It does not: the feed
+            // controller is REUSED, and its carousel deliberately keeps its page
+            // across a re-configure carrying the same attachments — that guard
+            // is what stops a second hydration yanking a viewer's carousel back
+            // to page one. So a post opened at page two, dismissed, then opened
+            // again from page ONE arrived still showing page two.
+            //
+            // An absent instruction and an instruction to go to zero are
+            // different things, and only one of them was expressible.
+            if let page = pager.page(for: viewModel.format)?.currentMediaPage(atIndex: index) {
                 seedable.openMediaPage(page, for: tapped.id)
+                #if DEBUG
+                if CarouselPlaybackAudit.isEnabled {
+                    print("[sync] card asked page=\(page)")
+                }
+                #endif
             }
             // …and the traffic runs the other way too, live. The card behind
             // follows the post's carousel, which is what makes the dismissal
