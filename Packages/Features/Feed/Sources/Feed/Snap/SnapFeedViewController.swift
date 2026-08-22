@@ -129,6 +129,39 @@ final class SnapFeedViewController: UIViewController {
     /// The post whose comments engagement is active, nil when disengaged.
     /// Owns the paging veto: the pager is frozen while the mutated layout
     /// (a per-cell state) is on screen.
+    /// Turns the stack's own edge recognizer OFF while this screen is up, and
+    /// puts it back exactly as it was on the way out.
+    ///
+    /// ⚠️ REFUSING a recognizer is not the same as disabling it, and the
+    /// difference is a whole gesture.
+    ///
+    /// `NativePopPolicy` already answers "no" for this screen — it owns its
+    /// dismissal — so the native pop never pops. But a refused
+    /// `UIScreenEdgePanGestureRecognizer` is still armed: it takes the touches
+    /// in the leading strip while it decides, and the grab's own pan is never
+    /// consulted. Measured with `-grab-log`: a drag from x=12 produced no begin
+    /// decision at all, while the same drag at x=200 produced one. On a post
+    /// with no carousel as well as on a collection — the strip has never worked
+    /// on this screen, which is why the first attempt at this bug was aimed at
+    /// the carousel and changed nothing.
+    ///
+    /// Restored rather than assigned back to `true`: the stack's gesture is not
+    /// ours, and whatever pushed us may have had its own opinion.
+    private func setNativePopSuppressed(_ suppressed: Bool) {
+        guard let pop = navigationController?.interactivePopGestureRecognizer else { return }
+        if suppressed {
+            guard restoredPopGestureEnabled == nil else { return }
+            restoredPopGestureEnabled = pop.isEnabled
+            pop.isEnabled = false
+        } else if let restored = restoredPopGestureEnabled {
+            pop.isEnabled = restored
+            restoredPopGestureEnabled = nil
+        }
+    }
+
+    /// What the stack's edge recognizer was before this screen turned it off.
+    private var restoredPopGestureEnabled: Bool?
+
     /// The viewer paged a post's collection.
     ///
     /// Reported OUT so the surface that opened this feed can follow. It is what
@@ -359,6 +392,7 @@ final class SnapFeedViewController: UIViewController {
         // The willAppear reconciliation's landing half — by now the bar's
         // containers are in the window and the walk-up reaches them.
         syncEngagementAfterAppearance()
+        setNativePopSuppressed(true)
         #if DEBUG
         runDebugAppearanceHooks()
         #endif
@@ -548,6 +582,7 @@ final class SnapFeedViewController: UIViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        setNativePopSuppressed(false)
         // Hand the shared bars back on the way out (see `releaseChromeTheme`).
         releaseChromeTheme()
         // Unlike the visibility bookkeeping below, the toolbar choreography
