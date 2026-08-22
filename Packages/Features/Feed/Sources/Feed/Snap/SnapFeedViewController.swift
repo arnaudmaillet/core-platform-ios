@@ -2817,7 +2817,24 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     }
 
     /// Hands the active page's rendering surface to a dismissal's flight card.
+    ///
+    /// ⚠️ A DISMISSAL's. Refused while a present is staging, and that guard is
+    /// the whole of a defect.
+    ///
+    /// `ZoomFlight.build` asks the destination when the source declines, on the
+    /// stated assumption that "on a present the destination's page isn't playing
+    /// yet and refuses". That held while a post's playback was decided by its
+    /// head attachment — a freshly configured page had nothing running.
+    ///
+    /// A mixed carousel broke it. This controller is REUSED: on a second
+    /// present its active cell is still the previous visit's, its carousel is
+    /// still on the page that visit left, and its clip is still held — paused
+    /// in place, which is deliberate. So it answered yes, and the flight from a
+    /// card showing a PHOTOGRAPH carried the video of a page nobody was looking
+    /// at. Measured: `source attach surface -> false` (the card correctly
+    /// declined) followed by a card reporting `frames=2`.
     public func zoomDonateLiveMediaView() -> UIView? {
+        guard !isAwaitingZoomPresentation else { return nil }
         guard let donated = activeSnapCell?.donateLiveRenderView() else { return nil }
         donatedLiveView = donated
         return donated
