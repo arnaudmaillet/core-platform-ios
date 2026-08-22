@@ -121,7 +121,23 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
     /// and without the pool learning that pages exist.
     public func host(_ surface: UIView) {
         guard pageViews.indices.contains(currentPage) else { return }
+        // ⚠️ Off the old page FIRST, always.
+        //
+        // Re-parenting alone moves the view, and leaves the page it came from
+        // still believing it holds one — which is enough to keep that page's
+        // badge hidden for ever. A caller that evicted before asking makes this
+        // a no-op; one that did not is exactly the case it exists for.
+        for view in pageViews where view !== pageViews[currentPage] {
+            _ = view.evictHostedSurface()
+        }
         pageViews[currentPage].host(surface)
+    }
+
+    /// Whether `view` is already hanging in the page being looked at — the
+    /// question a host has to ask before re-installing, so a surface that is
+    /// where it belongs is never torn out and put back.
+    public func hostsSurfaceOnCurrentPage(_ view: UIView) -> Bool {
+        pageViews.indices.contains(currentPage) && view.superview === pageViews[currentPage]
     }
 
     /// Takes the surface off whatever page is holding it. Called when the

@@ -364,6 +364,96 @@ struct MixedCarouselTests {
     }
 }
 
+/// The row's playback surface, across page changes.
+@MainActor
+struct RowSurfaceReinstallTests {
+    private func row() -> PostGridListRowCell {
+        let cell = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: 390, height: 500))
+        cell.configure(
+            with: GalleryPost(
+                id: PostID("p"), kind: .photo, isRepost: false,
+                pages: [
+                    GalleryPost.MediaPage(thumbnailURL: URL(string: "mock://a"), aspectRatio: 1.5),
+                    GalleryPost.MediaPage(
+                        thumbnailURL: URL(string: "mock://b"),
+                        videoURL: URL(string: "mock://video/b"), aspectRatio: 1.5
+                    )
+                ],
+                caption: "Short.", publishedAtMS: 0
+            ),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        let attributes = UICollectionViewLayoutAttributes(forCellWith: IndexPath(item: 0, section: 0))
+        attributes.frame = cell.frame
+        cell.bounds.size.height = cell.preferredLayoutAttributesFitting(attributes).frame.height
+        cell.layoutIfNeeded()
+        return cell
+    }
+
+    /// ⚠️ THE SECOND VISIT to a clip has to render too.
+    ///
+    /// The surface is evicted from its page on every page change — it has to
+    /// be, or a clip keeps drawing on the page the viewer scrolled away from,
+    /// which is still on screen peeking. `makeVideoRenderViewIfNeeded` then
+    /// returned the existing view without putting it back anywhere, so the
+    /// second start played into a view with no superview: the coordinator
+    /// reported a clean start, the pool decoded, and the card showed a still.
+    /// Autoplay worked exactly once per row.
+    ///
+    /// Asserted on the SUPERVIEW rather than on a "did it play" flag, because
+    /// that is what was wrong — every other signal in the system said yes.
+    @Test func aSurfaceIsReinstalledWhenTheViewerComesBackToAClip() {
+        let cell = row()
+        cell.debugScrollCarousel(toPage: 1, animated: false)
+        let surface = cell.makeVideoRenderViewIfNeeded()
+        let firstHost = surface.superview
+        let installed = firstHost != nil
+        #expect(installed)
+
+        // Away, which evicts…
+        cell.debugScrollCarousel(toPage: 0, animated: false)
+        let evicted = surface.superview == nil
+        #expect(evicted)
+
+        // …and back, which must put it somewhere again.
+        cell.debugScrollCarousel(toPage: 1, animated: false)
+        let again = cell.makeVideoRenderViewIfNeeded()
+        let secondHost = again.superview
+        let sameSurface = again === surface
+        let reinstalled = secondHost != nil
+        let samePage = secondHost === firstHost
+        #expect(sameSurface)
+        #expect(reinstalled)
+        #expect(samePage)
+    }
+
+    /// And a row with a single attachment is NOT re-parented on every ask:
+    /// `pin(to:)` discards the concrete frame until the next layout pass, which
+    /// resets `AVPlayerLayer.isReadyForDisplay` for ~170ms — measured, and the
+    /// reason the landing path installs by frame.
+    @Test func aSingleAttachmentSurfaceIsInstalledOnce() {
+        let cell = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: 390, height: 500))
+        cell.configure(
+            with: GalleryPost(
+                id: PostID("q"), kind: .video, isRepost: false,
+                thumbnailURL: URL(string: "mock://solo"), aspectRatio: 1.5,
+                caption: "Short.", publishedAtMS: 0
+            ),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        cell.layoutIfNeeded()
+
+        let first = cell.makeVideoRenderViewIfNeeded()
+        let host = first.superview
+        let constraints = host?.constraints.count ?? 0
+        _ = cell.makeVideoRenderViewIfNeeded()
+
+        let stillThere = first.superview === host
+        #expect(stillThere)
+        #expect((host?.constraints.count ?? 0) == constraints)
+    }
+}
+
 @MainActor
 struct CarouselChipsAreFixedTests {
     private func row(

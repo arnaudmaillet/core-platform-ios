@@ -209,7 +209,23 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// surface would have needed concealing separately, and would have been
     /// the thing left visible over a flight.
     public func makeVideoRenderViewIfNeeded() -> VideoRenderView {
-        if let loadedVideoRenderView { return loadedVideoRenderView }
+        if let loadedVideoRenderView {
+            // ⚠️ RE-INSTALLED, not just returned.
+            //
+            // On a collection the surface is evicted from its page on every
+            // page change — it has to be, or a clip keeps drawing on the page
+            // the viewer scrolled away from, which is still on screen peeking.
+            // Returning the view without putting it back somewhere meant the
+            // SECOND visit to a clip played into a view with no superview: the
+            // coordinator reported a clean start, the pool decoded, and the
+            // card showed a still. Autoplay worked exactly once per row.
+            //
+            // `install` no-ops when the surface is already where it belongs, so
+            // the single-attachment path is untouched — re-pinning it would
+            // reset `isReadyForDisplay` for ~170ms on every reconcile.
+            install(loadedVideoRenderView)
+            return loadedVideoRenderView
+        }
         let view = VideoRenderView()
         #if DEBUG
         view.debugLabel = "row"
@@ -232,12 +248,15 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// fight the page it is sitting in. `removeFromSuperview` first, because
     /// that is what drops the constraints the previous home left on it.
     private func install(_ view: VideoRenderView) {
-        view.removeFromSuperview()
         if showsCarousel, let carousel {
+            guard !carousel.hostsSurfaceOnCurrentPage(view) else { return }
+            view.removeFromSuperview()
             view.translatesAutoresizingMaskIntoConstraints = true
             carousel.host(view)
             return
         }
+        guard view.superview !== mediaView else { return }
+        view.removeFromSuperview()
         view.translatesAutoresizingMaskIntoConstraints = false
         mediaView.addSubview(view)
         view.pin(to: mediaView)
