@@ -1,6 +1,7 @@
 import CoreModels
 import DesignSystem
 import MediaCore
+import PostGrid
 import UIKit
 
 /// The snap *page's* UI chrome — the caption over the bottom scrim.
@@ -34,6 +35,9 @@ final class SnapChromeView: UIView {
     /// `configure` — so the flight replica renders an empty, invisible band
     /// by construction and the card stays pixel-identical to the landed page.
     private let commentTicker = SnapCommentTickerView()
+    /// Which page of a COLLECTION the media is showing. Hidden for every post
+    /// that has one piece of media, which is most of them.
+    private let mediaPageIndicator = MediaPageIndicatorView()
 
     /// The subtitle zone, directly above the band: a persistent pill of
     /// semantic comments, one at a time, with the count bubble leading it.
@@ -254,6 +258,28 @@ final class SnapChromeView: UIView {
             // media caption fills, so the band never sinks toward the bar.
             commentTicker.bottomAnchor.constraint(equalTo: captionFloorGuide.topAnchor, constant: -Spacing.md)
         }
+
+        // ⚠️ AFTER the ticker is in the hierarchy, not before. `constrain(in:)`
+        // is what adds a view, so a constraint minted against the ticker's
+        // anchors while it is still parentless throws "no common ancestor" at
+        // activation — which is a launch crash, not a layout warning.
+        // The media page indicator rides directly above the ticker: the two
+        // together are the page's bottom-left readout, and the band is the
+        // nearest thing with a settled vertical position — hanging the indicator
+        // off the caption instead would put a gap the ticker's presence changes.
+        //
+        // Centred horizontally. It is the MEDIA's readout, and the column under
+        // it — ticker, caption — is text starting at the margin: a chip sharing
+        // that edge attaches itself to the first line of the caption rather than
+        // to the photograph it describes.
+        mediaPageIndicator.isHidden = true
+        mediaPageIndicator.constrain(in: self) { parent in
+            mediaPageIndicator.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
+            mediaPageIndicator.bottomAnchor.constraint(
+                equalTo: commentTicker.topAnchor, constant: -Spacing.sm
+            )
+        }
+
 
         // The shortcut rail owns the trailing column, layered OVER the
         // band: its bottom rides down to the ticker's BOTTOM edge, so the
@@ -713,6 +739,26 @@ final class SnapChromeView: UIView {
     /// Streams while the owning cell is on screen (visibility-scoped — a
     /// page dragged partway in already flows; see the cell's
     /// `setTickerStreaming`).
+    /// How many media pages the post has, and which one is showing. A count
+    /// below two hides the indicator — a readout for a single photograph is
+    /// furniture answering a question nobody asked.
+    func setMediaPageCount(_ count: Int, current: Int) {
+        mediaPageIndicator.configure(count: count, current: current)
+    }
+
+    /// Moves the mark as the viewer pages. Separate from the count because this
+    /// runs on every scroll callback of a carousel under a finger.
+    func setMediaPage(_ page: Int) {
+        mediaPageIndicator.setCurrent(page)
+    }
+
+    /// The viewer asked for a page by touching the indicator. The CELL owns the
+    /// carousel, so the request travels out rather than the chrome reaching in.
+    var onMediaPageRequested: ((Int) -> Void)? {
+        get { mediaPageIndicator.onPageRequested }
+        set { mediaPageIndicator.onPageRequested = newValue }
+    }
+
     func setTickerActive(_ active: Bool) {
         commentTicker.setActive(active)
     }
