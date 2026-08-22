@@ -309,6 +309,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     public func donateVideoRenderView() -> VideoRenderView? {
         guard let view = loadedVideoRenderView else { return nil }
         loadedVideoRenderView = nil
+        // Told, not inferred. Removing the view from its superview leaves a
+        // carousel page still believing it holds one — its reference is weak
+        // and the flight card retains the view — and a page that believes that
+        // refuses to take it back.
+        carousel?.evictHostedSurface()
         view.removeFromSuperview()
         return view
     }

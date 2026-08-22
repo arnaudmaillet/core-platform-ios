@@ -340,6 +340,32 @@ struct MixedCarouselTests {
         }
     }
 
+    /// ⚠️ A SURFACE TAKEN AWAY BEHIND THE CAROUSEL'S BACK CAN COME HOME.
+    ///
+    /// A hero flight takes the render view by `removeFromSuperview` — it never
+    /// asks the carousel, and it cannot: the flight is driven from the surface's
+    /// own side. The page's reference is weak and the flight card retains the
+    /// view, so the page went on believing it held one, and re-hosting the same
+    /// object at the landing was skipped as redundant. The surface came back to
+    /// nowhere, the page showed its cover, and the NEXT flight flew a thumbnail.
+    ///
+    /// Reproduced here the way it happens: no eviction, just a removal.
+    @Test func aSurfaceTakenByAFlightIsRehostedOnItsReturn() {
+        let view = mixed()
+        view.setPage(1, animated: false)
+        let surface = UIView()
+        view.host(surface)
+        let hostedFirst = surface.superview === view.pageViews[1]
+        #expect(hostedFirst)
+
+        // What a flight does, and all it does.
+        surface.removeFromSuperview()
+
+        view.host(surface)
+        let hostedAgain = surface.superview === view.pageViews[1]
+        #expect(hostedAgain)
+    }
+
     /// A surface handed to the carousel lands on the page being looked at, and
     /// paging away takes it off again.
     ///
@@ -456,6 +482,38 @@ struct RowSurfaceReinstallTests {
         let hosted = surface.superview != nil
         #expect(moved)
         #expect(hosted)
+        #expect(cell.retainedVideoURL == URL(string: "mock://video/b"))
+    }
+
+    /// ⚠️ THE ROUND TRIP: hosted, donated to a flight, adopted back.
+    ///
+    /// This is the sequence the viewer reported — "after several hero
+    /// animations the player disappears and I get the thumbnail, and the next
+    /// flight uses the thumbnail as its window; doing it again works". Each
+    /// step alone was correct; the pair left a page believing it still held a
+    /// surface that had been carried off, and a page that believes that refuses
+    /// to take it back.
+    ///
+    /// The second attempt worked because the following page change evicted the
+    /// stale reference — which is exactly why this has to be tested as a
+    /// SEQUENCE rather than as three calls.
+    @Test func aDonatedSurfaceIsHostedAgainWhenTheFlightLands() {
+        let cell = row()
+        cell.debugScrollCarousel(toPage: 1, animated: false)
+        let surface = cell.makeVideoRenderViewIfNeeded()
+        let page = surface.superview
+        let hosted = page != nil
+        #expect(hosted)
+
+        let donated = cell.donateVideoRenderView()
+        let gone = donated === surface && surface.superview == nil
+        #expect(gone)
+
+        cell.adoptVideoRenderView(surface)
+
+        let home = surface.superview === page
+        #expect(home)
+        // And the row is holding it again, so the pool keeps its slot.
         #expect(cell.retainedVideoURL == URL(string: "mock://video/b"))
     }
 

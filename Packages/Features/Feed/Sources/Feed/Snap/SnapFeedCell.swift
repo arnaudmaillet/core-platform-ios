@@ -1025,6 +1025,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         guard videoPlayback.parkPlayback(from: mediaCard.renderView, keepingSurfaceAttached: true)
         else { return nil }
         let view = mediaCard.renderView
+        // Same rule as the row's donation: a carousel page has to be TOLD the
+        // surface is gone, or it refuses to take the same one back at landing.
+        mediaCard.releaseRenderViewFromPages()
         view.removeFromSuperview()
         return view
     }

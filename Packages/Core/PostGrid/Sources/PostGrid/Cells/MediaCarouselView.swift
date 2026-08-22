@@ -137,7 +137,7 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
     /// question a host has to ask before re-installing, so a surface that is
     /// where it belongs is never torn out and put back.
     public func hostsSurfaceOnCurrentPage(_ view: UIView) -> Bool {
-        pageViews.indices.contains(currentPage) && view.superview === pageViews[currentPage]
+        pageViews.indices.contains(currentPage) && pageViews[currentPage].hosts(view)
     }
 
     /// The stream of whichever page is holding `view`, nil when no page is.
@@ -529,7 +529,9 @@ final class CarouselPageView: UIView {
     /// The host's playback surface while this page is the one holding it.
     private weak var surface: UIView?
 
-    func hosts(_ view: UIView) -> Bool { surface === view }
+    /// Whether this page is REALLY holding `view` — both halves, for the reason
+    /// `host` states: a weak reference outlives the view being taken away.
+    func hosts(_ view: UIView) -> Bool { surface === view && view.superview === self }
     private let badge = UIImageView(image: UIImage(systemName: "play.fill"))
 
     override init(frame: CGRect) {
@@ -574,7 +576,18 @@ final class CarouselPageView: UIView {
     private static let badgeFraction: CGFloat = 0.12
 
     func host(_ surface: UIView) {
-        guard surface !== self.surface else { return }
+        // ⚠️ IDENTITY IS NOT ENOUGH — ask whether it is actually here.
+        //
+        // A hero flight takes the surface by `removeFromSuperview`, which the
+        // page cannot see: its reference is weak and the flight card retains
+        // the view, so the page went on believing it held one. Re-hosting the
+        // same object at the landing then hit this guard and returned, the
+        // surface was never re-inserted, and the page showed its cover — a
+        // living player hanging nowhere. The next flight duly flew a thumbnail.
+        //
+        // It cleared itself on the following page change, which is why a second
+        // attempt always worked and the first never did.
+        guard surface !== self.surface || surface.superview !== self else { return }
         self.surface = surface
         // ⚠️ BELOW the badge, above the cover. The badge is what says the page
         // is a video, and a surface inserted on top of it takes that away at
