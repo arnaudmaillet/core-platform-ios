@@ -193,9 +193,16 @@ final class SnapMediaCardView: UIView {
         carousel.host(renderView)
     }
 
-    /// Takes the surface off whatever page holds it. The page a viewer has
-    /// scrolled away from is still on screen in the card's own carousel and,
-    /// full-bleed, is the next thing they will see.
+    /// Whether the surface is already hanging in the page being looked at.
+    var hostsRenderViewOnCurrentPage: Bool {
+        carousel?.hostsSurfaceOnCurrentPage(renderView) ?? false
+    }
+
+    /// Takes the surface off whatever page holds it and hides it.
+    ///
+    /// ⚠️ Used when playback genuinely ENDS, not when the viewer pages away — a
+    /// clip left on its own page keeps its last frame, and taking the surface
+    /// off puts the page's thumbnail back.
     func releaseRenderViewFromPages() {
         carousel?.evictHostedSurface()
         renderView.isHidden = true

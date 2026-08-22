@@ -567,9 +567,15 @@ final class ForYouGridPage: UIView {
             let post = posts[flatIndex(for: indexPath)]
             guard post.id != heroFlyingPostID, // its twin is in the air
                   let cell = collectionView.cellForItem(at: indexPath) as? any GridPlaybackCell,
-                  let url = playableURL(for: post, in: cell),
+                  let held = playableURL(for: post, in: cell),
                   hasCover(for: post, in: cell)
             else { return nil }
+            // Held versus ADVANCING. A row keeps its player while the viewer is
+            // on another page of the same collection — the clip is still on
+            // screen there, peeking, and stopping it would put that page's
+            // thumbnail back.
+            let advancing = (cell as? PostGridListRowCell)
+                .map { $0.currentPageVideoURL == held } ?? true
 
             // Measured against the cell's MEDIA, which each shape locates for
             // itself (`videoMediaRect`) — a tile's is its bounds, a row's is
@@ -582,8 +588,9 @@ final class ForYouGridPage: UIView {
             else { return nil }
 
             return .init(
-                id: post.id, url: url, cell: cell,
-                distanceFromCentre: abs(frame.midY - centreY)
+                id: post.id, url: held, cell: cell,
+                distanceFromCentre: abs(frame.midY - centreY),
+                isPaused: !advancing
             )
         }
         playback.update(candidates: candidates, allowingStarts: allowingStarts)
@@ -651,7 +658,10 @@ final class ForYouGridPage: UIView {
     /// viewer just scrolled away from.
     private func playableURL(for post: GalleryPost, in cell: any GridPlaybackCell) -> URL? {
         if let row = cell as? PostGridListRowCell, post.isCollection {
-            return row.currentPageVideoURL
+            // RETAINED, not current: the row keeps its player while the viewer
+            // is on a still page of the same collection. Whether it advances is
+            // decided separately, at the call site.
+            return row.retainedVideoURL
         }
         guard autoplays(post) else { return nil }
         return post.videoURL

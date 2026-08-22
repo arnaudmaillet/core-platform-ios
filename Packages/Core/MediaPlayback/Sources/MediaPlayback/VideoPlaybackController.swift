@@ -207,6 +207,29 @@ public final class VideoPlaybackController {
         detach(key: key, view: view)
     }
 
+    /// Pauses or resumes the player rendering in `view`, without releasing it.
+    ///
+    /// ⚠️ Explicit, not a toggle, because this one is used for RECONCILIATION.
+    /// A toggle answers "flip whatever you are", which is right for a tap and
+    /// wrong for "make this match the world": two reconciles in a row would
+    /// undo each other, and one missed edge leaves the state inverted for good.
+    ///
+    /// The loan is untouched — the player, its item and its decoded frame stay
+    /// exactly where they are, which is the whole point: a paused surface keeps
+    /// showing its last frame, and resuming costs nothing.
+    ///
+    /// Returns whether there was a player to move.
+    @discardableResult
+    public func setPaused(_ paused: Bool, in view: VideoRenderView) -> Bool {
+        guard let player = activePlayers[ObjectIdentifier(view)] else { return false }
+        if paused {
+            player.pause()
+        } else {
+            player.play()
+        }
+        return true
+    }
+
     /// Toggles play/pause for the player bound to `view` (a user tapping the
     /// full-screen cell). Returns the new paused state. No-op returning `false`
     /// when no player is active for the view (e.g. an image/text cell).

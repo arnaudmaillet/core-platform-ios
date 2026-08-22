@@ -390,41 +390,73 @@ struct RowSurfaceReinstallTests {
         return cell
     }
 
-    /// ⚠️ THE SECOND VISIT to a clip has to render too.
+    /// ⚠️ PAGING AWAY DOES NOT PUT THE THUMBNAIL BACK.
     ///
-    /// The surface is evicted from its page on every page change — it has to
-    /// be, or a clip keeps drawing on the page the viewer scrolled away from,
-    /// which is still on screen peeking. `makeVideoRenderViewIfNeeded` then
-    /// returned the existing view without putting it back anywhere, so the
-    /// second start played into a view with no superview: the coordinator
-    /// reported a clean start, the pool decoded, and the card showed a still.
-    /// Autoplay worked exactly once per row.
+    /// The surface used to be evicted on every page change, which released the
+    /// page's cover to show through — so a clip appeared to be REPLACED by a
+    /// photograph the moment the viewer moved to the next page, while it was
+    /// merely no longer the one being watched. In a carousel that page is still
+    /// on screen, peeking. It keeps its last frame instead, paused in place.
     ///
-    /// Asserted on the SUPERVIEW rather than on a "did it play" flag, because
-    /// that is what was wrong — every other signal in the system said yes.
-    @Test func aSurfaceIsReinstalledWhenTheViewerComesBackToAClip() {
+    /// The row also keeps ANSWERING for that clip (`retainedVideoURL`): a row
+    /// that answered only for its current page would drop out of the pool's
+    /// ranking, and the player would go with the slot.
+    @Test func pagingAwayLeavesTheClipsFrameOnItsPage() {
         let cell = row()
         cell.debugScrollCarousel(toPage: 1, animated: false)
         let surface = cell.makeVideoRenderViewIfNeeded()
-        let firstHost = surface.superview
-        let installed = firstHost != nil
+        let host = surface.superview
+        let installed = host != nil
         #expect(installed)
 
-        // Away, which evicts…
         cell.debugScrollCarousel(toPage: 0, animated: false)
-        let evicted = surface.superview == nil
-        #expect(evicted)
 
-        // …and back, which must put it somewhere again.
+        let stillHosted = surface.superview === host
+        #expect(stillHosted)
+        // Not advancing — the viewer is on a still…
+        #expect(cell.currentPageVideoURL == nil)
+        // …and still held, which is what keeps the player.
+        #expect(cell.retainedVideoURL == URL(string: "mock://video/b"))
+    }
+
+    /// And it MOVES when the viewer reaches a different clip: the page it came
+    /// from must not be left believing it still holds a surface, which is enough
+    /// to keep that page's badge hidden for good.
+    @Test func arrivingAtAnotherClipMovesTheSurface() {
+        let cell = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: 390, height: 500))
+        cell.configure(
+            with: GalleryPost(
+                id: PostID("p"), kind: .photo, isRepost: false,
+                pages: [
+                    GalleryPost.MediaPage(
+                        thumbnailURL: URL(string: "mock://a"),
+                        videoURL: URL(string: "mock://video/a"), aspectRatio: 1.5
+                    ),
+                    GalleryPost.MediaPage(
+                        thumbnailURL: URL(string: "mock://b"),
+                        videoURL: URL(string: "mock://video/b"), aspectRatio: 1.5
+                    )
+                ],
+                caption: "Short.", publishedAtMS: 0
+            ),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        let attributes = UICollectionViewLayoutAttributes(forCellWith: IndexPath(item: 0, section: 0))
+        attributes.frame = cell.frame
+        cell.bounds.size.height = cell.preferredLayoutAttributesFitting(attributes).frame.height
+        cell.layoutIfNeeded()
+
+        let surface = cell.makeVideoRenderViewIfNeeded()
+        let firstHost = surface.superview
+
         cell.debugScrollCarousel(toPage: 1, animated: false)
-        let again = cell.makeVideoRenderViewIfNeeded()
-        let secondHost = again.superview
-        let sameSurface = again === surface
-        let reinstalled = secondHost != nil
-        let samePage = secondHost === firstHost
-        #expect(sameSurface)
-        #expect(reinstalled)
-        #expect(samePage)
+        _ = cell.makeVideoRenderViewIfNeeded()
+
+        let moved = surface.superview !== firstHost
+        let hosted = surface.superview != nil
+        #expect(moved)
+        #expect(hosted)
+        #expect(cell.retainedVideoURL == URL(string: "mock://video/b"))
     }
 
     /// And a row with a single attachment is NOT re-parented on every ask:

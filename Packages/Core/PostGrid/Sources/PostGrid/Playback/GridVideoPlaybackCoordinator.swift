@@ -34,12 +34,28 @@ public final class GridVideoPlaybackCoordinator {
         /// Distance from the viewport's vertical centre, in points. Lower wins;
         /// the caller measures it because only it knows the scroll geometry.
         public let distanceFromCentre: CGFloat
+        /// Held, but not advancing.
+        ///
+        /// ⚠️ A THIRD STATE, and the reason it exists: a clip on page two of a
+        /// carousel is still on screen when the viewer moves to page three —
+        /// peeking beside it — and stopping it there put the page's THUMBNAIL
+        /// back, which reads as the video being replaced by a photograph. Paused
+        /// it keeps its last frame, and coming back costs nothing.
+        ///
+        /// A paused candidate still holds its pool slot, so it competes for one
+        /// exactly as a playing one does: it is released when the ranking gives
+        /// its slot to a row nearer the centre, not when it stops advancing.
+        public let isPaused: Bool
 
-        public init(id: PostID, url: URL, cell: any GridPlaybackCell, distanceFromCentre: CGFloat) {
+        public init(
+            id: PostID, url: URL, cell: any GridPlaybackCell,
+            distanceFromCentre: CGFloat, isPaused: Bool = false
+        ) {
             self.id = id
             self.url = url
             self.cell = cell
             self.distanceFromCentre = distanceFromCentre
+            self.isPaused = isPaused
         }
     }
 
@@ -141,6 +157,15 @@ public final class GridVideoPlaybackCoordinator {
             && playing[candidate.id] != nil
             && playingURLs[candidate.id] != candidate.url {
             stop(id: candidate.id, cell: candidate.cell)
+        }
+        // Paused or resumed to match, every time, for everything still chosen.
+        // Reconciliation and not an edge: a row can arrive already paused (its
+        // carousel was left on another page), and a start below is followed by
+        // the same call for the same reason.
+        for candidate in chosen where playing[candidate.id] != nil {
+            candidate.cell.loadedVideoRenderView.map {
+                pool.setPaused(candidate.isPaused, in: $0)
+            }
         }
         guard allowingStarts else { return }
         for candidate in chosen where playing[candidate.id] == nil {
@@ -604,8 +629,13 @@ public final class GridVideoPlaybackCoordinator {
         let url = candidate.url
         // A tile that is already flying full screen keeps its lifted cap.
         let cap = uncappedIDs.contains(id) ? Self.uncapped : Self.tileBitRateCap
+        let paused = candidate.isPaused
         startTasks[id] = Task { [weak self, pool] in
             await pool.play(url, in: renderView, peakBitRate: cap)
+            // A candidate that arrives already paused — its carousel is resting
+            // on another page — is started and held on its first frame, which is
+            // what makes the frame there to show at all.
+            if paused { pool.setPaused(true, in: renderView) }
             // A settled start removes its own entry. Left in place, the map
             // only ever shrank on stop/donate, so `startTasks.isEmpty` — the
             // gate `discardHandoff` uses to tell "a claimant is still coming"

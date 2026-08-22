@@ -191,6 +191,24 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         showsCarousel ? carousel?.currentPageVideoURL : nil
     }
 
+    /// The clip this row is holding a player for, whether or not the viewer is
+    /// on its page.
+    ///
+    /// ⚠️ What the POOL is asked about, where `currentPageVideoURL` is what
+    /// decides whether it advances. A row that answered only for its current
+    /// page would drop out of the ranking the moment the viewer paged onto a
+    /// photograph — the slot would go, the player with it, and the paused frame
+    /// would be replaced by the thumbnail this exists to keep off screen.
+    public var retainedVideoURL: URL? {
+        currentPageVideoURL ?? (loadedVideoRenderView == nil ? nil : hostedPageVideoURL)
+    }
+
+    /// The clip belonging to the page the surface is actually hanging in.
+    private var hostedPageVideoURL: URL? {
+        guard let carousel, let surface = loadedVideoRenderView else { return nil }
+        return carousel.videoURL(ofPageHosting: surface)
+    }
+
     /// The viewer moved this row's carousel. Reported OUT because what has to
     /// happen next — reconciling autoplay against a page that may or may not be
     /// a video — is the surface's business, not the cell's.
@@ -1410,14 +1428,17 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         view.onPageChanged = { [weak self] page in
             guard let self else { return }
             self.pageIndicator.setCurrent(page)
-            // ⚠️ The surface is evicted HERE, before anyone is told.
+            // ⚠️ The surface STAYS on its page. It used to be evicted here.
             //
-            // A render view left on the page the viewer just scrolled away from
-            // keeps drawing a video beside the still they are now looking at —
-            // in a carousel that page is still on screen, peeking. The host is
-            // then free to decide whether the new page deserves a player at all;
-            // what it must not have to do is clean up the old one.
-            self.loadedVideoRenderView.map { _ in self.carousel?.evictHostedSurface() }
+            // Evicting put the page's thumbnail back the moment the viewer moved
+            // on, and in a carousel that page is still on screen — so a clip
+            // appeared to be replaced by a photograph while it was merely no
+            // longer the one being watched. It is paused in place instead, and
+            // keeps its last frame.
+            //
+            // Moving it is still handled: `install` re-hosts it when the viewer
+            // arrives at a DIFFERENT clip, and `host` clears the page it came
+            // from.
             self.onMediaPageChanged?(page)
         }
         // The indicator is a control, and the cell is what connects it: neither

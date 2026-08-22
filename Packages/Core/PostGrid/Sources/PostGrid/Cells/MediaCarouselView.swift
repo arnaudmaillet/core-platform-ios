@@ -140,6 +140,18 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
         pageViews.indices.contains(currentPage) && view.superview === pageViews[currentPage]
     }
 
+    /// The stream of whichever page is holding `view`, nil when no page is.
+    ///
+    /// The pool's question — "what is this row still holding a player for" —
+    /// which is not "what is the viewer looking at": a paused clip on page two
+    /// keeps its player while page three is on screen.
+    public func videoURL(ofPageHosting view: UIView) -> URL? {
+        for (index, page) in pageViews.enumerated() where page.hosts(view) {
+            return pages.indices.contains(index) ? pages[index].videoURL : nil
+        }
+        return nil
+    }
+
     /// Takes the surface off whatever page is holding it. Called when the
     /// viewer pages onto a still, and when the row stops playing.
     ///
@@ -514,8 +526,10 @@ final class CarouselPageView: UIView {
         badge.isHidden = !isPlayable || (hidesBadgeWhilePlaying && surface != nil)
     }
 
-    /// The host's playback surface while this page is the one playing.
+    /// The host's playback surface while this page is the one holding it.
     private weak var surface: UIView?
+
+    func hosts(_ view: UIView) -> Bool { surface === view }
     private let badge = UIImageView(image: UIImage(systemName: "play.fill"))
 
     override init(frame: CGRect) {

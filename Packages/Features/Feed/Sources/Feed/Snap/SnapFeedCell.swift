@@ -72,12 +72,26 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// viewer moved to.
     private func reconcilePagePlayback() {
         guard mediaCard.showsCollection, let videoPlayback else { return }
-        // The surface always leaves the old page first, whatever comes next:
-        // the eviction is what stops the previous clip drawing where it no
-        // longer belongs.
-        videoPlayback.stop(mediaCard.renderView)
-        mediaCard.releaseRenderViewFromPages()
+        let surface = mediaCard.renderView
         setPauseGlyphVisible(false)
+        // ⚠️ PAUSED IN PLACE, never stopped and evicted.
+        //
+        // Stopping released the player and took the surface off its page, which
+        // put that page's thumbnail back — the clip appeared to be replaced by a
+        // photograph the moment the viewer moved on, and coming back paid for a
+        // fresh decode. Paused, the page keeps its last frame and returning is
+        // free. The player is released when the page itself goes: `didResignActive`
+        // and `prepareForReuse` both already stop it.
+        guard isActive, let url = activeVideoURL else {
+            videoPlayback.setPaused(true, in: surface)
+            return
+        }
+        // Already on this clip's page — the viewer came back to it. Resume; a
+        // re-host would tear the surface out and put it back for nothing.
+        if mediaCard.hostsRenderViewOnCurrentPage {
+            videoPlayback.setPaused(false, in: surface)
+            return
+        }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-media-log") {
             print(String(format: "[page-play] %.3f page=%d active=%@ url=%@",
@@ -85,11 +99,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
                          isActive ? "Y" : "N", activeVideoURL?.lastPathComponent ?? "nil"))
         }
         #endif
-        guard isActive, let url = activeVideoURL else { return }
         mediaCard.hostRenderViewOnCurrentPage()
         mediaCard.setPoster(nil)
-        let view = mediaCard.renderView
-        Task { await videoPlayback.play(url, in: view) }
+        Task { await videoPlayback.play(url, in: surface) }
     }
     private var videoPlayback: VideoPlaybackController?
     private var imageTasks: [Task<Void, Never>] = []
