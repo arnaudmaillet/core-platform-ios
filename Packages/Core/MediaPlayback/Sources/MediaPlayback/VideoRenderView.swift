@@ -221,6 +221,19 @@ public final class VideoRenderView: UIView {
     func attach(_ player: AVPlayer, renderer: VideoFrameRenderer? = nil) {
         if let renderer {
             guard self.renderer !== renderer else { return }
+            // ⚠️ A NEW SOURCE MAKES WHAT IS QUEUED STALE.
+            //
+            // The companion to the flush on resume, and it exists because the
+            // card reaches the same state by paths that never pause: a player
+            // reclaimed after a dismissal, a surface joining a running clip, a
+            // mirror, a handoff. Each rebinds this view to a different clock
+            // while frames from the previous one are still waiting — and those,
+            // shown, are the video appearing to hurry.
+            //
+            // Only when the renderer actually CHANGES. A rebind to the same
+            // source is a no-op above and must stay one: flushing a healthy
+            // playing surface would cost it the frames it is about to show.
+            flushPendingSamples()
             self.renderer?.removeSurface(self)
             self.renderer = renderer
             renderer.addSurface(self)
