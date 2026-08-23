@@ -1,5 +1,6 @@
 import CoreModels
 import MediaCore
+import MediaPlayback
 import PostGrid
 import Testing
 import UIKit
@@ -77,6 +78,96 @@ struct CarouselPageSyncTests {
         #expect(controller.consumeInitialMediaPage(for: PostID("q")) == nil)
         // Still waiting for the post it was addressed to.
         #expect(controller.consumeInitialMediaPage(for: PostID("p")) == 3)
+    }
+}
+
+/// What a page does when it stops being the active one.
+///
+/// ⚠️ TWO REASONS, TWO BEHAVIOURS, and treating them alike put a thumbnail on
+/// screen at every page change.
+///
+/// Paging to the next post leaves this one alive and a swipe away. Releasing
+/// its player there means the return pays for a fresh decode and the surface
+/// falls back to its poster meanwhile — the cut the viewer reported. Scrolling
+/// the cell fully off screen is the other case, and there the loan has to go
+/// back: the grid behind is waiting for it.
+///
+/// Both directions are asserted, because a version that never released would
+/// pass a test written only for the reported symptom and would starve the pool.
+@MainActor
+struct SnapPageResignTests {
+    /// Waits for a condition the cell reaches on its own clock, bounded so a
+    /// regression fails rather than hangs.
+    private func settle(until condition: () -> Bool, tries: Int = 200) async {
+        for _ in 0..<tries where !condition() {
+            await Task.yield()
+        }
+    }
+
+    private func videoCell(_ pool: VideoPlaybackController) -> SnapFeedCell {
+        let cell = SnapFeedCell(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        cell.configure(
+            with: FeedItemDisplayModel(
+                id: PostID("post-video"),
+                authorID: ProfileID("profile-1"),
+                authorName: "Ava",
+                metaText: "@ava · 3m",
+                avatarURL: nil,
+                caption: "caption",
+                mediaURL: URL(string: "mock://video/1"),
+                mediaKind: .video,
+                thumbnailURL: nil,
+                audioText: nil,
+                likeCount: 0,
+                timestampText: "now"
+            ),
+            pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            videoPlayback: pool
+        )
+        cell.layoutIfNeeded()
+        return cell
+    }
+
+    @Test func pagingAwayPausesAndKeepsThePlayer() async {
+        let pool = VideoPlaybackController(
+            source: SingleFileVideoSource(), poolSize: 3
+        )
+        let cell = videoCell(pool)
+        // ⚠️ The CELL starts its own playback, in a Task, and a `play` of my own
+        // beside it would race that one — the first version did, and reported a
+        // surface with no player because the two detached each other. So the
+        // cell is left to do it and the test waits for the pool to say it
+        // happened.
+        cell.willBecomeActive()
+        await settle(until: { pool.hasPlayer(in: cell.debugRenderSurface) })
+        #expect(pool.hasPlayer(in: cell.debugRenderSurface))
+
+        cell.didResignActive(releasingPlayback: false)
+
+        // Held, and not advancing — which is the whole point: the frame stays.
+        #expect(pool.hasPlayer(in: cell.debugRenderSurface))
+        #expect(pool.isAdvancing(in: cell.debugRenderSurface) == false)
+    }
+
+    @Test func scrollingFullyOffReleasesThePlayer() async {
+        let pool = VideoPlaybackController(
+            source: SingleFileVideoSource(), poolSize: 3
+        )
+        let cell = videoCell(pool)
+        cell.willBecomeActive()
+        await settle(until: { pool.hasPlayer(in: cell.debugRenderSurface) })
+
+        cell.didResignActive(releasingPlayback: true)
+
+        // Released: the pool no longer binds this surface, so the grid behind
+        // can take the player back.
+        #expect(pool.hasPlayer(in: cell.debugRenderSurface) == false)
+    }
+}
+
+private struct SingleFileVideoSource: VideoSource {
+    func playableURL(for mediaURL: URL) async throws -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("stub.mp4")
     }
 }
 

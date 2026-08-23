@@ -1278,7 +1278,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         videoPlayback.reclaim(mediaCard.renderView)
     }
 
-    func didResignActive() {
+    #if DEBUG
+    /// The page's playback surface, for a test that needs to ask the pool about
+    /// it. Playback ownership is the pool's, so a test has to name the surface.
+    var debugRenderSurface: VideoRenderView { mediaCard.renderView }
+    #endif
+
+    func didResignActive(releasingPlayback: Bool) {
         guard isActive else { return }
         isActive = false
         // Covers the paths visibility can't see: backgrounding and the
@@ -1287,8 +1293,24 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         chrome.setSubtitlesActive(false)
         // Video is the only kind with anything to stop: a photo page's media
         // is static, so resigning leaves it exactly as it was.
-        if playsVideo {
-            videoPlayback?.stop(mediaCard.renderView)
+        guard playsVideo, let videoPlayback else { return }
+        // ⚠️ PAUSED unless the page is actually going away.
+        //
+        // This stopped unconditionally, which detaches the surface and hands
+        // the player back — so every page change put the poster back on the
+        // page just left, and returning to it paid for a fresh decode. Reported
+        // as "the player is removed whenever I leave the post, and the thumbnail
+        // appears, which makes a cut".
+        //
+        // A paused page keeps its surface, its frame and its playhead, and
+        // coming back is free. The loan is released only when the cell scrolls
+        // fully off — see `didEndDisplaying`, which is the caller that passes
+        // true — so the number of retained players stays bounded by the cells
+        // the feed keeps alive rather than by how far the viewer has scrolled.
+        if releasingPlayback {
+            videoPlayback.stop(mediaCard.renderView)
+        } else {
+            videoPlayback.setPaused(true, in: mediaCard.renderView)
         }
     }
 

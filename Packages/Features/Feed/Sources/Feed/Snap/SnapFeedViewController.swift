@@ -2174,7 +2174,9 @@ final class SnapFeedViewController: UIViewController {
 
     private func apply(_ transition: SnapLifecycleDispatcher.Transition) {
         if let resign = transition.resign {
-            lifecycleCell(at: resign)?.didResignActive()
+            // Paging within the feed: the page stays alive and a swipe away, so
+            // it keeps its player and simply stops advancing.
+            lifecycleCell(at: resign)?.didResignActive(releasingPlayback: false)
             // Paging away FINALIZES the session's boosts: the undo window
             // is the post's time on screen, and it just ended.
             if orderedIDs.indices.contains(resign), sessionBoostID == orderedIDs[resign] {
@@ -2447,7 +2449,9 @@ extension SnapFeedViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
         // Belt-and-suspenders release: a cell scrolled fully off is never active,
         // and this guarantees the resign even if it's recycled before a settle.
-        (cell as? SnapCellLifecycle)?.didResignActive()
+        // Fully off screen: the loan goes back, because the grid behind is
+        // waiting for it and nothing here is going to draw again.
+        (cell as? SnapCellLifecycle)?.didResignActive(releasingPlayback: true)
         // The resign above no-ops for a cell that was displayed but never
         // became active (a swiped-past page); its ticker must still stop.
         (cell as? SnapFeedCell)?.setTickerStreaming(false)
