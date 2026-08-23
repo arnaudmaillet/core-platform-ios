@@ -614,8 +614,25 @@ final class ForYouGridPage: UIView {
     /// Run after the reconcile rather than inside it: what matters is the state
     /// the VIEWER is left in once everything has had its say, not the state any
     /// one participant believes it produced.
+    /// Whether this page is the one the viewer is looking at.
+    ///
+    /// ⚠️ The audit's scope, and it needs one. A grid covered by an open post
+    /// legitimately holds surfaces that are not hosted and not drawing — the
+    /// post has them. Judging the card there reported the handoff working as a
+    /// fault, six times in a run.
+    private var isAudited = true
+
     private func auditCarouselPlayback() {
-        guard CarouselPlaybackAudit.isEnabled, let playback else { return }
+        guard CarouselPlaybackAudit.isEnabled, isAudited, let playback else { return }
+        // ⚠️ A HEARTBEAT, unconditionally.
+        //
+        // Three times this session a run was read as clean when it had produced
+        // NOTHING: a console that stopped delivering, a stale file from an
+        // earlier build, and a guard that silenced the only writer. A file that
+        // is always written and always carries its check count cannot be
+        // mistaken for a passing run — an empty one is now impossible rather
+        // than indistinguishable.
+        CarouselPlaybackAudit.report("card")
         for indexPath in collectionView.indexPathsForVisibleItems {
             let index = flatIndex(for: indexPath)
             guard posts.indices.contains(index),
@@ -646,6 +663,13 @@ final class ForYouGridPage: UIView {
                     ?? true,
                 hasPlayer: row.playbackSurface.map { videoPool?.hasPlayer(in: $0) ?? true } ?? false
             )
+            // ⚠️ Is the coordinator even talking about THIS cell? A collection
+            // view recycles, and a loan is held against the instance it was
+            // given to.
+            if playback.isPlaying(post.id),
+               let loaned = playback.loanedCell(post.id), loaned !== row {
+                CarouselPlaybackAudit.trace("cell mismatch \(post.id.rawValue)")
+            }
         }
     }
     #endif
@@ -826,6 +850,9 @@ final class ForYouGridPage: UIView {
     }
 
     func setAutoplayActive(_ active: Bool, keeping kept: PostID? = nil) {
+        #if DEBUG
+        isAudited = active
+        #endif
         playback?.setSurfaceVisible(active, keeping: kept)
         if active {
             updateAutoplay()

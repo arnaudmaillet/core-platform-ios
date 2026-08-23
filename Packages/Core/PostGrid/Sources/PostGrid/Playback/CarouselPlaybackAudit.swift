@@ -65,7 +65,19 @@ public enum CarouselPlaybackAudit {
     ) {
         guard isEnabled else { return }
         checks += 1
-        guard playing, clip, !(hosted && drawable) else { return }
+        // Debounced for the reason `checkAdvancing` states: a handoff legitimately
+        // leaves the card's surface un-hosted for a beat while the page takes it,
+        // and the card is covered by the flight card throughout. All six reports
+        // in a 1670-check run landed in that window and none after it.
+        let slot = "host/\(surface)/\(subject)/\(page)"
+        guard playing, clip, !(hosted && drawable) else {
+            stillFrames[slot] = 0
+            return
+        }
+        let seen = (stillFrames[slot] ?? 0) + 1
+        stillFrames[slot] = seen
+        guard seen >= framesBeforeFrozen else { return }
+        stillFrames[slot] = 0
         failures += 1
         emit(String(
             format: "[audit] FAIL #%d %@ %@ page=%d hosted=%@ drawable=%@",

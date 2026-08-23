@@ -168,9 +168,18 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // so what the surface is doing underneath is not what the viewer sees —
         // and the handoff deliberately leaves the page without a player for the
         // duration. Judging it here would report the mechanism as the fault.
-        guard CarouselPlaybackAudit.isEnabled, mediaCard.showsCollection,
-              !defersPlaybackForFlight
-        else { return }
+        guard CarouselPlaybackAudit.isEnabled, mediaCard.showsCollection else { return }
+        // ⚠️ The flight guard scopes the CHECK, not the whole audit.
+        //
+        // Written as an early return it silenced the only thing writing the
+        // file, and a run with `defersPlaybackForFlight` stuck on produced no
+        // output at all — which reads exactly like a clean run. Three
+        // measurements were lost to that before the file's timestamp gave it
+        // away.
+        guard !defersPlaybackForFlight else {
+            CarouselPlaybackAudit.report("post (in flight)")
+            return
+        }
         let surface = mediaCard.renderView
         let hasPlayer = videoPlayback?.hasPlayer(in: surface) ?? false
         let drawable = !surface.isHidden && surface.alpha > 0 && hasPlayer
