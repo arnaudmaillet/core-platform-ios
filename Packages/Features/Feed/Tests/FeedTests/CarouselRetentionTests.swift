@@ -213,6 +213,14 @@ struct CarouselRetentionTests {
             #expect(pool.hasPlayer(in: cell.debugSurface(forPage: page)))
             #expect(pool.isAdvancing(in: cell.debugSurface(forPage: page)) == false)
         }
+        // ⚠️ AND THE OTHER HALF: the watched one IS advancing.
+        //
+        // Asserting only that the kept clips are still is satisfied by a
+        // carousel where nothing plays at all — which is exactly the state
+        // produced on the card by fixing the reported fault carelessly. "One
+        // plays" and "the others do not" are two claims, and a test that makes
+        // one of them lets the other break in silence.
+        #expect(pool.isAdvancing(in: cell.debugSurface(forPage: 2)))
     }
 
     // MARK: - Ready before the viewer

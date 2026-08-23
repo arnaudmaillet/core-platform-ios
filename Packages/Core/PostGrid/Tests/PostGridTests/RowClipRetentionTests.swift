@@ -184,6 +184,52 @@ struct RowClipRetentionTests {
         #expect(cell.clipsToPrewarm().isEmpty)
     }
 
+    // MARK: - One at a time
+
+    private func settle(until condition: () -> Bool, tries: Int = 400) async {
+        for _ in 0..<tries where !condition() {
+            await Task.yield()
+        }
+    }
+
+    /// ⚠️ ONE CLIP PLAYS IN A CAROUSEL. EVER.
+    ///
+    /// Reported from the feed: paging a card's carousel left the previous clip
+    /// running, so several played at once. The cause is an ordering the post
+    /// page had already been bitten by — the pause pass read
+    /// `loadedVideoRenderView`, which is only re-pointed when a caller asks for
+    /// a surface, and that happens in the START pass afterwards. So the pause
+    /// spared the page just LEFT and paused the one arriving.
+    @Test func onlyOneClipPlaysAtATimeInACarousel() async {
+        let pool = VideoPlaybackController(
+            source: StubVideoSource(), poolSize: 6, capacity: 6
+        )
+        let coordinator = GridVideoPlaybackCoordinator(pool: pool, maxConcurrent: 6)
+        let cell = row([true, true], id: "post-0")
+        coordinator.setSurfaceVisible(true)
+
+        func reconcile(page: Int) async {
+            coordinator.update(candidates: [
+                .init(id: PostID("post-0"), url: self.url("clip-\(page)"),
+                      cell: cell, distanceFromCentre: 0)
+            ])
+            _ = cell.makeVideoRenderViewIfNeeded()
+            await settle { pool.activePlayerCount >= page + 1 }
+        }
+
+        await reconcile(page: 0)
+        cell.debugScrollCarousel(toPage: 1, animated: false)
+        await reconcile(page: 1)
+
+        // The denominator: two clips really are being held, so the count below
+        // is a choice between them rather than an empty set.
+        #expect(cell.retainedPlaybackSurfaces.count == 2)
+        let advancing = cell.retainedPlaybackSurfaces.filter { pool.isAdvancing(in: $0) }
+        #expect(advancing.count <= 1)
+        // And it is the page the viewer is ON that plays, not whichever survived.
+        #expect(advancing.first === cell.watchedClipSurface)
+    }
+
     // MARK: - Sharing the pool
 
     /// ⚠️ THE BUDGET IS IN PLAYERS, NOT ROWS.

@@ -177,14 +177,22 @@ public final class GridVideoPlaybackCoordinator {
             for surface in candidate.cell.retainClips(budget: rank == 0 ? spare : 0) {
                 pool.stop(surface)
             }
-            // ⚠️ A KEPT CLIP IS A PAUSED CLIP.
+            // ⚠️ ONE CLIP ADVANCES IN A CAROUSEL, AND IT IS THE WATCHED ONE.
             //
-            // The pause loop below only ever names the watched surface, so a
-            // clip left on a neighbouring page would go on playing — and in a
-            // card the page just left is still on screen, peeking. That is the
-            // difference between "keeps its last frame" and "keeps running".
+            // Two halves, and the second was wrong. A kept clip must be paused,
+            // or in a card the page just left goes on playing while still
+            // peeking on screen — "keeps its last frame" turning into "keeps
+            // running". And the one spared must be the page the viewer is ON.
+            //
+            // Read from `loadedVideoRenderView`, it was not: that field is
+            // re-pointed only when someone asks the cell for a surface, which
+            // happens in the START pass below. So this pass spared the page
+            // being LEFT and paused the one arriving — reported as several
+            // clips playing at once in a card's carousel, and reproduced as the
+            // wrong surface being the one that advanced.
+            let watched = candidate.cell.watchedClipSurface
             for surface in candidate.cell.retainedPlaybackSurfaces
-            where surface !== candidate.cell.loadedVideoRenderView {
+            where surface !== watched {
                 pool.setPaused(true, in: surface)
             }
             prewarm(candidate)
@@ -241,6 +249,27 @@ public final class GridVideoPlaybackCoordinator {
         guard allowingStarts else { return }
         for candidate in chosen where loans[candidate.id] == nil {
             start(candidate)
+        }
+        // ⚠️ THE ONE PLACE THE RULE IS APPLIED: in a carousel, the watched clip
+        // advances and nothing else does.
+        //
+        // Three passes above can each leave it stopped, and between them they
+        // did. A warmed clip is paused by construction — that is what warming
+        // IS — so arriving at one found a player already bound and nothing that
+        // would resume it: the pause pass had just paused everything, the loan
+        // had been released as stale, and the start pass skips a row whose
+        // player exists. The result was a carousel where nothing played at all,
+        // which is the mirror image of the reported fault and was produced by
+        // fixing it.
+        //
+        // Stated once, at the end, against the surface the CAROUSEL says is
+        // being watched — rather than left as an emergent property of three
+        // passes that each know a piece of it.
+        for candidate in chosen
+        where candidate.id != handoffID && !candidate.isPaused {
+            guard let watched = candidate.cell.watchedClipSurface,
+                  pool.hasPlayer(in: watched) else { continue }
+            pool.setPaused(false, in: watched)
         }
         #if DEBUG
         Self.logPool(loans.count, handoff: handoffID)

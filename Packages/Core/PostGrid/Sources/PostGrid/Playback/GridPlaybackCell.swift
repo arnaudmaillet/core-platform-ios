@@ -114,6 +114,14 @@ public protocol GridPlaybackCell: UIView {
     /// The clips worth bringing to their first frame before the viewer reaches
     /// them, each with a surface hosted and postered ready to receive one.
     func clipsToPrewarm() -> [(url: URL, surface: VideoRenderView)]
+
+    /// The surface for the media the viewer is looking at RIGHT NOW — the one
+    /// clip in this cell allowed to advance.
+    ///
+    /// ⚠️ Distinct from `loadedVideoRenderView`, which is re-pointed only when a
+    /// caller asks the cell for a surface. Anything deciding what may play must
+    /// ask THIS, or it decides against a page the viewer has already left.
+    var watchedClipSurface: VideoRenderView? { get }
 }
 
 public extension GridPlaybackCell {
@@ -131,4 +139,7 @@ public extension GridPlaybackCell {
 
     /// A cell showing one attachment has no neighbour to prepare.
     func clipsToPrewarm() -> [(url: URL, surface: VideoRenderView)] { [] }
+
+    /// With one attachment there is one surface, and it is the watched one.
+    var watchedClipSurface: VideoRenderView? { loadedVideoRenderView }
 }

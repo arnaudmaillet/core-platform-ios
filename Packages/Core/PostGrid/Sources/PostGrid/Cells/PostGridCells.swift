@@ -355,6 +355,25 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// rather than something a row helps itself to.
     private var clipBudget = 0
 
+    /// The surface belonging to the page the viewer is actually looking at.
+    ///
+    /// ⚠️ ASKED OF THE CAROUSEL, NEVER REMEMBERED — and that is the whole of a
+    /// reported defect.
+    ///
+    /// `loadedVideoRenderView` is re-pointed when someone asks the cell for a
+    /// surface, which happens in the coordinator's START pass. Anything running
+    /// BEFORE that — the pause pass, in particular — reads the page the viewer
+    /// has just left. Pausing "everything except the watched one" then spared
+    /// the clip being left and paused the one arriving, so a card's carousel
+    /// ended up with two clips playing at once.
+    ///
+    /// A still page has no watched clip, which is the honest answer: nothing on
+    /// it should be advancing.
+    public var watchedClipSurface: VideoRenderView? {
+        guard showsCarousel, let carousel else { return loadedVideoRenderView }
+        return pageSurfaces[carousel.currentPage]
+    }
+
     public var retainedPlaybackSurfaces: [VideoRenderView] {
         var surfaces = Array(pageSurfaces.values)
         if let loadedVideoRenderView,
