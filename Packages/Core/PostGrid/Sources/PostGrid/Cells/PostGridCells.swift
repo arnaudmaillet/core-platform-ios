@@ -226,7 +226,47 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// `setHeroMediaConcealed` applies while a twin is in the air. A sibling
     /// surface would have needed concealing separately, and would have been
     /// the thing left visible over a flight.
+    ///
+    /// ⚠️ For a collection it answers PER PAGE, once a budget has bought the row
+    /// a second surface. Until then `pageSurfaces` holds at most the watched
+    /// page and this behaves exactly as the single-surface version every
+    /// existing caller was written against.
     public func makeVideoRenderViewIfNeeded() -> VideoRenderView {
+        // ⚠️ GATED ON A GRANTED BUDGET, and this is not an optimisation.
+        //
+        // Minting per page regardless meant a row with no allowance still ended
+        // up holding two surfaces — and the coordinator reads exactly that
+        // ("more than one surface") to decide it may release a loan instead of
+        // stopping it. So a row nobody had given anything to would leave the
+        // previous clip's player bound, untracked and unreclaimable. With the
+        // gate, a budget of zero is the old single-surface behaviour, exactly.
+        if showsCarousel, clipBudget > 0, let carousel, carousel.currentPageVideoURL != nil {
+            let page = carousel.currentPage
+            if let existing = pageSurfaces[page] {
+                loadedVideoRenderView = existing
+                install(existing)
+                return existing
+            }
+            // The row's first surface belongs to the first clip page that asks
+            // for one: minting a second here would leave the original hanging
+            // with a live player and no page to draw it on.
+            if let inherited = loadedVideoRenderView,
+               !pageSurfaces.values.contains(where: { $0 === inherited }) {
+                pageSurfaces[page] = inherited
+                install(inherited)
+                return inherited
+            }
+            let view = VideoRenderView()
+            #if DEBUG
+            view.debugLabel = "row-p\(page)"
+            #endif
+            view.isHidden = true
+            view.isUserInteractionEnabled = false
+            pageSurfaces[page] = view
+            loadedVideoRenderView = view
+            install(view)
+            return view
+        }
         if let loadedVideoRenderView {
             // ⚠️ RE-INSTALLED, not just returned.
             //
@@ -294,6 +334,78 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     }
 
     public private(set) var loadedVideoRenderView: VideoRenderView?
+
+    // MARK: - Retained clips
+
+    /// A surface per clip page this row is keeping warm, keyed by page.
+    ///
+    /// ⚠️ THE ROW'S BUDGET IS WHAT IS LEFT OVER, not the pool's whole capacity.
+    ///
+    /// A post open full-screen is the only thing drawing and may spend the lot.
+    /// A row is one of several on screen, and the coordinator hands every chosen
+    /// row a player before anything is kept warm — so a row helping itself to
+    /// the same window would starve its neighbours, which is precisely the
+    /// budget `maxConcurrent` exists to divide. `retainClips(budget:)` is told
+    /// how much is spare; when the answer is nothing, this holds one entry and
+    /// the row behaves as it always did.
+    private var pageSurfaces: [Int: VideoRenderView] = [:]
+
+    /// How many EXTRA clips this row has been allowed to keep. Zero until a
+    /// coordinator says otherwise, which is what makes the retention opt-in
+    /// rather than something a row helps itself to.
+    private var clipBudget = 0
+
+    public var retainedPlaybackSurfaces: [VideoRenderView] {
+        var surfaces = Array(pageSurfaces.values)
+        if let loadedVideoRenderView,
+           !surfaces.contains(where: { $0 === loadedVideoRenderView }) {
+            surfaces.append(loadedVideoRenderView)
+        }
+        return surfaces
+    }
+
+    @discardableResult
+    public func retainClips(budget: Int) -> [VideoRenderView] {
+        clipBudget = budget
+        guard showsCarousel, let carousel else { return [] }
+        // One policy, in one place: the same window the post page uses. The
+        // budget is the EXTRA allowance, so the watched clip is added back — a
+        // row granted nothing still keeps the one it is playing.
+        let keep = Set(CarouselRetentionWindow.pagesToRetain(
+            videoPages: carousel.videoPageIndices,
+            currentPage: carousel.currentPage,
+            capacity: budget + 1
+        ))
+        var dropped: [VideoRenderView] = []
+        for (page, view) in pageSurfaces where !keep.contains(page) {
+            guard view !== loadedVideoRenderView else { continue }
+            carousel.evictSurface(onPage: page)
+            view.removeFromSuperview()
+            pageSurfaces[page] = nil
+            dropped.append(view)
+        }
+        // Re-hung every time, and idempotent: a page whose surface is still its
+        // own but whose carousel was re-laid out has to be put back.
+        for (page, view) in pageSurfaces {
+            view.translatesAutoresizingMaskIntoConstraints = true
+            carousel.host(view, onPage: page)
+        }
+        return dropped
+    }
+
+    /// Gives up every clip surface but the watched one — for reuse, and for the
+    /// end of this row's playback.
+    @discardableResult
+    public func releaseRetainedClips() -> [VideoRenderView] {
+        var dropped: [VideoRenderView] = []
+        for (page, view) in pageSurfaces where view !== loadedVideoRenderView {
+            carousel?.evictSurface(onPage: page)
+            view.removeFromSuperview()
+            pageSurfaces[page] = nil
+            dropped.append(view)
+        }
+        return dropped
+    }
 
     /// For a collection: only while the surface hangs in the page being looked
     /// at. A paused clip one page over is rendering, and is not what the viewer

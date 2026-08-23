@@ -163,11 +163,52 @@ public final class GridVideoPlaybackCoordinator {
         // the start below can pick it up. Restarting rather than retargeting
         // the existing player: the pool binds an item to a render surface, and
         // the surface has moved to another page too.
+        // ⚠️ THE BUDGET IS IN PLAYERS, NOT ROWS — and the difference is the only
+        // honest way to let a row keep a clip warm.
+        //
+        // Every chosen row is about to hold one player, so what a carousel may
+        // additionally keep is whatever the pool can carry beyond that. It goes
+        // to the most central row, because a viewer swiping a card's pages is
+        // looking at it. When the screen is full of playing rows the spare is
+        // zero and every row behaves exactly as it did before — the feature
+        // yields to its neighbours rather than competing with them.
+        let spare = max(0, pool.capacity - chosen.count)
+        for (rank, candidate) in chosen.enumerated() where candidate.id != handoffID {
+            for surface in candidate.cell.retainClips(budget: rank == 0 ? spare : 0) {
+                pool.stop(surface)
+            }
+            // ⚠️ A KEPT CLIP IS A PAUSED CLIP.
+            //
+            // The pause loop below only ever names the watched surface, so a
+            // clip left on a neighbouring page would go on playing — and in a
+            // card the page just left is still on screen, peeking. That is the
+            // difference between "keeps its last frame" and "keeps running".
+            for surface in candidate.cell.retainedPlaybackSurfaces
+            where surface !== candidate.cell.loadedVideoRenderView {
+                pool.setPaused(true, in: surface)
+            }
+        }
         for candidate in chosen
         where candidate.id != handoffID
             && loans[candidate.id] != nil
             && playingURLs[candidate.id] != candidate.url {
-            stop(id: candidate.id, cell: candidate.cell)
+            // ⚠️ RELEASED, not stopped, when the row is keeping the old clip.
+            //
+            // Paging a mixed carousel from one clip to another used to stop the
+            // loan so the start below could pick up the new stream — which threw
+            // away the player for the page just left, so coming back re-decoded
+            // and the page showed its thumbnail meanwhile. Exactly the cut fixed
+            // on the post page.
+            //
+            // A row holding more than one surface has somewhere to put the old
+            // clip, so only the BOOKKEEPING is undone: the start loop then binds
+            // the new page's own surface and the old one stays paused on its
+            // page. A row holding one surface has nowhere, and still stops.
+            if candidate.cell.retainedPlaybackSurfaces.count > 1 {
+                releaseStaleLoan(id: candidate.id)
+            } else {
+                stop(id: candidate.id, cell: candidate.cell)
+            }
         }
         // Paused or resumed to match, every time, for everything still chosen.
         // Reconciliation and not an edge: a row can arrive already paused (its
@@ -756,8 +797,18 @@ public final class GridVideoPlaybackCoordinator {
         Self.logTransition("stop ", id, count: loans.count - 1)
         #endif
         startTasks.removeValue(forKey: id)?.cancel()
-        if let renderView = cell.loadedVideoRenderView {
-            pool.stop(renderView)
+        // ⚠️ EVERY surface the row holds, not just the watched one.
+        //
+        // A loan is per POST, and a row with a collection can be holding a
+        // paused clip on a page the viewer left. Stopping `loadedVideoRenderView`
+        // alone released the loan while those players stayed bound — untracked,
+        // uncounted, and impossible to reclaim, because nothing was left that
+        // knew about them.
+        for surface in cell.retainedPlaybackSurfaces {
+            pool.stop(surface)
+        }
+        for surface in cell.releaseRetainedClips() {
+            pool.stop(surface)
         }
         cell.endVideoPreview()
         cell.onReuse = nil

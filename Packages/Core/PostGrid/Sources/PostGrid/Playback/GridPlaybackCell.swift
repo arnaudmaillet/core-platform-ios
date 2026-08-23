@@ -90,4 +90,38 @@ public protocol GridPlaybackCell: UIView {
     /// a player takes it back. A recycled cell that kept its loan would render
     /// the previous post's video under the new post's cover.
     var onReuse: (() -> Void)? { get set }
+
+    /// Every surface this cell is holding a player on.
+    ///
+    /// ⚠️ NOT the same question as `loadedVideoRenderView`, and the difference is
+    /// what makes a loan releasable. A cell with a collection can keep a paused
+    /// clip on a page the viewer left, so "the surface" and "the surfaces" stop
+    /// being the same set — and a release that stopped only the watched one
+    /// would leave the rest bound to players nobody is tracking.
+    var retainedPlaybackSurfaces: [VideoRenderView] { get }
+
+    /// Keeps at most `budget` extra clips warm besides the one being watched,
+    /// and reports the surfaces it gave up so the caller can end their playback.
+    ///
+    /// A budget of zero is the old behaviour exactly: one clip at a time.
+    @discardableResult
+    func retainClips(budget: Int) -> [VideoRenderView]
+
+    /// Gives up every kept clip but the watched one, reporting them.
+    @discardableResult
+    func releaseRetainedClips() -> [VideoRenderView]
+}
+
+public extension GridPlaybackCell {
+    /// A cell that draws one attachment holds one surface, and there is nothing
+    /// for a window to choose between.
+    var retainedPlaybackSurfaces: [VideoRenderView] {
+        loadedVideoRenderView.map { [$0] } ?? []
+    }
+
+    @discardableResult
+    func retainClips(budget: Int) -> [VideoRenderView] { [] }
+
+    @discardableResult
+    func releaseRetainedClips() -> [VideoRenderView] { [] }
 }
