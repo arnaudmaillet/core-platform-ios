@@ -213,6 +213,16 @@ public final class GridVideoPlaybackCoordinator {
             // clip, so only the BOOKKEEPING is undone: the start loop then binds
             // the new page's own surface and the old one stays paused on its
             // page. A row holding one surface has nowhere, and still stops.
+            #if DEBUG
+            if CarouselPlaybackAudit.isEnabled {
+                CarouselPlaybackAudit.trace(
+                    "grid url-changed \(candidate.id.rawValue) "
+                    + "was=\(playingURLs[candidate.id]?.lastPathComponent ?? "nil") "
+                    + "now=\(candidate.url.lastPathComponent) "
+                    + "surfaces=\(candidate.cell.retainedPlaybackSurfaces.count)"
+                )
+            }
+            #endif
             if candidate.cell.retainedPlaybackSurfaces.count > 1 {
                 releaseStaleLoan(id: candidate.id)
             } else {
@@ -238,7 +248,18 @@ public final class GridVideoPlaybackCoordinator {
         // Released rather than stopped: there is nothing to tear down, and
         // `stop` would fade the cover back in for the one frame before the
         // restart.
-        for candidate in chosen where loans[candidate.id] != nil && !isPlaying(candidate.id) {
+        // ⚠️ A START STILL IN FLIGHT IS NOT A STALE LOAN.
+        //
+        // `isPlaying` asks the pool whether a player is bound, and between
+        // `start` and its `await` landing the honest answer is "not yet". Read
+        // as staleness, the loan was released and the whole start thrown away
+        // and reissued — cancelling the resolution that was about to succeed and
+        // beginning the clip again from zero. Seen in the audit as a released
+        // loan followed immediately by a second `start` for the same post.
+        for candidate in chosen
+        where loans[candidate.id] != nil
+            && startTasks[candidate.id] == nil
+            && !isPlaying(candidate.id) {
             releaseStaleLoan(id: candidate.id)
         }
         for candidate in chosen where isPlaying(candidate.id) {
@@ -765,6 +786,13 @@ public final class GridVideoPlaybackCoordinator {
     private func start(_ candidate: Candidate) {
         #if DEBUG
         Self.logTransition("start", candidate.id, count: loans.count + 1)
+        if CarouselPlaybackAudit.isEnabled {
+            let surface = candidate.cell.watchedClipSurface
+            CarouselPlaybackAudit.trace(
+                "grid start \(candidate.id.rawValue) url=\(candidate.url.lastPathComponent) "
+                + "warm=\(surface.map { pool.hasPlayer(in: $0) } ?? false)"
+            )
+        }
         #endif
         loans[candidate.id] = candidate.cell
         playingURLs[candidate.id] = candidate.url
@@ -779,6 +807,27 @@ public final class GridVideoPlaybackCoordinator {
         // A tile that is already flying full screen keeps its lifted cap.
         let cap = uncappedIDs.contains(id) ? Self.uncapped : Self.tileBitRateCap
         let paused = candidate.isPaused
+        // ⚠️ A CLIP THAT IS ALREADY WARM IS RESUMED, NOT RE-PLAYED.
+        //
+        // `play` on a surface already bound to this asset replaces the item and
+        // begins again at zero — so arriving at a clip prepared for exactly this
+        // moment threw the preparation away and restarted it. Reported as "the
+        // last video's player jumps, it always resumes from the beginning", and
+        // read off the audit as `grid start … warm=true`: the coordinator was
+        // told the surface was ready and started it anyway.
+        //
+        // Worst on the last page of that gallery only because its stream is
+        // HLS, so re-filling the pipeline takes long enough to see as black.
+        // The fault had nothing to do with being last.
+        if pool.isBound(url, in: renderView) {
+            #if DEBUG
+            if CarouselPlaybackAudit.isEnabled {
+                CarouselPlaybackAudit.trace("grid resumed warm \(candidate.id.rawValue)")
+            }
+            #endif
+            pool.setPaused(paused, in: renderView)
+            return
+        }
         startTasks[id] = Task { [weak self, pool] in
             await pool.play(url, in: renderView, peakBitRate: cap)
             // A candidate that arrives already paused — its carousel is resting

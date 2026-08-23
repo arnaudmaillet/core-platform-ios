@@ -230,6 +230,52 @@ struct RowClipRetentionTests {
         #expect(advancing.first === cell.watchedClipSurface)
     }
 
+    /// ⚠️ ARRIVING AT A WARMED CLIP MUST NOT RESTART IT.
+    ///
+    /// The whole purpose of warming is that the picture is already there. The
+    /// coordinator started it anyway — `play` on a surface already bound to the
+    /// asset replaces the item and begins at zero — so the preparation was paid
+    /// for and thrown away, and the viewer saw the clip jump back to its start.
+    ///
+    /// Item creations are the measurement because nothing else distinguishes a
+    /// resumed clip from a restarted one from outside.
+    @Test func arrivingAtAWarmedClipResumesItInsteadOfRestarting() async {
+        let pool = VideoPlaybackController(
+            source: StubVideoSource(), poolSize: 6, capacity: 6
+        )
+        let coordinator = GridVideoPlaybackCoordinator(pool: pool, maxConcurrent: 6)
+        let cell = row([true, true], id: "post-0")
+        coordinator.setSurfaceVisible(true)
+
+        coordinator.update(candidates: [
+            .init(id: PostID("post-0"), url: url("clip-0"),
+                  cell: cell, distanceFromCentre: 0)
+        ])
+        _ = cell.makeVideoRenderViewIfNeeded()
+        // Both clips bound: the watched one, and the neighbour warmed for it.
+        await settle { pool.activePlayerCount >= 2 }
+        #expect(pool.activePlayerCount == 2, "the neighbour was never warmed")
+        let itemsBeforeArriving = pool.itemCreations
+
+        cell.debugScrollCarousel(toPage: 1, animated: false)
+        coordinator.update(candidates: [
+            .init(id: PostID("post-0"), url: url("clip-1"),
+                  cell: cell, distanceFromCentre: 0)
+        ])
+        _ = cell.makeVideoRenderViewIfNeeded()
+        // ⚠️ DRAINED, not sampled. A restart happens on the far side of the
+        // pool's await, while the resume is synchronous — so a test that
+        // measured as soon as the clip was advancing saw the resume, missed the
+        // restart entirely, and passed against the broken code. It did: this
+        // assertion was green before the fix existed.
+        for _ in 0..<600 { await Task.yield() }
+
+        // Nothing new was decoded: the clip the viewer arrived at is the one
+        // that was waiting for them.
+        #expect(pool.itemCreations == itemsBeforeArriving)
+        #expect(pool.isAdvancing(in: cell.watchedClipSurface!))
+    }
+
     // MARK: - Sharing the pool
 
     /// ⚠️ THE BUDGET IS IN PLAYERS, NOT ROWS.

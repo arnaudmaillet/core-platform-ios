@@ -177,6 +177,7 @@ public final class VideoPlaybackController {
         detach(key: key, view: view)
         let player = idlePlayers.popLast() ?? AVPlayer()
         let item = AVPlayerItem(url: playableURL)
+        itemCreations += 1
         // Set BEFORE the item goes live, so the very first segment request
         // already asks for the capped rung — set afterwards, the player has
         // usually committed to a higher one and the cap only takes effect at
@@ -347,6 +348,25 @@ public final class VideoPlaybackController {
         guard let player = activePlayers[ObjectIdentifier(view)] else { return false }
         return player.timeControlStatus != .paused
     }
+
+    /// Whether `view` is already bound to a player for **this** asset.
+    ///
+    /// ⚠️ The question a caller must ask before starting something, or it throws
+    /// away a decode it has already paid for. `play` on a surface that is
+    /// already showing the URL replaces the item and begins again at zero — so
+    /// arriving at a clip that was warmed for exactly this moment restarted it
+    /// from the beginning, which is the opposite of the point.
+    public func isBound(_ mediaURL: URL, in view: VideoRenderView) -> Bool {
+        let key = ObjectIdentifier(view)
+        return activePlayers[key] != nil && playingURL[key] == mediaURL
+    }
+
+    /// How many `AVPlayerItem`s this pool has created.
+    ///
+    /// The only honest way to see a restart from outside: a resumed clip keeps
+    /// its item, a restarted one gets a new one, and nothing else about them
+    /// differs from the caller's side.
+    public private(set) var itemCreations = 0
 
     /// Whether `view` currently has a player bound to it.
     ///
