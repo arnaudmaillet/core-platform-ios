@@ -234,8 +234,38 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
                 + "players=\(videoPlayback.activePlayerCount)/\(videoPlayback.capacity)"
             )
         }
+        publishRetentionProbe(pool: videoPlayback)
         #endif
     }
+
+    #if DEBUG
+    /// Publishes the retention state where a UI test can read it.
+    ///
+    /// ⚠️ A UI test drives REAL gestures and sees only the screen — and none of
+    /// what this feature promises is visible in a screenshot. "The clip kept its
+    /// player" and "the clip was decoded again" produce the same picture; the
+    /// difference is a cut the eye catches and a still frame cannot.
+    ///
+    /// So the invariant is published as an accessibility identifier rather than
+    /// inferred from pixels. It is the same reasoning as the audit's file sink:
+    /// an assertion needs something that can be WRONG, and a screenshot of a
+    /// carousel is not it.
+    private func publishRetentionProbe(pool: VideoPlaybackController) {
+        mediaCard.isAccessibilityElement = true
+        mediaCard.accessibilityIdentifier = [
+            "carousel",
+            "page=\(mediaCard.currentPage)",
+            // Total pages as well as clip count: a caller walking the carousel
+            // needs to know how far it goes, and the clips are not necessarily
+            // the pages it starts on.
+            "pages=\(mediaCard.pageCount)",
+            "clips=\(mediaCard.videoPageIndices.count)",
+            "kept=\(mediaCard.surfacedPages.count)",
+            "players=\(pool.activePlayerCount)",
+            "capacity=\(pool.capacity)",
+        ].joined(separator: ";")
+    }
+    #endif
 
     /// The post page's half of the carousel audit.
     ///
@@ -860,6 +890,14 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // an instruction to go back to the first.
             if let initialMediaPage { mediaCard.setPage(initialMediaPage, animated: false) }
             chrome.setMediaPageCount(model.mediaPages.count, current: mediaCard.currentPage)
+            #if DEBUG
+            // ⚠️ Published HERE as well as from the window, because the window
+            // only runs once the page is active or the viewer has moved — so a
+            // post sitting on page one, untouched, had no probe at all, and a UI
+            // test read that absence as "no collection here". The state it
+            // reports is the true one either way: nothing retained yet.
+            if let videoPlayback { publishRetentionProbe(pool: videoPlayback) }
+            #endif
             #if DEBUG
             // ⚠️ Both halves on one line: what was ASKED and where the carousel
             // ENDED UP. A sender that says nothing and a receiver that stays are

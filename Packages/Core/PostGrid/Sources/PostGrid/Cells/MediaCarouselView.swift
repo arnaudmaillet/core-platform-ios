@@ -159,6 +159,9 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
         pageViews.firstIndex { $0.hosts(view) }
     }
 
+    /// How many pages the carousel is showing.
+    public var pageCount: Int { pages.count }
+
     /// The indices of every page with a stream behind it, in order.
     ///
     /// The retention window's domain: it is chosen among THESE, never among all

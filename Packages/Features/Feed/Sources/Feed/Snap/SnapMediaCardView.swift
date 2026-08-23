@@ -212,6 +212,9 @@ final class SnapMediaCardView: UIView {
         showsCollection ? carousel?.currentPageVideoURL : nil
     }
 
+    /// How many pages the collection has.
+    var pageCount: Int { showsCollection ? (carousel?.pageCount ?? 0) : 0 }
+
     /// The pages carrying a stream — the retention window's domain.
     var videoPageIndices: [Int] {
         showsCollection ? (carousel?.videoPageIndices ?? []) : []
