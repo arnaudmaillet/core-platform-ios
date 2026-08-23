@@ -38,15 +38,41 @@ public final class VideoPlaybackController {
     /// Empty when the flag is off.
     private var renderers: [ObjectIdentifier: VideoFrameRenderer] = [:]
 
+    /// How many players may be bound to surfaces at once.
+    ///
+    /// ⚠️ NOT `poolSize`, and the two were conflated for as long as nothing
+    /// asked. `poolSize` is the idle cache; this is the working set. A caller
+    /// deciding how much of the budget it may hold — a carousel keeping its
+    /// clips warm across a page change — asks THIS one.
+    ///
+    /// It is a budget rather than an enforced ceiling: `play` still binds what
+    /// it is told to bind, because a surface that asked for a picture and got
+    /// silence is a worse failure than one player too many. What the number
+    /// buys is that every claimant can size itself against the same figure
+    /// instead of inventing its own.
+    ///
+    /// Six, because the ceiling that actually bites is the device's video
+    /// decoders, not memory — simultaneous hardware decode sessions are a small
+    /// number on every phone this ships to, and a seventh clip does not stutter
+    /// politely, it starves one of the six already playing.
+    public let capacity: Int
+
+    /// How many surfaces are holding a player right now. The measurement the
+    /// capacity claim is worth nothing without — see `VideoPoolIdentityTests`,
+    /// which asserts it against the number of distinct clips on screen.
+    public var activePlayerCount: Int { activePlayers.count }
+
     /// `poolSize` is the size of the **idle-player cache**, not a concurrency
     /// limit: `play` mints a new `AVPlayer` when the cache is empty, and the
-    /// number of simultaneous players is set by the calling surface (the grid's
-    /// `maxConcurrent`). Sizing it to match that surface is what keeps a scroll
-    /// from allocating and discarding players continuously — a cache smaller
-    /// than the working set drops every returned player on the floor.
-    public init(source: any VideoSource, poolSize: Int = 6) {
+    /// number of simultaneous players is `capacity`. Sizing the cache to match
+    /// the working set is what keeps a scroll from allocating and discarding
+    /// players continuously — a cache smaller than the working set drops every
+    /// returned player on the floor. They default to the same number for that
+    /// reason, and are separate because they answer different questions.
+    public init(source: any VideoSource, poolSize: Int = 6, capacity: Int = 6) {
         self.source = source
         self.poolSize = poolSize
+        self.capacity = capacity
         try? AVAudioSession.sharedInstance().setCategory(.ambient, mode: .moviePlayback)
     }
 

@@ -73,7 +73,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// viewer moved to.
     private func reconcilePagePlayback() {
         guard mediaCard.showsCollection, let videoPlayback else { return }
-        let surface = mediaCard.renderView
+        reconcileRetainedClips()
         setPauseGlyphVisible(false)
         // ⚠️ PAUSED IN PLACE, never stopped and evicted.
         //
@@ -87,7 +87,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             #if DEBUG
             CarouselPlaybackAudit.trace("post setPaused true page=\(mediaCard.currentPage)")
             #endif
-            videoPlayback.setPaused(true, in: surface)
+            videoPlayback.setPaused(true, in: mediaCard.renderView)
             return
         }
         // ⚠️ A FLIGHT OWNS THE START while it is in the air.
@@ -115,9 +115,22 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // `setPaused` already answers whether there was anything to resume. Two
         // states looked alike from outside and the return value is what tells
         // them apart, so it is read rather than discarded.
-        let wasHosted = mediaCard.hostsRenderViewOnCurrentPage
-        // Idempotent, and it is also what un-hides the surface.
+        // ⚠️ RE-POINTED FIRST, then asked — the order is the whole of the
+        // resume.
+        //
+        // `renderView` names the WATCHED page's surface, so until this call it
+        // is still the page the viewer just left. Asking "is it hosted here"
+        // before re-pointing therefore asked about the wrong view, always
+        // answered no, and every return to a kept clip re-played it from a cold
+        // decode — the retention would have been paid for and never spent.
         mediaCard.hostRenderViewOnCurrentPage()
+        let surface = mediaCard.renderView
+        // And the question is asked of the POOL, not of the hosting. A surface
+        // can be hanging on its page with no player behind it — a dismissed and
+        // reopened post is exactly that — and only the pool can tell the two
+        // apart. See `GridVideoPlaybackCoordinator.isPlaying` for the same rule
+        // on the other surface.
+        let wasHosted = videoPlayback.hasPlayer(in: surface)
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-media-log") {
             print(String(format: "[page-play] %.3f page=%d hosted=%@ url=%@",
@@ -154,6 +167,74 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             await videoPlayback.play(url, in: surface)
             self?.auditPagePlayback()
         }
+    }
+
+    /// Decides which of a collection's clips keep their player while the viewer
+    /// is on one page, and ends the rest.
+    ///
+    /// ## Retention is EARNED, never speculative
+    ///
+    /// A page gets a player when the viewer actually lands on it. Leaving pauses
+    /// it in place — surface, last decoded frame and playhead all kept — so
+    /// coming back costs nothing and looks like nothing happened. A clip the
+    /// viewer has never reached is not started early: it would spend a decoder
+    /// on a guess, and the poster it shows meanwhile is the same picture the
+    /// viewer would see anyway.
+    ///
+    /// What this method does is the OTHER half — deciding when a paused clip has
+    /// drifted far enough to stop being worth its player. `CarouselRetentionWindow`
+    /// answers that against the pool's stated capacity, so a gallery of twenty
+    /// clips holds the same number of players as a gallery of three.
+    private func reconcileRetainedClips() {
+        guard let videoPlayback, mediaCard.showsCollection else { return }
+        // ⚠️ Never mid-flight. The window would drop the surface the flight is
+        // carrying, or re-host a neighbour over the card in the air.
+        guard !defersPlaybackForFlight else { return }
+        // ⚠️ RE-POINTED BEFORE THE WINDOW IS APPLIED.
+        //
+        // `renderView` names the watched page's surface, and the window spares
+        // it — so applying the window first meant sparing the page just left,
+        // one clip beyond the budget, on every page change. Only for a clip
+        // page: a still has nothing to watch, and minting it a surface here
+        // would spend one on a photograph.
+        if mediaCard.currentPageVideoURL != nil {
+            mediaCard.hostRenderViewOnCurrentPage()
+        }
+        let keep = CarouselRetentionWindow.pagesToRetain(
+            videoPages: mediaCard.videoPageIndices,
+            currentPage: mediaCard.currentPage,
+            capacity: videoPlayback.capacity
+        )
+        // The watched surface is spared only when there IS one — on a still page
+        // the previous clip has no claim on the budget beyond the window's.
+        let watched = mediaCard.currentPageVideoURL != nil ? mediaCard.renderView : nil
+        for view in mediaCard.retainSurfaces(onPages: keep, sparing: watched) {
+            // The card gave these up; the pool is told here, because the card
+            // does not own playback.
+            videoPlayback.stop(view)
+        }
+        // ⚠️ EVERY page but the watched one is paused, and this is the half that
+        // re-pointing `renderView` quietly removed.
+        //
+        // While one surface walked from page to page, leaving a page took its
+        // player with it and the clip stopped by construction. Now the clip
+        // keeps its own surface — so nothing stops it, and in a full-bleed
+        // carousel the page just left is still on screen: the viewer moves to a
+        // photograph and a video goes on playing beside it. Pausing here is what
+        // makes "keeps its last frame" true rather than "keeps running".
+        for page in mediaCard.surfacedPages where page != mediaCard.currentPage {
+            videoPlayback.setPaused(true, in: mediaCard.surface(forPage: page))
+        }
+        mediaCard.hostRetainedSurfaces()
+        #if DEBUG
+        if CarouselPlaybackAudit.isEnabled {
+            CarouselPlaybackAudit.trace(
+                "retain page=\(mediaCard.currentPage) keep=\(keep) "
+                + "surfaced=\(mediaCard.surfacedPages) "
+                + "players=\(videoPlayback.activePlayerCount)/\(videoPlayback.capacity)"
+            )
+        }
+        #endif
     }
 
     /// The post page's half of the carousel audit.
@@ -796,6 +877,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             if isActive { reconcilePagePlayback() }
             return
         }
+        // A cell rebound from a collection to a single attachment without going
+        // through reuse would otherwise keep the old post's clips alive behind
+        // a hidden carousel.
+        for view in mediaCard.releaseRetainedSurfaces() {
+            videoPlayback?.stop(view)
+        }
         mediaCard.hideCollection()
         chrome.setMediaPageCount(0, current: 0)
 
@@ -1282,6 +1369,26 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// The page's playback surface, for a test that needs to ask the pool about
     /// it. Playback ownership is the pool's, so a test has to name the surface.
     var debugRenderSurface: VideoRenderView { mediaCard.renderView }
+
+    /// Moves the collection to a page as a viewer's swipe would.
+    ///
+    /// The simulator injects no touches and a unit test has no gesture, so this
+    /// is how the event this whole file turns on is reached. It goes through
+    /// `setPage`, not around it — the page change must arrive by the same path
+    /// a real swipe takes, or a test would be pinning a route nobody uses.
+    func debugShowPage(_ index: Int) {
+        mediaCard.setPage(index, animated: false)
+    }
+
+    /// Which pages are holding a playback surface — the retention window's
+    /// footprint, which is otherwise invisible from outside.
+    var debugSurfacedPages: [Int] { mediaCard.surfacedPages }
+
+    /// The surface a given page is holding, so a test can ask the POOL what is
+    /// behind it rather than trusting the cell's own account.
+    func debugSurface(forPage page: Int) -> VideoRenderView {
+        mediaCard.surface(forPage: page)
+    }
     #endif
 
     func didResignActive(releasingPlayback: Bool) {
@@ -1309,6 +1416,16 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // the feed keeps alive rather than by how far the viewer has scrolled.
         if releasingPlayback {
             videoPlayback.stop(mediaCard.renderView)
+            // ⚠️ The neighbours go too, and they are invisible from here.
+            //
+            // A retained clip's player is bound to a surface this method never
+            // names, so stopping only the watched one left every kept neighbour
+            // holding a decoder for a cell that had scrolled away — the leak the
+            // whole bound exists to prevent, arriving by the one path that does
+            // not go through the window.
+            for view in mediaCard.releaseRetainedSurfaces() {
+                videoPlayback.stop(view)
+            }
         } else {
             videoPlayback.setPaused(true, in: mediaCard.renderView)
         }
@@ -1343,6 +1460,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         onRequestCommentsPageDrive = nil
         setPauseGlyphVisible(false)
         videoPlayback?.stop(mediaCard.renderView)
+        // Reuse is the other door out, and a retained clip must not walk
+        // through it into the next post.
+        for view in mediaCard.releaseRetainedSurfaces() {
+            videoPlayback?.stop(view)
+        }
         representedID = nil
         mediaURL = nil
         mediaKind = .image

@@ -70,7 +70,15 @@ final class SnapMediaCardView: UIView {
                 renderView = view
             }
             view.transform = .identity
+            // ⚠️ The adopted view IS this page's surface from here on.
+            //
+            // Without this the page kept pointing at the surface the landing
+            // just replaced, so the next page change hosted a dead view and
+            // re-minted one for the page the viewer was already watching — two
+            // surfaces for one clip, and the live layer among the discarded.
+            pageSurfaces[currentPage] = view
             hostRenderViewOnCurrentPage()
+            hostRetainedSurfaces()
             return
         }
         guard view.superview !== self else { return }
@@ -166,6 +174,21 @@ final class SnapMediaCardView: UIView {
     func hideCollection() {
         carousel?.isHidden = true
         carousel?.cancelPendingWork()
+        // Every page's claim on a surface ends with the collection. The players
+        // behind them are the caller's to stop — see the call site, which
+        // releases and stops before asking for this.
+        pageSurfaces.removeAll()
+        // ⚠️ And the card takes its own surface back.
+        //
+        // After a collection, `renderView` is whichever page the viewer stopped
+        // on, hanging inside a carousel that is now hidden. A single-attachment
+        // post rebound into this cell would draw into a view nobody can see —
+        // the surface is pinned to the card at `init` and only a hero landing
+        // ever re-pins it, so nothing else would have put it back.
+        if renderView.superview !== self {
+            renderView.removeFromSuperview()
+            renderView.pin(to: self)
+        }
     }
 
     /// Which page a collection is showing, for a hero flight and for the chrome
@@ -189,21 +212,121 @@ final class SnapMediaCardView: UIView {
         showsCollection ? carousel?.currentPageVideoURL : nil
     }
 
+    /// The pages carrying a stream — the retention window's domain.
+    var videoPageIndices: [Int] {
+        showsCollection ? (carousel?.videoPageIndices ?? []) : []
+    }
+
+    /// The stream on a given page, for a caller reconciling a retained clip
+    /// against what its surface is actually holding.
+    func videoURL(onPage page: Int) -> URL? { carousel?.videoURL(onPage: page) }
+
     /// Moves the playback surface onto the page the viewer is looking at.
     ///
-    /// ⚠️ The SAME surface, re-parented — never a second one per page.
-    ///
-    /// Everything that makes a hero flight carry live video works by IDENTITY
-    /// on this view: the flight attaches a sibling surface alongside it, a
-    /// dismissal donates it, a landing adopts it, and a cancelled grab reclaims
-    /// it. Give a collection its own render view per page and every one of
-    /// those stops finding the thing it is holding. So the object never
-    /// changes; only which page it hangs in does.
+    /// ⚠️ `renderView` is THE WATCHED PAGE'S surface, and everything that makes
+    /// a hero flight carry live video works by identity on it: the flight
+    /// attaches a sibling alongside it, a dismissal donates it, a landing adopts
+    /// it, a cancelled grab reclaims it. That is why the retained neighbours are
+    /// separate objects that never fly — the flying one is only ever the one
+    /// under the viewer, and it is re-pointed between page changes rather than
+    /// re-parented from page to page.
     func hostRenderViewOnCurrentPage() {
         guard let carousel, !carousel.isHidden else { return }
+        renderView = surface(forPage: currentPage)
         renderView.translatesAutoresizingMaskIntoConstraints = true
         renderView.isHidden = false
-        carousel.host(renderView)
+        carousel.host(renderView, onPage: currentPage)
+    }
+
+    // MARK: - Retained clips
+
+    /// A surface for every clip this card is keeping warm, keyed by page.
+    ///
+    /// ⚠️ ONE PER PAGE, and that is the whole of the frozen-frame behaviour. A
+    /// single surface walked from page to page means the page it leaves falls
+    /// back to its poster — the cut reported as "the thumbnail comes back". A
+    /// page that keeps its own surface keeps its last decoded frame and its
+    /// playhead, so coming back is free and looks like nothing happened.
+    ///
+    /// Bounded by `CarouselRetentionWindow`, never by the size of the gallery.
+    private var pageSurfaces: [Int: VideoRenderView] = [:]
+
+    /// The surface for a page, minted on first use.
+    func surface(forPage page: Int) -> VideoRenderView {
+        if let existing = pageSurfaces[page] { return existing }
+        // The first page to ask inherits the card's OWN surface rather than
+        // minting a second one: a single-attachment post and a collection whose
+        // page is a clip are the same picture, and a landing that adopted the
+        // card's view before the carousel existed must still find it.
+        //
+        // The condition is "is the card's surface still unclaimed", not "is
+        // this page zero" — after the window drops a page and the viewer
+        // returns to it, page identity says nothing about who holds what.
+        let claimed = pageSurfaces.values.contains { $0 === renderView }
+        let view = claimed ? VideoRenderView() : renderView
+        #if DEBUG
+        view.debugLabel = "feed-p\(page)"
+        #endif
+        pageSurfaces[page] = view
+        return view
+    }
+
+    /// The pages currently holding a surface.
+    var surfacedPages: [Int] { pageSurfaces.keys.sorted() }
+
+    /// Keeps the named pages' surfaces and gives up every other, reporting the
+    /// ones dropped so the caller can end their playback.
+    ///
+    /// ⚠️ The card does not stop players — it does not own the pool. It reports
+    /// what it let go of and the cell ends those, which is the same division
+    /// that keeps playback ownership out of this file by construction.
+    /// - Parameter sparing: a surface to keep whatever the window says, or nil.
+    ///
+    ///   ⚠️ EXPLICIT, because as an implicit rule it was an off-by-one. This
+    ///   used to spare `renderView` unconditionally — but the window is applied
+    ///   before `renderView` is re-pointed, so what it actually spared was the
+    ///   page the viewer had just LEFT. One clip beyond the budget survived
+    ///   every page change, and the bound the whole design rests on was not a
+    ///   bound. Caught by restoring the regression, not by reading the code:
+    ///   the falsifying run reported two players where the disabled window
+    ///   should have allowed one.
+    @discardableResult
+    func retainSurfaces(onPages pages: [Int],
+                        sparing: VideoRenderView? = nil) -> [VideoRenderView] {
+        let kept = Set(pages)
+        var dropped: [VideoRenderView] = []
+        for (page, view) in pageSurfaces where !kept.contains(page) {
+            guard view !== sparing else { continue }
+            carousel?.evictSurface(onPage: page)
+            view.removeFromSuperview()
+            pageSurfaces[page] = nil
+            dropped.append(view)
+        }
+        return dropped
+    }
+
+    /// Hangs every retained clip on its own page, so a neighbour holds its
+    /// frozen frame instead of its poster while the viewer is elsewhere.
+    func hostRetainedSurfaces() {
+        guard let carousel, !carousel.isHidden else { return }
+        for (page, view) in pageSurfaces {
+            view.translatesAutoresizingMaskIntoConstraints = true
+            view.isHidden = false
+            carousel.host(view, onPage: page)
+        }
+    }
+
+    /// Gives up every retained surface but the watched one — a full teardown,
+    /// for reuse and for the end of playback.
+    ///
+    /// ⚠️ The watched one is SPARED here on purpose. It is the surface a
+    /// single-attachment post draws on, pinned to the card since `init`; taking
+    /// it away would leave the next video post with nowhere to draw, and only
+    /// a landing ever puts it back. Its player is stopped by the caller, which
+    /// is the part that actually has to happen.
+    @discardableResult
+    func releaseRetainedSurfaces() -> [VideoRenderView] {
+        retainSurfaces(onPages: [], sparing: renderView)
     }
 
     /// Whether the surface is already hanging in the page being looked at.

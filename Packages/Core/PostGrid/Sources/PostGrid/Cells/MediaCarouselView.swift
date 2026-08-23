@@ -113,24 +113,64 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
         pages.indices.contains(currentPage) ? pages[currentPage].videoURL : nil
     }
 
-    /// Puts a playback surface on the current page, sized to it.
+    /// Puts a playback surface on a given page, sized to it.
     ///
-    /// The surface belongs to the HOST — a row cell owns exactly one and the
-    /// coordinator hands its player around — so this only re-parents it. That
-    /// is what lets a mixed carousel play without a second render view per page
-    /// and without the pool learning that pages exist.
-    public func host(_ surface: UIView) {
-        guard pageViews.indices.contains(currentPage) else { return }
-        // ⚠️ Off the old page FIRST, always.
+    /// The surfaces belong to the HOST — this only re-parents them, and the
+    /// pool never learns that pages exist. What changed when clips began being
+    /// kept warm is how many a carousel may hold: **one per page**, not one in
+    /// total.
+    public func host(_ surface: UIView, onPage index: Int) {
+        guard pageViews.indices.contains(index) else { return }
+        // ⚠️ Off its OLD page first — but only this surface, never theirs.
         //
-        // Re-parenting alone moves the view, and leaves the page it came from
-        // still believing it holds one — which is enough to keep that page's
-        // badge hidden for ever. A caller that evicted before asking makes this
-        // a no-op; one that did not is exactly the case it exists for.
-        for view in pageViews where view !== pageViews[currentPage] {
+        // This loop used to evict every other page unconditionally, which was
+        // exactly right while a host owned one surface and walked it from page
+        // to page: re-parenting alone leaves the page it came from still
+        // believing it holds one, which is enough to keep that page's badge
+        // hidden for ever. Now that neighbours keep their own clip warm, the
+        // same loop would tear down everything the retention window just paid
+        // for. So the question narrowed from "is this a different page" to "is
+        // this page holding the view I am moving".
+        for (position, view) in pageViews.enumerated()
+        where position != index && view.hosts(surface) {
             _ = view.evictHostedSurface()
         }
-        pageViews[currentPage].host(surface)
+        pageViews[index].host(surface)
+    }
+
+    /// Puts a surface on the page being looked at.
+    public func host(_ surface: UIView) { host(surface, onPage: currentPage) }
+
+    /// The surface hanging on `index`, if any — how a host finds the view it
+    /// left there rather than keeping a second map of its own.
+    public func hostedSurface(onPage index: Int) -> UIView? {
+        pageViews.indices.contains(index) ? pageViews[index].hostedSurface : nil
+    }
+
+    /// Takes the surface off one page and reports it.
+    @discardableResult
+    public func evictSurface(onPage index: Int) -> UIView? {
+        guard pageViews.indices.contains(index) else { return nil }
+        return pageViews[index].evictHostedSurface()
+    }
+
+    /// Which page is holding `view`, nil when none is.
+    public func page(hosting view: UIView) -> Int? {
+        pageViews.firstIndex { $0.hosts(view) }
+    }
+
+    /// The indices of every page with a stream behind it, in order.
+    ///
+    /// The retention window's domain: it is chosen among THESE, never among all
+    /// pages, so a gallery of twenty photographs and two clips keeps two
+    /// players and not a window's worth of nothing.
+    public var videoPageIndices: [Int] {
+        pages.indices.filter { pages[$0].videoURL != nil }
+    }
+
+    /// The stream on a given page.
+    public func videoURL(onPage index: Int) -> URL? {
+        pages.indices.contains(index) ? pages[index].videoURL : nil
     }
 
     /// Whether `view` is already hanging in the page being looked at — the
@@ -526,8 +566,17 @@ final class CarouselPageView: UIView {
         badge.isHidden = !isPlayable || (hidesBadgeWhilePlaying && surface != nil)
     }
 
-    /// The host's playback surface while this page is the one holding it.
+    /// The host's playback surface while this page is holding it.
     private weak var surface: UIView?
+
+    /// The surface this page is REALLY holding — both halves again, for the
+    /// same reason `hosts(_:)` asks both: a weak reference outlives the view
+    /// being taken away by a flight, and a page that answered from the
+    /// reference alone would hand back a view hanging nowhere.
+    var hostedSurface: UIView? {
+        guard let surface, surface.superview === self else { return nil }
+        return surface
+    }
 
     /// Whether this page is REALLY holding `view` — both halves, for the reason
     /// `host` states: a weak reference outlives the view being taken away.
