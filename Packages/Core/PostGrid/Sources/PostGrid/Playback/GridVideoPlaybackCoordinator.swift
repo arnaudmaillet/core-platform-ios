@@ -187,6 +187,7 @@ public final class GridVideoPlaybackCoordinator {
             where surface !== candidate.cell.loadedVideoRenderView {
                 pool.setPaused(true, in: surface)
             }
+            prewarm(candidate)
         }
         for candidate in chosen
         where candidate.id != handoffID
@@ -767,6 +768,30 @@ public final class GridVideoPlaybackCoordinator {
             // by then the same id may hold a fresh start's task.
             guard let self, !Task.isCancelled else { return }
             startTasks.removeValue(forKey: id)
+        }
+    }
+
+    /// Brings a row's next clip to its first frame, so swiping the card's pages
+    /// shows a picture rather than a thumbnail and a wait.
+    ///
+    /// ⚠️ A WARM-UP THAT LANDS AFTER THE ROW LOST ITS LOAN IS UNDONE.
+    ///
+    /// `prewarm` binds its player on the far side of an await, and a feed is
+    /// scrolling the whole time — so a row that left the viewport in between
+    /// would end up holding a decoder acquired after it gave everything back,
+    /// with no loan left to reclaim it by. The same leak the post page's
+    /// accumulation battery caught, arriving here by a different door.
+    private func prewarm(_ candidate: Candidate) {
+        for clip in candidate.cell.clipsToPrewarm() {
+            guard !pool.hasPlayer(in: clip.surface) else { continue }
+            let id = candidate.id
+            Task { [weak self] in
+                await self?.pool.prewarm(clip.url, in: clip.surface)
+                guard let self, self.loans[id] != nil else {
+                    self?.pool.stop(clip.surface)
+                    return
+                }
+            }
         }
     }
 

@@ -110,6 +110,10 @@ public protocol GridPlaybackCell: UIView {
     /// Gives up every kept clip but the watched one, reporting them.
     @discardableResult
     func releaseRetainedClips() -> [VideoRenderView]
+
+    /// The clips worth bringing to their first frame before the viewer reaches
+    /// them, each with a surface hosted and postered ready to receive one.
+    func clipsToPrewarm() -> [(url: URL, surface: VideoRenderView)]
 }
 
 public extension GridPlaybackCell {
@@ -124,4 +128,7 @@ public extension GridPlaybackCell {
 
     @discardableResult
     func releaseRetainedClips() -> [VideoRenderView] { [] }
+
+    /// A cell showing one attachment has no neighbour to prepare.
+    func clipsToPrewarm() -> [(url: URL, surface: VideoRenderView)] { [] }
 }

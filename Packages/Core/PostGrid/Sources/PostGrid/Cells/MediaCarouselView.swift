@@ -162,6 +162,17 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
     /// How many pages the carousel is showing.
     public var pageCount: Int { pages.count }
 
+    /// The picture a given page is showing.
+    ///
+    /// ⚠️ Needed by anything that puts a surface on a page the viewer is NOT on.
+    /// `renderedCover` answers for the current page, which is the right answer
+    /// for a flight and the wrong one for a prewarm: handing a clip on page
+    /// three the cover of page one, or none at all, is what makes a freshly
+    /// hosted surface draw black over a photograph.
+    public func cover(onPage index: Int) -> UIImage? {
+        pageViews.indices.contains(index) ? pageViews[index].cover.image : nil
+    }
+
     /// The indices of every page with a stream behind it, in order.
     ///
     /// The retention window's domain: it is chosen among THESE, never among all

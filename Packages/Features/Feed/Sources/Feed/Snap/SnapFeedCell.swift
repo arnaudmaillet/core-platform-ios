@@ -88,6 +88,14 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             CarouselPlaybackAudit.trace("post setPaused true page=\(mediaCard.currentPage)")
             #endif
             videoPlayback.setPaused(true, in: mediaCard.renderView)
+            // ⚠️ A STILL PAGE WARMS TOO — the case the probe caught.
+            //
+            // Warming hung only off the paths that START something, so a viewer
+            // landing on a photograph warmed nothing at all and the clip two
+            // pages away was still a cold decode when they got there. Which is
+            // the whole complaint: the players should be in place whether or not
+            // the viewer is on them.
+            prewarmNeighbouringClips()
             return
         }
         // ⚠️ A FLIGHT OWNS THE START while it is in the air.
@@ -146,6 +154,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             }
             auditPagePlayback()
             #endif
+            // The resumed path warms too: arriving back at a kept clip is the
+            // moment the NEXT one becomes reachable in a swipe.
+            prewarmNeighbouringClips()
             return
         }
         // ⚠️ The page's own cover, and NOT nil — clearing it is what hid the
@@ -166,7 +177,83 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         Task { [weak self] in
             await videoPlayback.play(url, in: surface)
             self?.auditPagePlayback()
+            // ⚠️ AFTER, and that ordering is the whole safety of this.
+            //
+            // Prewarming opens streams. Doing it alongside the watched clip's
+            // start would put them in competition for bandwidth with the only
+            // picture on screen — trading a delay the viewer might never meet
+            // for a stutter in the one they are certainly looking at.
+            self?.prewarmNeighbouringClips()
         }
+    }
+
+    /// Brings the clips within one swipe to their first frame, so arriving at
+    /// them shows a picture instead of a thumbnail and a wait.
+    ///
+    /// The retention window makes the RETURN to a clip free; this is the other
+    /// half, and the one the viewer meets first. Bounded harder than retention
+    /// — see `CarouselRetentionWindow.prewarmDepth` for why the two numbers are
+    /// deliberately not the same.
+    /// Warm-ups in flight, so a page that goes away can call them off.
+    private var prewarmTasks: [Task<Void, Never>] = []
+
+    /// Ends every warm-up in flight. Called wherever playback is given back.
+    private func cancelPrewarming() {
+        for task in prewarmTasks { task.cancel() }
+        prewarmTasks.removeAll()
+    }
+
+    private func prewarmNeighbouringClips() {
+        guard let videoPlayback, mediaCard.showsCollection, isActive else { return }
+        guard !defersPlaybackForFlight else { return }
+        prewarmTasks.removeAll { $0.isCancelled }
+        let pages = CarouselRetentionWindow.pagesToPrewarm(
+            videoPages: mediaCard.videoPageIndices,
+            currentPage: mediaCard.currentPage,
+            budget: max(0, videoPlayback.capacity - 1)
+        )
+        for page in pages {
+            guard let url = mediaCard.videoURL(onPage: page) else { continue }
+            let surface = mediaCard.prepareSurface(forPage: page)
+            // Already warm: a clip kept from an earlier visit needs nothing, and
+            // asking would restart a player that is holding a good frame.
+            guard !videoPlayback.hasPlayer(in: surface) else { continue }
+            // ⚠️ A WARM-UP THAT LANDS AFTER THE PAGE HAS GONE IS UNDONE.
+            //
+            // `prewarm` resolves a URL and binds a player, and both happen after
+            // an await — so a viewer who scrolls away in the meantime left the
+            // cell holding a decoder it acquired AFTER giving everything back.
+            // Caught by the accumulation battery, which is precisely the leak it
+            // exists to find: one player survived every open/close cycle.
+            //
+            // Cancellation alone would not do it. The pool's await is not
+            // cooperative, so the binding can still happen; what makes this safe
+            // is asking again on the other side of it.
+            let task = Task { [weak self] in
+                await videoPlayback.prewarm(url, in: surface)
+                guard let self, self.isActive else {
+                    videoPlayback.stop(surface)
+                    return
+                }
+                #if DEBUG
+                // ⚠️ REPUBLISHED once the warm-up has actually landed.
+                //
+                // The probe was written where warming is REQUESTED, so it
+                // reported the state before any of it had happened and went on
+                // saying so for ever. Reading `players=1` off that and calling
+                // the warming broken would have been believing a stale snapshot
+                // — the same mistake as trusting a log nothing had written to.
+                self.publishRetentionProbe(pool: videoPlayback)
+                #endif
+            }
+            prewarmTasks.append(task)
+        }
+        #if DEBUG
+        if CarouselPlaybackAudit.isEnabled {
+            CarouselPlaybackAudit.trace("prewarm pages=\(pages)")
+        }
+        publishRetentionProbe(pool: videoPlayback)
+        #endif
     }
 
     /// Decides which of a collection's clips keep their player while the viewer
@@ -1082,13 +1169,25 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             }
             mediaCard.hostRenderViewOnCurrentPage()
             let view = mediaCard.renderView
-            Task { await videoPlayback.play(url, in: view) }
+            Task { [weak self] in
+                await videoPlayback.play(url, in: view)
+                // ⚠️ ACTIVATION IS ITS OWN DOOR, and it bypasses the page
+                // reconcile entirely — which is why warming hung off that
+                // reconcile alone did nothing at all for the case that matters
+                // most: opening a post. The test read "page one was never
+                // prepared", and it was right.
+                self?.prewarmNeighbouringClips()
+            }
         case false:
             // Nothing to start: a photo page's media is STATIC. The slow
             // zoom that used to prove activation here is gone (see
             // `SnapMediaCardView`), and video is the only kind with
             // motion of its own.
-            break
+            //
+            // But a collection opening on a photograph still has clips further
+            // in, and they are exactly the ones a viewer meets cold. Nothing to
+            // play here does not mean nothing to prepare.
+            prewarmNeighbouringClips()
         }
     }
 
@@ -1438,6 +1537,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         chrome.setSubtitlesActive(false)
         // Video is the only kind with anything to stop: a photo page's media
         // is static, so resigning leaves it exactly as it was.
+        cancelPrewarming()
         guard playsVideo, let videoPlayback else { return }
         // ⚠️ PAUSED unless the page is actually going away.
         //
@@ -1497,6 +1597,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         onRequestCommentsClose = nil
         onRequestCommentsPageDrive = nil
         setPauseGlyphVisible(false)
+        cancelPrewarming()
         videoPlayback?.stop(mediaCard.renderView)
         // Reuse is the other door out, and a retained clip must not walk
         // through it into the next post.

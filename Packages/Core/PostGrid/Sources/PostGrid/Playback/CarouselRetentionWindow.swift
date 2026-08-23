@@ -48,6 +48,43 @@ public enum CarouselRetentionWindow {
         videoPages: [Int], currentPage: Int, capacity: Int
     ) -> [Int] {
         guard capacity > 0 else { return [] }
+        return ranked(videoPages: videoPages, currentPage: currentPage)
+            .prefix(capacity)
+            .map { $0 }
+    }
+
+    /// How many clips are brought to their first frame BEFORE the viewer
+    /// reaches them.
+    ///
+    /// ⚠️ SMALLER THAN THE RETENTION WINDOW, and the two must not be confused.
+    ///
+    /// Retention keeps a decode that has already been paid for: the clip ran,
+    /// so holding it costs a decoder and nothing else. Prewarming starts a NEW
+    /// one — a stream to open, segments to fetch, a pipeline to fill — and it
+    /// does so while the clip the viewer is actually watching is starting.
+    /// Warming the whole window would mean six streams competing for bandwidth
+    /// with the only one on screen, which trades a delay the viewer might never
+    /// have met for a stutter in the one they are certainly looking at.
+    ///
+    /// Two: the page ahead and the page behind, which is everything reachable
+    /// by a single swipe. Beyond that the viewer has travelled, and a fresh
+    /// start is a fair price for a journey.
+    public static let prewarmDepth = 2
+
+    /// The clips worth preparing ahead of the viewer, nearest first, excluding
+    /// the one being watched — the caller is already starting that one.
+    public static func pagesToPrewarm(
+        videoPages: [Int], currentPage: Int, budget: Int
+    ) -> [Int] {
+        guard budget > 0 else { return [] }
+        return ranked(videoPages: videoPages, currentPage: currentPage)
+            .filter { $0 != currentPage }
+            .prefix(min(budget, prewarmDepth))
+            .map { $0 }
+    }
+
+    /// The shared ordering: by reach, then forward, then by page.
+    private static func ranked(videoPages: [Int], currentPage: Int) -> [Int] {
         let ranked = videoPages.sorted { lhs, rhs in
             let (near, far) = (abs(lhs - currentPage), abs(rhs - currentPage))
             if near != far { return near < far }
@@ -57,6 +94,6 @@ public enum CarouselRetentionWindow {
             if leadingLHS != leadingRHS { return leadingLHS }
             return lhs < rhs
         }
-        return Array(ranked.prefix(capacity))
+        return ranked
     }
 }

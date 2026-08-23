@@ -193,6 +193,29 @@ public final class VideoPlaybackController {
         player.play()
     }
 
+    /// Brings a clip to its first frame and stops there, so arriving at it
+    /// later costs nothing.
+    ///
+    /// ⚠️ PLAY-THEN-PAUSE, deliberately, rather than a player left un-started.
+    ///
+    /// A player that has never run has not necessarily decoded anything: under
+    /// the sample-buffer backing the frames come from a video output that only
+    /// fills while playback is running, so a "prepared" player would still show
+    /// the poster and the delay would simply move. Starting and stopping puts a
+    /// real frame on the surface, which is the whole point — the picture is
+    /// there before the viewer is.
+    ///
+    /// It advances a few frames doing so. That is invisible on a muted looping
+    /// preview and is the honest price of having something to show.
+    ///
+    /// Every duplicate-avoiding rule in `play` applies unchanged: prewarming a
+    /// clip another surface is already running joins that player rather than
+    /// minting a second.
+    public func prewarm(_ mediaURL: URL, in view: VideoRenderView, peakBitRate: Double = 0) async {
+        await play(mediaURL, in: view, peakBitRate: peakBitRate)
+        _ = setPaused(true, in: view)
+    }
+
     /// Detaches the player bound to `view` but keeps it **running**, parked
     /// under the URL it is playing, so the next `play` of that same URL adopts
     /// it rather than starting a second item.

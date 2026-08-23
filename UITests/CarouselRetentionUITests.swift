@@ -76,7 +76,7 @@ final class CarouselRetentionUITests: XCTestCase {
     func testDumpTheTreeOfACollectionPost() throws {
         let app = launch(startIndex: 4)
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 20))
-        Thread.sleep(forTimeInterval: 6)
+        Thread.sleep(forTimeInterval: 8)
         let tree = app.debugDescription
         print("=== PROBE PRESENT: \(tree.contains("carousel;"))")
         print(tree.prefix(4000))

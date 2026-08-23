@@ -67,6 +67,44 @@ import Testing
         #expect(retained([], on: 3).isEmpty)
     }
 
+    // MARK: - Prewarming
+
+    private func prewarmed(
+        _ videoPages: [Int], on page: Int, budget: Int = 6
+    ) -> [Int] {
+        CarouselRetentionWindow.pagesToPrewarm(
+            videoPages: videoPages, currentPage: page, budget: budget
+        )
+    }
+
+    /// The watched clip is never in the list — its caller is already starting
+    /// it, and prewarming it again would restart a running player.
+    @Test func theWatchedClipIsNotPrewarmed() {
+        #expect(prewarmed([0, 1, 2], on: 1).contains(1) == false)
+    }
+
+    /// ⚠️ HARDER BOUNDED THAN RETENTION, on purpose: warming opens streams that
+    /// compete with the clip on screen, where keeping costs only a decoder.
+    @Test func prewarmingStopsAtOneSwipeAway() {
+        let kept = retained([0, 1, 2, 3, 4], on: 2, capacity: 6)
+        let warm = prewarmed([0, 1, 2, 3, 4], on: 2, budget: 6)
+        #expect(warm.count == CarouselRetentionWindow.prewarmDepth)
+        #expect(warm.count < kept.count)
+        // And they are the reachable ones, in reach order.
+        #expect(warm == [3, 1])
+    }
+
+    /// A budget below the depth wins — the pool's spare capacity is the real
+    /// ceiling, and the depth only stops it going further.
+    @Test func aSmallBudgetBeatsTheDepth() {
+        #expect(prewarmed([0, 1, 2, 3], on: 0, budget: 1).count == 1)
+        #expect(prewarmed([0, 1, 2, 3], on: 0, budget: 0).isEmpty)
+    }
+
+    @Test func aLoneClipHasNothingToPrewarm() {
+        #expect(prewarmed([2], on: 2).isEmpty)
+    }
+
     @Test func theAnswerDoesNotDependOnTheInputsArrangement() {
         #expect(retained([9, 2, 5], on: 4) == retained([2, 5, 9], on: 4))
     }

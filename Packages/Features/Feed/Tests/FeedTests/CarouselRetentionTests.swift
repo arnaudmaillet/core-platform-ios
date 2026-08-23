@@ -215,6 +215,70 @@ struct CarouselRetentionTests {
         }
     }
 
+    // MARK: - Ready before the viewer
+
+    /// ⚠️ THE OTHER HALF: the clip one swipe away already has a picture.
+    ///
+    /// Retention makes the RETURN to a clip free; it does nothing for the first
+    /// arrival, which is still a cold decode — the thumbnail-then-video delay
+    /// the viewer reported. This is what removes it.
+    @Test func theNextClipIsReadyBeforeTheViewerArrives() async {
+        let pool = pool()
+        let cell = collectionCell([true, true, true], pool: pool)
+
+        // Through the same door as every other test: `debugShowPage` alone does
+        // not necessarily move anything when the carousel is already on that
+        // page, and a warm-up that never ran looks exactly like one that failed.
+        await page(cell, through: [0], pool: pool)
+        await settle { cell.debugSurfacedPages.contains(1) }
+        #expect(cell.debugSurfacedPages.contains(1), "page one was never prepared")
+
+        let ahead = cell.debugSurface(forPage: 1)
+        await settle { pool.hasPlayer(in: ahead) }
+        #expect(pool.hasPlayer(in: ahead))
+        // Ready, and NOT running: a warmed clip holds its frame rather than
+        // playing unseen beside the one on screen.
+        #expect(pool.isAdvancing(in: ahead) == false)
+    }
+
+    /// ⚠️ A COLLECTION THAT OPENS ON A PHOTOGRAPH WARMS ITS CLIPS ANYWAY.
+    ///
+    /// Warming hung only off the paths that start playback, so a post whose
+    /// first page is a still prepared nothing and every clip in it was met cold
+    /// — which is the whole of the complaint. Caught in the simulator by the
+    /// probe reading `kept=0`, not by any of the tests written before it.
+    @Test func aPostOpeningOnAStillStillWarmsItsClips() async {
+        let pool = pool()
+        let cell = collectionCell([false, false, true, true], pool: pool)
+
+        await settle { pool.activePlayerCount >= 1 }
+
+        #expect(pool.activePlayerCount >= 1, "a still first page warmed nothing")
+        #expect(cell.debugSurfacedPages.contains(2))
+    }
+
+    /// Warming must not duplicate: the clip being watched keeps the one player
+    /// it already has.
+    @Test func warmingNeverGivesAClipASecondPlayer() async {
+        let pool = pool()
+        let cell = collectionCell([true, true, true], pool: pool)
+
+        await page(cell, through: [0, 1, 2, 1, 0], pool: pool)
+
+        #expect(pool.playerCountByURL.values.allSatisfy { $0 == 1 })
+    }
+
+    /// And it respects the ceiling like everything else.
+    @Test func warmingStaysInsideTheBudget() async {
+        let pool = pool(capacity: 2)
+        let cell = collectionCell([true, true, true, true], pool: pool)
+
+        cell.debugShowPage(0)
+        await settle { pool.activePlayerCount >= 2 }
+
+        #expect(pool.activePlayerCount <= 2)
+    }
+
     // MARK: - Opening and closing, over and over
 
     /// ⚠️ THE ACCUMULATION TEST. Whatever the number of opens and closes, the

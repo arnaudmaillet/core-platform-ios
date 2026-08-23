@@ -154,6 +154,36 @@ struct RowClipRetentionTests {
         #expect(cell.retainedPlaybackSurfaces.count == 1)
     }
 
+    // MARK: - Ready before the viewer
+
+    /// ⚠️ Prepared AND HOSTED AND POSTERED — all three, or the fix is a defect.
+    ///
+    /// A surface hung on a page with no poster is a black rectangle over the
+    /// photograph until the stream fills, which is worse than the delay the
+    /// warming removes. So the surface being ready is not enough to assert.
+    @Test func aGrantedRowPreparesTheClipsWithinASwipe() {
+        let cell = row([true, true, true])
+        cell.retainClips(budget: 3)
+
+        let clips = cell.clipsToPrewarm()
+
+        #expect(clips.count == CarouselRetentionWindow.prewarmDepth)
+        #expect(clips.allSatisfy { $0.surface.superview != nil })
+        #expect(clips.allSatisfy { !$0.surface.isHidden })
+        // Not the page being watched: its player is already being started, and
+        // warming it again would restart what is running.
+        #expect(clips.allSatisfy { $0.surface !== cell.loadedVideoRenderView })
+    }
+
+    /// And a row with no allowance prepares nothing at all — the spare is the
+    /// ceiling on warming exactly as it is on keeping.
+    @Test func anUngrantedRowPreparesNothing() {
+        let cell = row([true, true, true])
+        cell.retainClips(budget: 0)
+
+        #expect(cell.clipsToPrewarm().isEmpty)
+    }
+
     // MARK: - Sharing the pool
 
     /// ⚠️ THE BUDGET IS IN PLAYERS, NOT ROWS.

@@ -215,6 +215,21 @@ final class SnapMediaCardView: UIView {
     /// How many pages the collection has.
     var pageCount: Int { showsCollection ? (carousel?.pageCount ?? 0) : 0 }
 
+    /// Readies a surface for a page the viewer is not on: minted, given THAT
+    /// page's cover to show while the stream fills, and hung on the page.
+    ///
+    /// The poster is the load-bearing part. A surface hosted with none is a
+    /// black rectangle over the photograph until the first frame lands, which
+    /// is a worse defect than the delay this exists to remove.
+    func prepareSurface(forPage page: Int) -> VideoRenderView {
+        let view = surface(forPage: page)
+        view.setPoster(carousel?.cover(onPage: page))
+        view.translatesAutoresizingMaskIntoConstraints = true
+        view.isHidden = false
+        carousel?.host(view, onPage: page)
+        return view
+    }
+
     /// The pages carrying a stream — the retention window's domain.
     var videoPageIndices: [Int] {
         showsCollection ? (carousel?.videoPageIndices ?? []) : []

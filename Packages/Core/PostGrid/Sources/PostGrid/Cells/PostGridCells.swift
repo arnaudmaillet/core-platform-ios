@@ -393,6 +393,40 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         return dropped
     }
 
+    /// The clips this row would like brought to their first frame, each with a
+    /// surface ready to receive one.
+    ///
+    /// The surface carries THAT page's cover as its poster: hosted without one
+    /// it is a black rectangle over the photograph until the stream fills,
+    /// which is a worse fault than the delay the warming is there to remove.
+    public func clipsToPrewarm() -> [(url: URL, surface: VideoRenderView)] {
+        guard showsCarousel, clipBudget > 0, let carousel else { return [] }
+        let pages = CarouselRetentionWindow.pagesToPrewarm(
+            videoPages: carousel.videoPageIndices,
+            currentPage: carousel.currentPage,
+            budget: clipBudget
+        )
+        return pages.compactMap { page in
+            guard let url = carousel.videoURL(onPage: page) else { return nil }
+            let view: VideoRenderView
+            if let existing = pageSurfaces[page] {
+                view = existing
+            } else {
+                view = VideoRenderView()
+                #if DEBUG
+                view.debugLabel = "row-warm-p\(page)"
+                #endif
+                view.isUserInteractionEnabled = false
+                pageSurfaces[page] = view
+            }
+            view.setPoster(carousel.cover(onPage: page))
+            view.isHidden = false
+            view.translatesAutoresizingMaskIntoConstraints = true
+            carousel.host(view, onPage: page)
+            return (url, view)
+        }
+    }
+
     /// Gives up every clip surface but the watched one — for reuse, and for the
     /// end of this row's playback.
     @discardableResult
