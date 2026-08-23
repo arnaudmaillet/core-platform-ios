@@ -143,12 +143,24 @@ struct VideoPlaybackControllerTests {
     @Test func detachingHidesABareSurfaceAndSparesOneWithAPoster() async {
         let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
 
-        let bare = VideoRenderView()
-        bare.isHidden = false
-        await controller.play(URL(string: "mock://video/1")!, in: bare)
-        controller.stop(bare)
-        #expect(bare.isHidden)
+        // ⚠️ The hide is the SAMPLE-BUFFER backing's, and CI runs this suite a
+        // second time on the other one (`AVSBDL_RENDER=0`), where a detached
+        // surface stays visible. Asserted unconditionally, this was green here
+        // and red on that second run — for a controller correct in both.
+        //
+        // Scoped rather than deleted, because the hide is exactly what made
+        // `setPoster(nil)` a request to be hidden, and that is the defect the
+        // collection path hit.
+        if VideoRenderFlags.usesSampleBufferLayer {
+            let bare = VideoRenderView()
+            bare.isHidden = false
+            await controller.play(URL(string: "mock://video/1")!, in: bare)
+            controller.stop(bare)
+            #expect(bare.isHidden)
+        }
 
+        // The other half holds on BOTH backings: a surface with something to
+        // show is never hidden out from under it.
         let postered = VideoRenderView()
         postered.isHidden = false
         postered.setPoster(UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { _ in })
