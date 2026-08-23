@@ -640,7 +640,8 @@ final class ForYouGridPage: UIView {
                 watching: row.currentPageVideoURL != nil && row.isSurfaceDrawable
                     && playback.isPlaying(post.id),
                 advancing: row.playbackSurface.map { videoPool?.isAdvancing(in: $0) ?? true }
-                    ?? true
+                    ?? true,
+                hasPlayer: row.playbackSurface.map { videoPool?.hasPlayer(in: $0) ?? true } ?? false
             )
         }
     }

@@ -100,6 +100,20 @@ public final class VideoPlaybackController {
         //
         // Joining is cheap and synchronous — no resolution, no await — so it
         // also removes a start-up delay on the second surface.
+        // ⚠️ ONE ASSET, ONE PLAYER — including one that is already ACTIVE.
+        //
+        // The branch above adopts a PARKED player, which is the handoff. It
+        // left a second case open: a player running this same asset for another
+        // surface. That happens by construction now — a card holds a clip
+        // paused on its page while the post opens the same clip — and minting a
+        // second one gives the asset two decoders on two clocks. The codebase
+        // has met that before (see `startDeferredPlayback`'s note on the
+        // cold-open race): the surface a viewer is looking at ends up bound to
+        // whichever of them a lookup happens to find, and a paused one behind a
+        // visible surface is a picture that has stopped for no visible reason.
+        //
+        // Joining is cheap and synchronous — no resolution, no await — so it
+        // also removes a start-up delay on the second surface.
         if let shared = sharedActivePlayer(playing: mediaURL),
            shared !== activePlayers[key] {
             detach(key: key, view: view)
@@ -114,6 +128,25 @@ public final class VideoPlaybackController {
         guard let playableURL = try? await source.playableURL(for: mediaURL) else { return }
         // Lost the race to a newer play/stop while resolving: drop this result.
         guard generation[key] == token else { return }
+        // ⚠️ AND ASK AGAIN, because the check above happened before an await.
+        //
+        // Two surfaces asking for the same asset at once — a grid row and the
+        // page opening over it — both passed the first check while neither had
+        // registered yet, and both minted. That is the cold-open race this
+        // file's other notes describe, and it is why the fast path alone left
+        // duplicates in the log: measured at 12 in one battery, always on the
+        // asset that two surfaces reach for simultaneously.
+        //
+        // Cheap: one dictionary lookup on a path that has just done I/O.
+        if let shared = sharedActivePlayer(playing: mediaURL), shared !== activePlayers[key] {
+            detach(key: key, view: view)
+            shared.currentItem?.preferredPeakBitRate = peakBitRate
+            bind(shared, to: view)
+            activePlayers[key] = shared
+            playingURL[key] = mediaURL
+            shared.play()
+            return
+        }
 
         detach(key: key, view: view)
         let player = idlePlayers.popLast() ?? AVPlayer()

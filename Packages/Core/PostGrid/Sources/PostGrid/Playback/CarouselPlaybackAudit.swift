@@ -106,15 +106,21 @@ public enum CarouselPlaybackAudit {
     /// feature working as a failure.
     public static func checkAdvancing(
         surface: String, subject: String, page: Int,
-        watching: Bool, advancing: Bool
+        watching: Bool, advancing: Bool, hasPlayer: Bool
     ) {
         guard isEnabled else { return }
         checks += 1
         guard watching, !advancing else { return }
         failures += 1
+        // ⚠️ Two very different faults look identical on screen, so the line
+        // names which one it is. A surface with NO player is one that lost its
+        // loan while its owner still believed it had one; a surface with a
+        // PAUSED player is one nobody resumed. Chasing them as a single symptom
+        // is what made this take three rounds.
         emit(String(
-            format: "[audit] FAIL #%d %@ %@ page=%d frozen-on-the-page-being-watched",
-            failures, surface, subject, page
+            format: "[audit] FAIL #%d %@ %@ page=%d frozen (%@)",
+            failures, surface, subject, page,
+            hasPlayer ? "paused" : "no-player"
         ))
     }
 
@@ -124,6 +130,16 @@ public enum CarouselPlaybackAudit {
         guard isEnabled else { return }
         failures += 1
         emit("[audit] FAIL #\(failures) DUPLICATE players=\(players) url=\(url)")
+    }
+
+    /// A breadcrumb, for chasing a state whose CAUSE is elsewhere in time.
+    ///
+    /// The frozen page is the case: by the time it is detected, whoever paused
+    /// it is long gone. Traces go to the same file so the sequence reads in
+    /// order alongside the failures.
+    public static func trace(_ line: String) {
+        guard isEnabled else { return }
+        emit("[audit] · \(line)")
     }
 
     /// Prints a one-line verdict. Called from the harness between cycles so a

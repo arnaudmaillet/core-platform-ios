@@ -275,11 +275,18 @@ public struct MockSocialDataset: Sendable {
             // declaring one it does not have is how a page ends up cropped
             // against a ratio nothing in the file matches.
             let collectionShapes: [(Int, Int)] = [(1600, 900), (1080, 1080), (900, 1600)]
-            let videoPagePosition = 1
+            // ⚠️ TWO of the three extra pages are clips, not one.
+            //
+            // One clip proves a gallery can hold a video; two prove the POOL
+            // keeps one player per asset rather than one per gallery. The
+            // difference is the whole of "no duplicates during the transitions"
+            // — with a single clip, a duplicate and a correct reuse look the
+            // same from outside.
+            let videoPagePositions: Set<Int> = [1, 2]
             let extraMedia: [(url: String, width: Int, height: Int)] =
                 index == 4
                 ? collectionShapes.enumerated().map { position, shape in
-                    switch (mediaCatalog, position == videoPagePosition) {
+                    switch (mediaCatalog, videoPagePositions.contains(position)) {
                     case (.synthetic, false):
                         ("mock://media/new-4-\(position)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
                     case (.synthetic, true):
@@ -291,7 +298,9 @@ public struct MockSocialDataset: Sendable {
                         (MockMediaFixtures.imageURL(index: 40 + position, width: shape.0, height: shape.1),
                          shape.0, shape.1)
                     case (.realAssets, true):
-                        { let fixture = MockMediaFixtures.videos[1]
+                        // A DIFFERENT clip per page: two pages on one asset
+                        // would hide the very duplication this exists to catch.
+                        { let fixture = MockMediaFixtures.videos[position]
                           return (fixture.url, fixture.width, fixture.height) }()
                     }
                 }

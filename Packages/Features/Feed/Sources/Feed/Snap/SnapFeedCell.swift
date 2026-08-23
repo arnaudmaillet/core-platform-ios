@@ -84,6 +84,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // free. The player is released when the page itself goes: `didResignActive`
         // and `prepareForReuse` both already stop it.
         guard isActive, let url = activeVideoURL else {
+            #if DEBUG
+            CarouselPlaybackAudit.trace("post setPaused true page=\(mediaCard.currentPage)")
+            #endif
             videoPlayback.setPaused(true, in: surface)
             return
         }
