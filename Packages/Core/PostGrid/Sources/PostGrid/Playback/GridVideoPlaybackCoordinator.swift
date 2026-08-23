@@ -162,15 +162,12 @@ public final class GridVideoPlaybackCoordinator {
         // Reconciliation and not an edge: a row can arrive already paused (its
         // carousel was left on another page), and a start below is followed by
         // the same call for the same reason.
+        // Paused or resumed to match, every time, for everything still chosen.
+        // Reconciliation and not an edge: a row can arrive already paused (its
+        // carousel was left on another page), and a start below is followed by
+        // the same call for the same reason.
         for candidate in chosen where playing[candidate.id] != nil {
             candidate.cell.loadedVideoRenderView.map {
-                #if DEBUG
-                if CarouselPlaybackAudit.isEnabled {
-                    CarouselPlaybackAudit.trace(
-                        "grid setPaused \(candidate.isPaused) \(candidate.id.rawValue)"
-                    )
-                }
-                #endif
                 pool.setPaused(candidate.isPaused, in: $0)
             }
         }

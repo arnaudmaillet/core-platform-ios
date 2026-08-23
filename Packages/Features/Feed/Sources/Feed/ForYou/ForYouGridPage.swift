@@ -321,6 +321,9 @@ final class ForYouGridPage: UIView {
     init(imagePipeline: ImagePipeline, style: Style, videoPlayback: VideoPlaybackController? = nil) {
         self.imagePipeline = imagePipeline
         videoPool = videoPlayback
+        #if DEBUG
+        CarouselPlaybackAudit.capturePoolTrace()
+        #endif
         playback = videoPlayback.map {
             GridVideoPlaybackCoordinator(pool: $0, maxConcurrent: Self.concurrentPlayers(for: style))
         }

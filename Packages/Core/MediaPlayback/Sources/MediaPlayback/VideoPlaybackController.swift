@@ -261,6 +261,7 @@ public final class VideoPlaybackController {
     /// in-flight `play` for the view.
     public func stop(_ view: VideoRenderView) {
         let key = ObjectIdentifier(view)
+        VideoPlaybackTrace.emit("stop \(playingURL[key]?.lastPathComponent ?? "-")")
         generation[key] = (generation[key] ?? 0) + 1
         detach(key: key, view: view)
     }
@@ -399,7 +400,11 @@ public final class VideoPlaybackController {
     /// real difference in behaviour rather than a difference in code paths.
     @discardableResult
     public func attachSurface(_ view: VideoRenderView, to mediaURL: URL) -> Bool {
-        guard let player = activePlayer(playing: mediaURL) else { return false }
+        guard let player = activePlayer(playing: mediaURL) else {
+            VideoPlaybackTrace.emit("attachSurface REFUSED \(mediaURL.lastPathComponent)")
+            return false
+        }
+        VideoPlaybackTrace.emit("attachSurface \(mediaURL.lastPathComponent)")
         bind(player, to: view)
         return true
     }
@@ -470,7 +475,11 @@ public final class VideoPlaybackController {
     /// the caller has already joined it.
     @discardableResult
     public func transferOwnership(of mediaURL: URL, to view: VideoRenderView) -> Bool {
-        guard let player = activePlayer(playing: mediaURL) else { return false }
+        guard let player = activePlayer(playing: mediaURL) else {
+            VideoPlaybackTrace.emit("transferOwnership REFUSED \(mediaURL.lastPathComponent)")
+            return false
+        }
+        VideoPlaybackTrace.emit("transferOwnership \(mediaURL.lastPathComponent)")
         if let previous = playingURL.first(where: { $0.value == mediaURL })?.key,
            previous != ObjectIdentifier(view) {
             // Clear the old owner's registration WITHOUT `detach` — detaching

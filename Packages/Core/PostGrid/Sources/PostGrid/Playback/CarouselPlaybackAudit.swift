@@ -1,4 +1,5 @@
 import Foundation
+import MediaPlayback
 
 #if DEBUG
 /// Reports states in which the VIEWER would be looking at a still where a clip
@@ -104,13 +105,35 @@ public enum CarouselPlaybackAudit {
     /// Only asked when the viewer is ON the clip's page: paused is the correct
     /// state everywhere else, and a check that ignored that would report the
     /// feature working as a failure.
+    /// How many consecutive observations a still picture must survive before it
+    /// counts.
+    ///
+    /// ⚠️ ONE observation is not a freeze. Between the coordinator registering a
+    /// start and the pool's async `play` binding a player there is a legitimate
+    /// window with no player at all, and the audit runs inside it — the very
+    /// first line of a run was a "no-player" report for a row that was starting
+    /// normally. Counting that inflated a real fault with a transient and sent
+    /// me looking for a bug in the handoff.
+    ///
+    /// Three, because reconciles come in bursts of two on a single scroll tick.
+    private static let framesBeforeFrozen = 3
+    private static var stillFrames: [String: Int] = [:]
+
     public static func checkAdvancing(
         surface: String, subject: String, page: Int,
         watching: Bool, advancing: Bool, hasPlayer: Bool
     ) {
         guard isEnabled else { return }
         checks += 1
-        guard watching, !advancing else { return }
+        let slot = "\(surface)/\(subject)/\(page)"
+        guard watching, !advancing else {
+            stillFrames[slot] = 0
+            return
+        }
+        let seen = (stillFrames[slot] ?? 0) + 1
+        stillFrames[slot] = seen
+        guard seen >= framesBeforeFrozen else { return }
+        stillFrames[slot] = 0
         failures += 1
         // ⚠️ Two very different faults look identical on screen, so the line
         // names which one it is. A surface with NO player is one that lost its
@@ -140,6 +163,13 @@ public enum CarouselPlaybackAudit {
     public static func trace(_ line: String) {
         guard isEnabled else { return }
         emit("[audit] · \(line)")
+    }
+
+    /// Wires the pool's own boundary trace into this file, so the two sides of
+    /// a handoff read as one sequence. Called once, by whoever builds the pool.
+    public static func capturePoolTrace() {
+        guard isEnabled else { return }
+        VideoPlaybackTrace.sink = { trace($0) }
     }
 
     /// Prints a one-line verdict. Called from the harness between cycles so a
