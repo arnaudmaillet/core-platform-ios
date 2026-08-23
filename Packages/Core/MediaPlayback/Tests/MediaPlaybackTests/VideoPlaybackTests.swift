@@ -157,6 +157,67 @@ struct VideoPlaybackControllerTests {
         #expect(postered.isHidden == false)
     }
 
+    /// ⚠️ ONE ASSET, ONE PLAYER — even when two surfaces want it at once.
+    ///
+    /// A card holding a clip paused on its page while the post opens the same
+    /// clip is now an ordinary state, and it used to mint a second `AVPlayer`:
+    /// two decoders on two clocks for one asset, with the surface a viewer is
+    /// looking at bound to whichever a lookup happened to find.
+    @Test func asecondSurfaceOnTheSameAssetJoinsTheSamePlayer() async {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        let url = URL(string: "mock://video/1")!
+        let first = VideoRenderView()
+        let second = VideoRenderView()
+
+        await controller.play(url, in: first)
+        await controller.play(url, in: second)
+
+        #expect(controller.playerCountByURL[url] == 1)
+        #expect(controller.activePlayer(in: first) === controller.activePlayer(in: second))
+    }
+
+    /// ⚠️ And ONE SURFACE LEAVING is not the end of the playback.
+    ///
+    /// Sharing the loan made this reachable: tearing the player down when the
+    /// first surface stops would pause the asset — and return it to the idle
+    /// pool — while the other is still rendering it. That is a frozen picture
+    /// with no cause visible from the side that froze it.
+    @Test func stoppingOneSurfaceLeavesTheOtherPlaying() async {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        let url = URL(string: "mock://video/1")!
+        let first = VideoRenderView()
+        let second = VideoRenderView()
+        await controller.play(url, in: first)
+        await controller.play(url, in: second)
+        let shared = controller.activePlayer(in: second)
+
+        controller.stop(first)
+
+        #expect(controller.activePlayer(in: first) == nil)
+        #expect(controller.activePlayer(in: second) === shared)
+        #expect(controller.isAdvancing(in: second))
+        // Not handed back while it is still being watched.
+        #expect(controller.idlePlayerCount == 0)
+
+        // And the LAST surface leaving does end it.
+        controller.stop(second)
+        #expect(controller.activePlayer(in: second) == nil)
+        #expect(controller.idlePlayerCount == 1)
+    }
+
+    /// Two DIFFERENT assets still get two players — the reuse must not collapse
+    /// unrelated playbacks onto one.
+    @Test func differentAssetsKeepTheirOwnPlayers() async {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        let first = VideoRenderView()
+        let second = VideoRenderView()
+
+        await controller.play(URL(string: "mock://video/1")!, in: first)
+        await controller.play(URL(string: "mock://video/2")!, in: second)
+
+        #expect(controller.activePlayer(in: first) !== controller.activePlayer(in: second))
+    }
+
     @Test func recappingAViewWithNoPlayerIsANoOp() {
         let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
         controller.setPeakBitRate(0, in: VideoRenderView()) // must not trap

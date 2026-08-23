@@ -319,6 +319,9 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// to the video at the moment of the tap, on a page that carries no video at
     /// all. Both directions are the same requirement stated once: what is on a
     /// page is what that page is.
+    /// The surface, for a host that needs to ask the pool about it.
+    public var playbackSurface: VideoRenderView? { loadedVideoRenderView }
+
     public var drawsVideoOnAStillPage: Bool {
         guard let view = loadedVideoRenderView, !view.isHidden, view.alpha > 0,
               showsCarousel, let carousel

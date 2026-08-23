@@ -29,6 +29,32 @@ public enum CarouselPlaybackAudit {
     private(set) static var failures = 0
     private(set) static var checks = 0
 
+    /// ⚠️ A FILE, not just the console.
+    ///
+    /// `simctl launch --console-pty` stopped delivering output mid-session, and
+    /// an empty log reads exactly like a passing one — two runs were reported as
+    /// "0 failures" from a log with no lines in it before the line count was
+    /// checked. A file the app writes itself cannot fail that way: it is either
+    /// there with content or it is not.
+    ///
+    /// It also makes the auditor usable by someone who is not driving the
+    /// simulator from a shell — reproduce the fault, then hand over the file.
+    private static let sink: URL? = {
+        guard isEnabled else { return nil }
+        let url = URL.documentsDirectory.appendingPathComponent("carousel-audit.log")
+        try? FileManager.default.removeItem(at: url)
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        return url
+    }()
+
+    private static func emit(_ line: String) {
+        print(line)
+        guard let sink, let handle = try? FileHandle(forWritingTo: sink) else { return }
+        defer { try? handle.close() }
+        try? handle.seekToEnd()
+        try? handle.write(contentsOf: Data((line + "\n").utf8))
+    }
+
     /// - Parameters:
     ///   - surface: which screen is reporting, so a failure names its half.
     ///   - subject: the post, so a failure can be reproduced.
@@ -40,7 +66,7 @@ public enum CarouselPlaybackAudit {
         checks += 1
         guard playing, clip, !(hosted && drawable) else { return }
         failures += 1
-        print(String(
+        emit(String(
             format: "[audit] FAIL #%d %@ %@ page=%d hosted=%@ drawable=%@",
             failures, surface, subject, page,
             hosted ? "Y" : "N", drawable ? "Y" : "N"
@@ -61,17 +87,51 @@ public enum CarouselPlaybackAudit {
         checks += 1
         guard drawsVideo else { return }
         failures += 1
-        print(String(
+        emit(String(
             format: "[audit] FAIL #%d %@ %@ page=%d video-on-a-still-page",
             failures, surface, subject, page
         ))
+    }
+
+    /// A picture that is on screen and not moving.
+    ///
+    /// ⚠️ The third fault of this family, and the one no existing question
+    /// could reach. The first asks whether the clip's page shows its clip; the
+    /// second whether a still page is free of one. Both are satisfied by a
+    /// surface that is exactly where it should be, showing the right frame, and
+    /// paused — which is what a viewer reports as "the player freezes".
+    ///
+    /// Only asked when the viewer is ON the clip's page: paused is the correct
+    /// state everywhere else, and a check that ignored that would report the
+    /// feature working as a failure.
+    public static func checkAdvancing(
+        surface: String, subject: String, page: Int,
+        watching: Bool, advancing: Bool
+    ) {
+        guard isEnabled else { return }
+        checks += 1
+        guard watching, !advancing else { return }
+        failures += 1
+        emit(String(
+            format: "[audit] FAIL #%d %@ %@ page=%d frozen-on-the-page-being-watched",
+            failures, surface, subject, page
+        ))
+    }
+
+    /// Two players on one asset — the state the pool's reuse rule exists to
+    /// make impossible, reported rather than assumed absent.
+    public static func reportDuplicate(url: String, players: Int) {
+        guard isEnabled else { return }
+        failures += 1
+        emit("[audit] FAIL #\(failures) DUPLICATE players=\(players) url=\(url)")
     }
 
     /// Prints a one-line verdict. Called from the harness between cycles so a
     /// long run reads as a sequence rather than as one number at the end.
     public static func report(_ label: String) {
         guard isEnabled else { return }
-        print(String(format: "[audit] %@ checks=%d failures=%d", label, checks, failures))
+        _ = sink
+        emit(String(format: "[audit] %@ checks=%d failures=%d", label, checks, failures))
     }
 }
 #endif

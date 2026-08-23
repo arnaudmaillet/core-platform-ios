@@ -234,6 +234,10 @@ final class ForYouGridPage: UIView {
     /// terms as the mosaic. The concurrency is the whole difference between the
     /// two shapes' playback — everything below this line is shared.
     private let playback: GridVideoPlaybackCoordinator?
+    /// The pool itself, held only so the audit can ask whether a surface is
+    /// ADVANCING — a question the coordinator does not answer, because "playing"
+    /// there means "holds a loan", not "is moving".
+    private let videoPool: VideoPlaybackController?
 
     /// How many videos may play at once, per shape.
     ///
@@ -316,6 +320,7 @@ final class ForYouGridPage: UIView {
 
     init(imagePipeline: ImagePipeline, style: Style, videoPlayback: VideoPlaybackController? = nil) {
         self.imagePipeline = imagePipeline
+        videoPool = videoPlayback
         playback = videoPlayback.map {
             GridVideoPlaybackCoordinator(pool: $0, maxConcurrent: Self.concurrentPlayers(for: style))
         }
@@ -627,6 +632,15 @@ final class ForYouGridPage: UIView {
                 surface: "card", subject: post.id.rawValue,
                 page: row.currentMediaPage ?? -1,
                 drawsVideo: row.drawsVideoOnAStillPage
+            )
+            // Frozen: on the clip's page, drawing, and not moving.
+            CarouselPlaybackAudit.checkAdvancing(
+                surface: "card", subject: post.id.rawValue,
+                page: row.currentMediaPage ?? -1,
+                watching: row.currentPageVideoURL != nil && row.isSurfaceDrawable
+                    && playback.isPlaying(post.id),
+                advancing: row.playbackSurface.map { videoPool?.isAdvancing(in: $0) ?? true }
+                    ?? true
             )
         }
     }

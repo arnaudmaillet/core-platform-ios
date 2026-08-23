@@ -189,6 +189,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // same in a log. A passing run has to be able to say how much it looked
         // at, or "0 failures" means nothing.
         CarouselPlaybackAudit.report("post")
+        // ⚠️ One asset, one player. Reported from here because the post is the
+        // second claimant: the card holds a paused player for the same clip
+        // while this page opens one of its own.
+        for (url, count) in videoPlayback?.playerCountByURL ?? [:] where count > 1 {
+            CarouselPlaybackAudit.reportDuplicate(url: url.lastPathComponent, players: count)
+        }
         #endif
     }
     private var videoPlayback: VideoPlaybackController?

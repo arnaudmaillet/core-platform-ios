@@ -86,6 +86,31 @@ public final class VideoPlaybackController {
             return
         }
 
+        // ⚠️ ONE ASSET, ONE PLAYER — including one that is already ACTIVE.
+        //
+        // The branch above adopts a PARKED player, which is the handoff. It
+        // left a second case open: a player running this same asset for another
+        // surface. That happens by construction now — a card holds a clip
+        // paused on its page while the post opens the same clip — and minting a
+        // second one gives the asset two decoders on two clocks. The codebase
+        // has met that before (see `startDeferredPlayback`'s note on the
+        // cold-open race): the surface a viewer is looking at ends up bound to
+        // whichever of them a lookup happens to find, and a paused one behind a
+        // visible surface is a picture that has stopped for no visible reason.
+        //
+        // Joining is cheap and synchronous — no resolution, no await — so it
+        // also removes a start-up delay on the second surface.
+        if let shared = sharedActivePlayer(playing: mediaURL),
+           shared !== activePlayers[key] {
+            detach(key: key, view: view)
+            shared.currentItem?.preferredPeakBitRate = peakBitRate
+            bind(shared, to: view)
+            activePlayers[key] = shared
+            playingURL[key] = mediaURL
+            shared.play()
+            return
+        }
+
         guard let playableURL = try? await source.playableURL(for: mediaURL) else { return }
         // Lost the race to a newer play/stop while resolving: drop this result.
         guard generation[key] == token else { return }
@@ -205,6 +230,39 @@ public final class VideoPlaybackController {
         let key = ObjectIdentifier(view)
         generation[key] = (generation[key] ?? 0) + 1
         detach(key: key, view: view)
+    }
+
+    /// How many DISTINCT players are currently on each asset.
+    ///
+    /// ⚠️ The answer should always be one. Two players on one URL means two
+    /// decoders on two clocks: the surface a viewer is looking at can be bound
+    /// to whichever of them a lookup happens to find, and a paused one behind a
+    /// visible surface is a picture that has stopped moving for no reason the
+    /// caller can see. The codebase has met this before — `startDeferredPlayback`
+    /// carries a note about the cold-open race minting a second player — and it
+    /// is measured here rather than reasoned about.
+    public var playerCountByURL: [URL: Int] {
+        var players: [URL: Set<ObjectIdentifier>] = [:]
+        for (key, url) in playingURL {
+            guard let player = activePlayers[key] else { continue }
+            players[url, default: []].insert(ObjectIdentifier(player))
+        }
+        if let parked {
+            players[parked.url, default: []].insert(ObjectIdentifier(parked.player))
+        }
+        return players.mapValues(\.count)
+    }
+
+    /// Whether the player bound to `view` is actually advancing.
+    ///
+    /// ⚠️ Distinct from "has a player" and from "is visible", and the gap
+    /// between the three is what a frozen picture IS: a surface on screen,
+    /// bound to a player, that is not moving. Paused is a legitimate state —
+    /// a clip one page over is meant to be paused — so the question only means
+    /// something next to whether the viewer is looking at it.
+    public func isAdvancing(in view: VideoRenderView) -> Bool {
+        guard let player = activePlayers[ObjectIdentifier(view)] else { return false }
+        return player.timeControlStatus != .paused
     }
 
     /// Whether `view` currently has a player bound to it.
@@ -416,6 +474,14 @@ public final class VideoPlaybackController {
         activePlayer(playing: mediaURL)?.currentItem?.preferredPeakBitRate = peakBitRate
     }
 
+    /// A player bound to some surface and playing `mediaURL`. Deliberately
+    /// blind to the parked slot: parking is the handoff's own mechanism and has
+    /// its own branch in `play`, which un-parks rather than sharing.
+    private func sharedActivePlayer(playing mediaURL: URL) -> AVPlayer? {
+        guard let key = playingURL.first(where: { $0.value == mediaURL })?.key else { return nil }
+        return activePlayers[key]
+    }
+
     private func activePlayer(playing mediaURL: URL) -> AVPlayer? {
         if let key = playingURL.first(where: { $0.value == mediaURL })?.key,
            let player = activePlayers[key] {
@@ -459,6 +525,16 @@ public final class VideoPlaybackController {
         view.detach(reason: "controller.stop")
         playingURL[key] = nil
         guard let player = activePlayers.removeValue(forKey: key) else { return }
+        // ⚠️ STILL IN USE? Then this is one surface leaving, not the end of a
+        // playback.
+        let stillInUse = activePlayers.values.contains { $0 === player }
+            || parked.map { $0.player === player } ?? false
+        guard !stillInUse else { return }
+        //
+        // The loan became shareable the moment `play` started joining an active
+        // player, and tearing it down here would pause the asset — and return it
+        // to the idle pool — while another surface is still rendering it. That
+        // is a frozen picture with no cause visible from the side that froze it.
         player.pause()
         removeLoop(for: player)
         player.replaceCurrentItem(with: nil)
