@@ -226,7 +226,11 @@ final class AppContainer {
         // root's business, which is what lets a feed row report a post without
         // the Feed package knowing the Profile package exists.
         reporting: profileReportRepository,
-        socialGraph: profileRepository
+        socialGraph: profileRepository,
+        // counter.v1, so a card can show reach. The timeline read hydrates
+        // likes only, and a card's counter chip shows VIEWS — without this it
+        // has nothing to say and hides itself, which is what it did.
+        counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient)
     )
 
     // MARK: - Maps
@@ -382,7 +386,10 @@ final class AppContainer {
     /// cache, and a post opened from a trending tile is already warm in the
     /// snap feed it opens into. See `ForYouExploreAdapter`.
     private lazy var exploreRepository = ForYouExploreAdapter(
-        forYou: ForYouRepository(feed: feedRepository)
+        forYou: ForYouRepository(
+            feed: feedRepository,
+            counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient)
+        )
     )
 
     /// Pictures and social context for the search screen's person rows.

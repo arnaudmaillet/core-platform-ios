@@ -149,6 +149,20 @@ public struct FeedDisplayModelBuilder: Sendable {
             extraMedia: entry.post.attachments.dropFirst().map { attachment in
                 GalleryPost.MediaPage(
                     thumbnailURL: attachment.thumbnailURL ?? attachment.url,
+                    // ⚠️ The page's OWN stream, and it was dropped here.
+                    //
+                    // This mapped a thumbnail and an aspect and nothing else, so
+                    // every page after the head arrived as a still whatever its
+                    // MIME said — a clip on page two of a collection reached the
+                    // post page as a photograph, with no badge and nothing to
+                    // play. The two grid projections already carry it; this one
+                    // is where the page's model is built and it did not.
+                    //
+                    // Routed through `MediaKind`, not a `video/` prefix: an HLS
+                    // manifest declares `application/vnd.apple.mpegurl`, which a
+                    // prefix test reads as a still.
+                    videoURL: MediaKind(mimeType: attachment.mimeType) == .video
+                        ? attachment.url : nil,
                     aspectRatio: attachment.aspectRatio
                 )
             }

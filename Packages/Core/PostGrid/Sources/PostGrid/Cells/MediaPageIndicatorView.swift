@@ -32,14 +32,11 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
     /// itself would be a second thing deciding where the pages are.
     public var onPageRequested: ((Int) -> Void)?
 
-    private let dots = UIStackView()
+    private let dots = PageDotsView()
     private let label = UILabel()
     private var pageCount = 0
 
     public init() {
-        dots.axis = .horizontal
-        dots.alignment = .center
-        dots.spacing = Self.dotSpacing
         label.font = PostMetaPillView.font
         label.textColor = PostMetaPillView.foreground
         label.adjustsFontForContentSizeCategory = true
@@ -52,41 +49,14 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
         addGestureRecognizer(tap)
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handleTouch))
         addGestureRecognizer(pan)
-    }
-
-    /// A drag across the dots scrubs the pages, and the chip has to win that
-    /// drag from the tab pager the way the carousel does.
-    ///
-    /// It cannot win it the same way: the pager yields to horizontally
-    /// SCROLLABLE content under the touch, and this is a chip with a pan
-    /// recognizer, not a scroll view. Declaring the intent is what closes the
-    /// gap — see `HorizontalDragOwning`.
-    ///
-    /// A tap and a pan on one view, both to the same action: a dot tap is a
-    /// zero-length scrub, so treating them as one thing means there is a single
-    /// place that turns an x into a page.
-    @objc private func handleTouch(_ recognizer: UIGestureRecognizer) {
-        guard pageCount >= 2 else { return }
-        onPageRequested?(
-            Self.page(at: recognizer.location(in: self).x, width: bounds.width, count: pageCount)
-        )
-    }
-
-    /// Which page a touch at `x` is asking for.
-    ///
-    /// Truncation, not rounding: the dots divide the strip into `count` equal
-    /// BANDS and the viewer is pointing at a band, not at a boundary between
-    /// two. Rounding makes the first and last bands half-width, so the ends —
-    /// the two pages people reach for most — are the hardest to hit.
-    ///
-    /// The chip's own padding is removed first, so the bands span the dots
-    /// rather than the capsule.
-    static func page(at x: CGFloat, width: CGFloat, count: Int) -> Int {
-        guard count > 1 else { return 0 }
-        let inset = insets.leading
-        let usable = max(width - inset * 2, 1)
-        let fraction = min(max((x - inset) / usable, 0), 1)
-        return min(Int(fraction * CGFloat(count)), count - 1)
+        // ⚠️ This chip YIELDS horizontal space; the counters and the date do not.
+        //
+        // It is the only one of the four whose content can be shown partially
+        // and still mean something — a window of dots still says "there are
+        // more, you are here" — while half a count or half a date says nothing.
+        // So it compresses first, down to the floor `PageDotsView` sets.
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        setContentHuggingPriority(.defaultLow, for: .horizontal)
     }
 
     @available(*, unavailable)
@@ -106,16 +76,7 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
         let usesDots = count <= Self.dotLimit
         dots.isHidden = !usesDots
         label.isHidden = usesDots
-
-        if usesDots {
-            if dots.arrangedSubviews.count != count {
-                dots.arrangedSubviews.forEach {
-                    dots.removeArrangedSubview($0)
-                    $0.removeFromSuperview()
-                }
-                for _ in 0..<count { dots.addArrangedSubview(makeDot()) }
-            }
-        }
+        if usesDots { dots.configure(count: count) }
         setCurrent(current)
     }
 
@@ -125,26 +86,156 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
         guard pageCount >= 2 else { return }
         let page = min(max(current, 0), pageCount - 1)
         if pageCount <= Self.dotLimit {
-            for (index, dot) in dots.arrangedSubviews.enumerated() {
-                // Opacity, not colour: the chip's foreground is `.label`, which
-                // already resolves against the interface style, and a second
-                // colour here would be a second thing to keep in step with it.
-                dot.alpha = index == page ? 1 : 0.35
-            }
+            dots.setCurrent(page)
         } else {
             label.text = "\(page + 1) / \(pageCount)"
         }
     }
 
-    private func makeDot() -> UIView {
-        let dot = UIView()
-        dot.backgroundColor = PostMetaPillView.foreground
-        dot.layer.cornerRadius = Self.dotDiameter / 2
-        dot.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            dot.widthAnchor.constraint(equalToConstant: Self.dotDiameter),
-            dot.heightAnchor.constraint(equalToConstant: Self.dotDiameter)
-        ])
-        return dot
+    @objc private func handleTouch(_ recognizer: UIGestureRecognizer) {
+        guard pageCount >= 2 else { return }
+        onPageRequested?(
+            Self.page(at: recognizer.location(in: self).x, width: bounds.width, count: pageCount)
+        )
+    }
+
+    /// Which page a touch at `x` is asking for.
+    ///
+    /// ⚠️ Across the WHOLE run of pages, even when only a window of dots is
+    /// drawn. The chip is a scrubber, not a row of discrete targets: with a
+    /// windowed indicator the visible dots are not the pages, so mapping a touch
+    /// onto them would make the far right mean "the last dot I can see" rather
+    /// than "the end" — and which page that is would change as the window moved.
+    /// One rule at every width, and every page reachable at every width.
+    ///
+    /// Truncation, not rounding: the strip divides into `count` equal BANDS and
+    /// the viewer is pointing at a band. Rounding makes the first and last bands
+    /// half-width, so the two pages people reach for most become the hardest to
+    /// hit.
+    static func page(at x: CGFloat, width: CGFloat, count: Int) -> Int {
+        guard count > 1 else { return 0 }
+        let inset = insets.leading
+        let usable = max(width - inset * 2, 1)
+        let fraction = min(max((x - inset) / usable, 0), 1)
+        return min(Int(fraction * CGFloat(count)), count - 1)
+    }
+
+    /// The floor this chip may be compressed to: two dots plus its own padding.
+    public var minimumChipWidth: CGFloat {
+        dots.minimumWidth + Self.insets.leading + Self.insets.trailing
+    }
+}
+
+/// The dots themselves, laid out by hand so the chip can be narrower than its
+/// content.
+///
+/// ⚠️ A WINDOW, not a clipped row. When the counters and the date take the
+/// space, this shows as many dots as fit — centred on the current page — rather
+/// than the first N. Clipping would hide exactly the dot the viewer is looking
+/// for the moment there are more pages than room, which is when an indicator
+/// starts earning its place.
+///
+/// Frames rather than a stack, for the reason the carousel uses frames: how many
+/// dots are visible is a function of the WIDTH, and a stack's arranged subviews
+/// cannot be added and removed inside a layout pass without fighting it.
+final class PageDotsView: UIView {
+    /// The floor: two dots. One dot says nothing a single page would not, and
+    /// the chip has to keep saying "there is more than one" at every width.
+    static let minimumVisibleDots = 2
+
+    private var count = 0
+    private var current = 0
+    private var dots: [UIView] = []
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        clipsToBounds = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    func configure(count: Int) {
+        guard count != self.count else { return }
+        self.count = count
+        dots.forEach { $0.removeFromSuperview() }
+        dots = (0..<count).map { _ in
+            let dot = UIView()
+            dot.backgroundColor = PostMetaPillView.foreground
+            dot.layer.cornerRadius = MediaPageIndicatorView.dotDiameter / 2
+            addSubview(dot)
+            return dot
+        }
+        invalidateIntrinsicContentSize()
+        setNeedsLayout()
+    }
+
+    func setCurrent(_ page: Int) {
+        current = page
+        // Opacity, not colour: the chip's foreground is `.label`, which already
+        // resolves against the interface style, and a second colour here would
+        // be a second thing to keep in step with it.
+        for (index, dot) in dots.enumerated() { dot.alpha = index == page ? 1 : 0.35 }
+        setNeedsLayout()
+    }
+
+    /// What the chip asks for when nothing is competing: every dot.
+    override var intrinsicContentSize: CGSize {
+        CGSize(width: Self.width(forDots: count), height: MediaPageIndicatorView.dotDiameter)
+    }
+
+    /// The floor the chip may be compressed to.
+    var minimumWidth: CGFloat { Self.width(forDots: Self.minimumVisibleDots) }
+
+    static func width(forDots visible: Int) -> CGFloat {
+        guard visible > 0 else { return 0 }
+        let diameter = MediaPageIndicatorView.dotDiameter
+        let spacing = MediaPageIndicatorView.dotSpacing
+        return CGFloat(visible) * diameter + CGFloat(visible - 1) * spacing
+    }
+
+    /// How many dots fit in `width`, never fewer than the floor and never more
+    /// than there are pages.
+    static func visibleDots(in width: CGFloat, count: Int) -> Int {
+        guard count > 0 else { return 0 }
+        let diameter = MediaPageIndicatorView.dotDiameter
+        let spacing = MediaPageIndicatorView.dotSpacing
+        let fitted = Int(floor((width + spacing) / (diameter + spacing)))
+        return min(count, max(fitted, minimumVisibleDots))
+    }
+
+    /// The first dot of the window, chosen so the current page sits in the
+    /// middle of it and the window never runs off either end.
+    static func windowStart(current: Int, visible: Int, count: Int) -> Int {
+        guard count > visible else { return 0 }
+        let half = visible / 2
+        return min(max(current - half, 0), count - visible)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard !dots.isEmpty else { return }
+        let visible = Self.visibleDots(in: bounds.width, count: count)
+        let start = Self.windowStart(current: current, visible: visible, count: count)
+        let diameter = MediaPageIndicatorView.dotDiameter
+        let spacing = MediaPageIndicatorView.dotSpacing
+        // Centred in whatever width the row left: a window narrower than the
+        // chip would otherwise sit against one edge and read as misaligned.
+        let used = Self.width(forDots: visible)
+        let originX = ((bounds.width - used) / 2).rounded()
+        let y = ((bounds.height - diameter) / 2).rounded()
+        for (index, dot) in dots.enumerated() {
+            let offset = index - start
+            guard offset >= 0, offset < visible else {
+                dot.isHidden = true
+                continue
+            }
+            dot.isHidden = false
+            dot.frame = CGRect(
+                x: originX + CGFloat(offset) * (diameter + spacing),
+                y: y, width: diameter, height: diameter
+            )
+        }
     }
 }

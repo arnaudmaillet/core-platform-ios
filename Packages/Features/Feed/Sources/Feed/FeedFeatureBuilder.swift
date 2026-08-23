@@ -1,4 +1,5 @@
 import MediaCore
+import CoreContracts
 import CoreModels
 import CoreStorage
 import ProfileInterface
@@ -61,8 +62,13 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         wallet: WalletStore? = nil,
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
         reporting: (any ContentReporting)? = nil,
-        socialGraph: (any SocialGraphWriting)? = nil
+        socialGraph: (any SocialGraphWriting)? = nil,
+        /// Reads the numbers the timeline does not carry, so a card can show
+        /// reach. Optional: without it the cards simply hide their counter,
+        /// which is what they did before.
+        counterClient: (any Counter_V1_CounterServiceClientInterface)? = nil
     ) {
+        self.counterClient = counterClient
         self.reporting = reporting
         self.socialGraph = socialGraph
         self.makeProfileSwitcher = makeProfileSwitcher
@@ -96,13 +102,15 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         await repository.prewarm(ids)
     }
 
+    private let counterClient: (any Counter_V1_CounterServiceClientInterface)?
+
     public func makeForYouViewController(
         onTabPresentationChange: ((ForYouTabPresentation) -> Void)?
     ) -> UIViewController {
         let repository = repository
         let forYou = ForYouViewController(
             viewModel: ForYouViewModel(
-                repository: ForYouRepository(feed: repository),
+                repository: ForYouRepository(feed: repository, counterClient: counterClient),
                 // Its OWN namespace. The profile gallery persists the same
                 // format axis under `profile.gallery.*`; sharing the keys would
                 // make each surface yank the other's landing tab.

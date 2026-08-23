@@ -185,12 +185,18 @@ struct CarouselConcealmentTests {
         return view
     }
 
+    /// ⚠️ The PAGES' alphas, which is not the same as every image view's.
+    ///
+    /// This collected `UIImageView`s and was right while a page WAS one. A page
+    /// is now a container — a cover, and a play badge for a page that carries a
+    /// clip — so the walk returned two views per page, and concealment does not
+    /// touch either of them: it dims the page, and the layers inside inherit it.
+    ///
+    /// Read off the carousel's own page list. The scroll view's subviews are
+    /// NOT it — UIKit keeps its two scroll indicators there, permanently at
+    /// alpha 0, which read as two extra concealed pages.
     private func pageAlphas(_ view: MediaCarouselView) -> [CGFloat] {
-        func images(_ node: UIView) -> [UIImageView] {
-            if let image = node as? UIImageView { return [image] }
-            return node.subviews.flatMap(images)
-        }
-        return images(view).map(\.alpha)
+        view.pageViews.map(\.alpha)
     }
 
     @Test func onlyTheFlownPageIsConcealed() {
@@ -245,15 +251,385 @@ struct CarouselConcealmentTests {
     }
 }
 
+/// A collection's pages need not agree about their type: `post.v1` gives every
+/// attachment its own MIME, and the client hydrates `MediaPage.videoURL` one
+/// page at a time. These pin the consequences — the parts that answer for the
+/// PAGE where something used to answer for the post.
+@MainActor
+struct MixedCarouselTests {
+    private func mixed() -> MediaCarouselView {
+        let view = MediaCarouselView(style: .card)
+        view.frame = CGRect(x: 0, y: 0, width: 340, height: 200)
+        view.configure(
+            with: [
+                GalleryPost.MediaPage(thumbnailURL: URL(string: "mock://a"), aspectRatio: 1.78),
+                GalleryPost.MediaPage(
+                    thumbnailURL: URL(string: "mock://b"),
+                    videoURL: URL(string: "mock://video/b"), aspectRatio: 1.78
+                ),
+                GalleryPost.MediaPage(thumbnailURL: URL(string: "mock://c"), aspectRatio: 1.78)
+            ],
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        view.layoutIfNeeded()
+        return view
+    }
+
+    /// ⚠️ THE REQUIREMENT: the stream follows the page.
+    ///
+    /// `GalleryPost.videoURL` answers for page one for ever, so a caller that
+    /// used it on a mixed collection would play page one's clip — or nothing at
+    /// all, which is what happened: a post whose first page is a photograph is a
+    /// `.photo` post, and the autoplay gate refused it outright.
+    @Test func theStreamIsTheCurrentPagesAndNotThePosts() {
+        let view = mixed()
+        #expect(view.currentPageVideoURL == nil)
+
+        view.setPage(1, animated: false)
+        #expect(view.currentPageVideoURL == URL(string: "mock://video/b"))
+
+        view.setPage(2, animated: false)
+        #expect(view.currentPageVideoURL == nil)
+    }
+
+    /// The badge is per page too, and it is the only thing that says a page in
+    /// the middle of a run of photographs is a clip — the row's own badge sits
+    /// over the whole preview and has no single answer to give.
+    @Test func onlyAPlayablePageWearsABadge() {
+        let view = mixed()
+
+        #expect(view.pageViews.map(\.isPlayable) == [false, true, false])
+        // And the badge really follows that flag rather than merely agreeing
+        // with it today: a still page draws its cover and nothing else, a
+        // playable one draws the mark as well.
+        let drawn = view.pageViews.map { page in
+            page.subviews.filter { !$0.isHidden }.count
+        }
+        #expect(drawn == [1, 2, 1])
+    }
+
+    /// ⚠️ The badge's fate under playback is decided by the SURFACE, not by the
+    /// page — and the two surfaces disagree on purpose.
+    ///
+    /// On a card the badge is what tells a clip apart from the photographs
+    /// either side of it while the viewer scrolls past. Full-bleed there is
+    /// nothing to tell it apart from, and a single-video post shows no badge on
+    /// that screen at all — keeping one would make two posts of the same kind
+    /// disagree on the same page.
+    @Test func aPlayingPageKeepsItsBadgeOnACardAndLosesItOnAPage() {
+        for style in [MediaCarouselView.Style.card, .page] {
+            let view = MediaCarouselView(style: style)
+            view.frame = CGRect(x: 0, y: 0, width: 340, height: 200)
+            view.configure(
+                with: [GalleryPost.MediaPage(
+                    thumbnailURL: URL(string: "mock://a"),
+                    videoURL: URL(string: "mock://video/a")
+                )],
+                imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            )
+            view.layoutIfNeeded()
+            let page = view.pageViews[0]
+            let restingBadges = page.subviews.filter { !$0.isHidden }.count
+
+            view.host(UIView())
+            let playingBadges = page.subviews.filter { !$0.isHidden }.count
+
+            #expect(restingBadges == 2)
+            // Card: cover, surface, badge. Page: cover and surface only.
+            #expect(playingBadges == (style == .card ? 3 : 2))
+        }
+    }
+
+    /// ⚠️ A SURFACE TAKEN AWAY BEHIND THE CAROUSEL'S BACK CAN COME HOME.
+    ///
+    /// A hero flight takes the render view by `removeFromSuperview` — it never
+    /// asks the carousel, and it cannot: the flight is driven from the surface's
+    /// own side. The page's reference is weak and the flight card retains the
+    /// view, so the page went on believing it held one, and re-hosting the same
+    /// object at the landing was skipped as redundant. The surface came back to
+    /// nowhere, the page showed its cover, and the NEXT flight flew a thumbnail.
+    ///
+    /// Reproduced here the way it happens: no eviction, just a removal.
+    @Test func aSurfaceTakenByAFlightIsRehostedOnItsReturn() {
+        let view = mixed()
+        view.setPage(1, animated: false)
+        let surface = UIView()
+        view.host(surface)
+        let hostedFirst = surface.superview === view.pageViews[1]
+        #expect(hostedFirst)
+
+        // What a flight does, and all it does.
+        surface.removeFromSuperview()
+
+        view.host(surface)
+        let hostedAgain = surface.superview === view.pageViews[1]
+        #expect(hostedAgain)
+    }
+
+    /// A surface handed to the carousel lands on the page being looked at, and
+    /// paging away takes it off again.
+    ///
+    /// ⚠️ The eviction searches every page rather than trusting `currentPage`:
+    /// the page changes BEFORE the host is told, so by the time anyone reacts
+    /// the surface is sitting on the page the viewer just left — still on
+    /// screen, peeking, playing a video beside the still they moved to.
+    @Test func theHostedSurfaceMovesWithTheViewer() {
+        let view = mixed()
+        let surface = UIView()
+        view.setPage(1, animated: false)
+        view.host(surface)
+
+        let host = surface.superview
+        #expect(host === view.pageViews[1])
+
+        view.setPage(2, animated: false)
+        let evicted = view.evictHostedSurface()
+        #expect(evicted === surface)
+        let orphaned = surface.superview == nil
+        #expect(orphaned)
+    }
+}
+
+/// The row's playback surface, across page changes.
+@MainActor
+struct RowSurfaceReinstallTests {
+    private func row() -> PostGridListRowCell {
+        let cell = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: 390, height: 500))
+        cell.configure(
+            with: GalleryPost(
+                id: PostID("p"), kind: .photo, isRepost: false,
+                pages: [
+                    GalleryPost.MediaPage(thumbnailURL: URL(string: "mock://a"), aspectRatio: 1.5),
+                    GalleryPost.MediaPage(
+                        thumbnailURL: URL(string: "mock://b"),
+                        videoURL: URL(string: "mock://video/b"), aspectRatio: 1.5
+                    )
+                ],
+                caption: "Short.", publishedAtMS: 0
+            ),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        let attributes = UICollectionViewLayoutAttributes(forCellWith: IndexPath(item: 0, section: 0))
+        attributes.frame = cell.frame
+        cell.bounds.size.height = cell.preferredLayoutAttributesFitting(attributes).frame.height
+        cell.layoutIfNeeded()
+        return cell
+    }
+
+    /// ⚠️ PAGING AWAY DOES NOT PUT THE THUMBNAIL BACK.
+    ///
+    /// The surface used to be evicted on every page change, which released the
+    /// page's cover to show through — so a clip appeared to be REPLACED by a
+    /// photograph the moment the viewer moved to the next page, while it was
+    /// merely no longer the one being watched. In a carousel that page is still
+    /// on screen, peeking. It keeps its last frame instead, paused in place.
+    ///
+    /// The row also keeps ANSWERING for that clip (`retainedVideoURL`): a row
+    /// that answered only for its current page would drop out of the pool's
+    /// ranking, and the player would go with the slot.
+    @Test func pagingAwayLeavesTheClipsFrameOnItsPage() {
+        let cell = row()
+        cell.debugScrollCarousel(toPage: 1, animated: false)
+        let surface = cell.makeVideoRenderViewIfNeeded()
+        let host = surface.superview
+        let installed = host != nil
+        #expect(installed)
+
+        cell.debugScrollCarousel(toPage: 0, animated: false)
+
+        let stillHosted = surface.superview === host
+        #expect(stillHosted)
+        // Not advancing — the viewer is on a still…
+        #expect(cell.currentPageVideoURL == nil)
+        // …and still held, which is what keeps the player.
+        #expect(cell.retainedVideoURL == URL(string: "mock://video/b"))
+    }
+
+    /// And it MOVES when the viewer reaches a different clip: the page it came
+    /// from must not be left believing it still holds a surface, which is enough
+    /// to keep that page's badge hidden for good.
+    @Test func arrivingAtAnotherClipMovesTheSurface() {
+        let cell = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: 390, height: 500))
+        cell.configure(
+            with: GalleryPost(
+                id: PostID("p"), kind: .photo, isRepost: false,
+                pages: [
+                    GalleryPost.MediaPage(
+                        thumbnailURL: URL(string: "mock://a"),
+                        videoURL: URL(string: "mock://video/a"), aspectRatio: 1.5
+                    ),
+                    GalleryPost.MediaPage(
+                        thumbnailURL: URL(string: "mock://b"),
+                        videoURL: URL(string: "mock://video/b"), aspectRatio: 1.5
+                    )
+                ],
+                caption: "Short.", publishedAtMS: 0
+            ),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        let attributes = UICollectionViewLayoutAttributes(forCellWith: IndexPath(item: 0, section: 0))
+        attributes.frame = cell.frame
+        cell.bounds.size.height = cell.preferredLayoutAttributesFitting(attributes).frame.height
+        cell.layoutIfNeeded()
+
+        let surface = cell.makeVideoRenderViewIfNeeded()
+        let firstHost = surface.superview
+
+        cell.debugScrollCarousel(toPage: 1, animated: false)
+        _ = cell.makeVideoRenderViewIfNeeded()
+
+        let moved = surface.superview !== firstHost
+        let hosted = surface.superview != nil
+        #expect(moved)
+        #expect(hosted)
+        #expect(cell.retainedVideoURL == URL(string: "mock://video/b"))
+    }
+
+    /// ⚠️ THE ROUND TRIP: hosted, donated to a flight, adopted back.
+    ///
+    /// This is the sequence the viewer reported — "after several hero
+    /// animations the player disappears and I get the thumbnail, and the next
+    /// flight uses the thumbnail as its window; doing it again works". Each
+    /// step alone was correct; the pair left a page believing it still held a
+    /// surface that had been carried off, and a page that believes that refuses
+    /// to take it back.
+    ///
+    /// The second attempt worked because the following page change evicted the
+    /// stale reference — which is exactly why this has to be tested as a
+    /// SEQUENCE rather than as three calls.
+    @Test func aDonatedSurfaceIsHostedAgainWhenTheFlightLands() {
+        let cell = row()
+        cell.debugScrollCarousel(toPage: 1, animated: false)
+        let surface = cell.makeVideoRenderViewIfNeeded()
+        let page = surface.superview
+        let hosted = page != nil
+        #expect(hosted)
+
+        let donated = cell.donateVideoRenderView()
+        let gone = donated === surface && surface.superview == nil
+        #expect(gone)
+
+        cell.adoptVideoRenderView(surface)
+
+        let home = surface.superview === page
+        #expect(home)
+        // And the row is holding it again, so the pool keeps its slot.
+        #expect(cell.retainedVideoURL == URL(string: "mock://video/b"))
+    }
+
+    /// ⚠️ THE FLIGHT MUST NOT CARRY A CLIP THE VIEWER HAS PAGED PAST.
+    ///
+    /// This is the defect the recording showed: the card was on a photograph,
+    /// the hero animation opened on the VIDEO, and the post arrived on the
+    /// photograph — a window showing something that was nowhere on screen.
+    ///
+    /// It followed directly from keeping the player alive across a page change.
+    /// "This row is playing" stopped meaning "this row's picture is moving", and
+    /// the flight asked the first question while needing the second. So the cell
+    /// answers the second one now, and the coordinator asks it before donating.
+    ///
+    /// Both directions are asserted. A guard that answered "no" always would
+    /// pass a one-sided version of this test and quietly kill live flights.
+    @Test func aPausedClipOnAnotherPageIsNotTheCurrentMedia() {
+        let cell = row()
+        cell.debugScrollCarousel(toPage: 1, animated: false)
+        _ = cell.makeVideoRenderViewIfNeeded()
+        #expect(cell.isRenderingCurrentMedia)
+
+        cell.debugScrollCarousel(toPage: 0, animated: false)
+
+        // Still holding the player — the frame stays on its page…
+        #expect(cell.retainedVideoURL == URL(string: "mock://video/b"))
+        // …and still NOT what the viewer is looking at.
+        #expect(cell.isRenderingCurrentMedia == false)
+
+        cell.debugScrollCarousel(toPage: 1, animated: false)
+        _ = cell.makeVideoRenderViewIfNeeded()
+        #expect(cell.isRenderingCurrentMedia)
+    }
+
+    /// A row with no surface at all is not rendering anything, whatever its
+    /// pages say — the case a flight from a still row hits on every tap.
+    @Test func aRowWithNoSurfaceIsNotRenderingCurrentMedia() {
+        let cell = row()
+        cell.debugScrollCarousel(toPage: 1, animated: false)
+
+        #expect(cell.isRenderingCurrentMedia == false)
+    }
+
+    /// ⚠️ ASKING FOR THE SURFACE MUST NOT MOVE IT ONTO A PHOTOGRAPH.
+    ///
+    /// The worst defect of this feature, and the one a recording caught rather
+    /// than any log: at the instant of the tap the card swapped from the
+    /// photograph being read to the video, and the flight carried what it
+    /// found. Nothing had scrolled — the surface had been re-hosted onto the
+    /// CURRENT page, which carries no clip at all.
+    ///
+    /// It came from the previous fix. Re-installing on every ask is right while
+    /// the viewer is on the clip and catastrophic one page over, because the
+    /// flight staging is one of the askers.
+    ///
+    /// So the ask is honoured only for a page that carries a stream, and a
+    /// still page is left exactly as it is.
+    @Test func askingForTheSurfaceOnAStillPageLeavesItWhereItIs() {
+        let cell = row()
+        cell.debugScrollCarousel(toPage: 1, animated: false)
+        let surface = cell.makeVideoRenderViewIfNeeded()
+        let clipPage = surface.superview
+
+        cell.debugScrollCarousel(toPage: 0, animated: false)
+        // What the flight staging does.
+        _ = cell.makeVideoRenderViewIfNeeded()
+
+        let stayed = surface.superview === clipPage
+        #expect(stayed)
+        #expect(cell.drawsVideoOnAStillPage == false)
+        // And the row still knows it is holding that clip.
+        #expect(cell.retainedVideoURL == URL(string: "mock://video/b"))
+    }
+
+    /// And a row with a single attachment is NOT re-parented on every ask:
+    /// `pin(to:)` discards the concrete frame until the next layout pass, which
+    /// resets `AVPlayerLayer.isReadyForDisplay` for ~170ms — measured, and the
+    /// reason the landing path installs by frame.
+    @Test func aSingleAttachmentSurfaceIsInstalledOnce() {
+        let cell = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: 390, height: 500))
+        cell.configure(
+            with: GalleryPost(
+                id: PostID("q"), kind: .video, isRepost: false,
+                thumbnailURL: URL(string: "mock://solo"), aspectRatio: 1.5,
+                caption: "Short.", publishedAtMS: 0
+            ),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        cell.layoutIfNeeded()
+
+        let first = cell.makeVideoRenderViewIfNeeded()
+        let host = first.superview
+        let constraints = host?.constraints.count ?? 0
+        _ = cell.makeVideoRenderViewIfNeeded()
+
+        let stillThere = first.superview === host
+        #expect(stillThere)
+        #expect((host?.constraints.count ?? 0) == constraints)
+    }
+}
+
 @MainActor
 struct CarouselChipsAreFixedTests {
-    private func row(pages: Int, width: CGFloat = 390) -> PostGridListRowCell {
+    private func row(
+        pages: Int, width: CGFloat = 390,
+        reactions: Int64 = 160, comments: Int64 = 12, publishedAtMS: Int64 = 0
+    ) -> PostGridListRowCell {
         let cell = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: width, height: 500))
         cell.configure(
             with: GalleryPost(
                 id: PostID("p"), kind: .photo, isRepost: false,
                 pages: (0..<pages).map { page("\($0)", aspect: 0.8) },
-                caption: "Short.", publishedAtMS: 0, reactionCount: 160
+                // LIKES and COMMENTS: one chip each on the preview, and a
+                // number the post does not have draws no chip at all.
+                caption: "Short.", publishedAtMS: publishedAtMS,
+                reactionCount: reactions, commentCount: comments
             ),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
         )
@@ -265,14 +641,55 @@ struct CarouselChipsAreFixedTests {
     }
 
     private func chipFrames(in cell: PostGridListRowCell) -> [CGRect] {
-        func pills(_ view: UIView) -> [PostMetaPillView] {
-            if let pill = view as? PostMetaPillView { return [pill] }
+        func pills(_ view: UIView) -> [UIView] {
+            if isChip(view) { return [view] }
             return view.subviews.flatMap(pills)
         }
+        // ⚠️ ON SCREEN, which is a question about a chip's ANCESTORS and not
+        // about the chip.
+        //
+        // This filtered on the pill's own `isHidden` and was right for exactly
+        // as long as a media row was the only row with pills in it. A card now
+        // builds BOTH shapes and hides one — the closing line by hiding its
+        // stack, the preview's chips by hiding the preview — so a chip of the
+        // shape that is not being drawn still answers `isHidden == false`, and
+        // every count here silently gained two.
+        func isOnScreen(_ view: UIView) -> Bool {
+            sequence(first: view, next: \.superview)
+                .prefix { $0 !== cell.contentView.superview }
+                .allSatisfy { !$0.isHidden && $0.alpha > 0 }
+        }
         return pills(cell.contentView)
-            .filter { !$0.isHidden }
+            .filter(isOnScreen)
             .map { $0.convert($0.bounds, to: cell.contentView) }
             .sorted { $0.minX < $1.minX }
+    }
+
+    /// ⚠️ A CHIP IS A BOX ON THE ROW, not a capsule.
+    ///
+    /// Three of the four wear one; the date lost its capsule and kept the box,
+    /// so a check for `PostMetaPillView` alone silently stopped counting it —
+    /// and the tests that read `frames[3]` crashed rather than failed, which is
+    /// the loudest possible version of a good outcome.
+    private func isChip(_ view: UIView) -> Bool {
+        view is PostMetaPillView || view is PostChipSlotView
+    }
+
+    /// The chips actually being drawn, in reading order — same rule as
+    /// `chipFrames`, for the tests that need the views and not their frames.
+    private func onScreenPills(in cell: PostGridListRowCell) -> [UIView] {
+        func pills(_ view: UIView) -> [UIView] {
+            if isChip(view) { return [view] }
+            return view.subviews.flatMap(pills)
+        }
+        func isOnScreen(_ view: UIView) -> Bool {
+            sequence(first: view, next: \.superview)
+                .prefix { $0 !== cell.contentView.superview }
+                .allSatisfy { !$0.isHidden && $0.alpha > 0 }
+        }
+        return pills(cell.contentView).filter(isOnScreen).sorted {
+            $0.convert($0.bounds, to: cell).minX < $1.convert($1.bounds, to: cell).minX
+        }
     }
 
     /// ⚠️ THE REQUIREMENT: the chips and the indicator belong to the PREVIEW,
@@ -285,7 +702,8 @@ struct CarouselChipsAreFixedTests {
     @Test func theChipsDoNotTravelWithThePages() {
         let cell = row(pages: 4)
         let before = chipFrames(in: cell)
-        #expect(before.count == 3)
+        // likes, comments, indicator, age.
+        #expect(before.count == 4)
 
         #expect(cell.debugScrollCarousel(toPage: 3, animated: false))
         cell.layoutIfNeeded()
@@ -302,8 +720,10 @@ struct CarouselChipsAreFixedTests {
     /// single-media post. An indicator for one page is furniture answering a
     /// question nobody asked.
     @Test func onlyACollectionWearsAnIndicator() {
-        #expect(chipFrames(in: row(pages: 1)).count == 2)
-        #expect(chipFrames(in: row(pages: 4)).count == 3)
+        // Likes, comments, age — and a fourth only when there are pages to
+        // indicate.
+        #expect(chipFrames(in: row(pages: 1)).count == 3)
+        #expect(chipFrames(in: row(pages: 4)).count == 4)
     }
 
     /// It sits BETWEEN the other two, which is the placement asked for and the
@@ -314,19 +734,23 @@ struct CarouselChipsAreFixedTests {
     /// different heights — a row of 6pt dots against a line of caption2 — so a
     /// shared bottom puts the short one's mass below the others, and the row
     /// stops reading as a row.
-    @Test func theIndicatorSitsBetweenTheCounterAndTheDate() throws {
+    @Test func theIndicatorSitsBetweenTheCountersAndTheDate() throws {
         let cell = row(pages: 4)
         let frames = chipFrames(in: cell)
-        #expect(frames.count == 3)
+        // likes, comments, indicator, age.
+        #expect(frames.count == 4)
 
-        #expect(frames[0].maxX <= frames[1].minX)
-        #expect(frames[1].maxX <= frames[2].minX)
-        for frame in frames {
-            #expect(abs(frame.midY - frames[0].midY) < 0.5)
+        for (left, right) in zip(frames, frames.dropFirst()) {
+            #expect(left.maxX <= right.minX)
+            #expect(abs(left.midY - right.midY) < 0.5)
         }
-        // And it really is shorter, so the assertion above is not the same as a
-        // bottom-edge one by accident.
-        #expect(frames[1].height < frames[2].height)
+        // ⚠️ And every chip is the SAME HEIGHT. A row of 6pt dots is shorter
+        // than a line of caption2, so an indicator sized by its contents came
+        // out visibly smaller than the three beside it — which is what stopped
+        // the four reading as one row.
+        for frame in frames {
+            #expect(abs(frame.height - frames[0].height) < 0.5)
+        }
     }
 
     /// The indicator is a CONTROL: a tap or a drag across it asks for a page.
@@ -363,20 +787,80 @@ struct CarouselChipsAreFixedTests {
     /// have cleared it.
     @Test func aRecycledRowDropsThePreviousCollection() {
         let cell = row(pages: 4)
-        #expect(chipFrames(in: cell).count == 3)
+        #expect(chipFrames(in: cell).count == 4)
 
         cell.prepareForReuse()
         cell.configure(
             with: GalleryPost(
                 id: PostID("q"), kind: .photo, isRepost: false,
                 thumbnailURL: URL(string: "mock://solo"), aspectRatio: 0.8,
-                caption: "Short.", publishedAtMS: 0, reactionCount: 12
+                caption: "Short.", publishedAtMS: 0, reactionCount: 12, commentCount: 3
             ),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
         )
         cell.layoutIfNeeded()
 
-        #expect(chipFrames(in: cell).count == 2)
+        #expect(chipFrames(in: cell).count == 3)
         #expect(cell.debugScrollCarousel(toPage: 1, animated: false) == false)
+    }
+
+    /// A row whose chips have room to move, so a layout that mispositions them
+    /// shows up as a measurement rather than as a coincidence.
+    ///
+    /// ⚠️ Three fixture choices, each load-bearing:
+    ///
+    /// - **Six-figure counts.** Whether the counters get squeezed depends on how
+    ///   wide they are; "160" and "12" fit inside almost anything.
+    /// - **A RECENT date**, so the age chip is "1h" rather than "Jan 1 1970" —
+    ///   a 123pt date chip filled the row on its own and clamped every gap to
+    ///   the minimum, which made the two spaces trivially equal and the whole
+    ///   assertion vacuous. It passed under the broken layout.
+    /// - **Ninety minutes**, not sixty: an hour on the nose sits on the boundary
+    ///   the formatter rounds at.
+    private func spaciousRow() -> PostGridListRowCell {
+        let ninetyMinutesAgo = Int64(Date().timeIntervalSince1970 * 1000) - 90 * 60 * 1000
+        return row(
+            pages: 6, reactions: 1_600_000, comments: 128_000,
+            publishedAtMS: ninetyMinutesAgo
+        )
+    }
+
+    /// ⚠️ A COUNT IS NEVER CLIPPED TO MAKE ROOM FOR THE INDICATOR.
+    ///
+    /// The regression this pins: the indicator was centred on the PREVIEW, which
+    /// fixes its leading edge at half the width and caps what is left for the
+    /// counters — so the comments chip rendered "💬 …" while empty preview sat
+    /// on the other side of the dots. Clipped, it reads as a number the post
+    /// has, and it is not one.
+    ///
+    /// Measuring each chip against what it asks for UNCONSTRAINED is the part
+    /// that matters: a frame-order or gap assertion passes just as happily on a
+    /// row of ellipses.
+    @Test func theCountersAreNeverSqueezedByTheIndicator() {
+        let cell = spaciousRow()
+        let ordered = onScreenPills(in: cell)
+        #expect(ordered.count == 4)
+
+        // Likes, comments and the date at their unconstrained width. The
+        // indicator is excluded on purpose — yielding is its job.
+        for chip in [ordered[0], ordered[1], ordered[3]] {
+            let wanted = chip.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+            #expect(chip.bounds.width >= wanted - 0.5)
+        }
+    }
+
+    /// And the indicator sits centred BETWEEN the two groups rather than on the
+    /// preview: the two dynamic spaces are equal, whatever the counters took.
+    @Test func theIndicatorFloatsBetweenTheGroups() {
+        let chips = chipFrames(in: spaciousRow())
+        #expect(chips.count == 4)
+
+        let leading = chips[2].minX - chips[1].maxX
+        let trailing = chips[3].minX - chips[2].maxX
+        #expect(abs(leading - trailing) < 0.5)
+        // And there is genuine slack here, so the equality above is a measured
+        // result and not two gaps clamped at the same minimum.
+        #expect(leading > PostGridListRowCell.chipGap + 1)
+        #expect(leading >= PostGridListRowCell.chipGap - 0.5)
     }
 }

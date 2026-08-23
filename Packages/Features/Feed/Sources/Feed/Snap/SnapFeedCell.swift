@@ -2,6 +2,7 @@ import MediaCore
 import CoreModels
 import DesignSystem
 import MediaPlayback
+import PostGrid
 import UIKit
 
 /// A full-screen snap cell: cover-fit media under a `SnapChromeView` overlay
@@ -42,6 +43,172 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     private var representedID: PostID?
     private var mediaURL: URL?
     private var mediaKind: MediaKind = .image
+
+    /// The stream this page should be playing RIGHT NOW, nil for none.
+    ///
+    /// ⚠️ Every playback path used to ask `mediaKind == .video` and take
+    /// `mediaURL`, and both answer for the post's HEAD attachment. A collection
+    /// whose first page is a photograph is a `.photo` post — so a clip on page
+    /// two was unreachable, and a post that DID lead with a clip would have
+    /// played it behind every other page.
+    ///
+    /// Routing both questions through one property is what let the rest of this
+    /// file stay as it is: the surface, the parking, the mirroring and the
+    /// landing all still work on `mediaCard.renderView` by identity.
+    private var activeVideoURL: URL? {
+        if mediaCard.showsCollection { return mediaCard.currentPageVideoURL }
+        return mediaKind == .video ? mediaURL : nil
+    }
+
+    /// Whether there is anything to play at all — the replacement for the
+    /// `mediaKind == .video` gates.
+    private var playsVideo: Bool { activeVideoURL != nil }
+
+    /// Reconciles playback with the page the viewer is now on.
+    ///
+    /// This is the carousel's autoplay: a clip starts when its page arrives and
+    /// stops when it leaves. Both halves matter and the second is the one that
+    /// bites — a page scrolled away from is still on screen in a full-bleed
+    /// carousel, so a video left running there plays beside the photograph the
+    /// viewer moved to.
+    private func reconcilePagePlayback() {
+        guard mediaCard.showsCollection, let videoPlayback else { return }
+        let surface = mediaCard.renderView
+        setPauseGlyphVisible(false)
+        // ⚠️ PAUSED IN PLACE, never stopped and evicted.
+        //
+        // Stopping released the player and took the surface off its page, which
+        // put that page's thumbnail back — the clip appeared to be replaced by a
+        // photograph the moment the viewer moved on, and coming back paid for a
+        // fresh decode. Paused, the page keeps its last frame and returning is
+        // free. The player is released when the page itself goes: `didResignActive`
+        // and `prepareForReuse` both already stop it.
+        guard isActive, let url = activeVideoURL else {
+            #if DEBUG
+            CarouselPlaybackAudit.trace("post setPaused true page=\(mediaCard.currentPage)")
+            #endif
+            videoPlayback.setPaused(true, in: surface)
+            return
+        }
+        // ⚠️ A FLIGHT OWNS THE START while it is in the air.
+        //
+        // `activate` defers to it deliberately — starting here attaches a NEWER
+        // layer to the player the card is flying and blanks the card mid-flight
+        // — and this path, arriving from `configure`, was not honouring the same
+        // rule. The audit caught it as a page holding a hosted, visible surface
+        // with no player behind it, three times in one run.
+        //
+        // `startDeferredPlayback` picks it up at the landing, which is the
+        // handshake that keeps one player and one playhead.
+        guard !defersPlaybackForFlight else { return }
+        // ⚠️ Hosted is not the same as PLAYABLE, and the difference is a whole
+        // dismissal.
+        //
+        // A page dismissed and reopened keeps its carousel — same pages, so it
+        // is deliberately not rebuilt — and the surface is still hanging in the
+        // clip's page from the previous visit. But `prepareForReuse` stopped the
+        // player, and `showCollection` hid the surface. Resuming on the strength
+        // of "it is hosted" therefore asked a player that no longer existed to
+        // play, left the surface hidden, and showed the page's THUMBNAIL.
+        // Reported as "the player is no longer in the post screen".
+        //
+        // `setPaused` already answers whether there was anything to resume. Two
+        // states looked alike from outside and the return value is what tells
+        // them apart, so it is read rather than discarded.
+        let wasHosted = mediaCard.hostsRenderViewOnCurrentPage
+        // Idempotent, and it is also what un-hides the surface.
+        mediaCard.hostRenderViewOnCurrentPage()
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-media-log") {
+            print(String(format: "[page-play] %.3f page=%d hosted=%@ url=%@",
+                         CACurrentMediaTime(), mediaCard.currentPage,
+                         wasHosted ? "Y" : "N",
+                         activeVideoURL?.lastPathComponent ?? "nil"))
+        }
+        #endif
+        if wasHosted, videoPlayback.setPaused(false, in: surface) {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-media-log") {
+                print(String(format: "[page-play] %.3f resumed", CACurrentMediaTime()))
+            }
+            auditPagePlayback()
+            #endif
+            return
+        }
+        // ⚠️ The page's own cover, and NOT nil — clearing it is what hid the
+        // surface.
+        //
+        // `play` detaches before it attaches, and detaching hides a surface
+        // that is visible and has no poster: the class does that so a cover
+        // does not sit on screen through the whole buffering window. Handing it
+        // nil first therefore created the exact condition that hides it, and
+        // nothing un-hid it afterwards — the viewer got the page's thumbnail
+        // with a live player behind it, which is the state the audit reports as
+        // `hosted=Y drawable=N`.
+        //
+        // A single-video post never hit this because its poster is loaded at
+        // configure. The collection path is now the same: poster first, and the
+        // first decoded frame retires it.
+        surface.setPoster(mediaCard.currentPageCover)
+        Task { [weak self] in
+            await videoPlayback.play(url, in: surface)
+            self?.auditPagePlayback()
+        }
+    }
+
+    /// The post page's half of the carousel audit.
+    ///
+    /// ⚠️ Asked AFTER the play resolves, not when it is requested. The failure
+    /// this exists to catch is a surface that is hosted and hidden, or hosted
+    /// with no player behind it — states that only exist once everything has
+    /// finished claiming success.
+    private func auditPagePlayback() {
+        #if DEBUG
+        // ⚠️ Not while a flight is in the air. The card is covering this page,
+        // so what the surface is doing underneath is not what the viewer sees —
+        // and the handoff deliberately leaves the page without a player for the
+        // duration. Judging it here would report the mechanism as the fault.
+        guard CarouselPlaybackAudit.isEnabled, mediaCard.showsCollection else { return }
+        // ⚠️ The flight guard scopes the CHECK, not the whole audit.
+        //
+        // Written as an early return it silenced the only thing writing the
+        // file, and a run with `defersPlaybackForFlight` stuck on produced no
+        // output at all — which reads exactly like a clean run. Three
+        // measurements were lost to that before the file's timestamp gave it
+        // away.
+        guard !defersPlaybackForFlight else {
+            CarouselPlaybackAudit.report("post (in flight)")
+            return
+        }
+        let surface = mediaCard.renderView
+        let hasPlayer = videoPlayback?.hasPlayer(in: surface) ?? false
+        let drawable = !surface.isHidden && surface.alpha > 0 && hasPlayer
+        if !drawable {
+            print(String(
+                format: "[audit] post detail hidden=%@ alpha=%.2f player=%@ deferring=%@",
+                surface.isHidden ? "Y" : "N", surface.alpha,
+                hasPlayer ? "Y" : "N", defersPlaybackForFlight ? "Y" : "N"
+            ))
+        }
+        CarouselPlaybackAudit.check(
+            surface: "post", subject: representedID?.rawValue ?? "-",
+            page: mediaCard.currentPage,
+            playing: isActive, clip: activeVideoURL != nil,
+            hosted: mediaCard.hostsRenderViewOnCurrentPage,
+            drawable: drawable
+        )
+        // ⚠️ A running total, because a silent auditor and a broken one read the
+        // same in a log. A passing run has to be able to say how much it looked
+        // at, or "0 failures" means nothing.
+        CarouselPlaybackAudit.report("post")
+        // ⚠️ One asset, one player. Reported from here because the post is the
+        // second claimant: the card holds a paused player for the same clip
+        // while this page opens one of its own.
+        for (url, count) in videoPlayback?.playerCountByURL ?? [:] where count > 1 {
+            CarouselPlaybackAudit.reportDuplicate(url: url.lastPathComponent, players: count)
+        }
+        #endif
+    }
     private var videoPlayback: VideoPlaybackController?
     private var imageTasks: [Task<Void, Never>] = []
     private var isActive = false
@@ -170,8 +337,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // the card owns the pages, the chrome owns the indicator, and neither
         // reaches for the other.
         mediaCard.onPageChanged = { [weak self] page in
-            self?.chrome.setMediaPage(page)
-            self?.onMediaPageChanged?(page)
+            guard let self else { return }
+            self.chrome.setMediaPage(page)
+            self.reconcilePagePlayback()
+            self.onMediaPageChanged?(page)
         }
         chrome.onMediaPageRequested = { [weak self] page in
             self?.mediaCard.setPage(page)
@@ -610,6 +779,21 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // an instruction to go back to the first.
             if let initialMediaPage { mediaCard.setPage(initialMediaPage, animated: false) }
             chrome.setMediaPageCount(model.mediaPages.count, current: mediaCard.currentPage)
+            #if DEBUG
+            // ⚠️ Both halves on one line: what was ASKED and where the carousel
+            // ENDED UP. A sender that says nothing and a receiver that stays are
+            // each behaving correctly on their own — the defect only exists
+            // between them, so only a line that shows both can name it.
+            if CarouselPlaybackAudit.isEnabled {
+                print("[sync] post asked=\(initialMediaPage.map(String.init) ?? "-")"
+                      + " landed=\(mediaCard.currentPage)")
+            }
+            #endif
+            // ⚠️ Opening ON a clip is not a page CHANGE, so nothing above would
+            // start it. A post opened from a card already showing page three
+            // lands on page three; if that page is a video it has to play from
+            // the moment it arrives, exactly as a single-video post does.
+            if isActive { reconcilePagePlayback() }
             return
         }
         mediaCard.hideCollection()
@@ -746,9 +930,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // Both comment surfaces share it.
         chrome.setTickerActive(true)
         chrome.setSubtitlesActive(true)
-        switch mediaKind {
-        case .video:
-            guard let url = mediaURL, let videoPlayback else { return }
+        // A COLLECTION asks its page, not the post. Everything below is the
+        // same sequence either way — the flight deferral, the warm attach, the
+        // start — because the surface it all works on is the same object.
+        switch playsVideo {
+        case true:
+            guard let url = activeVideoURL, let videoPlayback else { return }
             // A hero card may be flying this post's player right now. Starting
             // here would attach a NEWER layer to the same player and blank the
             // card mid-flight, so the start waits for the flight to land — see
@@ -768,9 +955,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
                 warmAttachForFlight(url: url)
                 return
             }
+            mediaCard.hostRenderViewOnCurrentPage()
             let view = mediaCard.renderView
             Task { await videoPlayback.play(url, in: view) }
-        case .image:
+        case false:
             // Nothing to start: a photo page's media is STATIC. The slow
             // zoom that used to prove activation here is gone (see
             // `SnapMediaCardView`), and video is the only kind with
@@ -835,9 +1023,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// playhead — so the page continues rather than restarting.
     func startDeferredPlayback() {
         defersPlaybackForFlight = false
-        guard isActive, mediaKind == .video,
-              let url = mediaURL, let videoPlayback
-        else { return }
+        guard isActive, let url = activeVideoURL, let videoPlayback else { return }
         // The flight is over: lift the tile's thumbnail-rung cap NOW, at
         // rest, whether playback was warm-attached or is about to start. The
         // lift used to ride the warm attach — flight staging — which invited
@@ -878,6 +1064,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// area and nothing to wait for.
     var isMediaContentRendering: Bool {
         guard mediaURL != nil else { return true }
+        // ⚠️ A collection answers for its CAROUSEL even when the page it is on
+        // is a clip: the pages either side are photographs, and the landing is
+        // presentable the moment they are. Asking the render surface would make
+        // the whole page wait on a decode that only one of its pages needs.
+        if mediaCard.showsCollection { return mediaCard.isImageReady }
         switch mediaKind {
         case .video:
             return mediaCard.renderView.isCompositingContent
@@ -898,7 +1089,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// asset — the grid tile a dismissal is flying home to.
     @discardableResult
     func parkPlayback() -> Bool {
-        guard mediaKind == .video, let videoPlayback else { return false }
+        guard playsVideo, let videoPlayback else { return false }
         if VideoRenderFlags.usesSampleBufferLayer {
             // Parking would detach this page's surface and stop it drawing,
             // and under N-surface there is no reason to: the landing tile takes
@@ -918,7 +1109,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// page keeps the view in its hierarchy but hands rendering over; on a
     /// cancelled grab `reclaimDonatedPlayback` puts everything back.
     func donateLiveRenderView() -> VideoRenderView? {
-        guard mediaKind == .video, let videoPlayback else { return nil }
+        guard playsVideo, let videoPlayback else { return nil }
         if VideoRenderFlags.usesSampleBufferLayer {
             // Nothing is donated: the card gets a surface of its own on the
             // same playback, primed with the current frame, and this page keeps
@@ -950,6 +1141,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         guard videoPlayback.parkPlayback(from: mediaCard.renderView, keepingSurfaceAttached: true)
         else { return nil }
         let view = mediaCard.renderView
+        // Same rule as the row's donation: a carousel page has to be TOLD the
+        // surface is gone, or it refuses to take the same one back at landing.
+        mediaCard.releaseRenderViewFromPages()
         view.removeFromSuperview()
         return view
     }
@@ -963,7 +1157,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func adoptLiveRenderView(_ view: VideoRenderView) {
         defersPlaybackForFlight = false
         mediaCard.restoreRenderView(view)
-        guard let url = mediaURL, let videoPlayback else { return }
+        guard let url = activeVideoURL, let videoPlayback else { return }
         videoPlayback.unparkPlayback(to: view, mediaURL: url)
     }
 
@@ -1053,7 +1247,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// Toggles the active video's playback and reflects it in the pause glyph.
     /// No-op for image/text cells (no player).
     func togglePlayback() {
-        guard mediaKind == .video, let videoPlayback else { return }
+        guard playsVideo, let videoPlayback else { return }
         let paused = videoPlayback.togglePlayback(in: mediaCard.renderView)
         setPauseGlyphVisible(paused)
     }
@@ -1072,7 +1266,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// flight carries the live video instead of a frozen cover. Returns
     /// whether a mirror was actually made.
     func mirrorPlayback(to surface: VideoRenderView) -> Bool {
-        guard mediaKind == .video, let videoPlayback else { return false }
+        guard playsVideo, let videoPlayback else { return false }
         return videoPlayback.mirror(from: mediaCard.renderView, to: surface)
     }
 
@@ -1080,11 +1274,17 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// surface goes away (a cancelled flight) — with multiple layers on one
     /// player, only the most recently attached is guaranteed to display.
     func reclaimPlayback() {
-        guard mediaKind == .video, let videoPlayback else { return }
+        guard playsVideo, let videoPlayback else { return }
         videoPlayback.reclaim(mediaCard.renderView)
     }
 
-    func didResignActive() {
+    #if DEBUG
+    /// The page's playback surface, for a test that needs to ask the pool about
+    /// it. Playback ownership is the pool's, so a test has to name the surface.
+    var debugRenderSurface: VideoRenderView { mediaCard.renderView }
+    #endif
+
+    func didResignActive(releasingPlayback: Bool) {
         guard isActive else { return }
         isActive = false
         // Covers the paths visibility can't see: backgrounding and the
@@ -1093,8 +1293,24 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         chrome.setSubtitlesActive(false)
         // Video is the only kind with anything to stop: a photo page's media
         // is static, so resigning leaves it exactly as it was.
-        if mediaKind == .video {
-            videoPlayback?.stop(mediaCard.renderView)
+        guard playsVideo, let videoPlayback else { return }
+        // ⚠️ PAUSED unless the page is actually going away.
+        //
+        // This stopped unconditionally, which detaches the surface and hands
+        // the player back — so every page change put the poster back on the
+        // page just left, and returning to it paid for a fresh decode. Reported
+        // as "the player is removed whenever I leave the post, and the thumbnail
+        // appears, which makes a cut".
+        //
+        // A paused page keeps its surface, its frame and its playhead, and
+        // coming back is free. The loan is released only when the cell scrolls
+        // fully off — see `didEndDisplaying`, which is the caller that passes
+        // true — so the number of retained players stays bounded by the cells
+        // the feed keeps alive rather than by how far the viewer has scrolled.
+        if releasingPlayback {
+            videoPlayback.stop(mediaCard.renderView)
+        } else {
+            videoPlayback.setPaused(true, in: mediaCard.renderView)
         }
     }
 

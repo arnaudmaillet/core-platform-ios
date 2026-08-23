@@ -141,9 +141,12 @@ struct RevealDismissCardTests {
     private func menuControl(in view: RevealDismissCardView) -> UIView? {
         func search(_ root: UIView) -> UIView? {
             for child in root.subviews {
+                // By ACCESSIBILITY LABEL, not by size. The band's trailing
+                // cluster now holds three identical squares — repost, save,
+                // "..." — so "the 40x40 button" stopped naming one thing and
+                // started returning whichever came first in the subview order.
                 if let button = child as? UIButton,
-                   abs(button.bounds.width - PostAuthorBandView.avatarDiameter) < 0.5,
-                   abs(button.bounds.height - PostAuthorBandView.avatarDiameter) < 0.5 {
+                   button.accessibilityLabel == "More actions" {
                     return button
                 }
                 if let found = search(child) { return found }

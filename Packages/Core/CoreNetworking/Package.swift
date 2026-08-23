@@ -20,6 +20,13 @@ let package = Package(
         .target(
             name: "CoreNetworking",
             dependencies: [
+                // ⚠️ `PostCounterReader` speaks counter.v1, so this target now
+                // needs the generated contracts. The package already depended on
+                // them for `CoreNetworkingMocks`, which is why the app built
+                // locally and only a clean CI build said otherwise: a resolved
+                // module is visible to the whole graph long after the target
+                // that declared it stopped being the only one using it.
+                "CoreContracts",
                 .product(name: "Connect", package: "connect-swift")
             ]
         ),

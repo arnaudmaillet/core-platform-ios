@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import Testing
+import UIKit
 @testable import MediaPlayback
 
 struct PlaceholderVideoFetcherTests {
@@ -102,6 +103,131 @@ struct VideoPlaybackControllerTests {
         controller.setPeakBitRate(0, in: view)
         #expect(controller.peakBitRate(in: view) == 0)
         #expect(controller.currentItem(in: view) === item)
+    }
+
+    /// ⚠️ THE RETURN VALUE IS THE POINT: it says whether there was anything to
+    /// resume, and two states look identical from outside.
+    ///
+    /// A surface can be hosted on the page the viewer is looking at and have no
+    /// player behind it — a post dismissed and reopened keeps its carousel, so
+    /// the surface is still hanging where it was, while the player went back to
+    /// the pool on the way out. A caller that treated "hosted" as "resumable"
+    /// asked a player that no longer existed to play, and showed the page's
+    /// thumbnail instead of the video.
+    @Test func resumingAViewWithNoPlayerReportsThatItDidNothing() async {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        let view = VideoRenderView()
+
+        #expect(controller.setPaused(false, in: view) == false)
+
+        await controller.play(URL(string: "mock://video/1")!, in: view)
+        #expect(controller.setPaused(true, in: view))
+        #expect(controller.setPaused(false, in: view))
+
+        controller.stop(view)
+        // Stopped, with the surface untouched — exactly the state that used to
+        // be mistaken for "paused, ready to resume".
+        #expect(controller.setPaused(false, in: view) == false)
+    }
+
+    /// ⚠️ A DETACH HIDES A VISIBLE SURFACE THAT HAS NO POSTER — and `play`
+    /// detaches before it attaches.
+    ///
+    /// The rule is deliberate: it stops a stale cover sitting on screen through
+    /// the whole buffering window. It also means that clearing a poster and
+    /// then playing is a request to be hidden, which is what a carousel page did
+    /// — the viewer got the page's thumbnail with a live player behind it.
+    ///
+    /// Both branches, because the fix is "hand it a poster" and a test that only
+    /// checked the empty case would pass on a version that always hides.
+    @Test func detachingHidesABareSurfaceAndSparesOneWithAPoster() async {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+
+        // ⚠️ The hide is the SAMPLE-BUFFER backing's, and CI runs this suite a
+        // second time on the other one (`AVSBDL_RENDER=0`), where a detached
+        // surface stays visible. Asserted unconditionally, this was green here
+        // and red on that second run — for a controller correct in both.
+        //
+        // Scoped rather than deleted, because the hide is exactly what made
+        // `setPoster(nil)` a request to be hidden, and that is the defect the
+        // collection path hit.
+        if VideoRenderFlags.usesSampleBufferLayer {
+            let bare = VideoRenderView()
+            bare.isHidden = false
+            await controller.play(URL(string: "mock://video/1")!, in: bare)
+            controller.stop(bare)
+            #expect(bare.isHidden)
+        }
+
+        // The other half holds on BOTH backings: a surface with something to
+        // show is never hidden out from under it.
+        let postered = VideoRenderView()
+        postered.isHidden = false
+        postered.setPoster(UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { _ in })
+        await controller.play(URL(string: "mock://video/2")!, in: postered)
+        controller.stop(postered)
+        #expect(postered.isHidden == false)
+    }
+
+    /// ⚠️ ONE ASSET, ONE PLAYER — even when two surfaces want it at once.
+    ///
+    /// A card holding a clip paused on its page while the post opens the same
+    /// clip is now an ordinary state, and it used to mint a second `AVPlayer`:
+    /// two decoders on two clocks for one asset, with the surface a viewer is
+    /// looking at bound to whichever a lookup happened to find.
+    @Test func asecondSurfaceOnTheSameAssetJoinsTheSamePlayer() async {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        let url = URL(string: "mock://video/1")!
+        let first = VideoRenderView()
+        let second = VideoRenderView()
+
+        await controller.play(url, in: first)
+        await controller.play(url, in: second)
+
+        #expect(controller.playerCountByURL[url] == 1)
+        #expect(controller.activePlayer(in: first) === controller.activePlayer(in: second))
+    }
+
+    /// ⚠️ And ONE SURFACE LEAVING is not the end of the playback.
+    ///
+    /// Sharing the loan made this reachable: tearing the player down when the
+    /// first surface stops would pause the asset — and return it to the idle
+    /// pool — while the other is still rendering it. That is a frozen picture
+    /// with no cause visible from the side that froze it.
+    @Test func stoppingOneSurfaceLeavesTheOtherPlaying() async {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        let url = URL(string: "mock://video/1")!
+        let first = VideoRenderView()
+        let second = VideoRenderView()
+        await controller.play(url, in: first)
+        await controller.play(url, in: second)
+        let shared = controller.activePlayer(in: second)
+
+        controller.stop(first)
+
+        #expect(controller.activePlayer(in: first) == nil)
+        #expect(controller.activePlayer(in: second) === shared)
+        #expect(controller.isAdvancing(in: second))
+        // Not handed back while it is still being watched.
+        #expect(controller.idlePlayerCount == 0)
+
+        // And the LAST surface leaving does end it.
+        controller.stop(second)
+        #expect(controller.activePlayer(in: second) == nil)
+        #expect(controller.idlePlayerCount == 1)
+    }
+
+    /// Two DIFFERENT assets still get two players — the reuse must not collapse
+    /// unrelated playbacks onto one.
+    @Test func differentAssetsKeepTheirOwnPlayers() async {
+        let controller = VideoPlaybackController(source: FixedVideoSource(url: stubURL), poolSize: 3)
+        let first = VideoRenderView()
+        let second = VideoRenderView()
+
+        await controller.play(URL(string: "mock://video/1")!, in: first)
+        await controller.play(URL(string: "mock://video/2")!, in: second)
+
+        #expect(controller.activePlayer(in: first) !== controller.activePlayer(in: second))
     }
 
     @Test func recappingAViewWithNoPlayerIsANoOp() {

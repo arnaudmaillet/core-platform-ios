@@ -162,6 +162,36 @@ struct PlainPushDismissalTests {
         )
     }
 
+    /// ⚠️ A screen that owns its dismissal DISABLES the stack's edge recognizer
+    /// while it is up, rather than relying on the policy refusing it.
+    ///
+    /// Refusing is not disabling, and the difference is a whole gesture. The
+    /// policy already answered "no" for this screen, so the native pop never
+    /// popped — but a refused `UIScreenEdgePanGestureRecognizer` is still armed
+    /// and takes the touches in the leading strip while it decides, so the
+    /// screen's OWN grab was never consulted there. Measured with `-grab-log`: a
+    /// drag from x=12 produced no begin decision at all while the same drag at
+    /// x=200 produced one — on a post with a carousel and on one without, which
+    /// is how the carousel was cleared of a bug it never had.
+    ///
+    /// Restored on the way out rather than forced back to `true`: the stack's
+    /// gesture is not ours, and whatever pushed us may have had its own opinion.
+    @Test func aFeedThatOwnsItsDismissalDisablesTheStacksEdgeGesture() {
+        let feed = makeBuilder().makeSnapFeedViewController(postIDs: [PostID("p1")])
+        let nav = UINavigationController(rootViewController: UIViewController())
+        nav.pushViewController(feed, animated: false)
+        let pop = nav.interactivePopGestureRecognizer
+        pop?.isEnabled = true
+
+        feed.beginAppearanceTransition(true, animated: false)
+        feed.endAppearanceTransition()
+        #expect(pop?.isEnabled == false)
+
+        feed.beginAppearanceTransition(false, animated: false)
+        feed.endAppearanceTransition()
+        #expect(pop?.isEnabled == true)
+    }
+
     /// And the unqualified spelling still means what every existing caller
     /// meant by it, so nothing that pairs a flight with this factory silently
     /// starts racing the edge pop.

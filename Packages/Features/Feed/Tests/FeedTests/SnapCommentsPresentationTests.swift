@@ -497,7 +497,7 @@ struct SnapCommentsPresentationTests {
         // The outbound push's lifecycle: activate, then resign (image
         // cells run the Ken Burns stop on this path).
         cell.willBecomeActive()
-        cell.didResignActive()
+        cell.didResignActive(releasingPlayback: true)
         #expect(media.transform == .identity)
         // Nothing the engagement does can disturb the media, because the
         // engagement no longer touches it.
@@ -630,7 +630,7 @@ struct SnapCommentsPresentationTests {
         }
         cell.setCommentsEngaged(true)
         expectStill("re-engaged")
-        cell.didResignActive()
+        cell.didResignActive(releasingPlayback: true)
         expectStill("resigned")
         cell.prepareForReuse()
         expectStill("reused")

@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import MediaCore
 import MediaPlayback
@@ -23,6 +24,15 @@ private final class WeakPageBox {
 }
 
 final class ForYouGridPage: UIView {
+    /// The saved-posts pile, shared with the post page and the profile's Saved
+    /// tab through `UserDefaults` — see `PostBookmarkStore`.
+    private let bookmarks = PostBookmarkStore()
+
+    /// The viewer asked to repost. UNSET today — see the note at the wiring
+    /// site: the control is drawn because the card's design calls for it, and
+    /// there is no client path that publishes a repost yet.
+    var onRepostRequested: ((GalleryPost) -> Void)?
+
     /// The page's fixed shape, chosen by its format at init.
     enum Style {
         case grid
@@ -224,6 +234,10 @@ final class ForYouGridPage: UIView {
     /// terms as the mosaic. The concurrency is the whole difference between the
     /// two shapes' playback — everything below this line is shared.
     private let playback: GridVideoPlaybackCoordinator?
+    /// The pool itself, held only so the audit can ask whether a surface is
+    /// ADVANCING — a question the coordinator does not answer, because "playing"
+    /// there means "holds a loan", not "is moving".
+    private let videoPool: VideoPlaybackController?
 
     /// How many videos may play at once, per shape.
     ///
@@ -306,6 +320,10 @@ final class ForYouGridPage: UIView {
 
     init(imagePipeline: ImagePipeline, style: Style, videoPlayback: VideoPlaybackController? = nil) {
         self.imagePipeline = imagePipeline
+        videoPool = videoPlayback
+        #if DEBUG
+        CarouselPlaybackAudit.capturePoolTrace()
+        #endif
         playback = videoPlayback.map {
             GridVideoPlaybackCoordinator(pool: $0, maxConcurrent: Self.concurrentPlayers(for: style))
         }
@@ -555,11 +573,17 @@ final class ForYouGridPage: UIView {
             indexPath -> GridVideoPlaybackCoordinator.Candidate? in
             guard !showsSkeleton, posts.indices.contains(flatIndex(for: indexPath)) else { return nil }
             let post = posts[flatIndex(for: indexPath)]
-            guard autoplays(post), let url = post.videoURL,
-                  post.id != heroFlyingPostID, // its twin is in the air
+            guard post.id != heroFlyingPostID, // its twin is in the air
                   let cell = collectionView.cellForItem(at: indexPath) as? any GridPlaybackCell,
+                  let held = playableURL(for: post, in: cell),
                   hasCover(for: post, in: cell)
             else { return nil }
+            // Held versus ADVANCING. A row keeps its player while the viewer is
+            // on another page of the same collection — the clip is still on
+            // screen there, peeking, and stopping it would put that page's
+            // thumbnail back.
+            let advancing = (cell as? PostGridListRowCell)
+                .map { $0.currentPageVideoURL == held } ?? true
 
             // Measured against the cell's MEDIA, which each shape locates for
             // itself (`videoMediaRect`) — a tile's is its bounds, a row's is
@@ -572,13 +596,83 @@ final class ForYouGridPage: UIView {
             else { return nil }
 
             return .init(
-                id: post.id, url: url, cell: cell,
-                distanceFromCentre: abs(frame.midY - centreY)
+                id: post.id, url: held, cell: cell,
+                distanceFromCentre: abs(frame.midY - centreY),
+                isPaused: !advancing
             )
         }
         playback.update(candidates: candidates, allowingStarts: allowingStarts)
         preloadAutoplayCovers(around: collectionView.indexPathsForVisibleItems)
+        #if DEBUG
+        auditCarouselPlayback()
+        #endif
     }
+
+    #if DEBUG
+    /// Asks every visible collection row the audit's four questions.
+    ///
+    /// Run after the reconcile rather than inside it: what matters is the state
+    /// the VIEWER is left in once everything has had its say, not the state any
+    /// one participant believes it produced.
+    /// Whether this page is the one the viewer is looking at.
+    ///
+    /// ⚠️ The audit's scope, and it needs one. A grid covered by an open post
+    /// legitimately holds surfaces that are not hosted and not drawing — the
+    /// post has them. Judging the card there reported the handoff working as a
+    /// fault, six times in a run.
+    private var isAudited = true
+
+    private func auditCarouselPlayback() {
+        guard CarouselPlaybackAudit.isEnabled, isAudited, let playback else { return }
+        // ⚠️ A HEARTBEAT, unconditionally.
+        //
+        // Three times this session a run was read as clean when it had produced
+        // NOTHING: a console that stopped delivering, a stale file from an
+        // earlier build, and a guard that silenced the only writer. A file that
+        // is always written and always carries its check count cannot be
+        // mistaken for a passing run — an empty one is now impossible rather
+        // than indistinguishable.
+        CarouselPlaybackAudit.report("card")
+        for indexPath in collectionView.indexPathsForVisibleItems {
+            let index = flatIndex(for: indexPath)
+            guard posts.indices.contains(index),
+                  let row = collectionView.cellForItem(at: indexPath) as? PostGridListRowCell
+            else { continue }
+            let post = posts[index]
+            guard post.isCollection else { continue }
+            CarouselPlaybackAudit.check(
+                surface: "card", subject: post.id.rawValue,
+                page: row.currentMediaPage ?? -1,
+                playing: playback.isPlaying(post.id),
+                clip: row.currentPageVideoURL != nil,
+                hosted: row.isRenderingCurrentMedia,
+                drawable: row.isSurfaceDrawable
+            )
+            CarouselPlaybackAudit.checkStillPage(
+                surface: "card", subject: post.id.rawValue,
+                page: row.currentMediaPage ?? -1,
+                drawsVideo: row.drawsVideoOnAStillPage
+            )
+            // Frozen: on the clip's page, drawing, and not moving.
+            CarouselPlaybackAudit.checkAdvancing(
+                surface: "card", subject: post.id.rawValue,
+                page: row.currentMediaPage ?? -1,
+                watching: row.currentPageVideoURL != nil && row.isSurfaceDrawable
+                    && playback.isPlaying(post.id),
+                advancing: row.playbackSurface.map { videoPool?.isAdvancing(in: $0) ?? true }
+                    ?? true,
+                hasPlayer: row.playbackSurface.map { videoPool?.hasPlayer(in: $0) ?? true } ?? false
+            )
+            // ⚠️ Is the coordinator even talking about THIS cell? A collection
+            // view recycles, and a loan is held against the instance it was
+            // given to.
+            if playback.isPlaying(post.id),
+               let loaned = playback.loanedCell(post.id), loaned !== row {
+                CarouselPlaybackAudit.trace("cell mismatch \(post.id.rawValue)")
+            }
+        }
+    }
+    #endif
 
     /// Brings the last-tapped post clear of the chrome, now that nobody is
     /// looking at this page.
@@ -624,6 +718,30 @@ final class ForYouGridPage: UIView {
     /// permanently still for a reason that never applied to them.
     private func autoplays(_ post: GalleryPost) -> Bool {
         style == .grid ? post.autoplaysInGrid : post.hasPlayableVideo
+    }
+
+    /// The stream this cell should be playing right now, or nil for none.
+    ///
+    /// ⚠️ A COLLECTION answers from its current page, and the post cannot answer
+    /// for it.
+    ///
+    /// `GalleryPost.videoURL` is page one's, for ever. Nothing in `post.v1` says
+    /// a carousel's attachments agree about their type, so a post whose first
+    /// page is a photograph is a `.photo` post that still has a clip on page
+    /// two — `autoplays(post)` would refuse it, and `post.videoURL` would be nil
+    /// even if it did not. Both questions move to the page.
+    ///
+    /// A row showing a still page answers nil, which is what stops the clip the
+    /// viewer just scrolled away from.
+    private func playableURL(for post: GalleryPost, in cell: any GridPlaybackCell) -> URL? {
+        if let row = cell as? PostGridListRowCell, post.isCollection {
+            // RETAINED, not current: the row keeps its player while the viewer
+            // is on a still page of the same collection. Whether it advances is
+            // decided separately, at the call site.
+            return row.retainedVideoURL
+        }
+        guard autoplays(post) else { return nil }
+        return post.videoURL
     }
 
     /// Whether a tile has something to show behind its video surface.
@@ -732,6 +850,9 @@ final class ForYouGridPage: UIView {
     }
 
     func setAutoplayActive(_ active: Bool, keeping kept: PostID? = nil) {
+        #if DEBUG
+        isAudited = active
+        #endif
         playback?.setSurfaceVisible(active, keeping: kept)
         if active {
             updateAutoplay()
@@ -854,9 +975,14 @@ final class ForYouGridPage: UIView {
     /// back. Returns nil when the tile is not playing, which is the same
     /// contract the donate path had.
     func liveFlightSurface(for postID: PostID) -> VideoRenderView? {
+        // ⚠️ The CURRENT PAGE's stream where there is one. `post.videoURL` is
+        // page one's for ever, so a collection opened from a clip on page three
+        // asked for the wrong asset — and a collection whose head is a
+        // photograph asked for nil and never flew live at all.
+        let row = cell(for: postID) as? PostGridListRowCell
         guard let playback,
               let index = posts.firstIndex(where: { $0.id == postID }),
-              let url = posts[index].videoURL
+              let url = row?.currentPageVideoURL ?? posts[index].videoURL
         else { return nil }
         let made = playback.makeAttachedSurface(for: postID, url: url)
         #if DEBUG
@@ -1775,10 +1901,47 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             // so a tap on the photograph has to arrive by its own route or the
             // card simply stops opening. Straight into the SAME handler a tap
             // anywhere else on the row lands in.
+            // Save, on the row. The pile is the SAME one the post page and the
+            // profile's Saved tab read — a second store here would let a card
+            // and the post it opens disagree about whether a post is saved.
+            //
+            // The control never toggles itself: `isBookmarked` is set from the
+            // store's answer, before and after, so a store that refused would
+            // leave the glyph telling the truth.
+            // ⚠️ REPOST HAS NO ACTION YET, and this closure is what makes the
+            // control visible anyway.
+            //
+            // The band hides a button whose handler is nil — visibility tracks
+            // the answer — so a repost with nothing behind it would simply not
+            // appear. The card's design calls for it, so it is drawn and the
+            // request fans out to `onRepostRequested`, which nothing sets.
+            // Pressing it does nothing today.
+            //
+            // What it needs is a real mutation, not a handler: `CreatePost`
+            // carries `parent_id` on the wire and `GalleryPost.isRepost` already
+            // reads it (the profile's Posts/Reposts split), but `PostComposer`
+            // takes no parent, so there is no client path that publishes one.
+            cell.onRepostTapped = { [weak self] in self?.onRepostRequested?(post) }
+            cell.isBookmarked = bookmarks.isSaved(post.id.rawValue)
+            cell.onBookmarkTapped = { [weak self, weak cell] in
+                guard let self else { return }
+                _ = bookmarks.toggle(post.id.rawValue)
+                cell?.isBookmarked = bookmarks.isSaved(post.id.rawValue)
+            }
             cell.onMediaTapped = { [weak self, weak cell] in
                 guard let self, let cell,
                       let path = self.collectionView.indexPath(for: cell) else { return }
                 self.collectionView(self.collectionView, didSelectItemAt: path)
+            }
+            // ⚠️ Paging a MIXED collection changes what should be playing, and
+            // nothing else would ask.
+            //
+            // Autoplay is reconciled when the visible SET changes — a scroll, a
+            // surface appearing. A carousel moving inside a stationary row
+            // changes neither, so a clip on page two would keep playing behind
+            // page three, and a clip on page three would never start.
+            cell.onMediaPageChanged = { [weak self] _ in
+                self?.updateAutoplay()
             }
             // The band's identity and its "...", if the post carries an author.
             // Captured by AUTHOR and by POST for the same reason the caption's

@@ -651,15 +651,17 @@ extension ZoomDismissInteractionController: UIGestureRecognizerDelegate {
         // fully completed — overlapping lifecycles must never share state.
         guard !isInteracting, context == nil,
               let pan = gestureRecognizer as? UIPanGestureRecognizer,
-              let view = pannedView else { return false }
-        guard destination?.isReadyForInteractiveDismissal == true else { return false }
+              let view = pannedView else { return grabLog("no pan/view", false) }
+        guard destination?.isReadyForInteractiveDismissal == true
+        else { return grabLog("not ready", false) }
         // `context == nil` only covers OUR transitions. A pop of a screen
         // pushed above the feed (profile, comments) can still be settling —
         // the feed is already `topViewController` then, and beginning a grab
         // would start a second pop mid-transition. Refuse; the next grab retries.
-        guard (destination as? UIViewController)?.transitionCoordinator == nil else { return false }
+        guard (destination as? UIViewController)?.transitionCoordinator == nil
+        else { return grabLog("transition settling", false) }
         guard let axis = ZoomDismissAxis.match(velocity: pan.velocity(in: view), axes: axes)
-        else { return false }
+        else { return grabLog("no axis v=\(pan.velocity(in: view))", false) }
         // The vertical axis carries one gate the horizontal never needed: the
         // destination may host subsurfaces that own their own vertical
         // gestures (a scrolling rail, an open comments panel), and a grab
@@ -673,12 +675,40 @@ extension ZoomDismissInteractionController: UIGestureRecognizerDelegate {
         // a carousel: a rightward drag on its pages means "previous photo" and
         // not "dismiss". Same per-touch question, asked of the same authority —
         // the destination is the only thing that knows which page it is on.
+        // ⚠️ The gesture's ORIGIN, not where the finger is now.
+        //
+        // `gestureRecognizerShouldBegin` fires once a pan has already travelled
+        // its slop, so `location(in:)` here is tens of points along the drag —
+        // measured at x=52 for a drag that started at x=12. A rule about the
+        // screen's leading strip read that as "not the edge" and refused, which
+        // is the second wrong answer this bug produced.
+        let origin = CGPoint(
+            x: pan.location(in: view).x - pan.translation(in: view).x,
+            y: pan.location(in: view).y - pan.translation(in: view).y
+        )
         if axis == .horizontal,
-           destination?.zoomHorizontalDismissalPermitted(at: pan.location(in: view), in: view) == false {
-            return false
+           destination?.zoomHorizontalDismissalPermitted(at: origin, in: view) == false {
+            return grabLog("horizontal refused at x=\(origin.x)", false)
         }
         activeAxis = axis
-        return true
+        return grabLog("BEGIN \(axis) from x=\(origin.x)", true)
+    }
+
+    /// `-grab-log`: every begin decision, with the reason it went that way.
+    ///
+    /// A grab that never begins is indistinguishable ON SCREEN from a grab that
+    /// begins and cancels, and from a touch that never reached this recognizer
+    /// at all. Three causes, one symptom — nothing happens — which is why the
+    /// last attempt at this bug was a guess.
+    @discardableResult
+    private func grabLog(_ reason: String, _ answer: Bool) -> Bool {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+            print(String(format: "[grab] %.3f %@ -> %@",
+                         CACurrentMediaTime(), reason, answer ? "yes" : "no"))
+        }
+        #endif
+        return answer
     }
 
     func gestureRecognizer(

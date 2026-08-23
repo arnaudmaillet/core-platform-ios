@@ -129,6 +129,39 @@ final class SnapFeedViewController: UIViewController {
     /// The post whose comments engagement is active, nil when disengaged.
     /// Owns the paging veto: the pager is frozen while the mutated layout
     /// (a per-cell state) is on screen.
+    /// Turns the stack's own edge recognizer OFF while this screen is up, and
+    /// puts it back exactly as it was on the way out.
+    ///
+    /// ⚠️ REFUSING a recognizer is not the same as disabling it, and the
+    /// difference is a whole gesture.
+    ///
+    /// `NativePopPolicy` already answers "no" for this screen — it owns its
+    /// dismissal — so the native pop never pops. But a refused
+    /// `UIScreenEdgePanGestureRecognizer` is still armed: it takes the touches
+    /// in the leading strip while it decides, and the grab's own pan is never
+    /// consulted. Measured with `-grab-log`: a drag from x=12 produced no begin
+    /// decision at all, while the same drag at x=200 produced one. On a post
+    /// with no carousel as well as on a collection — the strip has never worked
+    /// on this screen, which is why the first attempt at this bug was aimed at
+    /// the carousel and changed nothing.
+    ///
+    /// Restored rather than assigned back to `true`: the stack's gesture is not
+    /// ours, and whatever pushed us may have had its own opinion.
+    private func setNativePopSuppressed(_ suppressed: Bool) {
+        guard let pop = navigationController?.interactivePopGestureRecognizer else { return }
+        if suppressed {
+            guard restoredPopGestureEnabled == nil else { return }
+            restoredPopGestureEnabled = pop.isEnabled
+            pop.isEnabled = false
+        } else if let restored = restoredPopGestureEnabled {
+            pop.isEnabled = restored
+            restoredPopGestureEnabled = nil
+        }
+    }
+
+    /// What the stack's edge recognizer was before this screen turned it off.
+    private var restoredPopGestureEnabled: Bool?
+
     /// The viewer paged a post's collection.
     ///
     /// Reported OUT so the surface that opened this feed can follow. It is what
@@ -359,6 +392,7 @@ final class SnapFeedViewController: UIViewController {
         // The willAppear reconciliation's landing half — by now the bar's
         // containers are in the window and the walk-up reaches them.
         syncEngagementAfterAppearance()
+        setNativePopSuppressed(true)
         #if DEBUG
         runDebugAppearanceHooks()
         #endif
@@ -548,6 +582,7 @@ final class SnapFeedViewController: UIViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        setNativePopSuppressed(false)
         // Hand the shared bars back on the way out (see `releaseChromeTheme`).
         releaseChromeTheme()
         // Unlike the visibility bookkeeping below, the toolbar choreography
@@ -2139,7 +2174,9 @@ final class SnapFeedViewController: UIViewController {
 
     private func apply(_ transition: SnapLifecycleDispatcher.Transition) {
         if let resign = transition.resign {
-            lifecycleCell(at: resign)?.didResignActive()
+            // Paging within the feed: the page stays alive and a swipe away, so
+            // it keeps its player and simply stops advancing.
+            lifecycleCell(at: resign)?.didResignActive(releasingPlayback: false)
             // Paging away FINALIZES the session's boosts: the undo window
             // is the post's time on screen, and it just ended.
             if orderedIDs.indices.contains(resign), sessionBoostID == orderedIDs[resign] {
@@ -2412,7 +2449,9 @@ extension SnapFeedViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
         // Belt-and-suspenders release: a cell scrolled fully off is never active,
         // and this guarantees the resign even if it's recycled before a settle.
-        (cell as? SnapCellLifecycle)?.didResignActive()
+        // Fully off screen: the loan goes back, because the grid behind is
+        // waiting for it and nothing here is going to draw again.
+        (cell as? SnapCellLifecycle)?.didResignActive(releasingPlayback: true)
         // The resign above no-ops for a cell that was displayed but never
         // became active (a swiped-past page); its ticker must still stop.
         (cell as? SnapFeedCell)?.setTickerStreaming(false)
@@ -2782,7 +2821,24 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     }
 
     /// Hands the active page's rendering surface to a dismissal's flight card.
+    ///
+    /// ⚠️ A DISMISSAL's. Refused while a present is staging, and that guard is
+    /// the whole of a defect.
+    ///
+    /// `ZoomFlight.build` asks the destination when the source declines, on the
+    /// stated assumption that "on a present the destination's page isn't playing
+    /// yet and refuses". That held while a post's playback was decided by its
+    /// head attachment — a freshly configured page had nothing running.
+    ///
+    /// A mixed carousel broke it. This controller is REUSED: on a second
+    /// present its active cell is still the previous visit's, its carousel is
+    /// still on the page that visit left, and its clip is still held — paused
+    /// in place, which is deliberate. So it answered yes, and the flight from a
+    /// card showing a PHOTOGRAPH carried the video of a page nobody was looking
+    /// at. Measured: `source attach surface -> false` (the card correctly
+    /// declined) followed by a card reporting `frames=2`.
     public func zoomDonateLiveMediaView() -> UIView? {
+        guard !isAwaitingZoomPresentation else { return nil }
         guard let donated = activeSnapCell?.donateLiveRenderView() else { return nil }
         donatedLiveView = donated
         return donated

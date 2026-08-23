@@ -34,12 +34,28 @@ public final class GridVideoPlaybackCoordinator {
         /// Distance from the viewport's vertical centre, in points. Lower wins;
         /// the caller measures it because only it knows the scroll geometry.
         public let distanceFromCentre: CGFloat
+        /// Held, but not advancing.
+        ///
+        /// ⚠️ A THIRD STATE, and the reason it exists: a clip on page two of a
+        /// carousel is still on screen when the viewer moves to page three —
+        /// peeking beside it — and stopping it there put the page's THUMBNAIL
+        /// back, which reads as the video being replaced by a photograph. Paused
+        /// it keeps its last frame, and coming back costs nothing.
+        ///
+        /// A paused candidate still holds its pool slot, so it competes for one
+        /// exactly as a playing one does: it is released when the ranking gives
+        /// its slot to a row nearer the centre, not when it stops advancing.
+        public let isPaused: Bool
 
-        public init(id: PostID, url: URL, cell: any GridPlaybackCell, distanceFromCentre: CGFloat) {
+        public init(
+            id: PostID, url: URL, cell: any GridPlaybackCell,
+            distanceFromCentre: CGFloat, isPaused: Bool = false
+        ) {
             self.id = id
             self.url = url
             self.cell = cell
             self.distanceFromCentre = distanceFromCentre
+            self.isPaused = isPaused
         }
     }
 
@@ -76,8 +92,27 @@ public final class GridVideoPlaybackCoordinator {
 
     private let pool: VideoPlaybackController
     private let maxConcurrent: Int
-    /// Playing posts → the cell their player is bound to.
-    private var playing: [PostID: any GridPlaybackCell] = [:]
+    /// Posts this coordinator has taken a loan for → the cell it gave it to.
+    ///
+    /// ⚠️ A REGISTRY OF LOANS, not the truth about playback. The distinction is
+    /// the whole of this file's hardest bug: a handoff moves a player to the
+    /// page's surface — `transferOwnership` clears the previous owner's
+    /// registration on purpose — and this map knows nothing about it. Read as
+    /// "is this playing", it then answered yes for a row whose picture had
+    /// stopped, and the reconcile skipped it as already running.
+    ///
+    /// So the map answers only what it can know: which cells this coordinator
+    /// has started and must therefore clean up. Whether anything is PLAYING is
+    /// the pool's to answer — see `isPlaying`.
+    private var loans: [PostID: any GridPlaybackCell] = [:]
+    /// Playing posts → the stream each one is actually playing.
+    ///
+    /// ⚠️ A post is no longer one stream. A mixed carousel has a clip on one
+    /// page and a photograph on the next, so the same id can be asked to play a
+    /// DIFFERENT url as the viewer scrolls — and the reconcile below starts a
+    /// candidate only when nothing is playing for its id, which would have left
+    /// page two's clip running under page three's.
+    private var playingURLs: [PostID: URL] = [:]
     /// Posts whose cap is currently lifted (a tile that went full screen), so a
     /// reconcile doesn't quietly re-cap the item mid-flight.
     private var uncappedIDs: Set<PostID> = []
@@ -120,15 +155,53 @@ public final class GridVideoPlaybackCoordinator {
         logRankingIfChanged(ranked, chosen: chosenIDs)
         #endif
 
-        for (id, cell) in playing where !chosenIDs.contains(id) && id != handoffID {
+        for (id, cell) in loans where !chosenIDs.contains(id) && id != handoffID {
             stop(id: id, cell: cell)
         }
+        // A post that is still chosen but on a DIFFERENT stream — the viewer
+        // paged a mixed carousel from one clip to another — is stopped here so
+        // the start below can pick it up. Restarting rather than retargeting
+        // the existing player: the pool binds an item to a render surface, and
+        // the surface has moved to another page too.
+        for candidate in chosen
+        where candidate.id != handoffID
+            && loans[candidate.id] != nil
+            && playingURLs[candidate.id] != candidate.url {
+            stop(id: candidate.id, cell: candidate.cell)
+        }
+        // Paused or resumed to match, every time, for everything still chosen.
+        // Reconciliation and not an edge: a row can arrive already paused (its
+        // carousel was left on another page), and a start below is followed by
+        // the same call for the same reason.
+        // Paused or resumed to match, every time, for everything still chosen.
+        // Reconciliation and not an edge: a row can arrive already paused (its
+        // carousel was left on another page), and a start below is followed by
+        // the same call for the same reason.
+        // ⚠️ A LOAN WITH NO PLAYER BEHIND IT IS RELEASED, not resumed.
+        //
+        // This is what the derived `isPlaying` buys. A row whose player went to
+        // the page at a handoff still holds a loan here; asking its surface to
+        // resume does nothing — measured, `setPaused` returning false — and the
+        // start loop below used to skip it as already running. The picture then
+        // stayed on its last frame for good.
+        //
+        // Released rather than stopped: there is nothing to tear down, and
+        // `stop` would fade the cover back in for the one frame before the
+        // restart.
+        for candidate in chosen where loans[candidate.id] != nil && !isPlaying(candidate.id) {
+            releaseStaleLoan(id: candidate.id)
+        }
+        for candidate in chosen where isPlaying(candidate.id) {
+            candidate.cell.loadedVideoRenderView.map {
+                pool.setPaused(candidate.isPaused, in: $0)
+            }
+        }
         guard allowingStarts else { return }
-        for candidate in chosen where playing[candidate.id] == nil {
+        for candidate in chosen where loans[candidate.id] == nil {
             start(candidate)
         }
         #if DEBUG
-        Self.logPool(playing.count, handoff: handoffID)
+        Self.logPool(loans.count, handoff: handoffID)
         #endif
     }
 
@@ -174,9 +247,9 @@ public final class GridVideoPlaybackCoordinator {
         // is exempt on every path, and the tiles simply keep drawing behind
         // the dim for the few frames the stagger takes — which is invisible,
         // and arguably truer than freezing them all at the instant of the tap.
-        stopStaggered(playing.keys.filter { $0 != id }, forHandoff: id)
+        stopStaggered(loans.keys.filter { $0 != id }, forHandoff: id)
         #if DEBUG
-        Self.logPool(playing.count, handoff: handoffID)
+        Self.logPool(loans.count, handoff: handoffID)
         // Arm the flight probe HERE — the one moment guaranteed to precede any
         // window under test, since the scope opens before a transition is even
         // built. Every path that flies this tile's media goes through it.
@@ -187,7 +260,7 @@ public final class GridVideoPlaybackCoordinator {
         // trace that was never live. This says so instead, and names what WAS
         // playing, which is usually the reason (a tile that does not autoplay).
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-            if let surface = playing[id]?.loadedVideoRenderView {
+            if let surface = loans[id]?.loadedVideoRenderView {
                 surface.debugLabel = "tile"
                 surface.debugTracksFlight = true
                 // Name the post being flown. Without it there is no way to tell
@@ -201,7 +274,7 @@ public final class GridVideoPlaybackCoordinator {
             } else {
                 print(String(format: "[zoom-live] %.3f probe NOT armed — no live surface for %@ (playing: %@)",
                              CACurrentMediaTime(), String(describing: id),
-                             playing.keys.map { String(describing: $0) }.sorted().joined(separator: ",")))
+                             loans.keys.map { String(describing: $0) }.sorted().joined(separator: ",")))
             }
         }
         #endif
@@ -220,7 +293,7 @@ public final class GridVideoPlaybackCoordinator {
         guard let next = remaining.popLast() else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self, handoffID == handoff else { return }
-            if let cell = playing[next] {
+            if let cell = loans[next] {
                 stop(id: next, cell: cell)
             }
             stopStaggered(remaining, forHandoff: handoff)
@@ -247,7 +320,7 @@ public final class GridVideoPlaybackCoordinator {
         // removed here is only the mid-flight sweep, which was never the part
         // that bounded anything.
         #if DEBUG
-        Self.logPool(playing.count, handoff: nil)
+        Self.logPool(loans.count, handoff: nil)
         #endif
     }
 
@@ -257,7 +330,7 @@ public final class GridVideoPlaybackCoordinator {
 
     /// Stops whatever is playing in `cell` — the collection view recycled it.
     public func stop(cell: any GridPlaybackCell) {
-        guard let id = playing.first(where: { $0.value === cell })?.key else { return }
+        guard let id = loans.first(where: { $0.value === cell })?.key else { return }
         stop(id: id, cell: cell)
     }
 
@@ -270,7 +343,7 @@ public final class GridVideoPlaybackCoordinator {
         guard visible != isSurfaceVisible else { return }
         isSurfaceVisible = visible
         guard !visible else { return }
-        for (id, cell) in playing where id != kept {
+        for (id, cell) in loans where id != kept {
             stop(id: id, cell: cell)
         }
     }
@@ -279,7 +352,27 @@ public final class GridVideoPlaybackCoordinator {
 
     /// Whether `id` is playing right now — the source asks before deciding
     /// whether a flight can carry live video at all.
-    public func isPlaying(_ id: PostID) -> Bool { playing[id] != nil }
+    ///
+    /// ⚠️ DERIVED FROM THE POOL, never from this coordinator's own memory.
+    ///
+    /// Five places used to hold a piece of this one fact — the pool's player
+    /// map, this loan registry, a carousel page's weak reference to its
+    /// surface, the cell's render view, and a flight card's donated view — and
+    /// every defect in this feature was two of them disagreeing. A player that
+    /// moved on is invisible to everyone except the pool, which is the only one
+    /// that has to be told.
+    ///
+    /// So the answer is asked, not remembered. A disagreement is now impossible
+    /// rather than merely detectable.
+    /// The cell this coordinator handed `id`'s loan to — which is NOT
+    /// necessarily the cell showing `id` now. Exposed so the audit can compare
+    /// the two.
+    public func loanedCell(_ id: PostID) -> (any GridPlaybackCell)? { loans[id] }
+
+    public func isPlaying(_ id: PostID) -> Bool {
+        guard let surface = loans[id]?.loadedVideoRenderView else { return false }
+        return pool.hasPlayer(in: surface)
+    }
 
 
     /// Hands the tile's running player off to whatever plays the same URL next
@@ -300,12 +393,31 @@ public final class GridVideoPlaybackCoordinator {
     /// readiness gap. Returns the donated view, or nil when the tile is not
     /// playing.
     public func donateLiveSurface(of id: PostID) -> VideoRenderView? {
-        guard let cell = playing[id], let renderView = cell.loadedVideoRenderView,
+        // ⚠️ Only when the surface is showing what the viewer is looking at.
+        //
+        // "Playing" no longer means "this cell's picture is moving": a row keeps
+        // its player while the viewer pages onto a still of the same collection.
+        // Donating it there flew a clip the viewer had already paged past —
+        // reported as the hero animation taking the video as its window after a
+        // swipe. Declining falls through to the card's own cover, which is the
+        // current page's.
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            let cell = loans[id]
+            print(String(format: "[zoom-live] %.3f grid donate ask %@ playing=%@ current=%@",
+                         CACurrentMediaTime(), id.rawValue,
+                         cell == nil ? "N" : "Y",
+                         (cell?.isRenderingCurrentMedia ?? false) ? "Y" : "N"))
+        }
+        #endif
+        guard let cell = loans[id], cell.isRenderingCurrentMedia,
+              let renderView = cell.loadedVideoRenderView,
               pool.parkPlayback(from: renderView, keepingSurfaceAttached: true)
         else { return nil }
         let donated = cell.donateVideoRenderView()
         cell.onReuse = nil
-        playing[id] = nil
+        loans[id] = nil
+        playingURLs[id] = nil
         uncappedIDs.remove(id)
         startTasks.removeValue(forKey: id)?.cancel()
         return donated
@@ -320,12 +432,23 @@ public final class GridVideoPlaybackCoordinator {
     /// some surface is waiting on a decode round-trip, because no binding
     /// changed. Returns nil when the tile is not playing.
     public func makeAttachedSurface(for id: PostID, url: URL) -> VideoRenderView? {
+        // Same rule as `donateLiveSurface`, for the same reason: a surface that
+        // is not showing the viewer's media must not be flown.
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] %.3f grid attach ask %@ playing=%@ current=%@",
+                         CACurrentMediaTime(), id.rawValue,
+                         loans[id] == nil ? "N" : "Y",
+                         (loans[id]?.isRenderingCurrentMedia ?? false) ? "Y" : "N"))
+        }
+        #endif
+        guard loans[id]?.isRenderingCurrentMedia ?? false else { return nil }
         // Sweep before minting, not only at `endHandoff`. A flight can end
         // without the scope closing cleanly, and this way each new flight
         // cannot inherit more than the previous one's leftovers — the count is
         // self-limiting rather than dependent on a teardown path being hit.
         releaseFinishedFlightSurfaces()
-        guard playing[id] != nil else { return nil }
+        guard loans[id] != nil else { return nil }
         let view = VideoRenderView()
         #if DEBUG
         view.debugLabel = "card"
@@ -409,14 +532,14 @@ public final class GridVideoPlaybackCoordinator {
         guard pool.transferOwnership(of: url, to: view) else { return false }
         view.revealOnFirstFrame()
         pool.setPeakBitRate(Self.tileBitRateCap, for: url)
-        playing[id] = cell
+        loans[id] = cell
         uncappedIDs.remove(id)
         cell.onReuse = { [weak self] in
-            guard let self, let cell = playing[id] else { return }
+            guard let self, let cell = loans[id] else { return }
             stop(id: id, cell: cell)
         }
         #if DEBUG
-        Self.logPool(playing.count, handoff: handoffID)
+        Self.logPool(loans.count, handoff: handoffID)
         #endif
         return true
     }
@@ -447,14 +570,15 @@ public final class GridVideoPlaybackCoordinator {
 
     @discardableResult
     public func parkForHandoff(_ id: PostID) -> Bool {
-        guard let cell = playing[id], let renderView = cell.loadedVideoRenderView else { return false }
+        guard let cell = loans[id], let renderView = cell.loadedVideoRenderView else { return false }
         let parked = pool.parkPlayback(from: renderView)
         // The tile no longer owns a player; drop the bookkeeping so a reconcile
         // can hand it a fresh one when the viewer comes back.
         if parked {
             cell.endVideoPreview()
             cell.onReuse = nil
-            playing[id] = nil
+            loans[id] = nil
+        playingURLs[id] = nil
             uncappedIDs.remove(id)
         }
         return parked
@@ -468,9 +592,9 @@ public final class GridVideoPlaybackCoordinator {
         cell.beginVideoPreview()
         guard pool.unparkPlayback(to: view, mediaURL: url) else { return }
         pool.setPeakBitRate(Self.tileBitRateCap, in: view)
-        playing[id] = cell
+        loans[id] = cell
         cell.onReuse = { [weak self] in
-            guard let self, let cell = playing[id] else { return }
+            guard let self, let cell = loans[id] else { return }
             stop(id: id, cell: cell)
         }
     }
@@ -510,7 +634,7 @@ public final class GridVideoPlaybackCoordinator {
         guard claimed else { return false }
         pool.setPeakBitRate(Self.tileBitRateCap, in: view)
         hostedSurfaces[id] = view
-        playing[id] = cell
+        loans[id] = cell
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
             // Steady state: the flight is over, so this is the count that
@@ -520,11 +644,11 @@ public final class GridVideoPlaybackCoordinator {
         }
         #endif
         cell.onReuse = { [weak self] in
-            guard let self, let cell = playing[id] else { return }
+            guard let self, let cell = loans[id] else { return }
             stop(id: id, cell: cell)
         }
         #if DEBUG
-        Self.logPool(playing.count, handoff: handoffID)
+        Self.logPool(loans.count, handoff: handoffID)
         #endif
         return true
     }
@@ -544,7 +668,7 @@ public final class GridVideoPlaybackCoordinator {
         // transparent and a landing gated on them drops the flight card two
         // frames early, showing the tile's cover through it.
         if let hosted = hostedSurfaces[id] { return hosted.isRenderingVisibly }
-        guard let cell = playing[id], let view = cell.loadedVideoRenderView else { return false }
+        guard let cell = loans[id], let view = cell.loadedVideoRenderView else { return false }
         return view.isRenderingVisibly
     }
 
@@ -562,28 +686,34 @@ public final class GridVideoPlaybackCoordinator {
     }
 
     public func stopAll() {
-        for (id, cell) in playing { stop(id: id, cell: cell) }
+        for (id, cell) in loans { stop(id: id, cell: cell) }
     }
 
     // MARK: - Internals
 
     private func start(_ candidate: Candidate) {
         #if DEBUG
-        Self.logTransition("start", candidate.id, count: playing.count + 1)
+        Self.logTransition("start", candidate.id, count: loans.count + 1)
         #endif
-        playing[candidate.id] = candidate.cell
+        loans[candidate.id] = candidate.cell
+        playingURLs[candidate.id] = candidate.url
         candidate.cell.beginVideoPreview()
         let renderView = candidate.cell.makeVideoRenderViewIfNeeded()
         let id = candidate.id
         candidate.cell.onReuse = { [weak self] in
-            guard let self, let cell = playing[id] else { return }
+            guard let self, let cell = loans[id] else { return }
             stop(id: id, cell: cell)
         }
         let url = candidate.url
         // A tile that is already flying full screen keeps its lifted cap.
         let cap = uncappedIDs.contains(id) ? Self.uncapped : Self.tileBitRateCap
+        let paused = candidate.isPaused
         startTasks[id] = Task { [weak self, pool] in
             await pool.play(url, in: renderView, peakBitRate: cap)
+            // A candidate that arrives already paused — its carousel is resting
+            // on another page — is started and held on its first frame, which is
+            // what makes the frame there to show at all.
+            if paused { pool.setPaused(true, in: renderView) }
             // A settled start removes its own entry. Left in place, the map
             // only ever shrank on stop/donate, so `startTasks.isEmpty` — the
             // gate `discardHandoff` uses to tell "a claimant is still coming"
@@ -599,6 +729,21 @@ public final class GridVideoPlaybackCoordinator {
         }
     }
 
+    /// Forgets a loan whose player is gone, without touching the cell or the
+    /// pool: there is no playback to end, only bookkeeping to correct.
+    private func releaseStaleLoan(id: PostID) {
+        #if DEBUG
+        if CarouselPlaybackAudit.isEnabled {
+            CarouselPlaybackAudit.trace("grid released stale loan \(id.rawValue)")
+        }
+        #endif
+        startTasks.removeValue(forKey: id)?.cancel()
+        loans[id]?.onReuse = nil
+        loans[id] = nil
+        playingURLs[id] = nil
+        uncappedIDs.remove(id)
+    }
+
     private func stop(id: PostID, cell: any GridPlaybackCell) {
         // A hosted surface is released here rather than kept alive: playback is
         // ending anyway, so the layer teardown is invisible.
@@ -608,7 +753,7 @@ public final class GridVideoPlaybackCoordinator {
             onHostedSurfaceReleased?(id)
         }
         #if DEBUG
-        Self.logTransition("stop ", id, count: playing.count - 1)
+        Self.logTransition("stop ", id, count: loans.count - 1)
         #endif
         startTasks.removeValue(forKey: id)?.cancel()
         if let renderView = cell.loadedVideoRenderView {
@@ -616,7 +761,8 @@ public final class GridVideoPlaybackCoordinator {
         }
         cell.endVideoPreview()
         cell.onReuse = nil
-        playing[id] = nil
+        loans[id] = nil
+        playingURLs[id] = nil
         uncappedIDs.remove(id)
     }
 
@@ -668,11 +814,11 @@ public final class GridVideoPlaybackCoordinator {
     /// have no ladder to select from, so the cap is a no-op for them, which is
     /// itself worth seeing rather than guessing at.
     public func logPlaybackDiagnostics() {
-        guard !playing.isEmpty else {
+        guard !loans.isEmpty else {
             print("[grid-playback] nothing playing")
             return
         }
-        for (id, cell) in playing.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
+        for (id, cell) in loans.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
             guard let renderView = cell.loadedVideoRenderView else { continue }
             if let report = pool.debugBitRateReport(in: renderView) {
                 print(String(
@@ -685,7 +831,7 @@ public final class GridVideoPlaybackCoordinator {
         }
     }
 
-    var playingIDs: Set<PostID> { Set(playing.keys) }
+    var playingIDs: Set<PostID> { Set(loans.keys) }
 
     /// Awaits the in-flight `play` tasks, so a test can act on playback that is
     /// actually running rather than merely requested. `start` dispatches into a
