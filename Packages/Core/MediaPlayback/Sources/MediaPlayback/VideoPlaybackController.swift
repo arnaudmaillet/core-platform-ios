@@ -396,6 +396,15 @@ public final class VideoPlaybackController {
         if paused {
             player.pause()
         } else {
+            // ⚠️ Whatever is queued belongs to BEFORE the pause.
+            //
+            // The picture resumes at the playhead, and anything still waiting in
+            // the layer was decoded for a moment that has passed. Shown, those
+            // frames read as the video hurrying to catch up — the effect
+            // reported on a long stream, where the gap can grow, and never on a
+            // ten-second one, where it wraps. Dropped, the surface holds its
+            // frozen frame for one dispatch and then shows the present.
+            view.flushPendingSamples()
             player.play()
         }
         return true

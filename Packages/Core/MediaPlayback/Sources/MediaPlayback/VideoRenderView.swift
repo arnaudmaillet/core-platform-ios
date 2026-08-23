@@ -553,6 +553,28 @@ public final class VideoRenderView: UIView {
         }
     }
 
+    /// Drops frames queued but not yet shown, keeping the one on screen.
+    ///
+    /// ⚠️ For RESUMING, and the distinction from a teardown flush is the whole
+    /// point: `flush()` discards what is pending and leaves the displayed image
+    /// alone, so the surface holds its frozen frame until the next dispatch
+    /// replaces it with the CURRENT one.
+    ///
+    /// Why a resume needs it: a clip that went on running while the viewer was
+    /// elsewhere — which is exactly what a parked player does, deliberately, so
+    /// the post it was handed to keeps the playhead — comes back further along
+    /// than the frame the surface froze on. Whatever is still queued belongs to
+    /// the past. Shown, it reads as the video hurrying to catch up; dropped, the
+    /// picture simply resumes where the clip actually is.
+    ///
+    /// A short clip loops, so the gap wraps and stays small — which is why this
+    /// was reported on a long stream and not on a ten-second one.
+    func flushPendingSamples() {
+        guard let sampleBufferLayer else { return }
+        sampleBufferLayer.sampleBufferRenderer.flush()
+        enqueuedFrameCount = 0
+    }
+
     private func flushSampleBuffers() {
         guard let sampleBufferLayer else { return }
         #if DEBUG

@@ -25,6 +25,9 @@ final class CardCarouselProbeUITests: XCTestCase {
             Thread.sleep(forTimeInterval: 2)
         }
 
+        // ⚠️ TWO swipes: parks on the SHORT clip (Big Buck Bunny, 10s)
+        // instead of the long HLS stream. One variable changed, to test
+        // whether the reported effect really tracks media length.
         for _ in 0..<3 { swipeCarousel() }
         Thread.sleep(forTimeInterval: 4)
 
@@ -34,8 +37,15 @@ final class CardCarouselProbeUITests: XCTestCase {
         // card's player is parked and keeps RUNNING, so the picture the card
         // comes back to is not the picture it left.
         let media = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.36))
+        // ⚠️ A LONG DWELL, and the length is the experiment.
+        //
+        // `parkPlayback` detaches the card's player and deliberately keeps it
+        // RUNNING. On a ten-second clip that loops, the distance it travels
+        // while the post is open is imperceptible; on a minutes-long stream it
+        // is however long the viewer stayed. Five seconds proved nothing — the
+        // reported effect is supposed to scale with exactly this.
         media.tap()
-        Thread.sleep(forTimeInterval: 5)
+        Thread.sleep(forTimeInterval: 25)
 
         // Back out by the zoom dismissal: a downward drag from the media.
         let grabStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45))
