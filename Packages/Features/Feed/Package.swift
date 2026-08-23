@@ -37,6 +37,12 @@ let package = Package(
                 "CoreRealtime",
                 "CoreStorage",
                 "DesignSystem",
+                // ⚠️ The library target, not only the test one. `PostCounterReader`
+                // lives in CoreNetworking and this feature reads its counters
+                // through it — declared here because a warm derived-data tree
+                // resolves a module the whole graph can see, and only a clean
+                // build asks whether THIS target was entitled to it.
+                "CoreNetworking",
                 "PostGrid"
             ]
         ),
