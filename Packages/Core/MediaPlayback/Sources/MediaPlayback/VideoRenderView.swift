@@ -116,6 +116,52 @@ public final class VideoRenderView: UIView {
         updatePosterVisibility(ready: isReadyForDisplay)
     }
 
+    /// Says the picture is waiting for playback to reach it.
+    ///
+    /// ⚠️ AFTER A DELAY, never immediately. Most catch-ups last a few frames and
+    /// resolve before anyone could read a spinner; showing one for those would
+    /// replace a defect nobody noticed with a flicker everybody does. The
+    /// indicator is for the case the viewer actually experiences as a wait.
+    func setCatchingUp(_ catchingUp: Bool) {
+        guard catchingUp != isCatchingUp else { return }
+        isCatchingUp = catchingUp
+        catchUpWorkItem?.cancel()
+        catchUpWorkItem = nil
+        guard catchingUp else {
+            spinner?.stopAnimating()
+            return
+        }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.isCatchingUp else { return }
+            self.installSpinnerIfNeeded()
+            self.spinner?.startAnimating()
+        }
+        catchUpWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.catchUpIndicatorDelay, execute: work)
+    }
+
+    /// How long a catch-up must last before it is worth telling the viewer.
+    private static let catchUpIndicatorDelay: TimeInterval = 0.4
+    private var isCatchingUp = false
+    private var catchUpWorkItem: DispatchWorkItem?
+    private var spinner: UIActivityIndicatorView?
+
+    /// Built on first use: a timeline of stills must never allocate one.
+    private func installSpinnerIfNeeded() {
+        guard spinner == nil else { return }
+        let view = UIActivityIndicatorView(style: .medium)
+        view.color = .white
+        view.hidesWhenStopped = true
+        view.isUserInteractionEnabled = false
+        view.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(view)
+        NSLayoutConstraint.activate([
+            view.centerXAnchor.constraint(equalTo: centerXAnchor),
+            view.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        spinner = view
+    }
+
     private func updatePosterVisibility(ready: Bool) {
         let wasVisible = !posterView.isHidden
         let shouldHide = (posterView.image == nil) || ready

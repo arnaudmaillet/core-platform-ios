@@ -199,7 +199,14 @@ final class VideoFrameRenderer {
         // Before the "no new frame" return, for the same reason as the line
         // above: a probe that goes quiet when its subject stalls is worthless.
         sampleDispatchRate(atHostTime: hostTime)
-        guard let frame = source.copyFrame(atHostTime: hostTime) else { return }
+        let frame = source.copyFrame(atHostTime: hostTime)
+        // Told on every tick, including the ones that produce nothing — a drain
+        // IS a run of ticks that produce nothing, so a state set only when a
+        // frame arrives could never describe it.
+        for surface in targets {
+            surface.setCatchingUp(source.isCatchingUp)
+        }
+        guard let frame else { return }
         noteDispatch(itemTime: frame.itemTime, hostTime: hostTime)
         guard let format = formatDescription(matching: frame.buffer) else { return }
 

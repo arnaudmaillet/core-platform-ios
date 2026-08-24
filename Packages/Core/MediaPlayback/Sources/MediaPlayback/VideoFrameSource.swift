@@ -101,7 +101,14 @@ final class VideoFrameSource {
                 itemTime.seconds, playerTime.seconds
             ))
         }
-        guard output.hasNewPixelBuffer(forItemTime: wantedTime) else { return nil }
+        guard output.hasNewPixelBuffer(forItemTime: wantedTime) else {
+            // ⚠️ Nothing new is not a catch-up, and saying otherwise leaves a
+            // spinner turning over a clip that has simply been paused. A drain
+            // always HAS frames waiting — that is what makes it a drain — so
+            // reaching here means the wait, whatever it was, is over.
+            isCatchingUp = false
+            return nil
+        }
         // ⚠️ THE BUFFER'S OWN TIME, not the clock's.
         //
         // These are not the same number and the difference is a whole
@@ -145,17 +152,37 @@ final class VideoFrameSource {
         // a worse fault than the one being fixed, and one that would look like
         // the player dying. After `maxConsecutiveDrops` the next frame is shown
         // whatever its age: late video beats no video.
-        if displayTime.isValid, (wantedTime - displayTime).seconds > Self.staleFrameTolerance,
-           consecutiveDrops < Self.maxConsecutiveDrops {
-            consecutiveDrops += 1
+        let behind = displayTime.isValid
+            ? (wantedTime - displayTime).seconds : 0
+        if behind > Self.staleFrameTolerance {
+            // ⚠️ THE QUESTION IS WHETHER THE GAP IS CLOSING, not how many frames
+            // have been dropped.
+            //
+            // This was a fixed cap of 24, and the cap is what the viewer saw:
+            // after a fifth of a second it started letting stale frames through
+            // again, so a long backlog came out as a fast, stuttering scramble
+            // instead of a wait — "it advances very fast, stuttering, to get the
+            // cursor back". Dropping is right; stopping early is what made it
+            // ugly.
+            //
+            // A closing gap resolves itself, however long it takes, so it is
+            // waited out. A gap that stops closing never will, and then a late
+            // picture beats none — that is the case the old cap existed for, and
+            // it is the only one it should ever have covered.
+            let closing = !lastBehind.isFinite || behind < lastBehind - 0.001
+            lastBehind = behind
+            if closing || stalledDrops < Self.maxStalledDrops {
+                stalledDrops = closing ? 0 : stalledDrops + 1
+                isCatchingUp = true
+                return nil
+            }
             VideoPlaybackTrace.emit(String(
-                format: "dropped stale frame=%.3fs wanted=%.3fs behind=%.3fs n=%d",
-                displayTime.seconds, wantedTime.seconds,
-                (wantedTime - displayTime).seconds, consecutiveDrops
+                format: "gave up catching up behind=%.3fs", behind
             ))
-            return nil
         }
-        consecutiveDrops = 0
+        isCatchingUp = false
+        stalledDrops = 0
+        lastBehind = .infinity
         Self.ensureColorAttachments(on: buffer)
         lastClockTime = wantedTime
         return (buffer, displayTime.isValid ? displayTime : itemTime)
@@ -169,15 +196,21 @@ final class VideoFrameSource {
     /// of being dropped for being slightly late.
     private static let staleFrameTolerance: Double = 0.5
 
-    /// How many stale frames may be dropped in a row before one is shown anyway.
+    /// How many frames the gap may fail to close before the wait is abandoned.
     ///
-    /// At 120Hz this is a fifth of a second of holding the last picture — long
-    /// enough to drain a backlog of a few seconds, far too short to read as a
-    /// freeze. The cap is what makes this guard safe to be WRONG: if the output
-    /// is permanently behind rather than catching up, the video keeps playing,
-    /// merely late.
-    private static let maxConsecutiveDrops = 24
-    private var consecutiveDrops = 0
+    /// The safety valve, and only that: an output that is permanently behind
+    /// rather than draining would otherwise never show anything again. Half a
+    /// second at 120Hz, which no real catch-up spends standing still.
+    private static let maxStalledDrops = 60
+    private var stalledDrops = 0
+    private var lastBehind: Double = .infinity
+
+    /// Whether the picture is waiting for playback to catch up to it.
+    ///
+    /// Read by the renderer so the surface can say so. The honest state during
+    /// a drain is "the frame you are looking at is old and the next one is not
+    /// ready" — which is a load, and looks like one.
+    private(set) var isCatchingUp = false
 
     /// The clock reading that went with the last frame handed out.
     ///
