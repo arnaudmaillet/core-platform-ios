@@ -455,6 +455,10 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
     }
 
     /// Where page `index` rests, clamped so the last one lands flush.
+    /// The resting offset of a page, so a test can state its expectation in
+    /// pages rather than in arithmetic it would have to duplicate.
+    func debugOffset(forPage index: Int) -> CGFloat { offset(forPage: index) }
+
     private func offset(forPage index: Int) -> CGFloat {
         let maximum = max(scrollView.contentSize.width - bounds.width, 0)
         return min(CGFloat(index) * stride, maximum)
@@ -476,15 +480,30 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
         // Snap from the PROJECTED offset, not the current one: a flick that has
         // barely moved the content still means "next page", and reading the
         // live offset here would answer "stay".
+        // ⚠️ THE PAGE THE GESTURE STARTED ON is the anchor, and every outcome is
+        // measured from it.
+        //
+        // Where the finger LEFT the content is the honest reading of where the
+        // viewer is — the projected offset says where a flick would coast to,
+        // which on a hard swipe is three or four pages away. That is a scroll,
+        // not paging: the viewer asked for the next photograph and got a blur
+        // and a stranger.
+        let from = page(nearest: scrollView.contentOffset.x)
         var index = page(nearest: targetContentOffset.pointee.x)
         // A deliberate flick always advances at least one page, which is what
         // makes a short swipe feel like paging rather than like a nudge that
         // sprang back.
         if abs(velocity.x) > 0.2 {
-            let from = page(nearest: scrollView.contentOffset.x)
             index = velocity.x > 0 ? max(index, from + 1) : min(index, from - 1)
-            index = min(max(index, 0), max(pageViews.count - 1, 0))
         }
+        // ⚠️ AND AT MOST ONE, however hard the flick.
+        //
+        // One gesture, one page. Momentum decides how FAST it gets there, never
+        // how far — so a violent swipe and a careful one land on the same
+        // photograph, and the viewer can always predict what a swipe will do
+        // without calibrating their thumb.
+        index = min(max(index, from - 1), from + 1)
+        index = min(max(index, 0), max(pageViews.count - 1, 0))
         targetContentOffset.pointee.x = offset(forPage: index)
     }
 

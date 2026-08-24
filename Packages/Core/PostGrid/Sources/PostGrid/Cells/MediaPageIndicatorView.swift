@@ -153,16 +153,19 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
 
     /// Dots or a count, decided in ONE place.
     ///
-    /// ⚠️ Expanding overrides the limit on purpose. Above `dotLimit` a resting
+    /// ⚠️ Always dots, at every count. A "3 / 12" told the viewer how many pages
+    /// there are and nothing about WHERE they are, which is the one thing an
+    /// indicator over a photograph is for — and it read as a label bolted onto a
+    /// row of chips rather than as part of the carousel. A window of dots says
+    /// both, at any length.
     /// chip shows "3 / 12", because a dozen dots squeezed into a corner is a
     /// smear that says less than the number does. But the moment a finger is on
     /// it the chip is not a label any more, it is the thing being dragged — and
     /// what it must show then is WHERE the pages are, which only dots can say.
     private func applyPresentation() {
-        let usesDots = isExpanded || pageCount <= Self.dotLimit
-        dots.isHidden = !usesDots
-        label.isHidden = usesDots
-        if usesDots { dots.configure(count: pageCount) }
+        dots.isHidden = false
+        label.isHidden = true
+        dots.configure(count: pageCount)
     }
 
     /// Whether the chip is showing itself in full for a scrub.
@@ -171,6 +174,7 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
     public func setExpanded(_ expanded: Bool) {
         guard expanded != isExpanded, pageCount >= 2 else { return }
         isExpanded = expanded
+        dots.isExpanded = expanded
         applyPresentation()
         setCurrent(currentPage)
         invalidateIntrinsicContentSize()
@@ -188,11 +192,7 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
         guard pageCount >= 2 else { return }
         let page = min(max(current, 0), pageCount - 1)
         currentPage = page
-        if isExpanded || pageCount <= Self.dotLimit {
-            dots.setCurrent(page)
-        } else {
-            label.text = "\(page + 1) / \(pageCount)"
-        }
+        dots.setCurrent(page)
     }
 
     /// The viewer began or ended scrubbing.
@@ -269,6 +269,25 @@ final class PageDotsView: UIView {
     /// the chip has to keep saying "there is more than one" at every width.
     static let minimumVisibleDots = 2
 
+    /// The ceiling while nobody is touching it: four.
+    ///
+    /// ⚠️ A CAP ON WIDTH, not on meaning. Twelve dots resting on a card is a
+    /// smudge — legible as "many", useless as "where" — and it crowds the
+    /// counters beside it for information nobody is reading at rest. Four says
+    /// the same thing in a quarter of the room: there are more, you are here.
+    /// The rest of them exist and are one touch away, which is what the
+    /// expansion is for.
+    static let maximumRestingDots = 4
+
+    /// Whether the chip is being scrubbed, and may therefore show everything.
+    var isExpanded = false {
+        didSet {
+            guard isExpanded != oldValue else { return }
+            invalidateIntrinsicContentSize()
+            setNeedsLayout()
+        }
+    }
+
     private var count = 0
     private var current = 0
     private var dots: [UIView] = []
@@ -308,7 +327,11 @@ final class PageDotsView: UIView {
 
     /// What the chip asks for when nothing is competing: every dot.
     override var intrinsicContentSize: CGSize {
-        CGSize(width: Self.width(forDots: count), height: MediaPageIndicatorView.dotDiameter)
+        let asked = isExpanded ? count : min(count, Self.maximumRestingDots)
+        return CGSize(
+            width: Self.width(forDots: asked),
+            height: MediaPageIndicatorView.dotDiameter
+        )
     }
 
     /// The floor the chip may be compressed to.
