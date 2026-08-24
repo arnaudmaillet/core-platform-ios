@@ -77,7 +77,31 @@ final class VideoFrameSource {
         // Before playback starts the timebase has no rate and the answer comes
         // back invalid or negative; both mean "nothing to show yet".
         guard itemTime.isValid, itemTime >= .zero else { return nil }
-        guard output.hasNewPixelBuffer(forItemTime: itemTime) else { return nil }
+        // ⚠️ THE OUTPUT'S CLOCK CAN FALL BEHIND THE PLAYER'S, AND IT DOES.
+        //
+        // Measured on a paused-then-resumed adaptive stream: `out=10.500s` while
+        // `player=21.231s` — the output ten and a half seconds behind, which is
+        // exactly how long the clip had been held. Asking it for the frame at
+        // 10.5s while playback is really at 21.2s makes it deliver its backlog
+        // as fast as the display link asks, and THAT is the reported
+        // fast-forward. The viewer's own words for it were "as if it were trying
+        // to catch up on a delay"; it was, and the delay was ten seconds.
+        //
+        // The player's position is the truth about where playback is, so a
+        // disagreement is resolved in its favour. The threshold keeps this off
+        // the normal path, where the two agree within a frame or two and
+        // `itemTime(forHostTime:)` is the better answer — it is anchored to the
+        // upcoming refresh rather than to now.
+        let playerTime = player.currentTime()
+        var wantedTime = itemTime
+        if playerTime.isValid, abs((playerTime - itemTime).seconds) > 0.5 {
+            wantedTime = playerTime
+            VideoPlaybackTrace.emit(String(
+                format: "resynced output=%.3fs player=%.3fs",
+                itemTime.seconds, playerTime.seconds
+            ))
+        }
+        guard output.hasNewPixelBuffer(forItemTime: wantedTime) else { return nil }
         // ⚠️ THE BUFFER'S OWN TIME, not the clock's.
         //
         // These are not the same number and the difference is a whole
@@ -93,12 +117,12 @@ final class VideoFrameSource {
         // normal" with a playhead measured at 1x throughout.
         var displayTime = CMTime.invalid
         guard let buffer = output.copyPixelBuffer(
-            forItemTime: itemTime, itemTimeForDisplay: &displayTime
+            forItemTime: wantedTime, itemTimeForDisplay: &displayTime
         ) else {
             return nil
         }
         Self.ensureColorAttachments(on: buffer)
-        lastClockTime = itemTime
+        lastClockTime = wantedTime
         return (buffer, displayTime.isValid ? displayTime : itemTime)
     }
 
