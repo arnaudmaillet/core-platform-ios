@@ -54,6 +54,28 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
 
     private var prefersInteractiveGlass = false
 
+    /// The chip's own press response, for the surfaces that have no glass to
+    /// give them one.
+    ///
+    /// ⚠️ ONLY WHERE THERE IS NO LENS. On the post screen the chip IS glass, and
+    /// `isInteractive` already flexes the material under a finger — adding a
+    /// transform there would be a second effect fighting the system's, and this
+    /// codebase has already tried transforming a glass lens once and rejected
+    /// it. On a card the chip is a flat capsule with no such response, so it
+    /// gets one of its own: the same read, arrived at differently.
+    private func applyPressFeedback() {
+        guard !prefersInteractiveGlass else { return }
+        UIView.animate(
+            withDuration: 0.3, delay: 0,
+            usingSpringWithDamping: 0.6, initialSpringVelocity: 0.4,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.transform = self.isScrubbing
+                ? CGAffineTransform(scaleX: 1.18, y: 1.18)
+                : .identity
+        }
+    }
+
     override public func makeGround() -> UIVisualEffect? {
         guard prefersInteractiveGlass else { return super.makeGround() }
         // Shape before material, for the reason `PagedTabBar` records: a glass
@@ -190,24 +212,50 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
     public private(set) var isScrubbing = false {
         didSet {
             guard isScrubbing != oldValue else { return }
+            applyPressFeedback()
             onScrubbingChanged?(isScrubbing)
         }
     }
 
     @objc private func handleTouch(_ recognizer: UIGestureRecognizer) {
+        handleScrub(recognizer.state, atX: recognizer.location(in: self).x)
+    }
+
+    /// The gesture's whole meaning, in one place a test can reach.
+    ///
+    /// ⚠️ TOUCHING IT ASKS FOR NOTHING; ONLY DRAGGING DOES.
+    ///
+    /// A press used to select the page under the finger, which put two meanings
+    /// on one touch: a tap changed the page, and a tap that became a drag
+    /// changed it twice — once to wherever it landed and again to wherever it
+    /// went. The dots are narrow and sit between two counters, so the first of
+    /// those was as often a miss as an instruction. Sliding is unambiguous: the
+    /// page follows the finger, and letting go where you started leaves
+    /// everything as it was.
+    private func handleScrub(_ state: UIGestureRecognizer.State, atX x: CGFloat) {
         guard pageCount >= 2 else { return }
-        switch recognizer.state {
-        case .began, .changed:
+        switch state {
+        case .began:
             isScrubbing = true
+        case .changed:
+            isScrubbing = true
+            onPageRequested?(Self.page(at: x, width: bounds.width, count: pageCount))
         case .ended, .cancelled, .failed:
             isScrubbing = false
         default:
             break
         }
-        onPageRequested?(
-            Self.page(at: recognizer.location(in: self).x, width: bounds.width, count: pageCount)
-        )
     }
+
+    #if DEBUG
+    /// Drives the scrub without a finger — the simulator injects none.
+    ///
+    /// Goes through `handleScrub`, not around it: a test that reimplemented the
+    /// rule would pin a route nobody uses.
+    func debugScrub(_ state: UIGestureRecognizer.State, atX x: CGFloat) {
+        handleScrub(state, atX: x)
+    }
+    #endif
 
     /// Which page a touch at `x` is asking for.
     ///
@@ -311,18 +359,20 @@ final class PageDotsView: UIView {
             visible: Self.visibleDots(in: bounds.width, count: count),
             count: count
         )
-        // The window travelling is the only thing worth animating: the mark
-        // moving between two dots that stay put should be immediate, or it lags
-        // the finger.
-        guard start != previousStart else {
-            setNeedsLayout()
-            layoutIfNeeded()
-            return
-        }
+        // ⚠️ TWO DURATIONS, because two different things move.
+        //
+        // The mark passing between dots that stay put is a change of STATE —
+        // brief, or it lags the finger and the chip stops feeling attached to
+        // the gesture. The window travelling is a change of PLACE, and a place
+        // that jumps cannot be followed; that one is worth a spring.
+        //
+        // Both animate: a dot that switches colour and size on one frame reads
+        // as a light being flicked rather than as a mark moving along a row.
         setNeedsLayout()
+        let travelling = start != previousStart
         UIView.animate(
-            withDuration: 0.24, delay: 0,
-            usingSpringWithDamping: 0.82, initialSpringVelocity: 0,
+            withDuration: travelling ? 0.28 : 0.16, delay: 0,
+            usingSpringWithDamping: travelling ? 0.8 : 1, initialSpringVelocity: 0,
             options: [.allowUserInteraction, .beginFromCurrentState]
         ) { self.layoutIfNeeded() }
     }
@@ -404,14 +454,19 @@ final class PageDotsView: UIView {
             let continuesBefore = offset == 0 && start > 0
             let continuesAfter = offset == visible - 1 && start + visible < count
             let scale: CGFloat = (continuesBefore || continuesAfter) ? Self.edgeDotScale : 1
-            let side = (diameter * scale).rounded()
-            dot.frame = CGRect(
-                x: originX + CGFloat(offset) * (diameter + spacing)
-                    + ((diameter - side) / 2).rounded(),
-                y: centreY - (side / 2).rounded(),
-                width: side, height: side
+            // ⚠️ SCALED BY TRANSFORM, NEVER BY RESIZING.
+            //
+            // A dot laid out at a smaller SIZE needs a smaller corner radius to
+            // stay round, and `cornerRadius` is a layer property: it lands on
+            // the next frame while the size springs over a quarter of a second.
+            // A dot on its way in or out went briefly square. A transform
+            // carries the curve with it, so the dot is a circle the whole way.
+            dot.bounds = CGRect(x: 0, y: 0, width: diameter, height: diameter)
+            dot.transform = CGAffineTransform(scaleX: scale, y: scale)
+            dot.center = CGPoint(
+                x: originX + CGFloat(offset) * (diameter + spacing) + diameter / 2,
+                y: centreY
             )
-            dot.layer.cornerRadius = side / 2
             dot.alpha = isVisible ? (index == current ? 1 : 0.35) : 0
         }
     }

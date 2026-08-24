@@ -79,6 +79,44 @@ struct CarouselPagingLimitTests {
         #expect(target.x == view.debugOffset(forPage: 4))
     }
 
+    // MARK: - The indicator's gesture
+
+    /// ⚠️ TOUCHING IT ASKS FOR NOTHING; ONLY DRAGGING DOES.
+    ///
+    /// A press used to select the page under the finger, which put two meanings
+    /// on one touch: a tap changed the page, and a tap that became a drag
+    /// changed it twice — once to wherever it landed and again to wherever it
+    /// went. The dots are narrow and sit between two counters, so the first of
+    /// those was as often a miss as an instruction.
+    @Test func aPressAloneRequestsNoPage() {
+        let indicator = MediaPageIndicatorView()
+        indicator.frame = CGRect(x: 0, y: 0, width: 120, height: 20)
+        indicator.configure(count: 12, current: 0)
+        var requested: [Int] = []
+        indicator.onPageRequested = { requested.append($0) }
+
+        indicator.debugScrub(.began, atX: 100)
+
+        #expect(requested.isEmpty)
+    }
+
+    /// And dragging does, at the page under the finger — asserted beside its
+    /// opposite, because a gesture that asks for nothing at all would satisfy
+    /// the test above.
+    @Test func draggingRequestsThePageUnderTheFinger() {
+        let indicator = MediaPageIndicatorView()
+        indicator.frame = CGRect(x: 0, y: 0, width: 120, height: 20)
+        indicator.configure(count: 12, current: 0)
+        var requested: [Int] = []
+        indicator.onPageRequested = { requested.append($0) }
+
+        indicator.debugScrub(.began, atX: 10)
+        indicator.debugScrub(.changed, atX: 110)
+
+        #expect(requested.count == 1)
+        #expect((requested.first ?? 0) > 6)
+    }
+
     // MARK: - The dots
 
     /// ⚠️ FIVE, at any length, at rest and under a finger alike.
